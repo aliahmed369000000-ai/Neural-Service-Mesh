@@ -216,3 +216,177 @@ def run_api(mesh, host: str = "0.0.0.0", port: int = 5000, debug: bool = False):
     app = create_app(mesh)
     logger.info(f"API v2 starting on http://{host}:{port}")
     app.run(host=host, port=port, debug=debug)
+
+
+def _add_phase3_routes(app, mesh):
+    """Phase 3 API endpoints — added only when mesh has Phase 3 components."""
+
+    # ── Goal-Based Execution ───────────────────────────────────────────────
+
+    @app.route("/run/goal", methods=["POST"])
+    def run_goal():
+        """Phase 3: Execute based on a high-level goal description."""
+        b = request.get_json(force=True) or {}
+        goal = b.get("goal", "").strip()
+        if not goal:
+            return jsonify({"error": "goal is required"}), 400
+        result = mesh.run_goal(
+            goal=goal,
+            data=b.get("data", {}),
+            preferred_start=b.get("preferred_start"),
+            preferred_end=b.get("preferred_end"),
+            max_hops=int(b.get("max_hops", 10)),
+        )
+        return jsonify(result)
+
+    @app.route("/ai/plan", methods=["POST"])
+    def plan_goal():
+        """Phase 3: Build an execution plan without running it."""
+        b = request.get_json(force=True) or {}
+        goal = b.get("goal", "").strip()
+        if not goal:
+            return jsonify({"error": "goal is required"}), 400
+        plan = mesh.planner.plan(
+            goal,
+            preferred_start=b.get("preferred_start"),
+            preferred_end=b.get("preferred_end"),
+            required_tags=b.get("required_tags"),
+            max_hops=int(b.get("max_hops", 10)),
+        )
+        if not plan:
+            return jsonify({"error": "Could not build a plan for this goal"}), 404
+        return jsonify(plan.to_dict())
+
+    # ── Routing ────────────────────────────────────────────────────────────
+
+    @app.route("/ai/routes", methods=["POST"])
+    def rank_routes():
+        """Phase 3: Rank all routes using full AI scoring."""
+        b = request.get_json(force=True) or {}
+        start, end = b.get("start_id"), b.get("end_id")
+        if not start or not end:
+            return jsonify({"error": "start_id and end_id required"}), 400
+        candidates = mesh.routing.rank_routes(start, end,
+                                               max_candidates=int(b.get("max_candidates", 8)))
+        return jsonify({"routes": [c.to_dict() for c in candidates], "count": len(candidates)})
+
+    @app.route("/ai/route/explain", methods=["POST"])
+    def explain_route():
+        """Phase 3: Explain why a specific path was chosen."""
+        b = request.get_json(force=True) or {}
+        path = b.get("path", [])
+        if not path:
+            return jsonify({"error": "path list required"}), 400
+        return jsonify(mesh.routing.explain_route(path))
+
+    # ── Discovery ──────────────────────────────────────────────────────────
+
+    @app.route("/ai/discover", methods=["GET"])
+    def discover_connections():
+        """Phase 3: Suggest new connections based on semantic compatibility."""
+        threshold = float(request.args.get("threshold", 0.15))
+        suggestions = mesh.discover_connections(threshold)
+        return jsonify({"suggestions": suggestions, "count": len(suggestions)})
+
+    @app.route("/ai/discover/goal", methods=["POST"])
+    def discover_for_goal():
+        """Phase 3: Find nodes best suited for a goal."""
+        b = request.get_json(force=True) or {}
+        goal = b.get("goal", "").strip()
+        if not goal:
+            return jsonify({"error": "goal is required"}), 400
+        top_k = int(b.get("top_k", 5))
+        results = mesh.find_nodes_for_goal(goal, top_k)
+        return jsonify({"nodes": results, "goal": goal})
+
+    @app.route("/ai/announcements", methods=["GET"])
+    def node_announcements():
+        """Phase 3: List all node self-announcements."""
+        anns = [a.to_dict() for a in mesh.discovery.active_nodes()]
+        return jsonify({"announcements": anns, "count": len(anns)})
+
+    # ── Scoring ────────────────────────────────────────────────────────────
+
+    @app.route("/ai/scores", methods=["GET"])
+    def connection_scores():
+        """Phase 3: Get all connection performance scores."""
+        scores = mesh.scoring.list_scores()
+        return jsonify({"scores": scores, "count": len(scores),
+                        "summary": mesh.scoring.summary()})
+
+    @app.route("/ai/scores/top", methods=["GET"])
+    def top_scores():
+        n = int(request.args.get("n", 10))
+        return jsonify({
+            "top": mesh.scoring.top_connections(n),
+            "worst": mesh.scoring.worst_connections(n),
+        })
+
+    # ── Memory ─────────────────────────────────────────────────────────────
+
+    @app.route("/ai/memory", methods=["GET"])
+    def memory_overview():
+        """Phase 3: Route memory overview."""
+        return jsonify({
+            "summary": mesh.memory.summary(),
+            "routes": mesh.memory.all_routes(),
+            "best_nodes": mesh.memory.best_nodes(10),
+        })
+
+    @app.route("/ai/memory/promote", methods=["POST"])
+    def promote_route():
+        b = request.get_json(force=True) or {}
+        path = b.get("path", [])
+        if not path:
+            return jsonify({"error": "path required"}), 400
+        mesh.memory.promote_route(path)
+        return jsonify({"promoted": True, "path": path})
+
+    # ── Optimization ───────────────────────────────────────────────────────
+
+    @app.route("/ai/optimize", methods=["POST"])
+    def optimize():
+        """Phase 3: Run optimization analysis."""
+        b = request.get_json(force=True) or {}
+        auto_apply = bool(b.get("auto_apply", False))
+        report = mesh.optimize(auto_apply=auto_apply)
+        return jsonify(report)
+
+    @app.route("/ai/optimize/health", methods=["GET"])
+    def optimization_health():
+        """Phase 3: Quick health check from optimizer."""
+        return jsonify(mesh.optimizer.quick_health_check())
+
+    # ── Semantic ───────────────────────────────────────────────────────────
+
+    @app.route("/ai/semantic/profiles", methods=["GET"])
+    def semantic_profiles():
+        """Phase 3: List all semantic profiles."""
+        profiles = [p.to_dict() for p in mesh.semantic.all_profiles()]
+        return jsonify({"profiles": profiles, "count": len(profiles)})
+
+    @app.route("/ai/semantic/compatibility", methods=["POST"])
+    def semantic_compatibility():
+        """Phase 3: Get semantic compatibility score between two nodes."""
+        b = request.get_json(force=True) or {}
+        src, tgt = b.get("source_id"), b.get("target_id")
+        if not src or not tgt:
+            return jsonify({"error": "source_id and target_id required"}), 400
+        score = mesh.semantic.compatibility_score(src, tgt)
+        return jsonify({"source_id": src, "target_id": tgt, "compatibility_score": score})
+
+
+# ── Patched create_app to include Phase 3 routes ──────────────────────────
+
+_original_create_app = create_app
+
+def create_app(mesh):
+    app = _original_create_app(mesh)
+    # Update version in health endpoint
+    @app.route("/health/v3")
+    def health_v3():
+        return jsonify({"status": "ok", "version": "3.0.0", "phase": 3})
+    # Add Phase 3 routes if mesh supports them
+    if hasattr(mesh, "planner"):
+        _add_phase3_routes(app, mesh)
+    return app
