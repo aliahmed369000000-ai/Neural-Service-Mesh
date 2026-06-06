@@ -903,3 +903,99 @@ def create_app(mesh):
     if hasattr(mesh, "agent_factory"):
         _add_phase6_routes(app, mesh)
     return app
+
+
+# ── Phase 7 Routes ─────────────────────────────────────────────────────────
+
+def _add_phase7_routes(app, mesh):
+    from flask import request, jsonify
+
+    @app.route("/ai/phase7/introspect", methods=["GET"])
+    def p7_introspect():
+        """Phase 7: Self-awareness introspection report."""
+        return jsonify(mesh.introspect())
+
+    @app.route("/ai/phase7/sensors", methods=["GET"])
+    def p7_sensors():
+        """Phase 7: Sensor hub status and recent events."""
+        return jsonify(mesh.sensor_status())
+
+    @app.route("/ai/phase7/sensors/push", methods=["POST"])
+    def p7_sensor_push():
+        """Phase 7: Push a manual event to the webhook sensor."""
+        body = request.get_json(force=True) or {}
+        mesh.push_sensor_event(
+            event_type=body.get("event_type", "manual"),
+            payload=body.get("payload", {}),
+            severity=body.get("severity", "info"),
+        )
+        return jsonify({"status": "queued"})
+
+    @app.route("/ai/phase7/world-model", methods=["GET"])
+    def p7_world_model():
+        """Phase 7: Get the current world model / environment state."""
+        return jsonify(mesh.world_model())
+
+    @app.route("/ai/phase7/objectives", methods=["GET"])
+    def p7_objectives():
+        """Phase 7: Get all strategic objectives and progress."""
+        return jsonify(mesh.get_objectives())
+
+    @app.route("/ai/phase7/objectives/measure", methods=["POST"])
+    def p7_measure_objectives():
+        """Phase 7: Measure current metrics against objectives."""
+        return jsonify(mesh.measure_objectives())
+
+    @app.route("/ai/phase7/generate", methods=["POST"])
+    def p7_generate_module():
+        """Phase 7: Generate a module for a described gap."""
+        body = request.get_json(force=True) or {}
+        gap = body.get("gap_description", "GenericTransformer")
+        src = body.get("source_name", "")
+        tgt = body.get("target_name", "")
+        return jsonify(mesh.generate_module(gap, src, tgt))
+
+    @app.route("/ai/phase7/modules", methods=["GET"])
+    def p7_list_modules():
+        """Phase 7: List all auto-generated modules."""
+        status = request.args.get("status")
+        return jsonify(mesh.list_generated_modules(status=status))
+
+    @app.route("/ai/phase7/evolve", methods=["POST"])
+    def p7_evolve():
+        """Phase 7: Run evolution pipeline cycle(s)."""
+        body = request.get_json(force=True) or {}
+        cycles = int(body.get("cycles", 1))
+        return jsonify(mesh.evolve7(cycles=cycles, verbose=False))
+
+    @app.route("/ai/phase7/evolution/history", methods=["GET"])
+    def p7_evolution_history():
+        """Phase 7: Get evolution pipeline cycle history."""
+        limit = int(request.args.get("limit", 10))
+        return jsonify(mesh.get_evolution_history(limit=limit))
+
+    @app.route("/ai/phase7/sensors/start", methods=["POST"])
+    def p7_sensors_start():
+        """Phase 7: Start background sensor polling."""
+        body = request.get_json(force=True) or {}
+        interval = float(body.get("interval_s", 30.0))
+        return jsonify(mesh.start_sensors(interval_s=interval))
+
+    @app.route("/ai/phase7/sensors/stop", methods=["POST"])
+    def p7_sensors_stop():
+        """Phase 7: Stop background sensor polling."""
+        return jsonify(mesh.stop_sensors())
+
+    @app.route("/health/v7", methods=["GET"])
+    def health_v7():
+        return jsonify({"status": "ok", "version": "7.0.0", "phase": 7})
+
+
+# Patch create_app to include Phase 7
+_create_app_p6 = create_app
+
+def create_app(mesh):
+    app = _create_app_p6(mesh)
+    if hasattr(mesh, "evolution_pipeline"):
+        _add_phase7_routes(app, mesh)
+    return app
