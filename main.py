@@ -30,6 +30,10 @@ from ai.routing_engine import RoutingEngine
 from ai.goal_planner import GoalPlanner
 from ai.optimization_engine import OptimizationEngine
 
+# ── Phase 4 AI ─────────────────────────────────────────────────────────────
+from ai.learning_validator import LearningValidator
+from ai.reputation_engine import NodeReputationEngine
+
 # ── Services ───────────────────────────────────────────────────────────────
 from services.input_service import InputNode
 from services.processor_service import ProcessorNode
@@ -52,7 +56,7 @@ class NeuralServiceMesh:
     All Phase 2 APIs are preserved unchanged.
     """
 
-    VERSION = "3.0.0"
+    VERSION = "4.0.0"
 
     def __init__(self, storage_dir: str = "./data", db_path: str = "./data/mesh.db"):
         # ── Storage ────────────────────────────────────────────────────────
@@ -104,7 +108,7 @@ class NeuralServiceMesh:
             ai=self.ai,
         )
 
-        # Wire Phase 2 AI to graph
+        # ── Wire Phase 2 AI to graph
         self.ai.set_graph(self.graph)
         self.ai.set_db(self.db)
 
@@ -114,24 +118,47 @@ class NeuralServiceMesh:
         self.routing.set_knowledge_store(self.knowledge)
         self.optimizer.set_knowledge_store(self.knowledge)
 
+        # ── Phase 4: Learning Validation & Reputation ──────────────────
+        self.validator = LearningValidator(
+            memory_engine=self.memory,
+            scoring_engine=self.scoring,
+            knowledge_store=self.knowledge,
+        )
+        self.reputation = NodeReputationEngine(
+            knowledge_store=self.knowledge,
+            memory_engine=self.memory,
+        )
+
         # ── Install Phase 3 post-run hook ──────────────────────────────────
         self._install_phase3_hook()
 
-        logger.info(f"NeuralServiceMesh v{self.VERSION} ready (Phase 3 — Autonomous Intelligence)")
+        logger.info(f"NeuralServiceMesh v{self.VERSION} ready (Phase 4 — Learning Validation & Autonomous Evolution)")
 
     # ── Phase 3 hook into ExecutionEngine ─────────────────────────────────
 
     def _install_phase3_hook(self):
-        """Monkey-patch ExecutionEngine._persist to also call Phase 3 learners."""
+        """Monkey-patch ExecutionEngine._persist to also call Phase 3+4 learners."""
         original_persist = self.engine._persist
 
-        def _phase3_persist(result):
+        def _phase4_persist(result):
             original_persist(result)                    # Phase 2 behaviour
             result_dict = result.to_dict()
             self.scoring.record_run(result_dict)        # Update connection scores
             self.memory.learn_from_run(result_dict)     # Update route memory
 
-        self.engine._persist = _phase3_persist
+            # Phase 4: Update node reputation from execution result
+            try:
+                success = result_dict.get("status") == "success"
+                latency = result_dict.get("total_duration_ms", 0.0)
+                for step in result_dict.get("steps", []):
+                    nid = step.get("node_id", "")
+                    name = step.get("node_name", "")
+                    step_ok = step.get("status") == "success"
+                    self.reputation.record_execution(nid, name, step_ok, latency)
+            except Exception:
+                pass
+
+        self.engine._persist = _phase4_persist
 
     # ── Node Management ────────────────────────────────────────────────────
 
@@ -235,7 +262,7 @@ class NeuralServiceMesh:
     def status(self) -> dict:
         return {
             "version": self.VERSION,
-            "phase": 3,
+            "phase": 4,
             "nodes": self.registry.count(),
             "graph": self.graph.stats(),
             "storage": self.storage.stats(),
@@ -256,6 +283,56 @@ class NeuralServiceMesh:
             },
             # Phase 3 Knowledge Layer
             "knowledge_layer": self.knowledge.summary(),
+            # Phase 4 Learning & Reputation
+            "ai_phase4": {
+                "learning_metrics": self.validator.compute_metrics().to_dict(),
+                "reputation": self.reputation.summary(),
+            },
+        }
+
+    # ── Phase 4: Public API methods ────────────────────────────────────────
+
+    def get_ai_status(self) -> dict:
+        """GET /ai/status — Full AI system status with learning proof."""
+        proof = self.validator.prove_learning()
+        return {
+            "version": self.VERSION,
+            "phase": 4,
+            "system_status": self.status(),
+            "learning_proof": proof,
+        }
+
+    def get_ai_routes(self) -> dict:
+        """GET /ai/routes — All known routes ranked by memory score."""
+        routes = self.memory.all_routes()
+        ranked = sorted(routes, key=lambda r: r.get("memory_score", 0), reverse=True)
+        return {
+            "routes": ranked,
+            "count": len(ranked),
+            "summary": self.memory.summary(),
+        }
+
+    def get_ai_reputation(self) -> dict:
+        """GET /ai/reputation — All node reputation scores."""
+        self.reputation.update_from_memory()
+        return {
+            "nodes": self.reputation.all_reputations(),
+            "summary": self.reputation.summary(),
+        }
+
+    def get_ai_knowledge(self) -> dict:
+        """GET /ai/knowledge — Full knowledge layer snapshot."""
+        return {
+            "route_memory": self.knowledge.read_route_memory(),
+            "graph_metrics": self.knowledge.read_graph_metrics(),
+            "node_profiles_summary": {
+                "total": len(self.knowledge.list_active_node_profiles()),
+                "active_nodes": [
+                    {k: v for k, v in p.items() if k in ("node_id", "name", "discovery_score")}
+                    for p in self.knowledge.list_active_node_profiles()
+                ],
+            },
+            "learning_curve": self.validator.get_learning_curve(),
         }
 
 
@@ -344,18 +421,45 @@ def demo():
 
 # ── Entry point ────────────────────────────────────────────────────────────
 
+def simulate(rounds: int = 20, delay: float = 0.1):
+    """Phase 4 simulation mode — proves the AI learns from experience."""
+    from ai.simulation_engine import SimulationEngine
+    mesh = NeuralServiceMesh()
+    sim = SimulationEngine(mesh, validator=mesh.validator)
+    results = sim.run_simulation(
+        rounds=rounds,
+        executions_per_round=5,
+        delay_between_rounds=delay,
+        verbose=True,
+    )
+    # Save simulation report
+    import json, os
+    os.makedirs("./data", exist_ok=True)
+    report_path = "./data/simulation_report.json"
+    with open(report_path, "w") as f:
+        json.dump(results, f, indent=2)
+    print(f"\n  Simulation report saved to: {report_path}")
+    return results
+
+
 if __name__ == "__main__":
     import argparse
-    p = argparse.ArgumentParser(description="Neural Service Mesh v3")
-    p.add_argument("--mode", choices=["demo", "api"], default="demo",
-                   help="demo: run example pipeline | api: start Flask server")
+    p = argparse.ArgumentParser(description="Neural Service Mesh v4")
+    p.add_argument("--mode", choices=["demo", "api", "simulate"], default="demo",
+                   help="demo: example pipeline | api: Flask server | simulate: Phase 4 learning sim")
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=5000)
     p.add_argument("--debug", action="store_true")
+    p.add_argument("--rounds", type=int, default=20,
+                   help="Number of simulation rounds (simulate mode)")
+    p.add_argument("--delay", type=float, default=0.1,
+                   help="Delay between rounds in seconds (simulate mode)")
     args = p.parse_args()
 
     if args.mode == "demo":
         demo()
+    elif args.mode == "simulate":
+        simulate(rounds=args.rounds, delay=args.delay)
     else:
         from api.app import run_api
         mesh = NeuralServiceMesh()
