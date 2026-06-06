@@ -1,0 +1,235 @@
+{
+  "_meta": {
+    "schema_version": "1.0.0",
+    "created_at": "2026-06-06T00:22:29.764270+00:00",
+    "last_updated": "2026-06-06T00:22:29.826561+00:00",
+    "total_nodes": 3,
+    "description": "Node capabilities and semantic metadata registry"
+  },
+  "nodes": {
+    "a451c3ea-c0bc-4614-8baf-6d2a6accac6b": {
+      "node_id": "a451c3ea-c0bc-4614-8baf-6d2a6accac6b",
+      "name": "TextInput",
+      "description": "Entry point: accepts raw text",
+      "input_schema": {
+        "fields": {
+          "text": "str",
+          "source": "str",
+          "metadata": "dict"
+        },
+        "required": [
+          "text"
+        ],
+        "description": ""
+      },
+      "output_schema": {
+        "fields": {
+          "text": "str",
+          "source": "str",
+          "char_count": "int",
+          "word_count": "int"
+        },
+        "required": [
+          "text",
+          "char_count",
+          "word_count"
+        ],
+        "description": ""
+      },
+      "tags": [
+        "input",
+        "entry"
+      ],
+      "capability": "Entry point: accepts raw text",
+      "version": "1.0.0",
+      "announced_at": "2026-06-06T00:22:29.777563",
+      "is_active": true,
+      "semantic_profile": {
+        "input_tokens": [
+          "text",
+          "source",
+          "metadata"
+        ],
+        "output_tokens": [
+          "text",
+          "source",
+          "char",
+          "count",
+          "word",
+          "count"
+        ],
+        "capability_tokens": [
+          "entry",
+          "point",
+          "raw",
+          "text",
+          "accepts",
+          "input"
+        ],
+        "updated_at": "2026-06-06T00:22:29.777563"
+      },
+      "last_seen": "2026-06-06T00:22:29.779982+00:00",
+      "first_seen": "2026-06-06T00:22:29.779991+00:00",
+      "execution_stats": {
+        "total_executions": 1,
+        "successes": 1,
+        "failures": 0,
+        "avg_latency_ms": 0.07,
+        "last_executed": "2026-06-06T00:22:29.813798+00:00"
+      },
+      "discovery_score": 66.01
+    },
+    "aaaded4f-7fd4-4802-b78a-1779ad4521a4": {
+      "node_id": "aaaded4f-7fd4-4802-b78a-1779ad4521a4",
+      "name": "TextProcessor",
+      "description": "Analyzes and enriches text",
+      "input_schema": {
+        "fields": {
+          "text": "str",
+          "word_count": "int",
+          "char_count": "int"
+        },
+        "required": [
+          "text"
+        ],
+        "description": ""
+      },
+      "output_schema": {
+        "fields": {
+          "text": "str",
+          "processed_text": "str",
+          "word_count": "int",
+          "char_count": "int",
+          "sentences": "list",
+          "keywords": "list",
+          "analysis": "dict"
+        },
+        "required": [
+          "text",
+          "processed_text",
+          "analysis"
+        ],
+        "description": ""
+      },
+      "tags": [
+        "processor",
+        "analysis"
+      ],
+      "capability": "Analyzes and enriches text",
+      "version": "1.0.0",
+      "announced_at": "2026-06-06T00:22:29.782994",
+      "is_active": true,
+      "semantic_profile": {
+        "input_tokens": [
+          "text",
+          "word",
+          "count",
+          "char",
+          "count"
+        ],
+        "output_tokens": [
+          "text",
+          "processed",
+          "text",
+          "word",
+          "count",
+          "char",
+          "count",
+          "sentences",
+          "keywords",
+          "analysis"
+        ],
+        "capability_tokens": [
+          "processor",
+          "enriches",
+          "analysis",
+          "text",
+          "analyzes",
+          "and"
+        ],
+        "updated_at": "2026-06-06T00:22:29.782994"
+      },
+      "last_seen": "2026-06-06T00:22:29.785137+00:00",
+      "first_seen": "2026-06-06T00:22:29.785145+00:00",
+      "execution_stats": {
+        "total_executions": 2,
+        "successes": 2,
+        "failures": 0,
+        "avg_latency_ms": 0.25,
+        "last_executed": "2026-06-06T00:22:29.825989+00:00"
+      },
+      "discovery_score": 69.52
+    },
+    "96fe39c4-bfd4-4b3e-848d-cdfceef60dc4": {
+      "node_id": "96fe39c4-bfd4-4b3e-848d-cdfceef60dc4",
+      "name": "TextOutput",
+      "description": "Terminal node: formats final result",
+      "input_schema": {
+        "fields": {
+          "text": "str",
+          "analysis": "dict",
+          "keywords": "list"
+        },
+        "required": [
+          "text"
+        ],
+        "description": ""
+      },
+      "output_schema": {
+        "fields": {
+          "result": "Any",
+          "format": "str",
+          "rendered_at": "str",
+          "success": "bool"
+        },
+        "required": [
+          "result",
+          "format",
+          "success"
+        ],
+        "description": ""
+      },
+      "tags": [
+        "output",
+        "terminal"
+      ],
+      "capability": "Terminal node: formats final result",
+      "version": "1.0.0",
+      "announced_at": "2026-06-06T00:22:29.790002",
+      "is_active": true,
+      "semantic_profile": {
+        "input_tokens": [
+          "text",
+          "analysis",
+          "keywords"
+        ],
+        "output_tokens": [
+          "result",
+          "format",
+          "rendered",
+          "at",
+          "success"
+        ],
+        "capability_tokens": [
+          "formats",
+          "output",
+          "node",
+          "terminal",
+          "final",
+          "result"
+        ],
+        "updated_at": "2026-06-06T00:22:29.790002"
+      },
+      "last_seen": "2026-06-06T00:22:29.792331+00:00",
+      "first_seen": "2026-06-06T00:22:29.792340+00:00",
+      "execution_stats": {
+        "total_executions": 2,
+        "successes": 2,
+        "failures": 0,
+        "avg_latency_ms": 0.055,
+        "last_executed": "2026-06-06T00:22:29.826550+00:00"
+      },
+      "discovery_score": 69.52
+    }
+  }
+}
