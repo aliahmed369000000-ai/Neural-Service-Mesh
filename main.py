@@ -50,6 +50,7 @@ from ai.simulation_lab import SimulationLab
 from ai.meta_reasoner import MetaReasoner
 from ai.economic_engine import EconomicEngine
 from ai.system_dna import SystemDNA
+from ai.phase6_validator import Phase6Validator
 
 # ── Services ───────────────────────────────────────────────────────────────
 from services.input_service import InputNode
@@ -574,6 +575,40 @@ class NeuralServiceMesh:
             "summary": self.swarm.summary(),
         }
 
+    # ── Pre-Phase 7: Validation ────────────────────────────────────────────
+
+    def validate_phase6(self, project_root: Optional[str] = None, save_report: bool = True) -> dict:
+        """
+        Generate a full Phase 6 Validation Report before transitioning to Phase 7.
+
+        The report covers:
+          • File count & line-of-code breakdown
+          • Live system: nodes, routes, agents, swarm tasks, DNA snapshots
+          • Module usage analysis (which modules are actually imported)
+          • Phase coverage 1-6 (% of modules active per phase)
+          • Dead code detection (files never reached from main.py/app.py)
+          • Phase 7 readiness score (0-100)
+
+        Args:
+            project_root: Override the project root directory (auto-detected if None)
+            save_report:  If True, saves report JSON to ./data/phase6_validation_report.json
+
+        Returns:
+            Full validation report as a dict.
+        """
+        import json, os
+        validator = Phase6Validator(self, project_root=project_root)
+        report = validator.generate()
+
+        if save_report:
+            os.makedirs("./data", exist_ok=True)
+            report_path = "./data/phase6_validation_report.json"
+            with open(report_path, "w", encoding="utf-8") as f:
+                json.dump(report, f, indent=2, default=str)
+            print(f"  Report saved → {report_path}\n")
+
+        return report
+
 
 # ── Demo ───────────────────────────────────────────────────────────────────
 
@@ -684,8 +719,8 @@ def simulate(rounds: int = 20, delay: float = 0.1):
 if __name__ == "__main__":
     import argparse
     p = argparse.ArgumentParser(description="Neural Service Mesh v5")
-    p.add_argument("--mode", choices=["demo", "api", "simulate", "evolve", "phase6"], default="demo",
-                   help="demo: example pipeline | api: Flask server | simulate: Phase 4 learning sim | evolve: Phase 5 evolution | phase6: Phase 6 multi-agent demo")
+    p.add_argument("--mode", choices=["demo", "api", "simulate", "evolve", "phase6", "validate"], default="demo",
+                   help="demo: example pipeline | api: Flask server | simulate: Phase 4 learning sim | evolve: Phase 5 evolution | phase6: Phase 6 multi-agent demo | validate: Pre-Phase 7 validation report")
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=5000)
     p.add_argument("--debug", action="store_true")
@@ -780,6 +815,39 @@ if __name__ == "__main__":
         print("\n[ Full System Status — Phase 6 ]\n")
         status = mesh.status()
         print(json.dumps(status.get("ai_phase6", {}), indent=2))
+    elif args.mode == "validate":
+        import json
+        print("\n" + "="*65)
+        print("  Neural Service Mesh  —  Pre-Phase 7 Validation")
+        print("="*65 + "\n")
+        # Boot the mesh and run a minimal pipeline so live stats are populated
+        mesh = NeuralServiceMesh()
+        from services.input_service import InputNode
+        from services.processor_service import ProcessorNode
+        from services.output_service import OutputNode
+        inp  = mesh.register_node(InputNode("TextInput"))
+        proc = mesh.register_node(ProcessorNode("TextProcessor"), connect_to=inp)
+        out  = mesh.register_node(OutputNode("TextOutput", output_format="summary"), connect_to=proc)
+
+        # Run a quick pipeline so route memory is populated
+        sample = {"text": "Validation pre-flight check.", "source": "validate_mode"}
+        mesh.run(inp, out, sample, use_ai=True)
+
+        # Spawn one agent so factory stats are non-zero
+        mesh.spawn_agent("MonitorAgent")
+
+        # Take a DNA snapshot so dna_snapshots > 0
+        mesh.dna_snapshot(notes="Pre-Phase 7 validation snapshot")
+
+        # Generate the full report
+        report = mesh.validate_phase6(save_report=True)
+
+        # Print readiness summary
+        rd = report["phase7_readiness"]
+        print(f"\n  ╔══════════════════════════════════════════╗")
+        print(f"  ║  PHASE 7 READINESS SCORE: {rd['score']:5.1f} / 100      ║")
+        print(f"  ╚══════════════════════════════════════════╝")
+        print(f"\n  {rd['verdict']}\n")
     else:
         from api.app import run_api
         mesh = NeuralServiceMesh()
