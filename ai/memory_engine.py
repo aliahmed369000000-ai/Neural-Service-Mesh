@@ -2,14 +2,23 @@
 Phase 3 – Memory Engine
 Persistent SQLite memory of successful/failed routes,
 node performance, and learned patterns.
+
+Knowledge Layer Integration (Phase 3 completion):
+  Writes route records and node execution stats to:
+    knowledge/route_memory.json
+    knowledge/node_profiles.json
+  via KnowledgeStore (injected via set_knowledge_store()).
 """
 from __future__ import annotations
 import sqlite3
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
 from datetime import datetime
+
+if TYPE_CHECKING:
+    from knowledge.knowledge_store import KnowledgeStore
 
 logger = logging.getLogger(__name__)
 
@@ -135,9 +144,15 @@ class MemoryEngine:
         self._db_path = Path(db_path)
         self._routes: Dict[str, RouteMemory] = {}
         self._nodes: Dict[str, NodeMemory] = {}
+        self._knowledge = None   # KnowledgeStore — injected via set_knowledge_store()
         self._init_schema()
         self._load()
         logger.info("MemoryEngine initialised (Phase 3)")
+
+    def set_knowledge_store(self, ks) -> None:
+        """Inject the KnowledgeStore so MemoryEngine can persist to JSON knowledge files."""
+        self._knowledge = ks
+        logger.info("MemoryEngine: KnowledgeStore connected")
 
     # ── Schema ─────────────────────────────────────────────────────────────
 
@@ -237,6 +252,29 @@ class MemoryEngine:
 
         logger.debug(f"MemoryEngine learned from run {run_result.get('run_id','?')[:8]}")
 
+        # ── Knowledge layer: persist to JSON files ─────────────────────────
+        if self._knowledge:
+            rm = self._routes[path_key]
+            try:
+                self._knowledge.upsert_route(rm.to_dict())
+                run_id = run_result.get('run_id', '')
+                self._knowledge.append_route_execution(
+                    path_key, run_id, success, total_ms
+                )
+            except Exception as ke:
+                logger.warning(f"MemoryEngine: knowledge route write failed: {ke}")
+
+            for step in run_result.get('steps', []):
+                nid = step.get('node_id')
+                if not nid:
+                    continue
+                step_ok = step.get('status') == 'success'
+                step_ms = step.get('duration_ms') or 0.0
+                try:
+                    self._knowledge.update_node_execution_stats(nid, step_ok, step_ms)
+                except Exception as ke:
+                    logger.warning(f"MemoryEngine: knowledge node stats write failed: {ke}")
+
     def _persist_route(self, rm: RouteMemory):
         try:
             with self._conn() as conn:
@@ -319,6 +357,8 @@ class MemoryEngine:
         if key in self._routes:
             self._routes[key].is_promoted = True
             self._persist_route(self._routes[key])
+            if self._knowledge:
+                self._knowledge.promote_route(key)
 
     def demote_route(self, path: List[str]):
         """Remove promotion from a route."""
@@ -326,6 +366,8 @@ class MemoryEngine:
         if key in self._routes:
             self._routes[key].is_promoted = False
             self._persist_route(self._routes[key])
+            if self._knowledge:
+                self._knowledge.demote_route(key)
 
     def summary(self) -> dict:
         promoted = [r for r in self._routes.values() if r.is_promoted]
