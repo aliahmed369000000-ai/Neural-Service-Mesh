@@ -42,6 +42,15 @@ from ai.multi_goal_planner import MultiGoalPlanner
 from ai.governor import AIGovernanceLayer
 from ai.evolution_engine import EvolutionEngine
 
+# ── Phase 6 AI ─────────────────────────────────────────────────────────────
+from ai.agent_factory import AgentFactory
+from ai.swarm_coordinator import SwarmCoordinator
+from ai.self_optimizer import SelfOptimizer
+from ai.simulation_lab import SimulationLab
+from ai.meta_reasoner import MetaReasoner
+from ai.economic_engine import EconomicEngine
+from ai.system_dna import SystemDNA
+
 # ── Services ───────────────────────────────────────────────────────────────
 from services.input_service import InputNode
 from services.processor_service import ProcessorNode
@@ -64,7 +73,7 @@ class NeuralServiceMesh:
     All Phase 2 APIs are preserved unchanged.
     """
 
-    VERSION = "5.0.0"
+    VERSION = "6.0.0"
 
     def __init__(self, storage_dir: str = "./data", db_path: str = "./data/mesh.db"):
         # ── Storage ────────────────────────────────────────────────────────
@@ -177,7 +186,45 @@ class NeuralServiceMesh:
         # ── Install Phase 3 post-run hook ──────────────────────────────────
         self._install_phase3_hook()
 
-        logger.info(f"NeuralServiceMesh v{self.VERSION} ready (Phase 5 — Autonomous Service Creation & Evolution)")
+        # ── Phase 6: Multi-Agent Self-Improving Platform ────────────────
+        self.agent_factory = AgentFactory(knowledge_store=self.knowledge)
+        self.swarm = SwarmCoordinator(
+            factory=self.agent_factory,
+            max_agents=20,
+            knowledge_store=self.knowledge,
+        )
+        self.self_optimizer = SelfOptimizer(
+            registry=self.registry,
+            graph=self.graph,
+            scoring_engine=self.scoring,
+            memory_engine=self.memory,
+            knowledge_store=self.knowledge,
+            agent_factory=self.agent_factory,
+        )
+        self.simulation_lab = SimulationLab(
+            registry=self.registry,
+            graph=self.graph,
+            routing_engine=self.routing,
+            scoring_engine=self.scoring,
+            memory_engine=self.memory,
+            knowledge_store=self.knowledge,
+        )
+        self.meta_reasoner = MetaReasoner(
+            memory_engine=self.memory,
+            scoring_engine=self.scoring,
+            knowledge_store=self.knowledge,
+            evolution_engine=self.evolution,
+            governance_layer=self.governance,
+        )
+        self.economic_engine = EconomicEngine(
+            scoring_engine=self.scoring,
+            reputation_engine=self.reputation,
+            knowledge_store=self.knowledge,
+            registry=self.registry,
+        )
+        self.system_dna = SystemDNA(knowledge_store=self.knowledge)
+
+        logger.info(f"NeuralServiceMesh v{self.VERSION} ready (Phase 6 — Multi-Agent Self-Improving Platform)")
 
     # ── Phase 3 hook into ExecutionEngine ─────────────────────────────────
 
@@ -347,6 +394,16 @@ class NeuralServiceMesh:
                 "service_generator": self.service_generator.summary(),
                 "evolution": self.evolution.summary(),
             },
+            # Phase 6 Multi-Agent Self-Improving Platform
+            "ai_phase6": {
+                "agent_factory": self.agent_factory.summary(),
+                "swarm": self.swarm.summary(),
+                "self_optimizer": self.self_optimizer.summary(),
+                "simulation_lab": self.simulation_lab.summary(),
+                "meta_reasoner": self.meta_reasoner.summary(),
+                "economic_engine": self.economic_engine.summary(),
+                "system_dna": self.system_dna.summary(),
+            },
         }
 
     # ── Phase 4: Public API methods ────────────────────────────────────────
@@ -441,6 +498,80 @@ class NeuralServiceMesh:
         return {
             "services": self.service_generator.list_generated(status_filter=status),
             "summary": self.service_generator.summary(),
+        }
+
+    # ── Phase 6: Public API methods ────────────────────────────────────────
+
+    def spawn_agent(self, role: str, config: Optional[dict] = None) -> dict:
+        """Phase 6: Spawn a new autonomous agent."""
+        agent = self.agent_factory.spawn(role, config)
+        return agent.to_dict()
+
+    def swarm_execute(self, goal: str, data: dict, custom_tasks: Optional[list] = None) -> dict:
+        """Phase 6: Execute a goal using the agent swarm."""
+        result = self.swarm.execute(goal, data, custom_tasks)
+        return result.to_dict()
+
+    def self_optimize(self) -> dict:
+        """Phase 6: Run one self-optimization cycle."""
+        report = self.self_optimizer.run_cycle()
+        return report.to_dict()
+
+    def simulate_plans(self, goal: str, data: dict, n_plans: int = 100) -> dict:
+        """Phase 6: Run simulation lab to find the best execution plan."""
+        report = self.simulation_lab.run(goal=goal, data=data, n_plans=n_plans)
+        return report.to_dict()
+
+    def meta_reflect(self) -> dict:
+        """Phase 6: Run meta-reasoning reflection over recent history."""
+        insights = self.meta_reasoner.reflect()
+        return {
+            "insights": [i.to_dict() for i in insights],
+            "summary": self.meta_reasoner.summary(),
+        }
+
+    def meta_ask(self, question: str) -> dict:
+        """Phase 6: Ask the meta-reasoner a question about system decisions."""
+        return self.meta_reasoner.ask(question)
+
+    def economic_leaderboard(self, top_n: int = 10) -> dict:
+        """Phase 6: Get node economic leaderboard."""
+        return {
+            "leaderboard": self.economic_engine.leaderboard(top_n),
+            "summary": self.economic_engine.summary(),
+        }
+
+    def dna_snapshot(self, notes: str = "") -> dict:
+        """Phase 6: Capture a DNA snapshot of the current system state."""
+        snap = self.system_dna.snapshot(
+            registry=self.registry,
+            scoring_engine=self.scoring,
+            memory_engine=self.memory,
+            notes=notes,
+        )
+        return snap.to_dict()
+
+    def dna_diff(self, snapshot_id_a: str, snapshot_id_b: str) -> dict:
+        """Phase 6: Diff two DNA snapshots."""
+        return self.system_dna.diff(snapshot_id_a, snapshot_id_b)
+
+    def dna_rollback(self, snapshot_id: str) -> dict:
+        """Phase 6: Activate (roll back to) a prior DNA snapshot."""
+        success = self.system_dna.apply(snapshot_id)
+        return {"success": success, "snapshot_id": snapshot_id}
+
+    def get_agent_factory(self) -> dict:
+        """Phase 6: Get agent factory summary and active agents."""
+        return {
+            "summary": self.agent_factory.summary(),
+            "agents": self.agent_factory.all_agents(),
+        }
+
+    def get_swarm_history(self, limit: int = 10) -> dict:
+        """Phase 6: Get recent swarm execution history."""
+        return {
+            "history": self.swarm.history(limit),
+            "summary": self.swarm.summary(),
         }
 
 
@@ -553,8 +684,8 @@ def simulate(rounds: int = 20, delay: float = 0.1):
 if __name__ == "__main__":
     import argparse
     p = argparse.ArgumentParser(description="Neural Service Mesh v5")
-    p.add_argument("--mode", choices=["demo", "api", "simulate", "evolve"], default="demo",
-                   help="demo: example pipeline | api: Flask server | simulate: Phase 4 learning sim | evolve: Phase 5 evolution")
+    p.add_argument("--mode", choices=["demo", "api", "simulate", "evolve", "phase6"], default="demo",
+                   help="demo: example pipeline | api: Flask server | simulate: Phase 4 learning sim | evolve: Phase 5 evolution | phase6: Phase 6 multi-agent demo")
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=5000)
     p.add_argument("--debug", action="store_true")
@@ -586,6 +717,69 @@ if __name__ == "__main__":
         # Run evolution
         result = mesh.evolve(cycles=args.cycles, auto_register=True)
         print(json.dumps(result, indent=2))
+    elif args.mode == "phase6":
+        import json
+        print("\n" + "="*65)
+        print("  Neural Service Mesh  —  Phase 6 (Multi-Agent Self-Improving Platform)")
+        print("="*65 + "\n")
+        mesh = NeuralServiceMesh()
+        from services.input_service import InputNode
+        from services.processor_service import ProcessorNode
+        from services.output_service import OutputNode
+        inp  = mesh.register_node(InputNode("TextInput"))
+        proc = mesh.register_node(ProcessorNode("TextProcessor"), connect_to=inp)
+        out  = mesh.register_node(OutputNode("TextOutput", output_format="summary"), connect_to=proc)
+
+        sample_data = {"text": "The neural mesh is self-improving.", "source": "phase6_demo"}
+
+        print("[ Phase 6.1 — Agent Factory ]\n")
+        agent = mesh.spawn_agent("ResearchAgent")
+        print(f"  Spawned: {agent['role']} → {agent['agent_id']}\n")
+
+        print("[ Phase 6.2 — Swarm Execution ]\n")
+        swarm_result = mesh.swarm_execute("translate and review document", sample_data)
+        print(f"  Swarm status : {swarm_result['status']}")
+        print(f"  Tasks run    : {swarm_result['total_tasks']}")
+        print(f"  Tasks OK     : {swarm_result['success_count']}\n")
+
+        print("[ Phase 6.3 — Simulation Lab (100 plans) ]\n")
+        sim = mesh.simulate_plans("translate document", sample_data, n_plans=100)
+        best = sim.get("best_plan") or {}
+        print(f"  Plans simulated : {sim.get('n_plans_simulated')}")
+        print(f"  Best plan score : {best.get('composite_score')}")
+        print(f"  Best path       : {' → '.join(best.get('node_names', []))}\n")
+
+        print("[ Phase 6.4 — Self Optimizer ]\n")
+        opt = mesh.self_optimize()
+        print(f"  Cycle          : {opt['cycle']}")
+        print(f"  Nodes checked  : {opt['nodes_checked']}")
+        print(f"  Nodes flagged  : {opt['nodes_flagged']}\n")
+
+        print("[ Phase 6.5 — Meta Reasoner ]\n")
+        insights = mesh.meta_reflect()
+        print(f"  Insights produced: {len(insights['insights'])}")
+        for i in insights["insights"][:3]:
+            print(f"    [{i['insight_type'].upper()}] {i['title']}")
+
+        print("\n[ Phase 6.6 — Economic Leaderboard ]\n")
+        board = mesh.economic_leaderboard()
+        for entry in board["leaderboard"][:3]:
+            print(f"  #{entry['rank']}  {entry['node_name']:20s}  "
+                  f"cap={entry['capability_score']:.2f}  "
+                  f"trust={entry['trust_score']:.2f}  "
+                  f"composite={entry['composite_score']:.2f}")
+
+        print("\n[ Phase 6.7 — System DNA Snapshot ]\n")
+        dna = mesh.dna_snapshot(notes="Phase 6 demo snapshot")
+        print(f"  Snapshot   : {dna['snapshot_id']}")
+        print(f"  Version    : {dna['version']}")
+        print(f"  Health     : {dna['composite_health']}")
+        print(f"  Nodes      : {dna['node_count']}")
+        print(f"  Routes     : {dna['route_count']}")
+
+        print("\n[ Full System Status — Phase 6 ]\n")
+        status = mesh.status()
+        print(json.dumps(status.get("ai_phase6", {}), indent=2))
     else:
         from api.app import run_api
         mesh = NeuralServiceMesh()
