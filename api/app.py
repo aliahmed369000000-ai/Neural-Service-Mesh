@@ -744,3 +744,152 @@ def create_app(mesh):
     if hasattr(mesh, "evolution"):
         _add_phase5_routes(app, mesh)
     return app
+
+
+# ── Phase 6 routes ─────────────────────────────────────────────────────────
+
+def _add_phase6_routes(app, mesh):
+    from flask import jsonify, request
+
+    # Agents
+    @app.route("/ai/agents", methods=["GET"])
+    def p6_agents():
+        """Phase 6: List all agents."""
+        return jsonify(mesh.get_agent_factory())
+
+    @app.route("/ai/agents/spawn", methods=["POST"])
+    def p6_spawn():
+        """Phase 6: Spawn a new agent."""
+        body = request.get_json(force=True) or {}
+        role = body.get("role")
+        if not role:
+            return jsonify({"error": "role is required"}), 400
+        try:
+            return jsonify(mesh.spawn_agent(role, body.get("config")))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+    @app.route("/ai/agents/<agent_id>/retire", methods=["POST"])
+    def p6_retire(agent_id):
+        """Phase 6: Retire an agent."""
+        ok = mesh.agent_factory.retire(agent_id)
+        return jsonify({"retired": ok, "agent_id": agent_id})
+
+    # Swarm
+    @app.route("/ai/swarm/execute", methods=["POST"])
+    def p6_swarm():
+        """Phase 6: Execute a goal via the agent swarm."""
+        body = request.get_json(force=True) or {}
+        goal = body.get("goal", "")
+        data = body.get("data", {})
+        tasks = body.get("tasks")
+        return jsonify(mesh.swarm_execute(goal, data, tasks))
+
+    @app.route("/ai/swarm/history", methods=["GET"])
+    def p6_swarm_history():
+        """Phase 6: Get recent swarm execution history."""
+        limit = int(request.args.get("limit", 10))
+        return jsonify(mesh.get_swarm_history(limit))
+
+    # Self-optimizer
+    @app.route("/ai/optimize/self", methods=["POST"])
+    def p6_self_optimize():
+        """Phase 6: Trigger one self-optimization cycle."""
+        return jsonify(mesh.self_optimize())
+
+    @app.route("/ai/optimize/history", methods=["GET"])
+    def p6_optimize_history():
+        """Phase 6: Get self-optimizer history."""
+        limit = int(request.args.get("limit", 10))
+        return jsonify({"history": mesh.self_optimizer.history(limit)})
+
+    # Simulation lab
+    @app.route("/ai/simulate", methods=["POST"])
+    def p6_simulate():
+        """Phase 6: Run simulation lab over candidate plans."""
+        body = request.get_json(force=True) or {}
+        goal = body.get("goal", "")
+        data = body.get("data", {})
+        n_plans = int(body.get("n_plans", 100))
+        return jsonify(mesh.simulate_plans(goal, data, n_plans))
+
+    # Meta-reasoner
+    @app.route("/ai/meta/reflect", methods=["POST"])
+    def p6_reflect():
+        """Phase 6: Run meta-reasoning reflection."""
+        return jsonify(mesh.meta_reflect())
+
+    @app.route("/ai/meta/ask", methods=["POST"])
+    def p6_ask():
+        """Phase 6: Ask the meta-reasoner a question."""
+        body = request.get_json(force=True) or {}
+        question = body.get("question", "")
+        return jsonify(mesh.meta_ask(question))
+
+    @app.route("/ai/meta/insights", methods=["GET"])
+    def p6_insights():
+        """Phase 6: Get recent meta-reasoning insights."""
+        limit = int(request.args.get("limit", 10))
+        return jsonify({"insights": mesh.meta_reasoner.recent_insights(limit)})
+
+    # Economic engine
+    @app.route("/ai/economy/leaderboard", methods=["GET"])
+    def p6_leaderboard():
+        """Phase 6: Get economic leaderboard."""
+        top_n = int(request.args.get("top", 10))
+        return jsonify(mesh.economic_leaderboard(top_n))
+
+    @app.route("/ai/economy/node/<node_id>", methods=["GET"])
+    def p6_node_economy(node_id):
+        """Phase 6: Get economic profile for a single node."""
+        profile = mesh.economic_engine.get_profile(node_id)
+        if not profile:
+            return jsonify({"error": "Node not found in economic engine"}), 404
+        return jsonify(profile)
+
+    # System DNA (Phase 6 — richer than Phase 5 placeholder)
+    @app.route("/ai/dna/snapshot", methods=["POST"])
+    def p6_dna_snapshot():
+        """Phase 6: Capture a DNA snapshot."""
+        body = request.get_json(force=True) or {}
+        notes = body.get("notes", "")
+        return jsonify(mesh.dna_snapshot(notes))
+
+    @app.route("/ai/dna/history", methods=["GET"])
+    def p6_dna_history():
+        """Phase 6: Get DNA snapshot history."""
+        limit = int(request.args.get("limit", 10))
+        return jsonify({"history": mesh.system_dna.history(limit)})
+
+    @app.route("/ai/dna/diff", methods=["POST"])
+    def p6_dna_diff():
+        """Phase 6: Diff two DNA snapshots."""
+        body = request.get_json(force=True) or {}
+        a = body.get("snapshot_id_a")
+        b = body.get("snapshot_id_b")
+        if not a or not b:
+            return jsonify({"error": "snapshot_id_a and snapshot_id_b are required"}), 400
+        return jsonify(mesh.dna_diff(a, b))
+
+    @app.route("/ai/dna/rollback", methods=["POST"])
+    def p6_dna_rollback():
+        """Phase 6: Rollback to a prior DNA snapshot."""
+        body = request.get_json(force=True) or {}
+        sid = body.get("snapshot_id")
+        if not sid:
+            return jsonify({"error": "snapshot_id is required"}), 400
+        return jsonify(mesh.dna_rollback(sid))
+
+    @app.route("/health/v6", methods=["GET"])
+    def health_v6():
+        return jsonify({"status": "ok", "version": "6.0.0", "phase": 6})
+
+
+# Patch create_app to include Phase 6
+_create_app_p5 = create_app
+
+def create_app(mesh):
+    app = _create_app_p5(mesh)
+    if hasattr(mesh, "agent_factory"):
+        _add_phase6_routes(app, mesh)
+    return app
