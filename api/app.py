@@ -511,20 +511,236 @@ def _add_phase4_routes(app, mesh):
         return jsonify({"status": "ok", "version": "4.0.0", "phase": 4})
 
 
-# ── Patched create_app to include Phase 3+4 routes ───────────────────────
+def _add_phase5_routes(app, mesh):
+    """Phase 5 API endpoints — Autonomous Service Creation & Evolution."""
 
-_original_create_app = create_app
+    # ── Evolution ──────────────────────────────────────────────────────────
+
+    @app.route("/ai/evolve", methods=["POST"])
+    def ai_evolve():
+        """Phase 5: Run evolution cycle(s) — detect gaps and generate services."""
+        b = request.get_json(force=True) or {}
+        cycles = int(b.get("cycles", 1))
+        auto_register = bool(b.get("auto_register", True))
+        if cycles > 10:
+            return jsonify({"error": "Maximum 10 cycles per request"}), 400
+        result = mesh.evolve(cycles=cycles, auto_register=auto_register)
+        return jsonify(result)
+
+    # ── Gap Detection ──────────────────────────────────────────────────────
+
+    @app.route("/ai/gaps", methods=["GET"])
+    def ai_gaps():
+        """Phase 5: Get all detected gaps."""
+        include_resolved = request.args.get("include_resolved", "false").lower() == "true"
+        return jsonify({
+            "gaps": mesh.gap_detector.all_gaps(include_resolved=include_resolved),
+            "summary": mesh.gap_detector.summary(),
+        })
+
+    @app.route("/ai/gaps/scan", methods=["POST"])
+    def ai_gaps_scan():
+        """Phase 5: Trigger a gap scan."""
+        return jsonify(mesh.scan_gaps())
+
+    @app.route("/ai/gaps/<gap_id>/resolve", methods=["POST"])
+    def ai_gap_resolve(gap_id):
+        """Phase 5: Mark a gap as resolved."""
+        ok = mesh.gap_detector.mark_resolved(gap_id)
+        if ok:
+            return jsonify({"resolved": gap_id})
+        return jsonify({"error": "Gap not found"}), 404
+
+    # ── Service Generator ──────────────────────────────────────────────────
+
+    @app.route("/ai/services/generated", methods=["GET"])
+    def ai_generated_services():
+        """Phase 5: List all AI-generated service specs."""
+        status_filter = request.args.get("status")
+        return jsonify(mesh.get_generated_services(status=status_filter))
+
+    @app.route("/ai/services/create", methods=["POST"])
+    def ai_services_create():
+        """Phase 5: Manually trigger service generation for a gap."""
+        b = request.get_json(force=True) or {}
+        gap = b.get("gap")
+        if not gap:
+            # Build a minimal gap from request body
+            gap = {
+                "missing_service": b.get("missing_service", "AutoService"),
+                "confidence": float(b.get("confidence", 0.7)),
+                "gap_type": b.get("gap_type", "routing"),
+                "source_node": b.get("source_node", {}),
+                "target_node": b.get("target_node", {}),
+            }
+        spec = mesh.service_generator.generate_for_gap(gap)
+        if not spec:
+            return jsonify({"error": "Could not generate service"}), 500
+        return jsonify(spec.to_dict()), 201
+
+    @app.route("/ai/services/generated/<spec_id>/approve", methods=["POST"])
+    def ai_service_approve(spec_id):
+        """Phase 5: Approve a generated service spec for registration."""
+        ok = mesh.service_generator.approve_spec(spec_id)
+        if not ok:
+            return jsonify({"error": "Spec not found"}), 404
+        spec = mesh.service_generator.get_spec(spec_id)
+        if spec:
+            decision = mesh.governance.evaluate_generation(
+                spec.to_dict(), mesh.service_generator.summary()["total_generated"]
+            )
+            if decision.allowed:
+                node = mesh.service_generator.instantiate_spec(spec)
+                node_id = mesh.register_node(node)
+                return jsonify({"approved": spec_id, "node_id": node_id})
+            else:
+                return jsonify({"approved": False, "reason": decision.reason}), 403
+        return jsonify({"approved": spec_id})
+
+    @app.route("/ai/services/generated/<spec_id>/reject", methods=["POST"])
+    def ai_service_reject(spec_id):
+        """Phase 5: Reject a generated service spec."""
+        ok = mesh.service_generator.reject_spec(spec_id)
+        if ok:
+            return jsonify({"rejected": spec_id})
+        return jsonify({"error": "Spec not found"}), 404
+
+    # ── Capability Marketplace ─────────────────────────────────────────────
+
+    @app.route("/ai/marketplace", methods=["GET"])
+    def ai_marketplace():
+        """Phase 5: Get capability marketplace snapshot."""
+        return jsonify(mesh.get_marketplace())
+
+    @app.route("/ai/marketplace/find", methods=["POST"])
+    def ai_marketplace_find():
+        """Phase 5: Find providers for a capability."""
+        b = request.get_json(force=True) or {}
+        capability = b.get("capability", "")
+        if not capability:
+            return jsonify({"error": "capability required"}), 400
+        top_k = int(b.get("top_k", 5))
+        providers = mesh.marketplace.find_providers(capability, top_k=top_k)
+        return jsonify({
+            "capability": capability,
+            "providers": [p.to_dict() for p in providers],
+            "count": len(providers),
+        })
+
+    @app.route("/ai/marketplace/advertise", methods=["POST"])
+    def ai_marketplace_advertise():
+        """Phase 5: Manually advertise a node's capability."""
+        b = request.get_json(force=True) or {}
+        node_id = b.get("node_id", "")
+        node_name = b.get("node_name", "")
+        capability = b.get("capability", "")
+        if not all([node_id, capability]):
+            return jsonify({"error": "node_id and capability required"}), 400
+        ad = mesh.marketplace.advertise(
+            node_id=node_id,
+            node_name=node_name,
+            capability=capability,
+            quality_score=float(b.get("quality_score", 0.8)),
+        )
+        return jsonify(ad.to_dict()), 201
+
+    # ── Multi-Goal Planning ────────────────────────────────────────────────
+
+    @app.route("/ai/run/multi-goal", methods=["POST"])
+    def ai_run_multi_goal():
+        """Phase 5: Execute a complex multi-goal plan."""
+        b = request.get_json(force=True) or {}
+        goal = b.get("goal", "").strip()
+        data = b.get("data", {})
+        if not goal:
+            return jsonify({"error": "goal required"}), 400
+        result = mesh.run_multi_goal(goal, data)
+        return jsonify(result)
+
+    @app.route("/ai/plan/multi-goal", methods=["POST"])
+    def ai_plan_multi_goal():
+        """Phase 5: Build a multi-goal plan without executing it."""
+        b = request.get_json(force=True) or {}
+        goal = b.get("goal", "").strip()
+        if not goal:
+            return jsonify({"error": "goal required"}), 400
+        plan = mesh.multi_planner.plan(goal)
+        return jsonify(plan.to_dict())
+
+    # ── Governance ─────────────────────────────────────────────────────────
+
+    @app.route("/ai/governance", methods=["GET"])
+    def ai_governance():
+        """Phase 5: Get governance status and recent audit log."""
+        return jsonify(mesh.get_governance())
+
+    @app.route("/ai/governance/evaluate", methods=["POST"])
+    def ai_governance_evaluate():
+        """Phase 5: Evaluate a proposed action against governance policies."""
+        b = request.get_json(force=True) or {}
+        action = b.get("action", "add_route")
+        context = b.get("context", {})
+        decision = mesh.governance.evaluate(action, context)
+        return jsonify(decision.to_dict())
+
+    # ── Health v5 ──────────────────────────────────────────────────────────
+
+    @app.route("/health/v5", methods=["GET"])
+    def health_v5():
+        return jsonify({"status": "ok", "version": "5.0.0", "phase": 5})
+
+    # ── System DNA ─────────────────────────────────────────────────────────
+
+    @app.route("/ai/dna", methods=["GET"])
+    def ai_dna():
+        """Phase 5: System DNA — philosophy, evolution rules, weights."""
+        system_dna = {
+            "version": "5.0.0",
+            "philosophy": "Autonomous Neural Service Ecosystem",
+            "capabilities": [
+                "Self-learning from execution history",
+                "Gap detection and service generation",
+                "Capability-based routing (not name-based)",
+                "AI governance to prevent runaway growth",
+                "Multi-goal decomposition and planning",
+                "Autonomous evolution cycles",
+            ],
+            "evolution_rules": {
+                "max_generated_services": mesh.governance.MAX_GENERATED_SERVICES,
+                "max_path_length": mesh.governance.MAX_PATH_LENGTH,
+                "min_node_reputation": mesh.governance.MIN_NODE_REPUTATION,
+                "min_confidence_threshold": 0.4,
+            },
+            "weights": {
+                "quality_weight": 0.7,
+                "latency_weight": 0.3,
+                "reputation_influence": 0.25,
+            },
+            "learning_strategies": [
+                "Route memory reinforcement",
+                "Semantic similarity matching",
+                "Execution score tracking",
+                "Reputation-based node ranking",
+                "Capability marketplace indexing",
+            ],
+            "current_state": mesh.status(),
+        }
+        # Persist DNA
+        try:
+            mesh.knowledge.write_custom("system_dna", {
+                k: v for k, v in system_dna.items()
+                if k != "current_state"
+            })
+        except Exception:
+            pass
+        return jsonify(system_dna)
+
+
+# Patch create_app to include Phase 5
+_create_app_p4 = create_app
 
 def create_app(mesh):
-    app = _original_create_app(mesh)
-    # Health v3 compatibility
-    @app.route("/health/v3")
-    def health_v3():
-        return jsonify({"status": "ok", "version": "4.0.0", "phase": 4})
-    # Add Phase 3 routes if mesh supports them
-    if hasattr(mesh, "planner"):
-        _add_phase3_routes(app, mesh)
-    # Add Phase 4 routes if mesh supports them
-    if hasattr(mesh, "validator"):
-        _add_phase4_routes(app, mesh)
+    app = _create_app_p4(mesh)
+    if hasattr(mesh, "evolution"):
+        _add_phase5_routes(app, mesh)
     return app
