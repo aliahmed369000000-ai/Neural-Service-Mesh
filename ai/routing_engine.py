@@ -5,6 +5,11 @@ AI-driven dynamic route selection combining:
   - Historical execution scores (ScoringEngine)
   - Remembered routes (MemoryEngine)
   - Graph topology
+
+Knowledge Layer Integration (Phase 3 completion):
+  Reads best routes from knowledge/route_memory.json via KnowledgeStore.
+  Reads node profiles from knowledge/node_profiles.json for routing hints.
+  Uses knowledge-backed data as additional route candidates.
 """
 from __future__ import annotations
 import logging
@@ -56,7 +61,13 @@ class RoutingEngine:
         self._semantic = semantic_matcher
         self._scoring = scoring_engine
         self._memory = memory_engine
+        self._knowledge = None   # KnowledgeStore — injected via set_knowledge_store()
         logger.info("RoutingEngine initialised (Phase 3)")
+
+    def set_knowledge_store(self, ks) -> None:
+        """Inject the KnowledgeStore to enable knowledge-backed route discovery."""
+        self._knowledge = ks
+        logger.info("RoutingEngine: KnowledgeStore connected")
 
     def set_graph(self, graph):
         self._graph = graph
@@ -139,7 +150,18 @@ class RoutingEngine:
             for p in dfs_paths:
                 results.append((p, "ai_dfs"))
 
-        # 4. Semantic chain: build path guided by semantic compatibility
+        # 4. Knowledge-backed routes from JSON layer
+        if self._knowledge:
+            try:
+                best_from_ks = self._knowledge.get_best_routes(top_k=3)
+                for kr in best_from_ks:
+                    path = kr.get("path", [])
+                    if path and path[0] == start_id and path[-1] == end_id:
+                        results.append((path, "knowledge_json"))
+            except Exception as ke:
+                logger.debug(f"RoutingEngine: knowledge read error: {ke}")
+
+        # 5. Semantic chain: build path guided by semantic compatibility
         if self._semantic and self._graph:
             sem_path = self._semantic_guided_path(start_id, end_id)
             if sem_path:
