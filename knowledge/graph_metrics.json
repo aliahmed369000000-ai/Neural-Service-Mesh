@@ -1,0 +1,241 @@
+{
+  "_meta": {
+    "schema_version": "1.0.0",
+    "created_at": "2026-06-06T00:22:29.765093+00:00",
+    "last_updated": "2026-06-06T00:22:29.834435+00:00",
+    "description": "Graph statistics, node rankings, route rankings and optimisation metrics"
+  },
+  "graph_statistics": {
+    "total_nodes": 3,
+    "total_edges": 2,
+    "avg_degree": 0.6667,
+    "density": 0.333333,
+    "connected_components": 0,
+    "last_computed": "2026-06-06T00:22:29.827680+00:00"
+  },
+  "node_rankings": {
+    "by_success_rate": [
+      {
+        "node_id": "a451c3ea-c0bc-4614-8baf-6d2a6accac6b",
+        "name": "TextInput",
+        "success_rate": 1.0,
+        "executions": 1
+      },
+      {
+        "node_id": "aaaded4f-7fd4-4802-b78a-1779ad4521a4",
+        "name": "TextProcessor",
+        "success_rate": 1.0,
+        "executions": 2
+      },
+      {
+        "node_id": "96fe39c4-bfd4-4b3e-848d-cdfceef60dc4",
+        "name": "TextOutput",
+        "success_rate": 1.0,
+        "executions": 2
+      }
+    ],
+    "by_usage_count": [
+      {
+        "node_id": "aaaded4f-7fd4-4802-b78a-1779ad4521a4",
+        "name": "TextProcessor",
+        "executions": 2
+      },
+      {
+        "node_id": "96fe39c4-bfd4-4b3e-848d-cdfceef60dc4",
+        "name": "TextOutput",
+        "executions": 2
+      },
+      {
+        "node_id": "a451c3ea-c0bc-4614-8baf-6d2a6accac6b",
+        "name": "TextInput",
+        "executions": 1
+      }
+    ],
+    "by_avg_latency": [
+      {
+        "node_id": "96fe39c4-bfd4-4b3e-848d-cdfceef60dc4",
+        "name": "TextOutput",
+        "avg_latency_ms": 0.06
+      },
+      {
+        "node_id": "a451c3ea-c0bc-4614-8baf-6d2a6accac6b",
+        "name": "TextInput",
+        "avg_latency_ms": 0.07
+      },
+      {
+        "node_id": "aaaded4f-7fd4-4802-b78a-1779ad4521a4",
+        "name": "TextProcessor",
+        "avg_latency_ms": 0.25
+      }
+    ],
+    "bottleneck_nodes": [],
+    "idle_nodes": [],
+    "last_updated": "2026-06-06T00:22:29.828011+00:00"
+  },
+  "route_rankings": {
+    "top_routes": [
+      {
+        "path_key": "a451c3ea->aaaded4f->96fe39c4",
+        "path": [
+          "a451c3ea-c0bc-4614-8baf-6d2a6accac6b",
+          "aaaded4f-7fd4-4802-b78a-1779ad4521a4",
+          "96fe39c4-bfd4-4b3e-848d-cdfceef60dc4"
+        ],
+        "runs": 1,
+        "successes": 1,
+        "failures": 0,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.51,
+        "health": "excellent",
+        "memory_score": 85.0,
+        "is_promoted": false,
+        "first_seen": "2026-06-06T00:22:29.808521",
+        "last_seen": "2026-06-06T00:22:29.808532"
+      },
+      {
+        "path_key": "aaaded4f->96fe39c4",
+        "path": [
+          "aaaded4f-7fd4-4802-b78a-1779ad4521a4",
+          "96fe39c4-bfd4-4b3e-848d-cdfceef60dc4"
+        ],
+        "runs": 1,
+        "successes": 1,
+        "failures": 0,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.26,
+        "health": "excellent",
+        "memory_score": 85.0,
+        "is_promoted": false,
+        "first_seen": "2026-06-06T00:22:29.821033",
+        "last_seen": "2026-06-06T00:22:29.821042"
+      }
+    ],
+    "failed_routes": [],
+    "most_used": [
+      {
+        "path_key": "a451c3ea->aaaded4f->96fe39c4",
+        "path": [
+          "a451c3ea-c0bc-4614-8baf-6d2a6accac6b",
+          "aaaded4f-7fd4-4802-b78a-1779ad4521a4",
+          "96fe39c4-bfd4-4b3e-848d-cdfceef60dc4"
+        ],
+        "runs": 1,
+        "successes": 1,
+        "failures": 0,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.51,
+        "health": "excellent",
+        "memory_score": 85.0,
+        "is_promoted": false,
+        "first_seen": "2026-06-06T00:22:29.808521",
+        "last_seen": "2026-06-06T00:22:29.808532"
+      },
+      {
+        "path_key": "aaaded4f->96fe39c4",
+        "path": [
+          "aaaded4f-7fd4-4802-b78a-1779ad4521a4",
+          "96fe39c4-bfd4-4b3e-848d-cdfceef60dc4"
+        ],
+        "runs": 1,
+        "successes": 1,
+        "failures": 0,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.26,
+        "health": "excellent",
+        "memory_score": 85.0,
+        "is_promoted": false,
+        "first_seen": "2026-06-06T00:22:29.821033",
+        "last_seen": "2026-06-06T00:22:29.821042"
+      }
+    ],
+    "last_updated": "2026-06-06T00:22:29.828540+00:00"
+  },
+  "optimization_metrics": {
+    "total_optimization_runs": 1,
+    "last_optimization": "2026-06-06T00:22:29.833758+00:00",
+    "actions_history": [
+      {
+        "run": 1,
+        "ts": "2026-06-06T00:22:29.833771+00:00",
+        "total_actions": 1,
+        "applied_count": 0,
+        "action_counts": {
+          "suggest_edge": 1
+        }
+      }
+    ],
+    "improvements": {
+      "edges_pruned": 0,
+      "edges_promoted": 0,
+      "edges_suggested": 1,
+      "weights_updated": 0
+    },
+    "health_trend": [
+      {
+        "ts": "2026-06-06T00:22:29.834427+00:00",
+        "avg_score": 83.88,
+        "total_nodes": 3,
+        "total_edges": 2
+      }
+    ]
+  },
+  "connection_scores": {
+    "top_connections": [
+      {
+        "source_id": "aaaded4f-7fd4-4802-b78a-1779ad4521a4",
+        "target_id": "96fe39c4-bfd4-4b3e-848d-cdfceef60dc4",
+        "total_runs": 2,
+        "successful_runs": 2,
+        "failed_runs": 0,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.06,
+        "ema_latency_ms": 0.06,
+        "error_rate": 0.0,
+        "connection_score": 84.76,
+        "last_updated": "2026-06-06T00:22:29.819200"
+      },
+      {
+        "source_id": "a451c3ea-c0bc-4614-8baf-6d2a6accac6b",
+        "target_id": "aaaded4f-7fd4-4802-b78a-1779ad4521a4",
+        "total_runs": 1,
+        "successful_runs": 1,
+        "failed_runs": 0,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.32,
+        "ema_latency_ms": 0.32,
+        "error_rate": 0.0,
+        "connection_score": 83.0,
+        "last_updated": "2026-06-06T00:22:29.804568"
+      }
+    ],
+    "worst_connections": [
+      {
+        "source_id": "a451c3ea-c0bc-4614-8baf-6d2a6accac6b",
+        "target_id": "aaaded4f-7fd4-4802-b78a-1779ad4521a4",
+        "total_runs": 1,
+        "successful_runs": 1,
+        "failed_runs": 0,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.32,
+        "ema_latency_ms": 0.32,
+        "error_rate": 0.0,
+        "connection_score": 83.0,
+        "last_updated": "2026-06-06T00:22:29.804568"
+      },
+      {
+        "source_id": "aaaded4f-7fd4-4802-b78a-1779ad4521a4",
+        "target_id": "96fe39c4-bfd4-4b3e-848d-cdfceef60dc4",
+        "total_runs": 2,
+        "successful_runs": 2,
+        "failed_runs": 0,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.06,
+        "ema_latency_ms": 0.06,
+        "error_rate": 0.0,
+        "connection_score": 84.76,
+        "last_updated": "2026-06-06T00:22:29.819200"
+      }
+    ],
+    "last_updated": "2026-06-06T00:22:29.833128+00:00"
+  }
+}
