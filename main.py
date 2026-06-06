@@ -34,6 +34,14 @@ from ai.optimization_engine import OptimizationEngine
 from ai.learning_validator import LearningValidator
 from ai.reputation_engine import NodeReputationEngine
 
+# ── Phase 5 AI ─────────────────────────────────────────────────────────────
+from ai.service_generator import ServiceGeneratorEngine
+from ai.gap_detector import GapDetectionEngine
+from ai.capability_marketplace import CapabilityMarketplace
+from ai.multi_goal_planner import MultiGoalPlanner
+from ai.governor import AIGovernanceLayer
+from ai.evolution_engine import EvolutionEngine
+
 # ── Services ───────────────────────────────────────────────────────────────
 from services.input_service import InputNode
 from services.processor_service import ProcessorNode
@@ -56,7 +64,7 @@ class NeuralServiceMesh:
     All Phase 2 APIs are preserved unchanged.
     """
 
-    VERSION = "4.0.0"
+    VERSION = "5.0.0"
 
     def __init__(self, storage_dir: str = "./data", db_path: str = "./data/mesh.db"):
         # ── Storage ────────────────────────────────────────────────────────
@@ -129,10 +137,47 @@ class NeuralServiceMesh:
             memory_engine=self.memory,
         )
 
+        # ── Phase 5: Autonomous Service Creation & Evolution ───────────
+        self.governance = AIGovernanceLayer(
+            graph=self.graph,
+            reputation_engine=self.reputation,
+            knowledge_store=self.knowledge,
+        )
+        self.marketplace = CapabilityMarketplace(
+            knowledge_store=self.knowledge,
+        )
+        self.gap_detector = GapDetectionEngine(
+            graph=self.graph,
+            memory_engine=self.memory,
+            semantic_matcher=self.semantic,
+            knowledge_store=self.knowledge,
+            scoring_engine=self.scoring,
+        )
+        self.service_generator = ServiceGeneratorEngine(
+            knowledge_store=self.knowledge,
+            semantic_matcher=self.semantic,
+            governance=self.governance,
+        )
+        self.multi_planner = MultiGoalPlanner(
+            capability_marketplace=self.marketplace,
+            goal_planner=self.planner,
+            memory_engine=self.memory,
+            knowledge_store=self.knowledge,
+        )
+        self.evolution = EvolutionEngine(
+            mesh=self,
+            gap_detector=self.gap_detector,
+            service_generator=self.service_generator,
+            governance=self.governance,
+            capability_marketplace=self.marketplace,
+            multi_goal_planner=self.multi_planner,
+            knowledge_store=self.knowledge,
+        )
+
         # ── Install Phase 3 post-run hook ──────────────────────────────────
         self._install_phase3_hook()
 
-        logger.info(f"NeuralServiceMesh v{self.VERSION} ready (Phase 4 — Learning Validation & Autonomous Evolution)")
+        logger.info(f"NeuralServiceMesh v{self.VERSION} ready (Phase 5 — Autonomous Service Creation & Evolution)")
 
     # ── Phase 3 hook into ExecutionEngine ─────────────────────────────────
 
@@ -163,13 +208,19 @@ class NeuralServiceMesh:
     # ── Node Management ────────────────────────────────────────────────────
 
     def register_node(self, node, connect_to: Optional[str] = None) -> str:
-        """Phase 2-compatible register + Phase 3 announcement."""
+        """Phase 2-compatible register + Phase 3 announcement + Phase 5 marketplace."""
         node_id = self.registry.register(node)
         self.graph.add_node(node_id, node.metadata.to_dict())
         self.db.upsert_node(node.to_dict())
 
         # Phase 3: announce to discovery layer (populates semantic matcher)
         self.discovery.announce(node)
+
+        # Phase 5: advertise capabilities in marketplace
+        try:
+            self.marketplace.advertise_from_node(node)
+        except Exception:
+            pass
 
         if connect_to:
             self.graph.add_edge(connect_to, node_id)
@@ -288,6 +339,14 @@ class NeuralServiceMesh:
                 "learning_metrics": self.validator.compute_metrics().to_dict(),
                 "reputation": self.reputation.summary(),
             },
+            # Phase 5 Autonomous Evolution
+            "ai_phase5": {
+                "governance": self.governance.summary(),
+                "marketplace": self.marketplace.summary(),
+                "gap_detector": self.gap_detector.summary(),
+                "service_generator": self.service_generator.summary(),
+                "evolution": self.evolution.summary(),
+            },
         }
 
     # ── Phase 4: Public API methods ────────────────────────────────────────
@@ -333,6 +392,55 @@ class NeuralServiceMesh:
                 ],
             },
             "learning_curve": self.validator.get_learning_curve(),
+        }
+
+    # ── Phase 5: Public API methods ────────────────────────────────────────
+
+    def run_multi_goal(self, goal: str, data: dict) -> dict:
+        """Phase 5: Execute a complex multi-goal plan."""
+        plan = self.multi_planner.plan(goal)
+        if plan.status == "failed":
+            return {
+                "status": "failed",
+                "error": f"MultiGoalPlanner could not resolve goal: '{goal}'",
+                "plan": plan.to_dict(),
+            }
+        result = self.multi_planner.execute_plan(plan, self.engine, data)
+        return result
+
+    def evolve(self, cycles: int = 1, auto_register: bool = True) -> dict:
+        """Phase 5: Run evolution cycle(s) — discover gaps and generate services."""
+        return self.evolution.evolve(cycles=cycles, auto_register=auto_register, verbose=True)
+
+    def scan_gaps(self) -> dict:
+        """Phase 5: Scan for capability gaps without triggering generation."""
+        gaps = self.gap_detector.scan()
+        return {
+            "gaps": [g.to_dict() for g in gaps],
+            "count": len(gaps),
+            "summary": self.gap_detector.summary(),
+        }
+
+    def get_marketplace(self) -> dict:
+        """Phase 5: Get capability marketplace snapshot."""
+        return {
+            "summary": self.marketplace.summary(),
+            "capabilities": self.marketplace.list_capabilities(),
+            "advertisements": self.marketplace.all_advertisements(),
+        }
+
+    def get_governance(self) -> dict:
+        """Phase 5: Get governance layer status and audit log."""
+        return {
+            "summary": self.governance.summary(),
+            "recent_audit": self.governance.audit_log(limit=20),
+        }
+
+    def get_generated_services(self, status: Optional[str] = None) -> dict:
+        """Phase 5: List all AI-generated service specs."""
+        return {
+            "services": self.service_generator.list_generated(status_filter=status),
+            "summary": self.service_generator.summary(),
         }
 
 
@@ -444,9 +552,9 @@ def simulate(rounds: int = 20, delay: float = 0.1):
 
 if __name__ == "__main__":
     import argparse
-    p = argparse.ArgumentParser(description="Neural Service Mesh v4")
-    p.add_argument("--mode", choices=["demo", "api", "simulate"], default="demo",
-                   help="demo: example pipeline | api: Flask server | simulate: Phase 4 learning sim")
+    p = argparse.ArgumentParser(description="Neural Service Mesh v5")
+    p.add_argument("--mode", choices=["demo", "api", "simulate", "evolve"], default="demo",
+                   help="demo: example pipeline | api: Flask server | simulate: Phase 4 learning sim | evolve: Phase 5 evolution")
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=5000)
     p.add_argument("--debug", action="store_true")
@@ -454,12 +562,30 @@ if __name__ == "__main__":
                    help="Number of simulation rounds (simulate mode)")
     p.add_argument("--delay", type=float, default=0.1,
                    help="Delay between rounds in seconds (simulate mode)")
+    p.add_argument("--cycles", type=int, default=3,
+                   help="Number of evolution cycles (evolve mode)")
     args = p.parse_args()
 
     if args.mode == "demo":
         demo()
     elif args.mode == "simulate":
         simulate(rounds=args.rounds, delay=args.delay)
+    elif args.mode == "evolve":
+        import json
+        print("\n" + "="*65)
+        print("  Neural Service Mesh  —  Phase 5 (Autonomous Evolution)")
+        print("="*65 + "\n")
+        mesh = NeuralServiceMesh()
+        # Register some nodes first
+        from services.input_service import InputNode
+        from services.processor_service import ProcessorNode
+        from services.output_service import OutputNode
+        inp = mesh.register_node(InputNode("TextInput"))
+        proc = mesh.register_node(ProcessorNode("TextProcessor"), connect_to=inp)
+        out = mesh.register_node(OutputNode("TextOutput", output_format="summary"), connect_to=proc)
+        # Run evolution
+        result = mesh.evolve(cycles=args.cycles, auto_register=True)
+        print(json.dumps(result, indent=2))
     else:
         from api.app import run_api
         mesh = NeuralServiceMesh()
