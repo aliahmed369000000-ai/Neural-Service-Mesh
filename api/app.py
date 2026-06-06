@@ -376,17 +376,155 @@ def _add_phase3_routes(app, mesh):
         return jsonify({"source_id": src, "target_id": tgt, "compatibility_score": score})
 
 
-# ── Patched create_app to include Phase 3 routes ──────────────────────────
+def _add_phase4_routes(app, mesh):
+    """Phase 4 API endpoints — Learning Validation & Autonomous Evolution."""
+
+    # ── GET /ai/status ─────────────────────────────────────────────────────
+
+    @app.route("/ai/status", methods=["GET"])
+    def ai_status():
+        """Phase 4: Full AI status with learning proof."""
+        return jsonify(mesh.get_ai_status())
+
+    # ── GET /ai/routes ─────────────────────────────────────────────────────
+
+    @app.route("/ai/routes", methods=["GET"])
+    def ai_routes_get():
+        """Phase 4: All known routes ranked by memory score (GET version)."""
+        return jsonify(mesh.get_ai_routes())
+
+    # ── GET /ai/reputation ─────────────────────────────────────────────────
+
+    @app.route("/ai/reputation", methods=["GET"])
+    def ai_reputation():
+        """Phase 4: Node reputation scores."""
+        return jsonify(mesh.get_ai_reputation())
+
+    @app.route("/ai/reputation/<node_id>", methods=["GET"])
+    def ai_node_reputation(node_id):
+        """Phase 4: Single node reputation."""
+        mesh.reputation.update_from_memory()
+        rep = mesh.reputation.get_reputation(node_id)
+        if rep is None:
+            return jsonify({"error": "Node not found in reputation engine"}), 404
+        return jsonify(rep.to_dict())
+
+    @app.route("/ai/reputation/<node_id>/quarantine", methods=["POST"])
+    def quarantine_node(node_id):
+        """Phase 4: Quarantine a low-performing node."""
+        mesh.reputation.quarantine(node_id)
+        return jsonify({"quarantined": node_id})
+
+    @app.route("/ai/reputation/<node_id>/boost", methods=["POST"])
+    def boost_node(node_id):
+        """Phase 4: Manually boost a node's reputation."""
+        b = request.get_json(force=True) or {}
+        amount = float(b.get("amount", 10.0))
+        mesh.reputation.boost(node_id, amount)
+        rep = mesh.reputation.get_reputation(node_id)
+        return jsonify(rep.to_dict() if rep else {"boosted": node_id})
+
+    # ── GET /ai/knowledge ──────────────────────────────────────────────────
+
+    @app.route("/ai/knowledge", methods=["GET"])
+    def ai_knowledge():
+        """Phase 4: Full knowledge layer snapshot."""
+        return jsonify(mesh.get_ai_knowledge())
+
+    # ── Learning metrics ───────────────────────────────────────────────────
+
+    @app.route("/ai/learning/metrics", methods=["GET"])
+    def ai_learning_metrics():
+        """Phase 4: Current learning metrics."""
+        metrics = mesh.validator.compute_metrics()
+        return jsonify(metrics.to_dict())
+
+    @app.route("/ai/learning/prove", methods=["GET"])
+    def ai_learning_prove():
+        """Phase 4: Generate proof that the system is learning."""
+        return jsonify(mesh.validator.prove_learning())
+
+    @app.route("/ai/learning/curve", methods=["GET"])
+    def ai_learning_curve():
+        """Phase 4: Learning curve data points."""
+        return jsonify(mesh.validator.get_learning_curve())
+
+    # ── Graph evolution ────────────────────────────────────────────────────
+
+    @app.route("/ai/graph/evolve", methods=["POST"])
+    def ai_graph_evolve():
+        """
+        Phase 4: Trigger a full graph evolution cycle.
+        - Discovery engine proposes new connections
+        - Optimization engine flags weak connections
+        """
+        b = request.get_json(force=True) or {}
+        auto_apply = bool(b.get("auto_apply", False))
+
+        # Run discovery
+        suggestions = mesh.discover_connections(threshold=float(b.get("threshold", 0.15)))
+
+        # Run optimization
+        opt_report = mesh.optimize(auto_apply=auto_apply)
+
+        # Update knowledge layer
+        try:
+            mesh.knowledge.update_node_rankings(mesh.memory)
+            mesh.knowledge.update_route_rankings(mesh.memory)
+            mesh.knowledge.update_connection_scores(mesh.scoring)
+        except Exception:
+            pass
+
+        return jsonify({
+            "new_connection_suggestions": suggestions,
+            "optimization_report": opt_report,
+            "auto_apply": auto_apply,
+        })
+
+    # ── Simulation ─────────────────────────────────────────────────────────
+
+    @app.route("/ai/simulate", methods=["POST"])
+    def ai_simulate():
+        """Phase 4: Run a simulation loop via API."""
+        b = request.get_json(force=True) or {}
+        rounds = int(b.get("rounds", 5))
+        per_round = int(b.get("executions_per_round", 3))
+
+        if rounds > 50:
+            return jsonify({"error": "Maximum 50 rounds via API"}), 400
+
+        from ai.simulation_engine import SimulationEngine
+        sim = SimulationEngine(mesh, validator=mesh.validator)
+        inp, proc, out = sim.setup_simulation_nodes()
+        results = sim.run_simulation(
+            rounds=rounds,
+            executions_per_round=per_round,
+            delay_between_rounds=0,
+            verbose=False,
+        )
+        return jsonify(results)
+
+    # ── Health v4 ──────────────────────────────────────────────────────────
+
+    @app.route("/health/v4", methods=["GET"])
+    def health_v4():
+        return jsonify({"status": "ok", "version": "4.0.0", "phase": 4})
+
+
+# ── Patched create_app to include Phase 3+4 routes ───────────────────────
 
 _original_create_app = create_app
 
 def create_app(mesh):
     app = _original_create_app(mesh)
-    # Update version in health endpoint
+    # Health v3 compatibility
     @app.route("/health/v3")
     def health_v3():
-        return jsonify({"status": "ok", "version": "3.0.0", "phase": 3})
+        return jsonify({"status": "ok", "version": "4.0.0", "phase": 4})
     # Add Phase 3 routes if mesh supports them
     if hasattr(mesh, "planner"):
         _add_phase3_routes(app, mesh)
+    # Add Phase 4 routes if mesh supports them
+    if hasattr(mesh, "validator"):
+        _add_phase4_routes(app, mesh)
     return app
