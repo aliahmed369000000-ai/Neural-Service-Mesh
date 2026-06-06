@@ -52,6 +52,20 @@ from ai.economic_engine import EconomicEngine
 from ai.system_dna import SystemDNA
 from ai.phase6_validator import Phase6Validator
 
+# ── Phase 7 AI ─────────────────────────────────────────────────────────────
+from sensors.sensor_hub import SensorHub
+from sensors.api_sensor import APISensor
+from sensors.filesystem_sensor import FilesystemSensor
+from sensors.log_sensor import LogSensor
+from sensors.webhook_sensor import WebhookSensor
+from world_model.environment_model import EnvironmentModel
+from ai.self_awareness import SelfAwarenessEngine
+from ai.code_generator import CodeGenerationEngine
+from ai.sandbox_lab import SandboxTestingLab
+from ai.governance_p7 import P7GovernanceLayer
+from ai.objectives import ObjectivesEngine
+from ai.evolution_pipeline import EvolutionPipeline
+
 # ── Services ───────────────────────────────────────────────────────────────
 from services.input_service import InputNode
 from services.processor_service import ProcessorNode
@@ -74,7 +88,7 @@ class NeuralServiceMesh:
     All Phase 2 APIs are preserved unchanged.
     """
 
-    VERSION = "6.0.0"
+    VERSION = "7.0.0"
 
     def __init__(self, storage_dir: str = "./data", db_path: str = "./data/mesh.db"):
         # ── Storage ────────────────────────────────────────────────────────
@@ -225,7 +239,75 @@ class NeuralServiceMesh:
         )
         self.system_dna = SystemDNA(knowledge_store=self.knowledge)
 
-        logger.info(f"NeuralServiceMesh v{self.VERSION} ready (Phase 6 — Multi-Agent Self-Improving Platform)")
+        # ── Phase 7: Autonomous Evolution Platform ─────────────────────────
+        # 1. Sensory Layer
+        self.sensor_hub = SensorHub(interval_s=30.0)
+        self.api_sensor = APISensor(name="MeshAPISensor")
+        self.filesystem_sensor = FilesystemSensor(
+            name="CodeSensor",
+            config={"watch_paths": ["./ai", "./services", "./sensors"], "extensions": [".py"]},
+        )
+        self.log_sensor = LogSensor(name="MeshLogSensor", config={"log_paths": ["./logs"]})
+        self.webhook_sensor = WebhookSensor(name="MeshWebhookSensor")
+        self.sensor_hub.register(self.api_sensor)
+        self.sensor_hub.register(self.filesystem_sensor)
+        self.sensor_hub.register(self.log_sensor)
+        self.sensor_hub.register(self.webhook_sensor)
+
+        # 2. Environment / World Model
+        self.env_model = EnvironmentModel(model_dir="./world_model")
+        self.sensor_hub.on_event(lambda e: self.env_model.ingest_sensor_event(e.to_dict()))
+
+        # 3. Self-Awareness Engine
+        self.self_awareness = SelfAwarenessEngine(
+            registry=self.registry,
+            graph=self.graph,
+            scoring_engine=self.scoring,
+            memory_engine=self.memory,
+            agent_factory=self.agent_factory,
+            knowledge_store=self.knowledge,
+            environment_model=self.env_model,
+        )
+
+        # 4. Code Generation Engine
+        self.code_generator = CodeGenerationEngine(
+            output_dir="./services",
+            knowledge_store=self.knowledge,
+            governance=self.governance,
+        )
+
+        # 5. Sandbox Testing Lab
+        self.sandbox_lab_p7 = SandboxTestingLab(sandbox_dir="./sandbox")
+
+        # 6. Phase 7 Governance
+        self.governance_p7 = P7GovernanceLayer(
+            min_sandbox_score=75.0,
+            knowledge_store=self.knowledge,
+            base_governance=self.governance,
+        )
+
+        # 7. Strategic Objectives Engine
+        self.objectives = ObjectivesEngine(knowledge_store=self.knowledge)
+
+        # Wire self-awareness objectives
+        self.self_awareness._objectives = self.objectives
+
+        # 8. Evolution Pipeline (Phase 7)
+        self.evolution_pipeline = EvolutionPipeline(
+            mesh=self,
+            sensor_hub=self.sensor_hub,
+            environment_model=self.env_model,
+            self_awareness=self.self_awareness,
+            code_generator=self.code_generator,
+            sandbox_lab=self.sandbox_lab_p7,
+            governance_p7=self.governance_p7,
+            objectives_engine=self.objectives,
+            gap_detector=self.gap_detector,
+            knowledge_store=self.knowledge,
+            services_dir="./services",
+        )
+
+        logger.info(f"NeuralServiceMesh v{self.VERSION} ready (Phase 7 — Autonomous Evolution Platform)")
 
     # ── Phase 3 hook into ExecutionEngine ─────────────────────────────────
 
@@ -405,6 +487,17 @@ class NeuralServiceMesh:
                 "economic_engine": self.economic_engine.summary(),
                 "system_dna": self.system_dna.summary(),
             },
+            # Phase 7 Autonomous Evolution Platform
+            "ai_phase7": {
+                "sensor_hub": self.sensor_hub.summary(),
+                "environment_model": self.env_model.summary(),
+                "self_awareness": self.self_awareness.summary(),
+                "code_generator": self.code_generator.summary(),
+                "sandbox_lab": self.sandbox_lab_p7.summary(),
+                "governance_p7": self.governance_p7.summary(),
+                "objectives": self.objectives.summary(),
+                "evolution_pipeline": self.evolution_pipeline.summary(),
+            },
         }
 
     # ── Phase 4: Public API methods ────────────────────────────────────────
@@ -575,6 +668,103 @@ class NeuralServiceMesh:
             "summary": self.swarm.summary(),
         }
 
+    # ── Phase 7: Public API methods ───────────────────────────────────────
+
+    def evolve7(self, cycles: int = 1, verbose: bool = True) -> dict:
+        """Phase 7: Run evolution pipeline cycle(s) — full Observe→Deploy loop."""
+        results = self.evolution_pipeline.run_cycles(n=cycles, verbose=verbose)
+        return {"cycles": results, "total": len(results)}
+
+    def evolve7_once(self, verbose: bool = True) -> dict:
+        """Phase 7: Run a single evolution pipeline cycle."""
+        cycle = self.evolution_pipeline.run_cycle(verbose=verbose)
+        return cycle.to_dict()
+
+    def introspect(self) -> dict:
+        """Phase 7: Run self-awareness introspection."""
+        report = self.self_awareness.introspect()
+        return report.to_dict()
+
+    def sensor_status(self) -> dict:
+        """Phase 7: Get sensor hub summary and recent events."""
+        return {
+            "summary": self.sensor_hub.summary(),
+            "recent_events": self.sensor_hub.recent_events(limit=20),
+        }
+
+    def world_model(self) -> dict:
+        """Phase 7: Get the current environment/world model state."""
+        return self.env_model.get_state()
+
+    def push_sensor_event(self, event_type: str, payload: Optional[dict] = None,
+                          severity: str = "info"):
+        """Phase 7: Push a manual event to the webhook sensor."""
+        self.webhook_sensor.push_event(event_type, payload=payload, severity=severity)
+
+    def get_objectives(self) -> dict:
+        """Phase 7: Get all strategic objectives and their current progress."""
+        return {
+            "objectives": self.objectives.get_all_objectives(),
+            "summary": self.objectives.summary(),
+            "recommendations": self.objectives.get_recommendations(),
+        }
+
+    def measure_objectives(self) -> dict:
+        """Phase 7: Measure current metrics against strategic objectives."""
+        measurements = self.objectives.measure_from_mesh(self)
+        return {
+            "measurements": measurements,
+            "objectives": self.objectives.get_all_objectives(),
+            "recommendations": self.objectives.get_recommendations(),
+        }
+
+    def generate_module(self, gap_description: str, source_name: str = "",
+                        target_name: str = "") -> dict:
+        """Phase 7: Manually trigger code generation for a described gap."""
+        gap = {
+            "missing_service": gap_description,
+            "gap_type": "manual",
+            "source_node": {"name": source_name or "Source"},
+            "target_node": {"name": target_name or "Target"},
+            "confidence": 0.9,
+        }
+        module = self.code_generator.generate_from_gap(gap)
+        # Write to sandbox
+        self.code_generator.write_to_file(module, subdir="generated")
+        # Test
+        test_result = self.sandbox_lab_p7.test_module(module)
+        # Approve
+        decision = self.governance_p7.review(module, test_result.to_dict())
+        return {
+            "module": module.to_dict(),
+            "test_result": test_result.to_dict(),
+            "decision": decision.to_dict(),
+        }
+
+    def list_generated_modules(self, status: Optional[str] = None) -> dict:
+        """Phase 7: List all auto-generated modules."""
+        return {
+            "modules": self.code_generator.list_generated(status_filter=status),
+            "summary": self.code_generator.summary(),
+        }
+
+    def start_sensors(self, interval_s: float = 30.0):
+        """Phase 7: Start the background sensor polling loop."""
+        self.sensor_hub.start(interval_s=interval_s)
+        return {"status": "started", "interval_s": interval_s}
+
+    def stop_sensors(self):
+        """Phase 7: Stop the background sensor polling loop."""
+        self.sensor_hub.stop()
+        return {"status": "stopped"}
+
+    def get_evolution_history(self, limit: int = 10) -> dict:
+        """Phase 7: Get evolution pipeline cycle history."""
+        return {
+            "history": self.evolution_pipeline.get_history(limit),
+            "summary": self.evolution_pipeline.summary(),
+        }
+
     # ── Pre-Phase 7: Validation ────────────────────────────────────────────
 
     def validate_phase6(self, project_root: Optional[str] = None, save_report: bool = True) -> dict:
@@ -719,8 +909,8 @@ def simulate(rounds: int = 20, delay: float = 0.1):
 if __name__ == "__main__":
     import argparse
     p = argparse.ArgumentParser(description="Neural Service Mesh v5")
-    p.add_argument("--mode", choices=["demo", "api", "simulate", "evolve", "phase6", "validate"], default="demo",
-                   help="demo: example pipeline | api: Flask server | simulate: Phase 4 learning sim | evolve: Phase 5 evolution | phase6: Phase 6 multi-agent demo | validate: Pre-Phase 7 validation report")
+    p.add_argument("--mode", choices=["demo", "api", "simulate", "evolve", "phase6", "validate", "evolve7"], default="demo",
+                   help="demo: example pipeline | api: Flask server | simulate: Phase 4 learning sim | evolve: Phase 5 evolution | phase6: Phase 6 multi-agent demo | validate: Pre-Phase 7 validation report | evolve7: Phase 7 autonomous evolution")
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=5000)
     p.add_argument("--debug", action="store_true")
@@ -848,7 +1038,96 @@ if __name__ == "__main__":
         print(f"  ║  PHASE 7 READINESS SCORE: {rd['score']:5.1f} / 100      ║")
         print(f"  ╚══════════════════════════════════════════╝")
         print(f"\n  {rd['verdict']}\n")
-    else:
+    elif args.mode == "evolve7":
+        import json
+        print("\n" + "="*65)
+        print("  Neural Service Mesh  —  Phase 7 (Autonomous Evolution Platform)")
+        print("="*65 + "\n")
+        mesh = NeuralServiceMesh()
+
+        from services.input_service import InputNode
+        from services.processor_service import ProcessorNode
+        from services.output_service import OutputNode
+        inp  = mesh.register_node(InputNode("TextInput"))
+        proc = mesh.register_node(ProcessorNode("TextProcessor"), connect_to=inp)
+        out  = mesh.register_node(OutputNode("TextOutput", output_format="summary"), connect_to=proc)
+
+        # Seed some execution history
+        sample = {"text": "Phase 7 autonomous evolution test.", "source": "evolve7_demo"}
+        mesh.run(inp, out, sample, use_ai=True)
+
+        print("[ Phase 7.1 — Self-Awareness Introspection ]\n")
+        awareness = mesh.introspect()
+        print(f"  Nodes         : {awareness['node_count']}")
+        print(f"  Edges         : {awareness['edge_count']}")
+        print(f"  Health Score  : {awareness['system_health_score']:.2f}")
+        print(f"  Readiness     : {awareness['phase7_readiness']:.0%}")
+        for insight in awareness["insights"]:
+            print(f"  Insight       : {insight}")
+
+        print("\n[ Phase 7.2 — Strategic Objectives ]\n")
+        objectives = mesh.get_objectives()
+        for obj in objectives["objectives"]:
+            val = obj.get("current_value")
+            val_str = f"{val:.4f}" if val is not None else "not yet measured"
+            print(f"  [{obj['priority']}] {obj['name']:35s} → {val_str}")
+
+        print("\n[ Phase 7.3 — Measure Objectives ]\n")
+        measurements = mesh.measure_objectives()
+        for k, v in measurements["measurements"].items():
+            print(f"  {k:30s}: {v:.4f}")
+        if measurements["recommendations"]:
+            print("\n  Recommendations:")
+            for rec in measurements["recommendations"][:3]:
+                print(f"    [{rec['priority']}] {rec['objective']}: {rec['reason']}")
+
+        print("\n[ Phase 7.4 — Manual Module Generation ]\n")
+        result = mesh.generate_module(
+            gap_description="CsvToJsonConverter",
+            source_name="CSVInput",
+            target_name="JSONProcessor",
+        )
+        mod = result["module"]
+        test = result["test_result"]
+        decision = result["decision"]
+        print(f"  Module      : {mod['name']} ({mod['class_name']})")
+        print(f"  Syntax valid: {mod['syntax_valid']}")
+        print(f"  Code lines  : {mod['code_lines']}")
+        print(f"  Test score  : {test['score']}")
+        print(f"  Verdict     : {test['verdict']}")
+        print(f"  Decision    : {decision['verdict']} — {decision['reason'][:60]}")
+
+        print("\n[ Phase 7.5 — Sensor Hub Status ]\n")
+        sensors = mesh.sensor_status()
+        hub = sensors["summary"]
+        print(f"  Sensors registered : {hub['sensors_registered']}")
+        print(f"  Total events       : {hub['total_events']}")
+        for s in hub["sensors"]:
+            print(f"  [{s['sensor_type']:12s}] {s['name']:25s} events={s['event_count']}")
+
+        print("\n[ Phase 7.6 — World Model ]\n")
+        wm = mesh.env_model.summary()
+        print(f"  Total services     : {wm['total_services']}")
+        print(f"  Healthy            : {wm['healthy_services']}")
+        print(f"  Total capabilities : {wm['total_capabilities']}")
+        print(f"  Failure patterns   : {wm['active_failure_patterns']}")
+
+        print(f"\n[ Phase 7.7 — Full Evolution Pipeline ({args.cycles} cycle(s)) ]\n")
+        evolution = mesh.evolve7(cycles=args.cycles, verbose=True)
+        for i, cycle in enumerate(evolution["cycles"]):
+            s = cycle["summary"]
+            print(f"\n  Cycle {i+1} summary:")
+            print(f"    Sensor events : {s['sensor_events']}")
+            print(f"    Gaps detected : {s['gaps_detected']}")
+            print(f"    Generated     : {s['modules_generated']}")
+            print(f"    Tested        : {s['modules_tested']}")
+            print(f"    Approved      : {s['modules_approved']}")
+            print(f"    Deployed      : {s['modules_deployed']}")
+
+        print("\n[ Phase 7 Complete — System Status ]\n")
+        status = mesh.status()
+        print(json.dumps(status.get("ai_phase7", {}), indent=2))
+    elif args.mode == "api":
         from api.app import run_api
         mesh = NeuralServiceMesh()
         run_api(mesh, host=args.host, port=args.port, debug=args.debug)
