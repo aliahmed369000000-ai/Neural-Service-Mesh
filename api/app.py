@@ -884,6 +884,16 @@ def _add_phase6_routes(app, mesh):
     def health_v6():
         return jsonify({"status": "ok", "version": "6.0.0", "phase": 6})
 
+    @app.route("/ai/validate/phase6", methods=["GET"])
+    def p6_validate():
+        """Pre-Phase 7: Generate a full Phase 6 Validation Report."""
+        try:
+            save = request.args.get("save", "true").lower() == "true"
+            report = mesh.validate_phase6(save_report=save)
+            return jsonify(report)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
 
 # Patch create_app to include Phase 6
 _create_app_p5 = create_app
