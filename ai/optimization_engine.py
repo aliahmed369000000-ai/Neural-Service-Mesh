@@ -1,6 +1,7 @@
 """
 Phase 3 – Optimization Engine
 Periodically analyses the service graph and:
+  (Knowledge Layer: writes all analysis results to graph_metrics.json)
   - Removes consistently failing connections
   - Promotes consistently successful connections (lower weight)
   - Recommends new connections based on semantic compatibility
@@ -85,7 +86,13 @@ class OptimizationEngine:
         self._semantic = semantic_matcher
         self._last_report: Optional[OptimizationReport] = None
         self._run_count: int = 0
+        self._knowledge = None   # KnowledgeStore — injected via set_knowledge_store()
         logger.info("OptimizationEngine initialised (Phase 3)")
+
+    def set_knowledge_store(self, ks) -> None:
+        """Inject the KnowledgeStore to persist graph metrics and optimization history."""
+        self._knowledge = ks
+        logger.info("OptimizationEngine: KnowledgeStore connected")
 
     def set_components(self, graph=None, scoring=None, memory=None, semantic=None):
         if graph:
@@ -135,6 +142,47 @@ class OptimizationEngine:
             f"OptimizationEngine: analysis complete, "
             f"{len(report.actions)} actions recommended"
         )
+
+        # ── Knowledge layer: persist metrics to JSON files ──────────────
+        if self._knowledge:
+            try:
+                # Graph statistics
+                if self._graph:
+                    adj = self._graph._adjacency
+                    n_nodes = len(adj)
+                    n_edges = sum(len(e) for e in adj.values())
+                    avg_deg = n_edges / max(n_nodes, 1)
+                    max_edges = n_nodes * (n_nodes - 1) if n_nodes > 1 else 1
+                    density = n_edges / max_edges if max_edges > 0 else 0.0
+                    self._knowledge.update_graph_statistics(
+                        total_nodes=n_nodes, total_edges=n_edges,
+                        avg_degree=avg_deg, density=density,
+                    )
+
+                # Node + route rankings
+                if self._memory:
+                    self._knowledge.update_node_rankings(self._memory)
+                    self._knowledge.update_route_rankings(self._memory)
+
+                # Connection score snapshot
+                if self._scoring:
+                    self._knowledge.update_connection_scores(self._scoring)
+
+                # Record this optimization run
+                self._knowledge.record_optimization_run(report.to_dict())
+
+                # Health trend snapshot
+                avg_score = 0.0
+                if self._scoring:
+                    sc_summary = self._scoring.summary()
+                    avg_score = sc_summary.get("avg_connection_score", 0.0)
+                n_nodes = len(self._graph._adjacency) if self._graph else 0
+                n_edges = sum(len(e) for e in self._graph._adjacency.values()) if self._graph else 0
+                self._knowledge.append_health_snapshot(avg_score, n_nodes, n_edges)
+
+            except Exception as ke:
+                logger.warning(f"OptimizationEngine: knowledge write failed: {ke}")
+
         return report
 
     def apply_report(self, report: OptimizationReport, mesh) -> int:
