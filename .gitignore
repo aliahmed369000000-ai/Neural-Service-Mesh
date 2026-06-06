@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+env/
+.env
+
+# Database files
+data/mesh.db
+data/*.db
+*.db
+*.sqlite
+*.sqlite3
+
+# Log files
+logs/*.log
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Knowledge JSON files are tracked in git
+# (auto-created on first run if missing)
+# To exclude them, uncomment below:
+# knowledge/node_profiles.json
+# knowledge/route_memory.json
+# knowledge/graph_metrics.json
+
+# Models (large files)
+models/embeddings/*.bin
+models/embeddings/*.pt
+models/classifiers/*.bin
+models/classifiers/*.pt
