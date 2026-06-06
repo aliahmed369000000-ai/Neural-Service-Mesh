@@ -23,3 +23,12 @@ __all__ = [
     "OptimizationEngine", "OptimizationReport",
 ]
 
+
+# Phase 6
+from ai.agent_factory import AgentFactory, AgentInstance
+from ai.swarm_coordinator import SwarmCoordinator, SwarmResult
+from ai.self_optimizer import SelfOptimizer, SelfOptimizerReport
+from ai.simulation_lab import SimulationLab, SimulationReport
+from ai.meta_reasoner import MetaReasoner, DecisionExplanation, MetaReasonerInsight
+from ai.economic_engine import EconomicEngine, NodeEconomicProfile
+from ai.system_dna import SystemDNA, DNASnapshot
