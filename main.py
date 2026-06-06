@@ -21,6 +21,7 @@ from connectors.data_transformer import DataTransformer
 from ai.decision import AIDecisionLayer
 
 # ── Phase 3 AI ─────────────────────────────────────────────────────────────
+from knowledge.knowledge_store import KnowledgeStore
 from ai.semantic_matcher import SemanticMatcher
 from ai.scoring_engine import ScoringEngine
 from ai.memory_engine import MemoryEngine
@@ -66,6 +67,9 @@ class NeuralServiceMesh:
         # ── Phase 2 AI ────────────────────────────────────────────────────
         self.ai = AIDecisionLayer()
 
+        # ── Phase 3 Knowledge Layer (JSON persistent knowledge files) ────
+        self.knowledge = KnowledgeStore(knowledge_dir="./knowledge")
+
         # ── Phase 3 AI modules ────────────────────────────────────────────
         self.semantic = SemanticMatcher()
         self.scoring = ScoringEngine(db_path=db_path)
@@ -103,6 +107,12 @@ class NeuralServiceMesh:
         # Wire Phase 2 AI to graph
         self.ai.set_graph(self.graph)
         self.ai.set_db(self.db)
+
+        # ── Wire KnowledgeStore into Phase 3 AI modules ───────────────
+        self.memory.set_knowledge_store(self.knowledge)
+        self.discovery.set_knowledge_store(self.knowledge)
+        self.routing.set_knowledge_store(self.knowledge)
+        self.optimizer.set_knowledge_store(self.knowledge)
 
         # ── Install Phase 3 post-run hook ──────────────────────────────────
         self._install_phase3_hook()
@@ -244,6 +254,8 @@ class NeuralServiceMesh:
                 "discovery": self.discovery.summary(),
                 "optimization_runs": self.optimizer._run_count,
             },
+            # Phase 3 Knowledge Layer
+            "knowledge_layer": self.knowledge.summary(),
         }
 
 
