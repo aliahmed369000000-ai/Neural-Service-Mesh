@@ -658,6 +658,32 @@ class KnowledgeStore:
             },
         }
 
+    # ── Phase 5: Custom key-value knowledge storage ────────────────────────
+
+    def read_custom(self, key: str) -> Any:
+        """
+        Phase 5: Read arbitrary data stored under a custom key.
+        Stored in knowledge/<key>.json
+        """
+        import json
+        custom_path = self._dir / f"{key}.json"
+        if not custom_path.exists():
+            raise KeyError(f"Custom knowledge key not found: '{key}'")
+        with custom_path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def write_custom(self, key: str, data: Any) -> None:
+        """
+        Phase 5: Write arbitrary data under a custom key.
+        Stored atomically in knowledge/<key>.json
+        """
+        import json, tempfile, os
+        custom_path = self._dir / f"{key}.json"
+        tmp_path = custom_path.with_suffix(".tmp")
+        with tmp_path.open("w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, default=str)
+        os.replace(str(tmp_path), str(custom_path))
+
     def __repr__(self):
         s = self.summary()
         return (
