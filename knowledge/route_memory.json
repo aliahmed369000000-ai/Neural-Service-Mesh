@@ -1,0 +1,72 @@
+{
+  "_meta": {
+    "schema_version": "1.0.0",
+    "created_at": "2026-06-06T00:22:29.764732+00:00",
+    "last_updated": "2026-06-06T00:22:29.825539+00:00",
+    "total_routes": 2,
+    "description": "Successful and failed route history with scores and execution records"
+  },
+  "routes": {
+    "a451c3ea->aaaded4f->96fe39c4": {
+      "path_key": "a451c3ea->aaaded4f->96fe39c4",
+      "path": [
+        "a451c3ea-c0bc-4614-8baf-6d2a6accac6b",
+        "aaaded4f-7fd4-4802-b78a-1779ad4521a4",
+        "96fe39c4-bfd4-4b3e-848d-cdfceef60dc4"
+      ],
+      "runs": 1,
+      "successes": 1,
+      "failures": 0,
+      "success_rate": 1.0,
+      "avg_latency_ms": 0.51,
+      "health": "excellent",
+      "memory_score": 85.0,
+      "is_promoted": false,
+      "first_seen": "2026-06-06T00:22:29.808521",
+      "last_seen": "2026-06-06T00:22:29.808532",
+      "execution_history": [
+        {
+          "run_id": "5bac464d",
+          "ts": "2026-06-06T00:22:29.813357+00:00",
+          "success": true,
+          "latency_ms": 0.51
+        }
+      ]
+    },
+    "aaaded4f->96fe39c4": {
+      "path_key": "aaaded4f->96fe39c4",
+      "path": [
+        "aaaded4f-7fd4-4802-b78a-1779ad4521a4",
+        "96fe39c4-bfd4-4b3e-848d-cdfceef60dc4"
+      ],
+      "runs": 1,
+      "successes": 1,
+      "failures": 0,
+      "success_rate": 1.0,
+      "avg_latency_ms": 0.26,
+      "health": "excellent",
+      "memory_score": 85.0,
+      "is_promoted": false,
+      "first_seen": "2026-06-06T00:22:29.821033",
+      "last_seen": "2026-06-06T00:22:29.821042",
+      "execution_history": [
+        {
+          "run_id": "d6ee0a49",
+          "ts": "2026-06-06T00:22:29.825528+00:00",
+          "success": true,
+          "latency_ms": 0.26
+        }
+      ]
+    }
+  },
+  "failed_routes": {},
+  "statistics": {
+    "total_runs": 2,
+    "total_successes": 2,
+    "total_failures": 0,
+    "promoted_routes": 0,
+    "critical_routes": 0,
+    "avg_memory_score": 85.0,
+    "total_routes": 2
+  }
+}
