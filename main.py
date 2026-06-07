@@ -69,6 +69,17 @@ from ai.evolution_pipeline import EvolutionPipeline
 # ── Phase 8 AI — Real Neural Weights ───────────────────────────────────────
 from ai.neural_weights import NeuralWeightLayer, extract_routing_weights
 
+# ── Phase 9 AI — Rich Data + Dynamic Growth + Deep Network ─────────────────
+try:
+    from ai.rich_data_collector import RichDataCollector
+    from ai.dynamic_weight_layer import DynamicWeightLayer, extract_routing_weights_dynamic
+    from ai.deep_routing_network import DeepRoutingNetwork, extract_deep_routing_weights
+    _PHASE9_AVAILABLE = True
+except ImportError as _p9_err:
+    _PHASE9_AVAILABLE = False
+    import logging as _log
+    _log.getLogger(__name__).warning(f"Phase 9 modules not fully available: {_p9_err}")
+
 # ── Services ───────────────────────────────────────────────────────────────
 from services.input_service import InputNode
 from services.processor_service import ProcessorNode
@@ -91,7 +102,7 @@ class NeuralServiceMesh:
     All Phase 2 APIs are preserved unchanged.
     """
 
-    VERSION = "8.0.0"
+    VERSION = "9.0.0"
 
     def __init__(self, storage_dir: str = "./data", db_path: str = "./data/mesh.db"):
         # ── Storage ────────────────────────────────────────────────────────
@@ -329,6 +340,36 @@ class NeuralServiceMesh:
             )
 
         logger.info(f"NeuralServiceMesh v{self.VERSION} fully ready (Phase 8 — Real Neural Weights)")
+
+        # ── Phase 9: Rich Data + Dynamic Growth + Deep Network ─────────────
+        # Axis-1: RichDataCollector
+        self.rich_data_collector = getattr(self.routing, '_rich_data', None)
+        if self.rich_data_collector is not None and hasattr(self.routing, '_rich_data'):
+            # Wire the environment model so external signals flow in
+            try:
+                self.rich_data_collector.set_env_model(self.env_model)
+            except Exception:
+                pass
+
+        # Axis-2: DynamicWeightLayer
+        self.dynamic_layer = getattr(self.routing, '_dynamic_layer', None)
+
+        # Axis-3: DeepRoutingNetwork
+        self.deep_network = getattr(self.routing, '_deep_network', None)
+
+        _p9_components = sum([
+            self.rich_data_collector is not None,
+            self.dynamic_layer is not None,
+            self.deep_network is not None,
+        ])
+        if _p9_components > 0:
+            logger.info(
+                f"NeuralServiceMesh Phase 9: {_p9_components}/3 axes active — "
+                f"RichData={'✓' if self.rich_data_collector else '✗'}  "
+                f"DynamicLayer={'✓' if self.dynamic_layer else '✗'}  "
+                f"DeepNetwork={'✓' if self.deep_network else '✗'}"
+            )
+        logger.info(f"NeuralServiceMesh v{self.VERSION} fully ready (Phase 9 — Deep Learning)")
 
     # ── Phase 3 hook into ExecutionEngine ─────────────────────────────────
 
@@ -872,6 +913,100 @@ class NeuralServiceMesh:
                 "W_TOPOLOGY": self.routing.W_TOPOLOGY,
             },
         }
+
+    # ── Phase 9: Rich Data + Dynamic Growth + Deep Network ────────────────
+
+    def get_phase9_status(self) -> dict:
+        """
+        Phase 9: Return comprehensive status of all three Phase 9 axes.
+
+        Returns
+        -------
+        dict with keys:
+          axis1_rich_data    — RichDataCollector summary
+          axis2_dynamic_layer — DynamicWeightLayer summary (shape, growth events)
+          axis3_deep_network  — DeepRoutingNetwork summary (layers, loss)
+          routing_scalars    — current W_SEMANTIC / W_SCORE / W_MEMORY / W_TOPOLOGY
+        """
+        return self.routing.neural_weights_summary()
+
+    def get_deep_network_summary(self) -> dict:
+        """
+        Phase 9 Axis-3: Return deep neural network architecture and training state.
+        """
+        if self.deep_network is None:
+            return {"error": "DeepRoutingNetwork not available"}
+        return self.deep_network.summary()
+
+    def get_dynamic_layer_summary(self) -> dict:
+        """
+        Phase 9 Axis-2: Return DynamicWeightLayer state including growth history.
+        """
+        if self.dynamic_layer is None:
+            return {"error": "DynamicWeightLayer not available"}
+        return self.dynamic_layer.summary()
+
+    def get_rich_data_summary(self) -> dict:
+        """
+        Phase 9 Axis-1: Return RichDataCollector summary (7 data sources).
+        """
+        if self.rich_data_collector is None:
+            return {"error": "RichDataCollector not available"}
+        return self.rich_data_collector.summary()
+
+    def train_deep_network(self, input_vector: list, target: float) -> dict:
+        """
+        Phase 9 Axis-3: Manually submit one training step to the DeepRoutingNetwork.
+
+        Parameters
+        ----------
+        input_vector : list[float]  length 7
+        target : float  in [0, 1]
+
+        Returns
+        -------
+        dict with keys: loss, train_steps, routing_scalars
+        """
+        if self.deep_network is None:
+            return {"error": "DeepRoutingNetwork not available"}
+        loss = self.deep_network.train_step(input_vector, target)
+        self.routing._sync_weights_from_deep_network()
+        return {
+            "loss": round(loss, 8),
+            "train_steps": self.deep_network._train_steps,
+            "architecture": self.deep_network.architecture_str(),
+            "routing_scalars": {
+                "W_SEMANTIC": self.routing.W_SEMANTIC,
+                "W_SCORE":    self.routing.W_SCORE,
+                "W_MEMORY":   self.routing.W_MEMORY,
+                "W_TOPOLOGY": self.routing.W_TOPOLOGY,
+            },
+        }
+
+    def save_phase9_models(self) -> dict:
+        """
+        Phase 9: Persist all three Phase 9 models to disk.
+        """
+        results = {}
+        if self.dynamic_layer is not None:
+            try:
+                path = self.dynamic_layer.save(self.routing._DYNAMIC_WEIGHTS_PATH)
+                results["dynamic_layer"] = {"saved": True, "path": path}
+            except Exception as e:
+                results["dynamic_layer"] = {"saved": False, "error": str(e)}
+        else:
+            results["dynamic_layer"] = {"saved": False, "error": "not available"}
+
+        if self.deep_network is not None:
+            try:
+                path = self.deep_network.save(self.routing._DEEP_NETWORK_DIR)
+                results["deep_network"] = {"saved": True, "path": path}
+            except Exception as e:
+                results["deep_network"] = {"saved": False, "error": str(e)}
+        else:
+            results["deep_network"] = {"saved": False, "error": "not available"}
+
+        return results
 
     # ── Pre-Phase 7: Validation ────────────────────────────────────────────
 
