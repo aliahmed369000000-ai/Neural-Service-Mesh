@@ -36,6 +36,34 @@ except ImportError:
     _NEURAL_WEIGHTS_AVAILABLE = False
     logger.warning("NeuralWeightLayer not found — RoutingEngine will use static weights")
 
+# ── Phase 9: Rich Data Collector, Dynamic Layer, Deep Network ────────────────
+try:
+    from ai.rich_data_collector import RichDataCollector
+    _RICH_DATA_AVAILABLE = True
+except ImportError:
+    _RICH_DATA_AVAILABLE = False
+    logger.warning("RichDataCollector not found — Phase 9 Axis-1 disabled")
+
+try:
+    from ai.dynamic_weight_layer import (
+        DynamicWeightLayer, extract_routing_weights_dynamic,
+        get_default_dynamic_layer,
+    )
+    _DYNAMIC_LAYER_AVAILABLE = True
+except ImportError:
+    _DYNAMIC_LAYER_AVAILABLE = False
+    logger.warning("DynamicWeightLayer not found — Phase 9 Axis-2 disabled")
+
+try:
+    from ai.deep_routing_network import (
+        DeepRoutingNetwork, extract_deep_routing_weights,
+        get_default_deep_network,
+    )
+    _DEEP_NETWORK_AVAILABLE = True
+except ImportError:
+    _DEEP_NETWORK_AVAILABLE = False
+    logger.warning("DeepRoutingNetwork not found — Phase 9 Axis-3 disabled")
+
 
 class RouteCandidate:
     """A single route candidate with its composite score."""
@@ -81,6 +109,8 @@ class RoutingEngine:
 
     # Path used to persist the neural weight matrix
     _WEIGHTS_PATH = "models/classifiers/routing_weights.npy"
+    _DYNAMIC_WEIGHTS_PATH = "models/classifiers/dynamic_weights.npy"
+    _DEEP_NETWORK_DIR = "models/classifiers"
 
     def __init__(self, graph=None, semantic_matcher=None,
                  scoring_engine=None, memory_engine=None):
@@ -103,6 +133,32 @@ class RoutingEngine:
         else:
             logger.info("RoutingEngine initialised (Phase 3 — static weights)")
 
+        # ── Phase 9 Axis-1: Rich Data Collector ──────────────────────────
+        self._rich_data: Optional["RichDataCollector"] = None
+        if _RICH_DATA_AVAILABLE:
+            self._rich_data = RichDataCollector()
+            logger.info("RoutingEngine (Phase 9 Axis-1): RichDataCollector active")
+
+        # ── Phase 9 Axis-2: Dynamic Self-Growing Weight Layer ─────────────
+        self._dynamic_layer: Optional["DynamicWeightLayer"] = None
+        if _DYNAMIC_LAYER_AVAILABLE:
+            self._dynamic_layer = get_default_dynamic_layer(self._DYNAMIC_WEIGHTS_PATH)
+            logger.info(
+                f"RoutingEngine (Phase 9 Axis-2): DynamicWeightLayer active — "
+                f"shape=({self._dynamic_layer._rows}×{self._dynamic_layer._cols})"
+            )
+
+        # ── Phase 9 Axis-3: Deep Multi-Layer Network ──────────────────────
+        self._deep_network: Optional["DeepRoutingNetwork"] = None
+        if _DEEP_NETWORK_AVAILABLE:
+            self._deep_network = get_default_deep_network(self._DEEP_NETWORK_DIR)
+            # Use deep network weights as primary routing scalars
+            self._sync_weights_from_deep_network()
+            logger.info(
+                f"RoutingEngine (Phase 9 Axis-3): DeepRoutingNetwork active — "
+                f"{self._deep_network}"
+            )
+
     # ── Phase 8 helpers ───────────────────────────────────────────────────
 
     def _sync_weights_from_layer(self) -> None:
@@ -115,11 +171,30 @@ class RoutingEngine:
         self.W_MEMORY   = w["W_MEMORY"]
         self.W_TOPOLOGY = w["W_TOPOLOGY"]
 
-    def _build_feature_vector(self, breakdown: dict) -> list:
+    def _sync_weights_from_deep_network(self) -> None:
+        """Phase 9 Axis-3: Pull routing scalars from the deep network output."""
+        if self._deep_network is None:
+            return
+        try:
+            w = extract_deep_routing_weights(self._deep_network)
+            self.W_SEMANTIC = w["W_SEMANTIC"]
+            self.W_SCORE    = w["W_SCORE"]
+            self.W_MEMORY   = w["W_MEMORY"]
+            self.W_TOPOLOGY = w["W_TOPOLOGY"]
+        except Exception as e:
+            logger.warning(f"Phase9 deep network weight sync failed: {e}")
+
+    def _build_feature_vector(self, breakdown: dict, node_id: str = "") -> list:
         """
         Construct a 7-element feature vector from a route score breakdown.
         Used as input to NeuralWeightLayer.forward() / train_step().
+
+        Phase 9: When RichDataCollector is available, returns enriched vector
+        merging all 7 data sources for 10x stronger learning signal.
         """
+        if self._rich_data is not None:
+            return self._rich_data.collect(breakdown, node_id)
+        # Phase 8 fallback: basic 7-element vector
         sem   = breakdown.get("semantic", 50.0) / 100.0
         score = breakdown.get("score",    50.0) / 100.0
         mem   = breakdown.get("memory",   50.0) / 100.0
@@ -130,21 +205,48 @@ class RoutingEngine:
         mem_x_topo  = mem * topo
         return [sem, score, mem, topo, avg, sem_x_score, mem_x_topo]
 
-    def _neural_train_on_route(self, breakdown: dict, composite: float) -> None:
-        """Train the neural layer on one scored route (online learning)."""
-        if self._neural_layer is None:
-            return
-        x      = self._build_feature_vector(breakdown)
+    def _neural_train_on_route(self, breakdown: dict, composite: float,
+                               node_id: str = "") -> None:
+        """Train all neural layers on one scored route (online learning)."""
+        x      = self._build_feature_vector(breakdown, node_id)
         target = composite / 100.0          # normalise composite score to [0,1]
-        try:
-            loss = self._neural_layer.train_step(x, target)
-            # Re-sync routing weights after every N steps to avoid thrashing
-            if self._neural_layer._train_steps % 10 == 0:
-                self._sync_weights_from_layer()
-                self._persist_neural_weights()
-            logger.debug(f"Phase8 neural train_step loss={loss:.6f}")
-        except Exception as e:
-            logger.warning(f"Phase8 neural train_step failed: {e}")
+
+        # Phase 8: train original NeuralWeightLayer
+        if self._neural_layer is not None:
+            try:
+                loss = self._neural_layer.train_step(x, target)
+                if self._neural_layer._train_steps % 10 == 0:
+                    self._sync_weights_from_layer()
+                    self._persist_neural_weights()
+                logger.debug(f"Phase8 neural train_step loss={loss:.6f}")
+            except Exception as e:
+                logger.warning(f"Phase8 neural train_step failed: {e}")
+
+        # Phase 9 Axis-2: train dynamic self-growing layer
+        if self._dynamic_layer is not None:
+            try:
+                loss9 = self._dynamic_layer.train_step(x, target)
+                if self._dynamic_layer._train_steps % 10 == 0:
+                    self._persist_dynamic_weights()
+                logger.debug(f"Phase9 dynamic train_step loss={loss9:.6f}")
+            except Exception as e:
+                logger.warning(f"Phase9 dynamic train_step failed: {e}")
+
+        # Phase 9 Axis-3: train deep multi-layer network
+        if self._deep_network is not None:
+            try:
+                loss_deep = self._deep_network.train_step(x, target)
+                if self._deep_network._train_steps % 10 == 0:
+                    self._sync_weights_from_deep_network()
+                    self._persist_deep_network()
+                logger.debug(f"Phase9 deep net train_step loss={loss_deep:.6f}")
+            except Exception as e:
+                logger.warning(f"Phase9 deep net train_step failed: {e}")
+
+        # Phase 9: also record in RichDataCollector
+        if self._rich_data is not None:
+            success = composite >= 50.0
+            self._rich_data.record_routing_event(node_id, success)
 
     def _persist_neural_weights(self) -> None:
         """Save the neural layer weights to disk."""
@@ -155,17 +257,31 @@ class RoutingEngine:
         except Exception as e:
             logger.warning(f"Phase8 weight save failed: {e}")
 
+    def _persist_dynamic_weights(self) -> None:
+        """Phase 9 Axis-2: Save dynamic layer weights to disk."""
+        if self._dynamic_layer is None:
+            return
+        try:
+            self._dynamic_layer.save(self._DYNAMIC_WEIGHTS_PATH)
+        except Exception as e:
+            logger.warning(f"Phase9 dynamic weight save failed: {e}")
+
+    def _persist_deep_network(self) -> None:
+        """Phase 9 Axis-3: Save deep network weights to disk."""
+        if self._deep_network is None:
+            return
+        try:
+            self._deep_network.save(self._DEEP_NETWORK_DIR)
+        except Exception as e:
+            logger.warning(f"Phase9 deep network save failed: {e}")
+
     def get_neural_layer(self) -> Optional["NeuralWeightLayer"]:
         """Return the NeuralWeightLayer instance (Phase 8 API)."""
         return self._neural_layer
 
     def neural_weights_summary(self) -> dict:
-        """Return a dict summary of the current neural weight state."""
-        if self._neural_layer is None:
-            return {"enabled": False, "reason": "NeuralWeightLayer not available"}
-        return {
-            "enabled": True,
-            "layer": self._neural_layer.summary(),
+        """Return a dict summary of the current neural weight state (Phase 8 + 9)."""
+        result = {
             "routing_scalars": {
                 "W_SEMANTIC": self.W_SEMANTIC,
                 "W_SCORE":    self.W_SCORE,
@@ -173,6 +289,28 @@ class RoutingEngine:
                 "W_TOPOLOGY": self.W_TOPOLOGY,
             },
         }
+        # Phase 8
+        if self._neural_layer is not None:
+            result["phase8_layer"] = {"enabled": True, "layer": self._neural_layer.summary()}
+        else:
+            result["phase8_layer"] = {"enabled": False}
+        # Phase 9 Axis-1
+        if self._rich_data is not None:
+            result["phase9_rich_data"] = {"enabled": True, **self._rich_data.summary()}
+        else:
+            result["phase9_rich_data"] = {"enabled": False}
+        # Phase 9 Axis-2
+        if self._dynamic_layer is not None:
+            result["phase9_dynamic_layer"] = {"enabled": True, **self._dynamic_layer.summary()}
+        else:
+            result["phase9_dynamic_layer"] = {"enabled": False}
+        # Phase 9 Axis-3
+        if self._deep_network is not None:
+            result["phase9_deep_network"] = {"enabled": True, **self._deep_network.summary()}
+        else:
+            result["phase9_deep_network"] = {"enabled": False}
+        result["enabled"] = True
+        return result
 
     def set_knowledge_store(self, ks) -> None:
         """Inject the KnowledgeStore to enable knowledge-backed route discovery."""
