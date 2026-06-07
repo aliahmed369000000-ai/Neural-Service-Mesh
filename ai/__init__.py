@@ -32,3 +32,19 @@ from ai.simulation_lab import SimulationLab, SimulationReport
 from ai.meta_reasoner import MetaReasoner, DecisionExplanation, MetaReasonerInsight
 from ai.economic_engine import EconomicEngine, NodeEconomicProfile
 from ai.system_dna import SystemDNA, DNASnapshot
+
+# Phase 8 — Real Neural Weights
+from ai.neural_weights import NeuralWeightLayer, extract_routing_weights, get_default_layer
+
+__all__ += [
+    # Phase 6
+    "AgentFactory", "AgentInstance",
+    "SwarmCoordinator", "SwarmResult",
+    "SelfOptimizer", "SelfOptimizerReport",
+    "SimulationLab", "SimulationReport",
+    "MetaReasoner", "DecisionExplanation", "MetaReasonerInsight",
+    "EconomicEngine", "NodeEconomicProfile",
+    "SystemDNA", "DNASnapshot",
+    # Phase 8
+    "NeuralWeightLayer", "extract_routing_weights", "get_default_layer",
+]
