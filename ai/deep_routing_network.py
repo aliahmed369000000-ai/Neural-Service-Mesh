@@ -4,6 +4,13 @@ Phase 9 — Axis 3: Deep Multi-Layer Neural Network
 Elevates the project from a *linear model* (single weight matrix) to a
 genuine **deep neural network** with multiple learned layers.
 
+Column/input dimension contract (v15+)
+---------------------------------------
+  INPUT_DIM=7 is FIXED across all three weight systems:
+    • NeuralWeightLayer   shape=(9,7)  — rows fixed, cols=7
+    • DynamicWeightLayer  shape=(9+,7) — rows grow +23, cols=7 forever
+    • DeepRoutingNetwork  Layer-1 in=7 — input always 7 features
+
 Architecture (matches the images exactly):
 
     Input (7 features — from RichDataCollector)
@@ -49,11 +56,16 @@ logger = logging.getLogger(__name__)
 # ── Architecture definition ───────────────────────────────────────────────────
 # Each tuple: (output_dim, input_dim, activation)
 LAYER_CONFIGS: List[Tuple[int, int, str]] = [
-    (9,  7,  "relu"),    # Layer 1: simple patterns
+    (9,  7,  "relu"),    # Layer 1: 7 inputs → 9 nodes (matches DynamicWeightLayer base rows)
     (16, 9,  "relu"),    # Layer 2: composite patterns
     (8,  16, "relu"),    # Layer 3: knowledge compression
     (4,  8,  "softmax"), # Output:  routing weights (sum to 1)
 ]
+# Architecture note (v15+):
+#   INPUT_DIM=7 is FIXED — the 7-column constraint propagates from
+#   NeuralWeightLayer and DynamicWeightLayer.  Layer 1 output=9 aligns
+#   with the DynamicWeightLayer's starting row count so weight transfers
+#   between the two systems remain dimension-compatible.
 
 INPUT_DIM  = 7
 OUTPUT_DIM = 4
