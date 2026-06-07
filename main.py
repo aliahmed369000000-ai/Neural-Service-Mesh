@@ -216,7 +216,7 @@ class NeuralServiceMesh:
     All public APIs are backward-compatible across all layers.
     """
 
-    VERSION = "16.0.0"
+    VERSION = "17.0.0"
 
     def __init__(self, storage_dir: str = "./data", db_path: str = "./data/mesh.db"):
         # ── Storage ────────────────────────────────────────────────────────
@@ -509,6 +509,8 @@ class NeuralServiceMesh:
                 self_awareness=self.self_awareness,
                 structural_evolution=self.structural_evolution,
                 evolution_pipeline=getattr(self, "evolution_pipeline", None),
+                evolution_ethics=getattr(self, "evolution_ethics", None),
+                self_narrative=getattr(self, "self_narrative", None),
             )
             logger.info("DigitalBeingCore active — unified digital consciousness online")
 
