@@ -1049,3 +1049,87 @@ def create_app(mesh):
     app = _create_app_prev(mesh)
     _add_phase13_14_routes(app, mesh)
     return app
+
+
+# ── v16 Routes: Dashboard + Narrative + Ethics + Consolidator + Full Status ──
+
+def _add_v16_routes(app, mesh):
+    import os
+    from flask import send_file, jsonify, request
+
+    @app.route("/", methods=["GET"])
+    @app.route("/dashboard", methods=["GET"])
+    def dashboard():
+        dash = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dashboard.html")
+        if os.path.exists(dash):
+            return send_file(dash)
+        return "<h2>Dashboard file not found</h2>", 404
+
+    @app.route("/api/status/full", methods=["GET"])
+    def api_full_status():
+        return jsonify(mesh.get_full_system_status())
+
+    @app.route("/api/narrative/log", methods=["GET"])
+    def api_narrative_log():
+        n = int(request.args.get("n", 20))
+        return jsonify(mesh.get_narrative_log(n))
+
+    @app.route("/api/narrative/diary", methods=["GET"])
+    def api_narrative_diary():
+        if mesh.self_narrative is None:
+            return jsonify({"error": "SelfNarrative not available"})
+        return jsonify({"diary": mesh.self_narrative.get_todays_diary()})
+
+    @app.route("/api/ethics/violations", methods=["GET"])
+    def api_ethics_violations():
+        limit = int(request.args.get("limit", 50))
+        return jsonify(mesh.get_ethics_violations(limit))
+
+    @app.route("/api/consolidator/laws", methods=["GET"])
+    def api_consolidated_laws():
+        min_conf = float(request.args.get("min_confidence", 0.0))
+        return jsonify(mesh.get_consolidated_laws(min_conf))
+
+    @app.route("/api/immune/status", methods=["GET"])
+    def api_immune_status():
+        return jsonify(mesh.get_immune_system_status())
+
+    @app.route("/api/quality/status", methods=["GET"])
+    def api_quality_status():
+        return jsonify(mesh.get_quality_engine_status())
+
+    @app.route("/api/drives/status", methods=["GET"])
+    def api_drives_status():
+        return jsonify(mesh.get_drive_engine_status())
+
+    @app.route("/api/replication/status", methods=["GET"])
+    def api_replication_status():
+        return jsonify(mesh.get_replication_engine_status())
+
+    @app.route("/api/world_feed/status", methods=["GET"])
+    def api_world_feed_status():
+        return jsonify(mesh.get_world_feed_status())
+
+    @app.route("/api/checkpoint/list", methods=["GET"])
+    def api_checkpoint_list():
+        if mesh.brain_checkpoint is None:
+            return jsonify({"error": "BrainCheckpoint not available"})
+        return jsonify({"checkpoints": mesh.brain_checkpoint.list_checkpoints()})
+
+    @app.route("/api/checkpoint/save", methods=["POST"])
+    def api_checkpoint_save():
+        if mesh.brain_checkpoint is None:
+            return jsonify({"error": "BrainCheckpoint not available"})
+        path = mesh.brain_checkpoint.save(mesh)
+        return jsonify({"saved": True, "path": path})
+
+    @app.route("/health/v16", methods=["GET"])
+    def health_v16():
+        return jsonify({"status": "ok", "version": "16.0.0"})
+
+
+_create_app_v15 = create_app
+def create_app(mesh):
+    app = _create_app_v15(mesh)
+    _add_v16_routes(app, mesh)
+    return app
