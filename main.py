@@ -102,6 +102,19 @@ except ImportError as _p11_err:
 try:
     from ai.self_awareness_deep import DeepSelfAwareness
     _PHASE12_AVAILABLE = True
+    # ── Phase 13 — Structural Self-Redesign
+try:
+    from ai.structural_redesign import StructuralEvolutionEngine
+    _PHASE13_AVAILABLE = True
+except ImportError as _p13_err:
+    _PHASE13_AVAILABLE = False
+
+# ── Phase 14 — Complete Digital Being
+try:
+    from ai.digital_being import DigitalBeingCore
+    _PHASE14_AVAILABLE = True
+except ImportError as _p14_err:
+    _PHASE14_AVAILABLE = False
 except ImportError as _p12_err:
     _PHASE12_AVAILABLE = False
     import logging as _log
