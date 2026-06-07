@@ -624,7 +624,7 @@ class NeuralServiceMesh:
         self.self_narrative = None
         if _SELF_NARRATIVE_AVAILABLE:
             self.self_narrative = SelfNarrative(
-                episodic_memory=self.episodic_memory,
+                knowledge_store=self.knowledge,
             )
             # تسجيل حدث البدء
             self.self_narrative.record_event(
@@ -1449,7 +1449,10 @@ class NeuralServiceMesh:
     def get_self_narrative_status(self) -> dict:
         if self.self_narrative is None:
             return {"enabled": False}
-        return {"enabled": True, **self.self_narrative.summary()}
+        try:
+            return {"enabled": True, **self.self_narrative.summary()}
+        except Exception:
+            return {"enabled": True}
 
     def record_narrative_event(
         self,
@@ -1462,20 +1465,23 @@ class NeuralServiceMesh:
         if self.self_narrative is None:
             return {"error": "SelfNarrative not available"}
         entry = self.self_narrative.record_event(
-            event_type     = event_type,
-            data           = data or {},
+            event_type    = event_type,
+            data          = data or {},
             surprise_score = surprise_score,
-            importance     = importance,
+            importance    = importance,
         )
-        return entry.to_dict()
+        return entry.to_dict() if hasattr(entry, 'to_dict') else {"status": "recorded"}
 
     def get_identity_statement(self) -> dict:
         """إرجاع جملة الهوية الحالية للجهاز."""
         if self.self_narrative is None:
             return {"error": "SelfNarrative not available"}
+        s = self.self_narrative.summary()
+        top = max(s.get("by_type", {"unknown": 1}), key=s.get("by_type", {"unknown": 1}).get)
         return {
-            "identity": self.self_narrative.get_identity_statement(),
+            "identity": f"أنا جهاز عصبي رقمي سجّل {s.get('total',0)} حدثاً، أكثرها: {top}",
             "version":  self.VERSION,
+            "summary":  s,
         }
 
     def get_narrative_log(self, n: int = 20) -> dict:
@@ -1483,7 +1489,7 @@ class NeuralServiceMesh:
         if self.self_narrative is None:
             return {"error": "SelfNarrative not available"}
         return {
-            "log":   self.self_narrative.get_narrative_log(n),
+            "log":   self.self_narrative.get_log(n),
             "count": n,
         }
 
@@ -1491,14 +1497,17 @@ class NeuralServiceMesh:
         """توليد ملخص سردي ليومي."""
         if self.self_narrative is None:
             return {"error": "SelfNarrative not available"}
-        summary = self.self_narrative.generate_daily_summary()
-        return summary.to_dict()
+        return {"diary": self.self_narrative.get_todays_diary()}
 
     def get_today_narrative(self) -> dict:
         """إرجاع سرد اليوم الحالي."""
         if self.self_narrative is None:
             return {"error": "SelfNarrative not available"}
-        return self.self_narrative.get_today_narrative()
+        return {
+            "diary":      self.self_narrative.get_todays_diary(),
+            "log":        self.self_narrative.get_log(20),
+            "summary":    self.self_narrative.summary(),
+        }
 
     # ── Phase 16: Evolution Ethics API ───────────────────────────────────
 
