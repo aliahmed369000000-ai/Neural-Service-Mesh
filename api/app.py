@@ -999,3 +999,53 @@ def create_app(mesh):
     if hasattr(mesh, "evolution_pipeline"):
         _add_phase7_routes(app, mesh)
     return app
+def _add_phase13_14_routes(app, mesh):
+    from flask import jsonify, request
+
+    @app.route("/ai/phase13/status", methods=["GET"])
+    def p13_status(): return jsonify(mesh.get_structural_status())
+
+    @app.route("/ai/phase13/redesign", methods=["POST"])
+    def p13_redesign():
+        body = request.get_json(force=True) or {}
+        return jsonify(mesh.redesign(cycles=int(body.get("cycles",1)), verbose=False))
+
+    @app.route("/ai/phase13/history", methods=["GET"])
+    def p13_history(): return jsonify(mesh.get_arch_history(int(request.args.get("limit",10))))
+
+    @app.route("/ai/phase13/rollback", methods=["POST"])
+    def p13_rollback():
+        body = request.get_json(force=True) or {}
+        sid  = body.get("snapshot_id","")
+        return jsonify(mesh.arch_rollback(sid)) if sid else (jsonify({"error":"snapshot_id required"}),400)
+
+    @app.route("/ai/phase14/status",  methods=["GET"])
+    def p14_status(): return jsonify(mesh.get_being_status())
+
+    @app.route("/ai/phase14/cycle",   methods=["POST"])
+    def p14_cycle():
+        body = request.get_json(force=True) or {}
+        return jsonify(mesh.run_being_cycle(fast_mode=bool(body.get("fast_mode",True)), verbose=False))
+
+    @app.route("/ai/phase14/start",   methods=["POST"])
+    def p14_start():
+        body = request.get_json(force=True) or {}
+        return jsonify(mesh.start_being(fast_mode=bool(body.get("fast_mode",False))))
+
+    @app.route("/ai/phase14/stop",    methods=["POST"])
+    def p14_stop(): return jsonify(mesh.stop_being())
+
+    @app.route("/ai/phase14/history", methods=["GET"])
+    def p14_history(): return jsonify(mesh.get_being_history(int(request.args.get("limit",10))))
+
+    @app.route("/ai/full-status",     methods=["GET"])
+    def full_status_all(): return jsonify(mesh.get_full_system_status())
+
+    @app.route("/health/v14",         methods=["GET"])
+    def health_v14(): return jsonify({"status":"ok","version":"14.0.0","phase":14})
+
+_create_app_prev = create_app
+def create_app(mesh):
+    app = _create_app_prev(mesh)
+    _add_phase13_14_routes(app, mesh)
+    return app
