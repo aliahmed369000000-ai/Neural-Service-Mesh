@@ -684,6 +684,202 @@ class KnowledgeStore:
             json.dump(data, f, indent=2, default=str)
         os.replace(str(tmp_path), str(custom_path))
 
+    # ── Phase 15: Quranic Text Knowledge Storage ──────────────────────────────
+
+    _QURAN_INDEX_KEY   = "quran_index"
+    _QURAN_CHUNK_SIZE  = 100          # آيات per chunk file
+
+    def store_text(
+        self,
+        key: str,
+        text: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Store a text blob under an arbitrary key with optional metadata.
+        Stored atomically in knowledge/text_<key>.json
+
+        Example
+        -------
+        ks.store_text("bismillah", "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ",
+                      metadata={"surah": 1, "ayah": 1})
+        """
+        payload = {
+            "_type": "text",
+            "key": key,
+            "text": text,
+            "metadata": metadata or {},
+            "stored_at": _now_iso(),
+        }
+        self.write_custom(f"text_{key}", payload)
+        logger.debug(f"KnowledgeStore.store_text: key='{key}' len={len(text)}")
+
+    def retrieve_text(self, key: str) -> Dict[str, Any]:
+        """
+        Retrieve a text blob stored via store_text().
+        Returns the full payload dict: {key, text, metadata, stored_at}
+        Raises KeyError if not found.
+        """
+        return self.read_custom(f"text_{key}")
+
+    def store_quran(self, ayat: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Ingest the full Quran into KnowledgeStore.
+
+        Parameters
+        ----------
+        ayat : list of dicts with keys {surah, ayah, text}
+               (exactly the format produced by the alquran.cloud loader)
+
+        Returns
+        -------
+        dict  — index record with storage statistics
+        """
+        if not ayat:
+            raise ValueError("ayat list is empty — nothing to store")
+
+        chunk_size  = self._QURAN_CHUNK_SIZE
+        total_ayat  = len(ayat)
+        chunks      = [
+            ayat[i : i + chunk_size]
+            for i in range(0, total_ayat, chunk_size)
+        ]
+        total_chunks = len(chunks)
+
+        print(f"📖 بدء حفظ القرآن الكريم — {total_ayat} آية في {total_chunks} مجموعة …")
+
+        stored = 0
+        for i, chunk in enumerate(chunks):
+            chunk_key = f"quran_chunk_{i:04d}"
+            self.write_custom(chunk_key, chunk)
+            stored += len(chunk)
+            if i % 10 == 0 or i == total_chunks - 1:
+                pct = round((i + 1) / total_chunks * 100, 1)
+                print(f"  ✔ {pct}%  — مجموعة {i+1}/{total_chunks}  ({stored} آية محفوظة)")
+
+        # Build surah-level index for fast lookup
+        surah_index: Dict[str, Any] = {}
+        for a in ayat:
+            s = str(a["surah"])
+            if s not in surah_index:
+                surah_index[s] = {"first_chunk": None, "ayah_count": 0}
+            surah_index[s]["ayah_count"] += 1
+
+        # Tag which chunk each surah starts in
+        for i, chunk in enumerate(chunks):
+            for a in chunk:
+                s = str(a["surah"])
+                if surah_index[s]["first_chunk"] is None:
+                    surah_index[s]["first_chunk"] = i
+
+        index = {
+            "total_ayat":   total_ayat,
+            "total_chunks": total_chunks,
+            "chunk_size":   chunk_size,
+            "total_surahs": len(surah_index),
+            "surah_index":  surah_index,
+            "source":       "alquran.cloud — الرسم العثماني",
+            "stored_at":    _now_iso(),
+        }
+        self.write_custom(self._QURAN_INDEX_KEY, index)
+
+        print(f"\n✅ اكتمل — القرآن الكريم محفوظ بالكامل")
+        print(f"   آيات : {total_ayat}")
+        print(f"   سور  : {len(surah_index)}")
+        print(f"   ملفات: {total_chunks} chunk + 1 index")
+        return index
+
+    def quran_index(self) -> Dict[str, Any]:
+        """Return the Quran storage index. Raises KeyError if not stored yet."""
+        return self.read_custom(self._QURAN_INDEX_KEY)
+
+    def get_ayah(self, surah: int, ayah: int) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a single ayah by surah and ayah number.
+        Returns {surah, ayah, text} or None if not found.
+        """
+        try:
+            idx = self.quran_index()
+        except KeyError:
+            raise RuntimeError("القرآن غير محفوظ بعد — شغّل store_quran(ayat) أولاً")
+
+        s_info = idx["surah_index"].get(str(surah))
+        if not s_info:
+            return None
+
+        # Search from the first chunk of this surah onward
+        start_chunk = s_info["first_chunk"]
+        for ci in range(start_chunk, idx["total_chunks"]):
+            chunk_key = f"quran_chunk_{ci:04d}"
+            chunk = self.read_custom(chunk_key)
+            for a in chunk:
+                if a["surah"] == surah and a["ayah"] == ayah:
+                    return a
+            # Once surah changes past our target we can stop
+            if chunk and chunk[-1]["surah"] > surah:
+                break
+        return None
+
+    def get_surah(self, surah: int) -> List[Dict[str, Any]]:
+        """
+        Retrieve all ayahs of a given surah.
+        Returns list of {surah, ayah, text}.
+        """
+        try:
+            idx = self.quran_index()
+        except KeyError:
+            raise RuntimeError("القرآن غير محفوظ بعد — شغّل store_quran(ayat) أولاً")
+
+        s_info = idx["surah_index"].get(str(surah))
+        if not s_info:
+            return []
+
+        result: List[Dict[str, Any]] = []
+        start_chunk = s_info["first_chunk"]
+        for ci in range(start_chunk, idx["total_chunks"]):
+            chunk_key = f"quran_chunk_{ci:04d}"
+            chunk = self.read_custom(chunk_key)
+            for a in chunk:
+                if a["surah"] == surah:
+                    result.append(a)
+            if chunk and chunk[-1]["surah"] > surah:
+                break
+        return result
+
+    def search_quran(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
+        """
+        Simple substring search across all stored ayahs.
+        Returns list of matching {surah, ayah, text} dicts.
+        """
+        try:
+            idx = self.quran_index()
+        except KeyError:
+            raise RuntimeError("القرآن غير محفوظ بعد — شغّل store_quran(ayat) أولاً")
+
+        results: List[Dict[str, Any]] = []
+        for ci in range(idx["total_chunks"]):
+            chunk = self.read_custom(f"quran_chunk_{ci:04d}")
+            for a in chunk:
+                if query in a.get("text", ""):
+                    results.append(a)
+                    if len(results) >= max_results:
+                        return results
+        return results
+
+    def quran_stats(self) -> Dict[str, Any]:
+        """
+        Quick statistics about the stored Quran.
+        Returns summary dict or raises RuntimeError if not stored.
+        """
+        idx = self.quran_index()          # raises if missing
+        return {
+            "total_ayat":   idx["total_ayat"],
+            "total_surahs": idx["total_surahs"],
+            "total_chunks": idx["total_chunks"],
+            "source":       idx["source"],
+            "stored_at":    idx["stored_at"],
+        }
+
     def __repr__(self):
         s = self.summary()
         return (
