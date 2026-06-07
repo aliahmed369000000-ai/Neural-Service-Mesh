@@ -66,6 +66,9 @@ from ai.governance_p7 import P7GovernanceLayer
 from ai.objectives import ObjectivesEngine
 from ai.evolution_pipeline import EvolutionPipeline
 
+# ── Phase 8 AI — Real Neural Weights ───────────────────────────────────────
+from ai.neural_weights import NeuralWeightLayer, extract_routing_weights
+
 # ── Services ───────────────────────────────────────────────────────────────
 from services.input_service import InputNode
 from services.processor_service import ProcessorNode
@@ -88,7 +91,7 @@ class NeuralServiceMesh:
     All Phase 2 APIs are preserved unchanged.
     """
 
-    VERSION = "7.0.0"
+    VERSION = "8.0.0"
 
     def __init__(self, storage_dir: str = "./data", db_path: str = "./data/mesh.db"):
         # ── Storage ────────────────────────────────────────────────────────
@@ -309,6 +312,24 @@ class NeuralServiceMesh:
 
         logger.info(f"NeuralServiceMesh v{self.VERSION} ready (Phase 7 — Autonomous Evolution Platform)")
 
+        # ── Phase 8: Real Neural Weights ───────────────────────────────────
+        # The RoutingEngine already bootstraps its NeuralWeightLayer internally.
+        # We expose a top-level reference here for API access and status reporting.
+        self.neural_layer: Optional[NeuralWeightLayer] = self.routing.get_neural_layer()
+        if self.neural_layer is not None:
+            logger.info(
+                f"NeuralServiceMesh Phase 8: neural weight layer active  "
+                f"shape={self.neural_layer.weights.shape}  "
+                f"steps={self.neural_layer._train_steps}"
+            )
+        else:
+            logger.warning(
+                "NeuralServiceMesh Phase 8: NeuralWeightLayer unavailable — "
+                "install numpy to enable real neural weights."
+            )
+
+        logger.info(f"NeuralServiceMesh v{self.VERSION} fully ready (Phase 8 — Real Neural Weights)")
+
     # ── Phase 3 hook into ExecutionEngine ─────────────────────────────────
 
     def _install_phase3_hook(self):
@@ -498,6 +519,8 @@ class NeuralServiceMesh:
                 "objectives": self.objectives.summary(),
                 "evolution_pipeline": self.evolution_pipeline.summary(),
             },
+            # Phase 8 Real Neural Weights
+            "ai_phase8": self.routing.neural_weights_summary(),
         }
 
     # ── Phase 4: Public API methods ────────────────────────────────────────
@@ -763,6 +786,91 @@ class NeuralServiceMesh:
         return {
             "history": self.evolution_pipeline.get_history(limit),
             "summary": self.evolution_pipeline.summary(),
+        }
+
+    # ── Phase 8: Real Neural Weights ──────────────────────────────────────
+
+    def get_neural_weights(self) -> dict:
+        """
+        Phase 8: Return the full neural weight layer summary.
+
+        Includes the 10×7 weight matrix, training statistics, and the
+        current routing scalars derived from the first matrix row.
+        """
+        summary = self.routing.neural_weights_summary()
+        if self.neural_layer is not None:
+            summary["weights_matrix"] = self.neural_layer.get_weights_list()
+        return summary
+
+    def train_neural_weights(
+        self,
+        input_vector: list,
+        target: float,
+    ) -> dict:
+        """
+        Phase 8: Manually submit one training step to the NeuralWeightLayer.
+
+        Parameters
+        ----------
+        input_vector : list[float]  length 7
+            Feature vector (semantic, score, memory, topology, avg,
+            sem×score, mem×topo — all normalised to [0, 1]).
+        target : float
+            Desired output scalar in [0, 1].
+
+        Returns
+        -------
+        dict with keys: loss, train_steps, routing_scalars
+        """
+        if self.neural_layer is None:
+            return {"error": "NeuralWeightLayer not available — install numpy"}
+        loss = self.neural_layer.train_step(input_vector, target)
+        self.routing._sync_weights_from_layer()
+        return {
+            "loss":            round(loss, 8),
+            "train_steps":     self.neural_layer._train_steps,
+            "routing_scalars": {
+                "W_SEMANTIC": self.routing.W_SEMANTIC,
+                "W_SCORE":    self.routing.W_SCORE,
+                "W_MEMORY":   self.routing.W_MEMORY,
+                "W_TOPOLOGY": self.routing.W_TOPOLOGY,
+            },
+        }
+
+    def save_neural_weights(self, path: Optional[str] = None) -> dict:
+        """
+        Phase 8: Persist the current neural weight matrix to disk.
+
+        Parameters
+        ----------
+        path : str, optional
+            Destination .npy path.  Defaults to
+            ``models/classifiers/routing_weights.npy``.
+        """
+        if self.neural_layer is None:
+            return {"error": "NeuralWeightLayer not available"}
+        dest = path or self.routing._WEIGHTS_PATH
+        saved = self.neural_layer.save(dest)
+        return {"saved": True, "path": saved}
+
+    def load_neural_weights(self, path: str) -> dict:
+        """
+        Phase 8: Load a neural weight matrix from a .npy file and sync
+        the routing scalars.
+        """
+        if self.neural_layer is None:
+            return {"error": "NeuralWeightLayer not available"}
+        self.neural_layer.load(path)
+        self.routing._sync_weights_from_layer()
+        return {
+            "loaded": True,
+            "path":   path,
+            "routing_scalars": {
+                "W_SEMANTIC": self.routing.W_SEMANTIC,
+                "W_SCORE":    self.routing.W_SCORE,
+                "W_MEMORY":   self.routing.W_MEMORY,
+                "W_TOPOLOGY": self.routing.W_TOPOLOGY,
+            },
         }
 
     # ── Pre-Phase 7: Validation ────────────────────────────────────────────
