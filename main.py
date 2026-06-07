@@ -216,7 +216,7 @@ class NeuralServiceMesh:
     All public APIs are backward-compatible across all layers.
     """
 
-    VERSION = "17.0.0"
+    VERSION = "18.0.0"
 
     def __init__(self, storage_dir: str = "./data", db_path: str = "./data/mesh.db"):
         # ── Storage ────────────────────────────────────────────────────────
@@ -573,19 +573,23 @@ class NeuralServiceMesh:
             if self.episodic_memory is not None:
                 def _wf_memory_cb(item: dict):
                     try:
-                        from ai.episodic_memory import Episode
-                        ep = Episode(
-                            content=item.get("content", ""),
-                            source=item.get("source", "world_feed"),
-                            context={
-                                "title":        item.get("title", ""),
-                                "url":          item.get("url", ""),
+                        quality = float(item.get("quality_score", 70)) / 100.0
+                        self.episodic_memory.record(
+                            feature_vec = [quality, 0.5, 0.5, 0.5, 0.5],
+                            target      = quality,
+                            outcome     = quality,
+                            source      = item.get("source", "world_feed"),
+                            reward      = quality * 0.8,
+                            context     = {
+                                "content":       item.get("content", "")[:500],
+                                "title":         item.get("title", ""),
+                                "url":           item.get("url", ""),
                                 "quality_score": item.get("quality_score", 70),
+                                "ingested_at":   item.get("ingested_at", ""),
                             },
                         )
-                        self.episodic_memory.record(ep)
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        logger.debug(f"[WorldFeed→Memory] record failed: {_e}")
                 self.world_feed.set_memory_callback(_wf_memory_cb)
             logger.info("WorldFeed active — real-world data ingestion online")
 
@@ -641,7 +645,7 @@ class NeuralServiceMesh:
             logger.info("MemoryConsolidator active — semantic law engine online")
 
         logger.info(
-            f"NeuralServiceMesh v{self.VERSION} Phase 16 complete — "
+            f"NeuralServiceMesh v{self.VERSION} Phase 16+17 (fixes) complete — "
             f"SelfNarrative={'✓' if self.self_narrative else '✗'}  "
             f"EvolutionEthics={'✓' if self.evolution_ethics else '✗'}  "
             f"MemoryConsolidator={'✓' if self.memory_consolidator else '✗'}"
@@ -1221,9 +1225,15 @@ class NeuralServiceMesh:
 
     def get_full_system_status(self) -> dict:
         from datetime import datetime
+        quran_info = {}
+        try:
+            quran_info = self.knowledge.quran_stats()
+        except Exception:
+            quran_info = {"stored": False}
         return {
             "version":              self.VERSION,
             "timestamp":            datetime.utcnow().isoformat(),
+            "quran":                quran_info,
             "deep_network":         self.get_phase9_status(),
             "signal_stream":        self.get_signal_stream_status(),
             "episodic_memory":      self.get_memory_status(),
@@ -1572,6 +1582,202 @@ class NeuralServiceMesh:
         self.memory_consolidator.observe_pattern(pattern_key, description, metadata)
         count = self.memory_consolidator._local_pattern_counts.get(pattern_key, 0)
         return {"status": "observed", "pattern_key": pattern_key, "count": count}
+
+
+    # ── Quran & Knowledge Feed API ─────────────────────────────────────────
+
+    def store_quran(self, ayat: list) -> dict:
+        """
+        Store the full Quran in KnowledgeStore.
+        ayat: list of {surah, ayah, text} dicts (6236 items).
+        """
+        self.knowledge.store_quran(ayat)
+        stats = self.knowledge.quran_stats()
+        return {"status": "stored", **stats}
+
+    def get_ayah(self, surah: int, ayah: int) -> dict:
+        """Retrieve a single ayah by surah and ayah number."""
+        result = self.knowledge.get_ayah(surah, ayah)
+        if result is None:
+            return {"error": f"Ayah {surah}:{ayah} not found — run store_quran() first"}
+        return result
+
+    def get_surah(self, surah: int) -> dict:
+        """Retrieve all ayahs of a surah."""
+        ayat = self.knowledge.get_surah(surah)
+        return {"surah": surah, "count": len(ayat), "ayat": ayat}
+
+    def search_quran(self, query: str, max_results: int = 10) -> dict:
+        """Search Quran text. Returns matching ayahs."""
+        results = self.knowledge.search_quran(query, max_results=max_results)
+        return {"query": query, "count": len(results), "results": results}
+
+    def quran_stats(self) -> dict:
+        """Quick statistics about the stored Quran."""
+        try:
+            return self.knowledge.quran_stats()
+        except RuntimeError as e:
+            return {"error": str(e)}
+
+    def feed_quran_to_memory(self, batch_size: int = 100) -> dict:
+        """
+        Transfer stored Quran from KnowledgeStore into EpisodicMemoryEngine.
+        Each ayah becomes a weighted memory episode.
+        Longer surahs and early ayahs get slightly higher reward.
+        Returns a report dict.
+        """
+        if self.episodic_memory is None:
+            return {"error": "EpisodicMemoryEngine not available"}
+        try:
+            idx = self.knowledge.quran_index()
+        except (KeyError, RuntimeError) as e:
+            return {"error": f"Quran not stored yet — run store_quran() first: {e}"}
+
+        total_chunks = idx["total_chunks"]
+        recorded = 0
+        skipped  = 0
+
+        for ci in range(total_chunks):
+            chunk = self.knowledge.read_custom(f"quran_chunk_{ci:04d}")
+            if not chunk:
+                continue
+            for ayah_dict in chunk:
+                try:
+                    surah_num = int(ayah_dict.get("surah", 1))
+                    ayah_num  = int(ayah_dict.get("ayah",  1))
+                    text      = ayah_dict.get("text", "")
+                    if not text:
+                        skipped += 1
+                        continue
+
+                    # Feature vector: [surah_norm, ayah_norm, text_len_norm, reward, 0.5]
+                    surah_norm   = surah_num / 114.0
+                    ayah_norm    = min(ayah_num / 286.0, 1.0)   # longest surah=286
+                    text_len_norm = min(len(text) / 300.0, 1.0)
+                    reward       = 0.9 if surah_num <= 10 else 0.75
+
+                    self.episodic_memory.record(
+                        feature_vec = [surah_norm, ayah_norm, text_len_norm, reward, 0.5],
+                        target      = reward,
+                        outcome     = reward,
+                        source      = f"quran:{surah_num}:{ayah_num}",
+                        reward      = reward,
+                        context     = {
+                            "surah":      surah_num,
+                            "ayah":       ayah_num,
+                            "text":       text[:300],
+                            "source_type": "quran",
+                        },
+                    )
+                    recorded += 1
+
+                    # Observe pattern in consolidator
+                    if self.memory_consolidator is not None:
+                        self.memory_consolidator.observe_pattern(
+                            pattern_key = f"quran_surah_{surah_num}",
+                            description = f"آيات السورة {surah_num} في الذاكرة",
+                        )
+                except Exception as _ep_err:
+                    logger.debug(f"[feed_quran] skip ayah: {_ep_err}")
+                    skipped += 1
+
+        # Record narrative event
+        if self.self_narrative is not None:
+            self.self_narrative.record_event(
+                event_type    = "world_knowledge",
+                data          = {"message": f"تم تغذية {recorded} آية من القرآن الكريم للذاكرة"},
+                surprise_score = 0.3,
+                importance    = 1.0,
+            )
+
+        return {
+            "status":   "done",
+            "recorded": recorded,
+            "skipped":  skipped,
+            "total":    recorded + skipped,
+        }
+
+    def feed_text_to_memory(
+        self,
+        text: str,
+        source: str = "manual",
+        reward: float = 0.7,
+        chunk_size: int = 200,
+        metadata: Optional[dict] = None,
+    ) -> dict:
+        """
+        Feed any text (book, article, document) into EpisodicMemoryEngine.
+        Splits text into chunks and records each as an episode.
+
+        Parameters
+        ----------
+        text       : raw text to feed
+        source     : source label (e.g. "book:sahih_bukhari")
+        reward     : base reward value (0-1), higher = more important
+        chunk_size : characters per chunk
+        metadata   : extra context dict stored with every chunk
+        """
+        if self.episodic_memory is None:
+            return {"error": "EpisodicMemoryEngine not available"}
+        if not text or not text.strip():
+            return {"error": "text is empty"}
+
+        metadata  = metadata or {}
+        chunks    = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
+        total     = len(chunks)
+        recorded  = 0
+        skipped   = 0
+
+        for idx, chunk in enumerate(chunks):
+            chunk = chunk.strip()
+            if not chunk:
+                skipped += 1
+                continue
+            try:
+                position_norm = idx / max(total - 1, 1)
+                text_len_norm = min(len(chunk) / chunk_size, 1.0)
+
+                self.episodic_memory.record(
+                    feature_vec = [reward, position_norm, text_len_norm, 0.5, 0.5],
+                    target      = reward,
+                    outcome     = reward,
+                    source      = source,
+                    reward      = reward,
+                    context     = {
+                        "text":       chunk,
+                        "chunk_idx":  idx,
+                        "total_chunks": total,
+                        "source":     source,
+                        **metadata,
+                    },
+                )
+
+                if self.memory_consolidator is not None:
+                    self.memory_consolidator.observe_pattern(
+                        pattern_key = f"text_source:{source}",
+                        description = f"نص من المصدر: {source}",
+                    )
+                recorded += 1
+            except Exception as _e:
+                logger.debug(f"[feed_text] chunk {idx} failed: {_e}")
+                skipped += 1
+
+        if self.self_narrative is not None:
+            self.self_narrative.record_event(
+                event_type    = "world_knowledge",
+                data          = {"message": f"تم تغذية نص ({source}): {recorded} قطعة للذاكرة"},
+                surprise_score = 0.2,
+                importance    = reward,
+            )
+
+        return {
+            "status":       "done",
+            "source":       source,
+            "recorded":     recorded,
+            "skipped":      skipped,
+            "total_chunks": total,
+            "chunk_size":   chunk_size,
+        }
 
     # ── Validation ─────────────────────────────────────────────────────────
 
