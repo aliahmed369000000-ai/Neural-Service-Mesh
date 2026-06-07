@@ -615,17 +615,32 @@ class NeuralServiceMesh:
         # ── Phase 16: Evolution Ethics ────────────────────────────────────
         self.evolution_ethics = None
         if _EVOLUTION_ETHICS_AVAILABLE:
-            self.evolution_ethics = EvolutionEthics(
-                immune_system=self.immune_system,
-            )
+            try:
+                self.evolution_ethics = EvolutionEthics(
+                    immune_system=self.immune_system,
+                )
+            except TypeError:
+                # نسخة قديمة لا تقبل immune_system
+                self.evolution_ethics = EvolutionEthics()
+                if self.immune_system is not None:
+                    try:
+                        self.evolution_ethics._immune_system = self.immune_system
+                    except Exception:
+                        pass
             logger.info("EvolutionEthics active — ethical conscience layer online")
 
         # ── Phase 16: Self-Narrative ──────────────────────────────────────
         self.self_narrative = None
         if _SELF_NARRATIVE_AVAILABLE:
-            self.self_narrative = SelfNarrative(
-                knowledge_store=self.knowledge,
-            )
+            try:
+                self.self_narrative = SelfNarrative(
+                    knowledge_store=self.knowledge,
+                )
+            except TypeError:
+                try:
+                    self.self_narrative = SelfNarrative()
+                except Exception:
+                    self.self_narrative = None
             # تسجيل حدث البدء
             self.self_narrative.record_event(
                 event_type    = "checkpoint",
@@ -638,10 +653,16 @@ class NeuralServiceMesh:
         # ── Phase 16: Memory Consolidator ────────────────────────────────
         self.memory_consolidator = None
         if _MEMORY_CONSOLIDATOR_AVAILABLE:
-            self.memory_consolidator = MemoryConsolidator(
-                episodic_memory   = self.episodic_memory,
-                pattern_threshold = 10,
-            )
+            try:
+                self.memory_consolidator = MemoryConsolidator(
+                    episodic_memory   = self.episodic_memory,
+                    pattern_threshold = 10,
+                )
+            except TypeError:
+                try:
+                    self.memory_consolidator = MemoryConsolidator()
+                except Exception:
+                    self.memory_consolidator = None
             logger.info("MemoryConsolidator active — semantic law engine online")
 
         logger.info(
