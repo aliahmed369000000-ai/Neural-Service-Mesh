@@ -80,6 +80,33 @@ except ImportError as _p9_err:
     import logging as _log
     _log.getLogger(__name__).warning(f"Phase 9 modules not fully available: {_p9_err}")
 
+# ── Phase 10 — Continuous Signal Stream ────────────────────────────────────
+try:
+    from ai.signal_stream import SignalBus, ReplayBuffer, Experience
+    _PHASE10_AVAILABLE = True
+except ImportError as _p10_err:
+    _PHASE10_AVAILABLE = False
+    import logging as _log
+    _log.getLogger(__name__).warning(f"Phase 10 not available: {_p10_err}")
+
+# ── Phase 11 — Episodic Memory ─────────────────────────────────────────────
+try:
+    from ai.episodic_memory import EpisodicMemoryEngine, Episode
+    _PHASE11_AVAILABLE = True
+except ImportError as _p11_err:
+    _PHASE11_AVAILABLE = False
+    import logging as _log
+    _log.getLogger(__name__).warning(f"Phase 11 not available: {_p11_err}")
+
+# ── Phase 12 — Deep Self-Awareness ─────────────────────────────────────────
+try:
+    from ai.self_awareness_deep import DeepSelfAwareness
+    _PHASE12_AVAILABLE = True
+except ImportError as _p12_err:
+    _PHASE12_AVAILABLE = False
+    import logging as _log
+    _log.getLogger(__name__).warning(f"Phase 12 not available: {_p12_err}")
+
 # ── Services ───────────────────────────────────────────────────────────────
 from services.input_service import InputNode
 from services.processor_service import ProcessorNode
@@ -102,7 +129,7 @@ class NeuralServiceMesh:
     All Phase 2 APIs are preserved unchanged.
     """
 
-    VERSION = "9.0.0"
+    VERSION = "12.0.0"
 
     def __init__(self, storage_dir: str = "./data", db_path: str = "./data/mesh.db"):
         # ── Storage ────────────────────────────────────────────────────────
@@ -369,7 +396,41 @@ class NeuralServiceMesh:
                 f"DynamicLayer={'✓' if self.dynamic_layer else '✗'}  "
                 f"DeepNetwork={'✓' if self.deep_network else '✗'}"
             )
-        logger.info(f"NeuralServiceMesh v{self.VERSION} fully ready (Phase 9 — Deep Learning)")
+
+        # ── Phase 10: Continuous Signal Stream ─────────────────────────────
+        self.signal_bus: Optional["SignalBus"] = None
+        if _PHASE10_AVAILABLE:
+            self.signal_bus = SignalBus(
+                deep_network=self.deep_network,
+                dynamic_layer=self.dynamic_layer,
+                neural_layer=getattr(self.routing, '_neural_layer', None),
+                rich_data_collector=self.rich_data_collector,
+            )
+            logger.info("NeuralServiceMesh Phase 10: SignalBus ready — "
+                        "SelfStimulator + CuriosityEngine + DreamConsolidator active")
+
+        # ── Phase 11: Episodic Memory ───────────────────────────────────────
+        self.episodic_memory: Optional["EpisodicMemoryEngine"] = None
+        if _PHASE11_AVAILABLE:
+            self.episodic_memory = EpisodicMemoryEngine()
+            self.episodic_memory.start()
+            logger.info("NeuralServiceMesh Phase 11: EpisodicMemoryEngine active — "
+                        "3-tier memory online (working + episodic + semantic)")
+
+        # ── Phase 12: Deep Self-Awareness ───────────────────────────────────
+        self.self_awareness: Optional["DeepSelfAwareness"] = None
+        if _PHASE12_AVAILABLE:
+            self.self_awareness = DeepSelfAwareness()
+            logger.info("NeuralServiceMesh Phase 12: DeepSelfAwareness active — "
+                        "ConfidenceEstimator + WeaknessDetector + MetaCognition online")
+
+        logger.info(
+            f"NeuralServiceMesh v{self.VERSION} fully ready — "
+            f"Phases 1-12 active | "
+            f"SignalBus={'✓' if self.signal_bus else '✗'}  "
+            f"Memory={'✓' if self.episodic_memory else '✗'}  "
+            f"SelfAware={'✓' if self.self_awareness else '✗'}"
+        )
 
     # ── Phase 3 hook into ExecutionEngine ─────────────────────────────────
 
@@ -1007,6 +1068,169 @@ class NeuralServiceMesh:
             results["deep_network"] = {"saved": False, "error": "not available"}
 
         return results
+
+    # ── Phase 10: Signal Stream API ────────────────────────────────────────
+
+    def start_signal_stream(self, interval_s: float = 2.0) -> dict:
+        """
+        Phase 10: Start the continuous signal stream.
+        The system begins generating signals autonomously — 24/7.
+        """
+        if self.signal_bus is None:
+            return {"error": "SignalBus (Phase 10) not available"}
+        if self.signal_bus.is_running:
+            return {"status": "already_running", "stats": self.signal_bus.get_stats()}
+        self.signal_bus.start(interval_s=interval_s)
+        return {
+            "status": "started",
+            "interval_s": interval_s,
+            "message": "Signal stream active — SelfStimulator + Curiosity + Dream mode online",
+        }
+
+    def stop_signal_stream(self) -> dict:
+        """Phase 10: Stop the signal stream."""
+        if self.signal_bus is None:
+            return {"error": "SignalBus not available"}
+        self.signal_bus.stop()
+        return {"status": "stopped", "final_stats": self.signal_bus.get_stats()}
+
+    def get_signal_stream_status(self) -> dict:
+        """Phase 10: Get full signal stream statistics."""
+        if self.signal_bus is None:
+            return {"enabled": False}
+        return {"enabled": True, **self.signal_bus.get_stats()}
+
+    def push_real_signal(
+        self,
+        feature_vec: list,
+        target: float,
+        reward: float = 0.0,
+        context: Optional[dict] = None,
+    ) -> dict:
+        """
+        Phase 10: Inject a real experience into the signal stream.
+        Called automatically by RoutingEngine; can also be called manually.
+        """
+        if self.signal_bus is None:
+            return {"error": "SignalBus not available"}
+        self.signal_bus.push_real(feature_vec, target, reward, context)
+
+        # Also record in episodic memory
+        if self.episodic_memory is not None:
+            self.episodic_memory.record(
+                feature_vec=feature_vec,
+                target=target,
+                source="real",
+                reward=reward,
+                context=context,
+            )
+        return {"status": "recorded", "buffer_size": self.signal_bus.replay_buffer.size}
+
+    # ── Phase 11: Episodic Memory API ─────────────────────────────────────
+
+    def get_memory_status(self) -> dict:
+        """Phase 11: Full episodic memory status (3 tiers)."""
+        if self.episodic_memory is None:
+            return {"enabled": False}
+        return {"enabled": True, **self.episodic_memory.summary()}
+
+    def recall_similar(self, feature_vec: list, top_k: int = 5) -> dict:
+        """
+        Phase 11: Recall similar past experiences from memory.
+        The system searches its episodic store for related events.
+        """
+        if self.episodic_memory is None:
+            return {"error": "EpisodicMemoryEngine not available"}
+        episodes = self.episodic_memory.recall_similar(feature_vec, top_k=top_k)
+        return {
+            "query_vec":   feature_vec,
+            "recalled":    [e.to_dict() for e in episodes],
+            "count":       len(episodes),
+        }
+
+    def predict_from_memory(self, feature_vec: list) -> dict:
+        """
+        Phase 11: Ask the memory system to predict an outcome.
+        Uses semantic rules + episodic similarity.
+        """
+        if self.episodic_memory is None:
+            return {"error": "EpisodicMemoryEngine not available"}
+        prediction = self.episodic_memory.predict_from_memory(feature_vec)
+        return {
+            "feature_vec": feature_vec,
+            "prediction":  round(prediction, 4) if prediction is not None else None,
+            "has_prediction": prediction is not None,
+            "semantic_rules": len(self.episodic_memory.semantic_rules),
+        }
+
+    def get_strongest_memories(self, n: int = 10) -> dict:
+        """Phase 11: Return the n strongest memories in episodic store."""
+        if self.episodic_memory is None:
+            return {"error": "EpisodicMemoryEngine not available"}
+        return {
+            "memories": self.episodic_memory.get_strongest_memories(n),
+            "total_episodes": self.episodic_memory.episode_count(),
+        }
+
+    # ── Phase 12: Self-Awareness API ───────────────────────────────────────
+
+    def self_assess(self) -> dict:
+        """
+        Phase 12: Full self-assessment report.
+        The system reflects on its own learning, weaknesses, and goals.
+        """
+        if self.self_awareness is None:
+            return {"error": "DeepSelfAwareness (Phase 12) not available"}
+        signal_stats = self.signal_bus.get_stats() if self.signal_bus else None
+        mem_summary  = self.episodic_memory.summary() if self.episodic_memory else None
+        return self.self_awareness.self_assess(signal_stats, mem_summary)
+
+    def get_self_awareness_status(self) -> dict:
+        """Phase 12: Get confidence, weakness, and metacognition summaries."""
+        if self.self_awareness is None:
+            return {"enabled": False}
+        return {"enabled": True, **self.self_awareness.summary()}
+
+    def get_active_goals(self) -> dict:
+        """Phase 12: Return the system's currently active self-improvement goals."""
+        if self.self_awareness is None:
+            return {"error": "DeepSelfAwareness not available"}
+        return {
+            "active_goals":    self.self_awareness.metacog._active_goals,
+            "completed_goals": len(self.self_awareness.metacog._completed_goals),
+            "explore_rate":    round(self.self_awareness.metacog._explore_rate, 4),
+            "is_stagnating":   self.self_awareness.metacog._is_stagnating(),
+        }
+
+    def get_weak_regions(self) -> dict:
+        """
+        Phase 12: Identify feature-space regions where the network performs poorly.
+        Returns top weaknesses with severity scores and remedial signal count.
+        """
+        if self.self_awareness is None:
+            return {"error": "DeepSelfAwareness not available"}
+        weaknesses = self.self_awareness.weakness.scan()
+        remedial   = self.self_awareness.get_remedial_signals(n=len(weaknesses) * 2)
+        return {
+            "weak_regions":          weaknesses,
+            "count":                 len(weaknesses),
+            "remedial_signals_ready": len(remedial),
+            "coverage_pct":          self.self_awareness.weakness.coverage_pct(),
+        }
+
+    def get_full_system_status(self) -> dict:
+        """
+        Master status endpoint — all phases in one call.
+        The complete picture of the digital nervous system.
+        """
+        return {
+            "version":       self.VERSION,
+            "timestamp":     datetime.utcnow().isoformat(),
+            "phase9":        self.get_phase9_status(),
+            "phase10_signal_stream": self.get_signal_stream_status(),
+            "phase11_memory":        self.get_memory_status(),
+            "phase12_self_awareness": self.get_self_awareness_status(),
+        }
 
     # ── Pre-Phase 7: Validation ────────────────────────────────────────────
 
