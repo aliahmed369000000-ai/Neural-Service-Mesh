@@ -119,6 +119,50 @@ except ImportError as _err:
     _DIGITAL_BEING_AVAILABLE = False
     logging.getLogger(__name__).warning(f"Digital being not available: {_err}")
 
+# ── AI: Phase 15 — Quality, Immune, Replication ───────────────────────────
+try:
+    from ai.quality_engine import QualityEngine
+    _QUALITY_ENGINE_AVAILABLE = True
+except ImportError as _err:
+    _QUALITY_ENGINE_AVAILABLE = False
+    logging.getLogger(__name__).warning(f"QualityEngine not available: {_err}")
+
+try:
+    from ai.immune_system import ImmuneSystem
+    _IMMUNE_SYSTEM_AVAILABLE = True
+except ImportError as _err:
+    _IMMUNE_SYSTEM_AVAILABLE = False
+    logging.getLogger(__name__).warning(f"ImmuneSystem not available: {_err}")
+
+try:
+    from ai.self_replication import SelfReplicationEngine
+    _SELF_REPLICATION_AVAILABLE = True
+except ImportError as _err:
+    _SELF_REPLICATION_AVAILABLE = False
+    logging.getLogger(__name__).warning(f"SelfReplicationEngine not available: {_err}")
+
+# ── AI: Phase 15 — Brain Checkpoint, World Feed, Drive Engine ─────────────
+try:
+    from ai.brain_checkpoint import BrainCheckpoint
+    _BRAIN_CHECKPOINT_AVAILABLE = True
+except ImportError as _err:
+    _BRAIN_CHECKPOINT_AVAILABLE = False
+    logging.getLogger(__name__).warning(f"BrainCheckpoint not available: {_err}")
+
+try:
+    from ai.world_feed import WorldFeed
+    _WORLD_FEED_AVAILABLE = True
+except ImportError as _err:
+    _WORLD_FEED_AVAILABLE = False
+    logging.getLogger(__name__).warning(f"WorldFeed not available: {_err}")
+
+try:
+    from ai.drive_engine import DriveEngine
+    _DRIVE_ENGINE_AVAILABLE = True
+except ImportError as _err:
+    _DRIVE_ENGINE_AVAILABLE = False
+    logging.getLogger(__name__).warning(f"DriveEngine not available: {_err}")
+
 # ── Services ───────────────────────────────────────────────────────────────
 from services.input_service import InputNode
 from services.processor_service import ProcessorNode
@@ -148,7 +192,7 @@ class NeuralServiceMesh:
     All public APIs are backward-compatible across all layers.
     """
 
-    VERSION = "14.0.0"
+    VERSION = "15.0.0"
 
     def __init__(self, storage_dir: str = "./data", db_path: str = "./data/mesh.db"):
         # ── Storage ────────────────────────────────────────────────────────
@@ -451,6 +495,91 @@ class NeuralServiceMesh:
             f"SelfAware={'✓' if self.self_awareness else '✗'}  "
             f"StructuralEvo={'✓' if self.structural_evolution else '✗'}  "
             f"DigitalBeing={'✓' if self.digital_being else '✗'}"
+        )
+
+        # ── Phase 15: Quality Engine ───────────────────────────────────────
+        self.quality_engine = None
+        if _QUALITY_ENGINE_AVAILABLE:
+            self.quality_engine = QualityEngine(knowledge_store=self.knowledge)
+            logger.info("QualityEngine active — data quality scoring 0-100 online")
+
+        # ── Phase 15: Immune System ────────────────────────────────────────
+        self.immune_system = None
+        if _IMMUNE_SYSTEM_AVAILABLE:
+            self.immune_system = ImmuneSystem(knowledge_store=self.knowledge)
+            logger.info("ImmuneSystem active — digital immune layer online")
+
+        # ── Phase 15: Self-Replication Engine ─────────────────────────────
+        self.replication_engine = None
+        if _SELF_REPLICATION_AVAILABLE:
+            self.replication_engine = SelfReplicationEngine()
+            logger.info("SelfReplicationEngine active — self-improvement loop online")
+
+        # ── Phase 15: Brain Checkpoint ────────────────────────────────────
+        self.brain_checkpoint = None
+        if _BRAIN_CHECKPOINT_AVAILABLE:
+            self.brain_checkpoint = BrainCheckpoint(
+                checkpoint_dir="./checkpoints",
+                max_checkpoints=5,
+            )
+            self.brain_checkpoint.set_mesh(self)
+            # Attempt to restore last checkpoint on startup
+            try:
+                latest = self.brain_checkpoint.list_checkpoints()
+                if latest:
+                    logger.info(
+                        f"[BrainCheckpoint] Restoring from: {latest[0]['filename']}"
+                    )
+                    # (state application handled by caller or auto-wired layers)
+            except Exception as _ckpt_err:
+                logger.warning(f"[BrainCheckpoint] Startup restore skipped: {_ckpt_err}")
+            logger.info("BrainCheckpoint active — persistent identity across restarts online")
+
+        # ── Phase 15: World Feed ──────────────────────────────────────────
+        self.world_feed = None
+        if _WORLD_FEED_AVAILABLE:
+            self.world_feed = WorldFeed(
+                immune_system=self.immune_system,
+                quality_engine=self.quality_engine,
+                min_quality=60.0,
+            )
+            # Wire memory callback so accepted items flow into episodic memory
+            if self.episodic_memory is not None:
+                def _wf_memory_cb(item: dict):
+                    try:
+                        from ai.episodic_memory import Episode
+                        ep = Episode(
+                            content=item.get("content", ""),
+                            source=item.get("source", "world_feed"),
+                            context={
+                                "title":        item.get("title", ""),
+                                "url":          item.get("url", ""),
+                                "quality_score": item.get("quality_score", 70),
+                            },
+                        )
+                        self.episodic_memory.record(ep)
+                    except Exception:
+                        pass
+                self.world_feed.set_memory_callback(_wf_memory_cb)
+            logger.info("WorldFeed active — real-world data ingestion online")
+
+        # ── Phase 15: Drive Engine ────────────────────────────────────────
+        self.drive_engine = None
+        if _DRIVE_ENGINE_AVAILABLE:
+            self.drive_engine = DriveEngine(
+                signal_bus=self.signal_bus,
+                mesh_ref=self,
+            )
+            logger.info("DriveEngine active — internal motivation system online")
+
+        logger.info(
+            f"NeuralServiceMesh v{self.VERSION} Phase 15 complete — "
+            f"Checkpoint={'✓' if self.brain_checkpoint else '✗'}  "
+            f"WorldFeed={'✓' if self.world_feed else '✗'}  "
+            f"DriveEngine={'✓' if self.drive_engine else '✗'}  "
+            f"QualityEngine={'✓' if self.quality_engine else '✗'}  "
+            f"ImmuneSystem={'✓' if self.immune_system else '✗'}  "
+            f"Replication={'✓' if self.replication_engine else '✗'}"
         )
 
     # ── Execution Hook ─────────────────────────────────────────────────────
@@ -1036,7 +1165,205 @@ class NeuralServiceMesh:
             "deep_self_awareness":  self.get_self_awareness_status(),
             "structural_evolution": self.get_structural_evolution_status(),
             "digital_being":        self.get_digital_being_status(),
+            # ── Phase 15 ──────────────────────────────────────────────────
+            "quality_engine":       self.get_quality_engine_status(),
+            "immune_system":        self.get_immune_system_status(),
+            "replication_engine":   self.get_replication_engine_status(),
+            "brain_checkpoint":     self.get_brain_checkpoint_status(),
+            "world_feed":           self.get_world_feed_status(),
+            "drive_engine":         self.get_drive_engine_status(),
         }
+
+    # ── Phase 15: Quality Engine API ──────────────────────────────────────
+
+    def get_quality_engine_status(self) -> dict:
+        if self.quality_engine is None:
+            return {"enabled": False}
+        try:
+            return {"enabled": True, **self.quality_engine.summary()}
+        except Exception:
+            return {"enabled": True}
+
+    def rate_data_quality(self, item: dict, source: str = "api") -> dict:
+        """Rate a data item's quality (0-100)."""
+        if self.quality_engine is None:
+            return {"error": "QualityEngine not available"}
+        return self.quality_engine.rate(item, source=source)
+
+    # ── Phase 15: Immune System API ───────────────────────────────────────
+
+    def get_immune_system_status(self) -> dict:
+        if self.immune_system is None:
+            return {"enabled": False}
+        try:
+            return {"enabled": True, **self.immune_system.summary()}
+        except Exception:
+            return {"enabled": True}
+
+    def inspect_data(self, item: dict, source: str = "api") -> dict:
+        """Run an item through the immune system inspection."""
+        if self.immune_system is None:
+            return {"error": "ImmuneSystem not available"}
+        result = self.immune_system.inspect(item, source=source)
+        if hasattr(result, "__dict__"):
+            return result.__dict__
+        return result if isinstance(result, dict) else {"status": str(result)}
+
+    def trust_source(self, source_name: str) -> dict:
+        """Mark a source as trusted."""
+        if self.immune_system is None:
+            return {"error": "ImmuneSystem not available"}
+        self.immune_system.trust(source_name)
+        return {"status": "trusted", "source": source_name}
+
+    def blacklist_source(self, source_name: str) -> dict:
+        """Blacklist a source."""
+        if self.immune_system is None:
+            return {"error": "ImmuneSystem not available"}
+        self.immune_system.blacklist(source_name)
+        return {"status": "blacklisted", "source": source_name}
+
+    # ── Phase 15: Self-Replication API ────────────────────────────────────
+
+    def get_replication_engine_status(self) -> dict:
+        if self.replication_engine is None:
+            return {"enabled": False}
+        try:
+            return {"enabled": True, **self.replication_engine.summary()}
+        except Exception:
+            return {"enabled": True}
+
+    def run_replication_cycle(self) -> dict:
+        """Trigger one self-replication / self-improvement cycle."""
+        if self.replication_engine is None:
+            return {"error": "SelfReplicationEngine not available"}
+        return self.replication_engine.replicate(self)
+
+    # ── Phase 15: Brain Checkpoint API ────────────────────────────────────
+
+    def get_brain_checkpoint_status(self) -> dict:
+        if self.brain_checkpoint is None:
+            return {"enabled": False}
+        return {"enabled": True, **self.brain_checkpoint.summary()}
+
+    def save_checkpoint(self) -> dict:
+        """Manually trigger a brain state save."""
+        if self.brain_checkpoint is None:
+            return {"error": "BrainCheckpoint not available"}
+        path = self.brain_checkpoint.save(self)
+        return {"status": "saved", "path": path}
+
+    def load_checkpoint(self, path: Optional[str] = None) -> dict:
+        """Load a brain state (latest by default)."""
+        if self.brain_checkpoint is None:
+            return {"error": "BrainCheckpoint not available"}
+        return self.brain_checkpoint.load(path)
+
+    def list_checkpoints(self) -> list:
+        """List all available brain checkpoints."""
+        if self.brain_checkpoint is None:
+            return []
+        return self.brain_checkpoint.list_checkpoints()
+
+    def start_auto_checkpoint(self, interval_minutes: float = 10.0) -> dict:
+        """Start periodic auto-save of brain state."""
+        if self.brain_checkpoint is None:
+            return {"error": "BrainCheckpoint not available"}
+        self.brain_checkpoint.auto_save_start(interval_minutes=interval_minutes, mesh=self)
+        return {"status": "started", "interval_minutes": interval_minutes}
+
+    def stop_auto_checkpoint(self) -> dict:
+        """Stop the periodic auto-save."""
+        if self.brain_checkpoint is None:
+            return {"error": "BrainCheckpoint not available"}
+        self.brain_checkpoint.auto_save_stop()
+        return {"status": "stopped"}
+
+    # ── Phase 15: World Feed API ──────────────────────────────────────────
+
+    def get_world_feed_status(self) -> dict:
+        if self.world_feed is None:
+            return {"enabled": False}
+        return {"enabled": True, **self.world_feed.summary()}
+
+    def start_world_feed(self, interval_s: float = 300.0) -> dict:
+        """Start pulling data from real-world sources."""
+        if self.world_feed is None:
+            return {"error": "WorldFeed not available"}
+        if self.world_feed._running:
+            return {"status": "already_running", "stats": self.world_feed.get_feed_stats()}
+        self.world_feed.start(interval_s=interval_s)
+        return {"status": "started", "interval_s": interval_s, "sources": len(self.world_feed._sources)}
+
+    def stop_world_feed(self) -> dict:
+        """Stop the world feed."""
+        if self.world_feed is None:
+            return {"error": "WorldFeed not available"}
+        self.world_feed.stop()
+        return {"status": "stopped", "final_stats": self.world_feed.get_feed_stats()}
+
+    def add_feed_source(self, url: str, source_type: str = "rss", name: Optional[str] = None) -> dict:
+        """Add a new data source to the world feed."""
+        if self.world_feed is None:
+            return {"error": "WorldFeed not available"}
+        self.world_feed.add_source(url=url, source_type=source_type, name=name)
+        return {"status": "added", "url": url, "source_type": source_type}
+
+    def get_recent_feed_items(self, n: int = 20) -> list:
+        """Get the n most recently accepted feed items."""
+        if self.world_feed is None:
+            return []
+        return self.world_feed.get_recent(n)
+
+    def poll_world_feed_once(self) -> dict:
+        """Manually trigger one polling cycle (blocking)."""
+        if self.world_feed is None:
+            return {"error": "WorldFeed not available"}
+        self.world_feed.poll_once()
+        return {"status": "polled", "stats": self.world_feed.get_feed_stats()}
+
+    # ── Phase 15: Drive Engine API ────────────────────────────────────────
+
+    def get_drive_engine_status(self) -> dict:
+        if self.drive_engine is None:
+            return {"enabled": False}
+        return {"enabled": True, **self.drive_engine.summary()}
+
+    def start_drive_engine(self, interval_s: float = 5.0) -> dict:
+        """Start the internal motivation tick loop."""
+        if self.drive_engine is None:
+            return {"error": "DriveEngine not available"}
+        if self.drive_engine._running:
+            return {"status": "already_running"}
+        self.drive_engine.start(interval_s=interval_s)
+        return {"status": "started", "interval_s": interval_s}
+
+    def stop_drive_engine(self) -> dict:
+        """Stop the motivation tick loop."""
+        if self.drive_engine is None:
+            return {"error": "DriveEngine not available"}
+        self.drive_engine.stop()
+        return {"status": "stopped"}
+
+    def get_drives(self) -> dict:
+        """Get current state of all internal drives."""
+        if self.drive_engine is None:
+            return {"error": "DriveEngine not available"}
+        return self.drive_engine.get_drives()
+
+    def satisfy_drive(self, drive_name: str, amount: float = 0.35) -> dict:
+        """Manually satisfy a specific drive."""
+        if self.drive_engine is None:
+            return {"error": "DriveEngine not available"}
+        self.drive_engine.satisfy(drive_name, amount=amount)
+        return {"status": "satisfied", "drive": drive_name, "amount": amount}
+
+    def tick_drives(self) -> dict:
+        """Manually advance drives by one tick."""
+        if self.drive_engine is None:
+            return {"error": "DriveEngine not available"}
+        active = self.drive_engine.tick()
+        return {"active_drives": active, "dominant": self.drive_engine.get_dominant_drive()}
 
     # ── Validation ─────────────────────────────────────────────────────────
 
