@@ -275,6 +275,8 @@ class DigitalBeingCore:
         self_awareness=None,
         structural_evolution=None,
         evolution_pipeline=None,
+        evolution_ethics=None,
+        self_narrative=None,
         phase_durations: Optional[Dict[str, float]] = None,
     ):
         self.mesh                = mesh
@@ -283,6 +285,8 @@ class DigitalBeingCore:
         self.self_awareness      = self_awareness
         self.structural_evolution = structural_evolution
         self.evolution_pipeline  = evolution_pipeline
+        self.evolution_ethics    = evolution_ethics
+        self.self_narrative      = self_narrative
 
         self.clock   = LifecycleClock(phase_durations or DEFAULT_PHASE_DURATIONS)
         self.status  = BeingStatus()
@@ -522,9 +526,30 @@ class DigitalBeingCore:
     def _do_evolve(self) -> Dict[str, Any]:
         """
         EVOLVE phase: Run the full evolution pipeline.
-        Generate new modules, test them, deploy approved ones.
+        Checks evolution_ethics before proceeding.
+        Records narrative event after completion.
         """
         result: Dict[str, Any] = {"phase": EVOLVE, "actions": [], "deployed": 0}
+
+        # ── Ethics gate ──────────────────────────────────────────────────
+        if self.evolution_ethics is not None:
+            try:
+                ethics_check = self.evolution_ethics.check("evolve_cycle", {
+                    "vitality": self.status.vitality,
+                    "total_evolutions": self.status.total_evolutions,
+                })
+                if not ethics_check.get("allowed", True):
+                    result["blocked_by_ethics"] = ethics_check.get("reason", "ethics gate")
+                    result["actions"].append("ethics_blocked")
+                    if self.self_narrative is not None:
+                        self.self_narrative.record_event(
+                            "ethics_block",
+                            {"reason": ethics_check.get("reason"), "phase": EVOLVE},
+                            importance=0.85,
+                        )
+                    return result
+            except Exception as _e:
+                logger.debug(f"ethics check error: {_e}")
 
         if self.evolution_pipeline is not None:
             try:
@@ -546,6 +571,24 @@ class DigitalBeingCore:
                 result["evolve_error"] = str(e)
 
         self.status.total_evolutions += 1
+
+        # ── Narrative recording ──────────────────────────────────────────
+        if self.self_narrative is not None:
+            try:
+                self.self_narrative.record_event(
+                    "evolve",
+                    {
+                        "cycle": self.status.total_evolutions,
+                        "deployed": result.get("deployed", 0),
+                        "gaps": result.get("gaps_detected", 0),
+                        "vitality": round(self.status.vitality, 3),
+                    },
+                    importance=0.9 if result.get("deployed", 0) > 0 else 0.5,
+                    surprise_score=min(result.get("deployed", 0) * 0.2, 1.0),
+                )
+            except Exception:
+                pass
+
         return result
 
     # ── Main lifecycle cycle ──────────────────────────────────────────────
