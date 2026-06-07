@@ -1,1 +1,120 @@
-
+{
+  "saved_at": "2026-06-07T18:11:08.157486",
+  "count": 3,
+  "nodes": [
+    {
+      "node_id": "90d840e7-f9e0-4405-8646-44d3091c569f",
+      "name": "TextInput",
+      "node_type": "InputNode",
+      "created_at": "2026-06-07T18:11:08.129895",
+      "version": "1.0.0",
+      "tags": [
+        "input",
+        "entry"
+      ],
+      "description": "Entry point: accepts raw text",
+      "input_schema": {
+        "fields": {
+          "text": "str",
+          "source": "str",
+          "metadata": "dict"
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "output_schema": {
+        "fields": {
+          "text": "str",
+          "source": "str",
+          "char_count": "int",
+          "word_count": "int"
+        },
+        "required": [
+          "text",
+          "char_count",
+          "word_count"
+        ]
+      },
+      "execution_count": 0,
+      "last_executed": null
+    },
+    {
+      "node_id": "b2165fc1-0295-47dd-9652-d390829280f7",
+      "name": "TextProcessor",
+      "node_type": "ProcessorNode",
+      "created_at": "2026-06-07T18:11:08.145057",
+      "version": "1.0.0",
+      "tags": [
+        "processor",
+        "analysis"
+      ],
+      "description": "Analyzes and enriches text",
+      "input_schema": {
+        "fields": {
+          "text": "str",
+          "word_count": "int",
+          "char_count": "int"
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "output_schema": {
+        "fields": {
+          "text": "str",
+          "processed_text": "str",
+          "word_count": "int",
+          "char_count": "int",
+          "sentences": "list",
+          "keywords": "list",
+          "analysis": "dict"
+        },
+        "required": [
+          "text",
+          "processed_text",
+          "analysis"
+        ]
+      },
+      "execution_count": 0,
+      "last_executed": null
+    },
+    {
+      "node_id": "e4594360-cbb0-4924-957e-483ed3443764",
+      "name": "TextOutput",
+      "node_type": "OutputNode",
+      "created_at": "2026-06-07T18:11:08.157457",
+      "version": "1.0.0",
+      "tags": [
+        "output",
+        "terminal"
+      ],
+      "description": "Terminal node: formats final result",
+      "input_schema": {
+        "fields": {
+          "text": "str",
+          "analysis": "dict",
+          "keywords": "list"
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "output_schema": {
+        "fields": {
+          "result": "Any",
+          "format": "str",
+          "rendered_at": "str",
+          "success": "bool"
+        },
+        "required": [
+          "result",
+          "format",
+          "success"
+        ]
+      },
+      "execution_count": 0,
+      "last_executed": null
+    }
+  ]
+}
