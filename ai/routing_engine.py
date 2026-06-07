@@ -10,14 +10,31 @@ Knowledge Layer Integration (Phase 3 completion):
   Reads best routes from knowledge/route_memory.json via KnowledgeStore.
   Reads node profiles from knowledge/node_profiles.json for routing hints.
   Uses knowledge-backed data as additional route candidates.
+
+Phase 8 — Real Neural Weights:
+  Integrates NeuralWeightLayer (ai/neural_weights.py) so that the four
+  routing scalars (W_SEMANTIC, W_SCORE, W_MEMORY, W_TOPOLOGY) are derived
+  from a real 10×7 numpy weight matrix rather than hard-coded constants.
+  Weights are learned incrementally via train_step() on every scored route,
+  persisted to models/classifiers/routing_weights.npy, and reloaded on
+  startup automatically.
 """
 from __future__ import annotations
 import logging
 import math
+import os
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# ── Phase 8: import neural weight utilities ──────────────────────────────────
+try:
+    from ai.neural_weights import NeuralWeightLayer, extract_routing_weights, get_default_layer
+    _NEURAL_WEIGHTS_AVAILABLE = True
+except ImportError:
+    _NEURAL_WEIGHTS_AVAILABLE = False
+    logger.warning("NeuralWeightLayer not found — RoutingEngine will use static weights")
 
 
 class RouteCandidate:
@@ -41,28 +58,121 @@ class RouteCandidate:
 
 class RoutingEngine:
     """
-    Phase 3 Routing Engine.
+    Phase 3 + Phase 8 Routing Engine.
 
-    Route selection algorithm (weights sum to 1.0):
+    Route selection algorithm — weights derived from NeuralWeightLayer (Phase 8).
+    Fall-back static defaults (used when neural weights are unavailable):
       W_semantic  = 0.30  – how well nodes connect semantically
       W_score     = 0.35  – historical connection performance
       W_memory    = 0.25  – remembered route performance
       W_topology  = 0.10  – graph topology (shorter is better)
+
+    Phase 8 Neural Weights:
+      A 10×7 numpy weight matrix stored in NeuralWeightLayer supplies dynamic,
+      learned routing scalars.  The layer is trained incrementally after each
+      scored route and saved to disk for persistence across restarts.
     """
 
+    # ── Static fallback weights (Phase 3 defaults) ──────────────────────
     W_SEMANTIC = 0.30
-    W_SCORE = 0.35
-    W_MEMORY = 0.25
+    W_SCORE    = 0.35
+    W_MEMORY   = 0.25
     W_TOPOLOGY = 0.10
+
+    # Path used to persist the neural weight matrix
+    _WEIGHTS_PATH = "models/classifiers/routing_weights.npy"
 
     def __init__(self, graph=None, semantic_matcher=None,
                  scoring_engine=None, memory_engine=None):
-        self._graph = graph
+        self._graph    = graph
         self._semantic = semantic_matcher
-        self._scoring = scoring_engine
-        self._memory = memory_engine
+        self._scoring  = scoring_engine
+        self._memory   = memory_engine
         self._knowledge = None   # KnowledgeStore — injected via set_knowledge_store()
-        logger.info("RoutingEngine initialised (Phase 3)")
+
+        # ── Phase 8: Initialise neural weight layer ──────────────────────
+        self._neural_layer: Optional["NeuralWeightLayer"] = None
+        if _NEURAL_WEIGHTS_AVAILABLE:
+            self._neural_layer = get_default_layer(self._WEIGHTS_PATH)
+            self._sync_weights_from_layer()
+            logger.info(
+                f"RoutingEngine (Phase 8): NeuralWeightLayer active — "
+                f"W_SEMANTIC={self.W_SEMANTIC:.4f}  W_SCORE={self.W_SCORE:.4f}  "
+                f"W_MEMORY={self.W_MEMORY:.4f}  W_TOPOLOGY={self.W_TOPOLOGY:.4f}"
+            )
+        else:
+            logger.info("RoutingEngine initialised (Phase 3 — static weights)")
+
+    # ── Phase 8 helpers ───────────────────────────────────────────────────
+
+    def _sync_weights_from_layer(self) -> None:
+        """Pull the 4 routing scalars out of the neural layer (normalised)."""
+        if self._neural_layer is None:
+            return
+        w = extract_routing_weights(self._neural_layer)
+        self.W_SEMANTIC = w["W_SEMANTIC"]
+        self.W_SCORE    = w["W_SCORE"]
+        self.W_MEMORY   = w["W_MEMORY"]
+        self.W_TOPOLOGY = w["W_TOPOLOGY"]
+
+    def _build_feature_vector(self, breakdown: dict) -> list:
+        """
+        Construct a 7-element feature vector from a route score breakdown.
+        Used as input to NeuralWeightLayer.forward() / train_step().
+        """
+        sem   = breakdown.get("semantic", 50.0) / 100.0
+        score = breakdown.get("score",    50.0) / 100.0
+        mem   = breakdown.get("memory",   50.0) / 100.0
+        topo  = breakdown.get("topology", 50.0) / 100.0
+        # Additional engineered features
+        avg         = (sem + score + mem + topo) / 4.0
+        sem_x_score = sem * score
+        mem_x_topo  = mem * topo
+        return [sem, score, mem, topo, avg, sem_x_score, mem_x_topo]
+
+    def _neural_train_on_route(self, breakdown: dict, composite: float) -> None:
+        """Train the neural layer on one scored route (online learning)."""
+        if self._neural_layer is None:
+            return
+        x      = self._build_feature_vector(breakdown)
+        target = composite / 100.0          # normalise composite score to [0,1]
+        try:
+            loss = self._neural_layer.train_step(x, target)
+            # Re-sync routing weights after every N steps to avoid thrashing
+            if self._neural_layer._train_steps % 10 == 0:
+                self._sync_weights_from_layer()
+                self._persist_neural_weights()
+            logger.debug(f"Phase8 neural train_step loss={loss:.6f}")
+        except Exception as e:
+            logger.warning(f"Phase8 neural train_step failed: {e}")
+
+    def _persist_neural_weights(self) -> None:
+        """Save the neural layer weights to disk."""
+        if self._neural_layer is None:
+            return
+        try:
+            self._neural_layer.save(self._WEIGHTS_PATH)
+        except Exception as e:
+            logger.warning(f"Phase8 weight save failed: {e}")
+
+    def get_neural_layer(self) -> Optional["NeuralWeightLayer"]:
+        """Return the NeuralWeightLayer instance (Phase 8 API)."""
+        return self._neural_layer
+
+    def neural_weights_summary(self) -> dict:
+        """Return a dict summary of the current neural weight state."""
+        if self._neural_layer is None:
+            return {"enabled": False, "reason": "NeuralWeightLayer not available"}
+        return {
+            "enabled": True,
+            "layer": self._neural_layer.summary(),
+            "routing_scalars": {
+                "W_SEMANTIC": self.W_SEMANTIC,
+                "W_SCORE":    self.W_SCORE,
+                "W_MEMORY":   self.W_MEMORY,
+                "W_TOPOLOGY": self.W_TOPOLOGY,
+            },
+        }
 
     def set_knowledge_store(self, ks) -> None:
         """Inject the KnowledgeStore to enable knowledge-backed route discovery."""
@@ -232,16 +342,18 @@ class RoutingEngine:
     def _score_candidate(self, path: List[str], source: str) -> RouteCandidate:
         breakdown = {
             "semantic": self._semantic_score(path),
-            "score": self._history_score(path),
-            "memory": self._memory_score(path),
+            "score":    self._history_score(path),
+            "memory":   self._memory_score(path),
             "topology": self._topology_score(path),
         }
         composite = (
             breakdown["semantic"] * self.W_SEMANTIC +
-            breakdown["score"] * self.W_SCORE +
-            breakdown["memory"] * self.W_MEMORY +
+            breakdown["score"]    * self.W_SCORE    +
+            breakdown["memory"]   * self.W_MEMORY   +
             breakdown["topology"] * self.W_TOPOLOGY
         )
+        # Phase 8: train the neural layer on this route's features + score
+        self._neural_train_on_route(breakdown, composite)
         return RouteCandidate(path, composite, breakdown, source)
 
     def _semantic_score(self, path: List[str]) -> float:
@@ -308,4 +420,5 @@ class RoutingEngine:
         return explanation
 
     def __repr__(self):
-        return "<RoutingEngine (semantic+scoring+memory+topology)>"
+        neural = "neural-weights" if self._neural_layer is not None else "static-weights"
+        return f"<RoutingEngine (semantic+scoring+memory+topology | {neural})>"
