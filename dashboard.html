@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neural Service Mesh — لوحة التحكم الحية</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0a0a0f; color: #c9d1d9; font-family: 'Courier New', monospace; font-size: 13px; }
+  header { background: #161b22; border-bottom: 1px solid #21262d; padding: 12px 20px; display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: 16px; color: #58a6ff; }
+  .version { background: #1f6feb33; color: #58a6ff; padding: 2px 8px; border-radius: 4px; font-size: 11px; }
+  .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #3fb950; box-shadow: 0 0 6px #3fb950; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; padding: 16px; }
+  .card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 14px; }
+  .card h2 { font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+  .card h2 span { font-size: 16px; }
+  .metric { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #21262d22; }
+  .metric:last-child { border: none; }
+  .metric .label { color: #8b949e; }
+  .metric .value { color: #e6edf3; font-weight: bold; }
+  .value.green { color: #3fb950; }
+  .value.red { color: #f85149; }
+  .value.yellow { color: #d29922; }
+  .value.blue { color: #58a6ff; }
+  .bar-wrap { background: #21262d; border-radius: 4px; height: 6px; margin-top: 4px; overflow: hidden; }
+  .bar { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+  .bar.green { background: #3fb950; }
+  .bar.blue { background: #58a6ff; }
+  .bar.yellow { background: #d29922; }
+  .diary { background: #0d1117; border-radius: 4px; padding: 8px; max-height: 200px; overflow-y: auto; font-size: 11px; line-height: 1.6; }
+  .diary-line { color: #8b949e; border-bottom: 1px solid #21262d11; padding: 2px 0; }
+  .diary-line.high { color: #d29922; }
+  .diary-line.evolve { color: #58a6ff; }
+  .diary-line.ethics { color: #f85149; }
+  .phase-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }
+  .phase-LIVE { background:#1a3a1a; color:#3fb950; }
+  .phase-EXPERIENCE { background:#1a2a3a; color:#58a6ff; }
+  .phase-LEARN { background:#2a2a1a; color:#d29922; }
+  .phase-SLEEP { background:#1a1a2a; color:#79c0ff; }
+  .phase-DREAM { background:#2a1a2a; color:#d2a8ff; }
+  .phase-EVOLVE { background:#2a1a1a; color:#ff7b72; }
+  .refresh-btn { margin-right: auto; background: #21262d; border: 1px solid #30363d; color: #8b949e; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 12px; }
+  .refresh-btn:hover { color: #e6edf3; border-color: #58a6ff; }
+  #last-update { font-size: 11px; color: #8b949e; }
+  .full-width { grid-column: 1 / -1; }
+  .error { color: #f85149; font-size: 11px; padding: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="status-dot" id="statusDot"></div>
+  <h1>⚡ Neural Service Mesh</h1>
+  <span class="version" id="versionBadge">v16.0.0</span>
+  <button class="refresh-btn" onclick="refresh()">↻ تحديث</button>
+  <span id="last-update">—</span>
+</header>
+
+<div class="grid" id="grid">
+  <div class="card"><h2><span>🧬</span> حالة الكائن الرقمي</h2><div id="being"></div></div>
+  <div class="card"><h2><span>🧠</span> الشبكة العصبية</h2><div id="neural"></div></div>
+  <div class="card"><h2><span>💾</span> الذاكرة</h2><div id="memory"></div></div>
+  <div class="card"><h2><span>🌍</span> التغذية من العالم</h2><div id="world"></div></div>
+  <div class="card"><h2><span>🛡️</span> جهاز المناعة</h2><div id="immune"></div></div>
+  <div class="card"><h2><span>⭐</span> محرك الجودة</h2><div id="quality"></div></div>
+  <div class="card"><h2><span>🔥</span> الدوافع الداخلية</h2><div id="drives"></div></div>
+  <div class="card"><h2><span>⚖️</span> أخلاقيات التطور</h2><div id="ethics"></div></div>
+  <div class="card"><h2><span>🔄</span> التكاثر الذاتي</h2><div id="replication"></div></div>
+  <div class="card full-width"><h2><span>📖</span> يومية الكائن (آخر الأحداث)</h2><div class="diary" id="diary"></div></div>
+</div>
+
+<script>
+const API = '';  // same origin
+
+function metric(label, value, color='', bar=null) {
+  let barHtml = '';
+  if (bar !== null) {
+    const pct = Math.min(Math.max(bar * 100, 0), 100).toFixed(1);
+    const cls = bar > 0.7 ? 'green' : bar > 0.4 ? 'blue' : 'yellow';
+    barHtml = `<div class="bar-wrap"><div class="bar ${cls}" style="width:${pct}%"></div></div>`;
+  }
+  return `<div class="metric">
+    <span class="label">${label}</span>
+    <span class="value ${color}">${value}</span>
+  </div>${barHtml}`;
+}
+
+function yn(v) { return v ? '<span class="value green">✓ نشط</span>' : '<span class="value red">✗ غير متاح</span>'; }
+
+async function fetchJSON(path) {
+  try {
+    const r = await fetch(API + path);
+    return await r.json();
+  } catch(e) { return null; }
+}
+
+async function refresh() {
+  document.getElementById('last-update').textContent = 'جاري التحديث...';
+
+  const [status, narrative] = await Promise.all([
+    fetchJSON('/api/status/full'),
+    fetchJSON('/api/narrative/log?n=15'),
+  ]);
+
+  if (!status) {
+    document.getElementById('statusDot').style.background = '#f85149';
+    document.getElementById('last-update').textContent = 'تعذر الاتصال بالخادم';
+    return;
+  }
+
+  document.getElementById('versionBadge').textContent = 'v' + (status.version || '16.0.0');
+
+  // Being
+  const b = status.digital_being || {};
+  const phase = b.phase || '—';
+  const phaseClass = 'phase-' + phase;
+  document.getElementById('being').innerHTML =
+    `<div class="metric"><span class="label">الطور الحالي</span><span class="phase-badge ${phaseClass}">${phase}</span></div>` +
+    metric('الحيوية', ((b.vitality||0)*100).toFixed(1)+'%', b.vitality>0.6?'green':'yellow', b.vitality) +
+    metric('دورات الحياة', b.lifecycle_count||0, 'blue') +
+    metric('عمليات التطور', b.total_evolutions||0, 'blue') +
+    metric('الأخلاقيات', yn(status.evolution_ethics?.enabled)) +
+    metric('اليومية', yn(status.self_narrative?.enabled));
+
+  // Neural
+  const n = status.deep_self_awareness || {};
+  const sig = status.signal_stream || {};
+  document.getElementById('neural').innerHTML =
+    metric('الإشارات المرسلة', sig.signals_sent||0, 'blue') +
+    metric('الشبكة العميقة', yn(status.deep_network?.deep_network_available)) +
+    metric('الثقة', ((n.confidence||0)*100).toFixed(1)+'%', 'green', n.confidence) +
+    metric('الأهداف النشطة', n.active_goals||0, 'blue') +
+    metric('إيقاع الإشارات', sig.is_running ? '<span class="value green">يعمل</span>' : '<span class="value red">متوقف</span>');
+
+  // Memory
+  const m = status.episodic_memory || {};
+  const mc = status.memory_consolidator || {};
+  document.getElementById('memory').innerHTML =
+    metric('الحلقات المسجلة', m.episode_count||0, 'blue') +
+    metric('القواعد الدلالية', m.semantic_rules||0, 'green') +
+    metric('قوانين مُدمجة', mc.total_laws||0, 'green') +
+    metric('الذاكرة العاملة', m.working_memory_size||0) +
+    metric('checkpoint', yn(status.brain_checkpoint?.enabled));
+
+  // World Feed
+  const wf = status.world_feed || {};
+  document.getElementById('world').innerHTML =
+    metric('المصادر', wf.sources_count||0, 'blue') +
+    metric('العناصر المُجلبة', wf.total_fetched||0, 'blue') +
+    metric('المقبولة', wf.total_accepted||0, 'green') +
+    metric('المرفوضة', wf.total_rejected||0, 'red') +
+    metric('الحالة', wf.is_running ? '<span class="value green">يعمل</span>' : yn(wf.enabled));
+
+  // Immune
+  const im = status.immune_system || {};
+  document.getElementById('immune').innerHTML =
+    metric('الأحداث الفحوصة', im.total_inspected||0, 'blue') +
+    metric('محظور', im.total_blocked||0, 'red') +
+    metric('في الحجر الصحي', im.quarantine_count||0, 'yellow') +
+    metric('مستوى التهديد', ((im.threat_level||0)*100).toFixed(0)+'%', im.threat_level>0.5?'red':'green', im.threat_level) +
+    metric('مصادر في القائمة السوداء', im.blacklisted_count||0, 'red');
+
+  // Quality
+  const q = status.quality_engine || {};
+  document.getElementById('quality').innerHTML =
+    metric('إجمالي مُقيَّم', q.total_evaluated||0, 'blue') +
+    metric('متوسط الجودة', (q.avg_quality||0).toFixed(1)+'/100', q.avg_quality>70?'green':'yellow') +
+    metric('مرفوض (جودة منخفضة)', q.total_rejected||0, 'red') +
+    metric('معدل القبول', (q.acceptance_rate||0).toFixed(1)+'%', 'green');
+
+  // Drives
+  const d = status.drive_engine || {};
+  const drives = d.drives || {};
+  let dhtml = '';
+  for (const [name, info] of Object.entries(drives).slice(0,5)) {
+    const intensity = info.intensity || 0;
+    const cls = intensity > 0.7 ? 'red' : intensity > 0.4 ? 'yellow' : 'green';
+    dhtml += `<div class="metric"><span class="label">${name}</span><span class="value ${cls}">${(intensity*100).toFixed(0)}%</span></div>`;
+    dhtml += `<div class="bar-wrap"><div class="bar ${cls}" style="width:${intensity*100}%"></div></div>`;
+  }
+  document.getElementById('drives').innerHTML = dhtml || metric('الحالة', yn(d.enabled));
+
+  // Ethics
+  const et = status.evolution_ethics || {};
+  document.getElementById('ethics').innerHTML =
+    metric('الحالة', yn(et.enabled)) +
+    metric('القواعد النشطة', et.active_rules||0, 'blue') +
+    metric('الفحوصات', et.total_checks||0) +
+    metric('المحظورة', et.total_blocked||0, 'red') +
+    metric('المنبهات', et.total_warnings||0, 'yellow');
+
+  // Replication
+  const rep = status.replication_engine || {};
+  document.getElementById('replication').innerHTML =
+    metric('الحالة', yn(rep.enabled)) +
+    metric('التحليلات', rep.total_analyses||0, 'blue') +
+    metric('أجيال تولَّدت', rep.total_children||0, 'blue') +
+    metric('مُرقَّى (ناجح)', rep.total_promoted||0, 'green') +
+    metric('محذوف (فاشل)', rep.total_killed||0, 'red');
+
+  // Diary
+  if (narrative && narrative.entries) {
+    const lines = narrative.entries.map(e => {
+      const cls = e.event_type === 'evolve' ? 'evolve' : e.event_type === 'ethics_block' ? 'ethics' : e.importance >= 0.8 ? 'high' : '';
+      const time = new Date(e.timestamp * 1000).toLocaleTimeString('ar');
+      return `<div class="diary-line ${cls}">[${time}] [${e.event_type}] ${JSON.stringify(e.data).slice(0,80)}</div>`;
+    });
+    document.getElementById('diary').innerHTML = lines.join('') || '<div class="diary-line">لا توجد أحداث بعد</div>';
+  }
+
+  document.getElementById('last-update').textContent = 'آخر تحديث: ' + new Date().toLocaleTimeString('ar');
+  document.getElementById('statusDot').style.background = '#3fb950';
+}
+
+// Auto refresh every 5 seconds
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
