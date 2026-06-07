@@ -2,7 +2,7 @@
 Phase 8 — Real Neural Weights
 ==============================
 Provides a genuine numpy-backed weight matrix for the RoutingEngine.
-The weight matrix (9×7) replaces the hard-coded W_SEMANTIC / W_SCORE /
+The weight matrix (9 rows × 7 columns) replaces the hard-coded W_SEMANTIC / W_SCORE /
 W_MEMORY / W_TOPOLOGY scalar constants with learnable parameters derived
 from real execution data.
 
@@ -19,6 +19,13 @@ Architecture
   extract_routing_weights(layer)
     Returns the 4 scalars (W_SEMANTIC, W_SCORE, W_MEMORY, W_TOPOLOGY)
     derived from the first row of the weight matrix, normalised to sum=1.
+
+Growth strategy (Phase 9+)
+--------------------------
+  Columns are ALWAYS 7 — fixed to the feature vector size.
+  Row growth is handled by DynamicWeightLayer with GROW_ROWS=23,
+  starting from 9 rows.  Trajectory: 9 → 32 → 55 → 78 → ...
+  Max rows capped at 200 (see dynamic_weight_layer.py).
 
 Usage (standalone)
 ------------------
@@ -48,24 +55,33 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # ── Initial weight matrix (9 rows × 7 columns) ──────────────────────────────
+# Columns: FIXED at 7  (=INPUT_DIM from DeepRoutingNetwork / feature vector size)
+# Rows:    START at 9  — growth happens on rows only (+23 per plateau event)
 # Row 0 encodes the 4 routing-weight scalars (first 4 columns used).
-# Rows 1-9 are additional feature-transformation layers.
+# Rows 1-8 are additional feature-transformation layers.
 _INITIAL_WEIGHTS: List[List[float]] = [
     [0.2,  0.3,  0.5,  0.7,  0.11, 0.15, 0.17],
     [0.13, 0.31, 0.3,  0.1,  0.12, 0.23, 0.16],
     [0.13, 0.14, 0.3,  0.1,  0.15, 0.11, 0.1 ],
-    [0.10, 0.35, 0.19, 0.2,  0.1,  0.12, 0.4 ],
-    [0.12, 0.30, 0.13, 0.2,  0.1,  0.32, 0.4 ],
-    [0.10, 0.3,  0.4,  0.1,  0.4,  0.13, 0.1 ],
-    [0.25, 0.24, 0.3,  0.1,  0.10, 0.2,  0.29],
+    [0.11, 0.35, 0.19, 0.2,  0.1,  0.12, 0.4 ],
+    [0.121, 0.31, 0.13, 0.2,  0.1,  0.32, 0.4 ],
+    [0.11, 0.3,  0.4,  0.1,  0.4,  0.13, 0.1 ],
+    [0.25, 0.24, 0.3,  0.1,  0.11, 0.2,  0.29],
     [0.2,  0.5,  0.15, 0.10, 0.1,  0.3,  0.26],
-    [0.0,  0.4,  0.6,  0.3,  0.3,  0.10, 0.5 ],
+    [0.0,  0.4,  0.6,  0.3,  0.3,  0.11, 0.5 ],
 ]
 
 
 class NeuralWeightLayer:
     """
     A single dense weight layer backed by a (9 × 7) numpy matrix.
+
+    Design contract
+    ---------------
+    • COLUMNS are FIXED at 7 — they represent the 7 input features and
+      must never change (breaking change to the whole pipeline).
+    • ROWS start at 9 and grow in steps of +23 via DynamicWeightLayer.
+      This class (Phase 8) keeps its shape fixed; growth lives in Phase 9.
 
     Parameters
     ----------
@@ -77,7 +93,7 @@ class NeuralWeightLayer:
         Human-readable label stored in saved artefacts.
     """
 
-    SHAPE = (9, 7)
+    SHAPE = (9, 7)  # rows=9 (fixed base), cols=7 (NEVER change cols)
 
     def __init__(
         self,
@@ -118,8 +134,8 @@ class NeuralWeightLayer:
 
         Returns
         -------
-        np.ndarray  shape=(9,)
-            One activation per row of the weight matrix.
+        np.ndarray  shape=(rows,)
+            One activation per row of the weight matrix (9 for base layer).
         """
         x_arr = np.array(x, dtype=np.float64)
         if x_arr.shape != (self.SHAPE[1],):
