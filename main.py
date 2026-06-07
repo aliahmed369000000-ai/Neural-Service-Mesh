@@ -163,6 +163,28 @@ except ImportError as _err:
     _DRIVE_ENGINE_AVAILABLE = False
     logging.getLogger(__name__).warning(f"DriveEngine not available: {_err}")
 
+# ── AI: Phase 16 — Self-Narrative, Evolution Ethics, Memory Consolidator ───
+try:
+    from ai.self_narrative import SelfNarrative
+    _SELF_NARRATIVE_AVAILABLE = True
+except ImportError as _err:
+    _SELF_NARRATIVE_AVAILABLE = False
+    logging.getLogger(__name__).warning(f"SelfNarrative not available: {_err}")
+
+try:
+    from ai.evolution_ethics import EvolutionEthics
+    _EVOLUTION_ETHICS_AVAILABLE = True
+except ImportError as _err:
+    _EVOLUTION_ETHICS_AVAILABLE = False
+    logging.getLogger(__name__).warning(f"EvolutionEthics not available: {_err}")
+
+try:
+    from ai.memory_consolidator import MemoryConsolidator
+    _MEMORY_CONSOLIDATOR_AVAILABLE = True
+except ImportError as _err:
+    _MEMORY_CONSOLIDATOR_AVAILABLE = False
+    logging.getLogger(__name__).warning(f"MemoryConsolidator not available: {_err}")
+
 # ── Services ───────────────────────────────────────────────────────────────
 from services.input_service import InputNode
 from services.processor_service import ProcessorNode
@@ -188,11 +210,13 @@ class NeuralServiceMesh:
       Layer  12   : Deep self-awareness (confidence + weakness + metacognition)
       Layer  13   : Structural self-redesign (autonomous architecture evolution)
       Layer  14   : Complete digital being (unified consciousness core)
+      Layer  15   : Quality engine + immune system + self-replication + identity + world feed + drives
+      Layer  16   : Self-narrative (voice) + evolution ethics (conscience) + memory consolidation (laws)
 
     All public APIs are backward-compatible across all layers.
     """
 
-    VERSION = "15.0.0"
+    VERSION = "16.0.0"
 
     def __init__(self, storage_dir: str = "./data", db_path: str = "./data/mesh.db"):
         # ── Storage ────────────────────────────────────────────────────────
@@ -580,6 +604,45 @@ class NeuralServiceMesh:
             f"QualityEngine={'✓' if self.quality_engine else '✗'}  "
             f"ImmuneSystem={'✓' if self.immune_system else '✗'}  "
             f"Replication={'✓' if self.replication_engine else '✗'}"
+        )
+
+        # ── Phase 16: Evolution Ethics ────────────────────────────────────
+        self.evolution_ethics = None
+        if _EVOLUTION_ETHICS_AVAILABLE:
+            self.evolution_ethics = EvolutionEthics(
+                immune_system=self.immune_system,
+            )
+            logger.info("EvolutionEthics active — ethical conscience layer online")
+
+        # ── Phase 16: Self-Narrative ──────────────────────────────────────
+        self.self_narrative = None
+        if _SELF_NARRATIVE_AVAILABLE:
+            self.self_narrative = SelfNarrative(
+                episodic_memory=self.episodic_memory,
+            )
+            # تسجيل حدث البدء
+            self.self_narrative.record_event(
+                event_type    = "checkpoint",
+                data          = {"message": f"الجهاز بدأ — الإصدار {self.VERSION}"},
+                surprise_score = 0.1,
+                importance    = 0.8,
+            )
+            logger.info("SelfNarrative active — digital voice and identity journal online")
+
+        # ── Phase 16: Memory Consolidator ────────────────────────────────
+        self.memory_consolidator = None
+        if _MEMORY_CONSOLIDATOR_AVAILABLE:
+            self.memory_consolidator = MemoryConsolidator(
+                episodic_memory   = self.episodic_memory,
+                pattern_threshold = 10,
+            )
+            logger.info("MemoryConsolidator active — semantic law engine online")
+
+        logger.info(
+            f"NeuralServiceMesh v{self.VERSION} Phase 16 complete — "
+            f"SelfNarrative={'✓' if self.self_narrative else '✗'}  "
+            f"EvolutionEthics={'✓' if self.evolution_ethics else '✗'}  "
+            f"MemoryConsolidator={'✓' if self.memory_consolidator else '✗'}"
         )
 
     # ── Execution Hook ─────────────────────────────────────────────────────
@@ -1172,6 +1235,10 @@ class NeuralServiceMesh:
             "brain_checkpoint":     self.get_brain_checkpoint_status(),
             "world_feed":           self.get_world_feed_status(),
             "drive_engine":         self.get_drive_engine_status(),
+            # ── Phase 16 ──────────────────────────────────────────────────
+            "self_narrative":       self.get_self_narrative_status(),
+            "evolution_ethics":     self.get_evolution_ethics_status(),
+            "memory_consolidator":  self.get_memory_consolidator_status(),
         }
 
     # ── Phase 15: Quality Engine API ──────────────────────────────────────
@@ -1364,6 +1431,145 @@ class NeuralServiceMesh:
             return {"error": "DriveEngine not available"}
         active = self.drive_engine.tick()
         return {"active_drives": active, "dominant": self.drive_engine.get_dominant_drive()}
+
+    # ── Phase 16: Self-Narrative API ─────────────────────────────────────
+
+    def get_self_narrative_status(self) -> dict:
+        if self.self_narrative is None:
+            return {"enabled": False}
+        return {"enabled": True, **self.self_narrative.summary()}
+
+    def record_narrative_event(
+        self,
+        event_type: str,
+        data: Optional[dict] = None,
+        surprise_score: float = 0.0,
+        importance: float = 0.5,
+    ) -> dict:
+        """تسجيل حدث في السجل السردي للجهاز."""
+        if self.self_narrative is None:
+            return {"error": "SelfNarrative not available"}
+        entry = self.self_narrative.record_event(
+            event_type     = event_type,
+            data           = data or {},
+            surprise_score = surprise_score,
+            importance     = importance,
+        )
+        return entry.to_dict()
+
+    def get_identity_statement(self) -> dict:
+        """إرجاع جملة الهوية الحالية للجهاز."""
+        if self.self_narrative is None:
+            return {"error": "SelfNarrative not available"}
+        return {
+            "identity": self.self_narrative.get_identity_statement(),
+            "version":  self.VERSION,
+        }
+
+    def get_narrative_log(self, n: int = 20) -> dict:
+        """إرجاع آخر n حدث من السجل السردي."""
+        if self.self_narrative is None:
+            return {"error": "SelfNarrative not available"}
+        return {
+            "log":   self.self_narrative.get_narrative_log(n),
+            "count": n,
+        }
+
+    def generate_daily_narrative(self) -> dict:
+        """توليد ملخص سردي ليومي."""
+        if self.self_narrative is None:
+            return {"error": "SelfNarrative not available"}
+        summary = self.self_narrative.generate_daily_summary()
+        return summary.to_dict()
+
+    def get_today_narrative(self) -> dict:
+        """إرجاع سرد اليوم الحالي."""
+        if self.self_narrative is None:
+            return {"error": "SelfNarrative not available"}
+        return self.self_narrative.get_today_narrative()
+
+    # ── Phase 16: Evolution Ethics API ───────────────────────────────────
+
+    def get_evolution_ethics_status(self) -> dict:
+        if self.evolution_ethics is None:
+            return {"enabled": False}
+        return {"enabled": True, **self.evolution_ethics.summary()}
+
+    def ethics_check(self, action_type: str, params: Optional[dict] = None) -> dict:
+        """فحص أخلاقي لفعل تطوري قبل تنفيذه."""
+        if self.evolution_ethics is None:
+            return {"allowed": True, "reason": "EvolutionEthics not available — defaulting to allow"}
+        return self.evolution_ethics.check(action_type, params or {})
+
+    def ethics_record(self, action: str, verdict: bool, reason: str, params: Optional[dict] = None) -> dict:
+        """تسجيل قرار تطوري يدوياً مع مبرره الأخلاقي."""
+        if self.evolution_ethics is None:
+            return {"error": "EvolutionEthics not available"}
+        self.evolution_ethics.record_decision(action, verdict, reason, params)
+        return {"status": "recorded", "action": action, "verdict": verdict}
+
+    def get_ethics_violations(self, limit: int = 50) -> dict:
+        """إرجاع سجل الانتهاكات الأخلاقية."""
+        if self.evolution_ethics is None:
+            return {"error": "EvolutionEthics not available"}
+        return {
+            "violations": self.evolution_ethics.get_violations_log(limit),
+            "blocked_sources": self.evolution_ethics.get_blocked_sources(),
+        }
+
+    def report_source_rejection(self, source: str) -> dict:
+        """إبلاغ الضمير الأخلاقي برفض مصدر من الجهاز المناعي."""
+        if self.evolution_ethics is None:
+            return {"error": "EvolutionEthics not available"}
+        return self.evolution_ethics.report_source_rejection(source)
+
+    # ── Phase 16: Memory Consolidator API ────────────────────────────────
+
+    def get_memory_consolidator_status(self) -> dict:
+        if self.memory_consolidator is None:
+            return {"enabled": False}
+        return {"enabled": True, **self.memory_consolidator.summary()}
+
+    def consolidate_memory(self) -> dict:
+        """تشغيل دورة دمج فورية للذاكرة الدلالية."""
+        if self.memory_consolidator is None:
+            return {"error": "MemoryConsolidator not available"}
+        return self.memory_consolidator.consolidate()
+
+    def start_memory_consolidation(self, interval_minutes: float = 15.0) -> dict:
+        """تشغيل الدمج الدوري في background thread."""
+        if self.memory_consolidator is None:
+            return {"error": "MemoryConsolidator not available"}
+        if self.memory_consolidator._running:
+            return {"status": "already_running"}
+        self.memory_consolidator.start(interval_minutes=interval_minutes)
+        return {"status": "started", "interval_minutes": interval_minutes}
+
+    def stop_memory_consolidation(self) -> dict:
+        """إيقاف الدمج الدوري."""
+        if self.memory_consolidator is None:
+            return {"error": "MemoryConsolidator not available"}
+        self.memory_consolidator.stop()
+        return {"status": "stopped"}
+
+    def get_consolidated_laws(self, min_confidence: float = 0.0) -> dict:
+        """إرجاع القوانين الدلالية المكتسبة."""
+        if self.memory_consolidator is None:
+            return {"error": "MemoryConsolidator not available"}
+        laws = self.memory_consolidator.get_consolidated_laws(min_confidence)
+        return {
+            "laws":  laws,
+            "count": len(laws),
+            "min_confidence": min_confidence,
+        }
+
+    def observe_pattern(self, pattern_key: str, description: str = "", metadata: Optional[dict] = None) -> dict:
+        """تسجيل ملاحظة نمط للدمج المستقبلي."""
+        if self.memory_consolidator is None:
+            return {"error": "MemoryConsolidator not available"}
+        self.memory_consolidator.observe_pattern(pattern_key, description, metadata)
+        count = self.memory_consolidator._local_pattern_counts.get(pattern_key, 0)
+        return {"status": "observed", "pattern_key": pattern_key, "count": count}
 
     # ── Validation ─────────────────────────────────────────────────────────
 
