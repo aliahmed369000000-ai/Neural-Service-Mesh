@@ -1,1 +1,152 @@
-
+{
+  "runs": [
+    {
+      "run_id": "61d020cd-151a-433b-899c-d24c19108fa4",
+      "path": [
+        "90d840e7-f9e0-4405-8646-44d3091c569f",
+        "b2165fc1-0295-47dd-9652-d390829280f7",
+        "e4594360-cbb0-4924-957e-483ed3443764"
+      ],
+      "started_at": "2026-06-07T18:11:08.168887",
+      "finished_at": "2026-06-07T18:11:08.170954",
+      "total_duration_ms": 2.06,
+      "status": "success",
+      "final_output": {
+        "result": {
+          "text_preview": "الجهاز العصبي الرقمي يعمل بنجاح",
+          "word_count": 5,
+          "sentence_count": 1,
+          "top_keywords": [
+            "الجهاز",
+            "العصبي",
+            "الرقمي",
+            "يعمل",
+            "بنجاح"
+          ],
+          "language": "arabic"
+        },
+        "format": "summary",
+        "rendered_at": "2026-06-07T18:11:08.170935",
+        "success": true
+      },
+      "ai_suggested": false,
+      "steps": [
+        {
+          "index": 0,
+          "node_id": "90d840e7-f9e0-4405-8646-44d3091c569f",
+          "node_name": "TextInput",
+          "started_at": "2026-06-07T18:11:08.168911",
+          "finished_at": "2026-06-07T18:11:08.168958",
+          "duration_ms": 0.04,
+          "input_data": {
+            "text": "الجهاز العصبي الرقمي يعمل بنجاح",
+            "source": "test"
+          },
+          "output_data": {
+            "text": "الجهاز العصبي الرقمي يعمل بنجاح",
+            "source": "test",
+            "char_count": 31,
+            "word_count": 5,
+            "metadata": null
+          },
+          "status": "success",
+          "error": null,
+          "is_fallback": false
+        },
+        {
+          "index": 1,
+          "node_id": "b2165fc1-0295-47dd-9652-d390829280f7",
+          "node_name": "TextProcessor",
+          "started_at": "2026-06-07T18:11:08.168965",
+          "finished_at": "2026-06-07T18:11:08.170907",
+          "duration_ms": 1.93,
+          "input_data": {
+            "text": "الجهاز العصبي الرقمي يعمل بنجاح",
+            "source": "test",
+            "char_count": 31,
+            "word_count": 5,
+            "metadata": null
+          },
+          "output_data": {
+            "text": "الجهاز العصبي الرقمي يعمل بنجاح",
+            "processed_text": "الجهاز العصبي الرقمي يعمل بنجاح",
+            "word_count": 5,
+            "char_count": 31,
+            "sentences": [
+              "الجهاز العصبي الرقمي يعمل بنجاح"
+            ],
+            "keywords": [
+              "الجهاز",
+              "العصبي",
+              "الرقمي",
+              "يعمل",
+              "بنجاح"
+            ],
+            "analysis": {
+              "sentence_count": 1,
+              "unique_word_count": 5,
+              "avg_word_length": 5.4,
+              "has_numbers": false,
+              "language": "arabic"
+            }
+          },
+          "status": "success",
+          "error": null,
+          "is_fallback": false
+        },
+        {
+          "index": 2,
+          "node_id": "e4594360-cbb0-4924-957e-483ed3443764",
+          "node_name": "TextOutput",
+          "started_at": "2026-06-07T18:11:08.170916",
+          "finished_at": "2026-06-07T18:11:08.170949",
+          "duration_ms": 0.03,
+          "input_data": {
+            "text": "الجهاز العصبي الرقمي يعمل بنجاح",
+            "processed_text": "الجهاز العصبي الرقمي يعمل بنجاح",
+            "word_count": 5,
+            "char_count": 31,
+            "sentences": [
+              "الجهاز العصبي الرقمي يعمل بنجاح"
+            ],
+            "keywords": [
+              "الجهاز",
+              "العصبي",
+              "الرقمي",
+              "يعمل",
+              "بنجاح"
+            ],
+            "analysis": {
+              "sentence_count": 1,
+              "unique_word_count": 5,
+              "avg_word_length": 5.4,
+              "has_numbers": false,
+              "language": "arabic"
+            }
+          },
+          "output_data": {
+            "result": {
+              "text_preview": "الجهاز العصبي الرقمي يعمل بنجاح",
+              "word_count": 5,
+              "sentence_count": 1,
+              "top_keywords": [
+                "الجهاز",
+                "العصبي",
+                "الرقمي",
+                "يعمل",
+                "بنجاح"
+              ],
+              "language": "arabic"
+            },
+            "format": "summary",
+            "rendered_at": "2026-06-07T18:11:08.170935",
+            "success": true
+          },
+          "status": "success",
+          "error": null,
+          "is_fallback": false
+        }
+      ]
+    }
+  ]
+}
