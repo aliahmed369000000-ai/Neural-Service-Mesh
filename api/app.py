@@ -1324,3 +1324,264 @@ def create_app(mesh):
     app = _create_app_v16(mesh)
     _add_knowledge_sources_routes(app, mesh)
     return app
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Cognitive Knowledge Graph API  (Priority 4 — CKG Endpoints)
+# Endpoints: /knowledge/concepts  /knowledge/relations  /knowledge/query
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _add_ckg_routes(app, mesh):
+    """
+    All /knowledge/* endpoints for the Cognitive Knowledge Graph.
+    These power the Dashboard Concept Viewer tab.
+    """
+
+    def _get_ckg():
+        """Lazy-load CKG — only if the file exists."""
+        try:
+            from knowledge.cognitive_graph import get_ckg
+            return get_ckg()
+        except Exception as exc:
+            logger.warning(f"[CKG API] CKG not available: {exc}")
+            return None
+
+    # ── GET /knowledge/concepts ───────────────────────────────────────────
+    @app.route("/knowledge/concepts", methods=["GET"])
+    def knowledge_concepts():
+        """
+        كل المفاهيم في الـ CKG.
+        Query params:
+          ?cluster=أخلاق   — فلتر بـ cluster
+          ?top=N           — أقوى N مفهوم فقط
+          ?min_strength=0.3 — حد أدنى للقوة
+        """
+        ckg = _get_ckg()
+        if not ckg:
+            return jsonify({"error": "CKG not initialised", "concepts": []}), 503
+
+        cluster      = request.args.get("cluster")
+        top          = request.args.get("top", type=int)
+        min_strength = request.args.get("min_strength", 0.0, type=float)
+
+        concepts = ckg.all_concepts()
+
+        if cluster:
+            concepts = [c for c in concepts if c["cluster"] == cluster]
+        if min_strength > 0:
+            concepts = [c for c in concepts if c["strength"] >= min_strength]
+
+        concepts.sort(key=lambda c: c["strength"], reverse=True)
+
+        if top:
+            concepts = concepts[:top]
+
+        return jsonify({
+            "concepts":      concepts,
+            "total":         len(concepts),
+            "cluster_filter": cluster,
+            "stats":         ckg.stats(),
+        })
+
+    # ── GET /knowledge/relations ──────────────────────────────────────────
+    @app.route("/knowledge/relations", methods=["GET"])
+    def knowledge_relations():
+        """
+        كل العلاقات في الـ CKG.
+        Query params:
+          ?concept=صبر      — علاقات مفهوم محدد
+          ?top=N            — أقوى N علاقة
+          ?type=co_occurrence — فلتر بنوع العلاقة
+          ?min_weight=0.3
+        """
+        ckg = _get_ckg()
+        if not ckg:
+            return jsonify({"error": "CKG not initialised", "relations": []}), 503
+
+        concept    = request.args.get("concept")
+        top        = request.args.get("top", 100, type=int)
+        rel_type   = request.args.get("type")
+        min_weight = request.args.get("min_weight", 0.0, type=float)
+
+        if concept:
+            related = ckg.query_related(concept, top_k=top)
+            relations = []
+            for target, weight in related:
+                r = ckg.get_relation(concept, target)
+                if r and weight >= min_weight:
+                    relations.append(r.to_dict())
+        else:
+            relations = ckg.all_relations()
+            if rel_type:
+                relations = [r for r in relations if r["relation_type"] == rel_type]
+            if min_weight > 0:
+                relations = [r for r in relations if r["weight"] >= min_weight]
+            relations.sort(key=lambda r: r["weight"], reverse=True)
+            relations = relations[:top]
+
+        return jsonify({
+            "relations": relations,
+            "total":     len(relations),
+        })
+
+    # ── GET /knowledge/query ──────────────────────────────────────────────
+    @app.route("/knowledge/query", methods=["GET"])
+    def knowledge_query():
+        """
+        استعلام ذكي: ما المفاهيم المرتبطة بـ concept؟
+        Query params:
+          ?concept=صبر (required)
+          ?top=10
+          ?direction=both|in|out
+        """
+        ckg = _get_ckg()
+        if not ckg:
+            return jsonify({"error": "CKG not initialised"}), 503
+
+        concept   = request.args.get("concept", "").strip()
+        top       = request.args.get("top", 10, type=int)
+        direction = request.args.get("direction", "both")
+
+        if not concept:
+            return jsonify({"error": "concept parameter required"}), 400
+
+        c = ckg.get_concept(concept)
+        if not c:
+            return jsonify({
+                "concept": concept,
+                "found":   False,
+                "related": [],
+            })
+
+        related = ckg.query_related(concept, top_k=top, direction=direction)
+        path_to = {}
+        for target, _ in related[:5]:
+            p = ckg.find_path(concept, target, max_depth=4)
+            if p:
+                path_to[target] = p
+
+        return jsonify({
+            "concept":   c.to_dict(),
+            "found":     True,
+            "related":   [{"concept": n, "weight": w} for n, w in related],
+            "paths":     path_to,
+        })
+
+    # ── GET /knowledge/stats ──────────────────────────────────────────────
+    @app.route("/knowledge/stats", methods=["GET"])
+    def knowledge_stats():
+        """إحصائيات شاملة للـ CKG."""
+        ckg = _get_ckg()
+        if not ckg:
+            return jsonify({"error": "CKG not initialised"}), 503
+
+        from datetime import datetime, timezone, timedelta
+        since_24h = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+
+        return jsonify({
+            **ckg.stats(),
+            "cluster_summary":        ckg.cluster_summary(),
+            "cross_source_concepts":  ckg.cross_source_concepts(min_sources=2),
+            "concept_growth_24h":     ckg.concept_growth_rate(since_24h),
+        })
+
+    # ── GET /knowledge/path ───────────────────────────────────────────────
+    @app.route("/knowledge/path", methods=["GET"])
+    def knowledge_path():
+        """
+        مسار بين مفهومين.
+        ?from=صبر&to=آخرة
+        """
+        ckg = _get_ckg()
+        if not ckg:
+            return jsonify({"error": "CKG not initialised"}), 503
+
+        start = request.args.get("from", "").strip()
+        end   = request.args.get("to", "").strip()
+
+        if not start or not end:
+            return jsonify({"error": "from and to required"}), 400
+
+        path = ckg.find_path(start, end)
+        return jsonify({
+            "from":  start,
+            "to":    end,
+            "path":  path,
+            "found": path is not None,
+            "hops":  len(path) - 1 if path else None,
+        })
+
+
+_create_app_ks = create_app
+def create_app(mesh):
+    app = _create_app_ks(mesh)
+    _add_ckg_routes(app, mesh)
+    return app
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CKG Auto-Bootstrap on startup + Status endpoint
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _add_ckg_bootstrap_routes(app, mesh):
+    """
+    يشغّل بناء CKG تلقائياً عند أول طلب /knowledge/*
+    ويضيف endpoint /knowledge/bootstrap للتحكم اليدوي.
+    """
+    try:
+        from knowledge.ckg_bootstrap import bootstrap_ckg, is_bootstrap_done, wait_for_bootstrap
+        _BOOTSTRAP_AVAILABLE = True
+    except ImportError:
+        _BOOTSTRAP_AVAILABLE = False
+        logger.warning("[CKG Bootstrap] module not available")
+
+    # ── Auto-bootstrap on first /knowledge/* request ──────────────────────
+    _boot_triggered = [False]
+
+    @app.before_request
+    def maybe_bootstrap():
+        from flask import request as req
+        if (
+            _BOOTSTRAP_AVAILABLE
+            and req.path.startswith('/knowledge/')
+            and not _boot_triggered[0]
+            and not is_bootstrap_done()
+        ):
+            _boot_triggered[0] = True
+            bootstrap_ckg(mesh, background=True)
+
+    # ── GET /knowledge/bootstrap ──────────────────────────────────────────
+    @app.route("/knowledge/bootstrap", methods=["GET", "POST"])
+    def knowledge_bootstrap():
+        """
+        GET  → حالة البناء
+        POST → ابدأ بناء جديد (force=true لإعادة البناء)
+        """
+        if not _BOOTSTRAP_AVAILABLE:
+            return jsonify({"error": "ckg_bootstrap module not available"}), 503
+
+        from flask import request as req
+        from knowledge.ckg_bootstrap import bootstrap_ckg, is_bootstrap_done
+
+        if req.method == "GET":
+            return jsonify({
+                "done":    is_bootstrap_done(),
+                "message": "الجراف المعرفي جاهز" if is_bootstrap_done() else "جارٍ البناء أو لم يبدأ بعد",
+            })
+
+        # POST — trigger build
+        data  = req.get_json(force=True) or {}
+        force = data.get("force", False)
+        bootstrap_ckg(mesh, background=True, force=force)
+        return jsonify({
+            "status":  "started",
+            "message": "بدأ بناء الجراف المعرفي في الخلفية",
+            "force":   force,
+        })
+
+
+_create_app_ckg = create_app
+def create_app(mesh):
+    app = _create_app_ckg(mesh)
+    _add_ckg_bootstrap_routes(app, mesh)
+    return app
