@@ -21,6 +21,7 @@ Architecture:
 Public API:
     from knowledge_sources import SourceManager, SourceRegistry
     from knowledge_sources import SourceMetadata, SourceType, UpdateFrequency
+    from knowledge_sources import SourceTracker, SourceHealth
     from knowledge_sources.quran.quran_source import create_quran_source
 """
 
@@ -32,6 +33,7 @@ from knowledge_sources.source_registry  import SourceRegistry
 from knowledge_sources.source_validator import SourceValidator, ValidationResult
 from knowledge_sources.quality_scorer   import QualityScorer, QualityScore
 from knowledge_sources.score_manager    import SourceManager, SyncResult
+from knowledge_sources.source_tracker   import SourceTracker, SourceHealth
 from knowledge_sources.base_source      import (
     BaseKnowledgeSource,
     WikipediaSource, GitHubSource, RSSSource, PublicAPISource,
@@ -46,6 +48,8 @@ __all__ = [
     "SourceValidator", "ValidationResult",
     "QualityScorer", "QualityScore",
     "SourceManager", "SyncResult",
+    # Source Tracking
+    "SourceTracker", "SourceHealth",
     # Base & Stubs
     "BaseKnowledgeSource",
     "WikipediaSource", "GitHubSource", "RSSSource", "PublicAPISource",
