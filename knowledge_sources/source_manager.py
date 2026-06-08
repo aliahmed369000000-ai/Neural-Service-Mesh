@@ -38,6 +38,7 @@ from knowledge_sources.source_metadata import (
 from knowledge_sources.source_registry  import SourceRegistry
 from knowledge_sources.source_validator import SourceValidator
 from knowledge_sources.quality_scorer   import QualityScorer
+from knowledge_sources.source_tracker   import SourceTracker
 
 if TYPE_CHECKING:
     from ai.memory_engine            import MemoryEngine
@@ -93,6 +94,7 @@ class SourceManager:
         self._validator = validator or SourceValidator()
         self._scorer    = scorer    or QualityScorer()
         self._min_quality = min_quality_threshold
+        self._tracker   = SourceTracker()
 
         # Injected downstream components
         self._memory_engine:   Optional[Any] = None
@@ -210,6 +212,10 @@ class SourceManager:
             # 4. Ingest into downstream systems
             self._ingest_items(final_items, meta)
             result.items_ingested = len(final_items)
+            # Record items in tracker
+            for item in final_items:
+                self._tracker.record_item(item, meta)
+            self._tracker.flush_items()
 
             self._registry.mark_sync_done(
                 source_id,
@@ -226,6 +232,7 @@ class SourceManager:
 
         result.finish()
         self._sync_history[source_id] = result
+        self._tracker.record_sync(result)   # ← Source Tracking
         logger.info(
             f"[SourceManager] sync done: {meta.name} — "
             f"{result.items_ingested} ingested, {result.items_rejected} rejected, "
@@ -414,4 +421,17 @@ class SourceManager:
                 "feeders":   len(self._feeders),
             },
             "min_quality_threshold": self._min_quality,
+            "tracker":   self._tracker.summary(),
         }
+
+    def tracking_health(self) -> Dict[str, Any]:
+        """Full source health report from the tracker."""
+        return self._tracker.health_report()
+
+    def get_recent_items(self, n: int = 20) -> list:
+        """Return recently ingested knowledge items."""
+        return self._tracker.get_recent_items(n)
+
+    def get_sync_history(self, source_id: str, last_n: int = 10) -> list:
+        """Return sync history for a specific source."""
+        return self._tracker.get_sync_history(source_id, last_n)
