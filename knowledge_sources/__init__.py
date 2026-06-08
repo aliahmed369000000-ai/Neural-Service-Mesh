@@ -32,7 +32,7 @@ from knowledge_sources.source_metadata import (
 from knowledge_sources.source_registry  import SourceRegistry
 from knowledge_sources.source_validator import SourceValidator, ValidationResult
 from knowledge_sources.quality_scorer   import QualityScorer, QualityScore
-from knowledge_sources.score_manager    import SourceManager, SyncResult
+from knowledge_sources.source_manager    import SourceManager, SyncResult
 from knowledge_sources.source_tracker   import SourceTracker, SourceHealth
 from knowledge_sources.base_source      import (
     BaseKnowledgeSource,
