@@ -47,6 +47,7 @@ from knowledge_sources.source_metadata import (
     KnowledgeItem, SourceMetadata, SourceType, UpdateFrequency,
     AccessMode, SourceStatus
 )
+from knowledge_sources.concept_extractor import ConceptExtractor, fit_extractor_on_quran
 
 logger = logging.getLogger(__name__)
 
@@ -202,11 +203,14 @@ class QuranFeeder:
         surah_start:   int = 1,
         surah_end:     int = 114,
         max_items:     Optional[int] = None,
+        extractor:     Optional[ConceptExtractor] = None,
     ):
         self._loader      = loader or QuranLoader()
         self._surah_start = surah_start
         self._surah_end   = surah_end
         self._max_items   = max_items
+        self._extractor   = extractor or ConceptExtractor()
+        self._fitted      = False
 
     def fetch(self) -> List[KnowledgeItem]:
         """Main entry point — returns list of KnowledgeItems for the Quran."""
@@ -224,6 +228,20 @@ class QuranFeeder:
             surahs = raw_surahs.get("references", [])
         else:
             surahs = raw_surahs
+
+        # ── Fit TF-IDF on all texts first (one pass) ─────────────────────
+        if not self._fitted:
+            all_texts = [
+                ayah.get("text", "").strip()
+                for surah in surahs
+                for ayah in surah.get("ayahs", [])
+                if ayah.get("text", "").strip()
+            ]
+            if all_texts:
+                self._extractor.fit(all_texts)
+                self._fitted = True
+
+        _doc_counter = [0]   # mutable counter for doc_index
 
         for surah in surahs:
             surah_num = surah.get("number", 0)
@@ -265,7 +283,9 @@ class QuranFeeder:
                     raw_language   = "ar",
                     # ── Derived (system may write) ────────────────────
                     derived_tags      = tags,
-                    derived_concepts  = self._extract_concepts(text, surah_name, reference),
+                    derived_concepts  = self._extractor.extract_simple(
+                        text, surah_name=surah_name, reference=reference
+                    ),
                     derived_summary   = f"آية {ayah_num} من سورة {surah_name}",
                     # ── Trust ─────────────────────────────────────────
                     trust_score    = 1.0,
@@ -280,43 +300,6 @@ class QuranFeeder:
         logger.info(f"[QuranFeeder] produced {len(items)} items")
         return items
 
-    def _extract_concepts(
-        self, text: str, surah_name: str, reference: str
-    ) -> List[str]:
-        """
-        Extract basic concepts from an ayah for the knowledge graph.
-        This is DERIVED knowledge — the system adds this, not the original text.
-
-        In a full implementation, this would use NLP / embedding models.
-        Here we use a simple keyword approach as a foundation.
-        """
-        concepts = [f"سورة:{surah_name}", f"آية:{reference}"]
-
-        # Topic keywords commonly found in Quran
-        topic_map = {
-            "الله":     "توحيد",
-            "الرحمن":    "رحمة",
-            "الرحيم":     "رحمة",
-            "جنة":      "آخرة",
-            "نار":      "آخرة",
-            "يوم القيامة": "آخرة",
-            "صلاة":     "عبادة",
-            "زكاة":     "عبادة",
-            "صيام":     "عبادة",
-            "تقوى":     "أخلاق",
-            "علم":      "معرفة",
-            "عقل":      "معرفة",
-            "رسول":     "نبوة",
-            "نبي":      "نبوة",
-            "كتاب":     "وحي",
-            "قرآن":     "وحي",
-        }
-
-        for keyword, concept in topic_map.items():
-            if keyword in text and concept not in concepts:
-                concepts.append(concept)
-
-        return concepts[:10]  # Cap to avoid bloat
 
 
 # ── Convenience Factory ────────────────────────────────────────────────────
