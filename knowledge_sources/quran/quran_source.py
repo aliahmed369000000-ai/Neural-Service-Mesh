@@ -216,7 +216,14 @@ class QuranFeeder:
             return []
 
         items   = []
-        surahs  = data.get("surahs", {}).get("references", []) or data.get("surahs", [])
+        # Handle both structures:
+        # - API response cached: {"surahs": [...]}, surahs is a list directly
+        # - API response wrapped: {"surahs": {"references": [...]}}
+        raw_surahs = data.get("surahs", [])
+        if isinstance(raw_surahs, dict):
+            surahs = raw_surahs.get("references", [])
+        else:
+            surahs = raw_surahs
 
         for surah in surahs:
             surah_num = surah.get("number", 0)
