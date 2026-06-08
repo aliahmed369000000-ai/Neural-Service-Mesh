@@ -1897,7 +1897,14 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(description="Neural Service Mesh — Digital Nervous System")
     p.add_argument(
         "--mode",
-        choices=["demo", "api", "simulate", "evolve", "phase6", "validate", "evolve7"],
+        choices=[
+            "demo", "api", "simulate", "evolve", "phase6",
+            "validate", "evolve7",
+            # ── Knowledge Sources Layer ──────────────────────────────
+            "sources",        # list all registered sources
+            "source-sync",    # sync all active sources
+            "source-status",  # show source status + last sync results
+        ],
         default="demo",
         help=(
             "demo: example pipeline | "
@@ -1906,9 +1913,13 @@ if __name__ == "__main__":
             "evolve: autonomous evolution | "
             "phase6: multi-agent demo | "
             "validate: validation report | "
-            "evolve7: full evolution pipeline"
+            "evolve7: full evolution pipeline | "
+            "sources: list knowledge sources | "
+            "source-sync: run knowledge source sync | "
+            "source-status: show source health & last sync"
         ),
     )
+    p.add_argument("--source-id", default=None, help="Target a specific source by ID")
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=5000)
     p.add_argument("--debug", action="store_true")
@@ -1994,3 +2005,76 @@ if __name__ == "__main__":
         from api.app import run_api
         mesh = NeuralServiceMesh()
         run_api(mesh, host=args.host, port=args.port, debug=args.debug)
+
+    # ── Knowledge Sources Layer Modes ─────────────────────────────────────
+
+    elif args.mode == "sources":
+        import json
+        from knowledge_sources import SourceManager
+        from knowledge_sources.quran.quran_source import create_quran_source
+
+        sm = SourceManager()
+        meta, feeder = create_quran_source()
+        sm.register_source(meta, feeder)
+
+        print("\n" + "="*65)
+        print("  Knowledge Sources Registry")
+        print("="*65)
+        sources = sm.list_sources()
+        for s in sources:
+            print(f"\n  [{s['status'].upper()}] {s['name']}")
+            print(f"    ID          : {s['id']}")
+            print(f"    Type        : {s['source_type']}")
+            print(f"    Trust Score : {s['trust_score']}")
+            print(f"    Access Mode : {s['access_mode']}")
+            print(f"    Frequency   : {s['update_frequency']}")
+            print(f"    Registered  : {s['registered_at']}")
+        print(f"\n  Total Sources: {len(sources)}")
+        print(json.dumps(sm.summary(), indent=2))
+
+    elif args.mode == "source-sync":
+        import json
+        from knowledge_sources import SourceManager
+        from knowledge_sources.quran.quran_source import create_quran_source
+
+        mesh = NeuralServiceMesh()
+        sm   = SourceManager(min_quality_threshold=30.0)
+        sm.set_knowledge_store(mesh.knowledge)
+        sm.set_environment_model(mesh.env_model)
+
+        meta, feeder = create_quran_source(max_items=50)
+        sm.register_source(meta, feeder)
+
+        target = args.source_id if hasattr(args, "source_id") and args.source_id else meta.id
+        print(f"\n  Syncing source: {target}")
+        result = sm.sync_source(target)
+
+        print("\n" + "="*65)
+        print("  Knowledge Source Sync Complete")
+        print("="*65)
+        print(f"  Source      : {result.source_name}")
+        print(f"  Fetched     : {result.items_fetched}")
+        print(f"  Validated   : {result.items_validated}")
+        print(f"  Ingested    : {result.items_ingested}")
+        print(f"  Rejected    : {result.items_rejected}")
+        print(f"  Avg Quality : {result.avg_quality:.1f}/100")
+        print(f"  Success     : {result.success}")
+        if result.errors:
+            print(f"  Errors      : {result.errors}")
+
+    elif args.mode == "source-status":
+        import json
+        from knowledge_sources import SourceManager
+        from knowledge_sources.quran.quran_source import create_quran_source
+
+        sm = SourceManager()
+        meta, feeder = create_quran_source()
+        sm.register_source(meta, feeder)
+
+        print("\n" + "="*65)
+        print("  Knowledge Sources — Status Report")
+        print("="*65)
+        status = sm.source_status(meta.id)
+        print(json.dumps(status, indent=2, ensure_ascii=False))
+        print("\n  System Summary:")
+        print(json.dumps(sm.summary(), indent=2))
