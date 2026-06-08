@@ -1989,8 +1989,7 @@ if __name__ == "__main__":
 
         print("[ Self-Awareness Introspection ]\n")
         awareness = mesh.introspect()
-        print(f"  Nodes        : {awareness['node_count']}")
-        print(f"  Health Score : {awareness['system_health_score']:.2f}")
+        print(f"  Awareness    : {list(awareness.keys())}")
 
         print(f"\n[ Full Evolution Pipeline ({args.cycles} cycle(s)) ]\n")
         evolution = mesh.evolve7(cycles=args.cycles, verbose=True)
