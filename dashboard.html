@@ -3,219 +3,1235 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Neural Service Mesh — لوحة التحكم الحية</title>
+<title>Neural Service Mesh — المعرفة المعرفية</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: #0a0a0f; color: #c9d1d9; font-family: 'Courier New', monospace; font-size: 13px; }
-  header { background: #161b22; border-bottom: 1px solid #21262d; padding: 12px 20px; display: flex; align-items: center; gap: 12px; }
-  header h1 { font-size: 16px; color: #58a6ff; }
-  .version { background: #1f6feb33; color: #58a6ff; padding: 2px 8px; border-radius: 4px; font-size: 11px; }
-  .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #3fb950; box-shadow: 0 0 6px #3fb950; animation: pulse 2s infinite; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; padding: 16px; }
-  .card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 14px; }
-  .card h2 { font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
-  .card h2 span { font-size: 16px; }
-  .metric { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #21262d22; }
-  .metric:last-child { border: none; }
-  .metric .label { color: #8b949e; }
-  .metric .value { color: #e6edf3; font-weight: bold; }
-  .value.green { color: #3fb950; }
-  .value.red { color: #f85149; }
-  .value.yellow { color: #d29922; }
-  .value.blue { color: #58a6ff; }
-  .bar-wrap { background: #21262d; border-radius: 4px; height: 6px; margin-top: 4px; overflow: hidden; }
-  .bar { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
-  .bar.green { background: #3fb950; }
-  .bar.blue { background: #58a6ff; }
-  .bar.yellow { background: #d29922; }
-  .diary { background: #0d1117; border-radius: 4px; padding: 8px; max-height: 200px; overflow-y: auto; font-size: 11px; line-height: 1.6; }
-  .diary-line { color: #8b949e; border-bottom: 1px solid #21262d11; padding: 2px 0; }
-  .diary-line.high { color: #d29922; }
-  .diary-line.evolve { color: #58a6ff; }
-  .diary-line.ethics { color: #f85149; }
-  .phase-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }
-  .phase-LIVE { background:#1a3a1a; color:#3fb950; }
-  .phase-EXPERIENCE { background:#1a2a3a; color:#58a6ff; }
-  .phase-LEARN { background:#2a2a1a; color:#d29922; }
-  .phase-SLEEP { background:#1a1a2a; color:#79c0ff; }
-  .phase-DREAM { background:#2a1a2a; color:#d2a8ff; }
-  .phase-EVOLVE { background:#2a1a1a; color:#ff7b72; }
-  .refresh-btn { margin-right: auto; background: #21262d; border: 1px solid #30363d; color: #8b949e; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 12px; }
-  .refresh-btn:hover { color: #e6edf3; border-color: #58a6ff; }
-  #last-update { font-size: 11px; color: #8b949e; }
-  .full-width { grid-column: 1 / -1; }
-  .error { color: #f85149; font-size: 11px; padding: 4px; }
+/* ═══════════════════════════════════ TOKENS ═══════════════════════════════════ */
+:root {
+  --ink:      #080c14;
+  --ink2:     #0c1220;
+  --ink3:     #111927;
+  --ink4:     #18222f;
+  --rim:      #1d2a3a;
+  --rim2:     #253444;
+  --mist:     #3d5268;
+  --fog:      #5c7a94;
+  --dim:      #7a9ab5;
+  --soft:     #a8c0d4;
+  --text:     #cddaea;
+  --bright:   #e8f0f8;
+
+  --gold:     #f0c040;
+  --gold2:    #c9952a;
+  --gold3:    #ffd97033;
+  --gold-glow:#f0c04022;
+
+  --sapphire: #4a9eed;
+  --sapphire2:#2d6fba;
+  --emerald:  #3ecf6e;
+  --crimson:  #f05060;
+  --violet:   #a07af8;
+  --amber:    #f08830;
+  --teal:     #2ed4c8;
+  --rose:     #f07098;
+
+  --r:        7px;
+  --r2:       12px;
+}
+*,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+html { scroll-behavior:smooth; }
+body {
+  background:var(--ink);
+  color:var(--text);
+  font-family:'Cascadia Code','Fira Code','SF Mono',monospace;
+  font-size:13px;
+  min-height:100vh;
+  overflow-x:hidden;
+}
+
+/* ═══════════════════════════════════ HEADER ════════════════════════════════════ */
+header {
+  position:sticky; top:0; z-index:200;
+  background:var(--ink2);
+  border-bottom:1px solid var(--rim);
+  height:50px;
+  display:flex; align-items:center;
+  padding:0 18px;
+  gap:0;
+  backdrop-filter:blur(8px);
+}
+.logo { display:flex; align-items:center; gap:10px; padding-left:16px; border-left:1px solid var(--rim); }
+.pulse {
+  width:9px; height:9px; border-radius:50%;
+  background:var(--emerald); box-shadow:0 0 10px var(--emerald);
+  animation:heartbeat 2.4s ease-in-out infinite;
+}
+@keyframes heartbeat {
+  0%,100%{ transform:scale(1); opacity:1; }
+  14%{ transform:scale(1.3); opacity:.8; }
+  28%{ transform:scale(1); opacity:1; }
+  42%{ transform:scale(1.15); opacity:.9; }
+}
+.logo-title { font-size:12px; letter-spacing:.4px; color:var(--soft); font-weight:500; }
+.logo-badge {
+  font-size:10px; padding:2px 7px; border-radius:4px;
+  background:var(--ink4); border:1px solid var(--rim2);
+  color:var(--dim); letter-spacing:.3px;
+}
+
+/* tabs */
+.nav { display:flex; height:100%; align-items:stretch; padding-right:20px; }
+.nav-tab {
+  display:flex; align-items:center; gap:7px;
+  padding:0 20px;
+  color:var(--fog); font-size:12px;
+  cursor:pointer; user-select:none;
+  border-bottom:2px solid transparent;
+  transition:all .22s;
+  white-space:nowrap;
+}
+.nav-tab .ico { font-size:15px; transition:transform .3s; }
+.nav-tab:hover { color:var(--soft); background:var(--ink3); }
+.nav-tab:hover .ico { transform:scale(1.2); }
+.nav-tab.on { color:var(--gold); border-bottom-color:var(--gold); background:var(--gold-glow); }
+
+/* header right */
+.hdr-right { margin-right:auto; display:flex; align-items:center; gap:12px; }
+.hdr-btn {
+  background:var(--ink4); border:1px solid var(--rim2);
+  color:var(--fog); font-family:inherit; font-size:11px;
+  padding:5px 14px; border-radius:var(--r); cursor:pointer;
+  transition:all .2s; display:flex; align-items:center; gap:5px;
+}
+.hdr-btn:hover { border-color:var(--sapphire); color:var(--soft); }
+.hdr-btn.spin { animation:spin .7s linear; }
+@keyframes spin { to { transform:rotate(360deg); } }
+#ts { font-size:10px; color:var(--mist); }
+
+/* ═══════════════════════════════════ TABS ══════════════════════════════════════ */
+.page { display:none; }
+.page.on { display:block; }
+
+/* ═══════════════════════════════════ SYSTEM TAB ════════════════════════════════ */
+.sys-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(268px,1fr));
+  gap:10px; padding:14px;
+}
+.s-card {
+  background:var(--ink2); border:1px solid var(--rim);
+  border-radius:var(--r); padding:13px;
+}
+.s-card-title {
+  font-size:10px; color:var(--fog); text-transform:uppercase;
+  letter-spacing:1.2px; margin-bottom:11px;
+  display:flex; align-items:center; gap:6px;
+}
+.row { display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid var(--rim)44; }
+.row:last-child { border:none; }
+.row .k { color:var(--dim); }
+.row .v { color:var(--text); font-weight:600; }
+.v.g { color:var(--emerald); } .v.r { color:var(--crimson); }
+.v.y { color:var(--gold); }    .v.b { color:var(--sapphire); }
+.bw { background:var(--rim); border-radius:3px; height:3px; margin-top:3px; overflow:hidden; }
+.bf { height:100%; border-radius:3px; transition:width .6s ease; }
+.bf.g { background:var(--emerald); } .bf.b { background:var(--sapphire); } .bf.y { background:var(--gold); }
+.log-box {
+  background:var(--ink); border-radius:4px; padding:8px;
+  max-height:180px; overflow-y:auto; font-size:11px; line-height:1.75;
+}
+.log-ln { color:var(--fog); padding:1px 0; border-bottom:1px solid var(--rim)22; }
+.log-ln.hi { color:var(--gold); } .log-ln.ev { color:var(--sapphire); } .log-ln.et { color:var(--crimson); }
+.ph { display:inline-block; padding:2px 9px; border-radius:4px; font-size:11px; font-weight:600; }
+.ph-LIVE { background:#0d2b0d; color:var(--emerald); }
+.ph-LEARN { background:#1a1a0a; color:var(--gold); }
+.ph-EVOLVE { background:#1f0d0d; color:var(--crimson); }
+.fw { grid-column:1/-1; }
+
+/* ═══════════════════════════════════ KNOWLEDGE TAB ════════════════════════════ */
+#pg-knowledge { min-height:calc(100vh - 50px); }
+
+/* ── Kpi Row ────────────────────────────────────────────────────────────────── */
+.kpi-row {
+  display:grid;
+  grid-template-columns:repeat(5,1fr);
+  gap:10px; padding:14px 14px 0;
+}
+@media(max-width:900px){ .kpi-row{ grid-template-columns:repeat(3,1fr); } }
+@media(max-width:580px){ .kpi-row{ grid-template-columns:repeat(2,1fr); } }
+
+.kpi {
+  background:var(--ink2); border:1px solid var(--rim);
+  border-radius:var(--r2); padding:16px;
+  position:relative; overflow:hidden;
+}
+.kpi::after {
+  content:''; position:absolute; inset:0 auto 0 0;
+  width:3px;
+}
+.kpi.gold::after  { background:var(--gold);     box-shadow:2px 0 14px var(--gold)66; }
+.kpi.blue::after  { background:var(--sapphire);  box-shadow:2px 0 14px var(--sapphire)66; }
+.kpi.green::after { background:var(--emerald);   box-shadow:2px 0 14px var(--emerald)66; }
+.kpi.viol::after  { background:var(--violet);    box-shadow:2px 0 14px var(--violet)66; }
+.kpi.teal::after  { background:var(--teal);      box-shadow:2px 0 14px var(--teal)66; }
+
+.kpi-lbl { font-size:9px; letter-spacing:1px; text-transform:uppercase; color:var(--fog); margin-bottom:7px; }
+.kpi-val { font-size:28px; font-weight:700; letter-spacing:-1px; line-height:1; }
+.kpi.gold  .kpi-val { color:var(--gold); }
+.kpi.blue  .kpi-val { color:var(--sapphire); }
+.kpi.green .kpi-val { color:var(--emerald); }
+.kpi.viol  .kpi-val { color:var(--violet); }
+.kpi.teal  .kpi-val { color:var(--teal); }
+.kpi-sub { font-size:10px; color:var(--mist); margin-top:5px; }
+
+/* ── Two-panel Layout ───────────────────────────────────────────────────────── */
+.k-body {
+  display:grid; grid-template-columns:300px 1fr;
+  gap:12px; padding:12px 14px; min-height:560px;
+}
+@media(max-width:800px){ .k-body{ grid-template-columns:1fr; } }
+
+/* ── Panel ──────────────────────────────────────────────────────────────────── */
+.panel {
+  background:var(--ink2); border:1px solid var(--rim);
+  border-radius:var(--r2); display:flex; flex-direction:column;
+  overflow:hidden;
+}
+.panel-head {
+  padding:10px 14px; border-bottom:1px solid var(--rim);
+  display:flex; align-items:center; justify-content:space-between;
+  flex-shrink:0;
+}
+.panel-label {
+  font-size:10px; color:var(--fog); text-transform:uppercase;
+  letter-spacing:1px; display:flex; align-items:center; gap:6px;
+}
+.panel-count { font-size:10px; color:var(--mist); }
+.panel-body { flex:1; overflow-y:auto; }
+
+/* ── Search + Filter ─────────────────────────────────────────────────────────  */
+.srch-box { padding:10px 12px; border-bottom:1px solid var(--rim); }
+.srch {
+  width:100%; background:var(--ink); border:1px solid var(--rim2);
+  border-radius:var(--r); color:var(--text); font-family:inherit;
+  font-size:12px; padding:7px 12px; outline:none; direction:rtl;
+  transition:border-color .2s;
+}
+.srch:focus { border-color:var(--gold); }
+.srch::placeholder { color:var(--mist); }
+
+.cluster-bar {
+  padding:7px 12px; border-bottom:1px solid var(--rim);
+  display:flex; flex-wrap:wrap; gap:5px;
+}
+.cl-btn {
+  padding:3px 11px; border-radius:20px;
+  border:1px solid var(--rim2); background:transparent;
+  color:var(--fog); font-family:inherit; font-size:11px;
+  cursor:pointer; transition:all .18s;
+}
+.cl-btn:hover { border-color:var(--gold); color:var(--gold); }
+.cl-btn.on { background:var(--gold-glow); border-color:var(--gold)88; color:var(--gold); }
+
+/* ── Concept Row ─────────────────────────────────────────────────────────────  */
+.c-row {
+  display:flex; align-items:center; gap:9px;
+  padding:8px 12px; cursor:pointer;
+  border-bottom:1px solid var(--rim)33;
+  transition:background .15s; position:relative;
+}
+.c-row:last-child { border-bottom:none; }
+.c-row:hover { background:var(--ink3); }
+.c-row.sel { background:var(--gold-glow); }
+.c-row.sel::before {
+  content:''; position:absolute; right:0; top:0; bottom:0;
+  width:2px; background:var(--gold);
+}
+
+/* SVG ring */
+.ring-wrap { width:34px; height:34px; flex-shrink:0; }
+.ring-wrap svg { transform:rotate(-90deg); }
+.rg { fill:none; stroke:var(--rim2); stroke-width:3; }
+.rf { fill:none; stroke-width:3; stroke-linecap:round; transition:stroke-dashoffset .6s ease; }
+
+.c-info { flex:1; min-width:0; }
+.c-name { font-size:13px; font-weight:500; color:var(--bright); }
+.c-meta { font-size:10px; color:var(--fog); margin-top:2px; }
+.c-freq {
+  font-size:10px; background:var(--ink); border:1px solid var(--rim2);
+  color:var(--mist); padding:2px 7px; border-radius:10px; flex-shrink:0;
+}
+
+/* ── Right Panel Tabs ───────────────────────────────────────────────────────── */
+.r-tabs { display:flex; border-bottom:1px solid var(--rim); flex-shrink:0; }
+.r-tab {
+  padding:9px 18px; font-size:11px; cursor:pointer;
+  color:var(--fog); border-bottom:2px solid transparent;
+  transition:all .2s; flex:1; text-align:center;
+}
+.r-tab:hover:not(.on) { color:var(--soft); }
+.r-tab.on { color:var(--gold); border-bottom-color:var(--gold); background:var(--gold-glow); }
+
+.r-section { display:none; flex:1; overflow-y:auto; }
+.r-section.on { display:block; }
+
+/* ── Hero Banner ─────────────────────────────────────────────────────────────  */
+.hero {
+  display:none; align-items:center; gap:18px;
+  padding:18px 16px; border-bottom:1px solid var(--rim);
+  background:linear-gradient(135deg,var(--gold-glow),transparent 70%);
+  flex-shrink:0;
+}
+.hero.on { display:flex; }
+
+.hero-ring { width:72px; height:72px; flex-shrink:0; }
+.hero-ring svg { transform:rotate(-90deg); width:72px; height:72px; }
+
+.hero-name { font-size:26px; font-weight:700; color:var(--gold); letter-spacing:-.5px; }
+.hero-cl {
+  display:inline-block; font-size:11px; margin-top:5px;
+  background:var(--gold)20; border:1px solid var(--gold)44;
+  color:var(--gold); padding:2px 11px; border-radius:20px;
+}
+.hero-nums { display:flex; gap:18px; margin-top:9px; }
+.hero-num-item .lbl { font-size:10px; color:var(--fog); }
+.hero-num-item .val { font-size:18px; font-weight:700; color:var(--bright); display:block; }
+
+/* ── Path Finder ─────────────────────────────────────────────────────────────  */
+.path-bar {
+  display:flex; gap:8px; padding:10px 14px;
+  border-bottom:1px solid var(--rim); flex-shrink:0; flex-wrap:wrap;
+}
+.path-inp {
+  flex:1; min-width:80px;
+  background:var(--ink); border:1px solid var(--rim2);
+  border-radius:var(--r); color:var(--text);
+  font-family:inherit; font-size:12px; padding:6px 10px;
+  outline:none; direction:rtl; transition:border-color .2s;
+}
+.path-inp:focus { border-color:var(--sapphire); }
+.path-go {
+  background:var(--sapphire)22; border:1px solid var(--sapphire)55;
+  color:var(--sapphire); font-family:inherit; font-size:12px;
+  padding:6px 16px; border-radius:var(--r); cursor:pointer;
+  transition:all .2s;
+}
+.path-go:hover { background:var(--sapphire)44; }
+.path-out {
+  padding:8px 14px; border-bottom:1px solid var(--rim);
+  display:flex; flex-wrap:wrap; align-items:center; gap:5px;
+  flex-shrink:0; min-height:36px;
+}
+.path-node {
+  background:var(--gold)18; border:1px solid var(--gold)44;
+  color:var(--gold); padding:4px 13px; border-radius:20px;
+  font-size:12px; cursor:pointer; transition:all .15s;
+}
+.path-node:hover { background:var(--gold)33; }
+.path-arr { color:var(--mist); font-size:12px; }
+.path-hops { font-size:10px; color:var(--mist); }
+.path-none { font-size:11px; color:var(--mist); font-style:italic; }
+
+/* ── Relations ───────────────────────────────────────────────────────────────  */
+.rel-item {
+  display:flex; align-items:center; gap:9px;
+  padding:9px 14px; border-bottom:1px solid var(--rim)44;
+}
+.rel-item:last-child { border:none; }
+.rel-arrow { color:var(--mist); font-size:13px; flex-shrink:0; }
+.rel-name {
+  flex:1; font-size:13px; cursor:pointer; transition:color .15s;
+  font-weight:500;
+}
+.rel-name:hover { color:var(--gold); }
+.w-bar { width:75px; height:4px; background:var(--rim2); border-radius:2px; overflow:hidden; flex-shrink:0; }
+.w-fill { height:100%; border-radius:2px; transition:width .5s; }
+.w-val { font-size:10px; color:var(--fog); width:34px; text-align:left; flex-shrink:0; }
+.type-badge {
+  font-size:9px; padding:2px 7px; border-radius:4px; flex-shrink:0; letter-spacing:.3px;
+}
+.tb-co  { background:#1a1a08; color:var(--gold);    border:1px solid var(--gold)33; }
+.tb-sem { background:#081a1a; color:var(--teal);    border:1px solid var(--teal)33; }
+.tb-cau { background:#130d1a; color:var(--violet);  border:1px solid var(--violet)33; }
+
+/* ── Sources ─────────────────────────────────────────────────────────────────  */
+.src-tag {
+  display:inline-block; font-size:11px;
+  background:var(--ink); border:1px solid var(--rim2);
+  color:var(--fog); padding:3px 10px; border-radius:4px;
+  margin:3px 2px; direction:ltr;
+}
+
+/* ── Graph Canvas ────────────────────────────────────────────────────────────  */
+.canvas-wrap {
+  position:relative; overflow:hidden;
+  height:420px; background:var(--ink);
+}
+.canvas-wrap canvas { display:block; width:100%; height:100%; }
+.c-controls {
+  position:absolute; bottom:12px; left:12px;
+  display:flex; gap:6px;
+}
+.c-btn {
+  background:var(--ink3); border:1px solid var(--rim2);
+  color:var(--fog); width:28px; height:28px;
+  border-radius:var(--r); cursor:pointer; font-size:14px;
+  display:flex; align-items:center; justify-content:center;
+  transition:all .2s; user-select:none;
+}
+.c-btn:hover { border-color:var(--gold); color:var(--gold); }
+.canvas-hint {
+  position:absolute; top:10px; right:12px;
+  font-size:10px; color:var(--mist);
+}
+
+/* ── Bottom Row ──────────────────────────────────────────────────────────────  */
+.k-bottom {
+  display:grid; grid-template-columns:1fr 1fr;
+  gap:12px; padding:0 14px 14px;
+}
+@media(max-width:700px){ .k-bottom{ grid-template-columns:1fr; } }
+
+/* Cluster heatmap */
+.heat-grid {
+  display:grid; grid-template-columns:repeat(auto-fill,minmax(110px,1fr));
+  gap:8px; padding:12px;
+}
+.heat-cell {
+  border-radius:var(--r); padding:12px 10px;
+  text-align:center; cursor:pointer;
+  transition:all .22s; border:1px solid transparent;
+}
+.heat-cell:hover { transform:translateY(-2px); filter:brightness(1.15); }
+.hc-name { font-size:12px; font-weight:600; margin-bottom:5px; }
+.hc-count { font-size:22px; font-weight:700; }
+.hc-avg { font-size:9px; color:var(--mist); margin-top:3px; }
+
+/* Cross source */
+.x-item {
+  display:flex; align-items:center; gap:9px;
+  padding:9px 14px; border-bottom:1px solid var(--rim)44;
+  cursor:pointer; transition:background .15s;
+}
+.x-item:hover { background:var(--ink3); }
+.x-name { flex:1; font-size:13px; font-weight:500; }
+.x-dots { display:flex; gap:4px; }
+.x-dot {
+  width:22px; height:22px; border-radius:50%; font-size:9px;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--sapphire)20; border:1px solid var(--sapphire)44;
+  color:var(--sapphire);
+}
+
+/* ── Empty / Loading ─────────────────────────────────────────────────────────  */
+.empty {
+  display:flex; flex-direction:column; align-items:center;
+  justify-content:center; height:160px;
+  color:var(--mist); gap:8px; font-size:12px;
+}
+.empty-ico { font-size:30px; opacity:.25; }
+.loading {
+  display:flex; align-items:center; justify-content:center;
+  height:80px; gap:8px; color:var(--mist); font-size:11px;
+}
+.spin-r {
+  width:14px; height:14px; border-radius:50%;
+  border:2px solid var(--rim2); border-top-color:var(--gold);
+  animation:rotate .8s linear infinite;
+}
+@keyframes rotate { to { transform:rotate(360deg); } }
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────────  */
+::-webkit-scrollbar { width:5px; height:5px; }
+::-webkit-scrollbar-track { background:var(--ink); }
+::-webkit-scrollbar-thumb { background:var(--rim2); border-radius:3px; }
+::-webkit-scrollbar-thumb:hover { background:var(--mist); }
+
+/* ── Toast ───────────────────────────────────────────────────────────────────  */
+.toast {
+  position:fixed; bottom:20px; left:50%; transform:translateX(-50%) translateY(20px);
+  background:var(--ink3); border:1px solid var(--rim2);
+  border-radius:var(--r); padding:8px 22px;
+  font-size:12px; color:var(--text);
+  z-index:500; opacity:0; transition:all .3s; pointer-events:none;
+}
+.toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
 </style>
 </head>
 <body>
+
+<!-- ═══════════════════════════════ HEADER ══════════════════════════════════ -->
 <header>
-  <div class="status-dot" id="statusDot"></div>
-  <h1>⚡ Neural Service Mesh</h1>
-  <span class="version" id="versionBadge">v16.0.0</span>
-  <button class="refresh-btn" onclick="refresh()">↻ تحديث</button>
-  <span id="last-update">—</span>
+  <div class="logo">
+    <div class="pulse" id="hPulse"></div>
+    <span class="logo-title">Neural Service Mesh</span>
+    <span class="logo-badge" id="hVer">v16.0.0</span>
+  </div>
+
+  <nav class="nav">
+    <div class="nav-tab on" id="nt-sys"  onclick="gotoTab('sys')">
+      <span class="ico">⚡</span> النظام
+    </div>
+    <div class="nav-tab" id="nt-ckg" onclick="gotoTab('ckg')">
+      <span class="ico">🧠</span> المعرفة المعرفية
+    </div>
+  </nav>
+
+  <div class="hdr-right">
+    <button class="hdr-btn" id="refBtn" onclick="doRefresh()">
+      <span id="refIco">↻</span> تحديث
+    </button>
+    <span id="ts">—</span>
+  </div>
 </header>
 
-<div class="grid" id="grid">
-  <div class="card"><h2><span>🧬</span> حالة الكائن الرقمي</h2><div id="being"></div></div>
-  <div class="card"><h2><span>🧠</span> الشبكة العصبية</h2><div id="neural"></div></div>
-  <div class="card"><h2><span>💾</span> الذاكرة</h2><div id="memory"></div></div>
-  <div class="card"><h2><span>🌍</span> التغذية من العالم</h2><div id="world"></div></div>
-  <div class="card"><h2><span>🛡️</span> جهاز المناعة</h2><div id="immune"></div></div>
-  <div class="card"><h2><span>⭐</span> محرك الجودة</h2><div id="quality"></div></div>
-  <div class="card"><h2><span>🔥</span> الدوافع الداخلية</h2><div id="drives"></div></div>
-  <div class="card"><h2><span>⚖️</span> أخلاقيات التطور</h2><div id="ethics"></div></div>
-  <div class="card"><h2><span>🔄</span> التكاثر الذاتي</h2><div id="replication"></div></div>
-  <div class="card full-width"><h2><span>📖</span> يومية الكائن (آخر الأحداث)</h2><div class="diary" id="diary"></div></div>
+<!-- ═══════════════════════════════ TAB: SYSTEM ══════════════════════════════ -->
+<div class="page on" id="pg-sys">
+  <div class="sys-grid">
+    <div class="s-card"><div class="s-card-title"><span>🧬</span>الكائن الرقمي</div><div id="s-being"></div></div>
+    <div class="s-card"><div class="s-card-title"><span>🧠</span>الشبكة العصبية</div><div id="s-neural"></div></div>
+    <div class="s-card"><div class="s-card-title"><span>💾</span>الذاكرة</div><div id="s-mem"></div></div>
+    <div class="s-card"><div class="s-card-title"><span>🌍</span>التغذية</div><div id="s-feed"></div></div>
+    <div class="s-card"><div class="s-card-title"><span>🛡️</span>المناعة</div><div id="s-imm"></div></div>
+    <div class="s-card"><div class="s-card-title"><span>⭐</span>الجودة</div><div id="s-qual"></div></div>
+    <div class="s-card"><div class="s-card-title"><span>🔥</span>الدوافع</div><div id="s-drv"></div></div>
+    <div class="s-card"><div class="s-card-title"><span>⚖️</span>الأخلاقيات</div><div id="s-eth"></div></div>
+    <div class="s-card"><div class="s-card-title"><span>🔄</span>التكاثر</div><div id="s-rep"></div></div>
+    <div class="s-card fw"><div class="s-card-title"><span>📖</span>يومية الكائن</div><div class="log-box" id="s-log"></div></div>
+  </div>
 </div>
 
+<!-- ═══════════════════════════════ TAB: CKG ════════════════════════════════ -->
+<div class="page" id="pg-ckg">
+
+  <!-- KPI strip -->
+  <div class="kpi-row">
+    <div class="kpi gold"><div class="kpi-lbl">مفاهيم</div><div class="kpi-val" id="k-nc">—</div><div class="kpi-sub">في الجراف المعرفي</div></div>
+    <div class="kpi blue"><div class="kpi-lbl">علاقات</div><div class="kpi-val" id="k-nr">—</div><div class="kpi-sub">حافة موزونة</div></div>
+    <div class="kpi green"><div class="kpi-lbl">نمو ٢٤ ساعة</div><div class="kpi-val" id="k-gr">—</div><div class="kpi-sub">مفهوم مكتشف</div></div>
+    <div class="kpi viol"><div class="kpi-lbl">كثافة العلاقات</div><div class="kpi-val" id="k-dn">—</div><div class="kpi-sub">Relation Density</div></div>
+    <div class="kpi teal"><div class="kpi-lbl">عابر مصادر</div><div class="kpi-val" id="k-xs">—</div><div class="kpi-sub">Cross-Source</div></div>
+  </div>
+
+  <!-- Main two-panel -->
+  <div class="k-body">
+
+    <!-- LEFT: concept list -->
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-label">📋 المفاهيم</span>
+        <span class="panel-count" id="c-cnt">—</span>
+      </div>
+      <div class="srch-box">
+        <input class="srch" id="c-srch" placeholder="ابحث عن مفهوم…" oninput="renderList()">
+      </div>
+      <div class="cluster-bar" id="cl-bar">
+        <button class="cl-btn on" onclick="setCluster(null,this)">الكل</button>
+      </div>
+      <div class="panel-body" id="c-list">
+        <div class="loading"><div class="spin-r"></div> جارٍ التحميل…</div>
+      </div>
+    </div>
+
+    <!-- RIGHT: detail -->
+    <div class="panel" style="overflow:visible">
+
+      <!-- Hero -->
+      <div class="hero" id="hero">
+        <div class="hero-ring">
+          <svg viewBox="0 0 72 72">
+            <circle class="rg" cx="36" cy="36" r="30"/>
+            <circle class="rf" id="h-rf" cx="36" cy="36" r="30"
+              stroke="var(--gold)"
+              stroke-dasharray="188.5"
+              stroke-dashoffset="188.5"/>
+          </svg>
+        </div>
+        <div>
+          <div class="hero-name" id="h-name">—</div>
+          <div class="hero-cl" id="h-cl">—</div>
+          <div class="hero-nums">
+            <div class="hero-num-item"><span class="val" id="h-str">—</span><span class="lbl">قوة</span></div>
+            <div class="hero-num-item"><span class="val" id="h-fr">—</span><span class="lbl">ظهور</span></div>
+            <div class="hero-num-item"><span class="val" id="h-src">—</span><span class="lbl">مصدر</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Path finder -->
+      <div class="path-bar">
+        <input class="path-inp" id="p-from" placeholder="من: صبر">
+        <span style="color:var(--mist);line-height:32px">←</span>
+        <input class="path-inp" id="p-to" placeholder="إلى: آخرة">
+        <button class="path-go" onclick="findPath()">🔍 مسار</button>
+      </div>
+      <div class="path-out" id="p-out"></div>
+
+      <!-- Sub-tabs -->
+      <div class="r-tabs">
+        <div class="r-tab on"  onclick="rTab('rel',this)">العلاقات</div>
+        <div class="r-tab"     onclick="rTab('src',this)">المصادر</div>
+        <div class="r-tab"     onclick="rTab('gph',this)">الجراف</div>
+      </div>
+
+      <div class="r-section on" id="r-rel">
+        <div id="rel-body"><div class="empty"><div class="empty-ico">🔗</div>اختر مفهوماً</div></div>
+      </div>
+      <div class="r-section" id="r-src">
+        <div style="padding:14px" id="src-body"><div class="empty"><div class="empty-ico">📚</div>اختر مفهوماً</div></div>
+      </div>
+      <div class="r-section" id="r-gph" style="padding:0">
+        <div class="canvas-wrap">
+          <div class="canvas-hint">اسحب للتحريك • عجلة الماوس للتكبير</div>
+          <canvas id="g-cv"></canvas>
+          <div class="c-controls">
+            <button class="c-btn" onclick="gz(1.2)" title="تكبير">+</button>
+            <button class="c-btn" onclick="gz(.8)" title="تصغير">−</button>
+            <button class="c-btn" onclick="gReset()" title="إعادة">⟳</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom -->
+  <div class="k-bottom">
+    <div class="panel">
+      <div class="panel-head"><span class="panel-label">🌡️ خريطة المفاهيم الحرارية</span></div>
+      <div class="heat-grid" id="heat"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-label">🌐 عابر المصادر</span>
+        <span class="panel-count">مفاهيم في مصادر متعددة</span>
+      </div>
+      <div class="panel-body" id="xsrc">
+        <div class="loading"><div class="spin-r"></div></div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end pg-ckg -->
+
+<div class="toast" id="toast"></div>
+
 <script>
-const API = '';  // same origin
+'use strict';
+/* ══════════════════════════════════════════════════════════════════════════
+   STATE
+══════════════════════════════════════════════════════════════════════════ */
+const API = '';
+let tab      = 'sys';
+let concepts = [];
+let ckgStats = {};
+let relations= [];
+let selected = null;
+let selCluster = null;
+let graphScale = 1, gOX = 0, gOY = 0;
+let dragging = false, dragSt = {x:0,y:0};
+let physN = [], physE = [], animID = null, animOn = false;
+let raf  = null;
 
-function metric(label, value, color='', bar=null) {
-  let barHtml = '';
-  if (bar !== null) {
-    const pct = Math.min(Math.max(bar * 100, 0), 100).toFixed(1);
-    const cls = bar > 0.7 ? 'green' : bar > 0.4 ? 'blue' : 'yellow';
-    barHtml = `<div class="bar-wrap"><div class="bar ${cls}" style="width:${pct}%"></div></div>`;
-  }
-  return `<div class="metric">
-    <span class="label">${label}</span>
-    <span class="value ${color}">${value}</span>
-  </div>${barHtml}`;
+/* ══════════════════════════════════════════════════════════════════════════
+   CLUSTER COLORS
+══════════════════════════════════════════════════════════════════════════ */
+const CC = {
+  'توحيد': '#f0c040', 'عبادة': '#4a9eed', 'أخلاق': '#3ecf6e',
+  'إيمان': '#a07af8', 'آخرة':  '#f08830', 'نبوة':  '#2ed4c8',
+  'معرفة': '#79c0ff', 'مجتمع': '#f07098', 'كون':   '#56d364',
+  'هيكل':  '#5c7a94', 'غير مصنّف':'#5c7a94',
+};
+const cc = c => CC[c] || '#8b949e';
+
+function rgba(hex, a) {
+  const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${a})`;
 }
 
-function yn(v) { return v ? '<span class="value green">✓ نشط</span>' : '<span class="value red">✗ غير متاح</span>'; }
-
-async function fetchJSON(path) {
-  try {
-    const r = await fetch(API + path);
-    return await r.json();
-  } catch(e) { return null; }
+/* ══════════════════════════════════════════════════════════════════════════
+   ROUTING
+══════════════════════════════════════════════════════════════════════════ */
+function gotoTab(t) {
+  tab = t;
+  document.querySelectorAll('.page').forEach(el => el.classList.remove('on'));
+  document.querySelectorAll('.nav-tab').forEach(el => el.classList.remove('on'));
+  document.getElementById('pg-' + t).classList.add('on');
+  document.getElementById('nt-' + t).classList.add('on');
+  if (t === 'ckg') loadCKG();
 }
 
-async function refresh() {
-  document.getElementById('last-update').textContent = 'جاري التحديث...';
+function doRefresh() {
+  const ico = document.getElementById('refIco');
+  ico.style.display = 'inline-block';
+  ico.style.animation = 'rotate .7s linear';
+  setTimeout(() => { ico.style.animation = ''; }, 700);
+  if (tab === 'sys') refreshSystem();
+  else loadCKG();
+}
 
-  const [status, narrative] = await Promise.all([
-    fetchJSON('/api/status/full'),
-    fetchJSON('/api/narrative/log?n=15'),
+/* ══════════════════════════════════════════════════════════════════════════
+   API
+══════════════════════════════════════════════════════════════════════════ */
+async function api(path) {
+  try { const r = await fetch(API + path); return await r.json(); }
+  catch { return null; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   TOAST
+══════════════════════════════════════════════════════════════════════════ */
+function toast(msg, ms=2400) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), ms);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CKG LOAD
+══════════════════════════════════════════════════════════════════════════ */
+async function loadCKG() {
+  const [st, co, re] = await Promise.all([
+    api('/knowledge/stats'),
+    api('/knowledge/concepts'),
+    api('/knowledge/relations?top=300'),
   ]);
 
-  if (!status) {
-    document.getElementById('statusDot').style.background = '#f85149';
-    document.getElementById('last-update').textContent = 'تعذر الاتصال بالخادم';
-    return;
-  }
+  if (!st && !co) { renderEmpty(); return; }
 
-  document.getElementById('versionBadge').textContent = 'v' + (status.version || '16.0.0');
+  concepts  = co?.concepts  || [];
+  ckgStats  = st || {};
+  relations = re?.relations || [];
 
-  // Being
-  const b = status.digital_being || {};
-  const phase = b.phase || '—';
-  const phaseClass = 'phase-' + phase;
-  document.getElementById('being').innerHTML =
-    `<div class="metric"><span class="label">الطور الحالي</span><span class="phase-badge ${phaseClass}">${phase}</span></div>` +
-    metric('الحيوية', ((b.vitality||0)*100).toFixed(1)+'%', b.vitality>0.6?'green':'yellow', b.vitality) +
-    metric('دورات الحياة', b.lifecycle_count||0, 'blue') +
-    metric('عمليات التطور', b.total_evolutions||0, 'blue') +
-    metric('الأخلاقيات', yn(status.evolution_ethics?.enabled)) +
-    metric('اليومية', yn(status.self_narrative?.enabled));
-
-  // Neural
-  const n = status.deep_self_awareness || {};
-  const sig = status.signal_stream || {};
-  document.getElementById('neural').innerHTML =
-    metric('الإشارات المرسلة', sig.signals_sent||0, 'blue') +
-    metric('الشبكة العميقة', yn(status.deep_network?.deep_network_available)) +
-    metric('الثقة', ((n.confidence||0)*100).toFixed(1)+'%', 'green', n.confidence) +
-    metric('الأهداف النشطة', n.active_goals||0, 'blue') +
-    metric('إيقاع الإشارات', sig.is_running ? '<span class="value green">يعمل</span>' : '<span class="value red">متوقف</span>');
-
-  // Memory
-  const m = status.episodic_memory || {};
-  const mc = status.memory_consolidator || {};
-  document.getElementById('memory').innerHTML =
-    metric('الحلقات المسجلة', m.episode_count||0, 'blue') +
-    metric('القواعد الدلالية', m.semantic_rules||0, 'green') +
-    metric('قوانين مُدمجة', mc.total_laws||0, 'green') +
-    metric('الذاكرة العاملة', m.working_memory_size||0) +
-    metric('checkpoint', yn(status.brain_checkpoint?.enabled));
-
-  // World Feed
-  const wf = status.world_feed || {};
-  document.getElementById('world').innerHTML =
-    metric('المصادر', wf.sources_count||0, 'blue') +
-    metric('العناصر المُجلبة', wf.total_fetched||0, 'blue') +
-    metric('المقبولة', wf.total_accepted||0, 'green') +
-    metric('المرفوضة', wf.total_rejected||0, 'red') +
-    metric('الحالة', wf.is_running ? '<span class="value green">يعمل</span>' : yn(wf.enabled));
-
-  // Immune
-  const im = status.immune_system || {};
-  document.getElementById('immune').innerHTML =
-    metric('الأحداث الفحوصة', im.total_inspected||0, 'blue') +
-    metric('محظور', im.total_blocked||0, 'red') +
-    metric('في الحجر الصحي', im.quarantine_count||0, 'yellow') +
-    metric('مستوى التهديد', ((im.threat_level||0)*100).toFixed(0)+'%', im.threat_level>0.5?'red':'green', im.threat_level) +
-    metric('مصادر في القائمة السوداء', im.blacklisted_count||0, 'red');
-
-  // Quality
-  const q = status.quality_engine || {};
-  document.getElementById('quality').innerHTML =
-    metric('إجمالي مُقيَّم', q.total_evaluated||0, 'blue') +
-    metric('متوسط الجودة', (q.avg_quality||0).toFixed(1)+'/100', q.avg_quality>70?'green':'yellow') +
-    metric('مرفوض (جودة منخفضة)', q.total_rejected||0, 'red') +
-    metric('معدل القبول', (q.acceptance_rate||0).toFixed(1)+'%', 'green');
-
-  // Drives
-  const d = status.drive_engine || {};
-  const drives = d.drives || {};
-  let dhtml = '';
-  for (const [name, info] of Object.entries(drives).slice(0,5)) {
-    const intensity = info.intensity || 0;
-    const cls = intensity > 0.7 ? 'red' : intensity > 0.4 ? 'yellow' : 'green';
-    dhtml += `<div class="metric"><span class="label">${name}</span><span class="value ${cls}">${(intensity*100).toFixed(0)}%</span></div>`;
-    dhtml += `<div class="bar-wrap"><div class="bar ${cls}" style="width:${intensity*100}%"></div></div>`;
-  }
-  document.getElementById('drives').innerHTML = dhtml || metric('الحالة', yn(d.enabled));
-
-  // Ethics
-  const et = status.evolution_ethics || {};
-  document.getElementById('ethics').innerHTML =
-    metric('الحالة', yn(et.enabled)) +
-    metric('القواعد النشطة', et.active_rules||0, 'blue') +
-    metric('الفحوصات', et.total_checks||0) +
-    metric('المحظورة', et.total_blocked||0, 'red') +
-    metric('المنبهات', et.total_warnings||0, 'yellow');
-
-  // Replication
-  const rep = status.replication_engine || {};
-  document.getElementById('replication').innerHTML =
-    metric('الحالة', yn(rep.enabled)) +
-    metric('التحليلات', rep.total_analyses||0, 'blue') +
-    metric('أجيال تولَّدت', rep.total_children||0, 'blue') +
-    metric('مُرقَّى (ناجح)', rep.total_promoted||0, 'green') +
-    metric('محذوف (فاشل)', rep.total_killed||0, 'red');
-
-  // Diary
-  if (narrative && narrative.entries) {
-    const lines = narrative.entries.map(e => {
-      const cls = e.event_type === 'evolve' ? 'evolve' : e.event_type === 'ethics_block' ? 'ethics' : e.importance >= 0.8 ? 'high' : '';
-      const time = new Date(e.timestamp * 1000).toLocaleTimeString('ar');
-      return `<div class="diary-line ${cls}">[${time}] [${e.event_type}] ${JSON.stringify(e.data).slice(0,80)}</div>`;
-    });
-    document.getElementById('diary').innerHTML = lines.join('') || '<div class="diary-line">لا توجد أحداث بعد</div>';
-  }
-
-  document.getElementById('last-update').textContent = 'آخر تحديث: ' + new Date().toLocaleTimeString('ar');
-  document.getElementById('statusDot').style.background = '#3fb950';
+  renderKPI(st);
+  renderClusterBtns();
+  renderList();
+  renderHeat();
+  renderXsrc();
 }
 
-// Auto refresh every 5 seconds
-refresh();
-setInterval(refresh, 5000);
+function renderEmpty() {
+  document.getElementById('c-list').innerHTML =
+    `<div class="empty"><div class="empty-ico">🌱</div>
+     لم يتم بناء الجراف المعرفي بعد.<br>
+     شغّل <code>build_ckg_from_quran()</code> أولاً.</div>`;
+  ['k-nc','k-nr','k-gr','k-dn','k-xs'].forEach(id =>
+    document.getElementById(id).textContent = '0'
+  );
+}
+
+/* ── KPI ──────────────────────────────────────────────────────────────── */
+function renderKPI(st) {
+  if (!st) return;
+  set('k-nc', (st.total_concepts  || 0).toLocaleString('ar'));
+  set('k-nr', (st.total_relations || 0).toLocaleString('ar'));
+  set('k-gr', (st.concept_growth_24h || 0).toLocaleString('ar'));
+  set('k-dn', ((st.relation_density || 0)*100).toFixed(1)+'%');
+  set('k-xs', (st.cross_source_concepts?.length || 0).toLocaleString('ar'));
+}
+const set = (id, v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
+
+/* ── Cluster buttons ─────────────────────────────────────────────────── */
+function renderClusterBtns() {
+  const clusters = [...new Set(concepts.map(c=>c.cluster).filter(Boolean))];
+  const bar = document.getElementById('cl-bar');
+  bar.innerHTML = `<button class="cl-btn on" onclick="setCluster(null,this)">الكل</button>` +
+    clusters.map(cl =>
+      `<button class="cl-btn" onclick="setCluster('${cl}',this)"
+        style="border-color:${cc(cl)}22">${cl}</button>`
+    ).join('');
+}
+
+function setCluster(cl, btn) {
+  selCluster = cl;
+  document.querySelectorAll('.cl-btn').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  renderList();
+}
+
+/* ── Concept List ────────────────────────────────────────────────────── */
+function filteredConcepts() {
+  const q = document.getElementById('c-srch').value.trim();
+  let list = concepts;
+  if (selCluster) list = list.filter(c => c.cluster === selCluster);
+  if (q) list = list.filter(c => c.name.includes(q));
+  return list;
+}
+
+function renderList() {
+  const list = filteredConcepts();
+  set('c-cnt', list.length + ' مفهوم');
+  if (!list.length) {
+    document.getElementById('c-list').innerHTML =
+      `<div class="empty"><div class="empty-ico">🔍</div>لا نتائج</div>`;
+    return;
+  }
+  const CIRC = 2*Math.PI*14;
+  document.getElementById('c-list').innerHTML = list.map((c,i) => {
+    const off = CIRC*(1-c.strength);
+    const col = cc(c.cluster);
+    const isSel = selected?.name === c.name;
+    return `<div class="c-row${isSel?' sel':''}" onclick="pickConcept(${i})">
+      <div class="ring-wrap">
+        <svg viewBox="0 0 34 34" width="34" height="34">
+          <circle class="rg" cx="17" cy="17" r="14"/>
+          <circle class="rf" cx="17" cy="17" r="14"
+            stroke="${col}"
+            stroke-dasharray="${CIRC.toFixed(1)}"
+            stroke-dashoffset="${off.toFixed(1)}"/>
+        </svg>
+      </div>
+      <div class="c-info">
+        <div class="c-name">${c.name}</div>
+        <div class="c-meta" style="color:${col}">${c.cluster}</div>
+      </div>
+      <div class="c-freq">${c.frequency}</div>
+    </div>`;
+  }).join('');
+}
+
+/* ── Pick Concept ────────────────────────────────────────────────────── */
+async function pickConcept(idx) {
+  const list = filteredConcepts();
+  if (!list[idx]) return;
+  selected = list[idx];
+  renderList();
+  renderHero(selected);
+  document.getElementById('p-from').value = selected.name;
+  const data = await api(`/knowledge/query?concept=${encodeURIComponent(selected.name)}&top=20`);
+  if (data?.related) {
+    renderRelations(data.related, selected.name);
+    renderSources(selected);
+    buildGraph(selected.name, data.related);
+  }
+}
+
+function jumpTo(name) {
+  const idx = concepts.findIndex(c => c.name === name);
+  if (idx < 0) return;
+  selCluster = null;
+  document.getElementById('c-srch').value = '';
+  renderClusterBtns();
+  renderList();
+  pickConcept(concepts.indexOf(concepts.find(c=>c.name===name)));
+}
+
+/* ── Hero ────────────────────────────────────────────────────────────── */
+function renderHero(c) {
+  const CIRC = 2*Math.PI*30;
+  const off  = CIRC*(1-c.strength);
+  const col  = cc(c.cluster);
+  document.getElementById('hero').classList.add('on');
+  set('h-name', c.name);
+  document.getElementById('h-cl').textContent = c.cluster;
+  document.getElementById('h-cl').style.color = col;
+  document.getElementById('h-cl').style.background = rgba(col,.12);
+  document.getElementById('h-cl').style.borderColor = rgba(col,.35);
+  set('h-str', (c.strength*100).toFixed(0)+'%');
+  set('h-fr',  c.frequency);
+  set('h-src', (c.sources||[]).length);
+  const rf = document.getElementById('h-rf');
+  rf.style.strokeDasharray  = CIRC.toFixed(1);
+  rf.style.strokeDashoffset = off.toFixed(1);
+  rf.style.stroke = col;
+}
+
+/* ── Relations ───────────────────────────────────────────────────────── */
+function renderRelations(related, from) {
+  if (!related.length) {
+    document.getElementById('rel-body').innerHTML =
+      `<div class="empty"><div class="empty-ico">🔗</div>لا علاقات</div>`;
+    return;
+  }
+  const maxW = Math.max(...related.map(r=>r.weight), .001);
+  document.getElementById('rel-body').innerHTML = related.map(r => {
+    const rel = relations.find(x=>x.source===from&&x.target===r.concept)||{};
+    const rt  = rel.relation_type||'co_occurrence';
+    const rtAr= {co_occurrence:'تزامن',semantic:'دلالي',causal:'سببي'}[rt]||rt;
+    const tbCl= {co_occurrence:'tb-co',semantic:'tb-sem',causal:'tb-cau'}[rt]||'tb-co';
+    const col = cc((concepts.find(c=>c.name===r.concept)||{}).cluster||'');
+    return `<div class="rel-item">
+      <span class="rel-arrow">←</span>
+      <span class="rel-name" style="color:${col}" onclick="jumpTo('${r.concept}')">${r.concept}</span>
+      <div class="w-bar"><div class="w-fill" style="width:${(r.weight/maxW*100).toFixed(0)}%;background:${col}"></div></div>
+      <span class="w-val">${r.weight.toFixed(3)}</span>
+      <span class="type-badge ${tbCl}">${rtAr}</span>
+    </div>`;
+  }).join('');
+}
+
+/* ── Sources ─────────────────────────────────────────────────────────── */
+function renderSources(c) {
+  const srcs = c.sources||[];
+  document.getElementById('src-body').innerHTML = srcs.length
+    ? `<p style="font-size:11px;color:var(--fog);margin-bottom:10px">ظهر هذا المفهوم في ${srcs.length} موضع:</p>`
+      + srcs.map(s=>`<span class="src-tag">${s}</span>`).join('')
+    : `<div class="empty"><div class="empty-ico">📚</div>لا مصادر</div>`;
+}
+
+/* ── Path Finder ─────────────────────────────────────────────────────── */
+async function findPath() {
+  const from = document.getElementById('p-from').value.trim();
+  const to   = document.getElementById('p-to').value.trim();
+  if (!from||!to) { toast('أدخل المفهومين'); return; }
+  const data = await api(`/knowledge/path?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+  const out  = document.getElementById('p-out');
+  if (!data) { out.innerHTML=`<span class="path-none">تعذّر الاتصال</span>`; return; }
+  if (!data.found) { out.innerHTML=`<span class="path-none">لا مسار بين "${from}" و "${to}"</span>`; return; }
+  out.innerHTML = data.path.map(n=>`<span class="path-node" onclick="jumpTo('${n}')">${n}</span>`)
+    .join('<span class="path-arr"> ← </span>') +
+    `<span class="path-hops">(${data.hops} خطوة)</span>`;
+}
+
+/* ── Sub-tabs ────────────────────────────────────────────────────────── */
+function rTab(id, btn) {
+  document.querySelectorAll('.r-tab').forEach(b=>b.classList.remove('on'));
+  document.querySelectorAll('.r-section').forEach(s=>s.classList.remove('on'));
+  btn.classList.add('on');
+  document.getElementById('r-'+id).classList.add('on');
+  if (id==='gph' && selected) drawGraph();
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   FORCE-DIRECTED GRAPH
+══════════════════════════════════════════════════════════════════════════ */
+function buildGraph(center, related) {
+  const cv = document.getElementById('g-cv');
+  const pw = cv.parentElement;
+  cv.width  = pw.clientWidth  || 600;
+  cv.height = pw.clientHeight || 420;
+  const cx=cv.width/2, cy=cv.height/2;
+
+  physN = []; physE = [];
+  physN.push({
+    id:center, label:center, x:cx, y:cy, vx:0, vy:0,
+    r:24, col:cc(selected?.cluster||''), fixed:true,
+  });
+
+  const step = 2*Math.PI / Math.max(related.length,1);
+  related.forEach((r,i) => {
+    const angle = i*step - Math.PI/2;
+    const dist  = 140 + (1-r.weight)*60;
+    const c = concepts.find(c=>c.name===r.concept)||{};
+    physN.push({
+      id:r.concept, label:r.concept,
+      x: cx + Math.cos(angle)*dist,
+      y: cy + Math.sin(angle)*dist,
+      vx:0, vy:0,
+      r: 11 + r.weight*12,
+      col: cc(c.cluster||''),
+      fixed:false, w:r.weight,
+    });
+    physE.push({ s:center, t:r.concept, w:r.weight });
+  });
+
+  graphScale=1; gOX=0; gOY=0;
+  if(raf) cancelAnimationFrame(raf);
+  animOn=true;
+  runSim();
+}
+
+function runSim() {
+  const REPEL=3200, SPRING=.045, DAMPING=.84, DT=.65;
+  let step=0;
+  const nMap = () => Object.fromEntries(physN.map(n=>[n.id,n]));
+
+  function tick() {
+    if(step++ > 90) { animOn=false; return; }
+
+    // Repulsion
+    for(let i=0;i<physN.length;i++) {
+      for(let j=i+1;j<physN.length;j++) {
+        const a=physN[i], b=physN[j];
+        const dx=b.x-a.x, dy=b.y-a.y;
+        const d2=Math.max(dx*dx+dy*dy,1);
+        const f=REPEL/d2, d=Math.sqrt(d2);
+        const nx=dx/d, ny=dy/d;
+        if(!a.fixed){a.vx-=nx*f;a.vy-=ny*f;}
+        if(!b.fixed){b.vx+=nx*f;b.vy+=ny*f;}
+      }
+    }
+
+    // Spring
+    const nm = nMap();
+    physE.forEach(e => {
+      const a=nm[e.s], b=nm[e.t]; if(!a||!b) return;
+      const dx=b.x-a.x, dy=b.y-a.y;
+      const d=Math.sqrt(dx*dx+dy*dy)||1;
+      const tgt=110+(1-e.w)*70;
+      const f=(d-tgt)*SPRING;
+      const nx=dx/d, ny=dy/d;
+      if(!a.fixed){a.vx+=nx*f;a.vy+=ny*f;}
+      if(!b.fixed){b.vx-=nx*f;b.vy-=ny*f;}
+    });
+
+    physN.forEach(n => {
+      if(n.fixed)return;
+      n.vx*=DAMPING; n.vy*=DAMPING;
+      n.x+=n.vx*DT; n.y+=n.vy*DT;
+    });
+
+    drawGraph();
+    raf=requestAnimationFrame(tick);
+  }
+  tick();
+}
+
+function drawGraph() {
+  const cv  = document.getElementById('g-cv');
+  if(!cv) return;
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.save();
+  ctx.translate(gOX,gOY);
+  ctx.scale(graphScale,graphScale);
+
+  const nm = Object.fromEntries(physN.map(n=>[n.id,n]));
+
+  // edges
+  physE.forEach(e => {
+    const a=nm[e.s], b=nm[e.t]; if(!a||!b)return;
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y);
+    ctx.strokeStyle=`rgba(240,192,64,${(.12+e.w*.55).toFixed(2)})`;
+    ctx.lineWidth=.8+e.w*2.2;
+    ctx.stroke();
+    // weight label
+    if(e.w>.25){
+      ctx.font='9px monospace'; ctx.fillStyle='rgba(92,122,148,.8)';
+      ctx.textAlign='center';
+      ctx.fillText(e.w.toFixed(2),(a.x+b.x)/2,(a.y+b.y)/2-5);
+    }
+  });
+
+  // nodes
+  physN.forEach(n => {
+    // glow
+    const grd=ctx.createRadialGradient(n.x,n.y,0,n.x,n.y,n.r*2.2);
+    grd.addColorStop(0,rgba(n.col,.3));
+    grd.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.beginPath(); ctx.arc(n.x,n.y,n.r*2.2,0,Math.PI*2);
+    ctx.fillStyle=grd; ctx.fill();
+
+    // circle
+    ctx.beginPath(); ctx.arc(n.x,n.y,n.r,0,Math.PI*2);
+    ctx.fillStyle=n.fixed?rgba(n.col,.18):'#0c1220';
+    ctx.fill();
+    ctx.strokeStyle=n.col;
+    ctx.lineWidth=n.fixed?3:1.8;
+    ctx.stroke();
+
+    // label
+    ctx.fillStyle=n.fixed?n.col:'#cddaea';
+    ctx.font=`${n.fixed?'700 ':''}${n.fixed?13:11}px monospace`;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    const lbl=n.label.length>8?n.label.slice(0,7)+'…':n.label;
+    ctx.fillText(lbl,n.x,n.y);
+  });
+
+  ctx.restore();
+}
+
+function gz(f){ graphScale=Math.max(.25,Math.min(4,graphScale*f)); drawGraph(); }
+function gReset(){ graphScale=1;gOX=0;gOY=0; drawGraph(); }
+
+// canvas drag + wheel
+document.addEventListener('DOMContentLoaded',()=>{
+  const cv=document.getElementById('g-cv');
+  if(!cv)return;
+  cv.addEventListener('mousedown',e=>{
+    dragging=true;
+    dragSt={x:e.clientX-gOX,y:e.clientY-gOY};
+  });
+  cv.addEventListener('mousemove',e=>{
+    if(!dragging)return;
+    gOX=e.clientX-dragSt.x; gOY=e.clientY-dragSt.y;
+    drawGraph();
+  });
+  document.addEventListener('mouseup',()=>{dragging=false;});
+  cv.addEventListener('wheel',e=>{
+    e.preventDefault(); gz(e.deltaY<0?1.1:.9);
+  },{passive:false});
+  // touch
+  let lastTouchDist=0;
+  cv.addEventListener('touchstart',e=>{
+    if(e.touches.length===1){
+      dragging=true;
+      dragSt={x:e.touches[0].clientX-gOX,y:e.touches[0].clientY-gOY};
+    } else if(e.touches.length===2){
+      const dx=e.touches[0].clientX-e.touches[1].clientX;
+      const dy=e.touches[0].clientY-e.touches[1].clientY;
+      lastTouchDist=Math.sqrt(dx*dx+dy*dy);
+    }
+  },{passive:true});
+  cv.addEventListener('touchmove',e=>{
+    if(e.touches.length===1&&dragging){
+      gOX=e.touches[0].clientX-dragSt.x;
+      gOY=e.touches[0].clientY-dragSt.y;
+      drawGraph();
+    } else if(e.touches.length===2){
+      const dx=e.touches[0].clientX-e.touches[1].clientX;
+      const dy=e.touches[0].clientY-e.touches[1].clientY;
+      const d=Math.sqrt(dx*dx+dy*dy);
+      gz(d/lastTouchDist); lastTouchDist=d;
+    }
+  },{passive:true});
+  cv.addEventListener('touchend',()=>{dragging=false;});
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   HEATMAP
+══════════════════════════════════════════════════════════════════════════ */
+function renderHeat() {
+  const summary = ckgStats.cluster_summary||{};
+  const el = document.getElementById('heat');
+  if(!Object.keys(summary).length){
+    el.innerHTML=`<div class="empty" style="grid-column:1/-1"><div class="empty-ico">🌡️</div>لا بيانات</div>`;
+    return;
+  }
+  const maxC = Math.max(...Object.values(summary).map(s=>s.count),1);
+  el.innerHTML = Object.entries(summary).map(([cl,s])=>{
+    const col = cc(cl);
+    const intensity = s.count/maxC;
+    return `<div class="heat-cell" style="background:${rgba(col,.07+intensity*.22)};border-color:${rgba(col,.28)}"
+              onclick="filterByCl('${cl}')">
+      <div class="hc-name" style="color:${col}">${cl}</div>
+      <div class="hc-count" style="color:${col}">${s.count}</div>
+      <div class="hc-avg">قوة ${(s.avg_strength*100).toFixed(0)}%</div>
+    </div>`;
+  }).join('');
+}
+
+function filterByCl(cl) {
+  selCluster=cl;
+  document.querySelectorAll('.cl-btn').forEach(b=>{
+    b.classList.toggle('on', b.textContent.trim()===cl);
+  });
+  renderList();
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CROSS SOURCE
+══════════════════════════════════════════════════════════════════════════ */
+function renderXsrc() {
+  const list = ckgStats.cross_source_concepts||[];
+  const el = document.getElementById('xsrc');
+  if(!list.length){
+    el.innerHTML=`<div class="empty"><div class="empty-ico">🌐</div>لا توجد مفاهيم عابرة بعد</div>`;
+    return;
+  }
+  el.innerHTML = list.slice(0,15).map(c => {
+    const dots = (c.sources||[]).slice(0,5).map(s=>
+      `<div class="x-dot" title="${s}">${s.charAt(0).toUpperCase()}</div>`
+    ).join('');
+    return `<div class="x-item" onclick="jumpTo('${c.name}')">
+      <span class="x-name" style="color:${cc(c.cluster)}">${c.name}</span>
+      <div class="x-dots">${dots}</div>
+    </div>`;
+  }).join('');
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SYSTEM TAB
+══════════════════════════════════════════════════════════════════════════ */
+function m(k,v,cls='',bar=null) {
+  const bHtml = bar!==null
+    ? `<div class="bw"><div class="bf ${bar>.7?'g':bar>.4?'b':'y'}" style="width:${Math.min(bar*100,100).toFixed(1)}%"></div></div>`
+    : '';
+  return `<div class="row"><span class="k">${k}</span><span class="v ${cls}">${v}</span></div>${bHtml}`;
+}
+const yn = v => v ? '<span class="v g">✓</span>' : '<span class="v" style="color:var(--mist)">✗</span>';
+
+async function refreshSystem() {
+  const [st,nar] = await Promise.all([
+    api('/api/status/full'),
+    api('/api/narrative/log?n=15'),
+  ]);
+  const dot = document.getElementById('hPulse');
+  if(!st){
+    dot.style.background='var(--crimson)';
+    dot.style.boxShadow='0 0 10px var(--crimson)';
+    document.getElementById('ts').textContent='تعذّر الاتصال';
+    return;
+  }
+  dot.style.background='var(--emerald)'; dot.style.boxShadow='0 0 10px var(--emerald)';
+  set('hVer','v'+(st.version||'16.0.0'));
+
+  const b=st.digital_being||{}, ph=b.phase||'—';
+  document.getElementById('s-being').innerHTML=
+    `<div class="row"><span class="k">الطور</span><span class="ph ph-${ph}">${ph}</span></div>`+
+    m('الحيوية',((b.vitality||0)*100).toFixed(1)+'%',b.vitality>.6?'g':'y',b.vitality)+
+    m('دورات',b.lifecycle_count||0,'b')+
+    m('تطورات',b.total_evolutions||0,'b');
+
+  const n=st.deep_self_awareness||{}, sig=st.signal_stream||{};
+  document.getElementById('s-neural').innerHTML=
+    m('إشارات',sig.signals_sent||0,'b')+
+    m('شبكة عميقة',yn(st.deep_network?.deep_network_available))+
+    m('ثقة',((n.confidence||0)*100).toFixed(1)+'%','g',n.confidence)+
+    m('أهداف',n.active_goals||0,'b');
+
+  const mem=st.episodic_memory||{};
+  document.getElementById('s-mem').innerHTML=
+    m('حلقات',mem.episode_count||0,'b')+
+    m('قواعد',mem.semantic_rules||0,'g')+
+    m('عاملة',mem.working_memory_size||0);
+
+  const wf=st.world_feed||{};
+  document.getElementById('s-feed').innerHTML=
+    m('مصادر',wf.sources_count||0,'b')+
+    m('مُجلَب',wf.total_fetched||0,'b')+
+    m('مقبول',wf.total_accepted||0,'g')+
+    m('مرفوض',wf.total_rejected||0,'r');
+
+  const im=st.immune_system||{};
+  document.getElementById('s-imm').innerHTML=
+    m('مفحوص',im.total_inspected||0,'b')+
+    m('محظور',im.total_blocked||0,'r')+
+    m('التهديد',((im.threat_level||0)*100).toFixed(0)+'%',im.threat_level>.5?'r':'g',im.threat_level);
+
+  const q=st.quality_engine||{};
+  document.getElementById('s-qual').innerHTML=
+    m('إجمالي',q.total_evaluated||0,'b')+
+    m('متوسط',`${(q.avg_quality||0).toFixed(1)}/100`,q.avg_quality>70?'g':'y')+
+    m('معدل قبول',(q.acceptance_rate||0).toFixed(1)+'%','g');
+
+  const d=st.drive_engine||{};
+  let dh='';
+  for(const [k,v] of Object.entries(d.drives||{}).slice(0,5)){
+    const i=v.intensity||0; const c=i>.7?'r':i>.4?'y':'g';
+    dh+=`<div class="row"><span class="k">${k}</span><span class="v ${c}">${(i*100).toFixed(0)}%</span></div>
+         <div class="bw"><div class="bf ${c}" style="width:${i*100}%"></div></div>`;
+  }
+  document.getElementById('s-drv').innerHTML=dh||m('الحالة',yn(d.enabled));
+
+  const et=st.evolution_ethics||{};
+  document.getElementById('s-eth').innerHTML=
+    m('الحالة',yn(et.enabled))+
+    m('قواعد',et.active_rules||0,'b')+
+    m('محظور',et.total_blocked||0,'r');
+
+  const rp=st.replication_engine||{};
+  document.getElementById('s-rep').innerHTML=
+    m('الحالة',yn(rp.enabled))+
+    m('أجيال',rp.total_children||0,'b')+
+    m('مُرقَّى',rp.total_promoted||0,'g');
+
+  if(nar?.entries){
+    document.getElementById('s-log').innerHTML=nar.entries.map(e=>{
+      const c=e.event_type==='evolve'?'ev':e.event_type==='ethics_block'?'et':e.importance>=.8?'hi':'';
+      const t=new Date(e.timestamp*1000).toLocaleTimeString('ar');
+      return `<div class="log-ln ${c}">[${t}] [${e.event_type}] ${JSON.stringify(e.data).slice(0,80)}</div>`;
+    }).join('')||'<div class="log-ln">لا أحداث</div>';
+  }
+
+  document.getElementById('ts').textContent='آخر تحديث: '+new Date().toLocaleTimeString('ar');
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   BOOT
+══════════════════════════════════════════════════════════════════════════ */
+refreshSystem();
+setInterval(()=>{ if(tab==='sys')  refreshSystem(); },5000);
+setInterval(()=>{ if(tab==='ckg') loadCKG();       },15000);
 </script>
 </body>
 </html>
