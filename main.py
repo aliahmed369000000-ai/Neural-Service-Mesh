@@ -2046,6 +2046,10 @@ if __name__ == "__main__":
         meta, feeder = create_quran_source()  # no limit — all 6236 ayahs
         sm.register_source(meta, feeder)
 
+        # Clear stale fingerprints so a full re-sync is never blocked by
+        # duplicates left over from a previous partial run.
+        sm._validator.clear_hashes()
+
         target = args.source_id if hasattr(args, "source_id") and args.source_id else meta.id
         print(f"\n  Syncing source: {target}")
         result = sm.sync_source(target)
