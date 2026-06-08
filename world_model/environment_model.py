@@ -40,6 +40,8 @@ _DEFAULT_STATE: Dict[str, Any] = {
     "known_capabilities": [],   # list of capability strings
     "known_failures": {},       # failure_key → {count, last_seen, pattern, severity}
     "sensor_alerts": [],        # recent critical/error sensor events (last 200)
+    "known_concepts": {},       # concept_name → {cluster, strength, frequency}
+    "concept_relations": [],    # [{source, target, weight, type}] top-100
     "system_metrics": {         # aggregate health metrics
         "total_services": 0,
         "healthy_services": 0,
@@ -243,10 +245,50 @@ class EnvironmentModel:
         with self._lock:
             return list(self._state["sensor_alerts"])[-limit:]
 
+    # ── CKG Integration ────────────────────────────────────────────────────
+
+    def update_from_ckg(self, ckg) -> None:
+        """
+        تغذية الـ World Model من CKG بعد كل تحديث.
+        يُستدعى تلقائياً بعد كل دورة ingestion.
+        """
+        try:
+            stats = ckg.stats()
+            top_relations = sorted(
+                ckg.all_relations(),
+                key=lambda r: r["weight"],
+                reverse=True,
+            )[:100]
+
+            # مفاهيم مضغوطة (بدون sources الطويلة)
+            concepts_compact = {
+                name: {
+                    "cluster":   c["cluster"],
+                    "strength":  c["strength"],
+                    "frequency": c["frequency"],
+                }
+                for name, c in {c["name"]: c for c in ckg.all_concepts()}.items()
+            }
+
+            with self._lock:
+                self._state["known_concepts"]    = concepts_compact
+                self._state["concept_relations"] = top_relations
+                self._update_metrics()
+                self._save()
+
+            logger.info(
+                f"[EnvironmentModel] CKG sync: "
+                f"{len(concepts_compact)} concepts, {len(top_relations)} relations"
+            )
+        except Exception as exc:
+            logger.error(f"[EnvironmentModel] update_from_ckg error: {exc}")
+
     def summary(self) -> dict:
         with self._lock:
             return {
                 "world_model_path": str(self._path),
                 **self._state["system_metrics"],
                 "recent_alerts": len(self._state["sensor_alerts"]),
+                "known_concepts": len(self._state.get("known_concepts", {})),
+                "concept_relations": len(self._state.get("concept_relations", [])),
             }
