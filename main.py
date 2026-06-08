@@ -2041,6 +2041,7 @@ if __name__ == "__main__":
         sm   = SourceManager(min_quality_threshold=30.0)
         sm.set_knowledge_store(mesh.knowledge)
         sm.set_environment_model(mesh.env_model)
+        sm.set_semantic_matcher(mesh.semantic)
 
         meta, feeder = create_quran_source(max_items=50)
         sm.register_source(meta, feeder)
