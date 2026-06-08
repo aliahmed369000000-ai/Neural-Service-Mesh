@@ -1133,3 +1133,194 @@ def create_app(mesh):
     app = _create_app_v15(mesh)
     _add_v16_routes(app, mesh)
     return app
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Knowledge Sources Layer API  (Knowledge Layer — Phase KS)
+# Endpoints: /sources/*
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _add_knowledge_sources_routes(app, mesh):
+    """
+    Register all /sources/* endpoints.
+
+    These are the public API for the Knowledge Sources Layer.
+    The SourceManager is lazily created per-app and shared via app config.
+    """
+    from knowledge_sources import SourceManager, SourceMetadata
+    from knowledge_sources import SourceType, UpdateFrequency, AccessMode
+    from knowledge_sources.quran.quran_source import create_quran_source
+
+    # ── Initialise SourceManager ─────────────────────────────────────────
+    sm = SourceManager(min_quality_threshold=30.0)
+    sm.set_knowledge_store(getattr(mesh, "knowledge", None))
+    sm.set_environment_model(getattr(mesh, "env_model", None))
+
+    # Register Quran as the first official source
+    quran_meta, quran_feeder = create_quran_source()
+    sm.register_source(quran_meta, quran_feeder)
+
+    app.config["source_manager"] = sm
+
+    # ── GET /sources/list ─────────────────────────────────────────────────
+    @app.route("/sources/list", methods=["GET"])
+    def sources_list():
+        """List all registered knowledge sources with metadata."""
+        return jsonify({
+            "sources": sm.list_sources(),
+            "total":   len(sm.list_sources()),
+            "summary": sm.summary(),
+        })
+
+    # ── POST /sources/register ────────────────────────────────────────────
+    @app.route("/sources/register", methods=["POST"])
+    def sources_register():
+        """
+        Register a new knowledge source.
+
+        Body (JSON):
+          {
+            "name":             "My Source",
+            "source_type":      "encyclopedia",
+            "trust_score":      0.7,
+            "update_frequency": "daily",
+            "description":      "...",
+            "language":         "en",
+            "tags":             ["tag1", "tag2"],
+            "config":           {}
+          }
+        """
+        try:
+            data = request.get_json(force=True) or {}
+            meta = SourceMetadata(
+                name             = data.get("name", "Unnamed Source"),
+                description      = data.get("description", ""),
+                source_type      = SourceType(data.get("source_type", "custom")),
+                access_mode      = AccessMode(data.get("access_mode", "read_only")),
+                trust_score      = float(data.get("trust_score", 0.5)),
+                base_trust       = float(data.get("trust_score", 0.5)),
+                update_frequency = UpdateFrequency(data.get("update_frequency", "on_demand")),
+                language         = data.get("language", "en"),
+                tags             = data.get("tags", []),
+                config           = data.get("config", {}),
+                allow_raw_modification = False,  # always enforced
+            )
+            registered = sm.register_source(meta, feeder=None)
+            return jsonify({"registered": True, "source": registered.to_dict()}), 201
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 400
+
+    # ── POST /sources/sync ────────────────────────────────────────────────
+    @app.route("/sources/sync", methods=["POST"])
+    def sources_sync():
+        """
+        Trigger a sync for one or all sources.
+
+        Body (JSON):
+          { "source_id": "<id>" }   — sync one source
+          {}                         — sync all active sources
+        """
+        try:
+            data      = request.get_json(force=True) or {}
+            source_id = data.get("source_id")
+            async_mode = data.get("async", False)
+
+            if source_id:
+                if async_mode:
+                    sm.sync_source_async(source_id)
+                    return jsonify({"status": "started", "source_id": source_id})
+                result = sm.sync_source(source_id)
+                return jsonify({"result": result.to_dict()})
+            else:
+                results = sm.sync_all(async_mode=async_mode)
+                if async_mode:
+                    return jsonify({"status": "started_all"})
+                return jsonify({
+                    "results": [r.to_dict() for r in results],
+                    "total": len(results),
+                })
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 400
+
+    # ── GET /sources/status ───────────────────────────────────────────────
+    @app.route("/sources/status", methods=["GET"])
+    def sources_status():
+        """
+        Status of one or all sources.
+
+        Query params:
+          ?source_id=<id>   — status of one source
+          (none)            — status of all + sync history
+        """
+        source_id = request.args.get("source_id")
+        if source_id:
+            status = sm.source_status(source_id)
+            if not status:
+                return jsonify({"error": "Source not found"}), 404
+            return jsonify(status)
+        return jsonify({
+            "sources":      sm.list_sources(),
+            "sync_history": sm.all_sync_history(),
+            "summary":      sm.summary(),
+        })
+
+    # ── GET /sources/quality ──────────────────────────────────────────────
+    @app.route("/sources/quality", methods=["GET"])
+    def sources_quality():
+        """
+        Quality scoring summary for all sources.
+        Returns scorer stats and per-source avg quality scores.
+        """
+        scorer_summary = sm._scorer.summary()
+        per_source = [
+            {
+                "id":          s["id"],
+                "name":        s["name"],
+                "avg_quality": s.get("avg_quality_score", 0.0),
+                "trust_score": s["trust_score"],
+                "total_ingested": s.get("total_items_ingested", 0),
+                "total_rejected": s.get("total_items_rejected", 0),
+            }
+            for s in sm.list_sources()
+        ]
+        return jsonify({
+            "scorer":     scorer_summary,
+            "per_source": per_source,
+        })
+
+    # ── POST /sources/pause ───────────────────────────────────────────────
+    @app.route("/sources/pause", methods=["POST"])
+    def sources_pause():
+        data = request.get_json(force=True) or {}
+        sid  = data.get("source_id")
+        if not sid:
+            return jsonify({"error": "source_id required"}), 400
+        ok = sm.pause_source(sid)
+        return jsonify({"paused": ok, "source_id": sid})
+
+    # ── POST /sources/resume ──────────────────────────────────────────────
+    @app.route("/sources/resume", methods=["POST"])
+    def sources_resume():
+        data = request.get_json(force=True) or {}
+        sid  = data.get("source_id")
+        if not sid:
+            return jsonify({"error": "source_id required"}), 400
+        ok = sm.resume_source(sid)
+        return jsonify({"resumed": ok, "source_id": sid})
+
+    # ── GET /health/ks ────────────────────────────────────────────────────
+    @app.route("/health/ks", methods=["GET"])
+    def health_ks():
+        return jsonify({
+            "status":  "ok",
+            "layer":   "knowledge_sources",
+            "version": "1.0.0",
+            "sources": sm.summary()["registry"]["total_sources"],
+        })
+
+
+_create_app_v16 = create_app
+def create_app(mesh):
+    app = _create_app_v16(mesh)
+    _add_knowledge_sources_routes(app, mesh)
+    return app
