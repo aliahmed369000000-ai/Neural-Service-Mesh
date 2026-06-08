@@ -1,0 +1,228 @@
+{
+  "_meta": {
+    "schema_version": "1.0.0",
+    "saved_at": "2026-06-08T23:38:08.462900+00:00",
+    "total_concepts": 6,
+    "total_relations": 12,
+    "description": "Cognitive Knowledge Graph — Neural Service Mesh"
+  },
+  "concepts": {
+    "أسماء الله": {
+      "name": "أسماء الله",
+      "cluster": "توحيد",
+      "sources": [
+        "1:1",
+        "1:3"
+      ],
+      "frequency": 2,
+      "strength": 0.6826,
+      "first_seen": "2026-06-08T23:38:08.462342+00:00",
+      "last_seen": "2026-06-08T23:38:08.462539+00:00"
+    },
+    "الله": {
+      "name": "الله",
+      "cluster": "توحيد",
+      "sources": [
+        "1:1",
+        "1:2",
+        "112:1",
+        "112:2"
+      ],
+      "frequency": 4,
+      "strength": 1.0,
+      "first_seen": "2026-06-08T23:38:08.462376+00:00",
+      "last_seen": "2026-06-08T23:38:08.462603+00:00"
+    },
+    "علم": {
+      "name": "علم",
+      "cluster": "معرفة",
+      "sources": [
+        "1:2"
+      ],
+      "frequency": 1,
+      "strength": 0.4307,
+      "first_seen": "2026-06-08T23:38:08.462419+00:00",
+      "last_seen": "2026-06-08T23:38:08.462422+00:00"
+    },
+    "ذكر": {
+      "name": "ذكر",
+      "cluster": "عبادة",
+      "sources": [
+        "1:2"
+      ],
+      "frequency": 1,
+      "strength": 0.4307,
+      "first_seen": "2026-06-08T23:38:08.462429+00:00",
+      "last_seen": "2026-06-08T23:38:08.462431+00:00"
+    },
+    "يوم القيامة": {
+      "name": "يوم القيامة",
+      "cluster": "آخرة",
+      "sources": [
+        "1:4"
+      ],
+      "frequency": 1,
+      "strength": 0.4307,
+      "first_seen": "2026-06-08T23:38:08.462550+00:00",
+      "last_seen": "2026-06-08T23:38:08.462553+00:00"
+    },
+    "وحدانية": {
+      "name": "وحدانية",
+      "cluster": "توحيد",
+      "sources": [
+        "112:1",
+        "112:4"
+      ],
+      "frequency": 2,
+      "strength": 0.6826,
+      "first_seen": "2026-06-08T23:38:08.462577+00:00",
+      "last_seen": "2026-06-08T23:38:08.462612+00:00"
+    }
+  },
+  "relations": {
+    "أسماء الله→الله": {
+      "source": "أسماء الله",
+      "target": "الله",
+      "weight": 0.05,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "1:1"
+      ],
+      "count": 1,
+      "first_seen": "2026-06-08T23:38:08.462398+00:00",
+      "last_seen": "2026-06-08T23:38:08.462401+00:00"
+    },
+    "الله→أسماء الله": {
+      "source": "الله",
+      "target": "أسماء الله",
+      "weight": 0.05,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "1:1"
+      ],
+      "count": 1,
+      "first_seen": "2026-06-08T23:38:08.462409+00:00",
+      "last_seen": "2026-06-08T23:38:08.462411+00:00"
+    },
+    "علم→ذكر": {
+      "source": "علم",
+      "target": "ذكر",
+      "weight": 0.05,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "1:2"
+      ],
+      "count": 1,
+      "first_seen": "2026-06-08T23:38:08.462449+00:00",
+      "last_seen": "2026-06-08T23:38:08.462494+00:00"
+    },
+    "ذكر→علم": {
+      "source": "ذكر",
+      "target": "علم",
+      "weight": 0.05,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "1:2"
+      ],
+      "count": 1,
+      "first_seen": "2026-06-08T23:38:08.462503+00:00",
+      "last_seen": "2026-06-08T23:38:08.462505+00:00"
+    },
+    "علم→الله": {
+      "source": "علم",
+      "target": "الله",
+      "weight": 0.05,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "1:2"
+      ],
+      "count": 1,
+      "first_seen": "2026-06-08T23:38:08.462510+00:00",
+      "last_seen": "2026-06-08T23:38:08.462512+00:00"
+    },
+    "الله→علم": {
+      "source": "الله",
+      "target": "علم",
+      "weight": 0.05,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "1:2"
+      ],
+      "count": 1,
+      "first_seen": "2026-06-08T23:38:08.462517+00:00",
+      "last_seen": "2026-06-08T23:38:08.462519+00:00"
+    },
+    "ذكر→الله": {
+      "source": "ذكر",
+      "target": "الله",
+      "weight": 0.05,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "1:2"
+      ],
+      "count": 1,
+      "first_seen": "2026-06-08T23:38:08.462523+00:00",
+      "last_seen": "2026-06-08T23:38:08.462526+00:00"
+    },
+    "الله→ذكر": {
+      "source": "الله",
+      "target": "ذكر",
+      "weight": 0.05,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "1:2"
+      ],
+      "count": 1,
+      "first_seen": "2026-06-08T23:38:08.462530+00:00",
+      "last_seen": "2026-06-08T23:38:08.462532+00:00"
+    },
+    "الله→وحدانية": {
+      "source": "الله",
+      "target": "وحدانية",
+      "weight": 0.05,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "112:1"
+      ],
+      "count": 1,
+      "first_seen": "2026-06-08T23:38:08.462591+00:00",
+      "last_seen": "2026-06-08T23:38:08.462593+00:00"
+    },
+    "وحدانية→الله": {
+      "source": "وحدانية",
+      "target": "الله",
+      "weight": 0.05,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "112:1"
+      ],
+      "count": 1,
+      "first_seen": "2026-06-08T23:38:08.462597+00:00",
+      "last_seen": "2026-06-08T23:38:08.462599+00:00"
+    },
+    "أسماء الله→وحدانية": {
+      "source": "أسماء الله",
+      "target": "وحدانية",
+      "weight": 0.2,
+      "relation_type": "semantic",
+      "evidence": [
+        "cluster:توحيد"
+      ],
+      "count": 1,
+      "first_seen": "2026-06-08T23:38:08.462780+00:00",
+      "last_seen": "2026-06-08T23:38:08.462783+00:00"
+    },
+    "وحدانية→أسماء الله": {
+      "source": "وحدانية",
+      "target": "أسماء الله",
+      "weight": 0.2,
+      "relation_type": "semantic",
+      "evidence": [
+        "cluster:توحيد"
+      ],
+      "count": 1,
+      "first_seen": "2026-06-08T23:38:08.462790+00:00",
+      "last_seen": "2026-06-08T23:38:08.462792+00:00"
+    }
+  }
+}
