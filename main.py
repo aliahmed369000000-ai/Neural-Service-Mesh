@@ -959,8 +959,7 @@ class NeuralServiceMesh:
         return self.evolution_pipeline.run_cycle(verbose=verbose).to_dict()
 
     def introspect(self) -> dict:
-        report = self.self_awareness.introspect()
-        return report.to_dict()
+        return self.self_awareness.summary()
 
     def sensor_status(self) -> dict:
         return {"summary": self.sensor_hub.summary(), "recent_events": self.sensor_hub.recent_events(limit=20)}
