@@ -212,6 +212,37 @@ class SourceManager:
             # 4. Ingest into downstream systems
             self._ingest_items(final_items, meta)
             result.items_ingested = len(final_items)
+
+            # 4b. For SCRIPTURE sources: also build the dedicated quran_index
+            #     via store_quran() so search_quran() / get_ayah() work correctly.
+            if (
+                meta.source_type.value == "scripture"
+                and self._knowledge_store
+                and hasattr(self._knowledge_store, "store_quran")
+            ):
+                try:
+                    ayat = []
+                    for item in final_items:
+                        ref = item.raw_reference or ""
+                        if ":" in ref:
+                            parts = ref.split(":")
+                            if len(parts) == 2:
+                                try:
+                                    ayat.append({
+                                        "surah": int(parts[0]),
+                                        "ayah":  int(parts[1]),
+                                        "text":  item.raw_content,
+                                    })
+                                except ValueError:
+                                    pass
+                    if ayat:
+                        ayat.sort(key=lambda x: (x["surah"], x["ayah"]))
+                        self._knowledge_store.store_quran(ayat)
+                        logger.info(
+                            f"[SourceManager] Quran search index built: {len(ayat)} ayat"
+                        )
+                except Exception as _exc:
+                    logger.warning(f"[SourceManager] store_quran index error: {_exc}")
             # Record items in tracker
             for item in final_items:
                 self._tracker.record_item(item, meta)
@@ -279,6 +310,23 @@ class SourceManager:
                     self._ingest_to_knowledge_store(item, meta)
                 except Exception as exc:
                     logger.warning(f"[SourceManager] KS ingest error: {exc}")
+
+            # SemanticMatcher — index item text for semantic search
+            if self._semantic_matcher:
+                try:
+                    # Index derived tags and concepts for semantic retrieval
+                    searchable = (item.derived_summary or "") + " " + " ".join(item.derived_tags)
+                    if hasattr(self._semantic_matcher, "index_text"):
+                        self._semantic_matcher.index_text(
+                            item.item_id, searchable, metadata={
+                                "source_id":   meta.id,
+                                "source_name": meta.name,
+                                "reference":   item.raw_reference,
+                                "concepts":    item.derived_concepts,
+                            }
+                        )
+                except Exception as exc:
+                    logger.debug(f"[SourceManager] SemanticMatcher index skip: {exc}")
 
             # EnvironmentModel — update world model with new knowledge
             if self._env_model:
