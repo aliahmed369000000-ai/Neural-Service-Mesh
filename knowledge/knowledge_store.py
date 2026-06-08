@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time
 from copy import deepcopy
@@ -27,6 +28,27 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+# ── Arabic Normalization ───────────────────────────────────────────────────
+
+def normalize_arabic(text: str) -> str:
+    """
+    Normalize Arabic text for search indexing and query matching.
+    - Removes all tashkeel (harakat / diacritics)
+    - Unifies alef variants → ا
+    - Removes tatweel (kashida) and other formatting characters
+    - Collapses whitespace
+    """
+    # إزالة التشكيل الكامل (harakat + shadda + sukun + maddah + …)
+    text = re.sub(r'[\u064B-\u065F\u0670\u0640]', '', text)
+    # توحيد الألف (أ إ آ ٱ → ا)
+    text = re.sub(r'[أإآٱ]', 'ا', text)
+    # توحيد التاء المربوطة والهاء
+    # (اختياري — نتركه حتى لا نكسر المطابقة الدقيقة للكلمات)
+    # تنظيف المسافات
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
 
 # ── Sentinel defaults ──────────────────────────────────────────────────────
 
@@ -751,7 +773,13 @@ class KnowledgeStore:
         stored = 0
         for i, chunk in enumerate(chunks):
             chunk_key = f"quran_chunk_{i:04d}"
-            self.write_custom(chunk_key, chunk)
+            # Store both raw text and normalized text for each ayah
+            normalized_chunk = []
+            for a in chunk:
+                entry = dict(a)
+                entry["text_norm"] = normalize_arabic(a.get("text", ""))
+                normalized_chunk.append(entry)
+            self.write_custom(chunk_key, normalized_chunk)
             stored += len(chunk)
             if i % 10 == 0 or i == total_chunks - 1:
                 pct = round((i + 1) / total_chunks * 100, 1)
@@ -848,20 +876,31 @@ class KnowledgeStore:
 
     def search_quran(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
         """
-        Simple substring search across all stored ayahs.
-        Returns list of matching {surah, ayah, text} dicts.
+        Substring search across all stored ayahs.
+        Normalizes both the query and the stored text before matching,
+        so searches without tashkeel work on Uthmani-script text.
+        Returns list of matching {surah, ayah, text} dicts (raw text preserved).
         """
         try:
             idx = self.quran_index()
         except KeyError:
             raise RuntimeError("القرآن غير محفوظ بعد — شغّل store_quran(ayat) أولاً")
 
+        query_norm = normalize_arabic(query)
+
         results: List[Dict[str, Any]] = []
         for ci in range(idx["total_chunks"]):
             chunk = self.read_custom(f"quran_chunk_{ci:04d}")
             for a in chunk:
-                if query in a.get("text", ""):
-                    results.append(a)
+                # Use pre-computed text_norm if available, else normalize on-the-fly
+                text_norm = a.get("text_norm") or normalize_arabic(a.get("text", ""))
+                if query_norm in text_norm:
+                    # Return a clean dict with raw text (not the internal norm field)
+                    results.append({
+                        "surah": a.get("surah"),
+                        "ayah":  a.get("ayah"),
+                        "text":  a.get("text", ""),
+                    })
                     if len(results) >= max_results:
                         return results
         return results
