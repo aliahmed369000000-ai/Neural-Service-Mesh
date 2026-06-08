@@ -1,0 +1,49 @@
+{
+  "_meta": {
+    "schema_version": "1.0.0",
+    "total_sources": 1,
+    "updated_at": "2026-06-08T23:16:51.664101+00:00"
+  },
+  "sources": [
+    {
+      "id": "quran-uthmani-v1",
+      "name": "القرآن الكريم",
+      "description": "القرآن الكريم — المصدر الأول للمعرفة في النظام. نص ثابت محمي، لا يُعدَّل أصله أبداً. يُسمح للنظام ببناء علاقات ومفاهيم مستخرجة فقط.",
+      "source_type": "scripture",
+      "access_mode": "read_only",
+      "trust_score": 1.0,
+      "base_trust": 1.0,
+      "requires_citation": true,
+      "update_frequency": "static",
+      "last_sync": null,
+      "next_sync": null,
+      "sync_count": 0,
+      "error_count": 0,
+      "last_error": null,
+      "status": "active",
+      "registered_at": "2026-06-08T23:16:51.663866+00:00",
+      "total_items_ingested": 0,
+      "total_items_rejected": 0,
+      "avg_quality_score": 0.0,
+      "config": {
+        "local_file": "knowledge_sources/quran/data/quran.json",
+        "api_url": "https://api.alquran.cloud/v1/quran/quran-uthmani",
+        "edition": "quran-uthmani",
+        "total_surahs": 114,
+        "total_ayahs": 6236
+      },
+      "tags": [
+        "قرآن",
+        "إسلام",
+        "عربي",
+        "scripture",
+        "arabic"
+      ],
+      "language": "ar",
+      "version": "uthmani-1.0",
+      "allow_raw_modification": false,
+      "store_raw_data": true,
+      "store_derived_knowledge": true
+    }
+  ]
+}
