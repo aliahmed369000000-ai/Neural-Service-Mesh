@@ -880,6 +880,38 @@ class KnowledgeStore:
             "stored_at":    idx["stored_at"],
         }
 
+    # ── Knowledge Sources Integration ─────────────────────────────────────
+
+    def register_node(self, profile: Dict[str, Any]) -> None:
+        """
+        Register a knowledge node coming from the SourceManager pipeline.
+        Maps a KnowledgeItem profile dict → upsert_node_profile format.
+        Called by SourceManager._ingest_to_knowledge_store().
+        """
+        node_id = profile.get("node_id", "")
+        if not node_id:
+            return
+        # Build a node profile compatible with upsert_node_profile
+        node_profile = {
+            "node_id":          node_id,
+            "name":             profile.get("name", node_id),
+            "description":      profile.get("description", ""),
+            "capability":       profile.get("capability", "knowledge:unknown"),
+            "tags":             profile.get("tags", []),
+            "version":          profile.get("version", "1.0"),
+            "announced_at":     profile.get("announced_at", _now_iso()),
+            "is_active":        profile.get("is_active", True),
+            # Source tracking fields
+            "source_id":        profile.get("source_id", ""),
+            "source_name":      profile.get("source_name", ""),
+            "quality_score":    profile.get("quality_score", 0.0),
+            "trust_score":      profile.get("trust_score", 0.0),
+            "raw_reference":    profile.get("raw_reference", ""),
+            "raw_content":      profile.get("raw_content", ""),
+            "derived_concepts": profile.get("derived_concepts", []),
+        }
+        self.upsert_node_profile(node_id, node_profile)
+
     def __repr__(self):
         s = self.summary()
         return (
