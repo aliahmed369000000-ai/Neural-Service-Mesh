@@ -2043,7 +2043,7 @@ if __name__ == "__main__":
         sm.set_environment_model(mesh.env_model)
         sm.set_semantic_matcher(mesh.semantic)
 
-        meta, feeder = create_quran_source(max_items=50)
+        meta, feeder = create_quran_source()  # no limit — all 6236 ayahs
         sm.register_source(meta, feeder)
 
         target = args.source_id if hasattr(args, "source_id") and args.source_id else meta.id
