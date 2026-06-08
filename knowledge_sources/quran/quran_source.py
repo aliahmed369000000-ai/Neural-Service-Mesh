@@ -295,7 +295,7 @@ class QuranFeeder:
         # Topic keywords commonly found in Quran
         topic_map = {
             "الله":     "توحيد",
-            "الحمن":     "رحمة",
+            "الرحمن":    "رحمة",
             "الرحيم":     "رحمة",
             "جنة":      "آخرة",
             "نار":      "آخرة",
