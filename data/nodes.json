@@ -1,6 +1,6 @@
 {
-  "saved_at": "2026-06-07T18:11:08.157486",
-  "count": 3,
+  "saved_at": "2026-06-09T00:04:52.334695",
+  "count": 6,
   "nodes": [
     {
       "node_id": "90d840e7-f9e0-4405-8646-44d3091c569f",
@@ -112,6 +112,85 @@
           "format",
           "success"
         ]
+      },
+      "execution_count": 0,
+      "last_executed": null
+    },
+    {
+      "node_id": "bc557c84-c272-44d9-be9f-7179dc1e633f",
+      "name": "توحيد",
+      "node_type": "PassThroughNode",
+      "created_at": "2026-06-09T00:03:19.131683",
+      "version": "1.0.0",
+      "tags": [
+        "dynamic",
+        "passthrough"
+      ],
+      "description": "API-created pass-through node",
+      "input_schema": {
+        "fields": {
+          "data": "Any"
+        },
+        "required": []
+      },
+      "output_schema": {
+        "fields": {
+          "data": "Any"
+        },
+        "required": []
+      },
+      "execution_count": 0,
+      "last_executed": null
+    },
+    {
+      "node_id": "16a930d2-1c15-43d9-bb27-621ddf2622c6",
+      "name": "QuranReader",
+      "node_type": "PassThroughNode",
+      "created_at": "2026-06-09T00:04:51.824558",
+      "version": "1.0.0",
+      "tags": [
+        "quran",
+        "input"
+      ],
+      "description": "Reads Quran ayahs",
+      "input_schema": {
+        "fields": {
+          "data": "Any"
+        },
+        "required": []
+      },
+      "output_schema": {
+        "fields": {
+          "data": "Any"
+        },
+        "required": []
+      },
+      "execution_count": 0,
+      "last_executed": null
+    },
+    {
+      "node_id": "eb63e8a6-87ba-4443-a51f-f95afd8d2298",
+      "name": "ConceptExtractor",
+      "node_type": "PassThroughNode",
+      "created_at": "2026-06-09T00:04:52.334674",
+      "version": "1.0.0",
+      "tags": [
+        "quran",
+        "concept",
+        "ai"
+      ],
+      "description": "Extracts Islamic concepts",
+      "input_schema": {
+        "fields": {
+          "data": "Any"
+        },
+        "required": []
+      },
+      "output_schema": {
+        "fields": {
+          "data": "Any"
+        },
+        "required": []
       },
       "execution_count": 0,
       "last_executed": null

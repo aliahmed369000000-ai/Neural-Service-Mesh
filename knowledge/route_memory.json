@@ -2,8 +2,8 @@
   "_meta": {
     "schema_version": "1.0.0",
     "created_at": "2026-06-06T00:22:29.764732+00:00",
-    "last_updated": "2026-06-06T00:22:29.825539+00:00",
-    "total_routes": 2,
+    "last_updated": "2026-06-09T00:04:53.176352+00:00",
+    "total_routes": 4,
     "description": "Successful and failed route history with scores and execution records"
   },
   "routes": {
@@ -57,16 +57,65 @@
           "latency_ms": 0.26
         }
       ]
+    },
+    "bc557c84": {
+      "path_key": "bc557c84",
+      "path": [
+        "bc557c84-c272-44d9-be9f-7179dc1e633f"
+      ],
+      "runs": 1,
+      "successes": 1,
+      "failures": 0,
+      "success_rate": 1.0,
+      "avg_latency_ms": 0.23,
+      "health": "excellent",
+      "memory_score": 85.0,
+      "is_promoted": false,
+      "first_seen": "2026-06-09T00:03:43.544640",
+      "last_seen": "2026-06-09T00:03:43.544653",
+      "execution_history": [
+        {
+          "run_id": "63b1e576",
+          "ts": "2026-06-09T00:03:43.551861+00:00",
+          "success": true,
+          "latency_ms": 0.23
+        }
+      ]
+    },
+    "16a930d2->eb63e8a6": {
+      "path_key": "16a930d2->eb63e8a6",
+      "path": [
+        "16a930d2-1c15-43d9-bb27-621ddf2622c6",
+        "eb63e8a6-87ba-4443-a51f-f95afd8d2298"
+      ],
+      "runs": 1,
+      "successes": 1,
+      "failures": 0,
+      "success_rate": 1.0,
+      "avg_latency_ms": 0.24,
+      "health": "excellent",
+      "memory_score": 85.0,
+      "is_promoted": false,
+      "first_seen": "2026-06-09T00:04:53.164954",
+      "last_seen": "2026-06-09T00:04:53.164964",
+      "execution_history": [
+        {
+          "run_id": "66da2d38",
+          "ts": "2026-06-09T00:04:53.176339+00:00",
+          "success": true,
+          "latency_ms": 0.24
+        }
+      ]
     }
   },
   "failed_routes": {},
   "statistics": {
-    "total_runs": 2,
-    "total_successes": 2,
+    "total_runs": 4,
+    "total_successes": 4,
     "total_failures": 0,
     "promoted_routes": 0,
     "critical_routes": 0,
     "avg_memory_score": 85.0,
-    "total_routes": 2
+    "total_routes": 4
   }
 }

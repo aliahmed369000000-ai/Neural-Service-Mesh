@@ -930,7 +930,6 @@ class KnowledgeStore:
         node_id = profile.get("node_id", "")
         if not node_id:
             return
-        # Build a node profile compatible with upsert_node_profile
         node_profile = {
             "node_id":          node_id,
             "name":             profile.get("name", node_id),
@@ -940,7 +939,6 @@ class KnowledgeStore:
             "version":          profile.get("version", "1.0"),
             "announced_at":     profile.get("announced_at", _now_iso()),
             "is_active":        profile.get("is_active", True),
-            # Source tracking fields
             "source_id":        profile.get("source_id", ""),
             "source_name":      profile.get("source_name", ""),
             "quality_score":    profile.get("quality_score", 0.0),
@@ -950,6 +948,57 @@ class KnowledgeStore:
             "derived_concepts": profile.get("derived_concepts", []),
         }
         self.upsert_node_profile(node_id, node_profile)
+
+    def register_nodes_batch(self, profiles: List[Dict[str, Any]]) -> int:
+        """
+        Batch-register many knowledge nodes in a single read+write cycle.
+        Much faster than calling register_node() in a loop for large datasets.
+        Returns the number of nodes registered.
+        """
+        if not profiles:
+            return 0
+        data = self._read(self.NODE_PROFILES)
+        now = _now_iso()
+        count = 0
+        for profile in profiles:
+            node_id = profile.get("node_id", "")
+            if not node_id:
+                continue
+            node_profile = {
+                "node_id":          node_id,
+                "name":             profile.get("name", node_id),
+                "description":      profile.get("description", ""),
+                "capability":       profile.get("capability", "knowledge:unknown"),
+                "tags":             profile.get("tags", []),
+                "version":          profile.get("version", "1.0"),
+                "announced_at":     profile.get("announced_at", now),
+                "is_active":        profile.get("is_active", True),
+                "source_id":        profile.get("source_id", ""),
+                "source_name":      profile.get("source_name", ""),
+                "quality_score":    profile.get("quality_score", 0.0),
+                "trust_score":      profile.get("trust_score", 0.0),
+                "raw_reference":    profile.get("raw_reference", ""),
+                "raw_content":      profile.get("raw_content", ""),
+                "derived_concepts": profile.get("derived_concepts", []),
+                "last_seen":        now,
+                "execution_stats": {
+                    "total_executions": 0, "successes": 0, "failures": 0,
+                    "avg_latency_ms": 0.0, "last_executed": None,
+                },
+                "semantic_profile": {
+                    "input_tokens": [], "output_tokens": [], "capability_tokens": [],
+                },
+                "discovery_score": 0.0,
+            }
+            if "first_seen" not in data["nodes"].get(node_id, {}):
+                node_profile["first_seen"] = now
+            existing = data["nodes"].get(node_id, {})
+            data["nodes"][node_id] = {**existing, **node_profile}
+            count += 1
+        data["_meta"]["total_nodes"] = len(data["nodes"])
+        self._write(self.NODE_PROFILES, data)
+        logger.info(f"KnowledgeStore: batch registered {count} knowledge nodes")
+        return count
 
     def __repr__(self):
         s = self.summary()

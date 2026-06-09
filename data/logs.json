@@ -147,6 +147,107 @@
           "is_fallback": false
         }
       ]
+    },
+    {
+      "run_id": "63b1e576-1d3c-47ee-8aa0-8a8e8efb37b8",
+      "path": [
+        "bc557c84-c272-44d9-be9f-7179dc1e633f"
+      ],
+      "started_at": "2026-06-09T00:03:43.533039",
+      "finished_at": "2026-06-09T00:03:43.533283",
+      "total_duration_ms": 0.23,
+      "status": "success",
+      "final_output": {
+        "data": null
+      },
+      "ai_suggested": false,
+      "steps": [
+        {
+          "index": 0,
+          "node_id": "bc557c84-c272-44d9-be9f-7179dc1e633f",
+          "node_name": "توحيد",
+          "started_at": "2026-06-09T00:03:43.533064",
+          "finished_at": "2026-06-09T00:03:43.533278",
+          "duration_ms": 0.2,
+          "input_data": {},
+          "output_data": {
+            "data": null
+          },
+          "status": "success",
+          "error": null,
+          "is_fallback": false
+        }
+      ]
+    },
+    {
+      "run_id": "66da2d38-72e1-4da7-855f-830506986644",
+      "path": [
+        "16a930d2-1c15-43d9-bb27-621ddf2622c6",
+        "eb63e8a6-87ba-4443-a51f-f95afd8d2298"
+      ],
+      "started_at": "2026-06-09T00:04:53.157144",
+      "finished_at": "2026-06-09T00:04:53.157388",
+      "total_duration_ms": 0.24,
+      "status": "success",
+      "final_output": {
+        "data": null,
+        "text": "قُلْ هُوَ اللَّهُ أَحَدٌ",
+        "surah": 112,
+        "ayah": 1,
+        "concept": "توحيد"
+      },
+      "ai_suggested": false,
+      "steps": [
+        {
+          "index": 0,
+          "node_id": "16a930d2-1c15-43d9-bb27-621ddf2622c6",
+          "node_name": "QuranReader",
+          "started_at": "2026-06-09T00:04:53.157167",
+          "finished_at": "2026-06-09T00:04:53.157332",
+          "duration_ms": 0.15,
+          "input_data": {
+            "text": "قُلْ هُوَ اللَّهُ أَحَدٌ",
+            "surah": 112,
+            "ayah": 1,
+            "concept": "توحيد"
+          },
+          "output_data": {
+            "data": null,
+            "text": "قُلْ هُوَ اللَّهُ أَحَدٌ",
+            "surah": 112,
+            "ayah": 1,
+            "concept": "توحيد"
+          },
+          "status": "success",
+          "error": null,
+          "is_fallback": false
+        },
+        {
+          "index": 1,
+          "node_id": "eb63e8a6-87ba-4443-a51f-f95afd8d2298",
+          "node_name": "ConceptExtractor",
+          "started_at": "2026-06-09T00:04:53.157338",
+          "finished_at": "2026-06-09T00:04:53.157384",
+          "duration_ms": 0.04,
+          "input_data": {
+            "data": null,
+            "text": "قُلْ هُوَ اللَّهُ أَحَدٌ",
+            "surah": 112,
+            "ayah": 1,
+            "concept": "توحيد"
+          },
+          "output_data": {
+            "data": null,
+            "text": "قُلْ هُوَ اللَّهُ أَحَدٌ",
+            "surah": 112,
+            "ayah": 1,
+            "concept": "توحيد"
+          },
+          "status": "success",
+          "error": null,
+          "is_fallback": false
+        }
+      ]
     }
   ]
 }
