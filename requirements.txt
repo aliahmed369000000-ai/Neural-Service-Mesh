@@ -12,3 +12,10 @@ gunicorn
 numpy
 requests
 scikit-learn
+flask
+gunicorn
+numpy
+plotly
+requests
+scikit-learn
+streamlit
