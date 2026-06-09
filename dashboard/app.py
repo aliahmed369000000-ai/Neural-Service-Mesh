@@ -270,15 +270,7 @@ def search_concept(concept: str):
 
 # ── Build UI ─────────────────────────────────────────────────────────────────
 
-with gr.Blocks(
-    title="Neural Service Mesh — لوحة المراقبة",
-    css=DARK_CSS,
-    theme=gr.themes.Base(
-        primary_hue="purple",
-        secondary_hue="gray",
-        neutral_hue="gray",
-    ),
-) as demo:
+with gr.Blocks(title="Neural Service Mesh — لوحة المراقبة") as demo:
 
     gr.HTML("""
     <div style="text-align:center; padding: 1rem 0; direction:rtl;">
@@ -362,6 +354,11 @@ with gr.Blocks(
 if __name__ == "__main__":
     demo.launch(
         server_name="0.0.0.0",
-        server_port=int(os.environ.get("PORT", 7860)),
-        show_api=False,
+        server_port=int(os.environ.get("PORT", 8000)),
+        css=DARK_CSS,
+        theme=gr.themes.Base(
+            primary_hue="purple",
+            secondary_hue="gray",
+            neutral_hue="gray",
+        ),
     )
