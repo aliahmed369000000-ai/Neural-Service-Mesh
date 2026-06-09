@@ -1600,6 +1600,176 @@ def _add_ckg_routes(app, mesh):
             "hops":  len(path) - 1 if path else None,
         })
 
+    # ── GET /knowledge/search ─────────────────────────────────────────────
+    @app.route("/knowledge/search", methods=["GET"])
+    def knowledge_search():
+        """
+        بحث دلالي في آيات القرآن الكريم.
+
+        Query params:
+          ?q=نص البحث         — بحث بالنص (keyword + concept matching)
+          ?concept=إيمان      — بحث بمفهوم محدد من الـ CKG
+          ?cluster=عبادة      — بحث بمجموعة مفاهيم (cluster)
+          ?top=10             — عدد النتائج (افتراضي 10، أقصى 100)
+          ?min_quality=0      — أدنى درجة جودة (0-100)
+          ?include_text=true  — إظهار النص الكامل للآية
+        """
+        import re as _re
+
+        q           = request.args.get("q", "").strip()
+        concept_q   = request.args.get("concept", "").strip()
+        cluster_q   = request.args.get("cluster", "").strip()
+        top         = min(request.args.get("top", 10, type=int), 100)
+        min_quality = request.args.get("min_quality", 0.0, type=float)
+        include_txt = request.args.get("include_text", "true").lower() != "false"
+
+        if not q and not concept_q and not cluster_q:
+            return jsonify({"error": "أحد الحقول مطلوب: q أو concept أو cluster"}), 400
+
+        ckg = _get_ckg()
+
+        # ── Step 1: تحديد المفاهيم المستهدفة ────────────────────────────
+        target_concepts: Dict[str, float] = {}   # concept_name → relevance_score
+
+        if concept_q:
+            # بحث مباشر بالمفهوم + جيرانه في الـ CKG
+            if ckg and ckg.get_concept(concept_q):
+                target_concepts[concept_q] = 1.0
+                for related_name, rel_weight in ckg.query_related(concept_q, top_k=5):
+                    target_concepts[related_name] = max(
+                        target_concepts.get(related_name, 0.0),
+                        rel_weight * 0.6,
+                    )
+            else:
+                target_concepts[concept_q] = 1.0   # نحاول حتى لو غير موجود في CKG
+
+        if cluster_q and ckg:
+            # كل مفاهيم المجموعة المحددة
+            summary = ckg.cluster_summary()
+            for c_name, c_info in ckg._concepts.items():
+                if c_info.cluster == cluster_q:
+                    target_concepts[c_name] = max(
+                        target_concepts.get(c_name, 0.0), 0.85
+                    )
+
+        if q:
+            # استخراج مفاهيم من النص باستخدام ConceptExtractor
+            try:
+                from knowledge_sources.concept_extractor import ConceptExtractor
+                ce = ConceptExtractor()
+                matches = ce.extract(q)
+                for m in matches:
+                    target_concepts[m.concept] = max(
+                        target_concepts.get(m.concept, 0.0), m.score
+                    )
+            except Exception as _exc:
+                logger.warning(f"[/knowledge/search] ConceptExtractor error: {_exc}")
+
+            # بحث إضافي: هل النص يطابق اسم مفهوم مباشرة؟
+            if ckg:
+                for c_name in ckg._concepts:
+                    if q in c_name or c_name in q:
+                        target_concepts[c_name] = max(
+                            target_concepts.get(c_name, 0.0), 0.75
+                        )
+
+        if not target_concepts:
+            return jsonify({
+                "query":   {"q": q, "concept": concept_q, "cluster": cluster_q},
+                "results": [],
+                "total":   0,
+                "message": "لم يُعثر على مفاهيم مطابقة في الـ CKG",
+            })
+
+        # ── Step 2: البحث في KnowledgeStore عن آيات مطابقة ─────────────
+        try:
+            ks_data  = mesh.knowledge.read_node_profiles() if mesh.knowledge else {}
+        except Exception:
+            ks_data  = {}
+
+        all_nodes = ks_data.get("nodes", {})
+        quran_nodes = {
+            k: v for k, v in all_nodes.items()
+            if k.startswith("ks:quran:")
+        }
+
+        scored: list = []
+        for node_id, node in quran_nodes.items():
+            quality = node.get("quality_score", 0.0)
+            if quality < min_quality:
+                continue
+
+            derived = node.get("derived_concepts", [])
+            tags    = node.get("tags", [])
+
+            # حساب درجة التطابق
+            concept_score = 0.0
+            matched       = []
+            for c_name, c_rel in target_concepts.items():
+                if c_name in derived:
+                    concept_score += c_rel
+                    matched.append(c_name)
+                # مطابقة جزئية في الـ tags
+                elif any(c_name in t or t in c_name for t in tags):
+                    concept_score += c_rel * 0.4
+                    matched.append(f"~{c_name}")
+
+            # بحث نصي مباشر إذا كان q موجوداً
+            text_bonus = 0.0
+            raw_content = node.get("raw_content", "")
+            if q and raw_content and raw_content != "[protected]":
+                clean_q    = _re.sub(r"[\u064B-\u065F]", "", q)        # بدون تشكيل
+                clean_text = _re.sub(r"[\u064B-\u065F]", "", raw_content)
+                if clean_q and clean_q in clean_text:
+                    text_bonus = 0.5
+
+            total_score = concept_score + text_bonus
+            if total_score <= 0.0:
+                continue
+
+            # بناء نتيجة واحدة
+            entry = {
+                "reference":      node.get("raw_reference", node_id.replace("ks:", "")),
+                "node_id":        node_id,
+                "score":          round(total_score, 4),
+                "quality":        round(quality, 1),
+                "matched_concepts": matched,
+                "tags":           tags[:6],
+            }
+            if include_txt and raw_content and raw_content != "[protected]":
+                entry["text"] = raw_content[:300]
+
+            scored.append(entry)
+
+        # ترتيب: score تنازلياً ثم quality
+        scored.sort(key=lambda x: (-x["score"], -x["quality"]))
+        results = scored[:top]
+
+        # ── Step 3: إحصائيات المفاهيم في النتائج ────────────────────────
+        concept_freq: Dict[str, int] = {}
+        for r in results:
+            for c in r.get("matched_concepts", []):
+                concept_freq[c] = concept_freq.get(c, 0) + 1
+
+        return jsonify({
+            "query": {
+                "q":       q or None,
+                "concept": concept_q or None,
+                "cluster": cluster_q or None,
+                "top":     top,
+            },
+            "results":          results,
+            "total":            len(results),
+            "total_candidates": len(scored),
+            "target_concepts":  [
+                {"concept": c, "relevance": round(s, 3)}
+                for c, s in sorted(target_concepts.items(), key=lambda x: -x[1])
+            ],
+            "concept_frequency": dict(
+                sorted(concept_freq.items(), key=lambda x: -x[1])[:10]
+            ),
+        })
+
 
 _create_app_ks = create_app
 def create_app(mesh):
