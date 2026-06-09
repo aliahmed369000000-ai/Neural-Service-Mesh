@@ -2,7 +2,7 @@
   "_meta": {
     "schema_version": "1.0.0",
     "created_at": "2026-06-06T00:22:29.764270+00:00",
-    "last_updated": "2026-06-09T00:35:10.258112+00:00",
+    "last_updated": "2026-06-09T01:10:57.076166+00:00",
     "total_nodes": 6242,
     "description": "Node capabilities and semantic metadata registry"
   },
@@ -285893,16 +285893,16 @@
         ],
         "capability_tokens": [
           "created",
-          "dynamic",
           "passthrough",
-          "node",
+          "dynamic",
+          "api",
           "through",
-          "pass",
-          "api"
+          "node",
+          "pass"
         ],
         "updated_at": "2026-06-09T00:03:19.159935"
       },
-      "last_seen": "2026-06-09T00:35:09.411751+00:00",
+      "last_seen": "2026-06-09T01:10:56.053429+00:00",
       "first_seen": "2026-06-09T00:03:19.330471+00:00",
       "execution_stats": {
         "total_executions": 1,
@@ -285954,7 +285954,7 @@
         ],
         "updated_at": "2026-06-09T00:04:51.835016"
       },
-      "last_seen": "2026-06-09T00:35:09.846208+00:00",
+      "last_seen": "2026-06-09T01:10:56.567243+00:00",
       "first_seen": "2026-06-09T00:04:52.005711+00:00",
       "execution_stats": {
         "total_executions": 1,
@@ -286000,16 +286000,16 @@
           "data"
         ],
         "capability_tokens": [
+          "islamic",
+          "quran",
+          "extracts",
           "ai",
           "concept",
-          "extracts",
-          "concepts",
-          "quran",
-          "islamic"
+          "concepts"
         ],
         "updated_at": "2026-06-09T00:04:52.342428"
       },
-      "last_seen": "2026-06-09T00:35:10.258040+00:00",
+      "last_seen": "2026-06-09T01:10:57.076137+00:00",
       "first_seen": "2026-06-09T00:04:52.492755+00:00",
       "execution_stats": {
         "total_executions": 1,

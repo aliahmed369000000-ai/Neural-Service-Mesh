@@ -1078,7 +1078,7 @@ def _add_v16_routes(app, mesh):
     def api_narrative_diary():
         if mesh.self_narrative is None:
             return jsonify({"error": "SelfNarrative not available"})
-        return jsonify({"diary": mesh.self_narrative.get_todays_diary()})
+        return jsonify({"diary": mesh.self_narrative.get_today_narrative()})
 
     @app.route("/api/ethics/violations", methods=["GET"])
     def api_ethics_violations():

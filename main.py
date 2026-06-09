@@ -1509,7 +1509,7 @@ class NeuralServiceMesh:
         if self.self_narrative is None:
             return {"error": "SelfNarrative not available"}
         return {
-            "log":   self.self_narrative.get_log(n),
+            "log":   self.self_narrative.get_narrative_log(n),
             "count": n,
         }
 
@@ -1517,15 +1517,15 @@ class NeuralServiceMesh:
         """توليد ملخص سردي ليومي."""
         if self.self_narrative is None:
             return {"error": "SelfNarrative not available"}
-        return {"diary": self.self_narrative.get_todays_diary()}
+        return {"diary": self.self_narrative.get_today_narrative()}
 
     def get_today_narrative(self) -> dict:
         """إرجاع سرد اليوم الحالي."""
         if self.self_narrative is None:
             return {"error": "SelfNarrative not available"}
         return {
-            "diary":      self.self_narrative.get_todays_diary(),
-            "log":        self.self_narrative.get_log(20),
+            "diary":      self.self_narrative.get_today_narrative(),
+            "log":        self.self_narrative.get_narrative_log(20),
             "summary":    self.self_narrative.summary(),
         }
 
