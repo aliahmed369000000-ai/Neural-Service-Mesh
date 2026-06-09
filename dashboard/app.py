@@ -288,7 +288,12 @@ with gr.Blocks(
     """)
 
     with gr.Row():
-        refresh_btn = gr.Button("🔄 تحديث البيانات", variant="primary", scale=0)
+        refresh_btn  = gr.Button("🔄 تحديث", variant="primary", scale=0)
+        pause_btn    = gr.Button("⏸ إيقاف التحديث التلقائي", variant="secondary", scale=0)
+        last_updated = gr.HTML(
+            value="<span style='color:#6c7086; font-size:0.82rem; direction:rtl;'>⏱ لم يتم التحديث بعد</span>",
+            label="",
+        )
 
     kpi_html = gr.HTML(label="")
 
@@ -321,14 +326,37 @@ with gr.Blocks(
     </div>
     """)
 
-    def _refresh():
-        return load_dashboard()
+    # ── Auto-refresh timer (every 30 s) ──────────────────────────────────────
+    timer = gr.Timer(value=30, active=True)
 
-    refresh_btn.click(fn=_refresh, outputs=[kpi_html, loss_plot, cluster_plot])
+    def _refresh():
+        kpi, loss, cluster = load_dashboard()
+        now = datetime.now().strftime("%H:%M:%S")
+        ts  = f"<span style='color:#a6adc8; font-size:0.82rem; direction:rtl;'>✅ آخر تحديث: {now} — كل 30 ثانية</span>"
+        return kpi, loss, cluster, ts
+
+    def _manual_refresh():
+        kpi, loss, cluster = load_dashboard()
+        now = datetime.now().strftime("%H:%M:%S")
+        ts  = f"<span style='color:#cba6f7; font-size:0.82rem; direction:rtl;'>🔄 تحديث يدوي: {now}</span>"
+        return kpi, loss, cluster, ts
+
+    _outputs = [kpi_html, loss_plot, cluster_plot, last_updated]
+
+    # pause / resume toggle
+    def _toggle_pause(btn_label):
+        if "إيقاف" in btn_label:
+            return gr.Timer(active=False), gr.Button(value="▶ استئناف التحديث التلقائي")
+        else:
+            return gr.Timer(active=True),  gr.Button(value="⏸ إيقاف التحديث التلقائي")
+
+    timer.tick(fn=_refresh, outputs=_outputs)
+    refresh_btn.click(fn=_manual_refresh, outputs=_outputs)
+    pause_btn.click(fn=_toggle_pause, inputs=[pause_btn], outputs=[timer, pause_btn])
     search_btn.click(fn=search_concept, inputs=[concept_input], outputs=[search_result, raw_json_out])
     concept_input.submit(fn=search_concept, inputs=[concept_input], outputs=[search_result, raw_json_out])
 
-    demo.load(fn=_refresh, outputs=[kpi_html, loss_plot, cluster_plot])
+    demo.load(fn=_refresh, outputs=_outputs)
 
 
 if __name__ == "__main__":
