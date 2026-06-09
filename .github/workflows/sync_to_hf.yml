@@ -13,7 +13,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          lfs: true
 
       - name: Push to Hugging Face Space
         env:
@@ -21,4 +20,34 @@ jobs:
         run: |
           git config user.email "ali@neural-mesh.ai"
           git config user.name "Neural Mesh Bot"
+
+          # Clone the HF Space (or init fresh if it doesn't exist yet)
+          git clone https://AliAhmedMo:${HF_TOKEN}@huggingface.co/spaces/AliAhmedMo/neural-service-mesh-dashboard /tmp/hf_space 2>/dev/null \
+            || (mkdir -p /tmp/hf_space && cd /tmp/hf_space && git init && git remote add origin https://AliAhmedMo:${HF_TOKEN}@huggingface.co/spaces/AliAhmedMo/neural-service-mesh-dashboard)
+
+          # Sync code, excluding binary/runtime artifacts
+          rsync -av \
+            --delete \
+            --exclude='.git' \
+            --exclude='data/mesh.db' \
+            --exclude='data/*.json' \
+            --exclude='memory/' \
+            --exclude='checkpoints/' \
+            --exclude='logs/' \
+            --exclude='sandbox/' \
+            --exclude='**/__pycache__' \
+            --exclude='**/*.pyc' \
+            --exclude='**/*.db' \
+            --exclude='**/*.sqlite' \
+            --exclude='hf_README.md' \
+            $GITHUB_WORKSPACE/ /tmp/hf_space/
+
+          # Use the HF-specific README (with Space YAML front-matter)
+          cp $GITHUB_WORKSPACE/hf_README.md /tmp/hf_space/README.md
+
+          cd /tmp/hf_space
+          git config user.email "ali@neural-mesh.ai"
+          git config user.name "Neural Mesh Bot"
+          git add -A
+          git diff --cached --quiet || git commit -m "sync: update from GitHub ($(date -u '+%Y-%m-%d %H:%M UTC'))"
           git push https://AliAhmedMo:${HF_TOKEN}@huggingface.co/spaces/AliAhmedMo/neural-service-mesh-dashboard main --force
