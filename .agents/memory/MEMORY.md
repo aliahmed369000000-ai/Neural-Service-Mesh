@@ -1,0 +1,3 @@
+- [Quran ingestion batch fix](quran-ingestion.md) — SourceManager per-item file writes caused timeout for 6236 ayahs; fixed with register_nodes_batch (single write).
+- [CKG JSON structure](ckg-json-structure.md) — cognitive_graph.json uses "concepts"/"relations" dict keys, NOT "nodes"/"edges".
+- [Validator deduplication](validator-dedup.md) — SourceValidator uses hash-based dedup; clear data/ks_seen_hashes.json to allow re-sync of same items.

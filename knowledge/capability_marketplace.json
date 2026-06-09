@@ -1,0 +1,117 @@
+{
+  "\u062a\u0648\u062d\u064a\u062f": [
+    {
+      "node_id": "bc557c84-c272-44d9-be9f-7179dc1e633f",
+      "node_name": "\u062a\u0648\u062d\u064a\u062f",
+      "capability": "\u062a\u0648\u062d\u064a\u062f",
+      "quality_score": 0.8,
+      "avg_latency_ms": 100.0,
+      "composite_score": 0.854,
+      "tags": [
+        "dynamic",
+        "passthrough"
+      ],
+      "metadata": {},
+      "advertised_at": "2026-06-09T00:03:19.612609+00:00",
+      "last_updated": "2026-06-09T00:03:19.612609+00:00",
+      "execution_count": 0,
+      "is_active": true
+    }
+  ],
+  "quran": [
+    {
+      "node_id": "16a930d2-1c15-43d9-bb27-621ddf2622c6",
+      "node_name": "QuranReader",
+      "capability": "quran",
+      "quality_score": 0.8,
+      "avg_latency_ms": 100.0,
+      "composite_score": 0.854,
+      "tags": [
+        "quran",
+        "input"
+      ],
+      "metadata": {},
+      "advertised_at": "2026-06-09T00:04:52.281140+00:00",
+      "last_updated": "2026-06-09T00:04:52.281140+00:00",
+      "execution_count": 0,
+      "is_active": true
+    },
+    {
+      "node_id": "eb63e8a6-87ba-4443-a51f-f95afd8d2298",
+      "node_name": "ConceptExtractor",
+      "capability": "quran",
+      "quality_score": 0.8,
+      "avg_latency_ms": 100.0,
+      "composite_score": 0.854,
+      "tags": [
+        "quran",
+        "concept",
+        "ai"
+      ],
+      "metadata": {},
+      "advertised_at": "2026-06-09T00:04:52.768208+00:00",
+      "last_updated": "2026-06-09T00:04:52.768208+00:00",
+      "execution_count": 0,
+      "is_active": true
+    }
+  ],
+  "input": [
+    {
+      "node_id": "16a930d2-1c15-43d9-bb27-621ddf2622c6",
+      "node_name": "QuranReader",
+      "capability": "input",
+      "quality_score": 0.8,
+      "avg_latency_ms": 100.0,
+      "composite_score": 0.854,
+      "tags": [
+        "quran",
+        "input"
+      ],
+      "metadata": {},
+      "advertised_at": "2026-06-09T00:04:52.281798+00:00",
+      "last_updated": "2026-06-09T00:04:52.281798+00:00",
+      "execution_count": 0,
+      "is_active": true
+    }
+  ],
+  "concept": [
+    {
+      "node_id": "eb63e8a6-87ba-4443-a51f-f95afd8d2298",
+      "node_name": "ConceptExtractor",
+      "capability": "concept",
+      "quality_score": 0.8,
+      "avg_latency_ms": 100.0,
+      "composite_score": 0.854,
+      "tags": [
+        "quran",
+        "concept",
+        "ai"
+      ],
+      "metadata": {},
+      "advertised_at": "2026-06-09T00:04:52.768847+00:00",
+      "last_updated": "2026-06-09T00:04:52.768847+00:00",
+      "execution_count": 0,
+      "is_active": true
+    }
+  ],
+  "ai": [
+    {
+      "node_id": "eb63e8a6-87ba-4443-a51f-f95afd8d2298",
+      "node_name": "ConceptExtractor",
+      "capability": "ai",
+      "quality_score": 0.8,
+      "avg_latency_ms": 100.0,
+      "composite_score": 0.854,
+      "tags": [
+        "quran",
+        "concept",
+        "ai"
+      ],
+      "metadata": {},
+      "advertised_at": "2026-06-09T00:04:52.769261+00:00",
+      "last_updated": "2026-06-09T00:04:52.769261+00:00",
+      "execution_count": 0,
+      "is_active": true
+    }
+  ]
+}

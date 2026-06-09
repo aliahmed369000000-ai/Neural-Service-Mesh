@@ -1151,10 +1151,12 @@ def _add_knowledge_sources_routes(app, mesh):
     from knowledge_sources import SourceType, UpdateFrequency, AccessMode
     from knowledge_sources.quran.quran_source import create_quran_source
 
-    # ── Initialise SourceManager ─────────────────────────────────────────
+    # ── Initialise SourceManager — wire all mesh components ──────────────
     sm = SourceManager(min_quality_threshold=30.0)
     sm.set_knowledge_store(getattr(mesh, "knowledge", None))
     sm.set_environment_model(getattr(mesh, "env_model", None))
+    sm.set_memory_engine(getattr(mesh, "memory", None))
+    sm.set_semantic_matcher(getattr(mesh, "semantic", None))
 
     # Register Quran as the first official source
     quran_meta, quran_feeder = create_quran_source()
@@ -1209,6 +1211,93 @@ def _add_knowledge_sources_routes(app, mesh):
             return jsonify({"registered": True, "source": registered.to_dict()}), 201
         except Exception as exc:
             return jsonify({"error": str(exc)}), 400
+
+    # ── POST /sources/quran/sync — Full Quran pipeline ───────────────────
+    @app.route("/sources/quran/sync", methods=["POST"])
+    def sources_quran_sync():
+        """
+        Full Quran ingestion pipeline (synchronous):
+          1. SourceManager sync  → KnowledgeStore + MemoryEngine + SemanticMatcher
+          2. Force CKG rebuild   → CognitiveKnowledgeGraph with all 6236 ayahs
+          3. Update graph metrics + route rankings in KnowledgeStore
+          4. Update EnvironmentModel
+
+        Returns a combined report.
+        """
+        import threading
+        report = {}
+
+        # Step 1: Source sync
+        try:
+            result = sm.sync_source(quran_meta.id)
+            report["source_sync"] = {
+                "items_fetched":   result.items_fetched,
+                "items_validated": result.items_validated,
+                "items_ingested":  result.items_ingested,
+                "items_rejected":  result.items_rejected,
+                "avg_quality":     round(result.avg_quality, 2),
+                "success":         result.success,
+                "errors":          result.errors,
+            }
+        except Exception as exc:
+            report["source_sync"] = {"error": str(exc)}
+
+        # Step 2: Force-rebuild CKG from full quran.json
+        try:
+            from knowledge.ckg_bootstrap import bootstrap_ckg, wait_for_bootstrap
+            import knowledge.ckg_bootstrap as _ckgmod
+            # Reset done flag so force works
+            with _ckgmod._BOOTSTRAP_LOCK:
+                _ckgmod._BOOTSTRAP_DONE = False
+            t = bootstrap_ckg(mesh, background=True, force=True)
+            if t:
+                t.join(timeout=300)   # wait up to 5 min
+            from knowledge.ckg_bootstrap import is_bootstrap_done
+            report["ckg_rebuild"] = {"done": is_bootstrap_done()}
+        except Exception as exc:
+            report["ckg_rebuild"] = {"error": str(exc)}
+
+        # Step 3: Read CKG stats
+        try:
+            import json as _json
+            from pathlib import Path as _P
+            gf = _P("knowledge/cognitive_graph.json")
+            if gf.exists():
+                d = _json.loads(gf.read_text(encoding="utf-8"))
+                # CKG uses 'concepts' dict and 'relations' dict (not nodes/edges)
+                concepts = d.get("concepts", d.get("nodes", {}))
+                relations = d.get("relations", d.get("edges", {}))
+                report["ckg_stats"] = {
+                    "concepts": len(concepts),
+                    "relations": len(relations),
+                    "clusters": list({
+                        v.get("cluster", "?")
+                        for v in concepts.values()
+                        if isinstance(v, dict)
+                    }),
+                    "top_concepts": sorted(
+                        concepts.keys(),
+                        key=lambda k: concepts[k].get("reference_count", 0),
+                        reverse=True
+                    )[:5],
+                }
+            else:
+                report["ckg_stats"] = {"concepts": 0, "relations": 0}
+        except Exception as exc:
+            report["ckg_stats"] = {"error": str(exc)}
+
+        # Step 4: Update KnowledgeStore graph metrics
+        try:
+            if mesh.knowledge and mesh.memory:
+                mesh.knowledge.update_node_rankings(mesh.memory)
+                mesh.knowledge.update_route_rankings(mesh.memory)
+                mesh.knowledge.update_connection_scores(mesh.scoring)
+                report["knowledge_store_updated"] = True
+        except Exception as exc:
+            report["knowledge_store_updated"] = False
+            report["knowledge_store_error"] = str(exc)
+
+        return jsonify(report)
 
     # ── POST /sources/sync ────────────────────────────────────────────────
     @app.route("/sources/sync", methods=["POST"])

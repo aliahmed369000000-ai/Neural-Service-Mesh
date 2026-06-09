@@ -303,18 +303,28 @@ class SourceManager:
         self, items: List[KnowledgeItem], meta: SourceMetadata
     ) -> None:
         """Push validated + scored items to all downstream systems."""
-        for item in items:
-            # KnowledgeStore
-            if self._knowledge_store:
+
+        # ── KnowledgeStore: batch write (one file write for all items) ─────
+        if self._knowledge_store and hasattr(self._knowledge_store, "register_nodes_batch"):
+            try:
+                profiles = [self._build_ks_profile(item, meta) for item in items]
+                self._knowledge_store.register_nodes_batch(profiles)
+                logger.info(
+                    f"[SourceManager] KS batch ingested {len(profiles)} nodes for {meta.name}"
+                )
+            except Exception as exc:
+                logger.warning(f"[SourceManager] KS batch ingest error: {exc}")
+        elif self._knowledge_store:
+            for item in items:
                 try:
                     self._ingest_to_knowledge_store(item, meta)
                 except Exception as exc:
                     logger.warning(f"[SourceManager] KS ingest error: {exc}")
 
-            # SemanticMatcher — index item text for semantic search
+        # ── SemanticMatcher & EnvironmentModel: per-item (lightweight) ─────
+        for item in items:
             if self._semantic_matcher:
                 try:
-                    # Index derived tags and concepts for semantic retrieval
                     searchable = (item.derived_summary or "") + " " + " ".join(item.derived_tags)
                     if hasattr(self._semantic_matcher, "index_text"):
                         self._semantic_matcher.index_text(
@@ -328,36 +338,37 @@ class SourceManager:
                 except Exception as exc:
                     logger.debug(f"[SourceManager] SemanticMatcher index skip: {exc}")
 
-            # EnvironmentModel — update world model with new knowledge
             if self._env_model:
                 try:
                     self._ingest_to_env_model(item, meta)
                 except Exception as exc:
                     logger.warning(f"[SourceManager] EnvModel update error: {exc}")
 
-    def _ingest_to_knowledge_store(
-        self, item: KnowledgeItem, meta: SourceMetadata
-    ) -> None:
-        """Persist a knowledge item to the KnowledgeStore."""
-        # Store in node profiles as a knowledge node
-        profile = {
-            "node_id":     f"ks:{item.item_id}",
-            "name":        item.raw_reference or item.item_id[:16],
-            "description": item.derived_summary or item.raw_content[:200],
-            "capability":  f"knowledge:{meta.source_type.value}",
-            "tags":        item.derived_tags + [meta.source_type.value, meta.name],
-            "version":     "1.0",
-            "announced_at": item.ingested_at,
-            "is_active":   True,
-            "source_id":   meta.id,
-            "source_name": meta.name,
-            "quality_score": item.quality_score,
-            "trust_score":   item.trust_score,
-            "raw_reference": item.raw_reference,
-            # Raw content is stored only for non-scripture or is read-protected
-            "raw_content":   item.raw_content if meta.store_raw_data else "[protected]",
+    def _build_ks_profile(self, item: "KnowledgeItem", meta: "SourceMetadata") -> dict:
+        """Build a KnowledgeStore node profile dict from a KnowledgeItem."""
+        return {
+            "node_id":          f"ks:{item.item_id}",
+            "name":             item.raw_reference or item.item_id[:16],
+            "description":      item.derived_summary or item.raw_content[:200],
+            "capability":       f"knowledge:{meta.source_type.value}",
+            "tags":             item.derived_tags + [meta.source_type.value, meta.name],
+            "version":          "1.0",
+            "announced_at":     item.ingested_at,
+            "is_active":        True,
+            "source_id":        meta.id,
+            "source_name":      meta.name,
+            "quality_score":    item.quality_score,
+            "trust_score":      item.trust_score,
+            "raw_reference":    item.raw_reference,
+            "raw_content":      item.raw_content if meta.store_raw_data else "[protected]",
             "derived_concepts": item.derived_concepts,
         }
+
+    def _ingest_to_knowledge_store(
+        self, item: "KnowledgeItem", meta: "SourceMetadata"
+    ) -> None:
+        """Persist a single knowledge item to the KnowledgeStore (legacy path)."""
+        profile = self._build_ks_profile(item, meta)
         if hasattr(self._knowledge_store, "register_node"):
             self._knowledge_store.register_node(profile)
 
