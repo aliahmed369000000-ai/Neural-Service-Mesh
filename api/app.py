@@ -1844,3 +1844,188 @@ def create_app(mesh):
     app = _create_app_ckg(mesh)
     _add_ckg_bootstrap_routes(app, mesh)
     return app
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Arabic NLP Routes — Phase 18
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _add_arabic_nlp_routes(app, mesh):
+    """
+    Arabic language understanding endpoints.
+
+    Architecture: 3 analysis layers → 7-column feature vector → weight matrix
+      Layer 1 نحوي  — POST /arabic/syntax
+      Layer 2 صرفي  — POST /arabic/morphology
+      Layer 3 دلالي — POST /arabic/semantic
+      Full analysis — POST /arabic/analyze
+      Neural train  — POST /arabic/train
+      Status        — GET  /arabic/status
+    """
+    from ai.arabic_nlp import get_arabic_engine
+
+    def _get_engine():
+        ckg = None
+        try:
+            from knowledge.cognitive_graph import CognitiveMindGraph
+            ckg = getattr(mesh, "ckg", None) or getattr(mesh, "_ckg", None)
+        except Exception:
+            pass
+        return get_arabic_engine(ckg=ckg)
+
+    # ── GET /arabic/status ────────────────────────────────────────────────
+    @app.route("/arabic/status", methods=["GET"])
+    def arabic_status():
+        """حالة محرك فهم اللغة العربية."""
+        try:
+            eng = _get_engine()
+            return jsonify(eng.status())
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
+
+    # ── POST /arabic/analyze ──────────────────────────────────────────────
+    @app.route("/arabic/analyze", methods=["POST"])
+    def arabic_analyze():
+        """
+        تحليل كامل (نحوي + صرفي + دلالي) وإنتاج مُتجه الميزات (7 عناصر).
+
+        Body: { "text": "النص العربي هنا" }
+
+        Returns full 3-layer analysis + 7-element feature vector.
+        """
+        b    = request.get_json(force=True) or {}
+        text = (b.get("text") or b.get("نص") or "").strip()
+        if not text:
+            return jsonify({"error": "حقل text مطلوب"}), 400
+        try:
+            eng    = _get_engine()
+            result = eng.analyse(text)
+            return jsonify(result.to_dict())
+        except Exception as exc:
+            logger.error(f"[/arabic/analyze] {exc}")
+            return jsonify({"error": str(exc)}), 500
+
+    # ── POST /arabic/syntax ────────────────────────────────────────────────
+    @app.route("/arabic/syntax", methods=["POST"])
+    def arabic_syntax():
+        """
+        الطبقة 1 — التحليل النحوي (جمل، أفعال، أسماء، حروف).
+
+        Body: { "text": "..." }
+        """
+        b    = request.get_json(force=True) or {}
+        text = (b.get("text") or b.get("نص") or "").strip()
+        if not text:
+            return jsonify({"error": "حقل text مطلوب"}), 400
+        try:
+            eng = _get_engine()
+            return jsonify(eng.syntactic_only(text))
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
+
+    # ── POST /arabic/morphology ───────────────────────────────────────────
+    @app.route("/arabic/morphology", methods=["POST"])
+    def arabic_morphology():
+        """
+        الطبقة 2 — التحليل الصرفي (جذور، أوزان).
+
+        Body: { "text": "..." }
+        """
+        b    = request.get_json(force=True) or {}
+        text = (b.get("text") or b.get("نص") or "").strip()
+        if not text:
+            return jsonify({"error": "حقل text مطلوب"}), 400
+        try:
+            eng = _get_engine()
+            return jsonify(eng.morphological_only(text))
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
+
+    # ── POST /arabic/semantic ─────────────────────────────────────────────
+    @app.route("/arabic/semantic", methods=["POST"])
+    def arabic_semantic():
+        """
+        الطبقة 3 — التحليل الدلالي (معاني، مفاهيم، سياقات).
+
+        Body: { "text": "..." }
+        """
+        b    = request.get_json(force=True) or {}
+        text = (b.get("text") or b.get("نص") or "").strip()
+        if not text:
+            return jsonify({"error": "حقل text مطلوب"}), 400
+        try:
+            eng = _get_engine()
+            return jsonify(eng.semantic_only(text))
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
+
+    # ── POST /arabic/train ────────────────────────────────────────────────
+    @app.route("/arabic/train", methods=["POST"])
+    def arabic_train():
+        """
+        تدريب مصفوفة الأوزان العصبية باستخدام نتيجة التحليل العربي.
+
+        يُحلَّل النص → مُتجه 7 عناصر → يُغذَّى في NeuralWeightLayer/DynamicWeightLayer.
+
+        Body: { "text": "...", "target": 0.85 }
+          target: درجة الجودة المستهدفة (0.0-1.0)
+        """
+        b      = request.get_json(force=True) or {}
+        text   = (b.get("text") or b.get("نص") or "").strip()
+        target = float(b.get("target", 0.75))
+
+        if not text:
+            return jsonify({"error": "حقل text مطلوب"}), 400
+        if not 0.0 <= target <= 1.0:
+            return jsonify({"error": "target يجب أن يكون بين 0.0 و 1.0"}), 400
+
+        # Get the active neural layer from the mesh
+        neural_layer = None
+        try:
+            neural_layer = getattr(mesh, "dynamic_layer", None)
+            if neural_layer is None:
+                neural_layer = getattr(mesh, "neural_layer", None)
+        except Exception:
+            pass
+
+        if neural_layer is None:
+            return jsonify({"error": "لا توجد طبقة أوزان عصبية نشطة"}), 503
+
+        try:
+            eng    = _get_engine()
+            result = eng.analyse_and_train(text, target, neural_layer)
+            return jsonify(result)
+        except Exception as exc:
+            logger.error(f"[/arabic/train] {exc}")
+            return jsonify({"error": str(exc)}), 500
+
+    # ── POST /arabic/batch ────────────────────────────────────────────────
+    @app.route("/arabic/batch", methods=["POST"])
+    def arabic_batch():
+        """
+        تحليل دُفعة من النصوص دفعةً واحدة.
+
+        Body: { "texts": ["نص1", "نص2", ...] }
+        """
+        b     = request.get_json(force=True) or {}
+        texts = b.get("texts", [])
+        if not texts or not isinstance(texts, list):
+            return jsonify({"error": "حقل texts (قائمة) مطلوب"}), 400
+        if len(texts) > 100:
+            return jsonify({"error": "الحد الأقصى 100 نص في الدُّفعة الواحدة"}), 400
+        try:
+            eng     = _get_engine()
+            results = eng.batch_analyse(texts)
+            return jsonify({
+                "count":   len(results),
+                "results": [r.to_dict() for r in results],
+            })
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
+
+
+_create_app_arabic = create_app
+def create_app(mesh):
+    app = _create_app_arabic(mesh)
+    _add_arabic_nlp_routes(app, mesh)
+    return app
