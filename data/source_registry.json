@@ -2,7 +2,7 @@
   "_meta": {
     "schema_version": "1.0.0",
     "total_sources": 1,
-    "updated_at": "2026-06-09T00:05:16.900308+00:00"
+    "updated_at": "2026-06-09T00:15:50.911949+00:00"
   },
   "sources": [
     {
@@ -15,16 +15,16 @@
       "base_trust": 1.0,
       "requires_citation": true,
       "update_frequency": "static",
-      "last_sync": "2026-06-09T00:05:16.568108+00:00",
+      "last_sync": null,
       "next_sync": null,
-      "sync_count": 2,
+      "sync_count": 0,
       "error_count": 0,
       "last_error": null,
       "status": "active",
-      "registered_at": "2026-06-09T00:01:32.802511+00:00",
-      "total_items_ingested": 6236,
-      "total_items_rejected": 6236,
-      "avg_quality_score": 32.09,
+      "registered_at": "2026-06-09T00:15:50.911745+00:00",
+      "total_items_ingested": 0,
+      "total_items_rejected": 0,
+      "avg_quality_score": 0.0,
       "config": {
         "local_file": "knowledge_sources/quran/data/quran.json",
         "api_url": "https://api.alquran.cloud/v1/quran/quran-uthmani",
