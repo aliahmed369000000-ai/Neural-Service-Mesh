@@ -2,7 +2,7 @@
   "_meta": {
     "schema_version": "1.0.0",
     "created_at": "2026-06-06T00:22:29.764270+00:00",
-    "last_updated": "2026-06-09T04:29:14.016664+00:00",
+    "last_updated": "2026-06-09T04:35:19.915082+00:00",
     "total_nodes": 6242,
     "description": "Node capabilities and semantic metadata registry"
   },
@@ -285892,17 +285892,17 @@
           "data"
         ],
         "capability_tokens": [
-          "node",
-          "dynamic",
           "api",
           "created",
           "through",
           "pass",
+          "dynamic",
+          "node",
           "passthrough"
         ],
         "updated_at": "2026-06-09T00:03:19.159935"
       },
-      "last_seen": "2026-06-09T04:29:12.988229+00:00",
+      "last_seen": "2026-06-09T04:35:18.870296+00:00",
       "first_seen": "2026-06-09T00:03:19.330471+00:00",
       "execution_stats": {
         "total_executions": 1,
@@ -285947,14 +285947,14 @@
           "data"
         ],
         "capability_tokens": [
-          "quran",
-          "reads",
+          "input",
           "ayahs",
-          "input"
+          "quran",
+          "reads"
         ],
         "updated_at": "2026-06-09T00:04:51.835016"
       },
-      "last_seen": "2026-06-09T04:29:13.508255+00:00",
+      "last_seen": "2026-06-09T04:35:19.401157+00:00",
       "first_seen": "2026-06-09T00:04:52.005711+00:00",
       "execution_stats": {
         "total_executions": 1,
@@ -286000,16 +286000,16 @@
           "data"
         ],
         "capability_tokens": [
-          "concepts",
+          "quran",
           "islamic",
           "ai",
-          "concept",
-          "quran",
-          "extracts"
+          "concepts",
+          "extracts",
+          "concept"
         ],
         "updated_at": "2026-06-09T00:04:52.342428"
       },
-      "last_seen": "2026-06-09T04:29:14.016634+00:00",
+      "last_seen": "2026-06-09T04:35:19.915051+00:00",
       "first_seen": "2026-06-09T00:04:52.492755+00:00",
       "execution_stats": {
         "total_executions": 1,
