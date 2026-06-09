@@ -19,3 +19,4 @@ plotly
 requests
 scikit-learn
 streamlit
+gradio

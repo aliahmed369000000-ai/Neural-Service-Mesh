@@ -1,202 +1,146 @@
-import streamlit as st
-import requests
-import plotly.graph_objects as go
+from __future__ import annotations
+import os
+import math
 import json
 from datetime import datetime
 
-API_BASE = "http://localhost:5000"
+import requests
+import gradio as gr
+import plotly.graph_objects as go
 
-st.set_page_config(
-    page_title="Neural Service Mesh — Dashboard",
-    page_icon="🧠",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
+API_BASE = os.environ.get("API_BASE", "http://localhost:5000")
 
-st.markdown("""
-<style>
-    body, .stApp { direction: rtl; font-family: 'Segoe UI', Tahoma, sans-serif; }
-    .metric-card {
-        background: #1e1e2e;
-        border: 1px solid #313244;
-        border-radius: 12px;
-        padding: 1.2rem 1.5rem;
-        text-align: center;
-    }
-    .metric-value { font-size: 2.4rem; font-weight: 700; color: #cba6f7; }
-    .metric-label { font-size: 0.9rem; color: #a6adc8; margin-top: 4px; }
-    .section-title {
-        font-size: 1.1rem; font-weight: 600; color: #cdd6f4;
-        border-bottom: 1px solid #313244; padding-bottom: 6px; margin-bottom: 12px;
-    }
-    .result-box {
-        background: #181825; border: 1px solid #45475a;
-        border-radius: 10px; padding: 1rem 1.2rem;
-        font-size: 0.95rem; color: #cdd6f4;
-    }
-    .tag {
-        display: inline-block; background: #313244; color: #cba6f7;
-        border-radius: 20px; padding: 2px 12px; margin: 3px 3px;
-        font-size: 0.85rem;
-    }
-    .quran-tag {
-        display: inline-block; background: #1e3a2e; color: #a6e3a1;
-        border-radius: 20px; padding: 2px 12px; margin: 3px 3px;
-        font-size: 0.85rem;
-    }
-    .confidence-bar { height: 8px; border-radius: 4px; background: #313244; margin-top: 6px; }
-    .confidence-fill { height: 8px; border-radius: 4px; background: #cba6f7; }
-</style>
-""", unsafe_allow_html=True)
+DARK_CSS = """
+body, .gradio-container {
+    background: #11111b !important;
+    direction: rtl;
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+}
+.gr-panel, .block { background: #1e1e2e !important; border-color: #313244 !important; }
+.gr-button-primary { background: #cba6f7 !important; color: #1e1e2e !important; border: none !important; }
+.gr-button { background: #313244 !important; color: #cdd6f4 !important; border: none !important; }
+h1, h2, h3, label, .label-wrap { color: #cdd6f4 !important; }
+input, textarea { background: #181825 !important; color: #cdd6f4 !important; border-color: #45475a !important; }
+.metric-card {
+    background: #1e1e2e;
+    border: 1px solid #313244;
+    border-radius: 12px;
+    padding: 1.2rem 1.5rem;
+    text-align: center;
+    margin: 4px;
+}
+.metric-value { font-size: 2.2rem; font-weight: 700; color: #cba6f7; }
+.metric-label { font-size: 0.9rem; color: #a6adc8; margin-top: 4px; }
+.result-box {
+    background: #181825;
+    border: 1px solid #45475a;
+    border-radius: 10px;
+    padding: 1rem 1.2rem;
+    font-size: 0.95rem;
+    color: #cdd6f4;
+    direction: rtl;
+}
+.tag {
+    display: inline-block; background: #313244; color: #cba6f7;
+    border-radius: 20px; padding: 2px 12px; margin: 3px 3px; font-size: 0.85rem;
+}
+.quran-tag {
+    display: inline-block; background: #1e3a2e; color: #a6e3a1;
+    border-radius: 20px; padding: 2px 12px; margin: 3px 3px; font-size: 0.85rem;
+}
+.confidence-bar { height: 8px; border-radius: 4px; background: #313244; margin-top: 6px; }
+.confidence-fill { height: 8px; border-radius: 4px; }
+.section-divider { border-top: 1px solid #313244; margin: 1rem 0; }
+footer { display: none !important; }
+"""
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────
-
-@st.cache_data(ttl=30)
-def fetch_ckg_stats():
+def _get(path: str, timeout: int = 8):
     try:
-        r = requests.get(f"{API_BASE}/train/ckg", timeout=8)
+        r = requests.get(f"{API_BASE}{path}", timeout=timeout)
         return r.json() if r.ok else {}
     except Exception:
         return {}
 
 
-@st.cache_data(ttl=30)
-def fetch_matrix_stats():
+def _post(path: str, payload: dict, timeout: int = 10):
     try:
-        r = requests.get(f"{API_BASE}/train/matrix", timeout=8)
-        return r.json() if r.ok else {}
-    except Exception:
-        return {}
-
-
-@st.cache_data(ttl=30)
-def fetch_status():
-    try:
-        r = requests.get(f"{API_BASE}/status", timeout=8)
-        return r.json() if r.ok else {}
-    except Exception:
-        return {}
-
-
-@st.cache_data(ttl=60)
-def fetch_train_status():
-    try:
-        r = requests.get(f"{API_BASE}/train/status", timeout=8)
-        return r.json() if r.ok else {}
-    except Exception:
-        return {}
-
-
-def ask_concept(concept: str):
-    try:
-        r = requests.post(
-            f"{API_BASE}/train/ask",
-            json={"concept": concept},
-            timeout=10,
-        )
+        r = requests.post(f"{API_BASE}{path}", json=payload, timeout=timeout)
         return r.json()
     except Exception as e:
         return {"error": str(e)}
 
 
-def render_tags(items, css_class="tag"):
+def _render_tags(items, css_class="tag"):
     if not items:
         return "<span style='color:#6c7086'>—</span>"
     return "".join(f'<span class="{css_class}">{item}</span>' for item in items)
 
 
-# ── Header ──────────────────────────────────────────────────────────────────
-
-st.markdown(
-    "<h1 style='text-align:center; color:#cba6f7; margin-bottom:0;'>"
-    "🧠 Neural Service Mesh</h1>"
-    "<p style='text-align:center; color:#a6adc8; margin-top:4px;'>لوحة المراقبة المعرفية</p>",
-    unsafe_allow_html=True,
-)
-st.divider()
-
-# ── Fetch data ───────────────────────────────────────────────────────────────
-
-ckg   = fetch_ckg_stats()
-mat   = fetch_matrix_stats()
-stat  = fetch_status()
-tstat = fetch_train_status()
-
-# ── KPI row ─────────────────────────────────────────────────────────────────
-
-c1, c2, c3, c4 = st.columns(4)
-
-total_concepts = ckg.get("total_concepts", ckg.get("concepts", {}) and len(ckg.get("concepts", {})) or "—")
-train_steps    = mat.get("train_steps", "—")
-last_loss_raw  = mat.get("last_loss")
-last_loss      = f"{last_loss_raw:.4f}" if isinstance(last_loss_raw, (int, float)) else "—"
-
-# Last update: try multiple fields
-last_update = (
-    ckg.get("_meta", {}).get("saved_at")
-    or stat.get("started_at")
-    or stat.get("timestamp")
-    or tstat.get("last_trained_at")
-    or "—"
-)
-if last_update and last_update != "—":
+def _fmt_date(raw):
+    if not raw or raw == "—":
+        return "—"
     try:
-        dt = datetime.fromisoformat(last_update.replace("Z", "+00:00"))
-        last_update = dt.strftime("%Y-%m-%d  %H:%M")
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        return dt.strftime("%Y-%m-%d %H:%M")
     except Exception:
-        last_update = str(last_update)[:16]
+        return str(raw)[:16]
 
-with c1:
-    st.markdown(
-        f'<div class="metric-card">'
-        f'<div class="metric-value">{total_concepts}</div>'
-        f'<div class="metric-label">📚 مفاهيم في CKG</div></div>',
-        unsafe_allow_html=True,
+
+# ── Dashboard refresh ────────────────────────────────────────────────────────
+
+def load_dashboard():
+    ckg   = _get("/train/ckg")
+    mat   = _get("/train/matrix")
+    stat  = _get("/status")
+    tstat = _get("/train/status")
+
+    total_concepts = ckg.get("total_concepts") or (len(ckg.get("concepts", {})) or "—")
+    train_steps    = mat.get("train_steps", "—")
+    last_loss_raw  = mat.get("last_loss")
+    last_loss      = f"{last_loss_raw:.4f}" if isinstance(last_loss_raw, (int, float)) else "—"
+    last_update    = _fmt_date(
+        ckg.get("_meta", {}).get("saved_at")
+        or stat.get("started_at")
+        or stat.get("timestamp")
+        or tstat.get("last_trained_at")
     )
 
-with c2:
-    st.markdown(
-        f'<div class="metric-card">'
-        f'<div class="metric-value">{train_steps}</div>'
-        f'<div class="metric-label">🔁 خطوات التدريب</div></div>',
-        unsafe_allow_html=True,
-    )
+    kpi_html = f"""
+    <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:space-between; direction:rtl;">
+        <div class="metric-card" style="flex:1; min-width:160px;">
+            <div class="metric-value">{total_concepts}</div>
+            <div class="metric-label">📚 مفاهيم في CKG</div>
+        </div>
+        <div class="metric-card" style="flex:1; min-width:160px;">
+            <div class="metric-value">{train_steps}</div>
+            <div class="metric-label">🔁 خطوات التدريب</div>
+        </div>
+        <div class="metric-card" style="flex:1; min-width:160px;">
+            <div class="metric-value">{last_loss}</div>
+            <div class="metric-label">📉 آخر خسارة (loss)</div>
+        </div>
+        <div class="metric-card" style="flex:1; min-width:160px;">
+            <div class="metric-value" style="font-size:1.2rem;">{last_update}</div>
+            <div class="metric-label">🕐 آخر تحديث للنظام</div>
+        </div>
+    </div>
+    """
 
-with c3:
-    st.markdown(
-        f'<div class="metric-card">'
-        f'<div class="metric-value">{last_loss}</div>'
-        f'<div class="metric-label">📉 آخر خسارة (loss)</div></div>',
-        unsafe_allow_html=True,
-    )
+    loss_fig = _build_loss_fig(mat)
+    cluster_fig = _build_cluster_fig(ckg)
 
-with c4:
-    st.markdown(
-        f'<div class="metric-card">'
-        f'<div class="metric-value" style="font-size:1.3rem;">{last_update}</div>'
-        f'<div class="metric-label">🕐 آخر تحديث للنظام</div></div>',
-        unsafe_allow_html=True,
-    )
+    return kpi_html, loss_fig, cluster_fig
 
-st.markdown("<br>", unsafe_allow_html=True)
 
-# ── Loss curve ───────────────────────────────────────────────────────────────
+def _build_loss_fig(mat: dict):
+    weight_stats = mat.get("weight_stats", {})
+    train_steps  = mat.get("train_steps", 0)
+    steps_val    = train_steps if isinstance(train_steps, int) else 0
 
-st.markdown('<div class="section-title">📉 منحنى الخسارة (Loss Curve)</div>', unsafe_allow_html=True)
-
-weight_stats = mat.get("weight_stats", {})
-
-if weight_stats:
-    w_min  = weight_stats.get("min", 0)
-    w_max  = weight_stats.get("max", 1)
-    w_mean = weight_stats.get("mean", 0.5)
-    w_std  = weight_stats.get("std", 0.1)
-
-    steps_val = train_steps if isinstance(train_steps, int) else 0
-
-    if steps_val > 0:
-        import math
+    if weight_stats and steps_val > 0:
+        w_max = weight_stats.get("max", 1.0)
+        w_std = weight_stats.get("std", 0.1)
         xs = list(range(0, steps_val + 1, max(1, steps_val // 40)))
         ys = [max(0.01, w_max * math.exp(-0.06 * i) + w_std * math.sin(i * 0.4) * 0.05)
               for i in range(len(xs))]
@@ -218,103 +162,35 @@ if weight_stats:
         plot_bgcolor="#1e1e2e",
         font=dict(color="#cdd6f4", family="Segoe UI"),
         margin=dict(l=20, r=20, t=20, b=20),
-        xaxis=dict(
-            title="خطوة التدريب",
-            gridcolor="#313244",
-            showline=False,
-        ),
-        yaxis=dict(
-            title="الخسارة",
-            gridcolor="#313244",
-            showline=False,
-        ),
+        xaxis=dict(title="خطوة التدريب", gridcolor="#313244", showline=False),
+        yaxis=dict(title="الخسارة", gridcolor="#313244", showline=False),
         height=280,
     )
-    st.plotly_chart(fig, use_container_width=True)
-else:
-    st.info("لا تتوفر بيانات الأوزان بعد — قم بتشغيل التدريب أولاً.")
+    return fig
 
-st.divider()
 
-# ── Concept Search ───────────────────────────────────────────────────────────
-
-st.markdown('<div class="section-title">🔍 استعلام عن مفهوم</div>', unsafe_allow_html=True)
-
-col_inp, col_btn = st.columns([5, 1])
-with col_inp:
-    concept_input = st.text_input(
-        "أدخل مفهوماً",
-        placeholder="مثال: الجاذبية، الإيمان، الكم، الفلك...",
-        label_visibility="collapsed",
-    )
-with col_btn:
-    search_btn = st.button("🔎 بحث", use_container_width=True)
-
-if search_btn and concept_input.strip():
-    with st.spinner("جارٍ البحث في الشبكة المعرفية..."):
-        result = ask_concept(concept_input.strip())
-
-    if "error" in result:
-        st.error(f"خطأ: {result['error']}")
-    else:
-        found      = result.get("found_in_ckg", False)
-        conf       = result.get("confidence_score", 0.0)
-        related    = result.get("related_concepts", [])
-        sources    = result.get("sources", [])
-        cross      = result.get("cross_domain_connections", [])
-        quran_refs = result.get("quran_references", [])
-
-        conf_pct = int(conf * 100)
-        conf_color = "#a6e3a1" if conf > 0.6 else ("#f9e2af" if conf > 0.3 else "#f38ba8")
-
-        st.markdown(
-            f'<div class="result-box">'
-            f'<b style="color:#cba6f7; font-size:1.1rem;">📖 {result.get("concept","")}</b>'
-            f'{"<span style=\"color:#a6e3a1; margin-right:10px;\">✓ موجود في CKG</span>" if found else "<span style=\"color:#f38ba8; margin-right:10px;\">✗ غير موجود في CKG</span>"}'
-            f'<br><br>'
-
-            f'<b>درجة الثقة:</b> '
-            f'<span style="color:{conf_color}; font-weight:700;">{conf_pct}%</span>'
-            f'<div class="confidence-bar"><div class="confidence-fill" style="width:{conf_pct}%;background:{conf_color};"></div></div>'
-            f'<br>'
-
-            f'<b>📌 مفاهيم ذات صلة:</b><br>'
-            f'{render_tags(related)}'
-            f'<br><br>'
-
-            f'<b>🗂 المصادر:</b><br>'
-            f'{render_tags(sources)}'
-            f'<br><br>'
-
-            f'<b>🌐 روابط بين المجالات:</b><br>'
-            f'{render_tags(cross)}'
-            f'<br><br>'
-
-            f'<b>📿 مراجع قرآنية:</b><br>'
-            f'{render_tags(quran_refs, "quran-tag") if quran_refs else "<span style=\"color:#6c7086\">لا توجد مراجع قرآنية مباشرة</span>"}'
-
-            f'</div>',
-            unsafe_allow_html=True,
+def _build_cluster_fig(ckg: dict):
+    clusters = ckg.get("clusters", {})
+    if not clusters:
+        fig = go.Figure()
+        fig.update_layout(
+            paper_bgcolor="#1e1e2e",
+            plot_bgcolor="#1e1e2e",
+            font=dict(color="#cdd6f4"),
+            height=200,
+            annotations=[dict(
+                text="لا تتوفر مجموعات بعد",
+                x=0.5, y=0.5, showarrow=False,
+                font=dict(color="#6c7086", size=14),
+            )],
         )
+        return fig
 
-        with st.expander("📋 JSON الخام"):
-            st.json(result)
-
-elif search_btn:
-    st.warning("الرجاء إدخال مفهوم للبحث.")
-
-st.divider()
-
-# ── Cluster breakdown ────────────────────────────────────────────────────────
-
-clusters = ckg.get("clusters", {})
-if clusters:
-    st.markdown('<div class="section-title">🗂 توزيع المجموعات المعرفية</div>', unsafe_allow_html=True)
     sorted_clusters = sorted(clusters.items(), key=lambda x: -x[1])
     names  = [c[0] for c in sorted_clusters[:12]]
     counts = [c[1] for c in sorted_clusters[:12]]
 
-    fig2 = go.Figure(go.Bar(
+    fig = go.Figure(go.Bar(
         x=counts, y=names,
         orientation="h",
         marker=dict(
@@ -325,7 +201,7 @@ if clusters:
         text=counts,
         textposition="outside",
     ))
-    fig2.update_layout(
+    fig.update_layout(
         paper_bgcolor="#1e1e2e",
         plot_bgcolor="#1e1e2e",
         font=dict(color="#cdd6f4", family="Segoe UI"),
@@ -334,17 +210,130 @@ if clusters:
         yaxis=dict(gridcolor="#313244", autorange="reversed"),
         height=max(250, len(names) * 32),
     )
-    st.plotly_chart(fig2, use_container_width=True)
+    return fig
 
-# ── Footer ───────────────────────────────────────────────────────────────────
 
-st.markdown(
-    "<div style='text-align:center; color:#585b70; font-size:0.8rem; margin-top:2rem;'>"
-    "Neural Service Mesh v18 — لوحة المراقبة المعرفية"
-    "</div>",
-    unsafe_allow_html=True,
-)
+# ── Concept search ───────────────────────────────────────────────────────────
 
-if st.button("🔄 تحديث البيانات"):
-    st.cache_data.clear()
-    st.rerun()
+def search_concept(concept: str):
+    if not concept or not concept.strip():
+        return "<p style='color:#f9e2af; direction:rtl;'>الرجاء إدخال مفهوم للبحث.</p>", "{}"
+
+    result = _post("/train/ask", {"concept": concept.strip()})
+
+    if "error" in result:
+        return (
+            f"<p style='color:#f38ba8; direction:rtl;'>خطأ: {result['error']}</p>",
+            json.dumps(result, ensure_ascii=False, indent=2),
+        )
+
+    found      = result.get("found_in_ckg", False)
+    conf       = result.get("confidence_score", 0.0)
+    related    = result.get("related_concepts", [])
+    sources    = result.get("sources", [])
+    cross      = result.get("cross_domain_connections", [])
+    quran_refs = result.get("quran_references", [])
+
+    conf_pct   = int(conf * 100)
+    conf_color = "#a6e3a1" if conf > 0.6 else ("#f9e2af" if conf > 0.3 else "#f38ba8")
+    found_html = (
+        '<span style="color:#a6e3a1; margin-right:10px;">✓ موجود في CKG</span>'
+        if found else
+        '<span style="color:#f38ba8; margin-right:10px;">✗ غير موجود في CKG</span>'
+    )
+    quran_html = (
+        _render_tags(quran_refs, "quran-tag")
+        if quran_refs else
+        "<span style='color:#6c7086'>لا توجد مراجع قرآنية مباشرة</span>"
+    )
+
+    html = f"""
+    <div class="result-box">
+        <b style="color:#cba6f7; font-size:1.1rem;">📖 {result.get("concept","")}</b>
+        {found_html}
+        <br><br>
+        <b>درجة الثقة:</b>
+        <span style="color:{conf_color}; font-weight:700;">{conf_pct}%</span>
+        <div class="confidence-bar">
+            <div class="confidence-fill" style="width:{conf_pct}%; background:{conf_color};"></div>
+        </div>
+        <br>
+        <b>📌 مفاهيم ذات صلة:</b><br>{_render_tags(related)}<br><br>
+        <b>🗂 المصادر:</b><br>{_render_tags(sources)}<br><br>
+        <b>🌐 روابط بين المجالات:</b><br>{_render_tags(cross)}<br><br>
+        <b>📿 مراجع قرآنية:</b><br>{quran_html}
+    </div>
+    """
+    raw_json = json.dumps(result, ensure_ascii=False, indent=2)
+    return html, raw_json
+
+
+# ── Build UI ─────────────────────────────────────────────────────────────────
+
+with gr.Blocks(
+    title="Neural Service Mesh — لوحة المراقبة",
+    css=DARK_CSS,
+    theme=gr.themes.Base(
+        primary_hue="purple",
+        secondary_hue="gray",
+        neutral_hue="gray",
+    ),
+) as demo:
+
+    gr.HTML("""
+    <div style="text-align:center; padding: 1rem 0; direction:rtl;">
+        <h1 style="color:#cba6f7; margin-bottom:4px; font-size:2rem;">🧠 Neural Service Mesh</h1>
+        <p style="color:#a6adc8; margin:0; font-size:1rem;">لوحة المراقبة المعرفية — v18.0.0</p>
+    </div>
+    """)
+
+    with gr.Row():
+        refresh_btn = gr.Button("🔄 تحديث البيانات", variant="primary", scale=0)
+
+    kpi_html = gr.HTML(label="")
+
+    gr.HTML('<div class="section-divider"></div>')
+    gr.HTML('<p style="color:#a6adc8; font-weight:600; direction:rtl;">📉 منحنى الخسارة (Loss Curve)</p>')
+    loss_plot = gr.Plot(label="")
+
+    gr.HTML('<div class="section-divider"></div>')
+    gr.HTML('<p style="color:#a6adc8; font-weight:600; direction:rtl;">🗂 توزيع المجموعات المعرفية</p>')
+    cluster_plot = gr.Plot(label="")
+
+    gr.HTML('<div class="section-divider"></div>')
+    gr.HTML('<p style="color:#a6adc8; font-weight:600; direction:rtl;">🔍 استعلام عن مفهوم</p>')
+
+    with gr.Row():
+        concept_input = gr.Textbox(
+            placeholder="مثال: الجاذبية، الإيمان، الكم، الفلك...",
+            label="",
+            scale=5,
+        )
+        search_btn = gr.Button("🔎 بحث", variant="primary", scale=1)
+
+    search_result = gr.HTML(label="")
+    with gr.Accordion("📋 JSON الخام", open=False):
+        raw_json_out = gr.Code(language="json", label="")
+
+    gr.HTML("""
+    <div style="text-align:center; color:#585b70; font-size:0.8rem; margin-top:2rem; direction:rtl;">
+        Neural Service Mesh v18 — لوحة المراقبة المعرفية
+    </div>
+    """)
+
+    def _refresh():
+        return load_dashboard()
+
+    refresh_btn.click(fn=_refresh, outputs=[kpi_html, loss_plot, cluster_plot])
+    search_btn.click(fn=search_concept, inputs=[concept_input], outputs=[search_result, raw_json_out])
+    concept_input.submit(fn=search_concept, inputs=[concept_input], outputs=[search_result, raw_json_out])
+
+    demo.load(fn=_refresh, outputs=[kpi_html, loss_plot, cluster_plot])
+
+
+if __name__ == "__main__":
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=int(os.environ.get("PORT", 7860)),
+        show_api=False,
+    )
