@@ -2233,6 +2233,125 @@ def _add_knowledge_trainer_routes(app, mesh):
             )[:20],
         })
 
+    # ── POST /train/ask ───────────────────────────────────────────────────
+    @app.route("/train/ask", methods=["POST"])
+    def train_ask():
+        """
+        استعلام معرفي عن مفهوم من الـ CKG.
+        Body: { "concept": "الجاذبية" }
+        Returns: confidence_score, related_concepts, sources,
+                 cross_domain_connections, quran_references
+        """
+        import re as _re
+        from pathlib import Path
+        import json as _json
+
+        b       = request.get_json(force=True) or {}
+        concept = (b.get("concept") or "").strip()
+        if not concept:
+            return jsonify({"error": "حقل concept مطلوب"}), 400
+
+        # ── Load CKG directly from file (always up-to-date) ──────────────
+        ckg_path = Path("./knowledge/cognitive_graph.json")
+        if not ckg_path.exists():
+            return jsonify({"error": "CKG غير موجود — قم بتشغيل التدريب أولاً"}), 503
+
+        try:
+            with open(ckg_path, encoding="utf-8") as _f:
+                ckg_data = _json.load(_f)
+        except Exception as exc:
+            return jsonify({"error": f"خطأ في قراءة CKG: {exc}"}), 500
+
+        all_concepts = ckg_data.get("concepts", {})
+        all_relations = ckg_data.get("relations", {})
+
+        # ── Normalize for fuzzy matching ──────────────────────────────────
+        def _norm(t: str) -> str:
+            t = _re.sub(r'[\u064B-\u065F\u0670\u0640]', '', t)
+            t = _re.sub(r'[أإآٱ]', 'ا', t)
+            return t.strip()
+
+        norm_concept = _norm(concept)
+
+        # Try exact match first, then normalized match
+        concept_data = all_concepts.get(concept)
+        matched_key  = concept
+        if concept_data is None:
+            for k, v in all_concepts.items():
+                if _norm(k) == norm_concept:
+                    concept_data = v
+                    matched_key  = k
+                    break
+
+        # ── Confidence score ──────────────────────────────────────────────
+        if concept_data:
+            raw_strength    = float(concept_data.get("strength", 0.0))
+            raw_frequency   = int(concept_data.get("frequency", 0))
+            freq_score      = min(raw_frequency / 20.0, 1.0)
+            confidence_score = round(min(raw_strength * 0.6 + freq_score * 0.4, 1.0), 4)
+        else:
+            confidence_score = 0.0
+
+        # ── Related concepts & cross-domain connections ───────────────────
+        related_concepts: list = []
+        cross_domain_connections: list = []
+        my_cluster = (concept_data or {}).get("cluster", "")
+
+        # Gather neighbours from relations dict
+        neighbours: list = []
+        for rel_key, rel_val in all_relations.items():
+            src = rel_val.get("source", "")
+            tgt = rel_val.get("target", "")
+            w   = float(rel_val.get("weight", 0.0))
+            if _norm(src) == norm_concept:
+                neighbours.append((tgt, w))
+            elif _norm(tgt) == norm_concept:
+                neighbours.append((src, w))
+
+        neighbours.sort(key=lambda x: -x[1])
+
+        seen_related: set = set()
+        for nbr_name, _ in neighbours[:15]:
+            if nbr_name in seen_related or _norm(nbr_name) == norm_concept:
+                continue
+            seen_related.add(nbr_name)
+            nbr_data    = all_concepts.get(nbr_name, {})
+            nbr_cluster = nbr_data.get("cluster", "")
+            if nbr_cluster and nbr_cluster != my_cluster:
+                cross_domain_connections.append(nbr_cluster)
+            else:
+                related_concepts.append(nbr_name)
+
+        # De-duplicate cross-domain clusters and cap lists
+        cross_domain_connections = list(dict.fromkeys(cross_domain_connections))[:6]
+        related_concepts         = related_concepts[:8]
+
+        # ── Sources (domain clusters from concept data) ───────────────────
+        raw_sources = (concept_data or {}).get("sources", [])
+
+        # Quran refs look like "chapter:verse" e.g. "2:255"
+        quran_re      = _re.compile(r'^\d+:\d+$')
+        quran_refs    = [s for s in raw_sources if quran_re.match(str(s))]
+        domain_sources = list({
+            all_concepts.get(s, {}).get("cluster", "")
+            for s in raw_sources
+            if not quran_re.match(str(s)) and all_concepts.get(s)
+        } - {""})
+
+        # If concept itself has a cluster, add it as a source
+        if my_cluster and my_cluster not in domain_sources:
+            domain_sources.insert(0, my_cluster)
+
+        return jsonify({
+            "concept":                 matched_key if concept_data else concept,
+            "found_in_ckg":            concept_data is not None,
+            "confidence_score":        confidence_score,
+            "related_concepts":        related_concepts,
+            "sources":                 domain_sources[:6],
+            "cross_domain_connections": cross_domain_connections,
+            "quran_references":        quran_refs[:10],
+        })
+
     # ── GET /train/matrix ─────────────────────────────────────────────────
     @app.route("/train/matrix", methods=["GET"])
     def train_matrix_status():
