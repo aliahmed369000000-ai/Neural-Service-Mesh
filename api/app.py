@@ -2028,4 +2028,236 @@ _create_app_arabic = create_app
 def create_app(mesh):
     app = _create_app_arabic(mesh)
     _add_arabic_nlp_routes(app, mesh)
+    _add_knowledge_trainer_routes(app, mesh)
     return app
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Knowledge Trainer API — محرك التدريب المعرفي المدمج
+# ══════════════════════════════════════════════════════════════════════════
+
+def _add_knowledge_trainer_routes(app, mesh):
+    """
+    نقاط API للتدريب المعرفي المدمج.
+    المعرفة → متجه 7 أبعاد → مصفوفة الأوزان + cognitive_graph.json + SQLite
+    """
+    from ai.knowledge_trainer import KnowledgeTrainer
+
+    _trainer_cache: dict = {}
+
+    def _trainer() -> KnowledgeTrainer:
+        if "t" not in _trainer_cache:
+            _trainer_cache["t"] = KnowledgeTrainer(mesh)
+        return _trainer_cache["t"]
+
+    # ── GET /train/status ─────────────────────────────────────────────────
+    @app.route("/train/status", methods=["GET"])
+    def train_status():
+        """حالة محرك التدريب: المصفوفة، CKG، SQLite."""
+        return jsonify(_trainer().stats())
+
+    # ── POST /train/domain ─────────────────────────────────────────────────
+    @app.route("/train/domain", methods=["POST"])
+    def train_domain():
+        """
+        دِرِّب على مجال محدد من المصادر المدمجة.
+        Body: { "domain": "physics|math|history|biology|civilizations" }
+              أو "all" لتدريب جميع المجالات دفعة واحدة.
+        """
+        try:
+            from knowledge_sources.domain_sources import get_all_domain_items, \
+                get_physics_items, get_math_items, get_history_items, \
+                get_biology_items, get_civilizations_items
+        except ImportError as e:
+            return jsonify({"error": f"domain_sources غير متاح: {e}"}), 500
+
+        b      = request.get_json(force=True) or {}
+        domain = b.get("domain", "all").strip().lower()
+        t      = _trainer()
+
+        DOMAIN_MAP = {
+            "physics":       get_physics_items,
+            "math":          get_math_items,
+            "history":       get_history_items,
+            "biology":       get_biology_items,
+            "civilizations": get_civilizations_items,
+        }
+
+        if domain == "all":
+            result = t.train_all(get_all_domain_items())
+        elif domain in DOMAIN_MAP:
+            items  = DOMAIN_MAP[domain]()
+            result = t.train_domain(domain, items)
+        else:
+            return jsonify({
+                "error": f"المجال '{domain}' غير معروف",
+                "valid": ["all"] + list(DOMAIN_MAP.keys()),
+            }), 400
+
+        return jsonify(result)
+
+    # ── POST /train/wikipedia ─────────────────────────────────────────────
+    @app.route("/train/wikipedia", methods=["POST"])
+    def train_wikipedia():
+        """
+        جلب وتدريب من ويكيبيديا العربية.
+        Body: { "topics": [...], "max_items": 40 }  (اختياري)
+        """
+        try:
+            from knowledge_sources.web_fetcher import fetch_wikipedia_items
+        except ImportError as e:
+            return jsonify({"error": str(e)}), 500
+
+        b        = request.get_json(force=True) or {}
+        topics   = b.get("topics")       # None = القائمة الافتراضية
+        max_items= int(b.get("max_items", 40))
+
+        items  = fetch_wikipedia_items(topics=topics, max_items=max_items)
+        if not items:
+            return jsonify({"warning": "لم تُجلَب أي مقالات — تحقق من الاتصال",
+                            "items": 0})
+
+        result = _trainer().train_domain("wikipedia", items)
+        return jsonify(result)
+
+    # ── POST /train/github ────────────────────────────────────────────────
+    @app.route("/train/github", methods=["POST"])
+    def train_github():
+        """
+        جلب وتدريب من GitHub.
+        Body: { "queries": [...], "max_total": 50 }  (اختياري)
+        """
+        try:
+            from knowledge_sources.web_fetcher import fetch_github_items
+        except ImportError as e:
+            return jsonify({"error": str(e)}), 500
+
+        b         = request.get_json(force=True) or {}
+        queries   = b.get("queries")
+        max_total = int(b.get("max_total", 50))
+
+        items  = fetch_github_items(queries=queries, max_total=max_total)
+        if not items:
+            return jsonify({"warning": "لم تُجلَب أي مستودعات — تحقق من الاتصال",
+                            "items": 0})
+
+        result = _trainer().train_domain("github", items)
+        return jsonify(result)
+
+    # ── POST /train/all ────────────────────────────────────────────────────
+    @app.route("/train/all", methods=["POST"])
+    def train_all_sources():
+        """
+        دِرِّب على جميع المصادر: المجالات + ويكيبيديا + GitHub.
+        Body: { "include_web": true, "wiki_max": 30, "github_max": 40 }
+        """
+        try:
+            from knowledge_sources.domain_sources import get_all_domain_items
+            from knowledge_sources.web_fetcher    import fetch_wikipedia_items, fetch_github_items
+        except ImportError as e:
+            return jsonify({"error": str(e)}), 500
+
+        b           = request.get_json(force=True) or {}
+        include_web = bool(b.get("include_web", True))
+        wiki_max    = int(b.get("wiki_max",    30))
+        github_max  = int(b.get("github_max",  40))
+
+        all_items = get_all_domain_items()
+
+        if include_web:
+            wiki_items   = fetch_wikipedia_items(max_items=wiki_max)
+            github_items = fetch_github_items(max_total=github_max)
+            if wiki_items:
+                all_items["wikipedia"] = wiki_items
+            if github_items:
+                all_items["github"] = github_items
+
+        result = _trainer().train_all(all_items)
+        return jsonify(result)
+
+    # ── POST /train/custom ────────────────────────────────────────────────
+    @app.route("/train/custom", methods=["POST"])
+    def train_custom():
+        """
+        تدريب على معلومات مخصصة من المستخدم.
+        Body: {
+          "domain": "general",
+          "items": [
+            { "concept": "...", "text": "...", "cluster": "...",
+              "importance": 0.8, "certainty": 0.9, "relations": [] }
+          ]
+        }
+        """
+        b     = request.get_json(force=True) or {}
+        domain= b.get("domain", "general")
+        items = b.get("items", [])
+
+        if not items:
+            return jsonify({"error": "items مطلوب"}), 400
+        if len(items) > 500:
+            return jsonify({"error": "الحد الأقصى 500 عنصر في الطلب الواحد"}), 400
+
+        result = _trainer().train_domain(domain, items)
+        return jsonify(result)
+
+    # ── GET /train/ckg ────────────────────────────────────────────────────
+    @app.route("/train/ckg", methods=["GET"])
+    def train_ckg_stats():
+        """إحصائيات الـ CKG الحالية."""
+        import json
+        from pathlib import Path
+        ckg_path = Path("./knowledge/cognitive_graph.json")
+        if not ckg_path.exists():
+            return jsonify({"error": "cognitive_graph.json غير موجود"}), 404
+        with open(ckg_path, encoding="utf-8") as f:
+            data = json.load(f)
+        meta     = data.get("_meta", {})
+        concepts = data.get("concepts", {})
+        relations= data.get("relations", {})
+
+        clusters: dict = {}
+        for c in concepts.values():
+            cl = c.get("cluster", "unknown")
+            clusters[cl] = clusters.get(cl, 0) + 1
+
+        return jsonify({
+            "meta":             meta,
+            "total_concepts":   len(concepts),
+            "total_relations":  len(relations),
+            "clusters":         clusters,
+            "top_concepts": sorted(
+                [{"name": n, "strength": v.get("strength", 0),
+                  "frequency": v.get("frequency", 0)}
+                 for n, v in concepts.items()],
+                key=lambda x: x["strength"], reverse=True
+            )[:20],
+        })
+
+    # ── GET /train/matrix ─────────────────────────────────────────────────
+    @app.route("/train/matrix", methods=["GET"])
+    def train_matrix_status():
+        """حالة مصفوفة الأوزان الحالية."""
+        layer = getattr(mesh, "dynamic_layer", None) or \
+                getattr(mesh, "neural_layer", None)
+        if layer is None:
+            return jsonify({"error": "لا توجد طبقة أوزان"}), 503
+        return jsonify({
+            "shape":       list(layer.weights.shape),
+            "train_steps": getattr(layer, "_train_steps", 0),
+            "last_loss":   getattr(layer, "_last_loss", None),
+            "weight_stats": {
+                "min":  round(float(layer.weights.min()), 6),
+                "max":  round(float(layer.weights.max()), 6),
+                "mean": round(float(layer.weights.mean()), 6),
+                "std":  round(float(layer.weights.std()),  6),
+            },
+            "dimensions": {
+                "0_IMPORTANCE":  "أهمية المعلومة",
+                "1_CERTAINTY":   "درجة اليقين",
+                "2_ABSTRACTION": "مستوى التجريد",
+                "3_DOMAIN":      "رمز المجال",
+                "4_CONNECTIVITY":"كثافة العلاقات",
+                "5_TEMPORALITY": "الزمنية",
+                "6_NOVELTY":     "جِدَّة المعلومة",
+            },
+        })
