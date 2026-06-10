@@ -14,3 +14,10 @@ plotly
 requests
 scikit-learn
 streamlit
+flask
+gradio
+gunicorn
+numpy
+plotly
+requests
+scikit-learn
