@@ -1030,6 +1030,16 @@ class NeuralServiceMesh:
             return {"error": "NeuralWeightLayer not available — install numpy"}
         loss = self.neural_layer.train_step(input_vector, target)
         self.routing._sync_weights_from_layer()
+
+        # Auto-persist weights after every training step
+        try:
+            import os as _os
+            _ckpt_dir = "checkpoints"
+            _os.makedirs(_ckpt_dir, exist_ok=True)
+            self.neural_layer.save(f"{_ckpt_dir}/neural_weights.npy")
+        except Exception as _save_err:
+            logger.warning(f"[train_neural_weights] weight auto-save failed: {_save_err}")
+
         return {
             "loss": round(loss, 8),
             "train_steps": self.neural_layer._train_steps,
@@ -2001,7 +2011,42 @@ if __name__ == "__main__":
         print(json.dumps(mesh.get_full_system_status(), indent=2))
     elif args.mode == "api":
         from api.app import run_api
+        from pathlib import Path as _Path
         mesh = NeuralServiceMesh()
+
+        # ── Fix 1: Load persisted CKG into singleton before first request ──
+        try:
+            from knowledge.cognitive_graph import get_ckg as _get_ckg
+            _ckg = _get_ckg()
+            logger.info(
+                f"[Startup] CKG loaded: "
+                f"{_ckg.concept_count()} concepts, "
+                f"{_ckg.relation_count()} relations"
+            )
+        except Exception as _ckg_err:
+            logger.warning(f"[Startup] CKG load skipped: {_ckg_err}")
+
+        # ── Fix 1: Load persisted neural weights if checkpoint exists ───────
+        _weights_path = _Path("checkpoints/neural_weights.npy")
+        if _weights_path.exists() and mesh.neural_layer is not None:
+            try:
+                mesh.neural_layer.load(str(_weights_path))
+                logger.info(
+                    f"[Startup] Neural weights loaded: "
+                    f"steps={mesh.neural_layer._train_steps}"
+                )
+            except Exception as _w_err:
+                logger.warning(f"[Startup] Neural weights load skipped: {_w_err}")
+
+        # ── Start continuous Quran trainer in background ─────────────────────
+        try:
+            from knowledge.quran_continuous_trainer import QuranContinuousTrainer
+            _qct = QuranContinuousTrainer(mesh)
+            _qct.start()
+            logger.info("[Startup] QuranContinuousTrainer background thread started")
+        except Exception as _qct_err:
+            logger.warning(f"[Startup] QuranContinuousTrainer start skipped: {_qct_err}")
+
         run_api(mesh, host=args.host, port=args.port, debug=args.debug)
 
     # ── Knowledge Sources Layer Modes ─────────────────────────────────────

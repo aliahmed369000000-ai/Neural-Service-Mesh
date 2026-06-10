@@ -1559,14 +1559,11 @@ def _add_ckg_routes(app, mesh):
     # ── GET /knowledge/stats ──────────────────────────────────────────────
     @app.route("/knowledge/stats", methods=["GET"])
     def knowledge_stats():
-        """إحصائيات شاملة للـ CKG."""
-        ckg = _get_ckg()
-        if not ckg:
-            return jsonify({"error": "CKG not initialised"}), 503
-
+        """إحصائيات شاملة للـ CKG — يقرأ مباشرة من الكائن الحي."""
+        from knowledge.cognitive_graph import get_ckg
         from datetime import datetime, timezone, timedelta
+        ckg = get_ckg()
         since_24h = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
-
         return jsonify({
             **ckg.stats(),
             "cluster_summary":        ckg.cluster_summary(),
@@ -2350,6 +2347,132 @@ def _add_knowledge_trainer_routes(app, mesh):
             "sources":                 domain_sources[:6],
             "cross_domain_connections": cross_domain_connections,
             "quran_references":        quran_refs[:10],
+        })
+
+    # ── GET /train/audit ──────────────────────────────────────────────────
+    @app.route("/train/audit", methods=["GET"])
+    def train_audit():
+        """
+        Forensic training audit — all values read from persisted storage.
+        training_steps = SELECT COUNT(*) FROM knowledge_training (mesh.db)
+        concepts / relations = live CKG object
+        weights_saved = file existence check
+        """
+        import sqlite3 as _sqlite3
+        from pathlib import Path as _Path
+        from knowledge.cognitive_graph import get_ckg as _get_ckg
+
+        db_path = _Path("./data/mesh.db")
+        training_steps    = 0
+        training_sessions = 0
+        training_by_domain: dict = {}
+        recent_avg_loss   = None
+
+        if db_path.exists():
+            try:
+                conn = _sqlite3.connect(str(db_path))
+                cur  = conn.cursor()
+                cur.execute("SELECT COUNT(*) FROM knowledge_training")
+                training_steps = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) FROM training_sessions")
+                training_sessions = cur.fetchone()[0]
+                cur.execute(
+                    "SELECT domain, COUNT(*) FROM knowledge_training GROUP BY domain"
+                )
+                training_by_domain = {r[0]: r[1] for r in cur.fetchall()}
+                cur.execute(
+                    "SELECT AVG(avg_loss) FROM training_sessions"
+                )
+                row = cur.fetchone()
+                if row and row[0] is not None:
+                    recent_avg_loss = round(float(row[0]), 6)
+                conn.close()
+            except Exception as _e:
+                logger.warning(f"[/train/audit] DB read error: {_e}")
+
+        ckg = _get_ckg()
+        weights_path = _Path("./checkpoints/neural_weights.npy")
+
+        cursor_path = _Path("./data/quran_training_cursor.json")
+        cursor: dict = {}
+        if cursor_path.exists():
+            try:
+                import json as _json
+                with open(cursor_path, encoding="utf-8") as _f:
+                    cursor = _json.load(_f)
+            except Exception:
+                pass
+
+        return jsonify({
+            "training_steps":         training_steps,
+            "training_sessions":      training_sessions,
+            "training_by_domain":     training_by_domain,
+            "recent_avg_loss":        recent_avg_loss,
+            "concepts":               ckg.concept_count(),
+            "relations":              ckg.relation_count(),
+            "weights_saved":          weights_path.exists(),
+            "weights_path":           str(weights_path) if weights_path.exists() else None,
+            "quran_training_cursor":  cursor,
+        })
+
+    # ── GET /train/quran-audit ────────────────────────────────────────────
+    @app.route("/train/quran-audit", methods=["GET"])
+    def train_quran_audit():
+        """
+        Quran ingestion audit — reads from persisted files only.
+        ayah_count = quran_index.json (not runtime memory)
+        """
+        import json as _json
+        from pathlib import Path as _Path
+
+        qi_path = _Path("./knowledge/quran_index.json")
+        ayah_count   = 0
+        chunk_count  = 0
+        stored_at    = None
+        total_surahs = None
+
+        if qi_path.exists():
+            try:
+                with open(qi_path, encoding="utf-8") as _f:
+                    qi = _json.load(_f)
+                ayah_count   = qi.get("total_ayat",   0)
+                chunk_count  = qi.get("total_chunks",  0)
+                stored_at    = qi.get("stored_at")
+                total_surahs = qi.get("total_surahs")
+            except Exception as _e:
+                logger.warning(f"[/train/quran-audit] quran_index read error: {_e}")
+
+        np_path = _Path("./knowledge/node_profiles.json")
+        node_count = 0
+        if np_path.exists():
+            try:
+                with open(np_path, encoding="utf-8") as _f:
+                    np_data = _json.load(_f)
+                node_count = len(np_data.get("nodes", {}))
+            except Exception:
+                pass
+
+        cursor_path = _Path("./data/quran_training_cursor.json")
+        cursor: dict = {}
+        if cursor_path.exists():
+            try:
+                with open(cursor_path, encoding="utf-8") as _f:
+                    cursor = _json.load(_f)
+            except Exception:
+                pass
+
+        hashes_path = _Path("./data/ks_seen_hashes.json")
+
+        return jsonify({
+            "ayah_count":            ayah_count,
+            "chunk_count":           chunk_count,
+            "total_surahs":          total_surahs,
+            "stored_at":             stored_at,
+            "node_profiles_count":   node_count,
+            "training_cursor":       cursor,
+            "quran_index_path":      str(qi_path),
+            "hashes_file_exists":    hashes_path.exists(),
+            "chunk_files_on_disk":   len(list(_Path("./knowledge").glob("quran_chunk_*.json"))),
         })
 
     # ── GET /train/matrix ─────────────────────────────────────────────────
