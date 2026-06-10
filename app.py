@@ -1,3 +1,6 @@
+import sys
+sys.modules['audioop'] = type('MockModule', (), {'__file__': ''})()
+
 from dashboard.app import demo
 
 if __name__ == "__main__":
