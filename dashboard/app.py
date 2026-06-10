@@ -1,3 +1,6 @@
+import sys
+sys.modules['audioop'] = type('MockModule', (), {'__file__': ''})()
+
 from __future__ import annotations
 import os
 import math
