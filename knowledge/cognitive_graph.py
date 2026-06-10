@@ -689,6 +689,11 @@ def get_ckg(graph_file: Path = _GRAPH_FILE) -> CognitiveKnowledgeGraph:
     return _ckg_instance
 
 
+def get_cognitive_graph(graph_file: Path = _GRAPH_FILE) -> CognitiveKnowledgeGraph:
+    """Alias for get_ckg() — used by arabic_concept_discovery and other modules."""
+    return get_ckg(graph_file)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Integration Helper — يُشغَّل بعد كل batch ingestion من القرآن
 # ═══════════════════════════════════════════════════════════════════════════
