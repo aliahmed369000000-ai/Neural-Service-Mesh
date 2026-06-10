@@ -376,31 +376,32 @@ class ArabicConceptDiscovery:
         self, root_families: Dict[str, Dict[str, Any]]
     ) -> int:
         """
-        Merge discovered roots into the live ConceptDictionary.
-        Manually defined concepts take priority.
+        Merge discovered roots into the live ConceptExtractor keyword index.
+        Manually defined concepts take priority (existing keys are skipped).
         Returns number of new concepts added.
         """
         try:
             from knowledge_sources.concept_extractor import get_extractor
             extractor = get_extractor()
-            dictionary = extractor._dict
-            existing = set(dictionary.concept_keys())
-            added = 0
 
+            # Build set of already-known concept keys from the keyword index
+            existing_concepts: set = set()
+            if hasattr(extractor, "_keyword_index"):
+                existing_concepts = {concept for (_, concept) in extractor._keyword_index.values()}
+
+            added = 0
             for root, data in root_families.items():
-                if root in existing:
+                if root in existing_concepts:
                     continue  # manual definition takes priority
-                dictionary.add_concept(
-                    key      = root,
-                    label    = data["top_token"],
-                    category = "مكتشف_تلقائياً",
-                    roots    = data["tokens"],
-                    weight   = min(1.0, data["total_frequency"] / 500),
-                )
-                added += 1
+
+                # Inject discovered tokens into the keyword index
+                if hasattr(extractor, "_keyword_index"):
+                    for token in data["tokens"][:10]:   # top 10 tokens per root
+                        extractor._keyword_index[token] = ("مكتشف_تلقائياً", root)
+                    added += 1
 
             logger.info(
-                f"[ArabicConceptDiscovery] Merged {added} new concepts into ConceptDictionary"
+                f"[ArabicConceptDiscovery] Merged {added} new concepts into ConceptExtractor index"
             )
             return added
 
@@ -421,13 +422,14 @@ class ArabicConceptDiscovery:
             injected = 0
 
             for root, data in root_families.items():
-                cg.add_concept(
-                    name       = root,
-                    label      = data["top_token"],
-                    category   = "مكتشف_تلقائياً",
-                    source_id  = "arabic_discovery",
-                    freq_delta = data["total_frequency"],
-                )
+                # add_concept(name, cluster, source) — touch frequency each call
+                freq = data.get("total_frequency", 1)
+                for _ in range(min(freq, 20)):   # cap at 20 touches to avoid slowness
+                    cg.add_concept(
+                        name    = root,
+                        cluster = "مكتشف_تلقائياً",
+                        source  = "arabic_discovery",
+                    )
                 injected += 1
 
             cg.save()
