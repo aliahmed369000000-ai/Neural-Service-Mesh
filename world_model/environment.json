@@ -3,7 +3,7 @@
     "schema_version": "7.0.0",
     "description": "Phase 7 Environment Model \u2014 live system world map",
     "created_at": "2026-06-08T23:37:52.594113+00:00",
-    "last_updated": "2026-06-09T00:16:32.230994+00:00"
+    "last_updated": "2026-06-10T01:10:19.178641+00:00"
   },
   "known_services": {},
   "known_capabilities": [],
@@ -12,213 +12,998 @@
   "known_concepts": {
     "\u0623\u0633\u0645\u0627\u0621 \u0627\u0644\u0644\u0647": {
       "cluster": "\u062a\u0648\u062d\u064a\u062f",
-      "strength": 0.127,
+      "strength": 0.1244,
       "frequency": 2
     },
     "\u0627\u0644\u0644\u0647": {
       "cluster": "\u062a\u0648\u062d\u064a\u062f",
       "strength": 1.0,
-      "frequency": 5719
+      "frequency": 6862
     },
     "\u0639\u0644\u0645": {
       "cluster": "\u0645\u0639\u0631\u0641\u0629",
-      "strength": 0.9208,
-      "frequency": 2881
+      "strength": 0.9224,
+      "frequency": 3457
     },
     "\u0630\u0643\u0631": {
       "cluster": "\u0639\u0628\u0627\u062f\u0629",
-      "strength": 0.8289,
-      "frequency": 1301
+      "strength": 0.8324,
+      "frequency": 1561
     },
     "\u064a\u0648\u0645 \u0627\u0644\u0642\u064a\u0627\u0645\u0629": {
       "cluster": "\u0622\u062e\u0631\u0629",
-      "strength": 0.0801,
+      "strength": 0.0785,
       "frequency": 1
     },
     "\u0648\u062d\u062f\u0627\u0646\u064a\u0629": {
       "cluster": "\u062a\u0648\u062d\u064a\u062f",
-      "strength": 0.6844,
-      "frequency": 372
+      "strength": 0.6908,
+      "frequency": 446
     },
     "\u0632\u0643\u0627\u0629": {
       "cluster": "\u0639\u0628\u0627\u062f\u0629",
-      "strength": 0.6071,
-      "frequency": 190
+      "strength": 0.6151,
+      "frequency": 228
     },
     "\u0625\u064a\u0645\u0627\u0646": {
       "cluster": "\u0625\u064a\u0645\u0627\u0646",
-      "strength": 0.6998,
-      "frequency": 425
+      "strength": 0.706,
+      "frequency": 510
     },
     "\u063a\u064a\u0628": {
       "cluster": "\u0625\u064a\u0645\u0627\u0646",
-      "strength": 0.6387,
-      "frequency": 250
+      "strength": 0.646,
+      "frequency": 300
     },
     "\u0648\u062d\u064a": {
       "cluster": "\u0646\u0628\u0648\u0629",
-      "strength": 0.8074,
-      "frequency": 1080
+      "strength": 0.8114,
+      "frequency": 1296
     },
     "\u0643\u0641\u0631": {
       "cluster": "\u0625\u064a\u0645\u0627\u0646",
-      "strength": 0.8853,
-      "frequency": 2120
+      "strength": 0.8877,
+      "frequency": 2544
     },
     "\u0646\u0641\u0627\u0642": {
       "cluster": "\u0625\u064a\u0645\u0627\u0646",
-      "strength": 0.4142,
-      "frequency": 35
+      "strength": 0.4258,
+      "frequency": 42
     },
     "\u0646\u0627\u0631": {
       "cluster": "\u0622\u062e\u0631\u0629",
-      "strength": 0.802,
-      "frequency": 1030
+      "strength": 0.806,
+      "frequency": 1236
     },
     "\u062e\u0644\u0642": {
       "cluster": "\u0643\u0648\u0646",
-      "strength": 0.808,
-      "frequency": 1085
+      "strength": 0.8119,
+      "frequency": 1302
     },
     "\u0635\u062f\u0642": {
       "cluster": "\u0623\u062e\u0644\u0627\u0642",
-      "strength": 0.7497,
-      "frequency": 655
+      "strength": 0.7548,
+      "frequency": 786
     },
     "\u062a\u0642\u0648\u0649": {
       "cluster": "\u0623\u062e\u0644\u0627\u0642",
-      "strength": 0.7306,
-      "frequency": 555
+      "strength": 0.7361,
+      "frequency": 666
     },
     "\u062d\u062c": {
       "cluster": "\u0639\u0628\u0627\u062f\u0629",
-      "strength": 0.6239,
-      "frequency": 220
+      "strength": 0.6316,
+      "frequency": 264
     },
     "\u062d\u0643\u0645\u0629": {
       "cluster": "\u0645\u0639\u0631\u0641\u0629",
-      "strength": 0.7357,
-      "frequency": 580
+      "strength": 0.7411,
+      "frequency": 696
     },
     "\u062c\u0646\u0629": {
       "cluster": "\u0622\u062e\u0631\u0629",
-      "strength": 0.6884,
-      "frequency": 385
+      "strength": 0.6948,
+      "frequency": 462
     },
     "\u062a\u0648\u0628\u0629": {
       "cluster": "\u0623\u062e\u0644\u0627\u0642",
-      "strength": 0.6432,
-      "frequency": 260
+      "strength": 0.6505,
+      "frequency": 312
     },
     "\u0639\u0642\u0644": {
       "cluster": "\u0645\u0639\u0631\u0641\u0629",
-      "strength": 0.6363,
-      "frequency": 245
+      "strength": 0.6438,
+      "frequency": 294
     },
     "\u0635\u0628\u0631": {
       "cluster": "\u0623\u062e\u0644\u0627\u0642",
-      "strength": 0.6984,
-      "frequency": 420
+      "strength": 0.7046,
+      "frequency": 504
     },
     "\u0639\u062f\u0644": {
       "cluster": "\u0623\u062e\u0644\u0627\u0642",
-      "strength": 0.5543,
-      "frequency": 120
+      "strength": 0.5634,
+      "frequency": 144
     },
     "\u0634\u0643\u0631": {
       "cluster": "\u0623\u062e\u0644\u0627\u0642",
-      "strength": 0.6454,
-      "frequency": 265
+      "strength": 0.6526,
+      "frequency": 318
     },
     "\u0639\u0641\u0648": {
       "cluster": "\u0623\u062e\u0644\u0627\u0642",
-      "strength": 0.7669,
-      "frequency": 760
+      "strength": 0.7717,
+      "frequency": 912
     },
     "\u0628\u0639\u062b": {
       "cluster": "\u0622\u062e\u0631\u0629",
-      "strength": 0.6653,
-      "frequency": 315
+      "strength": 0.6721,
+      "frequency": 378
     },
     "\u0623\u0646\u0628\u064a\u0627\u0621": {
       "cluster": "\u0646\u0628\u0648\u0629",
-      "strength": 0.8201,
-      "frequency": 1205
+      "strength": 0.8238,
+      "frequency": 1446
     },
     "\u0625\u062d\u0633\u0627\u0646": {
       "cluster": "\u0623\u062e\u0644\u0627\u0642",
-      "strength": 0.6475,
-      "frequency": 270
+      "strength": 0.6547,
+      "frequency": 324
     },
     "\u0623\u0633\u0631\u0629": {
       "cluster": "\u0645\u062c\u062a\u0645\u0639",
-      "strength": 0.7749,
-      "frequency": 815
+      "strength": 0.7796,
+      "frequency": 978
     },
     "\u0635\u0644\u0627\u0629": {
       "cluster": "\u0639\u0628\u0627\u062f\u0629",
-      "strength": 0.5006,
-      "frequency": 75
+      "strength": 0.5106,
+      "frequency": 90
     },
     "\u0623\u0645\u0629": {
       "cluster": "\u0645\u062c\u062a\u0645\u0639",
-      "strength": 0.6557,
-      "frequency": 290
+      "strength": 0.6628,
+      "frequency": 348
     },
     "\u062f\u0639\u0627\u0621": {
       "cluster": "\u0639\u0628\u0627\u062f\u0629",
-      "strength": 0.6557,
-      "frequency": 290
+      "strength": 0.6628,
+      "frequency": 348
     },
     "\u0635\u064a\u0627\u0645": {
       "cluster": "\u0639\u0628\u0627\u062f\u0629",
-      "strength": 0.4653,
-      "frequency": 55
+      "strength": 0.476,
+      "frequency": 66
     },
     "\u062d\u0633\u0627\u0628": {
       "cluster": "\u0622\u062e\u0631\u0629",
-      "strength": 0.6291,
-      "frequency": 230
+      "strength": 0.6366,
+      "frequency": 276
     },
     "\u0646\u0639\u0645": {
       "cluster": "\u0643\u0648\u0646",
-      "strength": 0.572,
-      "frequency": 140
+      "strength": 0.5807,
+      "frequency": 168
     },
     "\u0648\u062d\u062f\u0629": {
       "cluster": "\u0645\u062c\u062a\u0645\u0639",
-      "strength": 0.5837,
-      "frequency": 155
+      "strength": 0.5922,
+      "frequency": 186
     },
     "\u0645\u062d\u0645\u062f \ufdfa": {
       "cluster": "\u0646\u0628\u0648\u0629",
-      "strength": 0.3766,
-      "frequency": 25
+      "strength": 0.3887,
+      "frequency": 30
     },
     "\u062a\u0641\u0643\u0631": {
       "cluster": "\u0645\u0639\u0631\u0641\u0629",
-      "strength": 0.5079,
-      "frequency": 80
+      "strength": 0.5179,
+      "frequency": 96
     },
     "\u064a\u0642\u064a\u0646": {
       "cluster": "\u0625\u064a\u0645\u0627\u0646",
-      "strength": 0.4752,
-      "frequency": 60
+      "strength": 0.4857,
+      "frequency": 72
     },
     "\u062a\u0639\u0627\u0648\u0646": {
       "cluster": "\u0645\u062c\u062a\u0645\u0639",
-      "strength": 0.2071,
-      "frequency": 5
+      "strength": 0.2203,
+      "frequency": 6
     },
     "\u0623\u0645\u0627\u0646\u0629": {
       "cluster": "\u0623\u062e\u0644\u0627\u0642",
-      "strength": 0.5006,
-      "frequency": 75
+      "strength": 0.5106,
+      "frequency": 90
     },
     "\u0634\u0648\u0631\u0649": {
       "cluster": "\u0645\u062c\u062a\u0645\u0639",
-      "strength": 0.2071,
-      "frequency": 5
+      "strength": 0.2203,
+      "frequency": 6
+    },
+    "\u0642\u0627\u0646\u0648\u0646 \u0646\u064a\u0648\u062a\u0646 \u0627\u0644\u0623\u0648\u0644": {
+      "cluster": "\u0645\u064a\u0643\u0627\u0646\u064a\u0643\u0627 \u0643\u0644\u0627\u0633\u064a\u0643\u064a\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0642\u0627\u0646\u0648\u0646 \u0646\u064a\u0648\u062a\u0646 \u0627\u0644\u062b\u0627\u0646\u064a": {
+      "cluster": "\u0645\u064a\u0643\u0627\u0646\u064a\u0643\u0627 \u0643\u0644\u0627\u0633\u064a\u0643\u064a\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0642\u0627\u0646\u0648\u0646 \u0646\u064a\u0648\u062a\u0646 \u0627\u0644\u062b\u0627\u0644\u062b": {
+      "cluster": "\u0645\u064a\u0643\u0627\u0646\u064a\u0643\u0627 \u0643\u0644\u0627\u0633\u064a\u0643\u064a\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0642\u0627\u0646\u0648\u0646 \u0627\u0644\u062c\u0627\u0630\u0628\u064a\u0629 \u0627\u0644\u0639\u0627\u0645\u0629": {
+      "cluster": "\u062c\u0627\u0630\u0628\u064a\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0646\u0633\u0628\u064a\u0629 \u0627\u0644\u062e\u0627\u0635\u0629": {
+      "cluster": "\u0646\u0633\u0628\u064a\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0646\u0633\u0628\u064a\u0629 \u0627\u0644\u0639\u0627\u0645\u0629": {
+      "cluster": "\u0646\u0633\u0628\u064a\u0629",
+      "strength": 0.1244,
+      "frequency": 2
+    },
+    "\u0645\u064a\u0643\u0627\u0646\u064a\u0643\u0627 \u0627\u0644\u0643\u0645": {
+      "cluster": "\u0643\u0645",
+      "strength": 0.1244,
+      "frequency": 2
+    },
+    "\u0645\u0639\u0627\u062f\u0644\u0629 \u0634\u0631\u0648\u062f\u0646\u063a\u0631": {
+      "cluster": "\u0643\u0645",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0642\u0648\u0627\u0646\u064a\u0646 \u0627\u0644\u062f\u064a\u0646\u0627\u0645\u064a\u0643\u0627 \u0627\u0644\u062d\u0631\u0627\u0631\u064a\u0629": {
+      "cluster": "\u062f\u064a\u0646\u0627\u0645\u064a\u0643\u0627 \u062d\u0631\u0627\u0631\u064a\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0645\u0648\u062c\u0629 \u0627\u0644\u0643\u0647\u0631\u0648\u0645\u063a\u0646\u0627\u0637\u064a\u0633\u064a\u0629": {
+      "cluster": "\u0643\u0647\u0631\u0648\u0645\u063a\u0646\u0627\u0637\u064a\u0633\u064a\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062b\u0642\u0648\u0628 \u0627\u0644\u0633\u0648\u062f\u0627\u0621": {
+      "cluster": "\u0641\u064a\u0632\u064a\u0627\u0621 \u0641\u0644\u0643\u064a\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0641\u064a\u0632\u064a\u0627\u0621 \u0627\u0644\u0646\u0648\u0648\u064a\u0629": {
+      "cluster": "\u0641\u064a\u0632\u064a\u0627\u0621 \u0646\u0648\u0648\u064a\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0646\u0645\u0648\u0630\u062c \u0627\u0644\u0642\u064a\u0627\u0633\u064a": {
+      "cluster": "\u0641\u064a\u0632\u064a\u0627\u0621 \u0627\u0644\u062c\u0633\u064a\u0645\u0627\u062a",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0628\u0648\u0632\u0648\u0646 \u0647\u064a\u063a\u0632": {
+      "cluster": "\u0641\u064a\u0632\u064a\u0627\u0621 \u0627\u0644\u062c\u0633\u064a\u0645\u0627\u062a",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u062b\u0627\u0628\u062a \u0633\u0631\u0639\u0629 \u0627\u0644\u0636\u0648\u0621": {
+      "cluster": "\u062b\u0648\u0627\u0628\u062a \u0643\u0648\u0646\u064a\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0646\u0638\u0631\u064a\u0629 \u0641\u064a\u062b\u0627\u063a\u0648\u0631\u0633": {
+      "cluster": "\u0647\u0646\u062f\u0633\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u062d\u0633\u0627\u0628 \u0627\u0644\u062a\u0641\u0627\u0636\u0644 \u0648\u0627\u0644\u062a\u0643\u0627\u0645\u0644": {
+      "cluster": "\u062a\u062d\u0644\u064a\u0644 \u0631\u064a\u0627\u0636\u064a",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0645\u0634\u062a\u0642\u0629": {
+      "cluster": "\u062a\u062d\u0644\u064a\u0644 \u0631\u064a\u0627\u0636\u064a",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062a\u0643\u0627\u0645\u0644": {
+      "cluster": "\u062a\u062d\u0644\u064a\u0644 \u0631\u064a\u0627\u0636\u064a",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0647\u0648\u064a\u0629 \u0623\u0648\u064a\u0644\u0631": {
+      "cluster": "\u062a\u062d\u0644\u064a\u0644 \u0645\u0631\u0643\u0628",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0646\u0638\u0631\u064a\u0629 \u0627\u0644\u0623\u0639\u062f\u0627\u062f \u0627\u0644\u0623\u0648\u0644\u064a\u0629": {
+      "cluster": "\u0646\u0638\u0631\u064a\u0629 \u0627\u0644\u0623\u0639\u062f\u0627\u062f",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062c\u0628\u0631 \u0627\u0644\u062e\u0637\u064a": {
+      "cluster": "\u062c\u0628\u0631",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0646\u0638\u0631\u064a\u0629 \u0641\u064a\u0631\u0645\u0627 \u0627\u0644\u0623\u062e\u064a\u0631\u0629": {
+      "cluster": "\u0646\u0638\u0631\u064a\u0629 \u0627\u0644\u0623\u0639\u062f\u0627\u062f",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0627\u062d\u062a\u0645\u0627\u0644\u0627\u062a \u0648\u0627\u0644\u0625\u062d\u0635\u0627\u0621": {
+      "cluster": "\u0627\u062d\u062a\u0645\u0627\u0644\u0627\u062a",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0647\u0646\u062f\u0633\u0629 \u063a\u064a\u0631 \u0627\u0644\u0625\u0642\u0644\u064a\u062f\u064a\u0629": {
+      "cluster": "\u0647\u0646\u062f\u0633\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0646\u0638\u0631\u064a\u0629 \u0627\u0644\u0645\u062c\u0645\u0648\u0639\u0627\u062a": {
+      "cluster": "\u0645\u0646\u0637\u0642 \u0631\u064a\u0627\u0636\u064a",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0646\u0638\u0631\u064a\u0629 \u0627\u0644\u0631\u0633\u0648\u0645 \u0627\u0644\u0628\u064a\u0627\u0646\u064a\u0629": {
+      "cluster": "\u0631\u064a\u0627\u0636\u064a\u0627\u062a \u062a\u0637\u0628\u064a\u0642\u064a\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062a\u062d\u0648\u064a\u0644 \u0627\u0644\u0641\u0648\u0631\u064a\u064a\u0647": {
+      "cluster": "\u062a\u062d\u0644\u064a\u0644 \u0631\u064a\u0627\u0636\u064a",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062e\u0648\u0627\u0631\u0632\u0645\u064a\u0627\u062a": {
+      "cluster": "\u0631\u064a\u0627\u0636\u064a\u0627\u062a \u062a\u0637\u0628\u064a\u0642\u064a\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u062d\u0633\u0627\u0628 \u0627\u0644\u0645\u062a\u063a\u064a\u0631\u0627\u062a": {
+      "cluster": "\u062a\u062d\u0644\u064a\u0644 \u0631\u064a\u0627\u0636\u064a",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062b\u0648\u0631\u0629 \u0627\u0644\u0635\u0646\u0627\u0639\u064a\u0629": {
+      "cluster": "\u062a\u0627\u0631\u064a\u062e \u062d\u062f\u064a\u062b",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062d\u0631\u0628 \u0627\u0644\u0639\u0627\u0644\u0645\u064a\u0629 \u0627\u0644\u0623\u0648\u0644\u0649": {
+      "cluster": "\u062a\u0627\u0631\u064a\u062e \u0645\u0639\u0627\u0635\u0631",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062d\u0631\u0628 \u0627\u0644\u0639\u0627\u0644\u0645\u064a\u0629 \u0627\u0644\u062b\u0627\u0646\u064a\u0629": {
+      "cluster": "\u062a\u0627\u0631\u064a\u062e \u0645\u0639\u0627\u0635\u0631",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062b\u0648\u0631\u0629 \u0627\u0644\u0641\u0631\u0646\u0633\u064a\u0629": {
+      "cluster": "\u062a\u0627\u0631\u064a\u062e \u062d\u062f\u064a\u062b",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0625\u0645\u0628\u0631\u0627\u0637\u0648\u0631\u064a\u0629 \u0627\u0644\u0631\u0648\u0645\u0627\u0646\u064a\u0629": {
+      "cluster": "\u062a\u0627\u0631\u064a\u062e \u0642\u062f\u064a\u0645",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0641\u062a\u062d \u0627\u0644\u0625\u0633\u0644\u0627\u0645\u064a": {
+      "cluster": "\u062a\u0627\u0631\u064a\u062e \u0625\u0633\u0644\u0627\u0645\u064a",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0639\u0635\u0631 \u0627\u0644\u0630\u0647\u0628\u064a \u0627\u0644\u0625\u0633\u0644\u0627\u0645\u064a": {
+      "cluster": "\u062a\u0627\u0631\u064a\u062e \u0625\u0633\u0644\u0627\u0645\u064a",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062b\u0648\u0631\u0629 \u0627\u0644\u0623\u0645\u0631\u064a\u0643\u064a\u0629": {
+      "cluster": "\u062a\u0627\u0631\u064a\u062e \u062d\u062f\u064a\u062b",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062d\u0631\u0628 \u0627\u0644\u0628\u0627\u0631\u062f\u0629": {
+      "cluster": "\u062a\u0627\u0631\u064a\u062e \u0645\u0639\u0627\u0635\u0631",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062b\u0648\u0631\u0629 \u0627\u0644\u0631\u0642\u0645\u064a\u0629": {
+      "cluster": "\u062a\u0627\u0631\u064a\u062e \u0645\u0639\u0627\u0635\u0631",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u062d\u0636\u0627\u0631\u0629 \u0628\u0644\u0627\u062f \u0627\u0644\u0631\u0627\u0641\u062f\u064a\u0646": {
+      "cluster": "\u062a\u0627\u0631\u064a\u062e \u0642\u062f\u064a\u0645",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062d\u0636\u0627\u0631\u0629 \u0627\u0644\u0645\u0635\u0631\u064a\u0629 \u0627\u0644\u0642\u062f\u064a\u0645\u0629": {
+      "cluster": "\u062a\u0627\u0631\u064a\u062e \u0642\u062f\u064a\u0645",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0646\u0638\u0631\u064a\u0629 \u0627\u0644\u062a\u0637\u0648\u0631": {
+      "cluster": "\u062a\u0637\u0648\u0631",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062e\u0644\u064a\u0629": {
+      "cluster": "\u0628\u064a\u0648\u0644\u0648\u062c\u064a\u0627 \u062e\u0644\u0648\u064a\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062d\u0645\u0636 \u0627\u0644\u0646\u0648\u0648\u064a DNA": {
+      "cluster": "\u0648\u0631\u0627\u062b\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062c\u064a\u0646\u0627\u062a": {
+      "cluster": "\u0648\u0631\u0627\u062b\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0628\u0631\u0648\u062a\u064a\u0646\u0627\u062a": {
+      "cluster": "\u0643\u064a\u0645\u064a\u0627\u0621 \u062d\u064a\u0648\u064a\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062a\u0645\u062b\u064a\u0644 \u0627\u0644\u0636\u0648\u0626\u064a": {
+      "cluster": "\u0641\u064a\u0632\u064a\u0648\u0644\u0648\u062c\u064a\u0627 \u0646\u0628\u0627\u062a\u064a\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0645\u0646\u0638\u0648\u0645\u0629 \u0627\u0644\u0645\u0646\u0627\u0639\u064a\u0629": {
+      "cluster": "\u0641\u064a\u0632\u064a\u0648\u0644\u0648\u062c\u064a\u0627",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0634\u0628\u0643\u0629 \u0627\u0644\u063a\u0630\u0627\u0626\u064a\u0629": {
+      "cluster": "\u0628\u064a\u0626\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062a\u0635\u0646\u064a\u0641 \u0627\u0644\u0628\u064a\u0648\u0644\u0648\u062c\u064a": {
+      "cluster": "\u062a\u0635\u0646\u064a\u0641",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0639\u0644\u0645 \u0627\u0644\u0623\u0639\u0635\u0627\u0628": {
+      "cluster": "\u0639\u0644\u0645 \u0623\u0639\u0635\u0627\u0628",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0645\u064a\u0643\u0631\u0648\u0628\u064a\u0648\u0645 \u0627\u0644\u0628\u0634\u0631\u064a": {
+      "cluster": "\u0645\u064a\u0643\u0631\u0648\u0628\u064a\u0648\u0644\u0648\u062c\u064a\u0627",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "CRISPR": {
+      "cluster": "\u0647\u0646\u062f\u0633\u0629 \u0648\u0631\u0627\u062b\u064a\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062d\u0636\u0627\u0631\u0629 \u0627\u0644\u0625\u063a\u0631\u064a\u0642\u064a\u0629": {
+      "cluster": "\u062d\u0636\u0627\u0631\u0627\u062a \u0642\u062f\u064a\u0645\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062d\u0636\u0627\u0631\u0629 \u0627\u0644\u0635\u064a\u0646\u064a\u0629": {
+      "cluster": "\u062d\u0636\u0627\u0631\u0627\u062a \u0622\u0633\u064a\u0627",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062d\u0636\u0627\u0631\u0629 \u0627\u0644\u0625\u0633\u0644\u0627\u0645\u064a\u0629": {
+      "cluster": "\u062d\u0636\u0627\u0631\u0627\u062a \u0625\u0633\u0644\u0627\u0645\u064a\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0639\u0635\u0631 \u0627\u0644\u0646\u0647\u0636\u0629 \u0627\u0644\u0623\u0648\u0631\u0648\u0628\u064a\u0629": {
+      "cluster": "\u062d\u0636\u0627\u0631\u0627\u062a \u0623\u0648\u0631\u0648\u0628\u064a\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u062d\u0636\u0627\u0631\u0629 \u0627\u0644\u0647\u0646\u0648\u062f \u0627\u0644\u0623\u0645\u0631\u064a\u0643\u064a\u064a\u0646": {
+      "cluster": "\u062d\u0636\u0627\u0631\u0627\u062a \u0623\u0645\u0631\u064a\u0643\u0627",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0637\u0631\u064a\u0642 \u0627\u0644\u062d\u0631\u064a\u0631": {
+      "cluster": "\u062a\u0628\u0627\u062f\u0644 \u062d\u0636\u0627\u0631\u064a",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062b\u0648\u0631\u0629 \u0627\u0644\u0639\u0644\u0645\u064a\u0629": {
+      "cluster": "\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u0639\u0644\u0648\u0645",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0643\u062a\u0627\u0628\u0629": {
+      "cluster": "\u0625\u0646\u062c\u0627\u0632\u0627\u062a \u0625\u0646\u0633\u0627\u0646\u064a\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0641\u0644\u0633\u0641\u0629": {
+      "cluster": "\u0641\u0643\u0631 \u0625\u0646\u0633\u0627\u0646\u064a",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0639\u0648\u0644\u0645\u0629": {
+      "cluster": "\u062d\u0636\u0627\u0631\u0629 \u0645\u0639\u0627\u0635\u0631\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0630\u0643\u0627\u0621 \u0627\u0635\u0637\u0646\u0627\u0639\u064a": {
+      "cluster": "\u0645\u0648\u0633\u0648\u0639\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u062a\u0639\u0644\u0645 \u0627\u0644\u0622\u0644\u0629 \u0627\u0644\u0622\u0644\u064a": {
+      "cluster": "\u0639\u0644\u0648\u0645",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0645\u0639\u0627\u0644\u062c\u0629 \u0627\u0644\u0644\u063a\u0629 \u0627\u0644\u0637\u0628\u064a\u0639\u064a\u0629": {
+      "cluster": "\u0639\u0644\u0648\u0645",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0639\u0644\u0645 \u0627\u0644\u062d\u0627\u0633\u0648\u0628": {
+      "cluster": "\u062a\u0627\u0631\u064a\u062e",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u062e\u0648\u0627\u0631\u0632\u0645\u064a\u0629": {
+      "cluster": "\u0631\u064a\u0627\u0636\u064a\u0627\u062a",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0642\u0627\u0639\u062f\u0629 \u0628\u064a\u0627\u0646\u0627\u062a": {
+      "cluster": "\u0639\u0644\u0648\u0645",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u062a\u0639\u0645\u064a\u0629 (\u062a\u0648\u0636\u064a\u062d)": {
+      "cluster": "\u0645\u0648\u0633\u0648\u0639\u0629",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "tensorflow": {
+      "cluster": "github:c++",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "transformers": {
+      "cluster": "github:python",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "ML-For-Beginners": {
+      "cluster": "github:jupyter notebook",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "funNLP": {
+      "cluster": "github:python",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "awesome-machine-learning": {
+      "cluster": "github:python",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "pytorch": {
+      "cluster": "github:python",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "netron": {
+      "cluster": "github:javascript",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "darknet": {
+      "cluster": "github:c",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "ultimatevocalremovergui": {
+      "cluster": "github:python",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "PlotNeuralNet": {
+      "cluster": "github:tex",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "spaCy": {
+      "cluster": "github:python",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "NLP-progress": {
+      "cluster": "github:python",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "awesome-nlp": {
+      "cluster": "github:unknown",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "nlp-tutorial": {
+      "cluster": "github:jupyter notebook",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "opencv": {
+      "cluster": "github:c++",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "supervision": {
+      "cluster": "github:python",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "500-AI-Machine-learning-Deep-learning-Computer-vision-NLP-Projects-with-code": {
+      "cluster": "github:unknown",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "awesome-computer-vision": {
+      "cluster": "github:unknown",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "skyvern": {
+      "cluster": "github:python",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "javascript-algorithms": {
+      "cluster": "github:javascript",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "interview": {
+      "cluster": "github:c++",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "JavaScript": {
+      "cluster": "github:javascript",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "interactive-coding-challenges": {
+      "cluster": "github:python",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "swift-algorithm-club": {
+      "cluster": "github:swift",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "etcd": {
+      "cluster": "github:go",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "ClickHouse": {
+      "cluster": "github:c++",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "seaweedfs": {
+      "cluster": "github:go",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "Hystrix": {
+      "cluster": "github:java",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "zipkin": {
+      "cluster": "github:java",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "openpilot": {
+      "cluster": "github:python",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "serenity": {
+      "cluster": "github:c++",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "glances": {
+      "cluster": "github:python",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "osquery": {
+      "cluster": "github:c++",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "distroless": {
+      "cluster": "github:starlark",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "next.js": {
+      "cluster": "github:javascript",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "rust": {
+      "cluster": "github:rust",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "TypeScript": {
+      "cluster": "github:typescript",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "svelte": {
+      "cluster": "github:javascript",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "webpack": {
+      "cluster": "github:javascript",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "bitcoin": {
+      "cluster": "github:c++",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "anoma": {
+      "cluster": "github:elixir",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "openssl": {
+      "cluster": "github:c",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "Ciphey": {
+      "cluster": "github:rust",
+      "strength": 0.0785,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0642\u0635\u0648\u0631 \u0627\u0644\u0630\u0627\u062a\u064a": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "Articles with missing Cite arXiv inputs": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0623\u062e\u0637\u0627\u0621 \u0627\u0644\u0627\u0633\u062a\u0634\u0647\u0627\u062f: \u0623\u0631\u062e\u0627\u064a\u0641": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0623\u062e\u0637\u0627\u0621 \u0627\u0644\u0627\u0633\u062a\u0634\u0647\u0627\u062f: \u0627\u0633\u0645 \u0639\u0627\u0645": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0623\u0644\u0628\u0631\u062a \u0623\u064a\u0646\u0634\u062a\u0627\u064a\u0646": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0627\u0633\u062a\u0634\u0647\u0627\u062f: \u0642\u064a\u0645\u0629 \u0627\u0644\u0645\u062c\u0644\u062f \u0637\u0648\u064a\u0644\u0629": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0625\u0634\u0639\u0627\u0639 \u0647\u0648\u0643\u064a\u0646\u063a": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0645\u0648\u062c\u0629 \u062f\u064a \u0628\u0631\u0648\u0644\u064a": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0623\u062e\u0637\u0627\u0621 \u0627\u0644\u0627\u0633\u062a\u0634\u0647\u0627\u062f: \u0645\u0633\u0627\u0631 \u0627\u0644\u0623\u0631\u0634\u064a\u0641": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0633\u062a\u062d\u062f\u0627\u062b\u0627\u062a \u0639\u0642\u062f 1920": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0627\u0633\u062a\u0634\u0647\u0627\u062f \u0628\u0645\u0635\u0627\u062f\u0631 \u0628\u0627\u0644\u0644\u063a\u0629 \u0627\u0644\u0623\u0644\u0645\u0627\u0646\u064a\u0629 (de)": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0627\u0633\u062a\u0634\u0647\u0627\u062f \u0628\u0645\u0635\u0627\u062f\u0631 \u0628\u0627\u0644\u0644\u063a\u0629 \u0627\u0644\u0625\u0646\u062c\u0644\u064a\u0632\u064a\u0629 (en)": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0627\u0633\u062a\u0634\u0647\u0627\u062f \u0628\u0645\u0635\u0627\u062f\u0631 \u0628\u0627\u0644\u0644\u063a\u0629 \u0627\u0644\u0641\u0631\u0646\u0633\u064a\u0629 (fr)": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0646\u0638\u0631\u064a\u0629 \u0627\u0644\u0623\u0633\u0627\u0633": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0647\u0648\u0644\u0648\u0643\u0648\u0633\u062a": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0623\u0645\u0645 \u0627\u0644\u0645\u062a\u062d\u062f\u0629": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0628\u0646 \u0633\u064a\u0646\u0627": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062e\u0648\u0627\u0631\u0632\u0645\u064a": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0646\u0627\u0628\u0644\u064a\u0648\u0646 \u0628\u0648\u0646\u0627\u0628\u0631\u062a": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u062d\u0642\u0648\u0642 \u0627\u0644\u0625\u0646\u0633\u0627\u0646": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0639\u0644\u0648\u0645": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062a\u0637\u0648\u0631": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0625\u0646\u0632\u064a\u0645\u0627\u062a": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0645\u064a\u062a\u0648\u0643\u0648\u0646\u062f\u0631\u064a\u0627": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062d\u0645\u0636 \u0627\u0644\u0646\u0648\u0648\u064a": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0643\u0644\u0648\u0631\u0648\u0641\u064a\u0644": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0623\u0643\u0633\u062c\u064a\u0646": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0627\u0646\u062a\u062e\u0627\u0628 \u0627\u0644\u0637\u0628\u064a\u0639\u064a": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0623\u062c\u0633\u0627\u0645 \u0627\u0644\u0645\u0636\u0627\u062f\u0629": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0644\u0642\u0627\u062d\u0627\u062a": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0642\u0627\u0646\u0648\u0646 \u0627\u0644\u0631\u0648\u0645\u0627\u0646\u064a": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062d\u0636\u0627\u0631\u0629 \u0627\u0644\u064a\u0648\u0646\u0627\u0646\u064a\u0629": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u062e\u062a\u0631\u0627\u0639 \u0627\u0644\u0648\u0631\u0642": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0641\u0646 \u0627\u0644\u0623\u0648\u0631\u0648\u0628\u064a": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0622\u0644\u0629 \u0627\u0644\u0628\u062e\u0627\u0631\u064a\u0629": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0631\u0623\u0633\u0645\u0627\u0644\u064a\u0629": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0632\u0631\u0627\u0639\u0629": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u062f\u064a\u0645\u0642\u0631\u0627\u0637\u064a\u0629": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "\u0627\u0644\u0630\u0643\u0627\u0621 \u0627\u0644\u0627\u0635\u0637\u0646\u0627\u0639\u064a": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "algorithm": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "algorithm-challenges": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "algorithms": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
+    },
+    "algorithms-implemented": {
+      "cluster": "\u063a\u064a\u0631 \u0645\u0635\u0646\u0651\u0641",
+      "strength": 0.0,
+      "frequency": 1
     }
   },
   "concept_relations": [
@@ -249,9 +1034,9 @@
         "74:31",
         "81:27"
       ],
-      "count": 191,
+      "count": 229,
       "first_seen": "2026-06-08T23:38:08.462449+00:00",
-      "last_seen": "2026-06-09T00:16:32.203274+00:00"
+      "last_seen": "2026-06-10T01:10:19.060822+00:00"
     },
     {
       "source": "\u0630\u0643\u0631",
@@ -280,9 +1065,9 @@
         "74:31",
         "81:27"
       ],
-      "count": 191,
+      "count": 229,
       "first_seen": "2026-06-08T23:38:08.462503+00:00",
-      "last_seen": "2026-06-09T00:16:32.203270+00:00"
+      "last_seen": "2026-06-10T01:10:19.060816+00:00"
     },
     {
       "source": "\u0639\u0644\u0645",
@@ -311,9 +1096,9 @@
         "81:29",
         "83:6"
       ],
-      "count": 716,
+      "count": 859,
       "first_seen": "2026-06-08T23:38:08.462510+00:00",
-      "last_seen": "2026-06-09T00:16:32.203557+00:00"
+      "last_seen": "2026-06-10T01:10:19.061929+00:00"
     },
     {
       "source": "\u0627\u0644\u0644\u0647",
@@ -342,9 +1127,9 @@
         "81:29",
         "83:6"
       ],
-      "count": 716,
+      "count": 859,
       "first_seen": "2026-06-08T23:38:08.462517+00:00",
-      "last_seen": "2026-06-09T00:16:32.203560+00:00"
+      "last_seen": "2026-06-10T01:10:19.061936+00:00"
     },
     {
       "source": "\u0630\u0643\u0631",
@@ -373,9 +1158,9 @@
         "76:29",
         "87:15"
       ],
-      "count": 306,
+      "count": 367,
       "first_seen": "2026-06-08T23:38:08.462523+00:00",
-      "last_seen": "2026-06-09T00:16:32.204421+00:00"
+      "last_seen": "2026-06-10T01:10:19.065108+00:00"
     },
     {
       "source": "\u0627\u0644\u0644\u0647",
@@ -404,9 +1189,9 @@
         "76:29",
         "87:15"
       ],
-      "count": 306,
+      "count": 367,
       "first_seen": "2026-06-08T23:38:08.462530+00:00",
-      "last_seen": "2026-06-09T00:16:32.204425+00:00"
+      "last_seen": "2026-06-10T01:10:19.065114+00:00"
     },
     {
       "source": "\u0627\u0644\u0644\u0647",
@@ -435,9 +1220,9 @@
         "72:2",
         "72:20"
       ],
-      "count": 136,
+      "count": 163,
       "first_seen": "2026-06-08T23:38:08.462591+00:00",
-      "last_seen": "2026-06-09T00:16:32.200238+00:00"
+      "last_seen": "2026-06-10T01:10:19.050251+00:00"
     },
     {
       "source": "\u0648\u062d\u062f\u0627\u0646\u064a\u0629",
@@ -466,9 +1251,9 @@
         "72:2",
         "72:20"
       ],
-      "count": 136,
+      "count": 163,
       "first_seen": "2026-06-08T23:38:08.462597+00:00",
-      "last_seen": "2026-06-09T00:16:32.200213+00:00"
+      "last_seen": "2026-06-10T01:10:19.050243+00:00"
     },
     {
       "source": "\u062e\u0644\u0642",
@@ -497,9 +1282,9 @@
         "50:16",
         "96:1"
       ],
-      "count": 210,
+      "count": 252,
       "first_seen": "2026-06-08T23:52:53.115275+00:00",
-      "last_seen": "2026-06-09T00:16:32.205725+00:00"
+      "last_seen": "2026-06-10T01:10:19.070065+00:00"
     },
     {
       "source": "\u0627\u0644\u0644\u0647",
@@ -528,9 +1313,9 @@
         "50:16",
         "96:1"
       ],
-      "count": 210,
+      "count": 252,
       "first_seen": "2026-06-08T23:52:53.115282+00:00",
-      "last_seen": "2026-06-09T00:16:32.205730+00:00"
+      "last_seen": "2026-06-10T01:10:19.070070+00:00"
     },
     {
       "source": "\u0648\u062d\u064a",
@@ -559,9 +1344,9 @@
         "48:18",
         "57:25"
       ],
-      "count": 140,
+      "count": 168,
       "first_seen": "2026-06-08T23:52:53.115313+00:00",
-      "last_seen": "2026-06-09T00:16:32.191943+00:00"
+      "last_seen": "2026-06-10T01:10:19.021133+00:00"
     },
     {
       "source": "\u0639\u0644\u0645",
@@ -590,9 +1375,9 @@
         "48:18",
         "57:25"
       ],
-      "count": 140,
+      "count": 168,
       "first_seen": "2026-06-08T23:52:53.115319+00:00",
-      "last_seen": "2026-06-09T00:16:32.191946+00:00"
+      "last_seen": "2026-06-10T01:10:19.021137+00:00"
     },
     {
       "source": "\u0643\u0641\u0631",
@@ -621,9 +1406,9 @@
         "74:31",
         "98:6"
       ],
-      "count": 245,
+      "count": 294,
       "first_seen": "2026-06-08T23:52:53.115435+00:00",
-      "last_seen": "2026-06-09T00:16:32.206146+00:00"
+      "last_seen": "2026-06-10T01:10:19.071613+00:00"
     },
     {
       "source": "\u0646\u0627\u0631",
@@ -652,9 +1437,9 @@
         "74:31",
         "98:6"
       ],
-      "count": 245,
+      "count": 294,
       "first_seen": "2026-06-08T23:52:53.115441+00:00",
-      "last_seen": "2026-06-09T00:16:32.206150+00:00"
+      "last_seen": "2026-06-10T01:10:19.071618+00:00"
     },
     {
       "source": "\u0639\u0644\u0645",
@@ -683,9 +1468,9 @@
         "60:1",
         "74:31"
       ],
-      "count": 165,
+      "count": 198,
       "first_seen": "2026-06-08T23:52:53.115577+00:00",
-      "last_seen": "2026-06-09T00:16:32.201278+00:00"
+      "last_seen": "2026-06-10T01:10:19.053920+00:00"
     },
     {
       "source": "\u0643\u0641\u0631",
@@ -714,9 +1499,9 @@
         "60:1",
         "74:31"
       ],
-      "count": 165,
+      "count": 198,
       "first_seen": "2026-06-08T23:52:53.115586+00:00",
-      "last_seen": "2026-06-09T00:16:32.201275+00:00"
+      "last_seen": "2026-06-10T01:10:19.053915+00:00"
     },
     {
       "source": "\u0643\u0641\u0631",
@@ -745,9 +1530,9 @@
         "71:26",
         "74:31"
       ],
-      "count": 435,
+      "count": 522,
       "first_seen": "2026-06-08T23:52:53.115605+00:00",
-      "last_seen": "2026-06-09T00:16:32.201281+00:00"
+      "last_seen": "2026-06-10T01:10:19.053924+00:00"
     },
     {
       "source": "\u0627\u0644\u0644\u0647",
@@ -776,9 +1561,9 @@
         "71:26",
         "74:31"
       ],
-      "count": 435,
+      "count": 522,
       "first_seen": "2026-06-08T23:52:53.115611+00:00",
-      "last_seen": "2026-06-09T00:16:32.201284+00:00"
+      "last_seen": "2026-06-10T01:10:19.053927+00:00"
     },
     {
       "source": "\u063a\u064a\u0628",
@@ -807,9 +1592,9 @@
         "64:18",
         "72:26"
       ],
-      "count": 145,
+      "count": 174,
       "first_seen": "2026-06-08T23:52:53.115799+00:00",
-      "last_seen": "2026-06-09T00:16:32.200446+00:00"
+      "last_seen": "2026-06-10T01:10:19.051020+00:00"
     },
     {
       "source": "\u0639\u0644\u0645",
@@ -838,9 +1623,71 @@
         "64:18",
         "72:26"
       ],
-      "count": 145,
+      "count": 174,
       "first_seen": "2026-06-08T23:52:53.115805+00:00",
-      "last_seen": "2026-06-09T00:16:32.200449+00:00"
+      "last_seen": "2026-06-10T01:10:19.051024+00:00"
+    },
+    {
+      "source": "\u0635\u0628\u0631",
+      "target": "\u0627\u0644\u0644\u0647",
+      "weight": 0.999,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:250",
+        "3:125",
+        "3:146",
+        "7:126",
+        "7:137",
+        "13:22",
+        "16:42",
+        "16:110",
+        "18:28",
+        "18:82",
+        "20:130",
+        "25:20",
+        "29:59",
+        "39:10",
+        "40:55",
+        "50:39",
+        "52:48",
+        "68:48",
+        "74:7",
+        "76:24"
+      ],
+      "count": 138,
+      "first_seen": "2026-06-08T23:52:53.116655+00:00",
+      "last_seen": "2026-06-10T01:10:19.056459+00:00"
+    },
+    {
+      "source": "\u0627\u0644\u0644\u0647",
+      "target": "\u0635\u0628\u0631",
+      "weight": 0.999,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:250",
+        "3:125",
+        "3:146",
+        "7:126",
+        "7:137",
+        "13:22",
+        "16:42",
+        "16:110",
+        "18:28",
+        "18:82",
+        "20:130",
+        "25:20",
+        "29:59",
+        "39:10",
+        "40:55",
+        "50:39",
+        "52:48",
+        "68:48",
+        "74:7",
+        "76:24"
+      ],
+      "count": 138,
+      "first_seen": "2026-06-08T23:52:53.116665+00:00",
+      "last_seen": "2026-06-10T01:10:19.056464+00:00"
     },
     {
       "source": "\u0643\u0641\u0631",
@@ -869,9 +1716,9 @@
         "58:5",
         "60:1"
       ],
-      "count": 145,
+      "count": 174,
       "first_seen": "2026-06-08T23:52:53.116675+00:00",
-      "last_seen": "2026-06-09T00:16:32.194021+00:00"
+      "last_seen": "2026-06-10T01:10:19.028369+00:00"
     },
     {
       "source": "\u0623\u0646\u0628\u064a\u0627\u0621",
@@ -900,9 +1747,9 @@
         "58:5",
         "60:1"
       ],
-      "count": 145,
+      "count": 174,
       "first_seen": "2026-06-08T23:52:53.116686+00:00",
-      "last_seen": "2026-06-09T00:16:32.194024+00:00"
+      "last_seen": "2026-06-10T01:10:19.028375+00:00"
     },
     {
       "source": "\u0623\u0646\u0628\u064a\u0627\u0621",
@@ -931,9 +1778,9 @@
         "60:1",
         "69:10"
       ],
-      "count": 225,
+      "count": 270,
       "first_seen": "2026-06-08T23:52:53.116706+00:00",
-      "last_seen": "2026-06-09T00:16:32.198603+00:00"
+      "last_seen": "2026-06-10T01:10:19.044320+00:00"
     },
     {
       "source": "\u0627\u0644\u0644\u0647",
@@ -962,9 +1809,71 @@
         "60:1",
         "69:10"
       ],
-      "count": 225,
+      "count": 270,
       "first_seen": "2026-06-08T23:52:53.116712+00:00",
-      "last_seen": "2026-06-09T00:16:32.198606+00:00"
+      "last_seen": "2026-06-10T01:10:19.044326+00:00"
+    },
+    {
+      "source": "\u0643\u0641\u0631",
+      "target": "\u0648\u062d\u064a",
+      "weight": 0.999,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "4:60",
+        "4:136",
+        "5:44",
+        "5:64",
+        "5:67",
+        "5:68",
+        "9:26",
+        "9:40",
+        "9:97",
+        "10:2",
+        "13:7",
+        "13:27",
+        "13:30",
+        "14:13",
+        "23:24",
+        "29:47",
+        "41:14",
+        "48:26",
+        "58:5",
+        "65:5"
+      ],
+      "count": 156,
+      "first_seen": "2026-06-08T23:52:53.117364+00:00",
+      "last_seen": "2026-06-10T01:10:19.036343+00:00"
+    },
+    {
+      "source": "\u0648\u062d\u064a",
+      "target": "\u0643\u0641\u0631",
+      "weight": 0.999,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "4:60",
+        "4:136",
+        "5:44",
+        "5:64",
+        "5:67",
+        "5:68",
+        "9:26",
+        "9:40",
+        "9:97",
+        "10:2",
+        "13:7",
+        "13:27",
+        "13:30",
+        "14:13",
+        "23:24",
+        "29:47",
+        "41:14",
+        "48:26",
+        "58:5",
+        "65:5"
+      ],
+      "count": 156,
+      "first_seen": "2026-06-08T23:52:53.117370+00:00",
+      "last_seen": "2026-06-10T01:10:19.036337+00:00"
     },
     {
       "source": "\u0639\u0644\u0645",
@@ -993,9 +1902,9 @@
         "63:1",
         "63:8"
       ],
-      "count": 185,
+      "count": 222,
       "first_seen": "2026-06-08T23:52:53.117790+00:00",
-      "last_seen": "2026-06-09T00:16:32.195397+00:00"
+      "last_seen": "2026-06-10T01:10:19.033107+00:00"
     },
     {
       "source": "\u0623\u0646\u0628\u064a\u0627\u0621",
@@ -1024,9 +1933,133 @@
         "63:1",
         "63:8"
       ],
-      "count": 185,
+      "count": 222,
       "first_seen": "2026-06-08T23:52:53.117800+00:00",
-      "last_seen": "2026-06-09T00:16:32.195401+00:00"
+      "last_seen": "2026-06-10T01:10:19.033112+00:00"
+    },
+    {
+      "source": "\u0639\u0644\u0645",
+      "target": "\u062e\u0644\u0642",
+      "weight": 0.999,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "7:54",
+        "9:36",
+        "10:5",
+        "16:8",
+        "16:70",
+        "22:5",
+        "30:22",
+        "30:30",
+        "31:25",
+        "35:11",
+        "36:36",
+        "40:57",
+        "41:9",
+        "44:39",
+        "46:4",
+        "50:16",
+        "57:4",
+        "65:12",
+        "67:14",
+        "70:39"
+      ],
+      "count": 144,
+      "first_seen": "2026-06-08T23:52:53.117951+00:00",
+      "last_seen": "2026-06-10T01:10:19.047077+00:00"
+    },
+    {
+      "source": "\u062e\u0644\u0642",
+      "target": "\u0639\u0644\u0645",
+      "weight": 0.999,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "7:54",
+        "9:36",
+        "10:5",
+        "16:8",
+        "16:70",
+        "22:5",
+        "30:22",
+        "30:30",
+        "31:25",
+        "35:11",
+        "36:36",
+        "40:57",
+        "41:9",
+        "44:39",
+        "46:4",
+        "50:16",
+        "57:4",
+        "65:12",
+        "67:14",
+        "70:39"
+      ],
+      "count": 144,
+      "first_seen": "2026-06-08T23:52:53.117962+00:00",
+      "last_seen": "2026-06-10T01:10:19.047082+00:00"
+    },
+    {
+      "source": "\u0623\u0633\u0631\u0629",
+      "target": "\u0627\u0644\u0644\u0647",
+      "weight": 0.999,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "5:68",
+        "6:131",
+        "6:145",
+        "7:155",
+        "8:54",
+        "11:45",
+        "11:81",
+        "11:117",
+        "17:17",
+        "19:55",
+        "20:134",
+        "21:76",
+        "26:169",
+        "28:59",
+        "29:46",
+        "31:33",
+        "33:13",
+        "37:76",
+        "59:2",
+        "59:7"
+      ],
+      "count": 156,
+      "first_seen": "2026-06-08T23:52:53.118335+00:00",
+      "last_seen": "2026-06-10T01:10:19.025562+00:00"
+    },
+    {
+      "source": "\u0627\u0644\u0644\u0647",
+      "target": "\u0623\u0633\u0631\u0629",
+      "weight": 0.999,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "5:68",
+        "6:131",
+        "6:145",
+        "7:155",
+        "8:54",
+        "11:45",
+        "11:81",
+        "11:117",
+        "17:17",
+        "19:55",
+        "20:134",
+        "21:76",
+        "26:169",
+        "28:59",
+        "29:46",
+        "31:33",
+        "33:13",
+        "37:76",
+        "59:2",
+        "59:7"
+      ],
+      "count": 156,
+      "first_seen": "2026-06-08T23:52:53.118346+00:00",
+      "last_seen": "2026-06-10T01:10:19.025565+00:00"
     },
     {
       "source": "\u0646\u0627\u0631",
@@ -1055,9 +2088,9 @@
         "67:6",
         "74:31"
       ],
-      "count": 200,
+      "count": 240,
       "first_seen": "2026-06-08T23:52:53.119250+00:00",
-      "last_seen": "2026-06-09T00:16:32.201330+00:00"
+      "last_seen": "2026-06-10T01:10:19.053991+00:00"
     },
     {
       "source": "\u0627\u0644\u0644\u0647",
@@ -1086,262 +2119,14 @@
         "67:6",
         "74:31"
       ],
-      "count": 200,
+      "count": 240,
       "first_seen": "2026-06-08T23:52:53.119257+00:00",
-      "last_seen": "2026-06-09T00:16:32.201333+00:00"
-    },
-    {
-      "source": "\u0648\u062d\u064a",
-      "target": "\u0627\u0644\u0644\u0647",
-      "weight": 0.999,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "20:113",
-        "20:114",
-        "22:5",
-        "23:29",
-        "25:21",
-        "26:63",
-        "28:24",
-        "28:87",
-        "29:46",
-        "29:50",
-        "34:6",
-        "39:6",
-        "39:55",
-        "41:14",
-        "41:39",
-        "42:7",
-        "42:15",
-        "53:23",
-        "59:21",
-        "99:5"
-      ],
-      "count": 335,
-      "first_seen": "2026-06-08T23:52:53.119903+00:00",
-      "last_seen": "2026-06-09T00:16:32.206268+00:00"
-    },
-    {
-      "source": "\u0627\u0644\u0644\u0647",
-      "target": "\u0648\u062d\u064a",
-      "weight": 0.999,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "20:113",
-        "20:114",
-        "22:5",
-        "23:29",
-        "25:21",
-        "26:63",
-        "28:24",
-        "28:87",
-        "29:46",
-        "29:50",
-        "34:6",
-        "39:6",
-        "39:55",
-        "41:14",
-        "41:39",
-        "42:7",
-        "42:15",
-        "53:23",
-        "59:21",
-        "99:5"
-      ],
-      "count": 335,
-      "first_seen": "2026-06-08T23:52:53.119914+00:00",
-      "last_seen": "2026-06-09T00:16:32.206273+00:00"
-    },
-    {
-      "source": "\u0639\u0641\u0648",
-      "target": "\u0627\u0644\u0644\u0647",
-      "weight": 0.999,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "38:35",
-        "38:66",
-        "40:7",
-        "40:55",
-        "41:6",
-        "41:43",
-        "42:5",
-        "47:15",
-        "47:19",
-        "53:32",
-        "57:21",
-        "59:10",
-        "60:4",
-        "60:5",
-        "66:8",
-        "67:12",
-        "71:10",
-        "71:28",
-        "73:20",
-        "110:3"
-      ],
-      "count": 295,
-      "first_seen": "2026-06-08T23:52:53.126411+00:00",
-      "last_seen": "2026-06-09T00:16:32.206761+00:00"
-    },
-    {
-      "source": "\u0627\u0644\u0644\u0647",
-      "target": "\u0639\u0641\u0648",
-      "weight": 0.999,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "38:35",
-        "38:66",
-        "40:7",
-        "40:55",
-        "41:6",
-        "41:43",
-        "42:5",
-        "47:15",
-        "47:19",
-        "53:32",
-        "57:21",
-        "59:10",
-        "60:4",
-        "60:5",
-        "66:8",
-        "67:12",
-        "71:10",
-        "71:28",
-        "73:20",
-        "110:3"
-      ],
-      "count": 295,
-      "first_seen": "2026-06-08T23:52:53.126422+00:00",
-      "last_seen": "2026-06-09T00:16:32.206765+00:00"
-    },
-    {
-      "source": "\u0643\u0641\u0631",
-      "target": "\u0648\u062d\u064a",
-      "weight": 0.9987,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "4:60",
-        "4:136",
-        "5:44",
-        "5:64",
-        "5:67",
-        "5:68",
-        "9:26",
-        "9:40",
-        "9:97",
-        "10:2",
-        "13:7",
-        "13:27",
-        "13:30",
-        "14:13",
-        "23:24",
-        "29:47",
-        "41:14",
-        "48:26",
-        "58:5",
-        "65:5"
-      ],
-      "count": 130,
-      "first_seen": "2026-06-08T23:52:53.117364+00:00",
-      "last_seen": "2026-06-09T00:16:32.196317+00:00"
-    },
-    {
-      "source": "\u0648\u062d\u064a",
-      "target": "\u0643\u0641\u0631",
-      "weight": 0.9987,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "4:60",
-        "4:136",
-        "5:44",
-        "5:64",
-        "5:67",
-        "5:68",
-        "9:26",
-        "9:40",
-        "9:97",
-        "10:2",
-        "13:7",
-        "13:27",
-        "13:30",
-        "14:13",
-        "23:24",
-        "29:47",
-        "41:14",
-        "48:26",
-        "58:5",
-        "65:5"
-      ],
-      "count": 130,
-      "first_seen": "2026-06-08T23:52:53.117370+00:00",
-      "last_seen": "2026-06-09T00:16:32.196314+00:00"
-    },
-    {
-      "source": "\u0623\u0633\u0631\u0629",
-      "target": "\u0627\u0644\u0644\u0647",
-      "weight": 0.9987,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "5:68",
-        "6:131",
-        "6:145",
-        "7:155",
-        "8:54",
-        "11:45",
-        "11:81",
-        "11:117",
-        "17:17",
-        "19:55",
-        "20:134",
-        "21:76",
-        "26:169",
-        "28:59",
-        "29:46",
-        "31:33",
-        "33:13",
-        "37:76",
-        "59:2",
-        "59:7"
-      ],
-      "count": 130,
-      "first_seen": "2026-06-08T23:52:53.118335+00:00",
-      "last_seen": "2026-06-09T00:16:32.193200+00:00"
-    },
-    {
-      "source": "\u0627\u0644\u0644\u0647",
-      "target": "\u0623\u0633\u0631\u0629",
-      "weight": 0.9987,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "5:68",
-        "6:131",
-        "6:145",
-        "7:155",
-        "8:54",
-        "11:45",
-        "11:81",
-        "11:117",
-        "17:17",
-        "19:55",
-        "20:134",
-        "21:76",
-        "26:169",
-        "28:59",
-        "29:46",
-        "31:33",
-        "33:13",
-        "37:76",
-        "59:2",
-        "59:7"
-      ],
-      "count": 130,
-      "first_seen": "2026-06-08T23:52:53.118346+00:00",
-      "last_seen": "2026-06-09T00:16:32.193203+00:00"
+      "last_seen": "2026-06-10T01:10:19.053995+00:00"
     },
     {
       "source": "\u0648\u062d\u064a",
       "target": "\u0623\u0646\u0628\u064a\u0627\u0621",
-      "weight": 0.9987,
+      "weight": 0.999,
       "relation_type": "co_occurrence",
       "evidence": [
         "4:61",
@@ -1365,14 +2150,14 @@
         "58:5",
         "64:8"
       ],
-      "count": 130,
+      "count": 156,
       "first_seen": "2026-06-08T23:52:53.119882+00:00",
-      "last_seen": "2026-06-09T00:16:32.195832+00:00"
+      "last_seen": "2026-06-10T01:10:19.034683+00:00"
     },
     {
       "source": "\u0623\u0646\u0628\u064a\u0627\u0621",
       "target": "\u0648\u062d\u064a",
-      "weight": 0.9987,
+      "weight": 0.999,
       "relation_type": "co_occurrence",
       "evidence": [
         "4:61",
@@ -1396,138 +2181,138 @@
         "58:5",
         "64:8"
       ],
-      "count": 130,
+      "count": 156,
       "first_seen": "2026-06-08T23:52:53.119893+00:00",
-      "last_seen": "2026-06-09T00:16:32.195829+00:00"
+      "last_seen": "2026-06-10T01:10:19.034678+00:00"
     },
     {
-      "source": "\u0639\u0644\u0645",
-      "target": "\u062e\u0644\u0642",
-      "weight": 0.9977,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "7:54",
-        "9:36",
-        "10:5",
-        "16:8",
-        "16:70",
-        "22:5",
-        "30:22",
-        "30:30",
-        "31:25",
-        "35:11",
-        "36:36",
-        "40:57",
-        "41:9",
-        "44:39",
-        "46:4",
-        "50:16",
-        "57:4",
-        "65:12",
-        "67:14",
-        "70:39"
-      ],
-      "count": 120,
-      "first_seen": "2026-06-08T23:52:53.117951+00:00",
-      "last_seen": "2026-06-09T00:16:32.199359+00:00"
-    },
-    {
-      "source": "\u062e\u0644\u0642",
-      "target": "\u0639\u0644\u0645",
-      "weight": 0.9977,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "7:54",
-        "9:36",
-        "10:5",
-        "16:8",
-        "16:70",
-        "22:5",
-        "30:22",
-        "30:30",
-        "31:25",
-        "35:11",
-        "36:36",
-        "40:57",
-        "41:9",
-        "44:39",
-        "46:4",
-        "50:16",
-        "57:4",
-        "65:12",
-        "67:14",
-        "70:39"
-      ],
-      "count": 120,
-      "first_seen": "2026-06-08T23:52:53.117962+00:00",
-      "last_seen": "2026-06-09T00:16:32.199363+00:00"
-    },
-    {
-      "source": "\u0635\u0628\u0631",
+      "source": "\u0648\u062d\u064a",
       "target": "\u0627\u0644\u0644\u0647",
-      "weight": 0.9972,
+      "weight": 0.999,
       "relation_type": "co_occurrence",
       "evidence": [
-        "2:250",
-        "3:125",
-        "3:146",
-        "7:126",
-        "7:137",
-        "13:22",
-        "16:42",
-        "16:110",
-        "18:28",
-        "18:82",
-        "20:130",
-        "25:20",
-        "29:59",
-        "39:10",
-        "40:55",
-        "50:39",
-        "52:48",
-        "68:48",
-        "74:7",
-        "76:24"
+        "20:113",
+        "20:114",
+        "22:5",
+        "23:29",
+        "25:21",
+        "26:63",
+        "28:24",
+        "28:87",
+        "29:46",
+        "29:50",
+        "34:6",
+        "39:6",
+        "39:55",
+        "41:14",
+        "41:39",
+        "42:7",
+        "42:15",
+        "53:23",
+        "59:21",
+        "99:5"
       ],
-      "count": 115,
-      "first_seen": "2026-06-08T23:52:53.116655+00:00",
-      "last_seen": "2026-06-09T00:16:32.202019+00:00"
+      "count": 402,
+      "first_seen": "2026-06-08T23:52:53.119903+00:00",
+      "last_seen": "2026-06-10T01:10:19.071942+00:00"
     },
     {
       "source": "\u0627\u0644\u0644\u0647",
-      "target": "\u0635\u0628\u0631",
-      "weight": 0.9972,
+      "target": "\u0648\u062d\u064a",
+      "weight": 0.999,
       "relation_type": "co_occurrence",
       "evidence": [
-        "2:250",
-        "3:125",
-        "3:146",
-        "7:126",
-        "7:137",
-        "13:22",
-        "16:42",
-        "16:110",
-        "18:28",
-        "18:82",
-        "20:130",
-        "25:20",
-        "29:59",
-        "39:10",
-        "40:55",
-        "50:39",
-        "52:48",
-        "68:48",
-        "74:7",
-        "76:24"
+        "20:113",
+        "20:114",
+        "22:5",
+        "23:29",
+        "25:21",
+        "26:63",
+        "28:24",
+        "28:87",
+        "29:46",
+        "29:50",
+        "34:6",
+        "39:6",
+        "39:55",
+        "41:14",
+        "41:39",
+        "42:7",
+        "42:15",
+        "53:23",
+        "59:21",
+        "99:5"
       ],
-      "count": 115,
-      "first_seen": "2026-06-08T23:52:53.116665+00:00",
-      "last_seen": "2026-06-09T00:16:32.202023+00:00"
+      "count": 402,
+      "first_seen": "2026-06-08T23:52:53.119914+00:00",
+      "last_seen": "2026-06-10T01:10:19.071949+00:00"
+    },
+    {
+      "source": "\u0639\u0641\u0648",
+      "target": "\u0627\u0644\u0644\u0647",
+      "weight": 0.999,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "38:35",
+        "38:66",
+        "40:7",
+        "40:55",
+        "41:6",
+        "41:43",
+        "42:5",
+        "47:15",
+        "47:19",
+        "53:32",
+        "57:21",
+        "59:10",
+        "60:4",
+        "60:5",
+        "66:8",
+        "67:12",
+        "71:10",
+        "71:28",
+        "73:20",
+        "110:3"
+      ],
+      "count": 354,
+      "first_seen": "2026-06-08T23:52:53.126411+00:00",
+      "last_seen": "2026-06-10T01:10:19.073786+00:00"
+    },
+    {
+      "source": "\u0627\u0644\u0644\u0647",
+      "target": "\u0639\u0641\u0648",
+      "weight": 0.999,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "38:35",
+        "38:66",
+        "40:7",
+        "40:55",
+        "41:6",
+        "41:43",
+        "42:5",
+        "47:15",
+        "47:19",
+        "53:32",
+        "57:21",
+        "59:10",
+        "60:4",
+        "60:5",
+        "66:8",
+        "67:12",
+        "71:10",
+        "71:28",
+        "73:20",
+        "110:3"
+      ],
+      "count": 354,
+      "first_seen": "2026-06-08T23:52:53.126422+00:00",
+      "last_seen": "2026-06-10T01:10:19.073792+00:00"
     },
     {
       "source": "\u062d\u0643\u0645\u0629",
       "target": "\u0639\u0644\u0645",
-      "weight": 0.9954,
+      "weight": 0.9983,
       "relation_type": "co_occurrence",
       "evidence": [
         "2:129",
@@ -1551,14 +2336,14 @@
         "62:2",
         "64:18"
       ],
-      "count": 105,
+      "count": 126,
       "first_seen": "2026-06-08T23:52:53.115757+00:00",
-      "last_seen": "2026-06-09T00:16:32.196152+00:00"
+      "last_seen": "2026-06-10T01:10:19.035813+00:00"
     },
     {
       "source": "\u0639\u0644\u0645",
       "target": "\u062d\u0643\u0645\u0629",
-      "weight": 0.9954,
+      "weight": 0.9983,
       "relation_type": "co_occurrence",
       "evidence": [
         "2:129",
@@ -1582,14 +2367,14 @@
         "62:2",
         "64:18"
       ],
-      "count": 105,
+      "count": 126,
       "first_seen": "2026-06-08T23:52:53.115764+00:00",
-      "last_seen": "2026-06-09T00:16:32.196155+00:00"
+      "last_seen": "2026-06-10T01:10:19.035818+00:00"
     },
     {
       "source": "\u062c\u0646\u0629",
       "target": "\u0627\u0644\u0644\u0647",
-      "weight": 0.9954,
+      "weight": 0.9983,
       "relation_type": "co_occurrence",
       "evidence": [
         "2:265",
@@ -1613,14 +2398,14 @@
         "57:21",
         "66:11"
       ],
-      "count": 105,
+      "count": 126,
       "first_seen": "2026-06-08T23:52:53.115858+00:00",
-      "last_seen": "2026-06-09T00:16:32.197052+00:00"
+      "last_seen": "2026-06-10T01:10:19.038926+00:00"
     },
     {
       "source": "\u0627\u0644\u0644\u0647",
       "target": "\u062c\u0646\u0629",
-      "weight": 0.9954,
+      "weight": 0.9983,
       "relation_type": "co_occurrence",
       "evidence": [
         "2:265",
@@ -1644,14 +2429,14 @@
         "57:21",
         "66:11"
       ],
-      "count": 105,
+      "count": 126,
       "first_seen": "2026-06-08T23:52:53.115864+00:00",
-      "last_seen": "2026-06-09T00:16:32.197055+00:00"
+      "last_seen": "2026-06-10T01:10:19.038934+00:00"
     },
     {
       "source": "\u062d\u0643\u0645\u0629",
       "target": "\u0627\u0644\u0644\u0647",
-      "weight": 0.9954,
+      "weight": 0.9983,
       "relation_type": "co_occurrence",
       "evidence": [
         "2:228",
@@ -1675,14 +2460,14 @@
         "51:30",
         "60:5"
       ],
-      "count": 105,
+      "count": 126,
       "first_seen": "2026-06-08T23:52:53.119549+00:00",
-      "last_seen": "2026-06-09T00:16:32.194316+00:00"
+      "last_seen": "2026-06-10T01:10:19.029245+00:00"
     },
     {
       "source": "\u0627\u0644\u0644\u0647",
       "target": "\u062d\u0643\u0645\u0629",
-      "weight": 0.9954,
+      "weight": 0.9983,
       "relation_type": "co_occurrence",
       "evidence": [
         "2:228",
@@ -1706,14 +2491,14 @@
         "51:30",
         "60:5"
       ],
-      "count": 105,
+      "count": 126,
       "first_seen": "2026-06-08T23:52:53.119556+00:00",
-      "last_seen": "2026-06-09T00:16:32.194319+00:00"
+      "last_seen": "2026-06-10T01:10:19.029249+00:00"
     },
     {
       "source": "\u062a\u0642\u0648\u0649",
       "target": "\u0627\u0644\u0644\u0647",
-      "weight": 0.9954,
+      "weight": 0.9983,
       "relation_type": "co_occurrence",
       "evidence": [
         "2:278",
@@ -1737,14 +2522,14 @@
         "59:7",
         "65:1"
       ],
-      "count": 105,
+      "count": 126,
       "first_seen": "2026-06-08T23:52:53.126432+00:00",
-      "last_seen": "2026-06-09T00:16:32.196213+00:00"
+      "last_seen": "2026-06-10T01:10:19.036039+00:00"
     },
     {
       "source": "\u0627\u0644\u0644\u0647",
       "target": "\u062a\u0642\u0648\u0649",
-      "weight": 0.9954,
+      "weight": 0.9983,
       "relation_type": "co_occurrence",
       "evidence": [
         "2:278",
@@ -1768,14 +2553,14 @@
         "59:7",
         "65:1"
       ],
-      "count": 105,
+      "count": 126,
       "first_seen": "2026-06-08T23:52:53.126443+00:00",
-      "last_seen": "2026-06-09T00:16:32.196236+00:00"
+      "last_seen": "2026-06-10T01:10:19.036045+00:00"
     },
     {
       "source": "\u0648\u062d\u064a",
       "target": "\u0630\u0643\u0631",
-      "weight": 0.9901,
+      "weight": 0.996,
       "relation_type": "co_occurrence",
       "evidence": [
         "2:231",
@@ -1797,14 +2582,14 @@
         "47:20",
         "65:10"
       ],
-      "count": 90,
+      "count": 108,
       "first_seen": "2026-06-08T23:52:53.125895+00:00",
-      "last_seen": "2026-06-09T00:16:32.196474+00:00"
+      "last_seen": "2026-06-10T01:10:19.036936+00:00"
     },
     {
       "source": "\u0630\u0643\u0631",
       "target": "\u0648\u062d\u064a",
-      "weight": 0.9901,
+      "weight": 0.996,
       "relation_type": "co_occurrence",
       "evidence": [
         "2:231",
@@ -1826,14 +2611,14 @@
         "47:20",
         "65:10"
       ],
-      "count": 90,
+      "count": 108,
       "first_seen": "2026-06-08T23:52:53.125901+00:00",
-      "last_seen": "2026-06-09T00:16:32.196476+00:00"
+      "last_seen": "2026-06-10T01:10:19.036940+00:00"
     },
     {
       "source": "\u062d\u0633\u0627\u0628",
       "target": "\u0627\u0644\u0644\u0647",
-      "weight": 0.9901,
+      "weight": 0.996,
       "relation_type": "co_occurrence",
       "evidence": [
         "3:37",
@@ -1855,14 +2640,14 @@
         "65:8",
         "78:36"
       ],
-      "count": 90,
+      "count": 108,
       "first_seen": "2026-06-08T23:52:53.131348+00:00",
-      "last_seen": "2026-06-09T00:16:32.202548+00:00"
+      "last_seen": "2026-06-10T01:10:19.058216+00:00"
     },
     {
       "source": "\u0627\u0644\u0644\u0647",
       "target": "\u062d\u0633\u0627\u0628",
-      "weight": 0.9901,
+      "weight": 0.996,
       "relation_type": "co_occurrence",
       "evidence": [
         "3:37",
@@ -1884,14 +2669,14 @@
         "65:8",
         "78:36"
       ],
-      "count": 90,
+      "count": 108,
       "first_seen": "2026-06-08T23:52:53.131355+00:00",
-      "last_seen": "2026-06-09T00:16:32.202551+00:00"
+      "last_seen": "2026-06-10T01:10:19.058223+00:00"
     },
     {
       "source": "\u0643\u0641\u0631",
       "target": "\u0623\u0633\u0631\u0629",
-      "weight": 0.9836,
+      "weight": 0.9927,
       "relation_type": "co_occurrence",
       "evidence": [
         "2:105",
@@ -1911,14 +2696,14 @@
         "98:1",
         "98:6"
       ],
-      "count": 80,
+      "count": 96,
       "first_seen": "2026-06-08T23:52:53.118300+00:00",
-      "last_seen": "2026-06-09T00:16:32.206153+00:00"
+      "last_seen": "2026-06-10T01:10:19.071622+00:00"
     },
     {
       "source": "\u0623\u0633\u0631\u0629",
       "target": "\u0643\u0641\u0631",
-      "weight": 0.9836,
+      "weight": 0.9927,
       "relation_type": "co_occurrence",
       "evidence": [
         "2:105",
@@ -1938,14 +2723,14 @@
         "98:1",
         "98:6"
       ],
-      "count": 80,
+      "count": 96,
       "first_seen": "2026-06-08T23:52:53.118310+00:00",
-      "last_seen": "2026-06-09T00:16:32.206156+00:00"
+      "last_seen": "2026-06-10T01:10:19.071626+00:00"
     },
     {
       "source": "\u0639\u0641\u0648",
       "target": "\u0643\u0641\u0631",
-      "weight": 0.9836,
+      "weight": 0.9927,
       "relation_type": "co_occurrence",
       "evidence": [
         "2:286",
@@ -1965,14 +2750,14 @@
         "60:5",
         "66:8"
       ],
-      "count": 80,
+      "count": 96,
       "first_seen": "2026-06-08T23:52:53.129787+00:00",
-      "last_seen": "2026-06-09T00:16:32.196839+00:00"
+      "last_seen": "2026-06-10T01:10:19.038313+00:00"
     },
     {
       "source": "\u0643\u0641\u0631",
       "target": "\u0639\u0641\u0648",
-      "weight": 0.9836,
+      "weight": 0.9927,
       "relation_type": "co_occurrence",
       "evidence": [
         "2:286",
@@ -1992,14 +2777,14 @@
         "60:5",
         "66:8"
       ],
-      "count": 80,
+      "count": 96,
       "first_seen": "2026-06-08T23:52:53.129793+00:00",
-      "last_seen": "2026-06-09T00:16:32.196842+00:00"
+      "last_seen": "2026-06-10T01:10:19.038317+00:00"
     },
     {
       "source": "\u062f\u0639\u0627\u0621",
       "target": "\u0627\u0644\u0644\u0647",
-      "weight": 0.9836,
+      "weight": 0.9927,
       "relation_type": "co_occurrence",
       "evidence": [
         "3:38",
@@ -2019,14 +2804,14 @@
         "39:8",
         "57:8"
       ],
-      "count": 80,
+      "count": 96,
       "first_seen": "2026-06-08T23:52:53.131410+00:00",
-      "last_seen": "2026-06-09T00:16:32.191377+00:00"
+      "last_seen": "2026-06-10T01:10:19.019131+00:00"
     },
     {
       "source": "\u0627\u0644\u0644\u0647",
       "target": "\u062f\u0639\u0627\u0621",
-      "weight": 0.9836,
+      "weight": 0.9927,
       "relation_type": "co_occurrence",
       "evidence": [
         "3:38",
@@ -2046,14 +2831,14 @@
         "39:8",
         "57:8"
       ],
-      "count": 80,
+      "count": 96,
       "first_seen": "2026-06-08T23:52:53.131416+00:00",
-      "last_seen": "2026-06-09T00:16:32.191380+00:00"
+      "last_seen": "2026-06-10T01:10:19.019135+00:00"
     },
     {
       "source": "\u0625\u064a\u0645\u0627\u0646",
       "target": "\u0627\u0644\u0644\u0647",
-      "weight": 0.9836,
+      "weight": 0.9927,
       "relation_type": "co_occurrence",
       "evidence": [
         "4:65",
@@ -2073,14 +2858,14 @@
         "41:44",
         "43:88"
       ],
-      "count": 80,
+      "count": 96,
       "first_seen": "2026-06-08T23:52:53.141971+00:00",
-      "last_seen": "2026-06-09T00:16:32.180783+00:00"
+      "last_seen": "2026-06-10T01:10:18.981269+00:00"
     },
     {
       "source": "\u0627\u0644\u0644\u0647",
       "target": "\u0625\u064a\u0645\u0627\u0646",
-      "weight": 0.9836,
+      "weight": 0.9927,
       "relation_type": "co_occurrence",
       "evidence": [
         "4:65",
@@ -2100,14 +2885,14 @@
         "41:44",
         "43:88"
       ],
-      "count": 80,
+      "count": 96,
       "first_seen": "2026-06-08T23:52:53.141978+00:00",
-      "last_seen": "2026-06-09T00:16:32.180786+00:00"
+      "last_seen": "2026-06-10T01:10:18.981275+00:00"
     },
     {
       "source": "\u0643\u0641\u0631",
       "target": "\u062e\u0644\u0642",
-      "weight": 0.9787,
+      "weight": 0.9901,
       "relation_type": "co_occurrence",
       "evidence": [
         "2:102",
@@ -2126,14 +2911,14 @@
         "41:9",
         "46:3"
       ],
-      "count": 75,
+      "count": 90,
       "first_seen": "2026-06-08T23:52:53.118011+00:00",
-      "last_seen": "2026-06-09T00:16:32.182422+00:00"
+      "last_seen": "2026-06-10T01:10:18.987139+00:00"
     },
     {
       "source": "\u062e\u0644\u0642",
       "target": "\u0643\u0641\u0631",
-      "weight": 0.9787,
+      "weight": 0.9901,
       "relation_type": "co_occurrence",
       "evidence": [
         "2:102",
@@ -2152,14 +2937,14 @@
         "41:9",
         "46:3"
       ],
-      "count": 75,
+      "count": 90,
       "first_seen": "2026-06-08T23:52:53.118016+00:00",
-      "last_seen": "2026-06-09T00:16:32.182426+00:00"
+      "last_seen": "2026-06-10T01:10:18.987143+00:00"
     },
     {
       "source": "\u0623\u0645\u0629",
       "target": "\u0627\u0644\u0644\u0647",
-      "weight": 0.9787,
+      "weight": 0.9901,
       "relation_type": "co_occurrence",
       "evidence": [
         "2:128",
@@ -2178,14 +2963,14 @@
         "22:67",
         "23:52"
       ],
-      "count": 75,
+      "count": 90,
       "first_seen": "2026-06-08T23:52:53.119340+00:00",
-      "last_seen": "2026-06-09T00:16:32.147105+00:00"
+      "last_seen": "2026-06-10T01:10:18.859102+00:00"
     },
     {
       "source": "\u0627\u0644\u0644\u0647",
       "target": "\u0623\u0645\u0629",
-      "weight": 0.9787,
+      "weight": 0.9901,
       "relation_type": "co_occurrence",
       "evidence": [
         "2:128",
@@ -2204,14 +2989,14 @@
         "22:67",
         "23:52"
       ],
-      "count": 75,
+      "count": 90,
       "first_seen": "2026-06-08T23:52:53.119346+00:00",
-      "last_seen": "2026-06-09T00:16:32.147107+00:00"
+      "last_seen": "2026-06-10T01:10:18.859105+00:00"
     },
     {
       "source": "\u062a\u0648\u0628\u0629",
       "target": "\u0627\u0644\u0644\u0647",
-      "weight": 0.9725,
+      "weight": 0.9866,
       "relation_type": "co_occurrence",
       "evidence": [
         "2:37",
@@ -2229,14 +3014,14 @@
         "73:20",
         "74:31"
       ],
-      "count": 70,
+      "count": 84,
       "first_seen": "2026-06-08T23:52:53.115906+00:00",
-      "last_seen": "2026-06-09T00:16:32.201320+00:00"
+      "last_seen": "2026-06-10T01:10:19.053977+00:00"
     },
     {
       "source": "\u0627\u0644\u0644\u0647",
       "target": "\u062a\u0648\u0628\u0629",
-      "weight": 0.9725,
+      "weight": 0.9866,
       "relation_type": "co_occurrence",
       "evidence": [
         "2:37",
@@ -2254,14 +3039,14 @@
         "73:20",
         "74:31"
       ],
-      "count": 70,
+      "count": 84,
       "first_seen": "2026-06-08T23:52:53.115912+00:00",
-      "last_seen": "2026-06-09T00:16:32.201322+00:00"
+      "last_seen": "2026-06-10T01:10:19.053980+00:00"
     },
     {
       "source": "\u0639\u0644\u0645",
       "target": "\u0639\u0641\u0648",
-      "weight": 0.9725,
+      "weight": 0.9866,
       "relation_type": "co_occurrence",
       "evidence": [
         "3:135",
@@ -2279,14 +3064,14 @@
         "71:4",
         "73:20"
       ],
-      "count": 70,
+      "count": 84,
       "first_seen": "2026-06-08T23:52:53.136272+00:00",
-      "last_seen": "2026-06-09T00:16:32.200915+00:00"
+      "last_seen": "2026-06-10T01:10:19.052688+00:00"
     },
     {
       "source": "\u0639\u0641\u0648",
       "target": "\u0639\u0644\u0645",
-      "weight": 0.9725,
+      "weight": 0.9866,
       "relation_type": "co_occurrence",
       "evidence": [
         "3:135",
@@ -2304,9 +3089,599 @@
         "71:4",
         "73:20"
       ],
-      "count": 70,
+      "count": 84,
       "first_seen": "2026-06-08T23:52:53.136278+00:00",
-      "last_seen": "2026-06-09T00:16:32.200913+00:00"
+      "last_seen": "2026-06-10T01:10:19.052685+00:00"
+    },
+    {
+      "source": "\u0643\u0641\u0631",
+      "target": "\u0625\u064a\u0645\u0627\u0646",
+      "weight": 0.9818,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:6",
+        "2:88",
+        "2:121",
+        "4:46",
+        "4:51",
+        "4:155",
+        "8:55",
+        "11:17",
+        "12:37",
+        "16:72",
+        "21:30",
+        "29:47",
+        "29:67"
+      ],
+      "count": 78,
+      "first_seen": "2026-06-08T23:52:53.115151+00:00",
+      "last_seen": "2026-06-10T01:10:18.908300+00:00"
+    },
+    {
+      "source": "\u0625\u064a\u0645\u0627\u0646",
+      "target": "\u0643\u0641\u0631",
+      "weight": 0.9818,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:6",
+        "2:88",
+        "2:121",
+        "4:46",
+        "4:51",
+        "4:155",
+        "8:55",
+        "11:17",
+        "12:37",
+        "16:72",
+        "21:30",
+        "29:47",
+        "29:67"
+      ],
+      "count": 78,
+      "first_seen": "2026-06-08T23:52:53.115158+00:00",
+      "last_seen": "2026-06-10T01:10:18.908296+00:00"
+    },
+    {
+      "source": "\u0635\u062f\u0642",
+      "target": "\u0639\u0644\u0645",
+      "weight": 0.9818,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:31",
+        "2:101",
+        "2:196",
+        "2:280",
+        "5:113",
+        "6:143",
+        "9:43",
+        "9:104",
+        "10:93",
+        "12:51",
+        "29:3",
+        "46:4",
+        "48:27"
+      ],
+      "count": 78,
+      "first_seen": "2026-06-08T23:52:53.115712+00:00",
+      "last_seen": "2026-06-10T01:10:18.997705+00:00"
+    },
+    {
+      "source": "\u0639\u0644\u0645",
+      "target": "\u0635\u062f\u0642",
+      "weight": 0.9818,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:31",
+        "2:101",
+        "2:196",
+        "2:280",
+        "5:113",
+        "6:143",
+        "9:43",
+        "9:104",
+        "10:93",
+        "12:51",
+        "29:3",
+        "46:4",
+        "48:27"
+      ],
+      "count": 78,
+      "first_seen": "2026-06-08T23:52:53.115719+00:00",
+      "last_seen": "2026-06-10T01:10:18.997709+00:00"
+    },
+    {
+      "source": "\u0625\u062d\u0633\u0627\u0646",
+      "target": "\u0627\u0644\u0644\u0647",
+      "weight": 0.9818,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:83",
+        "6:152",
+        "6:154",
+        "12:23",
+        "12:100",
+        "16:30",
+        "16:125",
+        "17:34",
+        "29:46",
+        "39:10",
+        "39:23",
+        "39:55",
+        "40:64"
+      ],
+      "count": 78,
+      "first_seen": "2026-06-08T23:52:53.117167+00:00",
+      "last_seen": "2026-06-10T01:10:18.964123+00:00"
+    },
+    {
+      "source": "\u0627\u0644\u0644\u0647",
+      "target": "\u0625\u062d\u0633\u0627\u0646",
+      "weight": 0.9818,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:83",
+        "6:152",
+        "6:154",
+        "12:23",
+        "12:100",
+        "16:30",
+        "16:125",
+        "17:34",
+        "29:46",
+        "39:10",
+        "39:23",
+        "39:55",
+        "40:64"
+      ],
+      "count": 78,
+      "first_seen": "2026-06-08T23:52:53.117173+00:00",
+      "last_seen": "2026-06-10T01:10:18.964127+00:00"
+    },
+    {
+      "source": "\u0623\u0646\u0628\u064a\u0627\u0621",
+      "target": "\u0635\u062f\u0642",
+      "weight": 0.9818,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:101",
+        "2:177",
+        "3:39",
+        "3:81",
+        "3:183",
+        "27:49",
+        "33:22",
+        "48:27",
+        "49:15",
+        "58:12",
+        "58:13",
+        "59:8",
+        "61:6"
+      ],
+      "count": 78,
+      "first_seen": "2026-06-08T23:52:53.117816+00:00",
+      "last_seen": "2026-06-10T01:10:19.030411+00:00"
+    },
+    {
+      "source": "\u0635\u062f\u0642",
+      "target": "\u0623\u0646\u0628\u064a\u0627\u0621",
+      "weight": 0.9818,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:101",
+        "2:177",
+        "3:39",
+        "3:81",
+        "3:183",
+        "27:49",
+        "33:22",
+        "48:27",
+        "49:15",
+        "58:12",
+        "58:13",
+        "59:8",
+        "61:6"
+      ],
+      "count": 78,
+      "first_seen": "2026-06-08T23:52:53.117822+00:00",
+      "last_seen": "2026-06-10T01:10:19.030414+00:00"
+    },
+    {
+      "source": "\u0628\u0639\u062b",
+      "target": "\u0639\u0644\u0645",
+      "weight": 0.9818,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:129",
+        "2:247",
+        "2:259",
+        "3:164",
+        "6:60",
+        "16:38",
+        "18:12",
+        "18:19",
+        "22:5",
+        "27:65",
+        "30:56",
+        "62:2",
+        "100:9"
+      ],
+      "count": 78,
+      "first_seen": "2026-06-08T23:52:53.119592+00:00",
+      "last_seen": "2026-06-10T01:10:19.072253+00:00"
+    },
+    {
+      "source": "\u0639\u0644\u0645",
+      "target": "\u0628\u0639\u062b",
+      "weight": 0.9818,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:129",
+        "2:247",
+        "2:259",
+        "3:164",
+        "6:60",
+        "16:38",
+        "18:12",
+        "18:19",
+        "22:5",
+        "27:65",
+        "30:56",
+        "62:2",
+        "100:9"
+      ],
+      "count": 78,
+      "first_seen": "2026-06-08T23:52:53.119599+00:00",
+      "last_seen": "2026-06-10T01:10:19.072260+00:00"
+    },
+    {
+      "source": "\u0635\u062f\u0642",
+      "target": "\u0627\u0644\u0644\u0647",
+      "weight": 0.9818,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:177",
+        "2:276",
+        "3:50",
+        "3:183",
+        "4:87",
+        "6:115",
+        "10:2",
+        "10:93",
+        "17:80",
+        "24:6",
+        "46:12",
+        "63:10",
+        "66:12"
+      ],
+      "count": 78,
+      "first_seen": "2026-06-08T23:52:53.121968+00:00",
+      "last_seen": "2026-06-10T01:10:19.039120+00:00"
+    },
+    {
+      "source": "\u0627\u0644\u0644\u0647",
+      "target": "\u0635\u062f\u0642",
+      "weight": 0.9818,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:177",
+        "2:276",
+        "3:50",
+        "3:183",
+        "4:87",
+        "6:115",
+        "10:2",
+        "10:93",
+        "17:80",
+        "24:6",
+        "46:12",
+        "63:10",
+        "66:12"
+      ],
+      "count": 78,
+      "first_seen": "2026-06-08T23:52:53.121979+00:00",
+      "last_seen": "2026-06-10T01:10:19.039124+00:00"
+    },
+    {
+      "source": "\u0630\u0643\u0631",
+      "target": "\u062e\u0644\u0642",
+      "weight": 0.9818,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:200",
+        "3:191",
+        "5:110",
+        "7:69",
+        "10:3",
+        "16:17",
+        "19:67",
+        "32:4",
+        "35:3",
+        "49:13",
+        "51:49",
+        "53:45",
+        "92:3"
+      ],
+      "count": 78,
+      "first_seen": "2026-06-08T23:52:53.123521+00:00",
+      "last_seen": "2026-06-10T01:10:19.068492+00:00"
+    },
+    {
+      "source": "\u062e\u0644\u0642",
+      "target": "\u0630\u0643\u0631",
+      "weight": 0.9818,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:200",
+        "3:191",
+        "5:110",
+        "7:69",
+        "10:3",
+        "16:17",
+        "19:67",
+        "32:4",
+        "35:3",
+        "49:13",
+        "51:49",
+        "53:45",
+        "92:3"
+      ],
+      "count": 78,
+      "first_seen": "2026-06-08T23:52:53.123530+00:00",
+      "last_seen": "2026-06-10T01:10:19.068496+00:00"
+    },
+    {
+      "source": "\u062b\u0627\u0628\u062a \u0633\u0631\u0639\u0629 \u0627\u0644\u0636\u0648\u0621",
+      "target": "\u0627\u0644\u0646\u0633\u0628\u064a\u0629 \u0627\u0644\u062e\u0627\u0635\u0629",
+      "weight": 0.98,
+      "relation_type": "central_to",
+      "evidence": [
+        "physics:\u062b\u0627\u0628\u062a \u0633\u0631\u0639\u0629 \u0627\u0644\u0636\u0648\u0621"
+      ],
+      "count": 1,
+      "first_seen": "2026-06-10T01:10:18.586323+00:00",
+      "last_seen": "2026-06-10T01:10:18.586326+00:00"
+    },
+    {
+      "source": "\u0627\u0644\u062a\u0643\u0627\u0645\u0644",
+      "target": "\u0627\u0644\u0645\u0634\u062a\u0642\u0629",
+      "weight": 0.98,
+      "relation_type": "inverse_of",
+      "evidence": [
+        "math:\u0627\u0644\u062a\u0643\u0627\u0645\u0644"
+      ],
+      "count": 1,
+      "first_seen": "2026-06-10T01:10:18.586368+00:00",
+      "last_seen": "2026-06-10T01:10:18.586369+00:00"
+    },
+    {
+      "source": "\u0639\u0644\u0645",
+      "target": "\u062a\u0642\u0648\u0649",
+      "weight": 0.9752,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:103",
+        "2:194",
+        "2:196",
+        "2:197",
+        "2:203",
+        "2:223",
+        "2:231",
+        "2:233",
+        "2:282",
+        "5:4",
+        "8:25",
+        "26:132"
+      ],
+      "count": 72,
+      "first_seen": "2026-06-08T23:52:53.118125+00:00",
+      "last_seen": "2026-06-10T01:10:18.882499+00:00"
+    },
+    {
+      "source": "\u062a\u0642\u0648\u0649",
+      "target": "\u0639\u0644\u0645",
+      "weight": 0.9752,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:103",
+        "2:194",
+        "2:196",
+        "2:197",
+        "2:203",
+        "2:223",
+        "2:231",
+        "2:233",
+        "2:282",
+        "5:4",
+        "8:25",
+        "26:132"
+      ],
+      "count": 72,
+      "first_seen": "2026-06-08T23:52:53.118132+00:00",
+      "last_seen": "2026-06-10T01:10:18.882494+00:00"
+    },
+    {
+      "source": "\u0623\u0646\u0628\u064a\u0627\u0621",
+      "target": "\u0628\u0639\u062b",
+      "weight": 0.9752,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:129",
+        "2:213",
+        "2:247",
+        "3:164",
+        "16:36",
+        "17:15",
+        "17:94",
+        "22:5",
+        "25:41",
+        "28:59",
+        "40:34",
+        "62:2"
+      ],
+      "count": 72,
+      "first_seen": "2026-06-08T23:52:53.119562+00:00",
+      "last_seen": "2026-06-10T01:10:19.031450+00:00"
+    },
+    {
+      "source": "\u0628\u0639\u062b",
+      "target": "\u0623\u0646\u0628\u064a\u0627\u0621",
+      "weight": 0.9752,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:129",
+        "2:213",
+        "2:247",
+        "3:164",
+        "16:36",
+        "17:15",
+        "17:94",
+        "22:5",
+        "25:41",
+        "28:59",
+        "40:34",
+        "62:2"
+      ],
+      "count": 72,
+      "first_seen": "2026-06-08T23:52:53.119569+00:00",
+      "last_seen": "2026-06-10T01:10:19.031453+00:00"
+    },
+    {
+      "source": "\u0639\u0644\u0645",
+      "target": "\u0623\u0633\u0631\u0629",
+      "weight": 0.9752,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:196",
+        "3:71",
+        "3:75",
+        "4:25",
+        "7:123",
+        "9:101",
+        "11:46",
+        "16:43",
+        "21:7",
+        "28:78",
+        "29:32",
+        "57:29"
+      ],
+      "count": 72,
+      "first_seen": "2026-06-08T23:52:53.123226+00:00",
+      "last_seen": "2026-06-10T01:10:19.021634+00:00"
+    },
+    {
+      "source": "\u0623\u0633\u0631\u0629",
+      "target": "\u0639\u0644\u0645",
+      "weight": 0.9752,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:196",
+        "3:71",
+        "3:75",
+        "4:25",
+        "7:123",
+        "9:101",
+        "11:46",
+        "16:43",
+        "21:7",
+        "28:78",
+        "29:32",
+        "57:29"
+      ],
+      "count": 72,
+      "first_seen": "2026-06-08T23:52:53.123232+00:00",
+      "last_seen": "2026-06-10T01:10:19.021638+00:00"
+    },
+    {
+      "source": "\u0639\u062f\u0644",
+      "target": "\u0627\u0644\u0644\u0647",
+      "weight": 0.9752,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:282",
+        "4:3",
+        "4:135",
+        "5:8",
+        "5:106",
+        "6:1",
+        "6:115",
+        "6:150",
+        "6:152",
+        "16:76",
+        "16:90",
+        "42:15"
+      ],
+      "count": 72,
+      "first_seen": "2026-06-08T23:52:53.129327+00:00",
+      "last_seen": "2026-06-10T01:10:18.972736+00:00"
+    },
+    {
+      "source": "\u0627\u0644\u0644\u0647",
+      "target": "\u0639\u062f\u0644",
+      "weight": 0.9752,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "2:282",
+        "4:3",
+        "4:135",
+        "5:8",
+        "5:106",
+        "6:1",
+        "6:115",
+        "6:150",
+        "6:152",
+        "16:76",
+        "16:90",
+        "42:15"
+      ],
+      "count": 72,
+      "first_seen": "2026-06-08T23:52:53.129333+00:00",
+      "last_seen": "2026-06-10T01:10:18.972740+00:00"
+    },
+    {
+      "source": "\u0648\u062d\u064a",
+      "target": "\u0623\u0633\u0631\u0629",
+      "weight": 0.9752,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "3:65",
+        "3:72",
+        "3:199",
+        "5:47",
+        "5:59",
+        "5:68",
+        "6:145",
+        "10:24",
+        "23:27",
+        "29:46",
+        "33:26",
+        "48:26"
+      ],
+      "count": 72,
+      "first_seen": "2026-06-08T23:52:53.132698+00:00",
+      "last_seen": "2026-06-10T01:10:18.997419+00:00"
+    },
+    {
+      "source": "\u0623\u0633\u0631\u0629",
+      "target": "\u0648\u062d\u064a",
+      "weight": 0.9752,
+      "relation_type": "co_occurrence",
+      "evidence": [
+        "3:65",
+        "3:72",
+        "3:199",
+        "5:47",
+        "5:59",
+        "5:68",
+        "6:145",
+        "10:24",
+        "23:27",
+        "29:46",
+        "33:26",
+        "48:26"
+      ],
+      "count": 72,
+      "first_seen": "2026-06-08T23:52:53.132705+00:00",
+      "last_seen": "2026-06-10T01:10:18.997423+00:00"
     },
     {
       "source": "\u062a\u0641\u0643\u0631",
@@ -2351,646 +3726,48 @@
       "last_seen": "2026-06-09T00:16:32.213677+00:00"
     },
     {
-      "source": "\u0643\u0641\u0631",
-      "target": "\u0625\u064a\u0645\u0627\u0646",
-      "weight": 0.9645,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "2:6",
-        "2:88",
-        "2:121",
-        "4:46",
-        "4:51",
-        "4:155",
-        "8:55",
-        "11:17",
-        "12:37",
-        "16:72",
-        "21:30",
-        "29:47",
-        "29:67"
-      ],
-      "count": 65,
-      "first_seen": "2026-06-08T23:52:53.115151+00:00",
-      "last_seen": "2026-06-09T00:16:32.160507+00:00"
-    },
-    {
-      "source": "\u0625\u064a\u0645\u0627\u0646",
-      "target": "\u0643\u0641\u0631",
-      "weight": 0.9645,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "2:6",
-        "2:88",
-        "2:121",
-        "4:46",
-        "4:51",
-        "4:155",
-        "8:55",
-        "11:17",
-        "12:37",
-        "16:72",
-        "21:30",
-        "29:47",
-        "29:67"
-      ],
-      "count": 65,
-      "first_seen": "2026-06-08T23:52:53.115158+00:00",
-      "last_seen": "2026-06-09T00:16:32.160504+00:00"
-    },
-    {
-      "source": "\u0635\u062f\u0642",
-      "target": "\u0639\u0644\u0645",
-      "weight": 0.9645,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "2:31",
-        "2:101",
-        "2:196",
-        "2:280",
-        "5:113",
-        "6:143",
-        "9:43",
-        "9:104",
-        "10:93",
-        "12:51",
-        "29:3",
-        "46:4",
-        "48:27"
-      ],
-      "count": 65,
-      "first_seen": "2026-06-08T23:52:53.115712+00:00",
-      "last_seen": "2026-06-09T00:16:32.185357+00:00"
-    },
-    {
       "source": "\u0639\u0644\u0645",
-      "target": "\u0635\u062f\u0642",
-      "weight": 0.9645,
+      "target": "\u0648\u062d\u062f\u0627\u0646\u064a\u0629",
+      "weight": 0.9663,
       "relation_type": "co_occurrence",
       "evidence": [
-        "2:31",
-        "2:101",
-        "2:196",
-        "2:280",
-        "5:113",
-        "6:143",
-        "9:43",
-        "9:104",
-        "10:93",
-        "12:51",
-        "29:3",
-        "46:4",
-        "48:27"
-      ],
-      "count": 65,
-      "first_seen": "2026-06-08T23:52:53.115719+00:00",
-      "last_seen": "2026-06-09T00:16:32.185360+00:00"
-    },
-    {
-      "source": "\u0625\u062d\u0633\u0627\u0646",
-      "target": "\u0627\u0644\u0644\u0647",
-      "weight": 0.9645,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "2:83",
-        "6:152",
-        "6:154",
-        "12:23",
-        "12:100",
-        "16:30",
-        "16:125",
-        "17:34",
-        "29:46",
-        "39:10",
-        "39:23",
-        "39:55",
-        "40:64"
-      ],
-      "count": 65,
-      "first_seen": "2026-06-08T23:52:53.117167+00:00",
-      "last_seen": "2026-06-09T00:16:32.176001+00:00"
-    },
-    {
-      "source": "\u0627\u0644\u0644\u0647",
-      "target": "\u0625\u062d\u0633\u0627\u0646",
-      "weight": 0.9645,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "2:83",
-        "6:152",
-        "6:154",
-        "12:23",
-        "12:100",
-        "16:30",
-        "16:125",
-        "17:34",
-        "29:46",
-        "39:10",
-        "39:23",
-        "39:55",
-        "40:64"
-      ],
-      "count": 65,
-      "first_seen": "2026-06-08T23:52:53.117173+00:00",
-      "last_seen": "2026-06-09T00:16:32.176003+00:00"
-    },
-    {
-      "source": "\u0623\u0646\u0628\u064a\u0627\u0621",
-      "target": "\u0635\u062f\u0642",
-      "weight": 0.9645,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "2:101",
-        "2:177",
-        "3:39",
-        "3:81",
-        "3:183",
-        "27:49",
-        "33:22",
-        "48:27",
-        "49:15",
-        "58:12",
-        "58:13",
-        "59:8",
-        "61:6"
-      ],
-      "count": 65,
-      "first_seen": "2026-06-08T23:52:53.117816+00:00",
-      "last_seen": "2026-06-09T00:16:32.194630+00:00"
-    },
-    {
-      "source": "\u0635\u062f\u0642",
-      "target": "\u0623\u0646\u0628\u064a\u0627\u0621",
-      "weight": 0.9645,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "2:101",
-        "2:177",
-        "3:39",
-        "3:81",
-        "3:183",
-        "27:49",
-        "33:22",
-        "48:27",
-        "49:15",
-        "58:12",
-        "58:13",
-        "59:8",
-        "61:6"
-      ],
-      "count": 65,
-      "first_seen": "2026-06-08T23:52:53.117822+00:00",
-      "last_seen": "2026-06-09T00:16:32.194633+00:00"
-    },
-    {
-      "source": "\u0628\u0639\u062b",
-      "target": "\u0639\u0644\u0645",
-      "weight": 0.9645,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "2:129",
-        "2:247",
-        "2:259",
-        "3:164",
-        "6:60",
-        "16:38",
-        "18:12",
+        "2:102",
+        "4:43",
+        "5:20",
+        "5:115",
+        "7:80",
+        "9:6",
         "18:19",
-        "22:5",
-        "27:65",
-        "30:56",
-        "62:2",
-        "100:9"
+        "18:22",
+        "18:26",
+        "29:28",
+        "72:26"
       ],
-      "count": 65,
-      "first_seen": "2026-06-08T23:52:53.119592+00:00",
-      "last_seen": "2026-06-09T00:16:32.206356+00:00"
+      "count": 66,
+      "first_seen": "2026-06-08T23:52:53.117939+00:00",
+      "last_seen": "2026-06-10T01:10:19.051016+00:00"
     },
     {
-      "source": "\u0639\u0644\u0645",
-      "target": "\u0628\u0639\u062b",
-      "weight": 0.9645,
+      "source": "\u0648\u062d\u062f\u0627\u0646\u064a\u0629",
+      "target": "\u0639\u0644\u0645",
+      "weight": 0.9663,
       "relation_type": "co_occurrence",
       "evidence": [
-        "2:129",
-        "2:247",
-        "2:259",
-        "3:164",
-        "6:60",
-        "16:38",
-        "18:12",
+        "2:102",
+        "4:43",
+        "5:20",
+        "5:115",
+        "7:80",
+        "9:6",
         "18:19",
-        "22:5",
-        "27:65",
-        "30:56",
-        "62:2",
-        "100:9"
+        "18:22",
+        "18:26",
+        "29:28",
+        "72:26"
       ],
-      "count": 65,
-      "first_seen": "2026-06-08T23:52:53.119599+00:00",
-      "last_seen": "2026-06-09T00:16:32.206359+00:00"
-    },
-    {
-      "source": "\u0635\u062f\u0642",
-      "target": "\u0627\u0644\u0644\u0647",
-      "weight": 0.9645,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "2:177",
-        "2:276",
-        "3:50",
-        "3:183",
-        "4:87",
-        "6:115",
-        "10:2",
-        "10:93",
-        "17:80",
-        "24:6",
-        "46:12",
-        "63:10",
-        "66:12"
-      ],
-      "count": 65,
-      "first_seen": "2026-06-08T23:52:53.121968+00:00",
-      "last_seen": "2026-06-09T00:16:32.197108+00:00"
-    },
-    {
-      "source": "\u0627\u0644\u0644\u0647",
-      "target": "\u0635\u062f\u0642",
-      "weight": 0.9645,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "2:177",
-        "2:276",
-        "3:50",
-        "3:183",
-        "4:87",
-        "6:115",
-        "10:2",
-        "10:93",
-        "17:80",
-        "24:6",
-        "46:12",
-        "63:10",
-        "66:12"
-      ],
-      "count": 65,
-      "first_seen": "2026-06-08T23:52:53.121979+00:00",
-      "last_seen": "2026-06-09T00:16:32.197111+00:00"
-    },
-    {
-      "source": "\u0630\u0643\u0631",
-      "target": "\u062e\u0644\u0642",
-      "weight": 0.9645,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "2:200",
-        "3:191",
-        "5:110",
-        "7:69",
-        "10:3",
-        "16:17",
-        "19:67",
-        "32:4",
-        "35:3",
-        "49:13",
-        "51:49",
-        "53:45",
-        "92:3"
-      ],
-      "count": 65,
-      "first_seen": "2026-06-08T23:52:53.123521+00:00",
-      "last_seen": "2026-06-09T00:16:32.205312+00:00"
-    },
-    {
-      "source": "\u062e\u0644\u0642",
-      "target": "\u0630\u0643\u0631",
-      "weight": 0.9645,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "2:200",
-        "3:191",
-        "5:110",
-        "7:69",
-        "10:3",
-        "16:17",
-        "19:67",
-        "32:4",
-        "35:3",
-        "49:13",
-        "51:49",
-        "53:45",
-        "92:3"
-      ],
-      "count": 65,
-      "first_seen": "2026-06-08T23:52:53.123530+00:00",
-      "last_seen": "2026-06-09T00:16:32.205316+00:00"
-    },
-    {
-      "source": "\u0639\u0644\u0645",
-      "target": "\u062a\u0642\u0648\u0649",
-      "weight": 0.954,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "2:103",
-        "2:194",
-        "2:196",
-        "2:197",
-        "2:203",
-        "2:223",
-        "2:231",
-        "2:233",
-        "2:282",
-        "5:4",
-        "8:25",
-        "26:132"
-      ],
-      "count": 60,
-      "first_seen": "2026-06-08T23:52:53.118125+00:00",
-      "last_seen": "2026-06-09T00:16:32.153395+00:00"
-    },
-    {
-      "source": "\u062a\u0642\u0648\u0649",
-      "target": "\u0639\u0644\u0645",
-      "weight": 0.954,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "2:103",
-        "2:194",
-        "2:196",
-        "2:197",
-        "2:203",
-        "2:223",
-        "2:231",
-        "2:233",
-        "2:282",
-        "5:4",
-        "8:25",
-        "26:132"
-      ],
-      "count": 60,
-      "first_seen": "2026-06-08T23:52:53.118132+00:00",
-      "last_seen": "2026-06-09T00:16:32.153392+00:00"
-    },
-    {
-      "source": "\u0623\u0646\u0628\u064a\u0627\u0621",
-      "target": "\u0628\u0639\u062b",
-      "weight": 0.954,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "2:129",
-        "2:213",
-        "2:247",
-        "3:164",
-        "16:36",
-        "17:15",
-        "17:94",
-        "22:5",
-        "25:41",
-        "28:59",
-        "40:34",
-        "62:2"
-      ],
-      "count": 60,
-      "first_seen": "2026-06-08T23:52:53.119562+00:00",
-      "last_seen": "2026-06-09T00:16:32.194923+00:00"
-    },
-    {
-      "source": "\u0628\u0639\u062b",
-      "target": "\u0623\u0646\u0628\u064a\u0627\u0621",
-      "weight": 0.954,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "2:129",
-        "2:213",
-        "2:247",
-        "3:164",
-        "16:36",
-        "17:15",
-        "17:94",
-        "22:5",
-        "25:41",
-        "28:59",
-        "40:34",
-        "62:2"
-      ],
-      "count": 60,
-      "first_seen": "2026-06-08T23:52:53.119569+00:00",
-      "last_seen": "2026-06-09T00:16:32.194926+00:00"
-    },
-    {
-      "source": "\u0639\u0644\u0645",
-      "target": "\u0623\u0633\u0631\u0629",
-      "weight": 0.954,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "2:196",
-        "3:71",
-        "3:75",
-        "4:25",
-        "7:123",
-        "9:101",
-        "11:46",
-        "16:43",
-        "21:7",
-        "28:78",
-        "29:32",
-        "57:29"
-      ],
-      "count": 60,
-      "first_seen": "2026-06-08T23:52:53.123226+00:00",
-      "last_seen": "2026-06-09T00:16:32.192084+00:00"
-    },
-    {
-      "source": "\u0623\u0633\u0631\u0629",
-      "target": "\u0639\u0644\u0645",
-      "weight": 0.954,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "2:196",
-        "3:71",
-        "3:75",
-        "4:25",
-        "7:123",
-        "9:101",
-        "11:46",
-        "16:43",
-        "21:7",
-        "28:78",
-        "29:32",
-        "57:29"
-      ],
-      "count": 60,
-      "first_seen": "2026-06-08T23:52:53.123232+00:00",
-      "last_seen": "2026-06-09T00:16:32.192088+00:00"
-    },
-    {
-      "source": "\u0639\u062f\u0644",
-      "target": "\u0627\u0644\u0644\u0647",
-      "weight": 0.954,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "2:282",
-        "4:3",
-        "4:135",
-        "5:8",
-        "5:106",
-        "6:1",
-        "6:115",
-        "6:150",
-        "6:152",
-        "16:76",
-        "16:90",
-        "42:15"
-      ],
-      "count": 60,
-      "first_seen": "2026-06-08T23:52:53.129327+00:00",
-      "last_seen": "2026-06-09T00:16:32.178435+00:00"
-    },
-    {
-      "source": "\u0627\u0644\u0644\u0647",
-      "target": "\u0639\u062f\u0644",
-      "weight": 0.954,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "2:282",
-        "4:3",
-        "4:135",
-        "5:8",
-        "5:106",
-        "6:1",
-        "6:115",
-        "6:150",
-        "6:152",
-        "16:76",
-        "16:90",
-        "42:15"
-      ],
-      "count": 60,
-      "first_seen": "2026-06-08T23:52:53.129333+00:00",
-      "last_seen": "2026-06-09T00:16:32.178437+00:00"
-    },
-    {
-      "source": "\u0648\u062d\u064a",
-      "target": "\u0623\u0633\u0631\u0629",
-      "weight": 0.954,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "3:65",
-        "3:72",
-        "3:199",
-        "5:47",
-        "5:59",
-        "5:68",
-        "6:145",
-        "10:24",
-        "23:27",
-        "29:46",
-        "33:26",
-        "48:26"
-      ],
-      "count": 60,
-      "first_seen": "2026-06-08T23:52:53.132698+00:00",
-      "last_seen": "2026-06-09T00:16:32.185268+00:00"
-    },
-    {
-      "source": "\u0623\u0633\u0631\u0629",
-      "target": "\u0648\u062d\u064a",
-      "weight": 0.954,
-      "relation_type": "co_occurrence",
-      "evidence": [
-        "3:65",
-        "3:72",
-        "3:199",
-        "5:47",
-        "5:59",
-        "5:68",
-        "6:145",
-        "10:24",
-        "23:27",
-        "29:46",
-        "33:26",
-        "48:26"
-      ],
-      "count": 60,
-      "first_seen": "2026-06-08T23:52:53.132705+00:00",
-      "last_seen": "2026-06-09T00:16:32.185272+00:00"
-    },
-    {
-      "source": "\u0635\u062f\u0642",
-      "target": "\u0635\u0644\u0627\u0629",
-      "weight": 0.9423,
-      "relation_type": "causal",
-      "evidence": [
-        "chain:\u0635\u062f\u0642\u2192\u0639\u0644\u0645\u2192\u0635\u0644\u0627\u0629",
-        "chain:\u0635\u062f\u0642\u2192\u0648\u062d\u064a\u2192\u0635\u0644\u0627\u0629",
-        "chain:\u0635\u062f\u0642\u2192\u0643\u0641\u0631\u2192\u0635\u0644\u0627\u0629",
-        "chain:\u0635\u062f\u0642\u2192\u0635\u0628\u0631\u2192\u0635\u0644\u0627\u0629",
-        "chain:\u0635\u062f\u0642\u2192\u062a\u0642\u0648\u0649\u2192\u0635\u0644\u0627\u0629",
-        "chain:\u0635\u062f\u0642\u2192\u0623\u0633\u0631\u0629\u2192\u0635\u0644\u0627\u0629",
-        "chain:\u0635\u062f\u0642\u2192\u062e\u0644\u0642\u2192\u0635\u0644\u0627\u0629",
-        "chain:\u0635\u062f\u0642\u2192\u063a\u064a\u0628\u2192\u0635\u0644\u0627\u0629"
-      ],
-      "count": 8,
-      "first_seen": "2026-06-09T00:16:32.211876+00:00",
-      "last_seen": "2026-06-09T00:16:32.211939+00:00"
-    },
-    {
-      "source": "\u062a\u0641\u0643\u0631",
-      "target": "\u0635\u0644\u0627\u0629",
-      "weight": 0.9423,
-      "relation_type": "causal",
-      "evidence": [
-        "chain:\u062a\u0641\u0643\u0631\u2192\u062e\u0644\u0642\u2192\u0635\u0644\u0627\u0629",
-        "chain:\u062a\u0641\u0643\u0631\u2192\u0648\u062d\u064a\u2192\u0635\u0644\u0627\u0629",
-        "chain:\u062a\u0641\u0643\u0631\u2192\u0639\u0644\u0645\u2192\u0635\u0644\u0627\u0629",
-        "chain:\u062a\u0641\u0643\u0631\u2192\u062d\u062c\u2192\u0635\u0644\u0627\u0629",
-        "chain:\u062a\u0641\u0643\u0631\u2192\u0635\u0628\u0631\u2192\u0635\u0644\u0627\u0629",
-        "chain:\u062a\u0641\u0643\u0631\u2192\u0628\u0639\u062b\u2192\u0635\u0644\u0627\u0629",
-        "chain:\u062a\u0641\u0643\u0631\u2192\u062a\u0642\u0648\u0649\u2192\u0635\u0644\u0627\u0629",
-        "chain:\u062a\u0641\u0643\u0631\u2192\u063a\u064a\u0628\u2192\u0635\u0644\u0627\u0629"
-      ],
-      "count": 8,
-      "first_seen": "2026-06-09T00:16:32.213059+00:00",
-      "last_seen": "2026-06-09T00:16:32.213203+00:00"
-    },
-    {
-      "source": "\u0635\u0644\u0627\u0629",
-      "target": "\u062a\u0641\u0643\u0631",
-      "weight": 0.9423,
-      "relation_type": "causal",
-      "evidence": [
-        "chain:\u0635\u0644\u0627\u0629\u2192\u062d\u062c\u2192\u062a\u0641\u0643\u0631",
-        "chain:\u0635\u0644\u0627\u0629\u2192\u062a\u0642\u0648\u0649\u2192\u062a\u0641\u0643\u0631",
-        "chain:\u0635\u0644\u0627\u0629\u2192\u0639\u0644\u0645\u2192\u062a\u0641\u0643\u0631",
-        "chain:\u0635\u0644\u0627\u0629\u2192\u0648\u062d\u064a\u2192\u062a\u0641\u0643\u0631",
-        "chain:\u0635\u0644\u0627\u0629\u2192\u062e\u0644\u0642\u2192\u062a\u0641\u0643\u0631",
-        "chain:\u0635\u0644\u0627\u0629\u2192\u0628\u0639\u062b\u2192\u062a\u0641\u0643\u0631",
-        "chain:\u0635\u0644\u0627\u0629\u2192\u063a\u064a\u0628\u2192\u062a\u0641\u0643\u0631",
-        "chain:\u0635\u0644\u0627\u0629\u2192\u0635\u0628\u0631\u2192\u062a\u0641\u0643\u0631"
-      ],
-      "count": 8,
-      "first_seen": "2026-06-09T00:16:32.213253+00:00",
-      "last_seen": "2026-06-09T00:16:32.213420+00:00"
-    },
-    {
-      "source": "\u0635\u0644\u0627\u0629",
-      "target": "\u0635\u062f\u0642",
-      "weight": 0.9423,
-      "relation_type": "causal",
-      "evidence": [
-        "chain:\u0635\u0644\u0627\u0629\u2192\u062a\u0642\u0648\u0649\u2192\u0635\u062f\u0642",
-        "chain:\u0635\u0644\u0627\u0629\u2192\u0643\u0641\u0631\u2192\u0635\u062f\u0642",
-        "chain:\u0635\u0644\u0627\u0629\u2192\u0639\u0644\u0645\u2192\u0635\u062f\u0642",
-        "chain:\u0635\u0644\u0627\u0629\u2192\u0623\u0633\u0631\u0629\u2192\u0635\u062f\u0642",
-        "chain:\u0635\u0644\u0627\u0629\u2192\u0648\u062d\u064a\u2192\u0635\u062f\u0642",
-        "chain:\u0635\u0644\u0627\u0629\u2192\u062e\u0644\u0642\u2192\u0635\u062f\u0642",
-        "chain:\u0635\u0644\u0627\u0629\u2192\u063a\u064a\u0628\u2192\u0635\u062f\u0642",
-        "chain:\u0635\u0644\u0627\u0629\u2192\u0635\u0628\u0631\u2192\u0635\u062f\u0642"
-      ],
-      "count": 8,
-      "first_seen": "2026-06-09T00:16:32.213258+00:00",
-      "last_seen": "2026-06-09T00:16:32.213412+00:00"
+      "count": 66,
+      "first_seen": "2026-06-08T23:52:53.117945+00:00",
+      "last_seen": "2026-06-10T01:10:19.051012+00:00"
     }
   ],
   "system_metrics": {
