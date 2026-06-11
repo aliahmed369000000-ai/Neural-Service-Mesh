@@ -2482,14 +2482,21 @@ def _add_knowledge_trainer_routes(app, mesh):
         High-intensity direct training on DynamicWeightLayer.
         Drives train_step() with structured vectors until loss < target_loss.
         Body: { "steps": 10000, "target_loss": 0.1, "lr_boost": 3.0 }
+        Requires X-Admin-Key header matching ADMIN_KEY env var when that var is set.
         """
         import numpy as np
         import time
 
+        required_key = os.environ.get("ADMIN_KEY", "").strip()
+        if required_key:
+            provided = request.headers.get("X-Admin-Key", "").strip()
+            if provided != required_key:
+                return jsonify({"error": "Unauthorized"}), 401
+
         b           = request.get_json(force=True) or {}
-        max_steps   = int(b.get("steps", 10000))
-        target_loss = float(b.get("target_loss", 0.1))
-        lr_boost    = float(b.get("lr_boost", 3.0))
+        max_steps   = min(int(b.get("steps", 10000)), 50000)
+        target_loss = float(max(0.01, min(b.get("target_loss", 0.1), 1.0)))
+        lr_boost    = float(max(1.0, min(b.get("lr_boost", 3.0), 10.0)))
 
         layer = getattr(mesh, "dynamic_layer", None) or getattr(mesh, "neural_layer", None)
         if layer is None:
