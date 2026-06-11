@@ -262,6 +262,8 @@ class RoutingEngine:
         if self._dynamic_layer is None:
             return
         try:
+            import os
+            os.makedirs(os.path.dirname(self._DYNAMIC_WEIGHTS_PATH), exist_ok=True)
             self._dynamic_layer.save(self._DYNAMIC_WEIGHTS_PATH)
         except Exception as e:
             logger.warning(f"Phase9 dynamic weight save failed: {e}")
