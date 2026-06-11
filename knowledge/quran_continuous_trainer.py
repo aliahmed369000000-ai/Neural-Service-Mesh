@@ -81,13 +81,23 @@ def _load_all_ayahs() -> List[Dict]:
 
 
 def _save_weights(mesh) -> bool:
-    """Save neural_layer weights to checkpoints/neural_weights.npy."""
+    """Save neural_layer weights to checkpoints/neural_weights.npy.
+    Also saves deep_network weights if available."""
     try:
         layer = getattr(mesh, "neural_layer", None)
         if layer is None:
             return False
         _WEIGHTS_DIR.mkdir(parents=True, exist_ok=True)
         layer.save(str(_WEIGHTS_PATH))
+        # إضافي: حفظ deep_network إن وُجد
+        deep_network = getattr(mesh, "deep_network", None)
+        if deep_network is not None:
+            try:
+                _deep_dir = Path("./models/classifiers/deep_network")
+                _deep_dir.mkdir(parents=True, exist_ok=True)
+                deep_network.save(str(_deep_dir))
+            except Exception as exc_deep:
+                logger.warning(f"[QCT] deep_network save failed: {exc_deep}")
         return True
     except Exception as exc:
         logger.warning(f"[QCT] Weight save failed: {exc}")
