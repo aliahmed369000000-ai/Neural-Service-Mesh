@@ -110,7 +110,7 @@ class BrainCheckpoint:
 
     def save(self, mesh) -> str:
         """
-        Save the complete brain state to disk.
+        Save the complete brain state to disk, then push to GitHub.
 
         Parameters
         ----------
@@ -145,6 +145,14 @@ class BrainCheckpoint:
             self._prune()
 
         logger.info(f"[BrainCheckpoint] Saved → {path}")
+
+        # ── Auto-push to GitHub in background ────────────────────────────
+        try:
+            from ai.github_sync import push_background
+            push_background(tag=tag)
+        except Exception as _ge:
+            logger.warning(f"[BrainCheckpoint] GitHub push skipped: {_ge}")
+
         return path
 
     # ── Core: Load ─────────────────────────────────────────────────────────

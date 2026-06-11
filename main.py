@@ -1,6 +1,21 @@
 from __future__ import annotations
 import sys
+import os
 from typing import Optional
+
+# ── Load .env (GITHUB_TOKEN, GITHUB_REMOTE, GITHUB_USER) ─────────────────────
+def _load_dotenv(path: str = ".env") -> None:
+    try:
+        with open(path, encoding="utf-8") as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if not _line or _line.startswith("#") or "=" not in _line:
+                    continue
+                _k, _v = _line.split("=", 1)
+                os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
+    except Exception:
+        pass
+_load_dotenv()
 
 # ── Logging ────────────────────────────────────────────────────────────────
 from logs.mesh_logger import MeshLogger

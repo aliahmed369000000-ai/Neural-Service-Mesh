@@ -2969,4 +2969,22 @@ _create_app_with_qa = create_app
 def create_app(mesh):
     app = _create_app_with_qa(mesh)
     _add_qa_and_learning_routes(app, mesh)
+    _add_github_sync_routes(app, mesh)
     return app
+
+
+def _add_github_sync_routes(app, mesh):
+    """GitHub sync status + manual push endpoints."""
+    from flask import request, jsonify
+
+    @app.route("/api/github/status", methods=["GET"])
+    def github_sync_status():
+        from ai.github_sync import status
+        return jsonify(status())
+
+    @app.route("/api/github/push", methods=["POST"])
+    def github_sync_push():
+        """Trigger an immediate push to GitHub."""
+        from ai.github_sync import push_now
+        result = push_now(tag="manual")
+        return jsonify(result)
