@@ -598,7 +598,23 @@ class CognitiveKnowledgeGraph:
     def load(self) -> None:
         """تحميل الجراف من JSON."""
         try:
-            data = json.loads(self._file.read_text(encoding="utf-8"))
+            raw_text = self._file.read_text(encoding="utf-8")
+            # فحص إذا كان الملف Git LFS pointer وليس JSON حقيقياً
+            if raw_text.startswith("version https://git-lfs.github.com"):
+                logger.warning(
+                    f"[CKG] {self._file} is a Git LFS pointer — "
+                    "initialising empty CKG and writing valid JSON."
+                )
+                empty_ckg = {"concepts": {}, "relations": {}, "version": "1.0"}
+                import tempfile, os
+                tmp = self._file.with_suffix(".tmp")
+                tmp.write_text(
+                    __import__("json").dumps(empty_ckg, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                os.replace(tmp, self._file)
+                return   # النتيجة: CKG فارغ، لا crash
+            data = __import__("json").loads(raw_text)
         except Exception as exc:
             logger.error(f"[CKG] load failed: {exc}")
             return
