@@ -2475,6 +2475,92 @@ def _add_knowledge_trainer_routes(app, mesh):
             "chunk_files_on_disk":   len(list(_Path("./knowledge").glob("quran_chunk_*.json"))),
         })
 
+    # ── POST /train/intensive ─────────────────────────────────────────────
+    @app.route("/train/intensive", methods=["POST"])
+    def train_intensive():
+        """
+        High-intensity direct training on DynamicWeightLayer.
+        Drives train_step() with structured vectors until loss < target_loss.
+        Body: { "steps": 10000, "target_loss": 0.1, "lr_boost": 3.0 }
+        """
+        import numpy as np
+        import time
+
+        b           = request.get_json(force=True) or {}
+        max_steps   = int(b.get("steps", 10000))
+        target_loss = float(b.get("target_loss", 0.1))
+        lr_boost    = float(b.get("lr_boost", 3.0))
+
+        layer = getattr(mesh, "dynamic_layer", None) or getattr(mesh, "neural_layer", None)
+        if layer is None:
+            return jsonify({"error": "No weight layer available"}), 503
+
+        original_lr = layer.learning_rate
+        layer.learning_rate = original_lr * lr_boost
+
+        rng = np.random.default_rng(42)
+        TRAINING_PAIRS = []
+        for _ in range(200):
+            vec = [
+                rng.uniform(0.6, 1.0),
+                rng.uniform(0.5, 1.0),
+                rng.uniform(0.3, 0.8),
+                rng.uniform(0.2, 0.9),
+                rng.uniform(0.4, 1.0),
+                rng.uniform(0.1, 0.7),
+                rng.uniform(0.3, 0.9),
+            ]
+            target = rng.uniform(0.7, 1.0)
+            TRAINING_PAIRS.append((vec, float(target)))
+
+        t0          = time.time()
+        steps_done  = 0
+        last_loss   = None
+        loss_window = []
+
+        for step in range(max_steps):
+            vec, target = TRAINING_PAIRS[step % len(TRAINING_PAIRS)]
+            loss = layer.train_step(vec, target)
+            last_loss = loss
+            loss_window.append(loss)
+            if len(loss_window) > 100:
+                loss_window.pop(0)
+            steps_done += 1
+
+            if step % 500 == 0 and len(loss_window) >= 50:
+                avg = sum(loss_window[-50:]) / 50
+                if avg < target_loss:
+                    break
+
+        layer.learning_rate = original_lr
+        elapsed = time.time() - t0
+        avg_recent = sum(loss_window[-50:]) / max(len(loss_window[-50:]), 1)
+
+        try:
+            mesh.save_neural_weights()
+        except Exception:
+            pass
+
+        return jsonify({
+            "steps_done":   steps_done,
+            "last_loss":    round(last_loss, 8) if last_loss is not None else None,
+            "avg_loss_50":  round(avg_recent, 8),
+            "target_loss":  target_loss,
+            "target_reached": avg_recent < target_loss,
+            "elapsed_s":    round(elapsed, 2),
+            "lr_used":      round(original_lr * lr_boost, 6),
+        })
+
+    # ── POST /train/save-weights ──────────────────────────────────────────
+    @app.route("/train/save-weights", methods=["POST"])
+    def train_save_weights():
+        """Save current neural weights to checkpoints/neural_weights.npy."""
+        try:
+            result = mesh.save_neural_weights()
+            return jsonify({"saved": True, "path": str(result.get("path", ""))})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
     # ── GET /train/matrix ─────────────────────────────────────────────────
     @app.route("/train/matrix", methods=["GET"])
     def train_matrix_status():
