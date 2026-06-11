@@ -1,7 +1,7 @@
 {
   "_meta": {
     "schema_version": "1.0.0",
-    "saved_at": "2026-06-11T04:54:54.120473+00:00",
+    "saved_at": "2026-06-11T04:57:12.028927+00:00",
     "total_concepts": 823,
     "total_relations": 2478,
     "description": "Cognitive Knowledge Graph — Neural Service Mesh"
@@ -1181,10 +1181,10 @@
         "114:3",
         "quran:الله"
       ],
-      "frequency": 8235,
+      "frequency": 8236,
       "strength": 0.9016,
       "first_seen": "2026-06-08T23:38:08.462376+00:00",
-      "last_seen": "2026-06-11T04:54:54.120403+00:00",
+      "last_seen": "2026-06-11T04:57:12.028859+00:00",
       "vector": [
         1.0,
         0.85,
@@ -1778,10 +1778,10 @@
         "quran:علم",
         "arabic_discovery"
       ],
-      "frequency": 4200,
+      "frequency": 4201,
       "strength": 0.8343,
       "first_seen": "2026-06-08T23:38:08.462419+00:00",
-      "last_seen": "2026-06-11T04:51:50.040966+00:00",
+      "last_seen": "2026-06-11T04:57:12.028895+00:00",
       "vector": [
         1.0,
         0.85,
@@ -3274,10 +3274,10 @@
         "quran:نار",
         "arabic_discovery"
       ],
-      "frequency": 1488,
-      "strength": 0.7306,
+      "frequency": 1489,
+      "strength": 0.7307,
       "first_seen": "2026-06-08T23:52:53.115208+00:00",
-      "last_seen": "2026-06-11T04:54:54.120467+00:00",
+      "last_seen": "2026-06-11T04:57:12.028881+00:00",
       "vector": [
         1.0,
         0.85,
