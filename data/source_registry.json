@@ -2,7 +2,7 @@
   "_meta": {
     "schema_version": "1.0.0",
     "total_sources": 1,
-    "updated_at": "2026-06-11T01:10:54.503431+00:00"
+    "updated_at": "2026-06-11T04:39:56.569382+00:00"
   },
   "sources": [
     {
@@ -21,7 +21,7 @@
       "error_count": 0,
       "last_error": null,
       "status": "active",
-      "registered_at": "2026-06-11T01:10:54.500775+00:00",
+      "registered_at": "2026-06-11T04:39:56.543152+00:00",
       "total_items_ingested": 0,
       "total_items_rejected": 0,
       "avg_quality_score": 0.0,
