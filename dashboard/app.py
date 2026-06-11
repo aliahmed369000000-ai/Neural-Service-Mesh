@@ -33,6 +33,32 @@ input, textarea { background: #181825 !important; color: #cdd6f4 !important; bor
 }
 .metric-value { font-size: 2.2rem; font-weight: 700; color: #cba6f7; }
 .metric-label { font-size: 0.9rem; color: #a6adc8; margin-top: 4px; }
+.status-card {
+    background: #181825;
+    border: 1px solid #45475a;
+    border-radius: 10px;
+    padding: 1rem 1.4rem;
+    margin: 6px 0;
+    color: #cdd6f4;
+    direction: rtl;
+}
+.status-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid #313244;
+}
+.status-row:last-child { border-bottom: none; }
+.status-key { color: #a6adc8; font-size: 0.9rem; }
+.status-val { color: #cba6f7; font-weight: 600; font-size: 0.95rem; }
+.status-val-green { color: #a6e3a1; font-weight: 600; }
+.status-val-red { color: #f38ba8; font-weight: 600; }
+.status-val-yellow { color: #f9e2af; font-weight: 600; }
+.domain-bar-wrap { margin: 4px 0; }
+.domain-bar-label { font-size: 0.82rem; color: #a6adc8; margin-bottom: 2px; }
+.domain-bar-track { height: 8px; background: #313244; border-radius: 4px; }
+.domain-bar-fill { height: 8px; border-radius: 4px; background: #cba6f7; }
 .result-box {
     background: #181825;
     border: 1px solid #45475a;
@@ -56,6 +82,8 @@ input, textarea { background: #181825 !important; color: #cdd6f4 !important; bor
 footer { display: none !important; }
 """
 
+
+# ── HTTP helpers ──────────────────────────────────────────────────────────────
 
 def _get(path: str, timeout: int = 8):
     try:
@@ -89,14 +117,188 @@ def _fmt_date(raw):
         return str(raw)[:16]
 
 
-# ── Dashboard refresh ────────────────────────────────────────────────────────
+def _fmt_num(v):
+    if v is None:
+        return "—"
+    if isinstance(v, float):
+        return f"{v:.6f}"
+    return str(v)
+
+
+# ── /train/status renderer ───────────────────────────────────────────────────
+
+def _render_train_status(tstat: dict) -> str:
+    if not tstat:
+        return "<div class='status-card' style='color:#f38ba8;'>⚠️ تعذّر الاتصال بـ /train/status</div>"
+
+    layer   = tstat.get("layer", {})
+    db_info = tstat.get("db", {})
+
+    shape_raw = layer.get("shape")
+    shape_str = f"{shape_raw[0]}×{shape_raw[1]}" if isinstance(shape_raw, list) and len(shape_raw) == 2 else "—"
+    train_steps = layer.get("train_steps", "—")
+    last_loss_raw = layer.get("last_loss")
+    last_loss   = f"{last_loss_raw:.6f}" if isinstance(last_loss_raw, float) else "—"
+    ckg_concepts= tstat.get("ckg_concepts", "—")
+
+    db_total    = db_info.get("total_items", "—")
+    db_sessions = db_info.get("total_sessions", "—")
+    db_domains  = db_info.get("domains", {})
+
+    domains_html = ""
+    if db_domains:
+        max_v = max(db_domains.values()) if db_domains else 1
+        for domain, count in sorted(db_domains.items(), key=lambda x: -x[1])[:10]:
+            pct = int(count / max(1, max_v) * 100)
+            domains_html += f"""
+            <div class='domain-bar-wrap'>
+                <div class='domain-bar-label'>{domain} — {count}</div>
+                <div class='domain-bar-track'>
+                    <div class='domain-bar-fill' style='width:{pct}%;'></div>
+                </div>
+            </div>"""
+
+    html = f"""
+    <div class='status-card'>
+        <b style='color:#cba6f7; font-size:1rem;'>⚙️ حالة محرك التدريب — /train/status</b>
+        <div class='section-divider'></div>
+        <div class='status-row'>
+            <span class='status-key'>شكل مصفوفة الأوزان</span>
+            <span class='status-val'>{shape_str}</span>
+        </div>
+        <div class='status-row'>
+            <span class='status-key'>خطوات التدريب (Layer)</span>
+            <span class='status-val'>{train_steps}</span>
+        </div>
+        <div class='status-row'>
+            <span class='status-key'>آخر خسارة (Last Loss)</span>
+            <span class='status-val'>{last_loss}</span>
+        </div>
+        <div class='status-row'>
+            <span class='status-key'>مفاهيم CKG</span>
+            <span class='status-val'>{ckg_concepts}</span>
+        </div>
+        <div class='status-row'>
+            <span class='status-key'>إجمالي العناصر المدرّبة (DB)</span>
+            <span class='status-val'>{db_total}</span>
+        </div>
+        <div class='status-row'>
+            <span class='status-key'>جلسات التدريب (DB)</span>
+            <span class='status-val'>{db_sessions}</span>
+        </div>
+        {f"<div class='section-divider'></div><b style='color:#a6adc8; font-size:0.85rem;'>توزيع المجالات في DB</b>{domains_html}" if domains_html else ""}
+    </div>
+    """
+    return html
+
+
+# ── /train/audit renderer ────────────────────────────────────────────────────
+
+def _render_train_audit(audit: dict) -> str:
+    if not audit:
+        return "<div class='status-card' style='color:#f38ba8;'>⚠️ تعذّر الاتصال بـ /train/audit</div>"
+
+    steps       = audit.get("training_steps", "—")
+    sessions    = audit.get("training_sessions", "—")
+    avg_loss    = audit.get("recent_avg_loss")
+    avg_loss_str= f"{avg_loss:.6f}" if isinstance(avg_loss, float) else "—"
+    concepts    = audit.get("concepts", "—")
+    relations   = audit.get("relations", "—")
+    w_saved     = audit.get("weights_saved", False)
+    w_path      = audit.get("weights_path") or "—"
+    by_domain   = audit.get("training_by_domain", {})
+    cursor      = audit.get("quran_training_cursor", {})
+
+    w_class  = "status-val-green" if w_saved else "status-val-red"
+    w_label  = "✅ محفوظة" if w_saved else "❌ غير محفوظة"
+
+    # domain breakdown
+    domain_rows = ""
+    if by_domain:
+        max_v = max(by_domain.values()) if by_domain else 1
+        for domain, count in sorted(by_domain.items(), key=lambda x: -x[1]):
+            pct = int(count / max(1, max_v) * 100)
+            domain_rows += f"""
+            <div class='domain-bar-wrap'>
+                <div class='domain-bar-label'>{domain} — {count} عنصر</div>
+                <div class='domain-bar-track'>
+                    <div class='domain-bar-fill' style='width:{pct}%;'></div>
+                </div>
+            </div>"""
+
+    # quran cursor
+    cursor_html = ""
+    if cursor:
+        cur_start = cursor.get("start_index", "—")
+        cur_total = cursor.get("total_ayahs", "—")
+        cur_ts    = _fmt_date(cursor.get("last_updated", ""))
+        pct_done  = int(int(cur_start) / max(1, int(cur_total)) * 100) if isinstance(cur_start, int) and isinstance(cur_total, int) else 0
+        cursor_html = f"""
+        <div class='section-divider'></div>
+        <b style='color:#a6adc8; font-size:0.85rem;'>📿 مؤشر تدريب القرآن</b>
+        <div class='status-row'>
+            <span class='status-key'>الآية الحالية / الإجمالي</span>
+            <span class='status-val'>{cur_start} / {cur_total}</span>
+        </div>
+        <div class='status-row'>
+            <span class='status-key'>آخر تحديث</span>
+            <span class='status-val'>{cur_ts}</span>
+        </div>
+        <div class='domain-bar-track' style='margin-top:4px;'>
+            <div class='domain-bar-fill' style='width:{pct_done}%; background:#a6e3a1;'></div>
+        </div>
+        <div style='font-size:0.8rem; color:#6c7086; margin-top:2px;'>{pct_done}% مكتمل</div>
+        """
+
+    html = f"""
+    <div class='status-card'>
+        <b style='color:#cba6f7; font-size:1rem;'>🔬 تدقيق الأوزان والتدريب — /train/audit</b>
+        <div class='section-divider'></div>
+        <div class='status-row'>
+            <span class='status-key'>إجمالي خطوات التدريب (DB)</span>
+            <span class='status-val'>{steps}</span>
+        </div>
+        <div class='status-row'>
+            <span class='status-key'>جلسات التدريب (DB)</span>
+            <span class='status-val'>{sessions}</span>
+        </div>
+        <div class='status-row'>
+            <span class='status-key'>متوسط الخسارة الكلي</span>
+            <span class='status-val'>{avg_loss_str}</span>
+        </div>
+        <div class='status-row'>
+            <span class='status-key'>مفاهيم CKG (مباشر)</span>
+            <span class='status-val'>{concepts}</span>
+        </div>
+        <div class='status-row'>
+            <span class='status-key'>علاقات CKG (مباشر)</span>
+            <span class='status-val'>{relations}</span>
+        </div>
+        <div class='status-row'>
+            <span class='status-key'>ملف الأوزان</span>
+            <span class='{w_class}'>{w_label}</span>
+        </div>
+        <div class='status-row'>
+            <span class='status-key'>مسار الأوزان</span>
+            <span class='status-val' style='font-size:0.8rem; color:#6c7086;'>{w_path}</span>
+        </div>
+        {f"<div class='section-divider'></div><b style='color:#a6adc8; font-size:0.85rem;'>توزيع التدريب حسب المجال</b>{domain_rows}" if domain_rows else ""}
+        {cursor_html}
+    </div>
+    """
+    return html
+
+
+# ── Main dashboard load ───────────────────────────────────────────────────────
 
 def load_dashboard():
     ckg   = _get("/train/ckg")
     mat   = _get("/train/matrix")
     stat  = _get("/status")
     tstat = _get("/train/status")
+    audit = _get("/train/audit")
 
+    # ── KPI bar ──
     total_concepts = ckg.get("total_concepts") or (len(ckg.get("concepts", {})) or "—")
     train_steps    = mat.get("train_steps", "—")
     last_loss_raw  = mat.get("last_loss")
@@ -105,7 +307,7 @@ def load_dashboard():
         ckg.get("_meta", {}).get("saved_at")
         or stat.get("started_at")
         or stat.get("timestamp")
-        or tstat.get("last_trained_at")
+        or tstat.get("db", {}).get("last_trained_at")
     )
 
     kpi_html = f"""
@@ -129,10 +331,12 @@ def load_dashboard():
     </div>
     """
 
-    loss_fig = _build_loss_fig(mat)
+    status_html = _render_train_status(tstat)
+    audit_html  = _render_train_audit(audit)
+    loss_fig    = _build_loss_fig(mat)
     cluster_fig = _build_cluster_fig(ckg)
 
-    return kpi_html, loss_fig, cluster_fig
+    return kpi_html, status_html, audit_html, loss_fig, cluster_fig
 
 
 def _build_loss_fig(mat: dict):
@@ -215,7 +419,7 @@ def _build_cluster_fig(ckg: dict):
     return fig
 
 
-# ── Concept search ───────────────────────────────────────────────────────────
+# ── Concept search ────────────────────────────────────────────────────────────
 
 def search_concept(concept: str):
     if not concept or not concept.strip():
@@ -270,9 +474,10 @@ def search_concept(concept: str):
     return html, raw_json
 
 
-# ── Build UI ─────────────────────────────────────────────────────────────────
+# ── Build UI ──────────────────────────────────────────────────────────────────
 
-with gr.Blocks(title="Neural Service Mesh — لوحة المراقبة") as demo:
+with gr.Blocks(title="Neural Service Mesh — لوحة المراقبة", css=DARK_CSS,
+               theme=gr.themes.Base(primary_hue="purple", secondary_hue="gray", neutral_hue="gray")) as demo:
 
     gr.HTML("""
     <div style="text-align:center; padding: 1rem 0; direction:rtl;">
@@ -289,9 +494,22 @@ with gr.Blocks(title="Neural Service Mesh — لوحة المراقبة") as dem
             label="",
         )
 
-    kpi_html = gr.HTML(label="")
+    # ── KPI row ──
+    kpi_html_out = gr.HTML(label="")
 
     gr.HTML('<div class="section-divider"></div>')
+
+    # ── Training Status + Audit (side by side on wide screens) ──
+    gr.HTML('<p style="color:#a6adc8; font-weight:600; direction:rtl; margin:4px 0;">📊 بيانات التدريب المباشرة</p>')
+    with gr.Row():
+        with gr.Column(scale=1):
+            train_status_html = gr.HTML(label="")
+        with gr.Column(scale=1):
+            train_audit_html  = gr.HTML(label="")
+
+    gr.HTML('<div class="section-divider"></div>')
+
+    # ── Charts ──
     gr.HTML('<p style="color:#a6adc8; font-weight:600; direction:rtl;">📉 منحنى الخسارة (Loss Curve)</p>')
     loss_plot = gr.Plot(label="")
 
@@ -300,8 +518,9 @@ with gr.Blocks(title="Neural Service Mesh — لوحة المراقبة") as dem
     cluster_plot = gr.Plot(label="")
 
     gr.HTML('<div class="section-divider"></div>')
-    gr.HTML('<p style="color:#a6adc8; font-weight:600; direction:rtl;">🔍 استعلام عن مفهوم</p>')
 
+    # ── Concept search ──
+    gr.HTML('<p style="color:#a6adc8; font-weight:600; direction:rtl;">🔍 استعلام عن مفهوم</p>')
     with gr.Row():
         concept_input = gr.Textbox(
             placeholder="مثال: الجاذبية، الإيمان، الكم، الفلك...",
@@ -316,51 +535,45 @@ with gr.Blocks(title="Neural Service Mesh — لوحة المراقبة") as dem
 
     gr.HTML("""
     <div style="text-align:center; color:#585b70; font-size:0.8rem; margin-top:2rem; direction:rtl;">
-        Neural Service Mesh v18 — لوحة المراقبة المعرفية
+        Neural Service Mesh v18 — لوحة المراقبة المعرفية — تحديث تلقائي كل 30 ثانية
     </div>
     """)
 
     # ── Auto-refresh timer (every 30 s) ──────────────────────────────────────
     timer = gr.Timer(value=30, active=True)
 
+    _OUTPUTS = [kpi_html_out, train_status_html, train_audit_html, loss_plot, cluster_plot, last_updated]
+
     def _refresh():
-        kpi, loss, cluster = load_dashboard()
+        kpi, status_h, audit_h, loss, cluster = load_dashboard()
         now = datetime.now().strftime("%H:%M:%S")
         ts  = f"<span style='color:#a6adc8; font-size:0.82rem; direction:rtl;'>✅ آخر تحديث: {now} — كل 30 ثانية</span>"
-        return kpi, loss, cluster, ts
+        return kpi, status_h, audit_h, loss, cluster, ts
 
     def _manual_refresh():
-        kpi, loss, cluster = load_dashboard()
+        kpi, status_h, audit_h, loss, cluster = load_dashboard()
         now = datetime.now().strftime("%H:%M:%S")
         ts  = f"<span style='color:#cba6f7; font-size:0.82rem; direction:rtl;'>🔄 تحديث يدوي: {now}</span>"
-        return kpi, loss, cluster, ts
+        return kpi, status_h, audit_h, loss, cluster, ts
 
-    _outputs = [kpi_html, loss_plot, cluster_plot, last_updated]
+    _paused = gr.State(value=False)
 
-    # pause / resume toggle
-    def _toggle_pause(btn_label):
-        if "إيقاف" in btn_label:
-            return gr.Timer(active=False), gr.Button(value="▶ استئناف التحديث التلقائي")
-        else:
-            return gr.Timer(active=True),  gr.Button(value="⏸ إيقاف التحديث التلقائي")
+    def _toggle_pause(paused: bool):
+        new_paused = not paused
+        new_label  = "▶ استئناف التحديث التلقائي" if new_paused else "⏸ إيقاف التحديث التلقائي"
+        return gr.Timer(active=not new_paused), gr.Button(value=new_label), new_paused
 
-    timer.tick(fn=_refresh, outputs=_outputs)
-    refresh_btn.click(fn=_manual_refresh, outputs=_outputs)
-    pause_btn.click(fn=_toggle_pause, inputs=[pause_btn], outputs=[timer, pause_btn])
+    timer.tick(fn=_refresh, outputs=_OUTPUTS)
+    refresh_btn.click(fn=_manual_refresh, outputs=_OUTPUTS)
+    pause_btn.click(fn=_toggle_pause, inputs=[_paused], outputs=[timer, pause_btn, _paused])
     search_btn.click(fn=search_concept, inputs=[concept_input], outputs=[search_result, raw_json_out])
     concept_input.submit(fn=search_concept, inputs=[concept_input], outputs=[search_result, raw_json_out])
 
-    demo.load(fn=_refresh, outputs=_outputs)
+    demo.load(fn=_refresh, outputs=_OUTPUTS)
 
 
 if __name__ == "__main__":
     demo.launch(
         server_name="0.0.0.0",
         server_port=int(os.environ.get("PORT", 8000)),
-        css=DARK_CSS,
-        theme=gr.themes.Base(
-            primary_hue="purple",
-            secondary_hue="gray",
-            neutral_hue="gray",
-        ),
     )
