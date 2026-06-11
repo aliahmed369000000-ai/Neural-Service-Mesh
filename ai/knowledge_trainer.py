@@ -236,7 +236,30 @@ class CKGManager:
         if self.path.exists():
             try:
                 with open(self.path, encoding="utf-8") as f:
-                    return json.load(f)
+                    raw = f.read()
+                # فحص Git LFS pointer
+                if raw.startswith("version https://git-lfs.github.com"):
+                    logger.warning(
+                        f"CKGManager: {self.path} is a Git LFS pointer — "
+                        "initialising empty CKG and writing valid JSON."
+                    )
+                    empty = {
+                        "_meta": {
+                            "schema_version": "1.0.0",
+                            "saved_at": _NOW(),
+                            "total_concepts": 0,
+                            "total_relations": 0,
+                            "description": "Cognitive Knowledge Graph — Neural Service Mesh",
+                        },
+                        "concepts": {},
+                        "relations": {},
+                    }
+                    tmp = self.path.with_suffix(".tmp")
+                    with open(tmp, "w", encoding="utf-8") as fw:
+                        json.dump(empty, fw, ensure_ascii=False, indent=2)
+                    tmp.replace(self.path)
+                    return empty
+                return json.loads(raw)
             except Exception:
                 pass
         return {
@@ -383,12 +406,18 @@ class KnowledgeTrainer:
         )
 
     def _get_layer(self):
-        """يحصل على أفضل طبقة أوزان متاحة (Dynamic > Neural)."""
+        """يحصل على أفضل طبقة أوزان متاحة (Deep > Dynamic > Neural)."""
         if self.mesh is None:
             return None
+        # أولاً: DeepRoutingNetwork — الأولوية القصوى
+        layer = getattr(self.mesh, "deep_network", None)
+        if layer is not None:
+            return layer
+        # ثانياً: DynamicWeightLayer
         layer = getattr(self.mesh, "dynamic_layer", None)
         if layer is not None:
             return layer
+        # ثالثاً: NeuralWeightLayer كـ fallback
         layer = getattr(self.mesh, "neural_layer", None)
         return layer
 
