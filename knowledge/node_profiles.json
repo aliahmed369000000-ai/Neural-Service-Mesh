@@ -2,8 +2,8 @@
   "_meta": {
     "schema_version": "1.0.0",
     "created_at": "2026-06-06T00:22:29.764270+00:00",
-    "last_updated": "2026-06-11T04:39:55.983471+00:00",
-    "total_nodes": 6242,
+    "last_updated": "2026-06-11T04:54:22.718274+00:00",
+    "total_nodes": 6245,
     "description": "Node capabilities and semantic metadata registry"
   },
   "nodes": {
@@ -285893,16 +285893,16 @@
         ],
         "capability_tokens": [
           "node",
-          "pass",
+          "created",
           "through",
           "passthrough",
-          "created",
+          "pass",
           "api",
           "dynamic"
         ],
         "updated_at": "2026-06-09T00:03:19.159935"
       },
-      "last_seen": "2026-06-11T04:39:54.705594+00:00",
+      "last_seen": "2026-06-11T04:54:19.869083+00:00",
       "first_seen": "2026-06-09T00:03:19.330471+00:00",
       "execution_stats": {
         "total_executions": 1,
@@ -285947,14 +285947,14 @@
           "data"
         ],
         "capability_tokens": [
-          "input",
-          "reads",
+          "quran",
           "ayahs",
-          "quran"
+          "input",
+          "reads"
         ],
         "updated_at": "2026-06-09T00:04:51.835016"
       },
-      "last_seen": "2026-06-11T04:39:55.463611+00:00",
+      "last_seen": "2026-06-11T04:54:20.459895+00:00",
       "first_seen": "2026-06-09T00:04:52.005711+00:00",
       "execution_stats": {
         "total_executions": 1,
@@ -286000,16 +286000,16 @@
           "data"
         ],
         "capability_tokens": [
-          "concepts",
-          "ai",
-          "quran",
-          "concept",
           "extracts",
-          "islamic"
+          "quran",
+          "islamic",
+          "ai",
+          "concept",
+          "concepts"
         ],
         "updated_at": "2026-06-09T00:04:52.342428"
       },
-      "last_seen": "2026-06-11T04:39:55.983438+00:00",
+      "last_seen": "2026-06-11T04:54:21.001523+00:00",
       "first_seen": "2026-06-09T00:04:52.492755+00:00",
       "execution_stats": {
         "total_executions": 1,
@@ -286019,6 +286019,230 @@
         "last_executed": "2026-06-09T00:04:53.780943+00:00"
       },
       "discovery_score": 66.01
+    },
+    "bdc6f00c-356a-41d4-8268-b5c04bce4a27": {
+      "node_id": "bdc6f00c-356a-41d4-8268-b5c04bce4a27",
+      "name": "SimInput",
+      "description": "Entry point: accepts raw text",
+      "input_schema": {
+        "fields": {
+          "text": "str",
+          "source": "str",
+          "metadata": "dict"
+        },
+        "required": [
+          "text"
+        ],
+        "description": ""
+      },
+      "output_schema": {
+        "fields": {
+          "text": "str",
+          "source": "str",
+          "char_count": "int",
+          "word_count": "int"
+        },
+        "required": [
+          "text",
+          "char_count",
+          "word_count"
+        ],
+        "description": ""
+      },
+      "tags": [
+        "input",
+        "entry"
+      ],
+      "capability": "Entry point: accepts raw text",
+      "version": "1.0.0",
+      "announced_at": "2026-06-11T04:49:38.570999",
+      "is_active": true,
+      "semantic_profile": {
+        "input_tokens": [
+          "text",
+          "source",
+          "metadata"
+        ],
+        "output_tokens": [
+          "text",
+          "source",
+          "char",
+          "count",
+          "word",
+          "count"
+        ],
+        "capability_tokens": [
+          "raw",
+          "text",
+          "input",
+          "point",
+          "entry",
+          "accepts"
+        ],
+        "updated_at": "2026-06-11T04:49:38.570999"
+      },
+      "last_seen": "2026-06-11T04:54:21.632401+00:00",
+      "first_seen": "2026-06-11T04:49:38.757421+00:00",
+      "execution_stats": {
+        "total_executions": 0,
+        "successes": 0,
+        "failures": 0,
+        "avg_latency_ms": 0.0,
+        "last_executed": null
+      },
+      "discovery_score": 0.0
+    },
+    "b42b2b02-4b85-4e0d-8d3c-c8b12139b7ba": {
+      "node_id": "b42b2b02-4b85-4e0d-8d3c-c8b12139b7ba",
+      "name": "SimProcessor",
+      "description": "Analyzes and enriches text",
+      "input_schema": {
+        "fields": {
+          "text": "str",
+          "word_count": "int",
+          "char_count": "int"
+        },
+        "required": [
+          "text"
+        ],
+        "description": ""
+      },
+      "output_schema": {
+        "fields": {
+          "text": "str",
+          "processed_text": "str",
+          "word_count": "int",
+          "char_count": "int",
+          "sentences": "list",
+          "keywords": "list",
+          "analysis": "dict"
+        },
+        "required": [
+          "text",
+          "processed_text",
+          "analysis"
+        ],
+        "description": ""
+      },
+      "tags": [
+        "processor",
+        "analysis"
+      ],
+      "capability": "Analyzes and enriches text",
+      "version": "1.0.0",
+      "announced_at": "2026-06-11T04:49:39.162036",
+      "is_active": true,
+      "semantic_profile": {
+        "input_tokens": [
+          "text",
+          "word",
+          "count",
+          "char",
+          "count"
+        ],
+        "output_tokens": [
+          "text",
+          "processed",
+          "text",
+          "word",
+          "count",
+          "char",
+          "count",
+          "sentences",
+          "keywords",
+          "analysis"
+        ],
+        "capability_tokens": [
+          "analyzes",
+          "text",
+          "processor",
+          "analysis",
+          "and",
+          "enriches"
+        ],
+        "updated_at": "2026-06-11T04:49:39.162036"
+      },
+      "last_seen": "2026-06-11T04:54:22.176691+00:00",
+      "first_seen": "2026-06-11T04:49:39.346312+00:00",
+      "execution_stats": {
+        "total_executions": 0,
+        "successes": 0,
+        "failures": 0,
+        "avg_latency_ms": 0.0,
+        "last_executed": null
+      },
+      "discovery_score": 0.0
+    },
+    "f5372809-9eb6-400f-ba33-f319aacbd35a": {
+      "node_id": "f5372809-9eb6-400f-ba33-f319aacbd35a",
+      "name": "SimOutput",
+      "description": "Terminal node: formats final result",
+      "input_schema": {
+        "fields": {
+          "text": "str",
+          "analysis": "dict",
+          "keywords": "list"
+        },
+        "required": [
+          "text"
+        ],
+        "description": ""
+      },
+      "output_schema": {
+        "fields": {
+          "result": "Any",
+          "format": "str",
+          "rendered_at": "str",
+          "success": "bool"
+        },
+        "required": [
+          "result",
+          "format",
+          "success"
+        ],
+        "description": ""
+      },
+      "tags": [
+        "output",
+        "terminal"
+      ],
+      "capability": "Terminal node: formats final result",
+      "version": "1.0.0",
+      "announced_at": "2026-06-11T04:49:39.780332",
+      "is_active": true,
+      "semantic_profile": {
+        "input_tokens": [
+          "text",
+          "analysis",
+          "keywords"
+        ],
+        "output_tokens": [
+          "result",
+          "format",
+          "rendered",
+          "at",
+          "success"
+        ],
+        "capability_tokens": [
+          "node",
+          "formats",
+          "result",
+          "final",
+          "output",
+          "terminal"
+        ],
+        "updated_at": "2026-06-11T04:49:39.780332"
+      },
+      "last_seen": "2026-06-11T04:54:22.718240+00:00",
+      "first_seen": "2026-06-11T04:49:39.981637+00:00",
+      "execution_stats": {
+        "total_executions": 0,
+        "successes": 0,
+        "failures": 0,
+        "avg_latency_ms": 0.0,
+        "last_executed": null
+      },
+      "discovery_score": 0.0
     }
   }
 }
