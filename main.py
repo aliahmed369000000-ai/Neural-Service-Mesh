@@ -2047,6 +2047,15 @@ if __name__ == "__main__":
         except Exception as _qct_err:
             logger.warning(f"[Startup] QuranContinuousTrainer start skipped: {_qct_err}")
 
+        # ── Enable auto-checkpoint every 10 minutes ───────────────────────────
+        try:
+            if mesh.brain_checkpoint is not None:
+                mesh.brain_checkpoint.auto_save_start(interval_minutes=10.0, mesh=mesh)
+                mesh.brain_checkpoint.save(mesh)
+                logger.info("[Startup] BrainCheckpoint auto-save ENABLED — interval=10 min, initial snapshot saved")
+        except Exception as _ckpt_err:
+            logger.warning(f"[Startup] BrainCheckpoint auto-save skipped: {_ckpt_err}")
+
         run_api(mesh, host=args.host, port=args.port, debug=args.debug)
 
     # ── Knowledge Sources Layer Modes ─────────────────────────────────────
