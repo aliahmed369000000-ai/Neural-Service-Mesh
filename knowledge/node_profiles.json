@@ -2,7 +2,7 @@
   "_meta": {
     "schema_version": "1.0.0",
     "created_at": "2026-06-06T00:22:29.764270+00:00",
-    "last_updated": "2026-06-11T19:19:45.595871+00:00",
+    "last_updated": "2026-06-11T19:29:09.896349+00:00",
     "total_nodes": 6245,
     "description": "Node capabilities and semantic metadata registry"
   },
@@ -285892,17 +285892,17 @@
           "data"
         ],
         "capability_tokens": [
-          "through",
-          "node",
           "api",
-          "dynamic",
           "passthrough",
-          "created",
-          "pass"
+          "pass",
+          "node",
+          "through",
+          "dynamic",
+          "created"
         ],
         "updated_at": "2026-06-09T00:03:19.159935"
       },
-      "last_seen": "2026-06-11T19:19:42.711716+00:00",
+      "last_seen": "2026-06-11T19:29:07.674326+00:00",
       "first_seen": "2026-06-09T00:03:19.330471+00:00",
       "execution_stats": {
         "total_executions": 1,
@@ -285947,14 +285947,14 @@
           "data"
         ],
         "capability_tokens": [
-          "reads",
+          "input",
           "quran",
-          "ayahs",
-          "input"
+          "reads",
+          "ayahs"
         ],
         "updated_at": "2026-06-09T00:04:51.835016"
       },
-      "last_seen": "2026-06-11T19:19:43.506294+00:00",
+      "last_seen": "2026-06-11T19:29:08.157681+00:00",
       "first_seen": "2026-06-09T00:04:52.005711+00:00",
       "execution_stats": {
         "total_executions": 1,
@@ -286000,16 +286000,16 @@
           "data"
         ],
         "capability_tokens": [
-          "ai",
-          "concept",
           "concepts",
+          "concept",
           "quran",
           "islamic",
+          "ai",
           "extracts"
         ],
         "updated_at": "2026-06-09T00:04:52.342428"
       },
-      "last_seen": "2026-06-11T19:19:44.250284+00:00",
+      "last_seen": "2026-06-11T19:29:08.587299+00:00",
       "first_seen": "2026-06-09T00:04:52.492755+00:00",
       "execution_stats": {
         "total_executions": 1,
@@ -286072,16 +286072,16 @@
           "count"
         ],
         "capability_tokens": [
-          "text",
+          "input",
+          "entry",
           "raw",
           "point",
-          "entry",
-          "input",
-          "accepts"
+          "accepts",
+          "text"
         ],
         "updated_at": "2026-06-11T04:49:38.570999"
       },
-      "last_seen": "2026-06-11T19:19:44.697841+00:00",
+      "last_seen": "2026-06-11T19:29:09.012610+00:00",
       "first_seen": "2026-06-11T04:49:38.757421+00:00",
       "execution_stats": {
         "total_executions": 0,
@@ -286153,16 +286153,16 @@
           "analysis"
         ],
         "capability_tokens": [
-          "text",
           "and",
           "enriches",
           "analyzes",
+          "text",
           "processor",
           "analysis"
         ],
         "updated_at": "2026-06-11T04:49:39.162036"
       },
-      "last_seen": "2026-06-11T19:19:45.157665+00:00",
+      "last_seen": "2026-06-11T19:29:09.464533+00:00",
       "first_seen": "2026-06-11T04:49:39.346312+00:00",
       "execution_stats": {
         "total_executions": 0,
@@ -286224,16 +286224,16 @@
           "success"
         ],
         "capability_tokens": [
+          "formats",
+          "terminal",
           "result",
           "node",
-          "output",
           "final",
-          "terminal",
-          "formats"
+          "output"
         ],
         "updated_at": "2026-06-11T04:49:39.780332"
       },
-      "last_seen": "2026-06-11T19:19:45.595841+00:00",
+      "last_seen": "2026-06-11T19:29:09.896312+00:00",
       "first_seen": "2026-06-11T04:49:39.981637+00:00",
       "execution_stats": {
         "total_executions": 0,
