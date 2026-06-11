@@ -2,7 +2,7 @@
   "_meta": {
     "schema_version": "1.0.0",
     "created_at": "2026-06-06T00:22:29.764270+00:00",
-    "last_updated": "2026-06-11T00:18:53.228192+00:00",
+    "last_updated": "2026-06-11T00:23:03.863851+00:00",
     "total_nodes": 6242,
     "description": "Node capabilities and semantic metadata registry"
   },
@@ -285892,17 +285892,17 @@
           "data"
         ],
         "capability_tokens": [
-          "pass",
-          "node",
-          "passthrough",
-          "api",
-          "dynamic",
           "through",
-          "created"
+          "created",
+          "node",
+          "dynamic",
+          "passthrough",
+          "pass",
+          "api"
         ],
         "updated_at": "2026-06-09T00:03:19.159935"
       },
-      "last_seen": "2026-06-11T00:18:52.145121+00:00",
+      "last_seen": "2026-06-11T00:23:02.812384+00:00",
       "first_seen": "2026-06-09T00:03:19.330471+00:00",
       "execution_stats": {
         "total_executions": 1,
@@ -285947,14 +285947,14 @@
           "data"
         ],
         "capability_tokens": [
-          "reads",
           "ayahs",
+          "input",
           "quran",
-          "input"
+          "reads"
         ],
         "updated_at": "2026-06-09T00:04:51.835016"
       },
-      "last_seen": "2026-06-11T00:18:52.707965+00:00",
+      "last_seen": "2026-06-11T00:23:03.347667+00:00",
       "first_seen": "2026-06-09T00:04:52.005711+00:00",
       "execution_stats": {
         "total_executions": 1,
@@ -286001,15 +286001,15 @@
         ],
         "capability_tokens": [
           "concept",
-          "islamic",
-          "quran",
-          "ai",
           "concepts",
-          "extracts"
+          "extracts",
+          "quran",
+          "islamic",
+          "ai"
         ],
         "updated_at": "2026-06-09T00:04:52.342428"
       },
-      "last_seen": "2026-06-11T00:18:53.228129+00:00",
+      "last_seen": "2026-06-11T00:23:03.863822+00:00",
       "first_seen": "2026-06-09T00:04:52.492755+00:00",
       "execution_stats": {
         "total_executions": 1,
