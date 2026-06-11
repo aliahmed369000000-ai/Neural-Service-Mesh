@@ -2,7 +2,7 @@
   "_meta": {
     "schema_version": "1.0.0",
     "created_at": "2026-06-06T00:22:29.764270+00:00",
-    "last_updated": "2026-06-10T03:04:27.193005+00:00",
+    "last_updated": "2026-06-11T00:12:44.759768+00:00",
     "total_nodes": 6242,
     "description": "Node capabilities and semantic metadata registry"
   },
@@ -285892,17 +285892,17 @@
           "data"
         ],
         "capability_tokens": [
+          "through",
           "created",
           "dynamic",
-          "through",
           "node",
-          "pass",
+          "api",
           "passthrough",
-          "api"
+          "pass"
         ],
         "updated_at": "2026-06-09T00:03:19.159935"
       },
-      "last_seen": "2026-06-10T03:04:26.223109+00:00",
+      "last_seen": "2026-06-11T00:12:43.703360+00:00",
       "first_seen": "2026-06-09T00:03:19.330471+00:00",
       "execution_stats": {
         "total_executions": 1,
@@ -285947,14 +285947,14 @@
           "data"
         ],
         "capability_tokens": [
-          "reads",
-          "ayahs",
           "quran",
+          "ayahs",
+          "reads",
           "input"
         ],
         "updated_at": "2026-06-09T00:04:51.835016"
       },
-      "last_seen": "2026-06-10T03:04:26.737403+00:00",
+      "last_seen": "2026-06-11T00:12:44.246041+00:00",
       "first_seen": "2026-06-09T00:04:52.005711+00:00",
       "execution_stats": {
         "total_executions": 1,
@@ -286000,16 +286000,16 @@
           "data"
         ],
         "capability_tokens": [
-          "concepts",
           "ai",
+          "concept",
           "quran",
-          "extracts",
+          "concepts",
           "islamic",
-          "concept"
+          "extracts"
         ],
         "updated_at": "2026-06-09T00:04:52.342428"
       },
-      "last_seen": "2026-06-10T03:04:27.192954+00:00",
+      "last_seen": "2026-06-11T00:12:44.759739+00:00",
       "first_seen": "2026-06-09T00:04:52.492755+00:00",
       "execution_stats": {
         "total_executions": 1,

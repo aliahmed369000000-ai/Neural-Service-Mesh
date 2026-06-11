@@ -21,3 +21,11 @@ numpy
 plotly
 requests
 scikit-learn
+flask
+gradio
+gunicorn
+numpy
+plotly
+requests
+scikit-learn
+streamlit
