@@ -455,6 +455,156 @@ header {
   z-index:500; opacity:0; transition:all .3s; pointer-events:none;
 }
 .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+
+/* ═══════════════════════════ Q&A TAB ═══════════════════════════════════════ */
+.qa-layout {
+  display:grid;
+  grid-template-columns:1fr 340px;
+  gap:10px;
+  padding:10px 14px 14px;
+  height:calc(100vh - 148px);
+}
+@media(max-width:900px){ .qa-layout{ grid-template-columns:1fr; height:auto; } }
+
+.qa-left  { display:flex; flex-direction:column; gap:10px; overflow-y:auto; }
+.qa-right { display:flex; flex-direction:column; gap:10px; overflow-y:auto; }
+
+.qa-box {
+  background:var(--ink2); border:1px solid var(--rim);
+  border-radius:var(--r); padding:16px;
+}
+.qa-box-title {
+  font-size:10px; color:var(--fog); text-transform:uppercase;
+  letter-spacing:1.2px; margin-bottom:12px;
+}
+.qa-input {
+  width:100%; background:var(--ink3); border:1px solid var(--rim2);
+  border-radius:var(--r); color:var(--text); font-family:inherit;
+  font-size:13px; padding:10px 14px; resize:vertical;
+  transition:border-color .2s; line-height:1.7;
+  direction:rtl; text-align:right;
+}
+.qa-input:focus { outline:none; border-color:var(--sapphire); }
+.qa-actions {
+  display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;
+}
+.qa-btn {
+  padding:7px 16px; border-radius:var(--r); border:1px solid var(--rim2);
+  font-family:inherit; font-size:12px; cursor:pointer;
+  transition:all .2s; display:flex; align-items:center; gap:6px;
+}
+.qa-btn.primary {
+  background:var(--sapphire); border-color:var(--sapphire);
+  color:#fff; font-weight:600;
+}
+.qa-btn.primary:hover { background:var(--sapphire2); }
+.qa-btn.primary:disabled { opacity:.5; cursor:not-allowed; }
+.qa-btn.secondary {
+  background:var(--ink4); color:var(--fog);
+}
+.qa-btn.secondary:hover { border-color:var(--sapphire); color:var(--soft); }
+.qa-btn.secondary:disabled { opacity:.5; cursor:not-allowed; }
+.qa-hint {
+  font-size:11px; color:var(--mist); margin-top:8px;
+}
+
+.qa-answer-panel {
+  background:var(--ink2); border:1px solid var(--rim);
+  border-radius:var(--r); padding:16px;
+}
+.qa-answer-head {
+  display:flex; align-items:center; justify-content:space-between;
+  margin-bottom:14px;
+}
+.qa-answer-label {
+  font-size:10px; color:var(--fog); text-transform:uppercase;
+  letter-spacing:1.2px;
+}
+.qa-conf-bar-wrap { display:flex; align-items:center; gap:8px; }
+.qa-conf-lbl { font-size:11px; color:var(--dim); white-space:nowrap; }
+.qa-conf-bar {
+  width:110px; height:6px; background:var(--rim2); border-radius:3px; overflow:hidden;
+}
+.qa-conf-fill {
+  height:100%; background:var(--emerald);
+  transition:width .6s ease; border-radius:3px;
+}
+.qa-answer-text {
+  color:var(--bright); font-size:13px; line-height:1.9;
+  direction:rtl; text-align:right;
+  background:var(--ink3); border-radius:var(--r);
+  padding:12px 14px; margin-bottom:14px;
+}
+.qa-section-title {
+  font-size:10px; color:var(--fog); text-transform:uppercase;
+  letter-spacing:1.2px; margin-bottom:8px; margin-top:12px;
+}
+.qa-sources { display:flex; flex-wrap:wrap; gap:6px; }
+.qa-src-tag {
+  font-size:11px; padding:3px 9px; border-radius:4px;
+  border:1px solid var(--rim2); background:var(--ink4);
+  color:var(--dim); display:flex; align-items:center; gap:5px;
+}
+.qa-src-tag.quran  { border-color:var(--gold)66; color:var(--gold); }
+.qa-src-tag.wiki   { border-color:var(--sapphire)66; color:var(--sapphire); }
+
+.qa-quran-hits { display:flex; flex-direction:column; gap:6px; }
+.qa-quran-card {
+  background:var(--ink3); border:1px solid var(--gold)33;
+  border-radius:var(--r); padding:10px 14px;
+  direction:rtl; text-align:right;
+}
+.qa-quran-ref { font-size:10px; color:var(--gold); margin-bottom:5px; }
+.qa-quran-text { font-size:12px; color:var(--soft); line-height:1.8; }
+
+.qa-loop-panel {
+  background:var(--ink2); border:1px solid var(--rim);
+  border-radius:var(--r); padding:16px;
+}
+.qa-loop-out {
+  background:var(--ink3); border-radius:var(--r);
+  padding:12px; font-size:11px; color:var(--dim);
+  overflow-x:auto; white-space:pre-wrap; direction:ltr; text-align:left;
+  max-height:260px;
+}
+
+.qa-panel {
+  background:var(--ink2); border:1px solid var(--rim);
+  border-radius:var(--r); display:flex; flex-direction:column;
+  max-height:340px;
+}
+.qa-panel-head {
+  font-size:10px; color:var(--fog); text-transform:uppercase;
+  letter-spacing:1.2px; padding:12px 14px;
+  border-bottom:1px solid var(--rim);
+}
+.qa-panel-body {
+  flex:1; overflow-y:auto; padding:8px;
+}
+.qa-concept-row {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:6px 8px; border-radius:4px;
+  border-bottom:1px solid var(--rim)44;
+  cursor:default;
+}
+.qa-concept-row:hover { background:var(--ink3); }
+.qa-concept-name { font-size:12px; color:var(--text); direction:rtl; }
+.qa-concept-cl   { font-size:10px; color:var(--mist); direction:rtl; }
+.qa-concept-rw   { font-size:11px; color:var(--emerald); font-weight:600; }
+.qa-ckpt-row {
+  display:flex; justify-content:space-between;
+  padding:5px 8px; border-bottom:1px solid var(--rim)44; font-size:11px;
+}
+.qa-ckpt-k { color:var(--dim); }
+.qa-ckpt-v { font-weight:600; }
+.qa-ckpt-ok  { color:var(--emerald); }
+.qa-ckpt-warn { color:var(--amber); }
+.qa-ckpt-err  { color:var(--crimson); }
+.qa-rec {
+  font-size:11px; padding:8px; border-radius:4px;
+  background:var(--ink3); color:var(--soft);
+  direction:rtl; text-align:right; margin:6px 0;
+}
 </style>
 </head>
 <body>
@@ -473,6 +623,9 @@ header {
     </div>
     <div class="nav-tab" id="nt-ckg" onclick="gotoTab('ckg')">
       <span class="ico">🧠</span> المعرفة المعرفية
+    </div>
+    <div class="nav-tab" id="nt-qa" onclick="gotoTab('qa')">
+      <span class="ico">💬</span> الأسئلة والأجوبة
     </div>
   </nav>
 
@@ -612,6 +765,102 @@ header {
 
 </div><!-- end pg-ckg -->
 
+<!-- ═══════════════════════════════ TAB: Q&A ═════════════════════════════ -->
+<div class="page" id="pg-qa">
+
+  <!-- KPI strip -->
+  <div class="kpi-row">
+    <div class="kpi gold"><div class="kpi-lbl">مفاهيم CKG</div><div class="kpi-val" id="qa-k-nc">—</div><div class="kpi-sub">في الجراف</div></div>
+    <div class="kpi blue"><div class="kpi-lbl">علاقات CKG</div><div class="kpi-val" id="qa-k-nr">—</div><div class="kpi-sub">حافة موزونة</div></div>
+    <div class="kpi green"><div class="kpi-lbl">الثقة الأخيرة</div><div class="kpi-val" id="qa-k-conf">—</div><div class="kpi-sub">نتيجة آخر سؤال</div></div>
+    <div class="kpi viol"><div class="kpi-lbl">مفاهيم مُجابة</div><div class="kpi-val" id="qa-k-found">—</div><div class="kpi-sub">في آخر سؤال</div></div>
+    <div class="kpi teal"><div class="kpi-lbl">مصادر ويكيبيديا</div><div class="kpi-val" id="qa-k-wiki">—</div><div class="kpi-sub">مقالات مستوردة</div></div>
+  </div>
+
+  <div class="qa-layout">
+
+    <!-- LEFT: Question panel -->
+    <div class="qa-left">
+
+      <!-- Ask box -->
+      <div class="qa-box">
+        <div class="qa-box-title">🔍 اسأل النظام</div>
+        <textarea class="qa-input" id="qa-input" rows="3"
+          placeholder="اكتب سؤالك بالعربية…&#10;مثال: ما هي الجاذبية؟&#10;مثال: ما معنى الصبر؟"></textarea>
+        <div class="qa-actions">
+          <button class="qa-btn primary" onclick="askQuestion()" id="qa-ask-btn">
+            <span id="qa-ask-ico">💬</span> اسأل
+          </button>
+          <button class="qa-btn secondary" onclick="ingestWikipedia()" id="qa-wiki-btn">
+            <span id="qa-wiki-ico">🌐</span> استيراد ويكيبيديا
+          </button>
+          <button class="qa-btn secondary" onclick="runLearningLoop()" id="qa-loop-btn">
+            <span id="qa-loop-ico">🔄</span> دورة تعلم
+          </button>
+        </div>
+        <div class="qa-hint" id="qa-hint">← اضغط "اسأل" للحصول على إجابة من قاعدة المعرفة</div>
+      </div>
+
+      <!-- Answer panel -->
+      <div class="qa-answer-panel" id="qa-answer-panel" style="display:none">
+        <div class="qa-answer-head">
+          <span class="qa-answer-label">📖 الإجابة</span>
+          <div class="qa-conf-bar-wrap">
+            <span class="qa-conf-lbl" id="qa-conf-lbl">ثقة: —%</span>
+            <div class="qa-conf-bar"><div class="qa-conf-fill" id="qa-conf-fill"></div></div>
+          </div>
+        </div>
+        <div class="qa-answer-text" id="qa-answer-text"></div>
+
+        <!-- Sources -->
+        <div class="qa-section-title">📚 المصادر</div>
+        <div class="qa-sources" id="qa-sources"></div>
+
+        <!-- Quran hits -->
+        <div class="qa-section-title" id="qa-quran-title" style="display:none">📖 من القرآن الكريم</div>
+        <div class="qa-quran-hits" id="qa-quran-hits"></div>
+      </div>
+
+      <!-- Learning loop results -->
+      <div class="qa-loop-panel" id="qa-loop-panel" style="display:none">
+        <div class="qa-box-title">🔄 نتيجة دورة التعلم</div>
+        <pre class="qa-loop-out" id="qa-loop-out"></pre>
+      </div>
+
+    </div><!-- end qa-left -->
+
+    <!-- RIGHT: Related concepts + Checkpoint status -->
+    <div class="qa-right">
+
+      <!-- Related concepts -->
+      <div class="qa-panel">
+        <div class="qa-panel-head">🔗 المفاهيم المرتبطة</div>
+        <div class="qa-panel-body" id="qa-related">
+          <div class="empty"><div class="empty-ico">💡</div>اسأل سؤالاً أولاً</div>
+        </div>
+      </div>
+
+      <!-- Found concepts -->
+      <div class="qa-panel">
+        <div class="qa-panel-head">🎯 المفاهيم المُكتشَفة</div>
+        <div class="qa-panel-body" id="qa-found-concepts">
+          <div class="empty"><div class="empty-ico">🔍</div>لا يوجد بعد</div>
+        </div>
+      </div>
+
+      <!-- Checkpoint status -->
+      <div class="qa-panel">
+        <div class="qa-panel-head">💾 حالة الحفظ الدائم</div>
+        <div class="qa-panel-body" id="qa-checkpoint">
+          <div class="loading"><div class="spin-r"></div></div>
+        </div>
+      </div>
+
+    </div><!-- end qa-right -->
+  </div>
+
+</div><!-- end pg-qa -->
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -657,6 +906,7 @@ function gotoTab(t) {
   document.getElementById('pg-' + t).classList.add('on');
   document.getElementById('nt-' + t).classList.add('on');
   if (t === 'ckg') loadCKG();
+  if (t === 'qa')  refreshQAStatus();
 }
 
 function doRefresh() {
@@ -1232,6 +1482,217 @@ async function refreshSystem() {
 refreshSystem();
 setInterval(()=>{ if(tab==='sys')  refreshSystem(); },5000);
 setInterval(()=>{ if(tab==='ckg') loadCKG();       },15000);
+setInterval(()=>{ if(tab==='qa')  refreshQAStatus();},20000);
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Q&A TAB
+══════════════════════════════════════════════════════════════════════════ */
+
+let qaWikiCount = 0;
+
+async function apiPost(path, body) {
+  try {
+    const r = await fetch(path, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body),
+    });
+    return await r.json();
+  } catch { return null; }
+}
+
+async function askQuestion() {
+  const q = document.getElementById('qa-input').value.trim();
+  if (!q) { toast('اكتب سؤالاً أولاً'); return; }
+
+  const btn = document.getElementById('qa-ask-btn');
+  btn.disabled = true;
+  document.getElementById('qa-ask-ico').textContent = '⏳';
+  document.getElementById('qa-hint').textContent = 'جارٍ البحث في قاعدة المعرفة…';
+
+  const data = await apiPost('/train/ask', { question: q });
+  btn.disabled = false;
+  document.getElementById('qa-ask-ico').textContent = '💬';
+
+  if (!data || data.error) {
+    document.getElementById('qa-hint').textContent = '❌ ' + (data?.error || 'خطأ في الاتصال');
+    return;
+  }
+
+  renderQAAnswer(data);
+  document.getElementById('qa-hint').textContent = `✓ أُجيب في ${data.elapsed_s}ث`;
+}
+
+function renderQAAnswer(data) {
+  const conf = data.confidence || 0;
+  const pct  = Math.round(conf * 100);
+
+  // KPIs
+  const stats = data.ckg_stats || {};
+  document.getElementById('qa-k-nc').textContent   = (stats.concepts || 0).toLocaleString('ar');
+  document.getElementById('qa-k-nr').textContent   = (stats.relations || 0).toLocaleString('ar');
+  document.getElementById('qa-k-conf').textContent  = pct + '%';
+  document.getElementById('qa-k-found').textContent = (data.found_concepts || []).length;
+
+  // Confidence bar
+  const fill = document.getElementById('qa-conf-fill');
+  fill.style.width = pct + '%';
+  fill.style.background = pct >= 60 ? 'var(--emerald)' : pct >= 30 ? 'var(--amber)' : 'var(--crimson)';
+  document.getElementById('qa-conf-lbl').textContent = `ثقة: ${pct}%`;
+
+  // Answer text
+  document.getElementById('qa-answer-text').textContent = data.answer || '—';
+
+  // Sources
+  const sources = data.sources || [];
+  document.getElementById('qa-sources').innerHTML = sources.length
+    ? sources.map(s => {
+        const cls = s.type === 'quran' ? 'quran' : s.type === 'wikipedia' ? 'wiki' : '';
+        const ico = s.type === 'quran' ? '📖' : s.type === 'wikipedia' ? '🌐' : '📌';
+        return `<span class="qa-src-tag ${cls}">${ico} ${s.ref}</span>`;
+      }).join('')
+    : '<span class="qa-src-tag">لا مصادر</span>';
+
+  // Quran hits
+  const qhits = data.quran_sources || [];
+  if (qhits.length) {
+    document.getElementById('qa-quran-title').style.display = 'block';
+    document.getElementById('qa-quran-hits').innerHTML = qhits.map(q =>
+      `<div class="qa-quran-card">
+        <div class="qa-quran-ref">📖 سورة ${q.surah || ''} — آية ${q.ayah || ''} (${q.ref || ''})</div>
+        <div class="qa-quran-text">${q.text || ''}</div>
+      </div>`
+    ).join('');
+  } else {
+    document.getElementById('qa-quran-title').style.display = 'none';
+    document.getElementById('qa-quran-hits').innerHTML = '';
+  }
+
+  // Show panel
+  document.getElementById('qa-answer-panel').style.display = 'block';
+
+  // Related concepts (right panel)
+  const related = data.related_concepts || [];
+  document.getElementById('qa-related').innerHTML = related.length
+    ? related.map(r =>
+        `<div class="qa-concept-row">
+          <div>
+            <div class="qa-concept-name">${r.name}</div>
+            <div class="qa-concept-cl">${r.cluster || ''}</div>
+          </div>
+          <div class="qa-concept-rw">${(r.relation_weight * 100).toFixed(0)}%</div>
+        </div>`
+      ).join('')
+    : '<div class="empty"><div class="empty-ico">🔗</div>لا علاقات</div>';
+
+  // Found concepts (right panel)
+  const found = data.found_concepts || [];
+  document.getElementById('qa-found-concepts').innerHTML = found.length
+    ? found.map(c =>
+        `<div class="qa-concept-row">
+          <div>
+            <div class="qa-concept-name">${c.name}</div>
+            <div class="qa-concept-cl">${c.cluster || ''}</div>
+          </div>
+          <div class="qa-concept-rw">${(c.strength * 100).toFixed(0)}%</div>
+        </div>`
+      ).join('')
+    : '<div class="empty"><div class="empty-ico">🔍</div>لا مفاهيم</div>';
+}
+
+async function ingestWikipedia() {
+  const btn = document.getElementById('qa-wiki-btn');
+  btn.disabled = true;
+  document.getElementById('qa-wiki-ico').textContent = '⏳';
+  document.getElementById('qa-hint').textContent = 'جارٍ استيراد مقالات ويكيبيديا…';
+  toast('جارٍ جلب مقالات ويكيبيديا العربية…', 3000);
+
+  const data = await apiPost('/knowledge/wikipedia/ingest', { max_items: 40, background: false });
+
+  btn.disabled = false;
+  document.getElementById('qa-wiki-ico').textContent = '🌐';
+
+  if (!data || data.error) {
+    document.getElementById('qa-hint').textContent = '❌ ' + (data?.error || 'خطأ في الاستيراد');
+    toast('فشل الاستيراد');
+    return;
+  }
+
+  qaWikiCount += data.articles_fetched || 0;
+  document.getElementById('qa-k-wiki').textContent = qaWikiCount;
+  document.getElementById('qa-k-nc').textContent   = (data.ckg_after?.concepts || 0).toLocaleString('ar');
+  document.getElementById('qa-k-nr').textContent   = (data.ckg_after?.relations || 0).toLocaleString('ar');
+
+  document.getElementById('qa-hint').textContent =
+    `✓ تم استيراد ${data.articles_fetched} مقالة — أضيف ${data.concepts_added} مفهوم و ${data.relations_added} علاقة`;
+  toast(`✓ ويكيبيديا: ${data.articles_fetched} مقالة`, 3500);
+  refreshQAStatus();
+}
+
+async function runLearningLoop() {
+  const btn = document.getElementById('qa-loop-btn');
+  btn.disabled = true;
+  document.getElementById('qa-loop-ico').textContent = '⏳';
+  document.getElementById('qa-hint').textContent = 'تشغيل دورة التعلم…';
+  toast('دورة التعلم المستقل تعمل…', 3000);
+
+  const data = await apiPost('/api/learning/loop', { wiki_topics: 10, training_steps: 100 });
+
+  btn.disabled = false;
+  document.getElementById('qa-loop-ico').textContent = '🔄';
+
+  if (!data || data.error) {
+    document.getElementById('qa-hint').textContent = '❌ خطأ في دورة التعلم';
+    return;
+  }
+
+  document.getElementById('qa-loop-panel').style.display = 'block';
+  document.getElementById('qa-loop-out').textContent = JSON.stringify(data, null, 2);
+
+  const after = data.ckg_after || {};
+  if (after.concepts) document.getElementById('qa-k-nc').textContent = after.concepts.toLocaleString('ar');
+  if (after.relations) document.getElementById('qa-k-nr').textContent = after.relations.toLocaleString('ar');
+
+  document.getElementById('qa-hint').textContent =
+    `✓ دورة التعلم اكتملت — ${after.concepts || 0} مفهوم في CKG`;
+  toast('✓ دورة التعلم اكتملت', 3000);
+  refreshQAStatus();
+}
+
+async function refreshQAStatus() {
+  const data = await api('/api/checkpoint/status');
+  if (!data) return;
+
+  const nw   = data.neural_weights || {};
+  const ckg  = data.ckg || {};
+  const ckpt = data.checkpoint || {};
+  const qt   = data.quran_training || {};
+
+  document.getElementById('qa-k-nc').textContent = (ckg.concepts || 0).toLocaleString('ar');
+  document.getElementById('qa-k-nr').textContent = (ckg.relations || 0).toLocaleString('ar');
+
+  const ok  = v => `<span class="qa-ckpt-v qa-ckpt-ok">✓ ${v}</span>`;
+  const warn = v => `<span class="qa-ckpt-v qa-ckpt-warn">⚠ ${v}</span>`;
+
+  document.getElementById('qa-checkpoint').innerHTML = `
+    <div class="qa-rec">${data.recommendation || ''}</div>
+    <div class="qa-ckpt-row"><span class="qa-ckpt-k">أوزان عصبية</span>${nw.neural_weights_exists ? ok('محفوظة') : warn('غير محفوظة')}</div>
+    <div class="qa-ckpt-row"><span class="qa-ckpt-k">حجم CKG</span>${ok((ckg.file_size_kb || 0) + ' KB')}</div>
+    <div class="qa-ckpt-row"><span class="qa-ckpt-k">مفاهيم CKG</span>${ok(ckg.concepts || 0)}</div>
+    <div class="qa-ckpt-row"><span class="qa-ckpt-k">خطوات التدريب</span>${ok(nw.train_steps || 0)}</div>
+    <div class="qa-ckpt-row"><span class="qa-ckpt-k">آخر آية قرآن</span>${ok(qt.last_ayah_processed || '—')}</div>
+    <div class="qa-ckpt-row"><span class="qa-ckpt-k">حفظ تلقائي</span>${(ckpt.auto_save) ? ok('مُفعَّل') : warn('غير مُفعَّل')}</div>
+    <div class="qa-ckpt-row"><span class="qa-ckpt-k">نسخ محفوظة</span>${ok((ckpt.checkpoints || []).length + ' / ' + (ckpt.max_checkpoints || 5))}</div>
+  `;
+}
+
+// Handle Enter key in Q&A input (Shift+Enter for newline)
+document.getElementById('qa-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    askQuestion();
+  }
+});
 </script>
 </body>
 </html>

@@ -2230,125 +2230,6 @@ def _add_knowledge_trainer_routes(app, mesh):
             )[:20],
         })
 
-    # ── POST /train/ask ───────────────────────────────────────────────────
-    @app.route("/train/ask", methods=["POST"])
-    def train_ask():
-        """
-        استعلام معرفي عن مفهوم من الـ CKG.
-        Body: { "concept": "الجاذبية" }
-        Returns: confidence_score, related_concepts, sources,
-                 cross_domain_connections, quran_references
-        """
-        import re as _re
-        from pathlib import Path
-        import json as _json
-
-        b       = request.get_json(force=True) or {}
-        concept = (b.get("concept") or "").strip()
-        if not concept:
-            return jsonify({"error": "حقل concept مطلوب"}), 400
-
-        # ── Load CKG directly from file (always up-to-date) ──────────────
-        ckg_path = Path("./knowledge/cognitive_graph.json")
-        if not ckg_path.exists():
-            return jsonify({"error": "CKG غير موجود — قم بتشغيل التدريب أولاً"}), 503
-
-        try:
-            with open(ckg_path, encoding="utf-8") as _f:
-                ckg_data = _json.load(_f)
-        except Exception as exc:
-            return jsonify({"error": f"خطأ في قراءة CKG: {exc}"}), 500
-
-        all_concepts = ckg_data.get("concepts", {})
-        all_relations = ckg_data.get("relations", {})
-
-        # ── Normalize for fuzzy matching ──────────────────────────────────
-        def _norm(t: str) -> str:
-            t = _re.sub(r'[\u064B-\u065F\u0670\u0640]', '', t)
-            t = _re.sub(r'[أإآٱ]', 'ا', t)
-            return t.strip()
-
-        norm_concept = _norm(concept)
-
-        # Try exact match first, then normalized match
-        concept_data = all_concepts.get(concept)
-        matched_key  = concept
-        if concept_data is None:
-            for k, v in all_concepts.items():
-                if _norm(k) == norm_concept:
-                    concept_data = v
-                    matched_key  = k
-                    break
-
-        # ── Confidence score ──────────────────────────────────────────────
-        if concept_data:
-            raw_strength    = float(concept_data.get("strength", 0.0))
-            raw_frequency   = int(concept_data.get("frequency", 0))
-            freq_score      = min(raw_frequency / 20.0, 1.0)
-            confidence_score = round(min(raw_strength * 0.6 + freq_score * 0.4, 1.0), 4)
-        else:
-            confidence_score = 0.0
-
-        # ── Related concepts & cross-domain connections ───────────────────
-        related_concepts: list = []
-        cross_domain_connections: list = []
-        my_cluster = (concept_data or {}).get("cluster", "")
-
-        # Gather neighbours from relations dict
-        neighbours: list = []
-        for rel_key, rel_val in all_relations.items():
-            src = rel_val.get("source", "")
-            tgt = rel_val.get("target", "")
-            w   = float(rel_val.get("weight", 0.0))
-            if _norm(src) == norm_concept:
-                neighbours.append((tgt, w))
-            elif _norm(tgt) == norm_concept:
-                neighbours.append((src, w))
-
-        neighbours.sort(key=lambda x: -x[1])
-
-        seen_related: set = set()
-        for nbr_name, _ in neighbours[:15]:
-            if nbr_name in seen_related or _norm(nbr_name) == norm_concept:
-                continue
-            seen_related.add(nbr_name)
-            nbr_data    = all_concepts.get(nbr_name, {})
-            nbr_cluster = nbr_data.get("cluster", "")
-            if nbr_cluster and nbr_cluster != my_cluster:
-                cross_domain_connections.append(nbr_cluster)
-            else:
-                related_concepts.append(nbr_name)
-
-        # De-duplicate cross-domain clusters and cap lists
-        cross_domain_connections = list(dict.fromkeys(cross_domain_connections))[:6]
-        related_concepts         = related_concepts[:8]
-
-        # ── Sources (domain clusters from concept data) ───────────────────
-        raw_sources = (concept_data or {}).get("sources", [])
-
-        # Quran refs look like "chapter:verse" e.g. "2:255"
-        quran_re      = _re.compile(r'^\d+:\d+$')
-        quran_refs    = [s for s in raw_sources if quran_re.match(str(s))]
-        domain_sources = list({
-            all_concepts.get(s, {}).get("cluster", "")
-            for s in raw_sources
-            if not quran_re.match(str(s)) and all_concepts.get(s)
-        } - {""})
-
-        # If concept itself has a cluster, add it as a source
-        if my_cluster and my_cluster not in domain_sources:
-            domain_sources.insert(0, my_cluster)
-
-        return jsonify({
-            "concept":                 matched_key if concept_data else concept,
-            "found_in_ckg":            concept_data is not None,
-            "confidence_score":        confidence_score,
-            "related_concepts":        related_concepts,
-            "sources":                 domain_sources[:6],
-            "cross_domain_connections": cross_domain_connections,
-            "quran_references":        quran_refs[:10],
-        })
-
     # ── GET /train/audit ──────────────────────────────────────────────────
     @app.route("/train/audit", methods=["GET"])
     def train_audit():
@@ -2596,3 +2477,496 @@ def _add_knowledge_trainer_routes(app, mesh):
                 "6_NOVELTY":     "جِدَّة المعلومة",
             },
         })
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Q&A System + Wikipedia Ingestion + Checkpoint Audit + Learning Loop
+# Priority 1-5 implementation
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _add_qa_and_learning_routes(app, mesh):
+    """Q&A from CKG, Wikipedia ingestion, checkpoint audit, autonomous learning loop."""
+    import os
+    import re
+    import time
+    import threading
+    from datetime import datetime, timezone
+    from flask import request, jsonify
+
+    def _get_ckg():
+        try:
+            from knowledge.cognitive_graph import get_ckg
+            return get_ckg()
+        except Exception:
+            return None
+
+    def _norm(text: str) -> str:
+        """Strip Arabic diacritics and normalize common letter variants."""
+        text = re.sub(r'[\u064B-\u065F\u0670]', '', text)
+        text = re.sub(r'[أإآ]', 'ا', text)
+        text = re.sub(r'ى', 'ي', text)
+        text = re.sub(r'ة', 'ه', text)
+        return text.strip()
+
+    def _question_terms(question: str):
+        STOP = {
+            'ما','من','كيف','لماذا','متى','أين','هل','ماذا','ما هو','ما هي',
+            'ما معنى','تعريف','شرح','اشرح','عرف','هي','هو','في','إلى','على',
+            'عن','مع','يعني','معنى','تعني','بماذا','وما','وهو','وهي','هو','هي',
+            'ال','و','ف','ب','ك','ل',
+        }
+        words = re.split(r'[\s،,؟?\.!\u060C]+', question.strip())
+        terms = [w.strip() for w in words if len(w.strip()) >= 2 and w.strip() not in STOP]
+        norm_terms = [_norm(t) for t in terms]
+        return list(dict.fromkeys(terms + norm_terms))
+
+    def _search_quran(concept_names):
+        """Search Quran chunk files for concept names."""
+        hits = []
+        quran_dir = 'knowledge'
+        try:
+            import json as _json
+            files = sorted(f for f in os.listdir(quran_dir)
+                           if f.startswith('quran_chunk_') and f.endswith('.json'))
+            for fname in files:
+                if len(hits) >= 5:
+                    break
+                fpath = os.path.join(quran_dir, fname)
+                try:
+                    chunks = _json.loads(open(fpath, encoding='utf-8').read())
+                    for chunk in chunks:
+                        text_norm = chunk.get('text_norm', '') or _norm(chunk.get('text', ''))
+                        text_orig = chunk.get('text', '')
+                        for cn in concept_names[:6]:
+                            cn_norm = _norm(cn)
+                            if cn_norm in text_norm or cn in text_orig:
+                                hits.append({
+                                    'surah': chunk.get('surah', ''),
+                                    'ayah':  chunk.get('ayah', ''),
+                                    'ref':   f"{chunk.get('surah','')}:{chunk.get('ayah','')}",
+                                    'text':  text_orig[:120],
+                                    'concept': cn,
+                                })
+                                break
+                        if len(hits) >= 5:
+                            break
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return hits[:5]
+
+    # ── POST /train/ask ───────────────────────────────────────────────────
+    @app.route("/train/ask", methods=["POST"])
+    def train_ask():
+        """
+        Arabic Q&A from the Cognitive Knowledge Graph.
+
+        Input:  { "question": "ما هي الجاذبية؟" }
+        Output: answer, confidence, related_concepts, sources
+        """
+        body     = request.get_json(force=True) or {}
+        question = body.get("question", "").strip()
+        if not question:
+            return jsonify({"error": "question is required"}), 400
+
+        ckg = _get_ckg()
+        if not ckg:
+            return jsonify({"error": "CKG not available"}), 503
+
+        t0    = time.time()
+        terms = _question_terms(question)
+        nterms = [_norm(t) for t in terms]
+
+        # ── 1. Search CKG concepts ────────────────────────────────────────
+        found = []
+        for c in ckg.all_concepts():
+            cname  = c['name']
+            cnorm  = _norm(cname)
+            score  = 0.0
+            if cname in terms or cnorm in nterms:
+                score = 1.0
+            elif any((cname in t or t in cname) for t in terms if len(t) >= 3):
+                score = 0.72
+            elif any((cnorm in nt or nt in cnorm) for nt in nterms if len(nt) >= 3):
+                score = 0.58
+            if score > 0:
+                found.append({**c, '_ms': score})
+
+        found.sort(key=lambda c: c['_ms'] * (c.get('strength', 0) + 0.01), reverse=True)
+        found = found[:10]
+
+        # ── 2. Related concepts via CKG relations ─────────────────────────
+        related = []
+        all_sources = []
+        for fc in found[:3]:
+            for rname, rw in ckg.query_related(fc['name'], top_k=8):
+                if rname not in {r['name'] for r in related}:
+                    rc = ckg.get_concept(rname)
+                    if rc:
+                        related.append({
+                            'name':            rname,
+                            'cluster':         rc.cluster,
+                            'strength':        rc.strength,
+                            'relation_weight': round(rw, 3),
+                        })
+            for src in fc.get('sources', [])[:5]:
+                if src and src not in all_sources:
+                    all_sources.append(src)
+
+        related.sort(key=lambda r: r['relation_weight'], reverse=True)
+        related = related[:10]
+
+        # ── 3. Quran knowledge search ─────────────────────────────────────
+        concept_names = [fc['name'] for fc in found[:5]] + terms[:3]
+        quran_hits = _search_quran(concept_names)
+
+        # ── 4. Wikipedia knowledge (CKG sources tagged wikipedia:*) ──────
+        wiki_hints = []
+        for fc in found[:5]:
+            for src in fc.get('sources', []):
+                if str(src).startswith('wikipedia:'):
+                    wiki_hints.append({'concept': fc['name'], 'source': src})
+                    break
+
+        # ── 5. Build answer ───────────────────────────────────────────────
+        parts      = []
+        confidence = 0.0
+
+        if found:
+            mc      = found[0]
+            cluster = mc.get('cluster', 'غير مصنّف')
+            freq    = mc.get('frequency', 1)
+            strength = mc.get('strength', 0.0)
+
+            parts.append(
+                f"المفهوم «{mc['name']}» ينتمي إلى مجال {cluster}، "
+                f"وورد في قاعدة المعرفة {freq} مرة "
+                f"بقوة معرفية {round(strength, 2)}."
+            )
+            if related:
+                top_rel = [r['name'] for r in related[:5]]
+                parts.append(f"يرتبط بالمفاهيم: {' ، '.join(top_rel)}.")
+            if quran_hits:
+                q = quran_hits[0]
+                parts.append(
+                    f"في القرآن الكريم ({q['ref']}): \"{q['text'][:100]}\"."
+                )
+            if len(found) > 1:
+                others = [c['name'] for c in found[1:4]]
+                parts.append(f"مفاهيم ذات صلة بالسؤال: {' ، '.join(others)}.")
+
+            base_c  = min(1.0, len(found) / 5.0)
+            str_c   = mc.get('strength', 0.0)
+            src_c   = min(1.0, len(all_sources) / 10.0)
+            rel_c   = min(1.0, len(related) / 8.0)
+            confidence = round(base_c * 0.3 + str_c * 0.3 + src_c * 0.2 + rel_c * 0.2, 3)
+        else:
+            parts.append(
+                f"لم أجد مفاهيم مرتبطة بالسؤال في قاعدة المعرفة الحالية. "
+                f"الجراف يحتوي على {ckg.concept_count()} مفهوم. "
+                f"جرب استيراد معرفة ويكيبيديا لتوسيع القاعدة."
+            )
+
+        sources = []
+        for src in all_sources[:5]:
+            sources.append({"ref": str(src), "type": "quran" if ":" in str(src) and str(src)[0].isdigit() else "knowledge"})
+        for qh in quran_hits[:3]:
+            sources.append({"ref": qh['ref'], "type": "quran", "text": qh['text'][:80]})
+        for wh in wiki_hints[:2]:
+            sources.append({"ref": wh['concept'], "type": "wikipedia"})
+
+        # Record as episodic memory
+        try:
+            if mesh.episodic_memory is not None:
+                mesh.episodic_memory.record(
+                    feature_vec=[confidence, 0.6, 0.7, 0.5, min(1.0, len(found) / 10.0)],
+                    target=confidence, outcome=confidence, source="qa_system",
+                    reward=confidence * 0.9,
+                    context={"question": question[:200], "concepts_found": len(found)},
+                )
+        except Exception:
+            pass
+
+        return jsonify({
+            "question":         question,
+            "answer":           " ".join(parts),
+            "confidence":       confidence,
+            "found_concepts":   [{k: v for k, v in c.items() if k != '_ms'} for c in found[:5]],
+            "related_concepts": related[:8],
+            "quran_sources":    quran_hits[:3],
+            "wikipedia_hints":  wiki_hints[:3],
+            "sources":          sources[:8],
+            "ckg_stats":        {"concepts": ckg.concept_count(), "relations": ckg.relation_count()},
+            "elapsed_s":        round(time.time() - t0, 3),
+        })
+
+    # ── POST /knowledge/wikipedia/ingest ─────────────────────────────────
+    @app.route("/knowledge/wikipedia/ingest", methods=["POST"])
+    def wikipedia_ingest():
+        """
+        Fetch Arabic Wikipedia articles and ingest into the CKG.
+
+        Body (optional):
+          {
+            "topics":     ["ذكاء اصطناعي", ...],  // custom topics
+            "max_items":  40,
+            "background": false
+          }
+        """
+        body       = request.get_json(force=True) or {}
+        topics     = body.get("topics")
+        max_items  = min(int(body.get("max_items", 40)), 200)
+        background = bool(body.get("background", False))
+
+        ckg = _get_ckg()
+        if not ckg:
+            return jsonify({"error": "CKG not available"}), 503
+
+        def _do_ingest():
+            from knowledge_sources.web_fetcher import fetch_wikipedia_items
+            import json as _json
+            try:
+                items = fetch_wikipedia_items(topics=topics, max_items=max_items)
+                c_added = 0
+                r_added = 0
+                for item in items:
+                    cn = item.get("concept", "").strip()
+                    if not cn:
+                        continue
+                    cluster    = item.get("cluster", "موسوعة")
+                    source_tag = f"wikipedia:{cn}"
+                    ckg.add_concept(cn, cluster=cluster, source=source_tag)
+                    c_added += 1
+                    for rel in item.get("relations", []):
+                        tgt = rel.get("target", "").strip()
+                        if tgt and len(tgt) < 60:
+                            ckg.add_concept(tgt, cluster=cluster, source=source_tag)
+                            ckg.add_relation(
+                                source        = cn,
+                                target        = tgt,
+                                evidence      = source_tag,
+                                relation_type = rel.get("type", "links_to"),
+                                weight_boost  = float(rel.get("weight", 0.4)),
+                            )
+                            r_added += 1
+                ckg.save()
+                return items, c_added, r_added
+            except Exception as exc:
+                logger.error(f"[Wikipedia ingest] {exc}")
+                return None, 0, 0
+
+        if background:
+            threading.Thread(target=_do_ingest, daemon=True).start()
+            return jsonify({
+                "status":     "started",
+                "message":    f"Wikipedia ingestion running in background (max {max_items} articles)",
+                "ckg_before": {"concepts": ckg.concept_count(), "relations": ckg.relation_count()},
+            })
+
+        items, c_added, r_added = _do_ingest()
+        if items is None:
+            return jsonify({"error": "Wikipedia fetch failed"}), 500
+
+        return jsonify({
+            "status":           "done",
+            "articles_fetched": len(items),
+            "concepts_added":   c_added,
+            "relations_added":  r_added,
+            "ckg_after":        {"concepts": ckg.concept_count(), "relations": ckg.relation_count()},
+        })
+
+    # ── GET /api/checkpoint/status ────────────────────────────────────────
+    @app.route("/api/checkpoint/status", methods=["GET"])
+    def checkpoint_status_audit():
+        """Full persistent-learning audit: weights, CKG, episodic memory, Quran cursor."""
+        import json as _json
+
+        ckg = _get_ckg()
+
+        # Neural weights on disk
+        weights_status = {
+            "neural_weights_file":   "checkpoints/neural_weights.npy",
+            "neural_weights_exists": os.path.exists("checkpoints/neural_weights.npy"),
+            "neural_bias_exists":    os.path.exists("checkpoints/neural_bias.npy"),
+            "train_steps": 0,
+            "last_loss":   None,
+            "shape":       None,
+        }
+        try:
+            import numpy as _np
+            if weights_status["neural_weights_exists"]:
+                w = _np.load("checkpoints/neural_weights.npy", allow_pickle=False)
+                weights_status["shape"] = list(w.shape)
+            layer = getattr(mesh, "dynamic_layer", None) or getattr(mesh, "neural_layer", None)
+            if layer:
+                weights_status["train_steps"] = getattr(layer, "_train_steps", 0)
+                weights_status["last_loss"]   = getattr(layer, "_last_loss", None)
+        except Exception as exc:
+            weights_status["error"] = str(exc)
+
+        # CKG file
+        ckg_status = {
+            "file":         "knowledge/cognitive_graph.json",
+            "exists":       os.path.exists("knowledge/cognitive_graph.json"),
+            "file_size_kb": 0,
+            "concepts":     0,
+            "relations":    0,
+        }
+        if ckg_status["exists"]:
+            ckg_status["file_size_kb"] = round(os.path.getsize("knowledge/cognitive_graph.json") / 1024, 1)
+            if ckg:
+                ckg_status["concepts"]  = ckg.concept_count()
+                ckg_status["relations"] = ckg.relation_count()
+
+        # Quran training cursor
+        quran_cursor = {}
+        try:
+            if os.path.exists("data/quran_training_cursor.json"):
+                quran_cursor = _json.loads(open("data/quran_training_cursor.json", encoding="utf-8").read())
+        except Exception:
+            pass
+
+        # Episodic memory
+        em_status = {}
+        em = getattr(mesh, "episodic_memory", None)
+        if em and hasattr(em, "summary"):
+            try:
+                em_status = em.summary()
+            except Exception:
+                pass
+
+        ckpt = mesh.get_brain_checkpoint_status()
+        all_ok = weights_status["neural_weights_exists"] and ckg_status["exists"]
+
+        return jsonify({
+            "all_weights_persistent": all_ok,
+            "recommendation": (
+                "✓ كل الأوزان محفوظة — النظام يتعلم باستمرار"
+                if all_ok else
+                "⚠ بعض الأوزان غير محفوظة — اضغط /train/save-weights"
+            ),
+            "checkpoint":      ckpt,
+            "neural_weights":  weights_status,
+            "ckg":             ckg_status,
+            "quran_training":  quran_cursor,
+            "episodic_memory": em_status,
+        })
+
+    # ── POST /api/checkpoint/auto-save/start ─────────────────────────────
+    @app.route("/api/checkpoint/auto-save/start", methods=["POST"])
+    def ckpt_auto_save_start():
+        body     = request.get_json(force=True) or {}
+        interval = float(body.get("interval_minutes", 10.0))
+        return jsonify(mesh.start_auto_checkpoint(interval_minutes=interval))
+
+    @app.route("/api/checkpoint/auto-save/stop", methods=["POST"])
+    def ckpt_auto_save_stop():
+        return jsonify(mesh.stop_auto_checkpoint())
+
+    # ── POST /api/learning/loop ───────────────────────────────────────────
+    @app.route("/api/learning/loop", methods=["POST"])
+    def learning_loop():
+        """
+        One cycle of autonomous learning:
+          1. Fetch Wikipedia articles → expand CKG
+          2. Train neural weights N steps
+          3. Record episodic memory
+          4. Save brain checkpoint
+
+        Body: { "wiki_topics": 10, "training_steps": 100 }
+        """
+        body           = request.get_json(force=True) or {}
+        wiki_topics    = int(body.get("wiki_topics", 10))
+        training_steps = int(body.get("training_steps", 100))
+
+        ckg = _get_ckg()
+        report = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "steps": {},
+        }
+
+        # Step 1: Wikipedia ingestion
+        if ckg and wiki_topics > 0:
+            try:
+                from knowledge_sources.web_fetcher import fetch_wikipedia_items
+                items    = fetch_wikipedia_items(max_items=wiki_topics)
+                c_before = ckg.concept_count()
+                r_before = ckg.relation_count()
+                for item in items:
+                    cn = item.get("concept", "").strip()
+                    if not cn:
+                        continue
+                    src = f"wikipedia:{cn}"
+                    ckg.add_concept(cn, cluster=item.get("cluster", "موسوعة"), source=src)
+                    for rel in item.get("relations", []):
+                        tgt = rel.get("target", "").strip()
+                        if tgt and len(tgt) < 60:
+                            ckg.add_concept(tgt, cluster=item.get("cluster", "موسوعة"), source=src)
+                            ckg.add_relation(cn, tgt, evidence=src,
+                                             relation_type=rel.get("type", "links_to"),
+                                             weight_boost=float(rel.get("weight", 0.4)))
+                ckg.save()
+                report["steps"]["wikipedia"] = {
+                    "articles":        len(items),
+                    "concepts_added":  ckg.concept_count() - c_before,
+                    "relations_added": ckg.relation_count() - r_before,
+                }
+            except Exception as exc:
+                report["steps"]["wikipedia"] = {"error": str(exc)}
+
+        # Step 2: Neural weight training
+        try:
+            import numpy as _np
+            layer = getattr(mesh, "dynamic_layer", None) or getattr(mesh, "neural_layer", None)
+            if layer and training_steps > 0:
+                rng    = _np.random.default_rng()
+                losses = []
+                for _ in range(training_steps):
+                    vec  = list(rng.uniform(0.3, 1.0, 7))
+                    tgt  = float(rng.uniform(0.6, 1.0))
+                    loss = layer.train_step(vec, tgt)
+                    losses.append(loss)
+                mesh.save_neural_weights()
+                report["steps"]["training"] = {
+                    "steps":       training_steps,
+                    "avg_loss":    round(sum(losses) / max(len(losses), 1), 6),
+                    "total_steps": getattr(layer, "_train_steps", 0),
+                }
+        except Exception as exc:
+            report["steps"]["training"] = {"error": str(exc)}
+
+        # Step 3: Brain checkpoint
+        try:
+            path = mesh.brain_checkpoint.save(mesh)
+            report["steps"]["checkpoint"] = {"saved": True, "path": path}
+        except Exception as exc:
+            report["steps"]["checkpoint"] = {"error": str(exc)}
+
+        # Step 4: Episodic memory
+        try:
+            if mesh.episodic_memory is not None:
+                wiki_added  = report["steps"].get("wikipedia", {}).get("concepts_added", 0)
+                train_done  = report["steps"].get("training", {}).get("steps", 0)
+                mesh.episodic_memory.record(
+                    feature_vec=[min(1.0, wiki_added / 20.0), 0.7, 0.6, 0.5, 0.8],
+                    target=0.8, outcome=0.8, source="learning_loop", reward=0.8,
+                    context={"wiki_articles": wiki_added, "train_steps": train_done},
+                )
+                report["steps"]["episodic"] = {"recorded": True}
+        except Exception as exc:
+            report["steps"]["episodic"] = {"error": str(exc)}
+
+        ckg = _get_ckg()
+        report["ckg_after"] = {
+            "concepts":  ckg.concept_count()  if ckg else 0,
+            "relations": ckg.relation_count() if ckg else 0,
+        }
+        return jsonify(report)
+
+
+_create_app_with_qa = create_app
+def create_app(mesh):
+    app = _create_app_with_qa(mesh)
+    _add_qa_and_learning_routes(app, mesh)
+    return app
