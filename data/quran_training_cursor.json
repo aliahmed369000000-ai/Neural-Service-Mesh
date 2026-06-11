@@ -1,7 +1,7 @@
 {
-  "last_ayah_processed": 1800,
+  "last_ayah_processed": 2200,
   "total_concepts": 941,
-  "total_relations": 392016,
-  "last_run": "2026-06-11T00:59:22.799238+00:00",
-  "total_training_steps": 621
+  "total_relations": 392008,
+  "last_run": "2026-06-11T01:06:03.861904+00:00",
+  "total_training_steps": 633
 }
