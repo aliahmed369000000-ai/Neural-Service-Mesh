@@ -1,7 +1,7 @@
 {
   "version": "18.0.0",
-  "saved_at": "2026-06-11T19:28:19.663114+00:00",
-  "tag": "20260611T192819Z",
+  "saved_at": "2026-06-12T03:11:58.103844+00:00",
+  "tag": "20260612T031158Z",
   "state": {
     "neural_weights": {
       "weights": [
@@ -1003,10 +1003,10 @@
         "124\u00d77"
       ],
       "weight_stats": {
-        "min": -0.610034,
-        "max": 0.552947,
-        "mean": 0.006979,
-        "std": 0.325949
+        "min": -0.607178,
+        "max": 0.588531,
+        "mean": 0.023011,
+        "std": 0.368599
       },
       "plateau_check": {
         "window_steps": 20,
@@ -1043,10 +1043,10 @@
           ],
           "activation": "relu",
           "weight_stats": {
-            "min": -0.226257,
-            "max": 0.225794,
-            "mean": -0.00089,
-            "std": 0.132537
+            "min": -0.226052,
+            "max": 0.225994,
+            "mean": -0.007446,
+            "std": 0.1286
           }
         },
         {
@@ -1057,10 +1057,10 @@
           ],
           "activation": "softmax",
           "weight_stats": {
-            "min": -0.644229,
-            "max": 0.639372,
-            "mean": 0.107286,
-            "std": 0.402265
+            "min": -0.615099,
+            "max": 0.666716,
+            "mean": 0.05029,
+            "std": 0.409697
           }
         }
       ],
@@ -1081,9 +1081,28 @@
       "semantic_rules": 0,
       "total_recalls": 0,
       "working_memory_size": 0,
-      "episodic_store_size": 0,
+      "episodic_store_size": 2,
       "semantic_rules_list": [],
-      "strongest_memories": [],
+      "strongest_memories": [
+        {
+          "id": "ep_1781206206577_9213",
+          "source": "learning_loop",
+          "target": 0.8,
+          "strength": 0.72,
+          "recalls": 0,
+          "tags": [
+            "high_reward"
+          ]
+        },
+        {
+          "id": "ep_1781206162291_2080",
+          "source": "qa_system",
+          "target": 0.46,
+          "strength": 0.5656,
+          "recalls": 0,
+          "tags": []
+        }
+      ],
       "is_running": true
     },
     "world_model": {
@@ -1131,7 +1150,7 @@
     },
     "meta": {
       "version": "18.0.0",
-      "saved_at": "2026-06-11T19:28:19.663104+00:00",
+      "saved_at": "2026-06-12T03:11:58.103832+00:00",
       "saves_done": 1
     }
   }
