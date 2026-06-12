@@ -1,0 +1,121 @@
+{
+  "_meta": {
+    "schema_version": "1.0.0",
+    "created_at": "2026-06-06T00:22:29.764732+00:00",
+    "last_updated": "2026-06-09T00:04:53.176352+00:00",
+    "total_routes": 4,
+    "description": "Successful and failed route history with scores and execution records"
+  },
+  "routes": {
+    "a451c3ea->aaaded4f->96fe39c4": {
+      "path_key": "a451c3ea->aaaded4f->96fe39c4",
+      "path": [
+        "a451c3ea-c0bc-4614-8baf-6d2a6accac6b",
+        "aaaded4f-7fd4-4802-b78a-1779ad4521a4",
+        "96fe39c4-bfd4-4b3e-848d-cdfceef60dc4"
+      ],
+      "runs": 1,
+      "successes": 1,
+      "failures": 0,
+      "success_rate": 1.0,
+      "avg_latency_ms": 0.51,
+      "health": "excellent",
+      "memory_score": 85.0,
+      "is_promoted": false,
+      "first_seen": "2026-06-06T00:22:29.808521",
+      "last_seen": "2026-06-06T00:22:29.808532",
+      "execution_history": [
+        {
+          "run_id": "5bac464d",
+          "ts": "2026-06-06T00:22:29.813357+00:00",
+          "success": true,
+          "latency_ms": 0.51
+        }
+      ]
+    },
+    "aaaded4f->96fe39c4": {
+      "path_key": "aaaded4f->96fe39c4",
+      "path": [
+        "aaaded4f-7fd4-4802-b78a-1779ad4521a4",
+        "96fe39c4-bfd4-4b3e-848d-cdfceef60dc4"
+      ],
+      "runs": 1,
+      "successes": 1,
+      "failures": 0,
+      "success_rate": 1.0,
+      "avg_latency_ms": 0.26,
+      "health": "excellent",
+      "memory_score": 85.0,
+      "is_promoted": false,
+      "first_seen": "2026-06-06T00:22:29.821033",
+      "last_seen": "2026-06-06T00:22:29.821042",
+      "execution_history": [
+        {
+          "run_id": "d6ee0a49",
+          "ts": "2026-06-06T00:22:29.825528+00:00",
+          "success": true,
+          "latency_ms": 0.26
+        }
+      ]
+    },
+    "bc557c84": {
+      "path_key": "bc557c84",
+      "path": [
+        "bc557c84-c272-44d9-be9f-7179dc1e633f"
+      ],
+      "runs": 1,
+      "successes": 1,
+      "failures": 0,
+      "success_rate": 1.0,
+      "avg_latency_ms": 0.23,
+      "health": "excellent",
+      "memory_score": 85.0,
+      "is_promoted": false,
+      "first_seen": "2026-06-09T00:03:43.544640",
+      "last_seen": "2026-06-09T00:03:43.544653",
+      "execution_history": [
+        {
+          "run_id": "63b1e576",
+          "ts": "2026-06-09T00:03:43.551861+00:00",
+          "success": true,
+          "latency_ms": 0.23
+        }
+      ]
+    },
+    "16a930d2->eb63e8a6": {
+      "path_key": "16a930d2->eb63e8a6",
+      "path": [
+        "16a930d2-1c15-43d9-bb27-621ddf2622c6",
+        "eb63e8a6-87ba-4443-a51f-f95afd8d2298"
+      ],
+      "runs": 1,
+      "successes": 1,
+      "failures": 0,
+      "success_rate": 1.0,
+      "avg_latency_ms": 0.24,
+      "health": "excellent",
+      "memory_score": 85.0,
+      "is_promoted": false,
+      "first_seen": "2026-06-09T00:04:53.164954",
+      "last_seen": "2026-06-09T00:04:53.164964",
+      "execution_history": [
+        {
+          "run_id": "66da2d38",
+          "ts": "2026-06-09T00:04:53.176339+00:00",
+          "success": true,
+          "latency_ms": 0.24
+        }
+      ]
+    }
+  },
+  "failed_routes": {},
+  "statistics": {
+    "total_runs": 4,
+    "total_successes": 4,
+    "total_failures": 0,
+    "promoted_routes": 0,
+    "critical_routes": 0,
+    "avg_memory_score": 85.0,
+    "total_routes": 4
+  }
+}
