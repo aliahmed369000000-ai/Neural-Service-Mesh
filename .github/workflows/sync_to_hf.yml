@@ -20,6 +20,7 @@ jobs:
         run: |
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
-          git config --global lfs.allowincompletepush true
+          git rm --cached data/mesh.db data/mesh.db-wal data/mesh.db-shm 2>/dev/null || true
+          git rm --cached -r attached_assets/ 2>/dev/null || true
           git remote add hf https://AliAhmedMo:${HF_TOKEN}@huggingface.co/spaces/AliAhmedMo/neural-service-mesh-dashboard
           git push hf main --force
