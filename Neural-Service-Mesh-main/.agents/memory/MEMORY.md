@@ -1,0 +1,5 @@
+- [Quran ingestion batch fix](quran-ingestion.md) — SourceManager per-item file writes caused timeout for 6236 ayahs; fixed with register_nodes_batch (single write).
+- [CKG JSON structure](ckg-json-structure.md) — cognitive_graph.json uses "concepts"/"relations" dict keys, NOT "nodes"/"edges".
+- [Validator deduplication](validator-dedup.md) — SourceValidator uses hash-based dedup; clear data/ks_seen_hashes.json to allow re-sync of same items.
+- [Route chaining pattern](route-chaining.md) — create_app uses nested chaining (_create_app_X = create_app; def create_app...); duplicate route names cause AssertionError at startup, always grep for existing routes before adding new ones.
+- [Q&A tab architecture](qa-tab.md) — /train/ask accepts {question}, /api/learning/loop accepts {wiki_topics, training_steps}; dashboard Q&A tab in pg-qa uses gotoTab('qa') + refreshQAStatus() auto-poll.

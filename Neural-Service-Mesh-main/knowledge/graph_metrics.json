@@ -1,0 +1,211 @@
+{
+  "_meta": {
+    "schema_version": "1.0.0",
+    "created_at": "2026-06-06T00:22:29.765093+00:00",
+    "last_updated": "2026-06-09T00:05:27.331466+00:00",
+    "description": "Graph statistics, node rankings, route rankings and optimisation metrics"
+  },
+  "graph_statistics": {
+    "total_nodes": 3,
+    "total_edges": 2,
+    "avg_degree": 0.6667,
+    "density": 0.333333,
+    "connected_components": 0,
+    "last_computed": "2026-06-06T00:22:29.827680+00:00"
+  },
+  "node_rankings": {
+    "by_success_rate": [
+      {
+        "node_id": "bc557c84-c272-44d9-be9f-7179dc1e633f",
+        "name": "توحيد",
+        "success_rate": 1.0,
+        "executions": 1
+      },
+      {
+        "node_id": "16a930d2-1c15-43d9-bb27-621ddf2622c6",
+        "name": "QuranReader",
+        "success_rate": 1.0,
+        "executions": 1
+      },
+      {
+        "node_id": "eb63e8a6-87ba-4443-a51f-f95afd8d2298",
+        "name": "ConceptExtractor",
+        "success_rate": 1.0,
+        "executions": 1
+      }
+    ],
+    "by_usage_count": [
+      {
+        "node_id": "bc557c84-c272-44d9-be9f-7179dc1e633f",
+        "name": "توحيد",
+        "executions": 1
+      },
+      {
+        "node_id": "16a930d2-1c15-43d9-bb27-621ddf2622c6",
+        "name": "QuranReader",
+        "executions": 1
+      },
+      {
+        "node_id": "eb63e8a6-87ba-4443-a51f-f95afd8d2298",
+        "name": "ConceptExtractor",
+        "executions": 1
+      }
+    ],
+    "by_avg_latency": [
+      {
+        "node_id": "eb63e8a6-87ba-4443-a51f-f95afd8d2298",
+        "name": "ConceptExtractor",
+        "avg_latency_ms": 0.04
+      },
+      {
+        "node_id": "16a930d2-1c15-43d9-bb27-621ddf2622c6",
+        "name": "QuranReader",
+        "avg_latency_ms": 0.15
+      },
+      {
+        "node_id": "bc557c84-c272-44d9-be9f-7179dc1e633f",
+        "name": "توحيد",
+        "avg_latency_ms": 0.2
+      }
+    ],
+    "bottleneck_nodes": [],
+    "idle_nodes": [],
+    "last_updated": "2026-06-09T00:05:27.329896+00:00"
+  },
+  "route_rankings": {
+    "top_routes": [
+      {
+        "path_key": "bc557c84",
+        "path": [
+          "bc557c84-c272-44d9-be9f-7179dc1e633f"
+        ],
+        "runs": 1,
+        "successes": 1,
+        "failures": 0,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.23,
+        "health": "excellent",
+        "memory_score": 85.0,
+        "is_promoted": false,
+        "first_seen": "2026-06-09T00:03:43.544640",
+        "last_seen": "2026-06-09T00:03:43.544653"
+      },
+      {
+        "path_key": "16a930d2->eb63e8a6",
+        "path": [
+          "16a930d2-1c15-43d9-bb27-621ddf2622c6",
+          "eb63e8a6-87ba-4443-a51f-f95afd8d2298"
+        ],
+        "runs": 1,
+        "successes": 1,
+        "failures": 0,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.24,
+        "health": "excellent",
+        "memory_score": 85.0,
+        "is_promoted": false,
+        "first_seen": "2026-06-09T00:04:53.164954",
+        "last_seen": "2026-06-09T00:04:53.164964"
+      }
+    ],
+    "failed_routes": [],
+    "most_used": [
+      {
+        "path_key": "bc557c84",
+        "path": [
+          "bc557c84-c272-44d9-be9f-7179dc1e633f"
+        ],
+        "runs": 1,
+        "successes": 1,
+        "failures": 0,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.23,
+        "health": "excellent",
+        "memory_score": 85.0,
+        "is_promoted": false,
+        "first_seen": "2026-06-09T00:03:43.544640",
+        "last_seen": "2026-06-09T00:03:43.544653"
+      },
+      {
+        "path_key": "16a930d2->eb63e8a6",
+        "path": [
+          "16a930d2-1c15-43d9-bb27-621ddf2622c6",
+          "eb63e8a6-87ba-4443-a51f-f95afd8d2298"
+        ],
+        "runs": 1,
+        "successes": 1,
+        "failures": 0,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.24,
+        "health": "excellent",
+        "memory_score": 85.0,
+        "is_promoted": false,
+        "first_seen": "2026-06-09T00:04:53.164954",
+        "last_seen": "2026-06-09T00:04:53.164964"
+      }
+    ],
+    "last_updated": "2026-06-09T00:05:27.330652+00:00"
+  },
+  "optimization_metrics": {
+    "total_optimization_runs": 1,
+    "last_optimization": "2026-06-06T00:22:29.833758+00:00",
+    "actions_history": [
+      {
+        "run": 1,
+        "ts": "2026-06-06T00:22:29.833771+00:00",
+        "total_actions": 1,
+        "applied_count": 0,
+        "action_counts": {
+          "suggest_edge": 1
+        }
+      }
+    ],
+    "improvements": {
+      "edges_pruned": 0,
+      "edges_promoted": 0,
+      "edges_suggested": 1,
+      "weights_updated": 0
+    },
+    "health_trend": [
+      {
+        "ts": "2026-06-06T00:22:29.834427+00:00",
+        "avg_score": 83.88,
+        "total_nodes": 3,
+        "total_edges": 2
+      }
+    ]
+  },
+  "connection_scores": {
+    "top_connections": [
+      {
+        "source_id": "16a930d2-1c15-43d9-bb27-621ddf2622c6",
+        "target_id": "eb63e8a6-87ba-4443-a51f-f95afd8d2298",
+        "total_runs": 1,
+        "successful_runs": 1,
+        "failed_runs": 0,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.04,
+        "ema_latency_ms": 0.04,
+        "error_rate": 0.0,
+        "connection_score": 83.0,
+        "last_updated": "2026-06-09T00:04:53.161975"
+      }
+    ],
+    "worst_connections": [
+      {
+        "source_id": "16a930d2-1c15-43d9-bb27-621ddf2622c6",
+        "target_id": "eb63e8a6-87ba-4443-a51f-f95afd8d2298",
+        "total_runs": 1,
+        "successful_runs": 1,
+        "failed_runs": 0,
+        "success_rate": 1.0,
+        "avg_latency_ms": 0.04,
+        "ema_latency_ms": 0.04,
+        "error_rate": 0.0,
+        "connection_score": 83.0,
+        "last_updated": "2026-06-09T00:04:53.161975"
+      }
+    ],
+    "last_updated": "2026-06-09T00:05:27.331457+00:00"
+  }
+}
