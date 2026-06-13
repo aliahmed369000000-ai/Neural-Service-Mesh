@@ -1,0 +1,4597 @@
+{
+  "concepts": {
+    "quran:79:25": {
+      "name": "quran:79:25",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:25"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580697+00:00",
+      "last_seen": "2026-06-11T21:03:14.580709+00:00",
+      "vector": [
+        0.6384000000000001,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:79:26": {
+      "name": "quran:79:26",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:26"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580720+00:00",
+      "last_seen": "2026-06-11T21:03:14.580723+00:00",
+      "vector": [
+        0.6362,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:79:27": {
+      "name": "quran:79:27",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:27"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580728+00:00",
+      "last_seen": "2026-06-11T21:03:14.580731+00:00",
+      "vector": [
+        0.6470999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:79:28": {
+      "name": "quran:79:28",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:28"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580735+00:00",
+      "last_seen": "2026-06-11T21:03:14.580738+00:00",
+      "vector": [
+        0.5562,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:79:29": {
+      "name": "quran:79:29",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:29"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580742+00:00",
+      "last_seen": "2026-06-11T21:03:14.580745+00:00",
+      "vector": [
+        0.6362,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:79:30": {
+      "name": "quran:79:30",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:30"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580749+00:00",
+      "last_seen": "2026-06-11T21:03:14.580751+00:00",
+      "vector": [
+        0.6365999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:79:31": {
+      "name": "quran:79:31",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:31"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580755+00:00",
+      "last_seen": "2026-06-11T21:03:14.580758+00:00",
+      "vector": [
+        0.6362,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:79:32": {
+      "name": "quran:79:32",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:32"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580762+00:00",
+      "last_seen": "2026-06-11T21:03:14.580764+00:00",
+      "vector": [
+        0.5574,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:79:33": {
+      "name": "quran:79:33",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:33"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580769+00:00",
+      "last_seen": "2026-06-11T21:03:14.580771+00:00",
+      "vector": [
+        0.6362,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:79:34": {
+      "name": "quran:79:34",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:34"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580775+00:00",
+      "last_seen": "2026-06-11T21:03:14.580778+00:00",
+      "vector": [
+        0.6374,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:79:35": {
+      "name": "quran:79:35",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:35"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580782+00:00",
+      "last_seen": "2026-06-11T21:03:14.580784+00:00",
+      "vector": [
+        0.647,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:79:36": {
+      "name": "quran:79:36",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:36"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580788+00:00",
+      "last_seen": "2026-06-11T21:03:14.580791+00:00",
+      "vector": [
+        0.6371,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:79:37": {
+      "name": "quran:79:37",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:37"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580794+00:00",
+      "last_seen": "2026-06-11T21:03:14.580796+00:00",
+      "vector": [
+        0.5562,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:79:38": {
+      "name": "quran:79:38",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:38"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580845+00:00",
+      "last_seen": "2026-06-11T21:03:14.580850+00:00",
+      "vector": [
+        0.6382,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:79:39": {
+      "name": "quran:79:39",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:39"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580855+00:00",
+      "last_seen": "2026-06-11T21:03:14.580858+00:00",
+      "vector": [
+        0.6376,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:79:40": {
+      "name": "quran:79:40",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:40"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580862+00:00",
+      "last_seen": "2026-06-11T21:03:14.580864+00:00",
+      "vector": [
+        0.6474,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:79:41": {
+      "name": "quran:79:41",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:41"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580868+00:00",
+      "last_seen": "2026-06-11T21:03:14.580870+00:00",
+      "vector": [
+        0.6470999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:79:42": {
+      "name": "quran:79:42",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:42"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580874+00:00",
+      "last_seen": "2026-06-11T21:03:14.580876+00:00",
+      "vector": [
+        0.6378,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:79:43": {
+      "name": "quran:79:43",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:43"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580880+00:00",
+      "last_seen": "2026-06-11T21:03:14.580882+00:00",
+      "vector": [
+        0.6273,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:79:44": {
+      "name": "quran:79:44",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:44"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580886+00:00",
+      "last_seen": "2026-06-11T21:03:14.580888+00:00",
+      "vector": [
+        0.5668,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:79:45": {
+      "name": "quran:79:45",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:45"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580920+00:00",
+      "last_seen": "2026-06-11T21:03:14.580924+00:00",
+      "vector": [
+        0.637,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:79:46": {
+      "name": "quran:79:46",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:79:46"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580930+00:00",
+      "last_seen": "2026-06-11T21:03:14.580933+00:00",
+      "vector": [
+        0.6362,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:1": {
+      "name": "quran:80:1",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:1"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580939+00:00",
+      "last_seen": "2026-06-11T21:03:14.580941+00:00",
+      "vector": [
+        0.6384000000000001,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:2": {
+      "name": "quran:80:2",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:2"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580946+00:00",
+      "last_seen": "2026-06-11T21:03:14.580948+00:00",
+      "vector": [
+        0.5568,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:3": {
+      "name": "quran:80:3",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:3"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580952+00:00",
+      "last_seen": "2026-06-11T21:03:14.580953+00:00",
+      "vector": [
+        0.6365999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:4": {
+      "name": "quran:80:4",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:4"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580957+00:00",
+      "last_seen": "2026-06-11T21:03:14.580959+00:00",
+      "vector": [
+        0.6475,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:5": {
+      "name": "quran:80:5",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:5"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580963+00:00",
+      "last_seen": "2026-06-11T21:03:14.580965+00:00",
+      "vector": [
+        0.5569,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:6": {
+      "name": "quran:80:6",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:6"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580968+00:00",
+      "last_seen": "2026-06-11T21:03:14.580970+00:00",
+      "vector": [
+        0.5569,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:7": {
+      "name": "quran:80:7",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:7"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580974+00:00",
+      "last_seen": "2026-06-11T21:03:14.580976+00:00",
+      "vector": [
+        0.6362,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:8": {
+      "name": "quran:80:8",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:8"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580979+00:00",
+      "last_seen": "2026-06-11T21:03:14.580981+00:00",
+      "vector": [
+        0.6362,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:9": {
+      "name": "quran:80:9",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:9"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580985+00:00",
+      "last_seen": "2026-06-11T21:03:14.580987+00:00",
+      "vector": [
+        0.5562,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:10": {
+      "name": "quran:80:10",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:10"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.580990+00:00",
+      "last_seen": "2026-06-11T21:03:14.580992+00:00",
+      "vector": [
+        0.5569,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:11": {
+      "name": "quran:80:11",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:11"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.581026+00:00",
+      "last_seen": "2026-06-11T21:03:14.581030+00:00",
+      "vector": [
+        0.5661999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:12": {
+      "name": "quran:80:12",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:12"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.581036+00:00",
+      "last_seen": "2026-06-11T21:03:14.581038+00:00",
+      "vector": [
+        0.5661999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:13": {
+      "name": "quran:80:13",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:13"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.581066+00:00",
+      "last_seen": "2026-06-11T21:03:14.581072+00:00",
+      "vector": [
+        0.5562,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:14": {
+      "name": "quran:80:14",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:14"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.581077+00:00",
+      "last_seen": "2026-06-11T21:03:14.581079+00:00",
+      "vector": [
+        0.5569,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:15": {
+      "name": "quran:80:15",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:15"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.581083+00:00",
+      "last_seen": "2026-06-11T21:03:14.581085+00:00",
+      "vector": [
+        0.5562,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:16": {
+      "name": "quran:80:16",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:16"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.581089+00:00",
+      "last_seen": "2026-06-11T21:03:14.581091+00:00",
+      "vector": [
+        0.5571,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:17": {
+      "name": "quran:80:17",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:17"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.581095+00:00",
+      "last_seen": "2026-06-11T21:03:14.581097+00:00",
+      "vector": [
+        0.6470999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:18": {
+      "name": "quran:80:18",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:18"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.581128+00:00",
+      "last_seen": "2026-06-11T21:03:14.581133+00:00",
+      "vector": [
+        0.5661999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:19": {
+      "name": "quran:80:19",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:19"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.581144+00:00",
+      "last_seen": "2026-06-11T21:03:14.581147+00:00",
+      "vector": [
+        0.6462,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:20": {
+      "name": "quran:80:20",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:20"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.581152+00:00",
+      "last_seen": "2026-06-11T21:03:14.581154+00:00",
+      "vector": [
+        0.5581,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:21": {
+      "name": "quran:80:21",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:21"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.581158+00:00",
+      "last_seen": "2026-06-11T21:03:14.581160+00:00",
+      "vector": [
+        0.6367,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:22": {
+      "name": "quran:80:22",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:22"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.581164+00:00",
+      "last_seen": "2026-06-11T21:03:14.581166+00:00",
+      "vector": [
+        0.5567,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:23": {
+      "name": "quran:80:23",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:23"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.581170+00:00",
+      "last_seen": "2026-06-11T21:03:14.581172+00:00",
+      "vector": [
+        0.6362,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:24": {
+      "name": "quran:80:24",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:24"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.581175+00:00",
+      "last_seen": "2026-06-11T21:03:14.581177+00:00",
+      "vector": [
+        0.6377,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:25": {
+      "name": "quran:80:25",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:25"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.581181+00:00",
+      "last_seen": "2026-06-11T21:03:14.581183+00:00",
+      "vector": [
+        0.6367,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:26": {
+      "name": "quran:80:26",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:26"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.581186+00:00",
+      "last_seen": "2026-06-11T21:03:14.581188+00:00",
+      "vector": [
+        0.6367,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:27": {
+      "name": "quran:80:27",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:27"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.581191+00:00",
+      "last_seen": "2026-06-11T21:03:14.581193+00:00",
+      "vector": [
+        0.5567,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:28": {
+      "name": "quran:80:28",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:28"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.581196+00:00",
+      "last_seen": "2026-06-11T21:03:14.581198+00:00",
+      "vector": [
+        0.5562,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:29": {
+      "name": "quran:80:29",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:29"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729008+00:00",
+      "last_seen": "2026-06-11T21:03:14.729018+00:00",
+      "vector": [
+        0.5568,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:30": {
+      "name": "quran:80:30",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:30"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729026+00:00",
+      "last_seen": "2026-06-11T21:03:14.729028+00:00",
+      "vector": [
+        0.5562,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:31": {
+      "name": "quran:80:31",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:31"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729064+00:00",
+      "last_seen": "2026-06-11T21:03:14.729068+00:00",
+      "vector": [
+        0.5562,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:32": {
+      "name": "quran:80:32",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:32"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729073+00:00",
+      "last_seen": "2026-06-11T21:03:14.729076+00:00",
+      "vector": [
+        0.6362,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:33": {
+      "name": "quran:80:33",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:33"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729081+00:00",
+      "last_seen": "2026-06-11T21:03:14.729084+00:00",
+      "vector": [
+        0.5573,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:34": {
+      "name": "quran:80:34",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:34"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729088+00:00",
+      "last_seen": "2026-06-11T21:03:14.729090+00:00",
+      "vector": [
+        0.6371,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:35": {
+      "name": "quran:80:35",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:35"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729094+00:00",
+      "last_seen": "2026-06-11T21:03:14.729096+00:00",
+      "vector": [
+        0.5569,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:36": {
+      "name": "quran:80:36",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:36"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729101+00:00",
+      "last_seen": "2026-06-11T21:03:14.729103+00:00",
+      "vector": [
+        0.5568,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:37": {
+      "name": "quran:80:37",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:37"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729107+00:00",
+      "last_seen": "2026-06-11T21:03:14.729110+00:00",
+      "vector": [
+        0.6368,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:38": {
+      "name": "quran:80:38",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:38"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729114+00:00",
+      "last_seen": "2026-06-11T21:03:14.729116+00:00",
+      "vector": [
+        0.6367,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:39": {
+      "name": "quran:80:39",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:39"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729120+00:00",
+      "last_seen": "2026-06-11T21:03:14.729122+00:00",
+      "vector": [
+        0.5568,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:40": {
+      "name": "quran:80:40",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:40"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729127+00:00",
+      "last_seen": "2026-06-11T21:03:14.729129+00:00",
+      "vector": [
+        0.6365999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:41": {
+      "name": "quran:80:41",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:41"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729133+00:00",
+      "last_seen": "2026-06-11T21:03:14.729135+00:00",
+      "vector": [
+        0.5562,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:80:42": {
+      "name": "quran:80:42",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:80:42"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729139+00:00",
+      "last_seen": "2026-06-11T21:03:14.729141+00:00",
+      "vector": [
+        0.647,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:1": {
+      "name": "quran:81:1",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:1"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729144+00:00",
+      "last_seen": "2026-06-11T21:03:14.729146+00:00",
+      "vector": [
+        0.6388,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:2": {
+      "name": "quran:81:2",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:2"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729151+00:00",
+      "last_seen": "2026-06-11T21:03:14.729153+00:00",
+      "vector": [
+        0.6191,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:3": {
+      "name": "quran:81:3",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:3"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729157+00:00",
+      "last_seen": "2026-06-11T21:03:14.729159+00:00",
+      "vector": [
+        0.5573,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:4": {
+      "name": "quran:81:4",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:4"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729163+00:00",
+      "last_seen": "2026-06-11T21:03:14.729165+00:00",
+      "vector": [
+        0.5573,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:5": {
+      "name": "quran:81:5",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:5"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729207+00:00",
+      "last_seen": "2026-06-11T21:03:14.729212+00:00",
+      "vector": [
+        0.5573,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:6": {
+      "name": "quran:81:6",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:6"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729217+00:00",
+      "last_seen": "2026-06-11T21:03:14.729220+00:00",
+      "vector": [
+        0.5573,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:7": {
+      "name": "quran:81:7",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:7"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729225+00:00",
+      "last_seen": "2026-06-11T21:03:14.729228+00:00",
+      "vector": [
+        0.5579999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:8": {
+      "name": "quran:81:8",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:8"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729261+00:00",
+      "last_seen": "2026-06-11T21:03:14.729266+00:00",
+      "vector": [
+        0.6371,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:9": {
+      "name": "quran:81:9",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:9"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729271+00:00",
+      "last_seen": "2026-06-11T21:03:14.729274+00:00",
+      "vector": [
+        0.5562,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:10": {
+      "name": "quran:81:10",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:10"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729278+00:00",
+      "last_seen": "2026-06-11T21:03:14.729280+00:00",
+      "vector": [
+        0.5574,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:11": {
+      "name": "quran:81:11",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:11"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729284+00:00",
+      "last_seen": "2026-06-11T21:03:14.729286+00:00",
+      "vector": [
+        0.5573,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:12": {
+      "name": "quran:81:12",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:12"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729291+00:00",
+      "last_seen": "2026-06-11T21:03:14.729293+00:00",
+      "vector": [
+        0.5573,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:13": {
+      "name": "quran:81:13",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:13"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729297+00:00",
+      "last_seen": "2026-06-11T21:03:14.729299+00:00",
+      "vector": [
+        0.5667,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:14": {
+      "name": "quran:81:14",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:14"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729303+00:00",
+      "last_seen": "2026-06-11T21:03:14.729305+00:00",
+      "vector": [
+        0.6462,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:15": {
+      "name": "quran:81:15",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:15"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729309+00:00",
+      "last_seen": "2026-06-11T21:03:14.729311+00:00",
+      "vector": [
+        0.5568,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:16": {
+      "name": "quran:81:16",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:16"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729315+00:00",
+      "last_seen": "2026-06-11T21:03:14.729317+00:00",
+      "vector": [
+        0.5586,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:17": {
+      "name": "quran:81:17",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:17"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729321+00:00",
+      "last_seen": "2026-06-11T21:03:14.729323+00:00",
+      "vector": [
+        0.5568,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:18": {
+      "name": "quran:81:18",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:18"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729326+00:00",
+      "last_seen": "2026-06-11T21:03:14.729328+00:00",
+      "vector": [
+        0.5574,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:19": {
+      "name": "quran:81:19",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:19"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729332+00:00",
+      "last_seen": "2026-06-11T21:03:14.729334+00:00",
+      "vector": [
+        0.6470999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:20": {
+      "name": "quran:81:20",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:20"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729337+00:00",
+      "last_seen": "2026-06-11T21:03:14.729339+00:00",
+      "vector": [
+        0.6774,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:21": {
+      "name": "quran:81:21",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:21"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729343+00:00",
+      "last_seen": "2026-06-11T21:03:14.729345+00:00",
+      "vector": [
+        0.5678,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:22": {
+      "name": "quran:81:22",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:22"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729349+00:00",
+      "last_seen": "2026-06-11T21:03:14.729351+00:00",
+      "vector": [
+        0.5572,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:23": {
+      "name": "quran:81:23",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:23"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729438+00:00",
+      "last_seen": "2026-06-11T21:03:14.729444+00:00",
+      "vector": [
+        0.6378,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:24": {
+      "name": "quran:81:24",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:24"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729450+00:00",
+      "last_seen": "2026-06-11T21:03:14.729453+00:00",
+      "vector": [
+        0.647,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:25": {
+      "name": "quran:81:25",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:25"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729457+00:00",
+      "last_seen": "2026-06-11T21:03:14.729459+00:00",
+      "vector": [
+        0.6365999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:26": {
+      "name": "quran:81:26",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:26"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729463+00:00",
+      "last_seen": "2026-06-11T21:03:14.729465+00:00",
+      "vector": [
+        0.5569,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:27": {
+      "name": "quran:81:27",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:27"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729468+00:00",
+      "last_seen": "2026-06-11T21:03:14.729471+00:00",
+      "vector": [
+        0.6566,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:28": {
+      "name": "quran:81:28",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:28"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729501+00:00",
+      "last_seen": "2026-06-11T21:03:14.729506+00:00",
+      "vector": [
+        0.677,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:81:29": {
+      "name": "quran:81:29",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:81:29"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729511+00:00",
+      "last_seen": "2026-06-11T21:03:14.729513+00:00",
+      "vector": [
+        0.6575,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:82:1": {
+      "name": "quran:82:1",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:82:1"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729517+00:00",
+      "last_seen": "2026-06-11T21:03:14.729519+00:00",
+      "vector": [
+        0.6392,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:82:2": {
+      "name": "quran:82:2",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:82:2"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729522+00:00",
+      "last_seen": "2026-06-11T21:03:14.729524+00:00",
+      "vector": [
+        0.6781999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:82:3": {
+      "name": "quran:82:3",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:82:3"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729527+00:00",
+      "last_seen": "2026-06-11T21:03:14.729529+00:00",
+      "vector": [
+        0.5573,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:82:4": {
+      "name": "quran:82:4",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:82:4"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729532+00:00",
+      "last_seen": "2026-06-11T21:03:14.729534+00:00",
+      "vector": [
+        0.5672,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:82:5": {
+      "name": "quran:82:5",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:82:5"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729537+00:00",
+      "last_seen": "2026-06-11T21:03:14.729539+00:00",
+      "vector": [
+        0.6462,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:82:6": {
+      "name": "quran:82:6",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:82:6"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729543+00:00",
+      "last_seen": "2026-06-11T21:03:14.729545+00:00",
+      "vector": [
+        0.6474,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:82:7": {
+      "name": "quran:82:7",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:82:7"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.729548+00:00",
+      "last_seen": "2026-06-11T21:03:14.729550+00:00",
+      "vector": [
+        0.6566,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:82:8": {
+      "name": "quran:82:8",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:82:8"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.882889+00:00",
+      "last_seen": "2026-06-11T21:03:14.882898+00:00",
+      "vector": [
+        0.6365999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:82:9": {
+      "name": "quran:82:9",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:82:9"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.882907+00:00",
+      "last_seen": "2026-06-11T21:03:14.882909+00:00",
+      "vector": [
+        0.6382,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:82:10": {
+      "name": "quran:82:10",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:82:10"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.882914+00:00",
+      "last_seen": "2026-06-11T21:03:14.882916+00:00",
+      "vector": [
+        0.6367,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:82:11": {
+      "name": "quran:82:11",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:82:11"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.882920+00:00",
+      "last_seen": "2026-06-11T21:03:14.882922+00:00",
+      "vector": [
+        0.5578,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:82:12": {
+      "name": "quran:82:12",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:82:12"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.882926+00:00",
+      "last_seen": "2026-06-11T21:03:14.882928+00:00",
+      "vector": [
+        0.5672999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:82:13": {
+      "name": "quran:82:13",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:82:13"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.882932+00:00",
+      "last_seen": "2026-06-11T21:03:14.882934+00:00",
+      "vector": [
+        0.6377,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:82:14": {
+      "name": "quran:82:14",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:82:14"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.882938+00:00",
+      "last_seen": "2026-06-11T21:03:14.882940+00:00",
+      "vector": [
+        0.6377,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:82:15": {
+      "name": "quran:82:15",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:82:15"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.882944+00:00",
+      "last_seen": "2026-06-11T21:03:14.882946+00:00",
+      "vector": [
+        0.5678,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:82:16": {
+      "name": "quran:82:16",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:82:16"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.882950+00:00",
+      "last_seen": "2026-06-11T21:03:14.882952+00:00",
+      "vector": [
+        0.6367,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:82:17": {
+      "name": "quran:82:17",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:82:17"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.882956+00:00",
+      "last_seen": "2026-06-11T21:03:14.882958+00:00",
+      "vector": [
+        0.6375,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:82:18": {
+      "name": "quran:82:18",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:82:18"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883003+00:00",
+      "last_seen": "2026-06-11T21:03:14.883008+00:00",
+      "vector": [
+        0.6374,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:82:19": {
+      "name": "quran:82:19",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:82:19"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883013+00:00",
+      "last_seen": "2026-06-11T21:03:14.883015+00:00",
+      "vector": [
+        0.6364,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:1": {
+      "name": "quran:83:1",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:1"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883042+00:00",
+      "last_seen": "2026-06-11T21:03:14.883047+00:00",
+      "vector": [
+        0.6385000000000001,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:2": {
+      "name": "quran:83:2",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:2"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883053+00:00",
+      "last_seen": "2026-06-11T21:03:14.883055+00:00",
+      "vector": [
+        0.6789000000000001,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:3": {
+      "name": "quran:83:3",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:3"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883059+00:00",
+      "last_seen": "2026-06-11T21:03:14.883062+00:00",
+      "vector": [
+        0.6375,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:4": {
+      "name": "quran:83:4",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:4"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883093+00:00",
+      "last_seen": "2026-06-11T21:03:14.883098+00:00",
+      "vector": [
+        0.6369,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:5": {
+      "name": "quran:83:5",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:5"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883103+00:00",
+      "last_seen": "2026-06-11T21:03:14.883106+00:00",
+      "vector": [
+        0.5571,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:6": {
+      "name": "quran:83:6",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:6"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883111+00:00",
+      "last_seen": "2026-06-11T21:03:14.883113+00:00",
+      "vector": [
+        0.6586,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:7": {
+      "name": "quran:83:7",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:7"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883117+00:00",
+      "last_seen": "2026-06-11T21:03:14.883119+00:00",
+      "vector": [
+        0.6373,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:8": {
+      "name": "quran:83:8",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:8"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883123+00:00",
+      "last_seen": "2026-06-11T21:03:14.883125+00:00",
+      "vector": [
+        0.6367,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:9": {
+      "name": "quran:83:9",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:9"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883129+00:00",
+      "last_seen": "2026-06-11T21:03:14.883131+00:00",
+      "vector": [
+        0.5571,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:10": {
+      "name": "quran:83:10",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:10"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883148+00:00",
+      "last_seen": "2026-06-11T21:03:14.883151+00:00",
+      "vector": [
+        0.6367,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:11": {
+      "name": "quran:83:11",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:11"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883155+00:00",
+      "last_seen": "2026-06-11T21:03:14.883157+00:00",
+      "vector": [
+        0.6489,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:12": {
+      "name": "quran:83:12",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:12"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883161+00:00",
+      "last_seen": "2026-06-11T21:03:14.883163+00:00",
+      "vector": [
+        0.6365,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:13": {
+      "name": "quran:83:13",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:13"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883167+00:00",
+      "last_seen": "2026-06-11T21:03:14.883169+00:00",
+      "vector": [
+        0.6374,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:14": {
+      "name": "quran:83:14",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:14"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883172+00:00",
+      "last_seen": "2026-06-11T21:03:14.883174+00:00",
+      "vector": [
+        0.6775,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:15": {
+      "name": "quran:83:15",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:15"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883179+00:00",
+      "last_seen": "2026-06-11T21:03:14.883180+00:00",
+      "vector": [
+        0.6568,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:16": {
+      "name": "quran:83:16",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:16"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883184+00:00",
+      "last_seen": "2026-06-11T21:03:14.883186+00:00",
+      "vector": [
+        0.638,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:17": {
+      "name": "quran:83:17",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:17"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883190+00:00",
+      "last_seen": "2026-06-11T21:03:14.883192+00:00",
+      "vector": [
+        0.6374,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:18": {
+      "name": "quran:83:18",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:18"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883196+00:00",
+      "last_seen": "2026-06-11T21:03:14.883198+00:00",
+      "vector": [
+        0.6372,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:19": {
+      "name": "quran:83:19",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:19"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883234+00:00",
+      "last_seen": "2026-06-11T21:03:14.883238+00:00",
+      "vector": [
+        0.6367,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:20": {
+      "name": "quran:83:20",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:20"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883244+00:00",
+      "last_seen": "2026-06-11T21:03:14.883247+00:00",
+      "vector": [
+        0.5571,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:21": {
+      "name": "quran:83:21",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:21"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883251+00:00",
+      "last_seen": "2026-06-11T21:03:14.883253+00:00",
+      "vector": [
+        0.5674,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:22": {
+      "name": "quran:83:22",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:22"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883283+00:00",
+      "last_seen": "2026-06-11T21:03:14.883288+00:00",
+      "vector": [
+        0.6377,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:23": {
+      "name": "quran:83:23",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:23"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883293+00:00",
+      "last_seen": "2026-06-11T21:03:14.883296+00:00",
+      "vector": [
+        0.6777,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:24": {
+      "name": "quran:83:24",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:24"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883300+00:00",
+      "last_seen": "2026-06-11T21:03:14.883302+00:00",
+      "vector": [
+        0.6376,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:25": {
+      "name": "quran:83:25",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:25"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883305+00:00",
+      "last_seen": "2026-06-11T21:03:14.883307+00:00",
+      "vector": [
+        0.6371,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:26": {
+      "name": "quran:83:26",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:26"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883311+00:00",
+      "last_seen": "2026-06-11T21:03:14.883313+00:00",
+      "vector": [
+        0.6369,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:27": {
+      "name": "quran:83:27",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:27"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883316+00:00",
+      "last_seen": "2026-06-11T21:03:14.883318+00:00",
+      "vector": [
+        0.6173,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:28": {
+      "name": "quran:83:28",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:28"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883322+00:00",
+      "last_seen": "2026-06-11T21:03:14.883324+00:00",
+      "vector": [
+        0.647,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:29": {
+      "name": "quran:83:29",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:29"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883328+00:00",
+      "last_seen": "2026-06-11T21:03:14.883329+00:00",
+      "vector": [
+        0.6386,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:30": {
+      "name": "quran:83:30",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:30"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883333+00:00",
+      "last_seen": "2026-06-11T21:03:14.883335+00:00",
+      "vector": [
+        0.6374,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:31": {
+      "name": "quran:83:31",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:31"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883339+00:00",
+      "last_seen": "2026-06-11T21:03:14.883341+00:00",
+      "vector": [
+        0.6478,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:32": {
+      "name": "quran:83:32",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:32"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883344+00:00",
+      "last_seen": "2026-06-11T21:03:14.883346+00:00",
+      "vector": [
+        0.6367,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:33": {
+      "name": "quran:83:33",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:33"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883349+00:00",
+      "last_seen": "2026-06-11T21:03:14.883351+00:00",
+      "vector": [
+        0.637,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:34": {
+      "name": "quran:83:34",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:34"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883355+00:00",
+      "last_seen": "2026-06-11T21:03:14.883357+00:00",
+      "vector": [
+        0.6384000000000001,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:35": {
+      "name": "quran:83:35",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:35"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883360+00:00",
+      "last_seen": "2026-06-11T21:03:14.883362+00:00",
+      "vector": [
+        0.6777,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:83:36": {
+      "name": "quran:83:36",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:83:36"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883366+00:00",
+      "last_seen": "2026-06-11T21:03:14.883368+00:00",
+      "vector": [
+        0.6379,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:1": {
+      "name": "quran:84:1",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:1"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883371+00:00",
+      "last_seen": "2026-06-11T21:03:14.883373+00:00",
+      "vector": [
+        0.6394,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:2": {
+      "name": "quran:84:2",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:2"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:14.883403+00:00",
+      "last_seen": "2026-06-11T21:03:14.883408+00:00",
+      "vector": [
+        0.6462,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:3": {
+      "name": "quran:84:3",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:3"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031195+00:00",
+      "last_seen": "2026-06-11T21:03:15.031204+00:00",
+      "vector": [
+        0.5568,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:4": {
+      "name": "quran:84:4",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:4"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031213+00:00",
+      "last_seen": "2026-06-11T21:03:15.031215+00:00",
+      "vector": [
+        0.6367,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:5": {
+      "name": "quran:84:5",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:5"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031220+00:00",
+      "last_seen": "2026-06-11T21:03:15.031222+00:00",
+      "vector": [
+        0.6462,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:6": {
+      "name": "quran:84:6",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:6"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031226+00:00",
+      "last_seen": "2026-06-11T21:03:15.031228+00:00",
+      "vector": [
+        0.6470999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:7": {
+      "name": "quran:84:7",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:7"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031233+00:00",
+      "last_seen": "2026-06-11T21:03:15.031235+00:00",
+      "vector": [
+        0.6369,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:8": {
+      "name": "quran:84:8",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:8"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031239+00:00",
+      "last_seen": "2026-06-11T21:03:15.031241+00:00",
+      "vector": [
+        0.6474,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:9": {
+      "name": "quran:84:9",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:9"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031245+00:00",
+      "last_seen": "2026-06-11T21:03:15.031247+00:00",
+      "vector": [
+        0.6469,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:10": {
+      "name": "quran:84:10",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:10"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031252+00:00",
+      "last_seen": "2026-06-11T21:03:15.031254+00:00",
+      "vector": [
+        0.6365,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:11": {
+      "name": "quran:84:11",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:11"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031258+00:00",
+      "last_seen": "2026-06-11T21:03:15.031260+00:00",
+      "vector": [
+        0.5672999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:12": {
+      "name": "quran:84:12",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:12"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031264+00:00",
+      "last_seen": "2026-06-11T21:03:15.031266+00:00",
+      "vector": [
+        0.5569,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:13": {
+      "name": "quran:84:13",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:13"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031270+00:00",
+      "last_seen": "2026-06-11T21:03:15.031272+00:00",
+      "vector": [
+        0.6869,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:14": {
+      "name": "quran:84:14",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:14"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031277+00:00",
+      "last_seen": "2026-06-11T21:03:15.031279+00:00",
+      "vector": [
+        0.6367,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:15": {
+      "name": "quran:84:15",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:15"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031328+00:00",
+      "last_seen": "2026-06-11T21:03:15.031332+00:00",
+      "vector": [
+        0.6469,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:16": {
+      "name": "quran:84:16",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:16"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031338+00:00",
+      "last_seen": "2026-06-11T21:03:15.031340+00:00",
+      "vector": [
+        0.5574,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:17": {
+      "name": "quran:84:17",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:17"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031344+00:00",
+      "last_seen": "2026-06-11T21:03:15.031346+00:00",
+      "vector": [
+        0.5569,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:18": {
+      "name": "quran:84:18",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:18"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031351+00:00",
+      "last_seen": "2026-06-11T21:03:15.031353+00:00",
+      "vector": [
+        0.5574,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:19": {
+      "name": "quran:84:19",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:19"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031357+00:00",
+      "last_seen": "2026-06-11T21:03:15.031359+00:00",
+      "vector": [
+        0.6362,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:20": {
+      "name": "quran:84:20",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:20"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031364+00:00",
+      "last_seen": "2026-06-11T21:03:15.031366+00:00",
+      "vector": [
+        0.6267,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:21": {
+      "name": "quran:84:21",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:21"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031370+00:00",
+      "last_seen": "2026-06-11T21:03:15.031372+00:00",
+      "vector": [
+        0.637,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:22": {
+      "name": "quran:84:22",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:22"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031409+00:00",
+      "last_seen": "2026-06-11T21:03:15.031414+00:00",
+      "vector": [
+        0.6579999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:23": {
+      "name": "quran:84:23",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:23"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031421+00:00",
+      "last_seen": "2026-06-11T21:03:15.031424+00:00",
+      "vector": [
+        0.6881999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:24": {
+      "name": "quran:84:24",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:24"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031435+00:00",
+      "last_seen": "2026-06-11T21:03:15.031437+00:00",
+      "vector": [
+        0.6372,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:84:25": {
+      "name": "quran:84:25",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:84:25"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031440+00:00",
+      "last_seen": "2026-06-11T21:03:15.031442+00:00",
+      "vector": [
+        0.6378,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:1": {
+      "name": "quran:85:1",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:1"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031446+00:00",
+      "last_seen": "2026-06-11T21:03:15.031448+00:00",
+      "vector": [
+        0.6395000000000001,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:2": {
+      "name": "quran:85:2",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:2"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031452+00:00",
+      "last_seen": "2026-06-11T21:03:15.031454+00:00",
+      "vector": [
+        0.5581,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:3": {
+      "name": "quran:85:3",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:3"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031458+00:00",
+      "last_seen": "2026-06-11T21:03:15.031460+00:00",
+      "vector": [
+        0.5576,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:4": {
+      "name": "quran:85:4",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:4"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031464+00:00",
+      "last_seen": "2026-06-11T21:03:15.031466+00:00",
+      "vector": [
+        0.5573,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:5": {
+      "name": "quran:85:5",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:5"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031470+00:00",
+      "last_seen": "2026-06-11T21:03:15.031472+00:00",
+      "vector": [
+        0.6309,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:6": {
+      "name": "quran:85:6",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:6"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031476+00:00",
+      "last_seen": "2026-06-11T21:03:15.031478+00:00",
+      "vector": [
+        0.5568,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:7": {
+      "name": "quran:85:7",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:7"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031481+00:00",
+      "last_seen": "2026-06-11T21:03:15.031483+00:00",
+      "vector": [
+        0.6373,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:8": {
+      "name": "quran:85:8",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:8"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031487+00:00",
+      "last_seen": "2026-06-11T21:03:15.031489+00:00",
+      "vector": [
+        0.6778,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:9": {
+      "name": "quran:85:9",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:9"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031531+00:00",
+      "last_seen": "2026-06-11T21:03:15.031536+00:00",
+      "vector": [
+        0.6376,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:10": {
+      "name": "quran:85:10",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:10"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031542+00:00",
+      "last_seen": "2026-06-11T21:03:15.031545+00:00",
+      "vector": [
+        0.6476999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:11": {
+      "name": "quran:85:11",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:11"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031550+00:00",
+      "last_seen": "2026-06-11T21:03:15.031552+00:00",
+      "vector": [
+        0.6376,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:12": {
+      "name": "quran:85:12",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:12"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031556+00:00",
+      "last_seen": "2026-06-11T21:03:15.031558+00:00",
+      "vector": [
+        0.6468,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:13": {
+      "name": "quran:85:13",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:13"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031562+00:00",
+      "last_seen": "2026-06-11T21:03:15.031564+00:00",
+      "vector": [
+        0.6367,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:14": {
+      "name": "quran:85:14",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:14"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031567+00:00",
+      "last_seen": "2026-06-11T21:03:15.031569+00:00",
+      "vector": [
+        0.6185,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:15": {
+      "name": "quran:85:15",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:15"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031573+00:00",
+      "last_seen": "2026-06-11T21:03:15.031575+00:00",
+      "vector": [
+        0.6181,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:16": {
+      "name": "quran:85:16",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:16"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031614+00:00",
+      "last_seen": "2026-06-11T21:03:15.031619+00:00",
+      "vector": [
+        0.5576,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:17": {
+      "name": "quran:85:17",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:17"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031630+00:00",
+      "last_seen": "2026-06-11T21:03:15.031633+00:00",
+      "vector": [
+        0.6377,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:18": {
+      "name": "quran:85:18",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:18"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031638+00:00",
+      "last_seen": "2026-06-11T21:03:15.031640+00:00",
+      "vector": [
+        0.5569,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:19": {
+      "name": "quran:85:19",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:19"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031643+00:00",
+      "last_seen": "2026-06-11T21:03:15.031645+00:00",
+      "vector": [
+        0.6479,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:20": {
+      "name": "quran:85:20",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:20"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031649+00:00",
+      "last_seen": "2026-06-11T21:03:15.031651+00:00",
+      "vector": [
+        0.6376,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:21": {
+      "name": "quran:85:21",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:21"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031655+00:00",
+      "last_seen": "2026-06-11T21:03:15.031656+00:00",
+      "vector": [
+        0.6374,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:85:22": {
+      "name": "quran:85:22",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:85:22"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031660+00:00",
+      "last_seen": "2026-06-11T21:03:15.031662+00:00",
+      "vector": [
+        0.5569,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:86:1": {
+      "name": "quran:86:1",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:86:1"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031665+00:00",
+      "last_seen": "2026-06-11T21:03:15.031667+00:00",
+      "vector": [
+        0.6397999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:86:2": {
+      "name": "quran:86:2",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:86:2"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031671+00:00",
+      "last_seen": "2026-06-11T21:03:15.031673+00:00",
+      "vector": [
+        0.6377,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:86:3": {
+      "name": "quran:86:3",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:86:3"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031676+00:00",
+      "last_seen": "2026-06-11T21:03:15.031678+00:00",
+      "vector": [
+        0.6214999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:86:4": {
+      "name": "quran:86:4",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:86:4"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031682+00:00",
+      "last_seen": "2026-06-11T21:03:15.031684+00:00",
+      "vector": [
+        0.6365999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:86:5": {
+      "name": "quran:86:5",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:86:5"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.031729+00:00",
+      "last_seen": "2026-06-11T21:03:15.031734+00:00",
+      "vector": [
+        0.6476000000000001,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:86:6": {
+      "name": "quran:86:6",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:86:6"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154247+00:00",
+      "last_seen": "2026-06-11T21:03:15.154256+00:00",
+      "vector": [
+        0.5668,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:86:7": {
+      "name": "quran:86:7",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:86:7"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154264+00:00",
+      "last_seen": "2026-06-11T21:03:15.154266+00:00",
+      "vector": [
+        0.6376,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:86:8": {
+      "name": "quran:86:8",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:86:8"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154271+00:00",
+      "last_seen": "2026-06-11T21:03:15.154273+00:00",
+      "vector": [
+        0.6365999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:86:9": {
+      "name": "quran:86:9",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:86:9"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154278+00:00",
+      "last_seen": "2026-06-11T21:03:15.154280+00:00",
+      "vector": [
+        0.5573,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:86:10": {
+      "name": "quran:86:10",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:86:10"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154284+00:00",
+      "last_seen": "2026-06-11T21:03:15.154286+00:00",
+      "vector": [
+        0.6365999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:86:11": {
+      "name": "quran:86:11",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:86:11"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154290+00:00",
+      "last_seen": "2026-06-11T21:03:15.154292+00:00",
+      "vector": [
+        0.5594,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:86:12": {
+      "name": "quran:86:12",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:86:12"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154296+00:00",
+      "last_seen": "2026-06-11T21:03:15.154298+00:00",
+      "vector": [
+        0.5588000000000001,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:86:13": {
+      "name": "quran:86:13",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:86:13"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154302+00:00",
+      "last_seen": "2026-06-11T21:03:15.154304+00:00",
+      "vector": [
+        0.5562,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:86:14": {
+      "name": "quran:86:14",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:86:14"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154362+00:00",
+      "last_seen": "2026-06-11T21:03:15.154367+00:00",
+      "vector": [
+        0.5569,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:86:15": {
+      "name": "quran:86:15",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:86:15"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154372+00:00",
+      "last_seen": "2026-06-11T21:03:15.154374+00:00",
+      "vector": [
+        0.5573,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:86:16": {
+      "name": "quran:86:16",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:86:16"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154379+00:00",
+      "last_seen": "2026-06-11T21:03:15.154381+00:00",
+      "vector": [
+        0.557,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:86:17": {
+      "name": "quran:86:17",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:86:17"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154385+00:00",
+      "last_seen": "2026-06-11T21:03:15.154388+00:00",
+      "vector": [
+        0.6469,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:87:1": {
+      "name": "quran:87:1",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:87:1"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154391+00:00",
+      "last_seen": "2026-06-11T21:03:15.154393+00:00",
+      "vector": [
+        0.6485,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:87:2": {
+      "name": "quran:87:2",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:87:2"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154398+00:00",
+      "last_seen": "2026-06-11T21:03:15.154400+00:00",
+      "vector": [
+        0.5669,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:87:3": {
+      "name": "quran:87:3",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:87:3"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154405+00:00",
+      "last_seen": "2026-06-11T21:03:15.154407+00:00",
+      "vector": [
+        0.5568,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:87:4": {
+      "name": "quran:87:4",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:87:4"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154411+00:00",
+      "last_seen": "2026-06-11T21:03:15.154413+00:00",
+      "vector": [
+        0.6372,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:87:5": {
+      "name": "quran:87:5",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:87:5"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154417+00:00",
+      "last_seen": "2026-06-11T21:03:15.154419+00:00",
+      "vector": [
+        0.5562,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:87:6": {
+      "name": "quran:87:6",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:87:6"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154422+00:00",
+      "last_seen": "2026-06-11T21:03:15.154424+00:00",
+      "vector": [
+        0.5568,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:87:7": {
+      "name": "quran:87:7",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:87:7"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154428+00:00",
+      "last_seen": "2026-06-11T21:03:15.154430+00:00",
+      "vector": [
+        0.6469,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:87:8": {
+      "name": "quran:87:8",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:87:8"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154434+00:00",
+      "last_seen": "2026-06-11T21:03:15.154436+00:00",
+      "vector": [
+        0.5562,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:87:9": {
+      "name": "quran:87:9",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:87:9"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154440+00:00",
+      "last_seen": "2026-06-11T21:03:15.154442+00:00",
+      "vector": [
+        0.6470999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:87:10": {
+      "name": "quran:87:10",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:87:10"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154446+00:00",
+      "last_seen": "2026-06-11T21:03:15.154448+00:00",
+      "vector": [
+        0.5661999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:87:11": {
+      "name": "quran:87:11",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:87:11"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154451+00:00",
+      "last_seen": "2026-06-11T21:03:15.154453+00:00",
+      "vector": [
+        0.5567,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:87:12": {
+      "name": "quran:87:12",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:87:12"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154457+00:00",
+      "last_seen": "2026-06-11T21:03:15.154459+00:00",
+      "vector": [
+        0.6884999999999999,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:87:13": {
+      "name": "quran:87:13",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:87:13"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154463+00:00",
+      "last_seen": "2026-06-11T21:03:15.154465+00:00",
+      "vector": [
+        0.677,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:87:14": {
+      "name": "quran:87:14",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:87:14"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154468+00:00",
+      "last_seen": "2026-06-11T21:03:15.154470+00:00",
+      "vector": [
+        0.5562,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:87:15": {
+      "name": "quran:87:15",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:87:15"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154474+00:00",
+      "last_seen": "2026-06-11T21:03:15.154476+00:00",
+      "vector": [
+        0.6567000000000001,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:87:16": {
+      "name": "quran:87:16",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:87:16"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154520+00:00",
+      "last_seen": "2026-06-11T21:03:15.154525+00:00",
+      "vector": [
+        0.6378,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:87:17": {
+      "name": "quran:87:17",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:87:17"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154556+00:00",
+      "last_seen": "2026-06-11T21:03:15.154561+00:00",
+      "vector": [
+        0.6371,
+        1.0,
+        0.39999999999999997,
+        0.5,
+        0.0,
+        0.5,
+        1.0
+      ]
+    },
+    "quran:87:18": {
+      "name": "quran:87:18",
+      "cluster": "scripture",
+      "sources": [
+        "quran:quran:87:18"
+      ],
+      "frequency": 1,
+      "strength": 0.1,
+      "first_seen": "2026-06-11T21:03:15.154566+00:00",
+      "last_seen": "2026-06-11T21:03:15.154568+00:00",
+      "vector": [
+        0.6379,
+        1.0,
+        0.39999999999999997,
+        0.5
