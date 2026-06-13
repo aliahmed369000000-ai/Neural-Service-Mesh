@@ -12,24 +12,34 @@ import plotly.graph_objects as go
 
 API_BASE = os.environ.get("API_BASE", "http://localhost:5000")
 
-# Start a local Flask API in a background thread so the dashboard can call http://localhost:5000
-# Set START_LOCAL_API=0 to disable (useful when Spaces provides an external API)
-def _start_local_api():
-    try:
-        import threading
-        # Instantiate mesh and run the API (this reuses the project's main mesh)
-        from main import NeuralServiceMesh
-        from api.app import run_api
-        mesh = NeuralServiceMesh()
-        t = threading.Thread(target=run_api, args=(mesh, "0.0.0.0", 5000, False), daemon=True)
-        t.start()
-    except Exception as e:
-        # Don't crash the dashboard if API fails to start
-        print("[dashboard] Could not start local API:", e)
+# Use local service modules instead of HTTP calls.
+from services import ckg_service, training_service, search_service
 
-# Default: start the local API unless explicitly disabled
-if os.environ.get("START_LOCAL_API", "1") == "1":
-    _start_local_api()
+
+def _get(path: str, timeout: int = 8):
+    try:
+        if path == "/train/ckg":
+            return ckg_service.get_ckg_stats()
+        if path == "/train/matrix":
+            return training_service.get_matrix()
+        if path == "/status":
+            return training_service.get_status()
+        if path == "/train/status":
+            return training_service.get_train_status()
+        if path == "/train/audit":
+            return training_service.get_train_audit()
+        return {}
+    except Exception:
+        return {}
+
+
+def _post(path: str, payload: dict, timeout: int = 10):
+    try:
+        if path == "/train/ask":
+            return search_service.ask(payload.get('concept') or payload.get('question') or '')
+        return {"error": "unsupported"}
+    except Exception as e:
+        return {"error": str(e)}
 
 DARK_CSS = """
 body, .gradio-container {
