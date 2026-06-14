@@ -287,6 +287,20 @@ def load_ckg() -> Dict:
         return _empty
 
 
+@st.cache_data(ttl=60)
+def load_entities() -> Dict:
+    """تحميل طبقة الكيانات المعرفية (entities.json) — يعود بـ {} إن لم تكن موجودة."""
+    path = KNOWLEDGE_DIR / "entities.json"
+    try:
+        content = path.read_text(encoding="utf-8").strip()
+        if not content:
+            return {}
+        data = json.loads(content)
+        return data.get("entities", {}) if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
 def get_episodic_stats() -> Dict:
     db_path = MEMORY_DIR / "episodic.db"
     stats = {"working": 0, "semantic": 0, "episodic": 0, "rules": 0}
@@ -745,10 +759,10 @@ def render_qa():
     # ── أمثلة جاهزة ──
     st.markdown("**أمثلة:**")
     examples = [
+        "من هو محمد ﷺ؟",
         "ما علاقة الصبر بالإيمان؟",
         "ماذا يقول القرآن عن العدل؟",
-        "ما هي علامات التقوى؟",
-        "ما العلاقة بين العلم والحكمة؟",
+        "ما قصة يوسف؟",
     ]
     ex_cols = st.columns(len(examples))
     chosen_example = None
@@ -779,7 +793,8 @@ def render_qa():
         return
 
     with st.spinner("يتم تحليل السؤال والبحث في قاعدة المعرفة..."):
-        result = answer_question(question, ckg, ayat)
+        entities = load_entities()
+        result = answer_question(question, ckg, ayat, entities=entities)
 
     # ── حفظ الحلقة في الذاكرة التجريبية ──
     db_path = MEMORY_DIR / "episodic.db"
@@ -811,7 +826,15 @@ def render_qa():
         st.markdown("")
 
     # ── ملخص الإجابة ──
-    st.markdown('<div class="section-header">📝 ملخص الإجابة</div>', unsafe_allow_html=True)
+    entity_info = result.get("entity")
+    if entity_info:
+        st.markdown(
+            f'<div class="section-header">📝 ملخص الإجابة '
+            f'<span class="badge badge-purple">كيان: {entity_info["name"]} ({entity_info["type"]})</span></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown('<div class="section-header">📝 ملخص الإجابة</div>', unsafe_allow_html=True)
     st.markdown(f"""
     <div class="root-item" style="font-size:1.05rem; line-height:1.8">
         {result['summary']}
