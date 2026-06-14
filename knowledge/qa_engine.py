@@ -274,6 +274,37 @@ def compute_confidence(
 # ═══════════════════════════════════════════════════════════════════════════
 # 5) توليد إجابة منظمة
 # ═══════════════════════════════════════════════════════════════════════════
+# ── عبارات افتتاحية طبيعية بحسب المجموعة المعرفية للمفهوم الأساسي ──
+CLUSTER_OPENERS = {
+    "توحيد":   "في باب التوحيد وأسماء الله وصفاته، يتحدث القرآن الكريم عن",
+    "عبادة":   "في باب العبادات، يبيّن القرآن الكريم أحكام ومعاني",
+    "أخلاق":   "من القيم الأخلاقية التي يدعو إليها القرآن الكريم",
+    "إيمان":   "في باب العقيدة والإيمان، يتناول القرآن الكريم",
+    "آخرة":    "في وصف الدار الآخرة، يذكر القرآن الكريم",
+    "نبوة":    "في سياق قصص الأنبياء والرسالات، يذكر القرآن الكريم",
+    "معرفة":   "في مجال العلم والمعرفة، يوجّه القرآن الكريم إلى",
+    "مجتمع":   "في تنظيم شؤون المجتمع، يبيّن القرآن الكريم أحكام",
+    "كون":     "من آيات الله في الكون، يذكر القرآن الكريم",
+    "قصص":     "من القصص القرآني، يروي القرآن الكريم خبر",
+    "روح":     "في تزكية النفس وأحوالها، يتحدث القرآن الكريم عن",
+    "حكم":     "في باب الأحكام والقضاء، يبيّن القرآن الكريم",
+    "اقتصاد":  "في باب المعاملات المالية، ينظّم القرآن الكريم أحكام",
+    "سلوك":    "من السلوكيات التي يحذّر القرآن الكريم منها أو يدعو إليها",
+    "فقه":     "في الأحكام الفقهية، يبيّن القرآن الكريم حكم",
+    "باطن":    "في أعمال القلوب والإيمان الباطن، يتحدث القرآن الكريم عن",
+}
+
+# علاقات لها صياغة طبيعية خاصة عند ذكرها
+RELATION_PHRASES = {
+    "co_occurrence":     "وترد هذه الفكرة مرتبطة في آيات عديدة بمفهوم",
+    "semantic":          "وهي مرتبطة من حيث المعنى بمفهوم",
+    "thematic_cluster":  "وتتكرر هذه الفكرة جنباً إلى جنب مع مفهوم",
+    "root_link":         "ويتصل لفظياً بجذر",
+    "narrative_sequence": "وترتبط في السياق القصصي بـ",
+    "episodic_rule":     "وقد لوحظ تكرار ربطها بمفهوم",
+}
+
+
 def generate_answer(
     question: str,
     concept_matches: List[Tuple[str, float]],
@@ -282,15 +313,19 @@ def generate_answer(
     concepts_db: Dict[str, Any],
 ) -> Dict[str, Any]:
     """
-    يبني إجابة منظمة (ملخص + مفاهيم مرتبطة + آيات داعمة + درجة ثقة)
-    اعتماداً فقط على بيانات الـ CKG والقرآن الموجودة.
+    يبني إجابة منظمة بصياغة طبيعية احترافية (ملخص + مفاهيم مرتبطة +
+    آيات داعمة + درجة ثقة) اعتماداً فقط على بيانات الـ CKG والقرآن الموجودة.
+
+    الصياغة تتجنب الإشارة إلى "النظام" أو "CKG" أو الأرقام الداخلية،
+    وتقدّم الإجابة كشرح معرفي مباشر يستشهد بالآيات كدليل.
     """
     confidence = compute_confidence(concept_matches, related_concepts, verses)
 
     if not concept_matches:
         return {
             "question":         question,
-            "summary":          "لم يتم العثور على مفاهيم مرتبطة بهذا السؤال في قاعدة المعرفة الحالية (173 مفهوم).",
+            "summary":          "لم يتم العثور على مفهوم واضح يطابق هذا السؤال في قاعدة المعرفة الحالية. "
+                                 "حاول إعادة صياغة السؤال باستخدام مصطلح قرآني أوضح (مثل: الصبر، العدل، التوحيد، الصلاة).",
             "primary_concepts": [],
             "related_concepts": [],
             "verses":           [],
@@ -305,32 +340,65 @@ def generate_answer(
     non_meta_names = [c for c in primary_names if c not in META_CONCEPTS]
     topic_names = non_meta_names if non_meta_names else primary_names
 
-    # ── بناء ملخص الإجابة ──
+    main_concept = topic_names[0]
+    main_cdata   = concepts_db.get(main_concept, {})
+    main_cluster = main_cdata.get("cluster", "")
+    opener = CLUSTER_OPENERS.get(main_cluster, "يتحدث القرآن الكريم عن")
+
+    # إزالة المفاهيم الثانوية التي تشترك بكلمتها الأولى مع المفهوم الأساسي
+    # أو مع مفهوم ثانوي آخر سبقه (مثل "حكمة" و"حكمة عملية")
+    # لتجنب التكرار في الصياغة
+    seen_first_words = {main_concept.split(" ")[0]}
+    secondary_names = []
+    for c in topic_names[1:]:
+        first_word = c.split(" ")[0]
+        if first_word in seen_first_words:
+            continue
+        seen_first_words.add(first_word)
+        secondary_names.append(c)
+
+    # ── بناء ملخص الإجابة بصياغة طبيعية ──
     summary_parts = []
 
-    if len(topic_names) == 1:
-        summary_parts.append(f"يتحدث القرآن الكريم عن مفهوم «{topic_names[0]}» في عدة مواضع.")
+    if not secondary_names:
+        summary_parts.append(f"{opener} «{main_concept}».")
     else:
-        joined = "، ".join(f"«{c}»" for c in topic_names)
-        summary_parts.append(f"يربط القرآن الكريم بين المفاهيم التالية: {joined}.")
+        secondary = "، ".join(f"«{c}»" for c in secondary_names)
+        summary_parts.append(f"{opener} «{main_concept}»، وتتصل هذه الفكرة أيضاً بـ {secondary}.")
 
-    # ── ذكر العلاقات المستنتجة ──
+    # ── ذكر العلاقات المستنتجة بصياغة طبيعية ──
     if related_concepts:
-        top_related = related_concepts[:3]
-        rel_names = "، ".join(f"«{r['concept']}»" for r in top_related)
-        summary_parts.append(
-            f"وترتبط هذه المفاهيم دلالياً (عبر {len(related_concepts)} علاقة مستخرجة من الـ CKG) "
-            f"بمفاهيم أخرى أبرزها: {rel_names}."
-        )
+        # نختار أقوى علاقة من كل نوع متاح (حتى نتنوع في الصياغة) بحد أقصى 3
+        seen_types = {}
+        for r in related_concepts:
+            rtype = r.get("relation_type", "")
+            if rtype not in seen_types and r["concept"] != main_concept:
+                seen_types[rtype] = r
+            if len(seen_types) >= 3:
+                break
 
-    # ── ذكر الآيات ──
+        rel_sentences = []
+        for rtype, r in seen_types.items():
+            phrase = RELATION_PHRASES.get(rtype, "وترتبط بمفهوم")
+            target = r["concept"]
+            # إزالة بادئة "root:" إن وُجدت في أسماء الجذور
+            target_display = target.replace("root:", "")
+            rel_sentences.append(f"{phrase} «{target_display}»")
+
+        if rel_sentences:
+            summary_parts.append("، ".join(rel_sentences) + ".")
+
+    # ── ذكر الآيات بصياغة استشهادية ──
     if verses:
-        summary_parts.append(
-            f"وقد استُخرجت {len(verses)} آية من القرآن الكريم (من إجمالي 6236 آية) "
-            f"تدعم هذه العلاقة المعرفية."
-        )
+        if len(verses) == 1:
+            v = verses[0]
+            summary_parts.append(f"ومن الآيات الدالة على ذلك قوله تعالى في سورة {v['surah']} الآية {v['ayah']}.")
+        else:
+            refs = "، ".join(f"({v['surah']}:{v['ayah']})" for v in verses[:3])
+            extra = f"، وغيرها من {len(verses)} آية" if len(verses) > 3 else ""
+            summary_parts.append(f"ومن الآيات الدالة على ذلك: {refs}{extra}.")
     else:
-        summary_parts.append("ولم يتم العثور على آيات مباشرة مرتبطة بهذا المفهوم في الفهرس الحالي.")
+        summary_parts.append("ولم يُعثر على آيات مرتبطة مباشرة بهذا المفهوم في الفهرس الحالي.")
 
     summary = " ".join(summary_parts)
 
