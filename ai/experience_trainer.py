@@ -1,0 +1,303 @@
+"""
+Experience Learning — الجزء 2: تقييم الجودة + ExperienceTrainer
+===================================================================
+Requirements #4-#7:
+  - experience quality scoring (concept/relation coverage, memory recall
+    quality, answer confidence)
+  - ExperienceTrainer: replay top / recent / diverse episodes
+  - NeuralCore يتحسّن من الخبرة المتراكمة بمرور الوقت
+"""
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Sequence
+
+import numpy as np
+
+from ai.experience_store import Episode, EpisodeStore
+from ai.neural_core import NeuralCore
+
+logger = logging.getLogger("ExperienceLearning")
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 1) تقييم جودة التجربة (Requirement #4)
+# ════════════════════════════════════════════════════════════════════════
+
+def score_concept_coverage(matched_concepts: List[Dict[str, Any]],
+                            max_expected: int = 5) -> float:
+    """
+    تغطية المفاهيم: نسبة عدد المفاهيم المطابقة إلى max_expected (مقصوصة عند 1.0).
+    صفر إن لم يُطابَق أي مفهوم.
+    """
+    if not matched_concepts:
+        return 0.0
+    return float(min(1.0, len(matched_concepts) / max_expected))
+
+
+def score_relation_coverage(related_concepts: List[Dict[str, Any]],
+                             max_expected: int = 10) -> float:
+    """
+    تغطية العلاقات: نسبة عدد العلاقات المتبوعة (وأوزانها) إلى max_expected.
+    تُحسب كـ (متوسط relation_weight) * (نسبة العدد إلى max_expected).
+    """
+    if not related_concepts:
+        return 0.0
+    count_ratio = min(1.0, len(related_concepts) / max_expected)
+    avg_weight = float(np.mean([r.get("relation_weight", 0.0) for r in related_concepts]))
+    return float(round(count_ratio * avg_weight, 6))
+
+
+def score_memory_recall_quality(memory_hits: List[Dict[str, Any]],
+                                 self_match_threshold: float = 0.999) -> float:
+    """
+    جودة استرجاع الذاكرة: متوسط التشابه للذكريات المسترجَعة،
+    باستثناء الذكرى الذاتية (التي خُزِّنت في هذه الخطوة نفسها، تشابه≈1.0)
+    إن وُجدت أكثر من ذكرى واحدة.
+    صفر إن لم تُسترجَع أي ذكرى.
+    """
+    if not memory_hits:
+        return 0.0
+    sims = [h.get("similarity", 0.0) for h in memory_hits]
+    if len(sims) > 1:
+        # استبعاد أعلى تشابه (الذكرى الذاتية المخزَّنة للتو) إن كانت ~1.0
+        if max(sims) >= self_match_threshold:
+            sims_excl = [s for s in sims if s < self_match_threshold]
+            if sims_excl:
+                sims = sims_excl
+    return float(round(np.mean(sims), 6))
+
+
+def score_answer_confidence(decision_weights: Dict[str, float],
+                             matched_concepts: List[Dict[str, Any]]) -> float:
+    """
+    ثقة الإجابة: مزيج من:
+      - W_SEMANTIC (ثقة الشبكة الدلالية)
+      - متوسط strength للمفاهيم المطابقة (إن وُجدت)
+    confidence = 0.5 * W_SEMANTIC + 0.5 * avg(strength)
+    إن لم توجد مفاهيم مطابقة: confidence = W_SEMANTIC * 0.5 (عقوبة لعدم التغطية)
+    """
+    w_sem = float(decision_weights.get("W_SEMANTIC", 0.0))
+    if matched_concepts:
+        avg_strength = float(np.mean([m.get("strength", 0.0) for m in matched_concepts]))
+        conf = 0.5 * w_sem + 0.5 * avg_strength
+    else:
+        conf = 0.5 * w_sem
+    return float(round(min(1.0, max(0.0, conf)), 6))
+
+
+def score_episode(
+    matched_concepts: List[Dict[str, Any]],
+    related_concepts: List[Dict[str, Any]],
+    memory_hits: List[Dict[str, Any]],
+    decision_weights: Dict[str, float],
+    max_expected_concepts: int = 5,
+    max_expected_relations: int = 10,
+) -> Dict[str, float]:
+    """
+    يحسب كل مكوّنات الجودة + overall_quality (متوسط الأربعة).
+    Requirement #5: تُخزَّن هذه القيم داخل الـ Episode (في حقل `quality`).
+    """
+    concept_coverage = score_concept_coverage(matched_concepts, max_expected_concepts)
+    relation_coverage = score_relation_coverage(related_concepts, max_expected_relations)
+    memory_recall_quality = score_memory_recall_quality(memory_hits)
+    answer_confidence = score_answer_confidence(decision_weights, matched_concepts)
+
+    overall = float(np.mean([
+        concept_coverage, relation_coverage, memory_recall_quality, answer_confidence
+    ]))
+
+    return {
+        "concept_coverage": round(concept_coverage, 6),
+        "relation_coverage": round(relation_coverage, 6),
+        "memory_recall_quality": round(memory_recall_quality, 6),
+        "answer_confidence": round(answer_confidence, 6),
+        "overall_quality": round(overall, 6),
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 2) ExperienceTrainer (Requirements #3, #6, #7)
+# ════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class ReplayReport:
+    """نتيجة جولة replay واحدة."""
+    strategy: str
+    episodes_used: int
+    avg_loss_before: Optional[float]
+    avg_loss_after: Optional[float]
+    losses: List[float]
+    episode_ids: List[str]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "strategy": self.strategy,
+            "episodes_used": self.episodes_used,
+            "avg_loss_before": self.avg_loss_before,
+            "avg_loss_after": self.avg_loss_after,
+            "improved": (
+                self.avg_loss_after is not None and self.avg_loss_before is not None
+                and self.avg_loss_after < self.avg_loss_before
+            ),
+            "episode_ids": self.episode_ids,
+        }
+
+
+class ExperienceTrainer:
+    """
+    يحوّل حلقات سابقة (Episodes) إلى إشارات تدريب لـ NeuralCore.
+
+    إشارة التدريب (training signal) لكل حلقة:
+      x      = episode.context_vector  (7,)  — نفس متجه السياق الذي وُلِّد منه القرار
+      target = إعادة بناء هدف محسَّن من quality scores + target_used الأصلي:
+
+        target_refined = normalize(
+            0.5 * target_used_original  +  0.5 * quality_components
+        )
+
+      حيث quality_components = [concept_coverage, relation_coverage,
+                                  memory_recall_quality, answer_confidence]
+
+      الفكرة: الهدف الأصلي (target_used) كان مبنياً من strength/weight لحظة
+      السؤال، لكن quality scores تعكس "كيف كانت التجربة فعلياً" (شمولية
+      التغطية والثقة) — الدمج بينهما هو "إشارة التعلّم من الخبرة" الفعلية،
+      المختلفة عن إشارة CKG الأولية وحدها.
+
+    Parameters
+    ----------
+    core  : NeuralCore المراد تحسينه
+    store : EpisodeStore (مصدر الحلقات)
+    """
+
+    def __init__(self, core: NeuralCore, store: EpisodeStore):
+        self.core = core
+        self.store = store
+
+    # ── بناء إشارة تدريب من حلقة واحدة ────────────────────────────────
+
+    def _episode_to_signal(self, ep: Episode) -> Optional[tuple]:
+        if not ep.context_vector:
+            return None
+
+        x = np.array(ep.context_vector, dtype=np.float64)
+
+        quality_vec = np.array([
+            ep.quality.get("concept_coverage", 0.0),
+            ep.quality.get("relation_coverage", 0.0),
+            ep.quality.get("memory_recall_quality", 0.0),
+            ep.quality.get("answer_confidence", 0.0),
+        ], dtype=np.float64)
+
+        if ep.target_used is not None and len(ep.target_used) == 4:
+            original = np.array(ep.target_used, dtype=np.float64)
+        else:
+            original = np.array([0.30, 0.35, 0.25, 0.10], dtype=np.float64)
+
+        combined = 0.5 * original + 0.5 * quality_vec
+        total = combined.sum()
+        if total <= 0.0:
+            target = original
+        else:
+            target = combined / total
+
+        return x, target
+
+    # ── replay عام ───────────────────────────────────────────────────
+
+    def _replay(self, episodes: List[Episode], strategy: str) -> ReplayReport:
+        signals = []
+        used_ids = []
+        for ep in episodes:
+            sig = self._episode_to_signal(ep)
+            if sig is None:
+                continue
+            signals.append(sig)
+            used_ids.append(ep.episode_id)
+
+        if not signals:
+            return ReplayReport(strategy, 0, None, None, [], [])
+
+        losses_before = []
+        for x, target in signals:
+            out = self.core.forward(x)
+            from ai.neural_core import mse_loss
+            l, _ = mse_loss(out, target)
+            losses_before.append(l)
+
+        losses_after = []
+        for x, target in signals:
+            l = self.core.train_step(x, target)
+            losses_after.append(l)
+            self.core.evolve_if_plateau()
+
+        self.store.mark_replayed(used_ids)
+
+        return ReplayReport(
+            strategy=strategy,
+            episodes_used=len(signals),
+            avg_loss_before=round(float(np.mean(losses_before)), 8),
+            avg_loss_after=round(float(np.mean(losses_after)), 8),
+            losses=[round(float(l), 8) for l in losses_after],
+            episode_ids=used_ids,
+        )
+
+    # ── الإستراتيجيات الثلاث (Requirement #6) ──────────────────────────
+
+    def replay_top(self, limit: int = 20) -> ReplayReport:
+        """يعيد تدريب NeuralCore على أعلى الحلقات جودة (overall_quality)."""
+        episodes = self.store.get_top_by_quality(limit=limit)
+        return self._replay(episodes, strategy="top")
+
+    def replay_recent(self, limit: int = 20) -> ReplayReport:
+        """يعيد تدريب NeuralCore على أحدث الحلقات."""
+        episodes = self.store.get_recent(limit=limit)
+        return self._replay(episodes, strategy="recent")
+
+    def replay_diverse(self, limit: int = 20, seed: Optional[int] = None) -> ReplayReport:
+        """يعيد تدريب NeuralCore على عينة متنوعة (clusters مختلفة)."""
+        episodes = self.store.get_diverse_sample(limit=limit, seed=seed)
+        return self._replay(episodes, strategy="diverse")
+
+    # ── دورة تدريب دورية كاملة (Requirement #3/#7) ─────────────────────
+
+    def run_training_cycle(
+        self,
+        top_limit: int = 10,
+        recent_limit: int = 10,
+        diverse_limit: int = 10,
+        save: bool = True,
+        save_path: str = "models/neural_core",
+        seed: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        دورة replay كاملة: top + recent + diverse، بالترتيب.
+        تُحفَظ النواة بعد الدورة إن save=True.
+
+        Returns: تقرير يحتوي نتائج الثلاث استراتيجيات + إحصاءات المخزن.
+        """
+        n_episodes = self.store.count()
+        if n_episodes == 0:
+            return {
+                "status": "no_episodes",
+                "message": "لا توجد حلقات مخزَّنة بعد — لا يمكن تشغيل دورة تدريب.",
+            }
+
+        report_top = self.replay_top(limit=top_limit)
+        report_recent = self.replay_recent(limit=recent_limit)
+        report_diverse = self.replay_diverse(limit=diverse_limit, seed=seed)
+
+        if save:
+            try:
+                self.core.save(save_path)
+            except Exception as e:
+                logger.warning(f"NeuralCore save failed after training cycle: {e}")
+
+        return {
+            "status": "ok",
+            "store_stats": self.store.stats(),
+            "top": report_top.to_dict(),
+            "recent": report_recent.to_dict(),
+            "diverse": report_diverse.to_dict(),
+        }
