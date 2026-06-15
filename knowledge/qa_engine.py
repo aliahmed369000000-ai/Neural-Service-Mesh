@@ -187,15 +187,43 @@ def find_entity_match(
 # ═══════════════════════════════════════════════════════════════════════════
 # 2) إيجاد المفاهيم المرتبطة عبر العلاقات في CKG
 # ═══════════════════════════════════════════════════════════════════════════
+# الحد الأدنى لتكرار المفهوم المرتبط في القرآن ليُعتبر "ذا دلالة كافية"
+# لعرضه في قائمة المفاهيم المرتبطة. مفاهيم نادرة جداً (مثل "سخرية" بـ4 تكرارات)
+# قد تحصل على "weight" مرتفع كاذب رياضياً (count / min(freq)) لمجرد أن
+# عدد ظهوراتها القليل تزامن مع مفهوم شائع — فنستثني هذه الحالات هنا.
+MIN_RELATED_FREQUENCY = 8
+
+
+def _relation_rank_score(weight: float, count: int, other_freq: int) -> float:
+    """
+    يحسب درجة ترتيب أكثر توازناً من "weight" الخام المخزّن في CKG.
+
+    weight الخام = count / min(freq_a, freq_b) → ينحاز للمفاهيم النادرة
+    (قاسم صغير يرفع النسبة حتى مع عدد تزامن قليل جداً).
+
+    الدرجة الجديدة تأخذ في الحسبان أيضاً:
+      - عدد مرات التزامن الفعلي (count) — أدلة أكثر = أوثق
+      - تكرار المفهوم الآخر في القرآن (other_freq) — مفهوم له حضور
+        حقيقي في النص، لا مجرد ذكر عابر
+    """
+    import math
+    count_factor = math.log(count + 1) if count > 0 else 0.3  # علاقات بلا evidence (semantic/narrative) تحصل على عامل ثابت معتدل
+    freq_factor  = math.log(other_freq + 1)
+    return weight * count_factor * freq_factor
+
+
 def find_related_concepts(
     primary_concepts: List[str],
     relations_db: Dict[str, Any],
+    concepts_db: Optional[Dict[str, Any]] = None,
     top_k: int = 8,
 ) -> List[Dict[str, Any]]:
     """
-    يبحث في جدول العلاقات (2149 علاقة) عن المفاهيم المرتبطة
-    بالمفاهيم الأساسية المستخرجة من السؤال.
+    يبحث في جدول العلاقات عن المفاهيم المرتبطة بالمفاهيم الأساسية
+    المستخرجة من السؤال، مع ترتيب متوازن يتجنب طغيان المفاهيم
+    النادرة جداً ذات "weight" مرتفع كاذب رياضياً (انظر _relation_rank_score).
     """
+    concepts_db = concepts_db or {}
     primary_norm = {normalize_arabic(c) for c in primary_concepts}
     related: Dict[str, Dict[str, Any]] = {}
 
@@ -213,21 +241,71 @@ def find_related_concepts(
         if other is None:
             continue
 
-        weight = rel.get("weight", 0.0)
-        rtype  = rel.get("relation_type", "")
+        # استثناء أسماء الجذور (root:...) من قائمة "المفاهيم المرتبطة"
+        # المعروضة للمستخدم — تبقى متاحة عبر علاقات root_link لأغراض أخرى
+        if other.startswith("root:"):
+            continue
 
-        # إن وجد المفهوم بأكثر من علاقة، نحتفظ بأعلى وزن
+        other_freq = concepts_db.get(other, {}).get("frequency", 0)
+        # استثناء المفاهيم النادرة جداً (دلالة ضعيفة إحصائياً)
+        if concepts_db and other_freq < MIN_RELATED_FREQUENCY:
+            continue
+
+        weight = rel.get("weight", 0.0)
+        count  = rel.get("count", 0)
+        rtype  = rel.get("relation_type", "")
+        score  = _relation_rank_score(weight, count, other_freq)
+
+        # إن وجد المفهوم بأكثر من علاقة، نحتفظ بالأعلى بحسب الدرجة المتوازنة
         existing = related.get(other)
-        if existing is None or weight > existing["weight"]:
+        if existing is None or score > existing["_score"]:
             related[other] = {
                 "concept":       other,
                 "weight":        weight,
                 "relation_type": rtype,
                 "evidence":      rel.get("evidence", []),
+                "_score":        score,
             }
 
-    ranked = sorted(related.values(), key=lambda x: -x["weight"])
-    return ranked[:top_k]
+    ranked = sorted(related.values(), key=lambda x: -x["_score"])
+
+    # ── ضمان تنوّع أنواع العلاقات في النتائج النهائية ──────────────────
+    # الترتيب الخام قد يُهيمن عليه نوع واحد (عادة co_occurrence ذو evidence
+    # كثيرة)، فتغيب علاقات semantic/narrative_sequence القيّمة موضوعياً
+    # حتى لو كانت أقل توثيقاً إحصائياً. نضمن ظهور أعلى نتيجة من كل نوع
+    # متاح أولاً، ثم نكمل الباقي بالترتيب العام.
+    by_type: Dict[str, List[Dict[str, Any]]] = {}
+    for r in ranked:
+        by_type.setdefault(r["relation_type"], []).append(r)
+
+    diversified: List[Dict[str, Any]] = []
+    seen_concepts = set()
+
+    # الجولة الأولى: أفضل نتيجة من كل نوع علاقة (بترتيب ظهور الأنواع
+    # في القائمة الأصلية، أي الأنواع الأقوى عموماً أولاً)
+    type_order = list(dict.fromkeys(r["relation_type"] for r in ranked))
+    for rtype in type_order:
+        candidates = by_type.get(rtype, [])
+        if candidates and candidates[0]["concept"] not in seen_concepts:
+            diversified.append(candidates[0])
+            seen_concepts.add(candidates[0]["concept"])
+        if len(diversified) >= top_k:
+            break
+
+    # الجولة الثانية: إكمال الباقي بالترتيب العام حتى الوصول لـ top_k
+    if len(diversified) < top_k:
+        for r in ranked:
+            if r["concept"] in seen_concepts:
+                continue
+            diversified.append(r)
+            seen_concepts.add(r["concept"])
+            if len(diversified) >= top_k:
+                break
+
+    # إزالة الحقل الداخلي _score قبل الإعادة
+    for r in diversified:
+        r.pop("_score", None)
+    return diversified[:top_k]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -587,7 +665,7 @@ def answer_question(
     all_primary = [c for c, _ in concept_matches[:3]]
     non_meta_primary = [c for c in all_primary if c not in META_CONCEPTS]
     primary_names = non_meta_primary if non_meta_primary else all_primary
-    related_concepts = find_related_concepts(primary_names, relations_db, top_k=max_related) if primary_names else []
+    related_concepts = find_related_concepts(primary_names, relations_db, concepts_db, top_k=max_related) if primary_names else []
 
     # 3. الآيات الداعمة
     verses = retrieve_supporting_verses(concept_matches, concepts_db, ayat_by_ref, max_verses=max_verses)
