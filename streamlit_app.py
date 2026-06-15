@@ -855,22 +855,41 @@ def render_qa():
     st.markdown("")
     st.markdown('<div class="section-header">🧩 المفاهيم المستخرجة من السؤال</div>', unsafe_allow_html=True)
     for c in result["primary_concepts"]:
-        st.markdown(f"""
-        <div class="root-item">
-            <strong>{c['name']}</strong>
-            <span class="badge badge-purple" style="margin-right:8px">{c['cluster']}</span>
-            <span class="badge badge-blue">تكرار في القرآن: {c['frequency']}</span>
-            <span class="badge badge-amber">درجة التطابق: {c['match']:.0%}</span>
-        </div>
-        """, unsafe_allow_html=True)
+        if entity_info:
+            # في إجابات الكيانات، أرقام "تكرار/تطابق" التقنية لا تضيف
+            # قيمة للمستخدم — نعرض فقط الاسم والمجموعة المعرفية
+            st.markdown(f"""
+            <div class="root-item">
+                <strong>{c['name']}</strong>
+                <span class="badge badge-purple" style="margin-right:8px">{c['cluster']}</span>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div class="root-item">
+                <strong>{c['name']}</strong>
+                <span class="badge badge-purple" style="margin-right:8px">{c['cluster']}</span>
+                <span class="badge badge-blue">تكرار في القرآن: {c['frequency']}</span>
+                <span class="badge badge-amber">درجة التطابق: {c['match']:.0%}</span>
+            </div>
+            """, unsafe_allow_html=True)
 
     # ── المفاهيم المرتبطة (من العلاقات) ──
     related = result.get("related_concepts", [])
     if related:
         st.markdown("")
         st.markdown('<div class="section-header">🔗 مفاهيم مرتبطة (من الذاكرة الدلالية)</div>', unsafe_allow_html=True)
+        rel_type_labels = {
+            "co_occurrence":     "تزامن في الآية",
+            "semantic":          "علاقة دلالية",
+            "thematic_cluster":  "تجمّع موضوعي",
+            "root_link":         "ربط بجذر",
+            "narrative_sequence": "تسلسل سردي",
+            "episodic_rule":     "قاعدة من الذاكرة التجريبية",
+            "entity_attribute":  "صفة الكيان",
+        }
         for r in related[:6]:
-            rtype = "تزامن" if r["relation_type"] == "co_occurrence" else "دلالية"
+            rtype = rel_type_labels.get(r["relation_type"], r["relation_type"])
             st.markdown(f"""
             <div class="root-item">
                 <strong>{r['concept']}</strong>
