@@ -232,6 +232,16 @@ class CKGManager:
         self.path = path
         self._data: Dict[str, Any] = self._load()
 
+    @property
+    def _concepts(self) -> Dict[str, Any]:
+        """
+        توافق مع ai.arabic_nlp.SemanticAnalyser الذي يتوقع `ckg._concepts`
+        (مرجع مباشر إلى قاموس المفاهيم). يعيد نفس الكائن المرجعي
+        self._data["concepts"] (وليس نسخة)، لذا أي تعديل عبر add_concept
+        ينعكس فوراً هنا أيضاً.
+        """
+        return self._data.setdefault("concepts", {})
+
     def _load(self) -> Dict[str, Any]:
         if self.path.exists():
             try:
