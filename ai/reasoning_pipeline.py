@@ -58,6 +58,8 @@ import numpy as np
 
 from ai.neural_core import NeuralCore, get_default_core
 from ai.knowledge_trainer import CKGManager, VectorEncoder, DOMAIN_CODES
+from ai.experience_store import Episode, EpisodeStore
+from ai.experience_trainer import score_episode
 
 try:
     from ai.arabic_nlp import ArabicNLPEngine
@@ -119,6 +121,8 @@ class PipelineResult:
     target_used: Optional[List[float]] = None
     train_loss: Optional[float] = None
     memory_index: Optional[int] = None
+    episode_id: Optional[str] = None
+    quality: Optional[Dict[str, float]] = None
 
     def to_dict(self) -> dict:
         return {
@@ -133,6 +137,8 @@ class PipelineResult:
             "target_used": self.target_used,
             "train_loss": self.train_loss,
             "memory_index": self.memory_index,
+            "episode_id": self.episode_id,
+            "quality": self.quality,
         }
 
 
@@ -167,6 +173,8 @@ class ReasoningPipeline:
         domain: str = "general",
         core_save_path: Optional[str] = "models/neural_core",
         autosave_every: int = 1,
+        episode_store: Optional[EpisodeStore] = None,
+        record_episodes: bool = True,
     ):
         self.core = core if core is not None else get_default_core(core_save_path or "models/neural_core")
         self.ckg = ckg if ckg is not None else CKGManager()
@@ -188,10 +196,16 @@ class ReasoningPipeline:
         self.autosave_every = max(0, autosave_every)
         self._queries_since_save = 0
 
+        self.record_episodes = record_episodes
+        self.episode_store = episode_store if episode_store is not None else (
+            EpisodeStore() if record_episodes else None
+        )
+
         logger.info(
             f"ReasoningPipeline ready — core={self.core!r}  "
             f"ckg_concepts={self.ckg.concept_count()}  "
-            f"arabic_nlp={'on' if self.arabic_engine else 'off'}"
+            f"arabic_nlp={'on' if self.arabic_engine else 'off'}  "
+            f"episodes={'on' if self.episode_store else 'off'}"
         )
 
     def save_core(self) -> Optional[str]:
@@ -516,6 +530,42 @@ class ReasoningPipeline:
         # 5: Answer
         answer_text = self._build_answer_text(question, ranked, weights)
 
+        # ── Experience Learning: بناء وتخزين Episode (Requirements #1,#2,#4,#5) ──
+        episode_id: Optional[str] = None
+        quality: Optional[Dict[str, float]] = None
+        memory_hits_dicts = [
+            {"similarity": h.similarity, "metadata": {k: v for k, v in h.metadata.items() if k != "raw_vector"}}
+            for h in memory_hits
+        ]
+
+        if self.episode_store is not None:
+            quality = score_episode(
+                matched_concepts=[vars(m) for m in matched],
+                related_concepts=[vars(r) for r in related],
+                memory_hits=memory_hits_dicts,
+                decision_weights=weights,
+            )
+            confidence = quality["answer_confidence"]
+
+            episode = Episode(
+                question=question,
+                matched_concepts=[vars(m) for m in matched],
+                related_concepts=[vars(r) for r in related],
+                decision_weights=weights,
+                confidence=confidence,
+                answer=answer_text,
+                context_vector=context_vector.tolist(),
+                target_used=target.tolist() if target is not None else None,
+                train_loss=train_loss,
+                memory_hits=memory_hits_dicts,
+                quality=quality,
+            )
+            try:
+                episode_id = self.episode_store.add(episode)
+            except Exception as e:
+                logger.warning(f"EpisodeStore.add failed: {e}")
+                episode_id = None
+
         # حفظ تلقائي اختياري (بعد التدريب فقط)
         if self.train_on_query and self.autosave_every > 0:
             self._queries_since_save += 1
@@ -538,4 +588,6 @@ class ReasoningPipeline:
             target_used=target.tolist() if target is not None else None,
             train_loss=train_loss,
             memory_index=memory_index,
+            episode_id=episode_id,
+            quality=quality,
         )
