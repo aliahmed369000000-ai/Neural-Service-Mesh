@@ -642,6 +642,137 @@ class AssociativeMemory:
                 break
         return results
 
+    # ── دمج الذكريات المتشابهة (consolidation) ────────────────────────
+
+    def consolidate(
+        self,
+        similarity_threshold: float = 0.95,
+        min_group_size: int = 2,
+    ) -> dict:
+        """
+        يدمج الذكريات المتشابهة جداً في ذكرى واحدة ممثَّلة.
+
+        الخوارزمية:
+        ───────────
+        1. يحسب cosine similarity بين كل الذكريات المخزَّنة (مصفوفة NxN).
+        2. يجمّع الذكريات التي تشابهها ≥ similarity_threshold في مجموعات
+           (greedy grouping: أول ذكرى غير مُدمَجة بعد تبدأ مجموعة جديدة).
+        3. لكل مجموعة بحجم ≥ min_group_size:
+           - الوزن الجديد = متوسط المتجهات (مُطبَّع).
+           - الـ metadata المدمجة تحتوي:
+               merged_count: عدد الذكريات المدمجة
+               episode_ids:  قائمة بكل episode_ids من metadata الذكريات المدمجة
+               sources:      قائمة بكل source من metadata الذكريات المدمجة
+               stored_at:    timestamp الآن (وقت الدمج)
+               merged: True
+           - تُستبدل ذكريات المجموعة كلها بالذكرى المدمجة الواحدة.
+        4. الذكريات غير المجمَّعة (مجموعات بحجم 1) تُبقى كما هي.
+        5. تُعاد `_vectors` و`_meta` بالنظام الجديد بعد الدمج.
+
+        Parameters
+        ----------
+        similarity_threshold : float, default 0.95
+            الحد الأدنى للتشابه لاعتبار ذكريين متشابهتين.
+        min_group_size : int, default 2
+            الحد الأدنى لحجم المجموعة لتُدمج (لا تُدمج مجموعات حجمها 1).
+
+        Returns
+        -------
+        dict:
+            {
+                "before": int,         # عدد الذكريات قبل الدمج
+                "after": int,          # عدد الذكريات بعد الدمج
+                "merged_groups": int,  # عدد المجموعات التي دُمجت
+                "freed": int,          # عدد الذكريات المحذوفة (before - after)
+            }
+        """
+        n = self._vectors.shape[0]
+        if n < min_group_size:
+            return {"before": n, "after": n, "merged_groups": 0, "freed": 0}
+
+        # حساب مصفوفة التشابه (NxN) — _vectors مُطبَّعة مسبقاً
+        sim_matrix = self._vectors @ self._vectors.T  # shape (N, N)
+
+        # Greedy grouping
+        used = [False] * n
+        groups: List[List[int]] = []
+
+        for i in range(n):
+            if used[i]:
+                continue
+            group = [i]
+            used[i] = True
+            for j in range(i + 1, n):
+                if not used[j] and sim_matrix[i, j] >= similarity_threshold:
+                    group.append(j)
+                    used[j] = True
+            groups.append(group)
+
+        # بناء القوائم الجديدة
+        new_vectors: List[np.ndarray] = []
+        new_meta: List[dict] = []
+        merged_groups = 0
+
+        for group in groups:
+            if len(group) < min_group_size:
+                # لا دمج — أبقِ الذكرى كما هي
+                new_vectors.append(self._vectors[group[0]])
+                new_meta.append(self._meta[group[0]])
+            else:
+                # دمج: متوسط المتجهات مُطبَّع
+                vecs = self._vectors[group]          # shape (k, dim)
+                avg = vecs.mean(axis=0)
+                norm = np.linalg.norm(avg)
+                merged_vec = avg / norm if norm > 0 else avg
+
+                # جمع metadata
+                episode_ids = []
+                sources = []
+                for idx in group:
+                    m = self._meta[idx]
+                    ep_id = m.get("episode_id") or m.get("id")
+                    if ep_id:
+                        episode_ids.append(ep_id)
+                    src = m.get("source") or m.get("concept") or m.get("domain")
+                    if src:
+                        sources.append(src)
+
+                merged_meta = {
+                    "merged": True,
+                    "merged_count": len(group),
+                    "episode_ids": episode_ids,
+                    "sources": sources,
+                    "stored_at": datetime.now(timezone.utc).isoformat(),
+                }
+
+                new_vectors.append(merged_vec)
+                new_meta.append(merged_meta)
+                merged_groups += 1
+
+        before = n
+        after = len(new_vectors)
+
+        # تحديث الحالة الداخلية
+        if new_vectors:
+            self._vectors = np.vstack([v.reshape(1, -1) for v in new_vectors])
+        else:
+            self._vectors = np.zeros((0, self.dim), dtype=np.float64)
+        self._meta = new_meta
+
+        result = {
+            "before": before,
+            "after": after,
+            "merged_groups": merged_groups,
+            "freed": before - after,
+        }
+        logger.info(
+            f"AssociativeMemory.consolidate(): "
+            f"{before}→{after} memories | "
+            f"{merged_groups} groups merged | "
+            f"freed {before - after} slots"
+        )
+        return result
+
     # ── حفظ/تحميل ────────────────────────────────────────────────────
 
     def save(self, path: str) -> str:
