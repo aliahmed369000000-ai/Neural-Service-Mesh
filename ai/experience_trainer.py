@@ -174,6 +174,7 @@ class ExperienceTrainer:
     def __init__(self, core: NeuralCore, store: EpisodeStore):
         self.core = core
         self.store = store
+        self._cycle_count: int = 0
 
     # ── بناء إشارة تدريب من حلقة واحدة ────────────────────────────────
 
@@ -373,6 +374,7 @@ class ExperienceTrainer:
         seed: Optional[int] = None,
         benchmark: Optional[Any] = None,  # ← BenchmarkSuite أو None (lazy-typed لتجنب circular import)
         rollback_threshold: float = 0.05,  # ← هامش التراجع المسموح في MSE
+        consolidate_every: int = 5,  # ← دمج الذاكرة كل N دورة (0 = تعطيل)
     ) -> Dict[str, Any]:
         """
         دورة replay كاملة: top + recent + diverse، بالترتيب.
@@ -451,6 +453,16 @@ class ExperienceTrainer:
             except Exception as e:
                 logger.warning(f"NeuralCore save failed after training cycle: {e}")
 
+        # 4.5. دمج الذاكرة الدوري (consolidation)
+        self._cycle_count += 1
+        consolidation_result = None
+        if consolidate_every > 0 and self._cycle_count % consolidate_every == 0:
+            try:
+                consolidation_result = self.core.memory.consolidate()
+                logger.info(f"Memory consolidation at cycle {self._cycle_count}: {consolidation_result}")
+            except Exception as e:
+                logger.warning(f"Memory consolidation failed: {e}")
+
         # 5. التقرير النهائي
         result = {
             "status": "ok",
@@ -467,5 +479,7 @@ class ExperienceTrainer:
                 "rollback_threshold": rollback_threshold,
                 "n_samples": benchmark.n_samples,
             }
+        if consolidation_result is not None:
+            result["memory_consolidation"] = consolidation_result
 
         return result
