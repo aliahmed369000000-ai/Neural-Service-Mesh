@@ -20,6 +20,14 @@ from ai.neural_core import NeuralCore
 from ai.core_history import CoreHistory, get_default_history, \
     EVENT_TRAINING_CYCLE, EVENT_ROLLBACK, EVENT_PROMOTION, EVENT_CONSOLIDATION
 
+# ── GapFinder: تحميل كسول لتجنب الاستيراد الدائري ─────────────────────────
+def _get_gap_scheduler_class():
+    try:
+        from ai.knowledge_gap_finder import GapFinderScheduler
+        return GapFinderScheduler
+    except ImportError:
+        return None
+
 logger = logging.getLogger("ExperienceLearning")
 
 
@@ -178,6 +186,36 @@ class ExperienceTrainer:
         self.store = store
         self._cycle_count: int = 0
         self._history: CoreHistory = get_default_history()
+
+        # ── GapFinder: مجدِّول الاستكشاف التلقائي ─────────────────────
+        self._gap_scheduler = None
+        self._gap_explore_every: int = 3
+
+    def set_pipeline(self, pipeline, gap_explore_every: int = 3):
+        """
+        يربط ReasoningPipeline بـ ExperienceTrainer لتفعيل الاستكشاف التلقائي.
+
+        Parameters
+        ----------
+        pipeline : ReasoningPipeline
+            النظام الذي سيُستخدم لتشغيل أسئلة GapFinder.
+        gap_explore_every : int
+            عدد دورات التدريب بين كل دورة استكشافية. 0 = تعطيل.
+        """
+        GapSchedulerCls = _get_gap_scheduler_class()
+        if GapSchedulerCls is None:
+            logger.warning("set_pipeline: GapFinderScheduler غير متاح — يُتجاهَل")
+            return
+
+        self._gap_scheduler = GapSchedulerCls(
+            pipeline=pipeline,
+            drive_engine=getattr(pipeline, "_drive_engine", None),
+        )
+        self._gap_explore_every = max(0, gap_explore_every)
+        logger.info(
+            f"[ExperienceTrainer] GapFinderScheduler مرتبط  "
+            f"(استكشاف كل {self._gap_explore_every} دورة)"
+        )
 
     # ── بناء إشارة تدريب من حلقة واحدة ────────────────────────────────
 
@@ -535,6 +573,27 @@ class ExperienceTrainer:
             result["memory_consolidation"] = consolidation_result
         if promotion_result is not None:
             result["structural_variation"] = promotion_result
+        if gap_exploration_result is not None:
+            result["gap_exploration"] = {
+                "questions_asked":   gap_exploration_result.get("questions_asked", 0),
+                "gaps_found":        gap_exploration_result.get("gaps_found", 0),
+                "drives_satisfied":  gap_exploration_result.get("drives_satisfied", []),
+                "skipped":           gap_exploration_result.get("skipped", False),
+            }
+
+        # ── GapFinder: استكشاف تلقائي لفجوات المعرفة (كل N دورة) ──────
+        gap_exploration_result = None
+        if (self._gap_scheduler is not None
+                and self._gap_explore_every > 0
+                and self._cycle_count % self._gap_explore_every == 0):
+            try:
+                gap_exploration_result = self._gap_scheduler.run_one_cycle(force=True)
+                logger.info(
+                    f"[ExperienceTrainer] GapFinder دورة #{self._cycle_count}  "
+                    f"أسئلة={gap_exploration_result.get('questions_asked', 0)}"
+                )
+            except Exception as exc:
+                logger.warning(f"GapFinder cycle error: {exc}")
 
         # ── سجل التاريخ: حدث training_cycle في النهاية ──
         self._history.log_event(
