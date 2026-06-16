@@ -57,6 +57,9 @@ class Episode:
 
     episode_id: str = field(default_factory=lambda: f"exp_{uuid.uuid4().hex[:16]}")
 
+    # تغذية رجعية خارجية من المستخدم
+    external_feedback: Optional[Dict[str, Any]] = None
+
     def to_row(self) -> Dict[str, Any]:
         return {
             "id": self.episode_id,
@@ -72,6 +75,7 @@ class Episode:
             "train_loss": self.train_loss,
             "memory_hits": json.dumps(self.memory_hits, ensure_ascii=False),
             "quality": json.dumps(self.quality, ensure_ascii=False),
+            "external_feedback": json.dumps(self.external_feedback) if self.external_feedback is not None else None,
         }
 
     @classmethod
@@ -90,6 +94,7 @@ class Episode:
             train_loss=row["train_loss"],
             memory_hits=json.loads(row["memory_hits"]),
             quality=json.loads(row["quality"]) if row["quality"] else {},
+            external_feedback=json.loads(row["external_feedback"]) if row["external_feedback"] else None,
         )
 
 
@@ -130,6 +135,12 @@ class EpisodeStore:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_neural_episodes_quality "
                       "ON neural_episodes(json_extract(quality, '$.overall_quality'))")
         conn.commit()
+        # هجرة قواعد البيانات القديمة — أضف العمود إن لم يكن موجوداً
+        try:
+            conn.execute("ALTER TABLE neural_episodes ADD COLUMN external_feedback TEXT")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # العمود موجود مسبقاً
         conn.close()
 
     # ── إضافة ────────────────────────────────────────────────────────
@@ -229,6 +240,46 @@ class EpisodeStore:
         )
         conn.commit()
         conn.close()
+
+    def update_feedback(
+        self,
+        episode_id: str,
+        rating: Optional[str],
+        correction_text: Optional[str] = None,
+    ) -> bool:
+        """
+        يحدّث حقل external_feedback لحلقة موجودة.
+        يرجع True إن وُجد الـ episode_id، False إن لم يوجد.
+        """
+        from datetime import datetime, timezone
+        feedback = {
+            "rating": rating,
+            "correction_text": correction_text,
+            "feedback_at": datetime.now(timezone.utc).isoformat(),
+        }
+        conn = sqlite3.connect(str(self.db_path))
+        cursor = conn.execute(
+            "UPDATE neural_episodes SET external_feedback = ? WHERE id = ?",
+            (json.dumps(feedback), episode_id),
+        )
+        conn.commit()
+        affected = cursor.rowcount
+        conn.close()
+        return affected > 0
+
+    def get_with_feedback(self, limit: int = 50) -> List[Episode]:
+        """يرجع الحلقات التي لديها external_feedback مرتبة بالأحدث أولاً."""
+        conn = sqlite3.connect(str(self.db_path))
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """SELECT * FROM neural_episodes
+               WHERE external_feedback IS NOT NULL
+               ORDER BY timestamp DESC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        conn.close()
+        return [Episode.from_row(r) for r in rows]
 
     def stats(self) -> Dict[str, Any]:
         conn = sqlite3.connect(str(self.db_path))
