@@ -371,12 +371,28 @@ class ExperienceTrainer:
         save: bool = True,
         save_path: str = "models/neural_core",
         seed: Optional[int] = None,
+        benchmark: Optional[Any] = None,  # ← BenchmarkSuite أو None (lazy-typed لتجنب circular import)
+        rollback_threshold: float = 0.05,  # ← هامش التراجع المسموح في MSE
     ) -> Dict[str, Any]:
         """
         دورة replay كاملة: top + recent + diverse، بالترتيب.
         تُحفَظ النواة بعد الدورة إن save=True.
 
-        Returns: تقرير يحتوي نتائج الثلاث استراتيجيات + إحصاءات المخزن.
+        إذا مُرّر benchmark:
+          1. يُحسب score_before = benchmark.evaluate(core) قبل التدريب.
+          2. تُحفظ نسخة احتياطية مؤقتة من NeuralCore.
+          3. تُنفَّذ دورة التدريب كالمعتاد.
+          4. يُحسب score_after = benchmark.evaluate(core) بعد التدريب.
+          5. إذا score_after > score_before + rollback_threshold:
+               → تُستعاد النسخة الاحتياطية (rollback)، rolled_back=True.
+             وإلا: تُحذف النسخة الاحتياطية، rolled_back=False.
+          6. تُسجَّل نتائج Benchmark في التقرير النهائي.
+
+        إن لم يُمرَّر benchmark (None)، تعمل الدالة بالضبط كما كانت
+        (backward compatible) دون أي تغيير في السلوك.
+
+        Returns: تقرير يحتوي نتائج الثلاث استراتيجيات + إحصاءات المخزن
+                 (+ معلومات benchmark إن وُجدت).
         """
         n_episodes = self.store.count()
         if n_episodes == 0:
@@ -385,20 +401,71 @@ class ExperienceTrainer:
                 "message": "لا توجد حلقات مخزَّنة بعد — لا يمكن تشغيل دورة تدريب.",
             }
 
+        # 1. قبل التدريب: benchmark + نسخة احتياطية
+        backup_path = None
+        score_before = None
+        if benchmark is not None:
+            score_before = benchmark.evaluate(self.core)["score"]
+            backup_path = save_path + "_rollback_backup"
+            try:
+                self.core.save(backup_path)
+            except Exception as e:
+                logger.warning(f"Benchmark backup failed: {e}")
+                backup_path = None
+
+        # 2. تنفيذ التدريب (دون تغيير)
         report_top = self.replay_top(limit=top_limit)
         report_recent = self.replay_recent(limit=recent_limit)
         report_diverse = self.replay_diverse(limit=diverse_limit, seed=seed)
 
+        # 3. بعد التدريب: benchmark + قرار rollback
+        score_after = None
+        rolled_back = False
+        if benchmark is not None and backup_path is not None:
+            score_after = benchmark.evaluate(self.core)["score"]
+            if score_after > score_before + rollback_threshold:
+                # تراجع الأداء بأكثر من الهامش المسموح → rollback
+                try:
+                    from ai.neural_core import NeuralCore
+                    self.core = NeuralCore.load(backup_path)
+                    rolled_back = True
+                    logger.warning(
+                        f"run_training_cycle: ROLLBACK triggered — "
+                        f"score_before={score_before:.6f}, score_after={score_after:.6f}"
+                    )
+                except Exception as e:
+                    logger.error(f"Rollback failed: {e}")
+            # تنظيف النسخة الاحتياطية
+            try:
+                import os
+                import shutil
+                if os.path.exists(backup_path):
+                    shutil.rmtree(backup_path, ignore_errors=True)
+            except Exception:
+                pass
+
+        # 4. حفظ إن save=True (بعد rollback أو بعد تدريب ناجح)
         if save:
             try:
                 self.core.save(save_path)
             except Exception as e:
                 logger.warning(f"NeuralCore save failed after training cycle: {e}")
 
-        return {
+        # 5. التقرير النهائي
+        result = {
             "status": "ok",
             "store_stats": self.store.stats(),
             "top": report_top.to_dict(),
             "recent": report_recent.to_dict(),
             "diverse": report_diverse.to_dict(),
         }
+        if benchmark is not None:
+            result["benchmark"] = {
+                "score_before": round(score_before, 8) if score_before is not None else None,
+                "score_after": round(score_after, 8) if score_after is not None else None,
+                "rolled_back": rolled_back,
+                "rollback_threshold": rollback_threshold,
+                "n_samples": benchmark.n_samples,
+            }
+
+        return result
