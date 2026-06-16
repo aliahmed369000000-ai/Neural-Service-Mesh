@@ -375,6 +375,9 @@ class ExperienceTrainer:
         benchmark: Optional[Any] = None,  # ← BenchmarkSuite أو None (lazy-typed لتجنب circular import)
         rollback_threshold: float = 0.05,  # ← هامش التراجع المسموح في MSE
         consolidate_every: int = 5,  # ← دمج الذاكرة كل N دورة (0 = تعطيل)
+        promote_every: int = 10,  # ← تنوّع بنيوي + ترقية كل N دورة (0 = تعطيل)
+        n_variants: int = 3,  # ← عدد الـ variants في select_and_promote
+        improvement_threshold: float = 0.02,  # ← الحد الأدنى للتحسّن المطلوب للترقية
     ) -> Dict[str, Any]:
         """
         دورة replay كاملة: top + recent + diverse، بالترتيب.
@@ -463,6 +466,25 @@ class ExperienceTrainer:
             except Exception as e:
                 logger.warning(f"Memory consolidation failed: {e}")
 
+        # 4.6. تنوّع بنيوي + ترقية دورية (structural variation & promotion)
+        promotion_result = None
+        if (benchmark is not None
+                and promote_every > 0
+                and self._cycle_count % promote_every == 0):
+            try:
+                from ai.neural_core import NeuralCore
+                new_core, promo_report = NeuralCore.select_and_promote(
+                    core=self.core,
+                    benchmark=benchmark,
+                    n_variants=n_variants,
+                    improvement_threshold=improvement_threshold,
+                )
+                if promo_report["promoted"]:
+                    self.core = new_core   # استبدال النواة الحالية بالأفضل
+                promotion_result = promo_report
+            except Exception as e:
+                logger.warning(f"select_and_promote failed: {e}")
+
         # 5. التقرير النهائي
         result = {
             "status": "ok",
@@ -481,5 +503,7 @@ class ExperienceTrainer:
             }
         if consolidation_result is not None:
             result["memory_consolidation"] = consolidation_result
+        if promotion_result is not None:
+            result["structural_variation"] = promotion_result
 
         return result
