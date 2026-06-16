@@ -106,7 +106,9 @@ class EpisodeStore:
     """تخزين دائم للحلقات (جدول neural_episodes مستقل)."""
 
     def __init__(self, db_path: Path | str = DEFAULT_DB_PATH):
-        self.db_path = Path(db_path)
+        # مسار مطلق فوراً (انظر نفس الملاحظة في ai/core_history.py) — يحمي
+        # من سلوك مختلف إن تغيّر CWD بعد إنشاء الكائن.
+        self.db_path = Path(db_path).resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
