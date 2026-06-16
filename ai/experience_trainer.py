@@ -17,6 +17,8 @@ import numpy as np
 
 from ai.experience_store import Episode, EpisodeStore
 from ai.neural_core import NeuralCore
+from ai.core_history import CoreHistory, get_default_history, \
+    EVENT_TRAINING_CYCLE, EVENT_ROLLBACK, EVENT_PROMOTION, EVENT_CONSOLIDATION
 
 logger = logging.getLogger("ExperienceLearning")
 
@@ -175,6 +177,7 @@ class ExperienceTrainer:
         self.core = core
         self.store = store
         self._cycle_count: int = 0
+        self._history: CoreHistory = get_default_history()
 
     # ── بناء إشارة تدريب من حلقة واحدة ────────────────────────────────
 
@@ -406,6 +409,9 @@ class ExperienceTrainer:
                 "message": "لا توجد حلقات مخزَّنة بعد — لا يمكن تشغيل دورة تدريب.",
             }
 
+        # ── سجل التاريخ: hash الحالة الأب قبل أي تعديل ──
+        parent_hash = self._history.get_last_state_hash()
+
         # 1. قبل التدريب: benchmark + نسخة احتياطية
         backup_path = None
         score_before = None
@@ -449,6 +455,20 @@ class ExperienceTrainer:
             except Exception:
                 pass
 
+        # ── سجل التاريخ: حدث rollback إن حدث ──
+        if rolled_back:
+            self._history.log_event(
+                core=self.core,
+                event_type=EVENT_ROLLBACK,
+                benchmark_score=score_before,  # score ما قبل التدريب (الأفضل)
+                parent_hash=parent_hash,
+                extra={
+                    "score_before": score_before,
+                    "score_after": score_after,
+                    "rollback_threshold": rollback_threshold,
+                },
+            )
+
         # 4. حفظ إن save=True (بعد rollback أو بعد تدريب ناجح)
         if save:
             try:
@@ -485,6 +505,16 @@ class ExperienceTrainer:
             except Exception as e:
                 logger.warning(f"select_and_promote failed: {e}")
 
+        # ── سجل التاريخ: حدث promotion إن حدث ──
+        if promotion_result is not None and promotion_result.get("promoted"):
+            self._history.log_event(
+                core=self.core,
+                event_type=EVENT_PROMOTION,
+                benchmark_score=promotion_result.get("best_variant_score"),
+                parent_hash=parent_hash,
+                extra=promotion_result,
+            )
+
         # 5. التقرير النهائي
         result = {
             "status": "ok",
@@ -505,5 +535,18 @@ class ExperienceTrainer:
             result["memory_consolidation"] = consolidation_result
         if promotion_result is not None:
             result["structural_variation"] = promotion_result
+
+        # ── سجل التاريخ: حدث training_cycle في النهاية ──
+        self._history.log_event(
+            core=self.core,
+            event_type=EVENT_TRAINING_CYCLE,
+            benchmark_score=score_after if score_after is not None else None,
+            parent_hash=parent_hash,
+            extra={
+                "cycle": self._cycle_count,
+                "top_trained": report_top.to_dict().get("episodes_used"),
+                "recent_trained": report_recent.to_dict().get("episodes_used"),
+            },
+        )
 
         return result
