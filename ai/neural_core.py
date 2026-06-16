@@ -33,7 +33,10 @@ import time
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ai.benchmark_suite import BenchmarkSuite
 
 import numpy as np
 
@@ -1010,16 +1013,22 @@ class NeuralCore:
                                   loss=loss, optimizer=optimizer, name=f"{name}_net", seed=seed)
 
         # ── تحميل الأوزان المدروسة بعد بناء الطبقات مباشرة ──
-        _weights = _NEURAL_CORE_WEIGHTS
-        _layer_index = 0
-        for _layer in self.net.layers:
-            _rows = _layer.out_dim  # 7 للطبقات 1-15، و4 للطبقة 16
-            _layer.W = np.array(
-                _weights[_layer_index: _layer_index + _rows],
-                dtype=np.float64
-            )
-            _layer.b = np.full(_rows, 0.6, dtype=np.float64)
-            _layer_index += _rows
+        # تُحمَّل فقط إذا كانت بنية الشبكة مطابقة تماماً للبنية الافتراضية
+        # (15 طبقة 7×7 + طبقة أخيرة 4×7)، حفاظاً على صحة أي بنية مختلفة
+        # تُبنى عبر fork_variant (مثل add_layer بوحدات غير 7).
+        _default_shapes = [(7, 7)] * len(DEFAULT_HIDDEN_DIMS) + [(output_dim, 7)]
+        _actual_shapes = [layer.W.shape for layer in self.net.layers]
+        if _actual_shapes == _default_shapes:
+            _weights = _NEURAL_CORE_WEIGHTS
+            _layer_index = 0
+            for _layer in self.net.layers:
+                _rows = _layer.out_dim  # 7 للطبقات 1-15، و4 للطبقة 16
+                _layer.W = np.array(
+                    _weights[_layer_index: _layer_index + _rows],
+                    dtype=np.float64
+                )
+                _layer.b = np.full(_rows, 0.6, dtype=np.float64)
+                _layer_index += _rows
 
         self.memory = AssociativeMemory(dim=input_dim, capacity=memory_capacity,
                                          name=f"{name}_memory")
@@ -1147,6 +1156,317 @@ class NeuralCore:
         logger.info(f"NeuralCore '{self.name}' EVOLVED: طبقة 7×7 جديدة أُضيفت قبل الطبقة الأخيرة "
                     f"(إجمالي الطبقات: {len(self.net.layers)}, الخطوة: {self.net._train_steps})")
         return True
+
+    # ── تنوّع بنيوي + اختيار (structural variation & selection) ───────
+
+    def fork_variant(self, mutation: dict, name: Optional[str] = None) -> "NeuralCore":
+        """
+        ينشئ نسخة من NeuralCore الحالية مع تغيير بنيوي محدد (طفرة).
+        لا يؤثر على الأصل أبداً — نسخة مستقلة تماماً.
+
+        mutation : dict يحدد نوع الطفرة. الأنواع المدعومة:
+
+        1. إضافة طبقة مخفية جديدة:
+           {"type": "add_layer", "units": int, "position": int}
+           - يُدرج طبقة relu جديدة في موضع `position` من الطبقات المخفية
+           - layer_dims الجديد: [7, ..., units_at_position, ..., 4]
+           - الأوزان الموجودة تُنسخ للطبقات قبل/بعد موضع الإدراج (ما أمكن)
+           - أوزان الطبقة الجديدة: Xavier init (الافتراضي عند بناء الشبكة)
+
+        2. تغيير learning_rate:
+           {"type": "change_lr", "lr": float}
+           - نفس البنية والأوزان، لكن learning_rate مختلف
+
+        3. تغيير activation لطبقة:
+           {"type": "change_activation", "layer_index": int, "activation": str}
+           - layer_index: 0-based من كل الطبقات (0 = أول طبقة مخفية)
+           - activation: "relu", "tanh", "sigmoid", أو "softmax"
+           - نفس الأوزان، activation مختلف للطبقة المحددة
+
+        Parameters
+        ----------
+        mutation : dict  وصف الطفرة (انظر أعلاه)
+        name : str أو None  اسم للنسخة الجديدة (يولَّد تلقائياً إن None)
+
+        Returns
+        -------
+        NeuralCore  نسخة جديدة مستقلة بالطفرة المطلوبة
+
+        Raises
+        ------
+        ValueError  إذا كان نوع الطفرة غير معروف أو البيانات ناقصة
+        """
+        mutation_type = mutation.get("type")
+        variant_name = name or f"{self.name}_variant_{mutation_type}"
+
+        # استخرج بنية الشبكة الحالية
+        current_layer_dims = list(self.net.layer_dims)
+        current_activations = [layer.activation for layer in self.net.layers]
+
+        if mutation_type == "add_layer":
+            units = int(mutation.get("units", 16))
+            position = int(mutation.get("position", len(current_layer_dims) // 2))
+            # position: موضع الإدراج في hidden_dims (0-based)
+            # current_layer_dims = [input, h1, h2, ..., output]
+            # hidden range = [1 : -1]
+            position = max(1, min(position, len(current_layer_dims) - 1))
+
+            new_layer_dims = (
+                current_layer_dims[:position]
+                + [units]
+                + current_layer_dims[position:]
+            )
+            new_activations = (
+                current_activations[:position - 1]
+                + ["relu"]
+                + current_activations[position - 1:]
+            )
+
+            variant = NeuralCore(
+                input_dim=new_layer_dims[0],
+                hidden_dims=new_layer_dims[1:-1],
+                output_dim=new_layer_dims[-1],
+                activations=new_activations,
+                loss=self.net.loss_name,
+                learning_rate=self.net.learning_rate,
+                optimizer=self.net.optimizer,
+                memory_capacity=self.memory.capacity,
+                plateau_window=self.plateau_window,
+                plateau_threshold=self.plateau_threshold,
+                plateau_cooldown=self.plateau_cooldown,
+                grow_units=self.grow_units,
+                max_hidden_width=self.max_hidden_width,
+                name=variant_name,
+            )
+            # نسخ أوزان الطبقات الموجودة (ما أمكن — الطبقات قبل/بعد الإدراج)
+            for i, src_layer in enumerate(self.net.layers):
+                j = i if i < position - 1 else i + 1  # تخطي الطبقة الجديدة
+                if j < len(variant.net.layers):
+                    tgt_layer = variant.net.layers[j]
+                    # نسخ الأوزان إن تطابقت الأبعاد
+                    if src_layer.W.shape == tgt_layer.W.shape:
+                        tgt_layer.W = src_layer.W.copy()
+                        tgt_layer.b = src_layer.b.copy()
+
+        elif mutation_type == "change_lr":
+            lr = float(mutation.get("lr", self.net.learning_rate * 2))
+            variant = NeuralCore(
+                input_dim=current_layer_dims[0],
+                hidden_dims=current_layer_dims[1:-1],
+                output_dim=current_layer_dims[-1],
+                activations=list(current_activations),
+                loss=self.net.loss_name,
+                learning_rate=lr,
+                optimizer=self.net.optimizer,
+                memory_capacity=self.memory.capacity,
+                plateau_window=self.plateau_window,
+                plateau_threshold=self.plateau_threshold,
+                plateau_cooldown=self.plateau_cooldown,
+                grow_units=self.grow_units,
+                max_hidden_width=self.max_hidden_width,
+                name=variant_name,
+            )
+            # نسخ الأوزان كاملاً (نفس البنية)
+            for src_layer, tgt_layer in zip(self.net.layers, variant.net.layers):
+                tgt_layer.W = src_layer.W.copy()
+                tgt_layer.b = src_layer.b.copy()
+
+        elif mutation_type == "change_activation":
+            layer_index = int(mutation.get("layer_index", 0))
+            new_activation = str(mutation.get("activation", "tanh"))
+            if new_activation not in ("relu", "tanh", "sigmoid", "softmax"):
+                raise ValueError(f"activation غير مدعوم: {new_activation}")
+
+            new_activations = list(current_activations)
+            if 0 <= layer_index < len(new_activations):
+                new_activations[layer_index] = new_activation
+            else:
+                raise ValueError(
+                    f"layer_index {layer_index} خارج النطاق [0, {len(new_activations)-1}]"
+                )
+
+            variant = NeuralCore(
+                input_dim=current_layer_dims[0],
+                hidden_dims=current_layer_dims[1:-1],
+                output_dim=current_layer_dims[-1],
+                activations=new_activations,
+                loss=self.net.loss_name,
+                learning_rate=self.net.learning_rate,
+                optimizer=self.net.optimizer,
+                memory_capacity=self.memory.capacity,
+                plateau_window=self.plateau_window,
+                plateau_threshold=self.plateau_threshold,
+                plateau_cooldown=self.plateau_cooldown,
+                grow_units=self.grow_units,
+                max_hidden_width=self.max_hidden_width,
+                name=variant_name,
+            )
+            # نسخ الأوزان كاملاً
+            for src_layer, tgt_layer in zip(self.net.layers, variant.net.layers):
+                tgt_layer.W = src_layer.W.copy()
+                tgt_layer.b = src_layer.b.copy()
+
+        else:
+            raise ValueError(
+                f"نوع الطفرة غير معروف: '{mutation_type}'. "
+                f"الأنواع المدعومة: add_layer, change_lr, change_activation"
+            )
+
+        logger.info(
+            f"fork_variant: '{self.name}' → '{variant_name}' "
+            f"(mutation={mutation})"
+        )
+        return variant
+
+    @staticmethod
+    def evaluate_variants(
+        variants: List["NeuralCore"],
+        benchmark: "BenchmarkSuite",
+    ) -> List[dict]:
+        """
+        يُقيّم كل نسخة بناءً على benchmark.evaluate() ويرجع النتائج مرتبةً
+        من الأفضل (MSE أقل) إلى الأسوأ.
+
+        Parameters
+        ----------
+        variants : List[NeuralCore]
+        benchmark : BenchmarkSuite
+
+        Returns
+        -------
+        List[dict]:
+            [
+                {"core": NeuralCore, "score": float, "rank": int},
+                ...
+            ]
+            مرتب تصاعدياً بـ score (أقل MSE = أفضل = رتبة 1)
+        """
+        results = []
+        for v in variants:
+            try:
+                eval_result = benchmark.evaluate(v)
+                results.append({
+                    "core": v,
+                    "score": eval_result["score"],
+                    "n_samples": eval_result.get("n_samples", 0),
+                })
+            except Exception as e:
+                logger.warning(f"evaluate_variants: فشل تقييم '{v.name}': {e}")
+                results.append({
+                    "core": v,
+                    "score": float("inf"),
+                    "n_samples": 0,
+                })
+
+        results.sort(key=lambda r: r["score"])
+        for i, r in enumerate(results):
+            r["rank"] = i + 1
+
+        return results
+
+    @staticmethod
+    def select_and_promote(
+        core: "NeuralCore",
+        benchmark: "BenchmarkSuite",
+        n_variants: int = 3,
+        improvement_threshold: float = 0.02,
+        mutations: Optional[List[dict]] = None,
+    ) -> Tuple["NeuralCore", dict]:
+        """
+        ينشئ 2-3 variants بطفرات مختلفة، يقيّمها، ويستبدل `core`
+        بالأفضل فقط إذا تفوّق على الأصل بهامش `improvement_threshold`.
+
+        Parameters
+        ----------
+        core : NeuralCore  النواة الأصلية
+        benchmark : BenchmarkSuite  للتقييم
+        n_variants : int  عدد الـ variants (افتراضي 3)
+        improvement_threshold : float
+            الحد الأدنى للتحسّن المطلوب (MSE relative reduction).
+            مثال: 0.02 = يجب أن يكون الـ variant أفضل بـ 2% على الأقل.
+        mutations : Optional[List[dict]]
+            قائمة طفرات مخصصة. إن None، تُستخدم الطفرات الافتراضية الثلاث:
+            [
+                {"type": "change_lr", "lr": core.net.learning_rate * 2},
+                {"type": "change_lr", "lr": core.net.learning_rate * 0.5},
+                {"type": "change_activation", "layer_index": 0, "activation": "tanh"},
+            ]
+
+        Returns
+        -------
+        Tuple[NeuralCore, dict]:
+            - NeuralCore: الأفضل (قد يكون الأصل أو variant)
+            - dict: تقرير العملية:
+                {
+                    "promoted": bool,          # هل تم الترقية؟
+                    "original_score": float,
+                    "best_variant_score": float,
+                    "best_variant_name": str,
+                    "improvement_pct": float,  # نسبة التحسّن (إن وُجد)
+                    "variants_evaluated": int,
+                }
+        """
+        if mutations is None:
+            mutations = [
+                {"type": "change_lr", "lr": core.net.learning_rate * 2},
+                {"type": "change_lr", "lr": core.net.learning_rate * 0.5},
+                {"type": "change_activation", "layer_index": 0, "activation": "tanh"},
+            ]
+        mutations = mutations[:n_variants]
+
+        # تقييم الأصل
+        original_score = benchmark.evaluate(core)["score"]
+
+        # إنشاء variants
+        variants = []
+        for i, mutation in enumerate(mutations):
+            try:
+                v = core.fork_variant(mutation, name=f"{core.name}_variant_{i+1}")
+                variants.append(v)
+            except Exception as e:
+                logger.warning(f"select_and_promote: فشل إنشاء variant {i+1}: {e}")
+
+        if not variants:
+            return core, {
+                "promoted": False,
+                "original_score": original_score,
+                "best_variant_score": None,
+                "best_variant_name": None,
+                "improvement_pct": 0.0,
+                "variants_evaluated": 0,
+            }
+
+        # تقييم variants
+        ranked = NeuralCore.evaluate_variants(variants, benchmark)
+        best = ranked[0]
+
+        improvement = (original_score - best["score"]) / original_score if original_score > 0 else 0.0
+        promoted = improvement >= improvement_threshold
+
+        if promoted:
+            winner = best["core"]
+            winner.name = core.name  # يحمل نفس اسم الأصل
+            logger.info(
+                f"select_and_promote: PROMOTED '{best['core'].name}' "
+                f"(score {best['score']:.6f} vs original {original_score:.6f}, "
+                f"improvement={improvement*100:.2f}%)"
+            )
+        else:
+            winner = core
+            logger.info(
+                f"select_and_promote: NO PROMOTION "
+                f"(best variant score {best['score']:.6f} vs original {original_score:.6f}, "
+                f"improvement={improvement*100:.2f}% < threshold={improvement_threshold*100:.2f}%)"
+            )
+
+        return winner, {
+            "promoted": promoted,
+            "original_score": round(original_score, 8),
+            "best_variant_score": round(best["score"], 8),
+            "best_variant_name": best["core"].name,
+            "improvement_pct": round(improvement * 100, 4),
+            "variants_evaluated": len(variants),
+        }
 
     # ── حفظ/تحميل النواة بالكامل ──────────────────────────────────────
 
