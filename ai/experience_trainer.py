@@ -260,6 +260,107 @@ class ExperienceTrainer:
         episodes = self.store.get_diverse_sample(limit=limit, seed=seed)
         return self._replay(episodes, strategy="diverse")
 
+    def replay_feedback(self, limit: int = 20) -> ReplayReport:
+        """
+        يعيد تدريب NeuralCore على الحلقات التي لديها external_feedback،
+        مع تعديل الـ target بناءً على التقييم.
+
+        معادلة تعديل الـ target:
+        ─────────────────────────
+        target_original = target_used (المخزَّن في الحلقة)
+
+        إذا rating == "up":
+            target_adjusted = target_original  (نُقوّيه كما هو — لا تغيير)
+            يعني: الشبكة كانت صحيحة، نُعزّز نفس الهدف
+
+        إذا rating == "down":
+            target_adjusted = 1.0 - target_original  (عكس الهدف)
+            المعادلة: target_adjusted_i = 1.0 - target_original_i  لكل عنصر i
+            يعني: إذا كان target=[0.3, 0.5, 0.1, 0.1]
+                  يصبح:  target=[0.7, 0.5, 0.9, 0.9]
+            ثم يُطبَّع ليجمع إلى 1.0:
+                  target_final = target_adjusted / sum(target_adjusted)
+            المنطق: "down" يعني أن الشبكة أعطت أوزاناً خاطئة،
+                    فندفعها في الاتجاه المعاكس.
+
+        إذا correction_text موجود:
+            يُسجَّل في الـ metadata فقط (للمراجعة البشرية لاحقاً)،
+            لا يؤثر على الـ target حالياً (مستقبلي).
+
+        الأولوية: حلقات الـ "down" أولاً (أكثر أهمية للتصحيح)،
+                  ثم حلقات الـ "up".
+        ─────────────────────────
+        """
+        episodes_with_fb = self.store.get_with_feedback(limit=limit)
+        if not episodes_with_fb:
+            return ReplayReport("feedback", 0, None, None, [], [])
+
+        # ترتيب: "down" أولاً ثم "up"
+        down_eps = [ep for ep in episodes_with_fb
+                    if ep.external_feedback and ep.external_feedback.get("rating") == "down"]
+        up_eps = [ep for ep in episodes_with_fb
+                  if ep.external_feedback and ep.external_feedback.get("rating") == "up"]
+        other_eps = [ep for ep in episodes_with_fb
+                     if ep not in down_eps and ep not in up_eps]
+        ordered = down_eps + up_eps + other_eps
+
+        signals = []
+        used_ids = []
+        for ep in ordered:
+            if not ep.context_vector:
+                continue
+
+            x = np.array(ep.context_vector, dtype=np.float64)
+
+            if ep.target_used is not None and len(ep.target_used) == 4:
+                target_original = np.array(ep.target_used, dtype=np.float64)
+            else:
+                target_original = np.array([0.30, 0.35, 0.25, 0.10], dtype=np.float64)
+
+            rating = ep.external_feedback.get("rating") if ep.external_feedback else None
+
+            if rating == "down":
+                target_adjusted = 1.0 - target_original
+                total = target_adjusted.sum()
+                target = target_adjusted / total if total > 0 else target_original
+            else:
+                # "up" أو None: نُعزّز الهدف الأصلي كما هو
+                target = target_original
+
+            signals.append((x, target, ep))
+            used_ids.append(ep.episode_id)
+
+        if not signals:
+            return ReplayReport("feedback", 0, None, None, [], [])
+
+        losses_before = []
+        for x, target, _ in signals:
+            out = self.core.forward(x)
+            from ai.neural_core import mse_loss
+            l, _ = mse_loss(out, target)
+            losses_before.append(l)
+
+        losses_after = []
+        for x, target, ep in signals:
+            correction = ep.external_feedback.get("correction_text") if ep.external_feedback else None
+            # correction_text مسجَّل للمراجعة البشرية فقط — لا يؤثر على التدريب حالياً
+            if correction:
+                logger.info(f"replay_feedback: episode={ep.episode_id} has correction_text (logged only): {correction[:80]}")
+            l = self.core.train_step(x, target)
+            losses_after.append(l)
+            self.core.evolve_if_plateau()
+
+        self.store.mark_replayed(used_ids)
+
+        return ReplayReport(
+            strategy="feedback",
+            episodes_used=len(signals),
+            avg_loss_before=round(float(np.mean(losses_before)), 8),
+            avg_loss_after=round(float(np.mean(losses_after)), 8),
+            losses=[round(float(l), 8) for l in losses_after],
+            episode_ids=used_ids,
+        )
+
     # ── دورة تدريب دورية كاملة (Requirement #3/#7) ─────────────────────
 
     def run_training_cycle(
