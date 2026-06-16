@@ -553,6 +553,20 @@ class ExperienceTrainer:
                 extra=promotion_result,
             )
 
+        # ── GapFinder: استكشاف تلقائي لفجوات المعرفة (كل N دورة) ──────
+        gap_exploration_result = None
+        if (self._gap_scheduler is not None
+                and self._gap_explore_every > 0
+                and self._cycle_count % self._gap_explore_every == 0):
+            try:
+                gap_exploration_result = self._gap_scheduler.run_one_cycle(force=True)
+                logger.info(
+                    f"[ExperienceTrainer] GapFinder دورة #{self._cycle_count}  "
+                    f"أسئلة={gap_exploration_result.get('questions_asked', 0)}"
+                )
+            except Exception as exc:
+                logger.warning(f"GapFinder cycle error: {exc}")
+
         # 5. التقرير النهائي
         result = {
             "status": "ok",
@@ -580,20 +594,6 @@ class ExperienceTrainer:
                 "drives_satisfied":  gap_exploration_result.get("drives_satisfied", []),
                 "skipped":           gap_exploration_result.get("skipped", False),
             }
-
-        # ── GapFinder: استكشاف تلقائي لفجوات المعرفة (كل N دورة) ──────
-        gap_exploration_result = None
-        if (self._gap_scheduler is not None
-                and self._gap_explore_every > 0
-                and self._cycle_count % self._gap_explore_every == 0):
-            try:
-                gap_exploration_result = self._gap_scheduler.run_one_cycle(force=True)
-                logger.info(
-                    f"[ExperienceTrainer] GapFinder دورة #{self._cycle_count}  "
-                    f"أسئلة={gap_exploration_result.get('questions_asked', 0)}"
-                )
-            except Exception as exc:
-                logger.warning(f"GapFinder cycle error: {exc}")
 
         # ── سجل التاريخ: حدث training_cycle في النهاية ──
         self._history.log_event(
