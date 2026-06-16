@@ -591,3 +591,44 @@ class ReasoningPipeline:
             episode_id=episode_id,
             quality=quality,
         )
+
+    def submit_feedback(
+        self,
+        episode_id: str,
+        rating: Optional[str] = None,
+        correction_text: Optional[str] = None,
+    ) -> dict:
+        """
+        واجهة خارجية لتقديم تغذية رجعية على حلقة سابقة.
+
+        Parameters
+        ----------
+        episode_id : str
+            معرّف الحلقة (episode_id) من نتيجة answer() السابقة.
+        rating : "up" / "down" / None
+            "up"   = الإجابة كانت صحيحة / مفيدة
+            "down" = الإجابة كانت خاطئة / مضللة
+            None   = تعليق فقط بدون تقييم
+        correction_text : str أو None
+            نص تصحيحي اختياري من المستخدم.
+
+        Returns
+        -------
+        dict : {"status": "ok"/"not_found"/"error", "episode_id": ..., "rating": ...}
+        """
+        if rating not in ("up", "down", None):
+            return {"status": "error", "message": "rating يجب أن يكون 'up' أو 'down' أو None"}
+
+        if self.episode_store is None:
+            return {"status": "error", "message": "episode_store غير مُهيَّأ"}
+
+        success = self.episode_store.update_feedback(episode_id, rating, correction_text)
+        if not success:
+            return {"status": "not_found", "episode_id": episode_id}
+
+        return {
+            "status": "ok",
+            "episode_id": episode_id,
+            "rating": rating,
+            "has_correction": correction_text is not None,
+        }
