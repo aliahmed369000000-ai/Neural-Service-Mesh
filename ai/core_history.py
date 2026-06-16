@@ -56,7 +56,11 @@ class CoreHistory:
     """
 
     def __init__(self, db_path: Path = DB_PATH):
-        self.db_path = Path(db_path)
+        # تحويل إلى مسار مطلق فوراً — لو ظل نسبياً، أي os.chdir() لاحق في
+        # نفس العملية يجعل sqlite3.connect() يفتح/ينشئ ملفاً مختلفاً تماماً
+        # بصمت (بدون الجدول)، لأن sqlite3 يُعيد حلّ المسارات النسبية عند كل
+        # connect() لا عند إنشاء الكائن.
+        self.db_path = Path(db_path).resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
