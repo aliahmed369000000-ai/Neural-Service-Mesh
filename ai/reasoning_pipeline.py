@@ -56,7 +56,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from ai.neural_core import NeuralCore, get_default_core
+from ai.neural_core import NeuralCore, get_default_core, auto_dims
 from ai.knowledge_trainer import CKGManager, VectorEncoder, DOMAIN_CODES
 from ai.experience_store import Episode, EpisodeStore
 from ai.experience_trainer import score_episode
@@ -176,9 +176,20 @@ class ReasoningPipeline:
         episode_store: Optional[EpisodeStore] = None,
         record_episodes: bool = True,
     ):
-        self.core = core if core is not None else get_default_core(core_save_path or "models/neural_core")
-        self.ckg = ckg if ckg is not None else CKGManager()
         self.encoder = VectorEncoder()
+        self.ckg = ckg if ckg is not None else CKGManager()
+
+        if core is not None:
+            self.core = core
+        else:
+            # الأبعاد تُحسَب تلقائياً من طول متجه VectorEncoder الفعلي،
+            # لا من رقم ثابت مكتوب يدوياً — تتكيّف تلقائياً مع أي تغيير
+            # مستقبلي في الترميز أو في حجم CKG، بدون أي تعديل يدوي للكود.
+            input_dim, hidden_dims, output_dim = auto_dims(self.encoder)
+            self.core = get_default_core(
+                core_save_path or "models/neural_core",
+                input_dim=input_dim, hidden_dims=hidden_dims, output_dim=output_dim,
+            )
 
         self.arabic_engine = None
         if ArabicNLPEngine is not None:
