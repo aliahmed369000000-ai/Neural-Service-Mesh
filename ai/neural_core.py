@@ -825,6 +825,45 @@ DEFAULT_INPUT_DIM = 7          # ثابت — يطابق VectorEncoder في know
 DEFAULT_HIDDEN_DIMS = [108, 32]  # طبقة أولى 108×7 (أوزان مدروسة) + طبقة ثانية 32×108 (Xavier)
 DEFAULT_OUTPUT_DIM = 4         # W_SEMANTIC, W_SCORE, W_MEMORY, W_TOPOLOGY
 
+
+def auto_dims(
+    encoder,
+    sample_text: str = "نموذج",
+    domain: str = "general",
+    hidden_ratio_1: float = 10.0,
+    hidden_ratio_2: float = 3.0,
+    output_dim: int = DEFAULT_OUTPUT_DIM,
+) -> Tuple[int, List[int], int]:
+    """
+    يحسب input_dim تلقائياً من طول متجه VectorEncoder الفعلي بدل رقم ثابت
+    مكتوب يدوياً (7) قد ينكسر بصمت إن تغيّر طول الترميز لاحقاً (مثلاً عند
+    توسيع CKG أو تعديل VectorEncoder ليُخرج خصائص إضافية).
+
+    hidden_dims تُبنى بنسبة ثابتة من input_dim (لا أرقام يدوية أيضاً):
+        h1 = input_dim * hidden_ratio_1   (مقصوصة عند حد أدنى 8)
+        h2 = h1 / hidden_ratio_2          (مقصوصة عند حد أدنى 4)
+
+    النسب الافتراضية (10x ثم /3) اختيار عملي وليس قيداً صارماً — تكفي
+    لمنع عنق الزجاجة (طبقة أضيق من اللازم تفقد معلومة) ولمنع التضخم
+    الزائد (طبقة أوسع من اللازم تبطّئ التدريب بلا فائدة فعلية)، لأي
+    input_dim مستقبلي بغض النظر عن حجم قاعدة المعرفة.
+
+    Parameters
+    ----------
+    encoder : VectorEncoder (أو أي كائن له encode(text=..., domain=...))
+    sample_text, domain : نص تجريبي فقط لقياس طول متجه الترميز الفعلي
+    output_dim : عدد أبعاد الخرج (ثابت حسب التصميم الحالي: 4 أوزان قرار)
+
+    Returns
+    -------
+    (input_dim, hidden_dims, output_dim)
+    """
+    sample_vector = encoder.encode(text=sample_text, domain=domain)
+    input_dim = int(len(sample_vector))
+    h1 = max(8, round(input_dim * hidden_ratio_1))
+    h2 = max(4, round(h1 / hidden_ratio_2))
+    return input_dim, [h1, h2], output_dim
+
 # ── الأوزان الابتدائية المدروسة للطبقة الأولى فقط (108 صف × 7 أعمدة) ────────
 # البنية: 7 → [108×7 relu, مدروسة] → [32×108 relu, Xavier] → [4×32 softmax, Xavier]
 # الطبقة الأولى فقط تحمل أوزاناً مدروسة. الطبقتان الثانية والثالثة تتعلمان بالتدريب.
@@ -1869,8 +1908,23 @@ def extract_routing_weights(layer: Union[NeuralWeightLayer, DynamicWeightLayer, 
 _default_core: Optional[NeuralCore] = None
 
 
-def get_default_core(directory: str = "models/neural_core") -> NeuralCore:
-    """يُعيد (ويُخزِّن) نسخة NeuralCore الافتراضية الوحيدة."""
+def get_default_core(
+    directory: str = "models/neural_core",
+    input_dim: Optional[int] = None,
+    hidden_dims: Optional[List[int]] = None,
+    output_dim: Optional[int] = None,
+) -> NeuralCore:
+    """
+    يُعيد (ويُخزِّن) نسخة NeuralCore الافتراضية الوحيدة.
+
+    إن وُجد نموذج محفوظ في `directory`، يُحمَّل كما هو (أبعاده الفعلية
+    المحفوظة، بغض النظر عن input_dim/hidden_dims/output_dim المُمرَّرة هنا
+    — هذه فقط لبناء نواة *جديدة* إن لم يوجد نموذج محفوظ بعد).
+
+    إن لم يوجد نموذج محفوظ ومُرِّرت input_dim، تُبنى نواة جديدة بهذه
+    الأبعاد (عادة محسوبة عبر auto_dims() بدل أرقام ثابتة). إن لم تُمرَّر،
+    تُستخدم القيم الافتراضية الثابتة (DEFAULT_*) للتوافق الخلفي فقط.
+    """
     global _default_core
     if _default_core is None:
         if os.path.exists(os.path.join(directory, "network.json")):
@@ -1880,5 +1934,15 @@ def get_default_core(directory: str = "models/neural_core") -> NeuralCore:
             except Exception as e:
                 logger.warning(f"Could not load NeuralCore from {directory}: {e}")
         if _default_core is None:
-            _default_core = NeuralCore(name="default_neural_core")
+            kwargs = {"name": "default_neural_core"}
+            if input_dim is not None:
+                kwargs["input_dim"] = input_dim
+            if hidden_dims is not None:
+                kwargs["hidden_dims"] = hidden_dims
+            if output_dim is not None:
+                kwargs["output_dim"] = output_dim
+            _default_core = NeuralCore(**kwargs)
+            logger.info(
+                f"NeuralCore created fresh — {_default_core.net.architecture_str()}"
+            )
     return _default_core
