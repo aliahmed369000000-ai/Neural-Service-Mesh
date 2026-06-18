@@ -1,7 +1,7 @@
 """
 Reasoning Pipeline — Question → CKG → Neural Core → Decision → Answer
 ========================================================================
-يربط NeuralCore (ai/neural_core.py) بالـ Cognitive Knowledge Graph الفعلي
+يربط NeuralCore (ai/neural_core.py — بنية 7→112→32→4) بالـ Cognitive Knowledge Graph الفعلي
 (knowledge/cognitive_graph.json عبر CKGManager في ai/knowledge_trainer.py).
 
 التدفق
@@ -16,7 +16,7 @@ Reasoning Pipeline — Question → CKG → Neural Core → Decision → Answer
        ArabicNLP → متجه سياق نهائي (7,) — "context_vector"
 
 3. Neural Core
-     → NeuralCore.forward(context_vector) → 4 أوزان توجيه
+     → NeuralCore.forward(context_vector[7]) → L1(112×7,مدروسة) → L2(32×112,متعلَّمة) → L3(4×32,softmax) → 4 أوزان توجيه
        (W_SEMANTIC, W_SCORE, W_MEMORY, W_TOPOLOGY) [Decision]
      → NeuralCore.recall(context_vector) → ذكريات سابقة ذات صلة
 
@@ -56,7 +56,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from ai.neural_core import NeuralCore, get_default_core
+from ai.neural_core import (
+    NeuralCore, get_default_core, auto_dims,
+    DEFAULT_INPUT_DIM,    # 7  — ثابت
+    DEFAULT_HIDDEN_DIMS,  # [112, 32] — الطبقة الأولى مدروسة (nnn_112.csv)
+    DEFAULT_OUTPUT_DIM,   # 4  — ثابت
+)
 from ai.knowledge_trainer import CKGManager, VectorEncoder, DOMAIN_CODES
 from ai.experience_store import Episode, EpisodeStore
 from ai.experience_trainer import score_episode
@@ -123,6 +128,8 @@ class PipelineResult:
     memory_index: Optional[int] = None
     episode_id: Optional[str] = None
     quality: Optional[Dict[str, float]] = None
+    net_architecture: Optional[str] = None   # مثال: "7→112→32→4" (يتحدث مع النمو)
+    grew: bool = False                        # True إذا نمت الشبكة في هذه الخطوة
 
     def to_dict(self) -> dict:
         return {
@@ -139,6 +146,8 @@ class PipelineResult:
             "memory_index": self.memory_index,
             "episode_id": self.episode_id,
             "quality": self.quality,
+            "net_architecture": self.net_architecture,
+            "grew": self.grew,
         }
 
 
@@ -176,9 +185,22 @@ class ReasoningPipeline:
         episode_store: Optional[EpisodeStore] = None,
         record_episodes: bool = True,
     ):
-        self.core = core if core is not None else get_default_core(core_save_path or "models/neural_core")
-        self.ckg = ckg if ckg is not None else CKGManager()
         self.encoder = VectorEncoder()
+        self.ckg = ckg if ckg is not None else CKGManager()
+
+        if core is not None:
+            self.core = core
+        else:
+            # نستخدم DEFAULT_* من neural_core.py مباشرة لضمان تحميل الأوزان
+            # المدروسة (nnn_112.csv — 112 صف × 7 أعمدة) في الطبقة الأولى.
+            # auto_dims() تحسب h1=input_dim*10=70 وهو غير صحيح لهذه البنية.
+            # L1(112×7) مدروسة، L2(32×112) و L3(4×32) تتعلمان بالتدريب.
+            self.core = get_default_core(
+                core_save_path or "models/neural_core",
+                input_dim=DEFAULT_INPUT_DIM,
+                hidden_dims=list(DEFAULT_HIDDEN_DIMS),
+                output_dim=DEFAULT_OUTPUT_DIM,
+            )
 
         self.arabic_engine = None
         if ArabicNLPEngine is not None:
@@ -202,7 +224,7 @@ class ReasoningPipeline:
         )
 
         logger.info(
-            f"ReasoningPipeline ready — core={self.core!r}  "
+            f"ReasoningPipeline ready — arch={self.core.net.architecture_str()}  "
             f"ckg_concepts={self.ckg.concept_count()}  "
             f"arabic_nlp={'on' if self.arabic_engine else 'off'}  "
             f"episodes={'on' if self.episode_store else 'off'}"
@@ -497,16 +519,19 @@ class ReasoningPipeline:
                     "matched": [m.name for m in matched],
                     "domain": self.domain,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "net_arch": self.core.net.architecture_str(),
                 },
             )
             decision_vec = np.array(train_result["output"], dtype=np.float64)
-            train_loss = train_result["loss"]
+            train_loss   = train_result["loss"]
             memory_index = train_result["memory_index"]
+            grew         = bool(train_result.get("grew", False))
         else:
             decision_vec = self.core.forward(context_vector)
-            train_loss = None
+            train_loss   = None
             memory_index = None
-            target = None
+            target       = None
+            grew         = False
 
         memory_raw = self.core.recall(context_vector, top_k=self.top_k_memory)
         memory_hits = [MemoryHit(similarity=r["similarity"], metadata=r["metadata"])
@@ -590,6 +615,8 @@ class ReasoningPipeline:
             memory_index=memory_index,
             episode_id=episode_id,
             quality=quality,
+            net_architecture=self.core.net.architecture_str(),
+            grew=grew,
         )
 
     def submit_feedback(
