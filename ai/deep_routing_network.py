@@ -1,49 +1,30 @@
 """
-Phase 9 — Axis 3: Single-Layer Routing Network (v17 — single layer)
-=====================================================================
-This module now implements a **single fully-connected layer** instead
-of the previous 3-layer deep network. The network is intentionally kept
-as ONE layer with a FIXED shape contract:
+Phase 9 — Axis 3: Deep Routing Network (v18 — three layers, expanded)
+======================================================================
+Upgraded from v17 (single layer 7→108) to a proper 3-layer network:
 
-Column/input dimension contract
----------------------------------------
-  INPUT_DIM=7 is FIXED:
-    • DeepRoutingNetwork  Layer-1  shape=(108, 7) — cols FIXED at 7,
-      rows start at 108 and grow only by +6 per trigger (max 200).
-
-Architecture (v17 — single layer):
-
-    Input (7 features — from RichDataCollector)
+Architecture (v18):
+    Input (128 features — CKG concept vector)
         ↓
-    Layer 1: 108×7   — relu  (rows grow +6 up to max 200, cols FIXED=7)
+    Layer 1: 512×128  relu   (rows growable +8, no upper limit)
         ↓
-    Output: 108-dim activation vector
-        → routing weights (W_SEMANTIC, W_SCORE, W_MEMORY, W_TOPOLOGY)
-          are derived from rows 0-3 of the output, normalised to sum=1
-          (same convention as the Phase 8 `extract_routing_weights`).
-
-The single layer:
-  - Stores a weight matrix of shape (out_dim × in_dim) = (108 × 7)
-  - All biases are fixed at 0.6
-  - Uses ReLU activation
-  - Supports gradient-based training via backpropagation (single layer)
-
-Growth rules (the only layer):
-  - Columns (7) are FIXED and must never change
-  - Rows grow by +6 per trigger
-  - Max rows: 200
-  - Bias for newly added rows is also 0.6
+    Layer 2: 256×512  relu
+        ↓
+    Layer 3:  16×256  softmax
+        ↓
+    Output: 16-dim routing weight vector
+      → 4 primary weights (W_SEMANTIC, W_SCORE, W_MEMORY, W_TOPOLOGY)
+        derived from rows 0-3, normalised to sum=1 (backward compatible).
 
 Backward compatibility
 ----------------------
-`get_default_deep_network()` returns a singleton instance.
-`extract_deep_routing_weights(net)` returns the same 4-key dict as the
-Phase 8 `extract_routing_weights(layer)`.
-The public API (`forward`, `train_step`, `train_batch`,
-`predict_routing_weights`, `grow`, `load_custom_weights`, `save`, `load`,
-`summary`, `architecture_str`, `.layers[0]`, `.weights`, `.SHAPE`) is kept
-unchanged so existing callers (RoutingEngine, KnowledgeTrainer, main.py)
-continue to work without modification.
+ALL public API preserved: forward(), train_step(), train_batch(),
+predict_routing_weights(), grow(), load_custom_weights(), save(), load(),
+summary(), architecture_str(), .layers[0], .weights, .SHAPE,
+get_default_deep_network(), extract_deep_routing_weights()
+
+Old 7-feature vectors are zero-padded to 128 automatically.
+Old v17 weights (108×7 or 112×7 from nnn_112.csv) are migrated via migrate_weights().
 """
 from __future__ import annotations
 
@@ -58,147 +39,38 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# ── Architecture definition ───────────────────────────────────────────────────
-# Single-layer architecture (v17):
-#   Layer 1: 108×7  relu   — rows growable (+6, NO upper limit), cols=7 FIXED, bias=0.6
+# ── Architecture constants (v18) ──────────────────────────────────────────────
+INPUT_DIM      = 128
+HIDDEN1_DIM    = 512
+HIDDEN2_DIM    = 256
+OUTPUT_DIM     = 16
+LEARNING_RATE  = 0.003
+WEIGHTS_DIR    = "models/classifiers"
+
+L1_INITIAL_ROWS = 512
+L1_GROW_BY      = 8
+L1_MAX_ROWS     = None
+L1_COLS         = INPUT_DIM  # FIXED at 128
+
+PLATEAU_WINDOW    = 50
+PLATEAU_THRESHOLD = 0.01
+PLATEAU_COOLDOWN  = 200
+
 LAYER_CONFIGS: List[Tuple[int, int, str]] = [
-    (108, 7, "relu"),    # Layer 1: 7 inputs → 108 nodes
-]
-
-INPUT_DIM     = 7
-OUTPUT_DIM    = 4
-LEARNING_RATE = 0.005
-WEIGHTS_DIR   = "models/classifiers"
-
-# Layer growth parameters
-L1_INITIAL_ROWS = 108
-L1_GROW_BY      = 6
-L1_MAX_ROWS     = None   # NO upper limit — rows grow indefinitely
-L1_COLS         = 7      # FIXED — must never change
-
-# ── Plateau-based auto-growth (يتطور عند انخفاض القدرة على الفهم) ────────────
-# When the training loss stops improving (the network's "ability to
-# understand" the data plateaus), the single layer grows by +6 rows.
-PLATEAU_WINDOW    = 50     # loss-history window size used to detect plateau
-PLATEAU_THRESHOLD = 0.01   # min relative improvement to NOT be a plateau
-PLATEAU_COOLDOWN  = 200    # min train_steps between growth events
-
-# ── Initial Layer 1 weights (108×7) provided by user ─────────────────────────
-_L1_INITIAL_WEIGHTS: List[List[float]] = [
-    [0.2,  0.3,  0.5,  0.7,  0.11, 0.15, 0.17],
-    [0.13, 0.31, 0.3,  0.1,  0.12, 0.23, 0.16],
-    [0.13, 0.14, 0.3,  0.1,  0.15, 0.11, 0.1 ],
-    [0.11, 0.35, 0.19, 0.2,  0.1,  0.12, 0.4 ],
-    [0.121, 0.31, 0.13, 0.2,  0.1,  0.32, 0.4 ],
-    [0.11, 0.3,  0.4,  0.1,  0.4,  0.13, 0.1 ],
-    [0.25, 0.24, 0.3,  0.1,  0.11, 0.2,  0.29],
-    [0.2,  0.5,  0.15, 0.10, 0.1,  0.3,  0.26],
-    [0.0,  0.4,  0.6,  0.3,  0.3,  0.11, 0.5 ],
-    [0.9,  0.18,  0.21,  0.1,  0.9, 0.4, 0.31],
-    [0.5, 0.8, 0.11,  0.1,  0.14, 0.5, 0.16],
-    [0.13, 0.2, 0.18,  0.1,  0.9, 0.4, 0.9 ],
-    [0.51, 0.37, 0.3, 0.1,  0.11,  0.5, 0.1 ],
-    [0.26, 0.65, 0.27, 0.1,  0.15,  0.5, 0.12 ],
-    [0.26, 0.21,  0.22,  0.1,  0.9,  0.4, 0.3 ],
-    [0.5, 0.14, 0.5,  0.1,  0.3, 0.2,  0.1],
-    [0.1,  0.3,  0.22, 0.5, 0.8,  0.74,  0.17],
-    [0.12,  0.3,  0.4,  0.1,  0.4,  0.19, 0.1 ],
-    [0.31,  0.5,  0.6,  0.19,  0.3, 0.7, 0.2],
-    [0.21, 0.4, 0.1,  0.2,  0.11, 0.21, 0.2],
-    [0.11, 0.11, 0.16,  0.1,  0.21, 0.3, 0.15 ],
-    [0.11, 0.38, 0.19, 0.2,  0.1,  0.12, 0.4 ],
-    [0.17, 0.6, 0.9, 0.3,  0.4,  0.13, 0.6 ],
-    [0.1, 0.25,  0.42,  0.5,  0.27,  0.33, 0.4 ],
-    [0.12, 0.82, 0.36,  0.3,  0.9, 0.1,  0.26],
-    [0.2,  0.21,  0.3, 0.5, 0.6,  0.1,  0.13],
-    [0.2,  0.22,  0.22,  0.7,  0.8,  0.3, 0.1 ],
-    [0.2,  0.28,  0.3,  0.5,  0.6, 0.1, 0.23],
-    [0.3, 0.2, 0.3,  0.1,  0.12, 0.13, 0.32],
-    [0.25, 0.26, 0.3,  0.1,  0.2, 0.4, 0.13 ],
-    [0.13, 0.15, 0.3, 0.1,  0.6,  0.1, 0.1 ],
-    [0.11, 0.21, 0.3, 0.1,  0.4,  0.1, 0.18 ],
-    [0.18, 0.9,  0.17,  0.2,  0.1,  0.12, 0.4 ],
-    [0.13, 0.3, 0.4,  0.1,  0.4, 0.16,  0.1],
-    [0.7,  0.3,  0.4, 0.1, 0.25,  0.11,  0.1],
-    [0.2,  0.11,  0.14,  0.2,  0.1,  0.9, 0.21 ],
-    [0.5,  0.1,  0.1,  0.2,  0.6, 0.6, 0.1],
-    [0.36, 0.31, 0.2,  0.3,  0.11, 0.31, 0.17],
-    [0.31, 0.9, 0.11,  0.6,  0.4, 0.1, 0.1 ],
-    [0.42, 0.1, 0.2, 0.6,  0.4,  0.1, 0.1 ],
-    [0.29, 0.1, 0.2, 0.8,  0.4,  0.1, 0.12 ],
-    [0.2, 0.1,  0.2,  0.9,  0.5,  0.12, 0.1 ],
-    [0.31, 0.1, 0.2,  0.2,  0.11, 0.5,  0.8],
-    [0.21,  0.1,  0.2, 0.2, 0.11,  0.5,  0.9],
-    [0.7,  0.1,  0.2,  0.6,  0.4,  0.1, 0.1 ],
-    [0.11,  0.1,  0.2,  0.6,  0.4, 0.1, 0.1],
-    [0.18, 0.23, 0.6,  0.1,  0.4, 0.24, 0.1],
-    [0.44, 0.6, 0.15,  0.1,  0.17, 0.5, 0.1 ],
-    [0.1, 0.75, 0.12, 0.2,  0.1,  0.19, 0.4 ],
-    [0.16, 0.32, 0.12, 0.3,  0.14,  0.6, 0.13 ],
-    [0.9, 0.4,  0.5,  0.2,  0.6,  0.7, 0.7 ],
-    [0.6, 0.5, 0.5,  0.2,  0.2, 0.3,  0.4],
-    [0.8,  0.7,  0.6, 0.2, 0.12,  0.9,  0.11],
-    [0.9,  0.26,  0.21,  0.1,  0.4,  0.3, 0.12 ],
-    [0.8,  0.4,  0.5,  0.1,  0.8, 0.4, 0.4],
-    [0.3, 0.4, 0.11,  0.1,  0.2, 0.7, 0.14],
-    [0.1, 0.3, 0.1,  0.2,  0.4, 0.11, 0.1 ],
-    [0.3, 0.6, 0.4, 0.1,  0.7,  0.6, 0.1 ],
-    [0.1, 0.3, 0.1, 0.2,  0.4,  0.11, 0.1 ],
-    [0.89, 0.78,  0.13,  0.2,  0.1,  0.19, 0.4 ],
-    [0.1, 0.3, 0.1,  0.2,  0.4, 0.11,  0.1],
-    [0.2,  0.4,  0.1, 0.2, 0.1,  0.11,  0.1],
-    [0.31,  0.56,  0.11,  0.1,  0.1,  0.2, 0.23 ],
-    [0.2,  0.4,  0.1,  0.2,  0.4, 0.11, 0.1],
-    [0.22, 0.41, 0.18,  0.2,  0.1, 0.17, 0.4],
-    [0.5, 0.14, 0.12,  0.2,  0.1, 0.13, 0.4 ],
-    [0.33, 0.16, 0.15, 0.1,  0.8,  0.1, 0.12 ],
-    [0.12, 0.9, 0.7, 0.3,  0.11,  0.5, 0.11 ],
-    [0.1, 0.3,  0.1,  0.1,  0.7,  0.4, 0.6 ],
-    [0.1, 0.17, 0.1,  0.2,  0.6, 0.1,  0.12],
-    [0.6,  0.12,  0.19, 0.1, 0.16,  0.41,  0.21],
-    [0.14,  0.5,  0.16,  0.3,  0.6,  0.15, 0.12 ],
-    [0.4,  0.15,  0.8,  0.2, 0.1, 0.11, 0.4],
-    [0.9, 0.13, 0.8,  0.2,  0.1, 0.4, 0.4],
-    [0.5, 0.3, 0.6,  0.2,  0.8, 0.16, 0.16 ],
-    [0.13, 0.15, 0.18, 0.3,  0.5,  0.4, 0.1 ],
-    [0.6, 0.2, 0.4, 0.2,  0.7,  0.8, 0.5 ],
-    [0.5, 0.8,  0.2,  0.6,  0.3,  0.4, 0.5 ],
-    [0.4, 0.6, 0.4,  0.2,  0.1, 0.7,  0.14],
-    [0.3,  0.4,  0.11, 0.1, 0.8,  0.5,  0.6],
-    [0.8,  0.8,  0.7,  0.1,  0.12,  0.12, 0.11 ],
-    [0.6,  0.8,  0.7,  0.1,  0.1, 0.15, 0.14],
-    [0.23, 0.21, 0.6,  0.1,  0.2, 0.11, 0.9],
-    [0.6, 0.12, 0.7,  0.1,  0.9, 0.14, 0.9 ],
-    [0.4, 0.6, 0.5, 0.2,  0.4,  0.11, 0.4 ],
-    [0.4, 0.16, 0.5, 0.2,  0.7,  0.18, 0.14 ],
-    [0.1, 0.3,  0.6,  0.4,  0.4,  0.11, 0.5 ],
-    [0.2, 0.7, 0.7,  0.3,  0.5, 0.4,  0.1],
-    [0.11,  0.14,  0.11, 0.2, 0.3,  0.11,  0.1],
-    [0.5,  0.5,  0.6,  0.2,  0.16,  0.4, 0.8 ],
-    [0.6,  0.9,  0.5,  0.2,  0.11, 0.11, 0.11],
-    [0.3, 0.8, 0.2,  0.2,  0.4, 0.11, 0.5],
-    [0.9, 0.5, 0.1,  0.2,  0.6, 0.15, 0.8 ],
-    [0.9, 0.7, 0.3, 0.1,  0.4,  0.8, 0.11 ],
-    [0.5, 0.18, 0.13, 0.2,  0.5,  0.4, 0.2 ],
-    [0.7, 0.0,  0.8,  0.1,  0.15,  0.9, 0.6 ],
-    [0.1, 0.17, 0.2,  0.1,  0.11, 0.1,  0.9],
-    [0.2,  0.41,  0.2, 0.6, 0.3,  0.24,  0.19],
-    [0.9,  0.7,  0.11,  0.1,  0.1,  0.8, 0.19 ],
-    [0.3,  0.11,  0.4,  0.2,  0.6, 0.7, 0.7],
-    [0.12, 0.4, 0.1,  0.1,  0.7, 0.2, 0.7],
-    [0.4, 0.1, 0.6,  0.1,  0.4, 0.9, 0.3 ],
-    [0.7, 0.25, 0.11, 0.2,  0.11,  0.26, 0.0 ],
-    [0.3, 0.2, 0.8, 0.1,  0.2,  0.3, 0.7 ],
-    [0.4, 0.18,  0.3,  0.1,  0.7,  0.4, 0.11 ],
-    [0.0, 0.7, 0.5,  0.2,  0.3, 0.13,  0.4],
-    [0.17,  0.5,  0.17, 0.1, 0.4,  0.5,  0.6],
-    [0.0,  0.11,  0.0,  0.1,  0.7,  0.13, 0.0 ],
+    (HIDDEN1_DIM, INPUT_DIM,   "relu"),
+    (HIDDEN2_DIM, HIDDEN1_DIM, "relu"),
+    (OUTPUT_DIM,  HIDDEN2_DIM, "softmax"),
 ]
 
 
 def _xavier_init(rows: int, cols: int) -> np.ndarray:
     limit = math.sqrt(6.0 / (rows + cols))
     return np.random.uniform(-limit, limit, size=(rows, cols)).astype(np.float64)
+
+
+def _he_init(rows: int, cols: int) -> np.ndarray:
+    std = math.sqrt(2.0 / cols)
+    return np.random.normal(0.0, std, size=(rows, cols)).astype(np.float64)
 
 
 def _relu(x: np.ndarray) -> np.ndarray:
@@ -211,7 +83,7 @@ def _relu_deriv(x: np.ndarray) -> np.ndarray:
 
 def _softmax(x: np.ndarray) -> np.ndarray:
     shifted = x - x.max()
-    exp_x = np.exp(shifted)
+    exp_x = np.exp(np.clip(shifted, -500, 500))
     total = exp_x.sum()
     if total == 0:
         return np.ones(len(x)) / len(x)
@@ -219,76 +91,47 @@ def _softmax(x: np.ndarray) -> np.ndarray:
 
 
 class DenseLayer:
-    """
-    A single fully-connected layer with configurable activation.
-
-    Stores:
-      weights : (out_dim, in_dim)
-      biases  : (out_dim,)   — initialised to 0.6
-    """
-
     def __init__(self, out_dim: int, in_dim: int,
                  activation: str = "relu", name: str = ""):
         self.out_dim = out_dim
-        self.in_dim = in_dim
+        self.in_dim  = in_dim
         self.activation = activation
         self.name = name or f"layer_{out_dim}x{in_dim}"
 
-        self.weights: np.ndarray = _xavier_init(out_dim, in_dim)
-        self.biases: np.ndarray = np.full(out_dim, 0.6, dtype=np.float64)
+        if activation == "relu":
+            self.weights: np.ndarray = _he_init(out_dim, in_dim)
+        else:
+            self.weights: np.ndarray = _xavier_init(out_dim, in_dim)
+        self.biases: np.ndarray = np.zeros(out_dim, dtype=np.float64)
 
-        # Cached values for backprop
-        self._last_input: Optional[np.ndarray] = None
+        self._last_input:   Optional[np.ndarray] = None
         self._last_pre_act: Optional[np.ndarray] = None
-        self._last_output: Optional[np.ndarray] = None
+        self._last_output:  Optional[np.ndarray] = None
 
     def forward(self, x: np.ndarray) -> np.ndarray:
-        """Forward pass: W·x + b → activation."""
         self._last_input = x.copy()
         pre = self.weights @ x + self.biases
         self._last_pre_act = pre.copy()
-
         if self.activation == "relu":
             out = _relu(pre)
         elif self.activation == "softmax":
             out = _softmax(pre)
         else:
-            out = pre  # linear
-
+            out = pre
         self._last_output = out.copy()
         return out
 
-    def backward(
-        self,
-        grad_output: np.ndarray,
-        learning_rate: float,
-    ) -> np.ndarray:
-        """
-        Backpropagate through this layer.
-
-        Updates weights and biases in-place.
-        Returns gradient to pass to the previous layer.
-        """
+    def backward(self, grad_output: np.ndarray,
+                 learning_rate: float) -> np.ndarray:
         if self.activation == "relu":
             grad_pre = grad_output * _relu_deriv(self._last_pre_act)
-        elif self.activation == "softmax":
-            # For MSE + softmax: simplified gradient (treat as linear)
-            grad_pre = grad_output
         else:
             grad_pre = grad_output
-
-        # Weight gradient: outer product of pre-activation grad and input
         grad_w = np.outer(grad_pre, self._last_input)
-        grad_b = grad_pre
         grad_x = self.weights.T @ grad_pre
-
-        # Gradient descent update
         self.weights -= learning_rate * grad_w
-        self.biases  -= learning_rate * grad_b
-
-        # Clip for stability
-        self.weights = np.clip(self.weights, -5.0, 5.0)
-
+        self.biases  -= learning_rate * grad_pre
+        self.weights  = np.clip(self.weights, -5.0, 5.0)
         return grad_x
 
     def summary(self) -> dict:
@@ -315,30 +158,10 @@ class DenseLayer:
         self.in_dim  = self.weights.shape[1]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Deep Routing Network
-# ─────────────────────────────────────────────────────────────────────────────
-
 class DeepRoutingNetwork:
     """
-    Phase 9 Axis-3: Deep multi-layer routing weight predictor (v16).
-
-    Architecture (3 layers):
-        Input (7) → Layer1 108×7 relu → Layer2 9×108 relu → Layer3 4×9 softmax
-
-    Layer 1 growth rules:
-      - Columns (7) are FIXED and must never change
-      - Rows grow by +6 per trigger (call grow())
-      - Max rows: 200
-      - When Layer 1 grows, Layer 2's in_dim expands in lockstep
-
-    The output is always 4 values that sum to 1.0, directly usable as
-    (W_SEMANTIC, W_SCORE, W_MEMORY, W_TOPOLOGY).
-
-    Parameters
-    ----------
-    learning_rate : float  default 0.005
-    name : str
+    Phase 9 Axis-3: Three-layer routing network (v18).
+    Input(128) → L1(512,relu) → L2(256,relu) → L3(16,softmax)
     """
 
     def __init__(
@@ -354,154 +177,92 @@ class DeepRoutingNetwork:
         self._train_steps = 0
         self._last_loss: Optional[float] = None
         self._loss_history: List[float] = []
-
-        # ── إعدادات النمو عند الركود (انخفاض القدرة على الفهم) ───────────
-        self.plateau_window = plateau_window
+        self.plateau_window    = plateau_window
         self.plateau_threshold = plateau_threshold
-        self.plateau_cooldown = plateau_cooldown
+        self.plateau_cooldown  = plateau_cooldown
         self._steps_since_growth = 0
         self._growth_events: List[dict] = []
 
-        # Build the single layer: 108×7 relu, bias=0.6
-        l1 = DenseLayer(L1_INITIAL_ROWS, L1_COLS, "relu",
-                        name=f"L1_{L1_INITIAL_ROWS}x{L1_COLS}_relu")
-        l1.weights = np.array(_L1_INITIAL_WEIGHTS, dtype=np.float64)
-        l1.biases  = np.full(L1_INITIAL_ROWS, 0.6, dtype=np.float64)
+        l1 = DenseLayer(L1_INITIAL_ROWS, INPUT_DIM,   "relu",
+                        name=f"L1_{L1_INITIAL_ROWS}x{INPUT_DIM}_relu")
+        l2 = DenseLayer(HIDDEN2_DIM, L1_INITIAL_ROWS, "relu",
+                        name=f"L2_{HIDDEN2_DIM}x{L1_INITIAL_ROWS}_relu")
+        l3 = DenseLayer(OUTPUT_DIM,  HIDDEN2_DIM,     "softmax",
+                        name=f"L3_{OUTPUT_DIM}x{HIDDEN2_DIM}_softmax")
 
-        self.layers: List[DenseLayer] = [l1]
+        self.layers: List[DenseLayer] = [l1, l2, l3]
 
-        total_params = self._count_params()
         logger.info(
-            f"DeepRoutingNetwork '{self.name}' initialised — "
-            f"1 layer: 7→108(relu) | "
-            f"total parameters: {total_params}"
+            f"DeepRoutingNetwork '{self.name}' v18 — "
+            f"128→512(relu)→256(relu)→16(softmax) | "
+            f"params: {self._count_params():,}"
         )
 
-    # ── Growth (single layer rows) ────────────────────────────────────────
-
     def grow(self) -> bool:
-        """
-        Grow the single layer by +6 rows. There is NO upper limit on rows —
-        the layer can grow indefinitely.
-
-        Columns (7) are never touched. Bias for new rows is 0.6.
-
-        Returns True (growth always succeeds; no max-rows ceiling).
-        """
-        l1 = self.layers[0]
-        current_rows = l1.out_dim
-        new_rows = current_rows + L1_GROW_BY
+        l1, l2 = self.layers[0], self.layers[1]
+        old_rows = l1.out_dim
         added    = L1_GROW_BY
+        new_rows = old_rows + added
 
-        # Extend layer weights (new rows xavier-init) and biases (0.6)
-        new_w = _xavier_init(added, L1_COLS)
-        l1.weights = np.vstack([l1.weights, new_w])
-        l1.biases  = np.concatenate([l1.biases, np.full(added, 0.6)])
+        new_w1 = _he_init(added, l1.in_dim)
+        l1.weights = np.vstack([l1.weights, new_w1])
+        l1.biases  = np.concatenate([l1.biases, np.zeros(added)])
         l1.out_dim = new_rows
-        l1.name    = f"L1_{new_rows}x{L1_COLS}_relu"
+        l1.name    = f"L1_{new_rows}x{l1.in_dim}_relu"
+
+        new_cols2 = _he_init(l2.out_dim, added)
+        l2.weights = np.hstack([l2.weights, new_cols2])
+        l2.in_dim  = new_rows
+        l2.name    = f"L2_{l2.out_dim}x{new_rows}_relu"
 
         logger.info(
-            f"DeepRoutingNetwork.grow(): layer {current_rows}→{new_rows} rows | "
-            f"total params now: {self._count_params()}"
+            f"grow(): L1 {old_rows}→{new_rows} | "
+            f"total params: {self._count_params():,}"
         )
         return True
 
-    # ── Custom weight loader ──────────────────────────────────────────────
-
-    def load_custom_weights(
-        self,
-        matrix: np.ndarray,
-        layer_index: int = 0,
-    ) -> None:
+    def migrate_weights(self, old_weights: np.ndarray) -> None:
+        """Migrate old weights (any shape: 108×7, 112×7, etc.) into new L1 (128-dim).
+        الأوزان المدروسة من nnn_112.csv (112×7) تُدمج تلقائياً في أول 112 صف من L1.
         """
-        Load a custom weight matrix into the single layer.
+        old = np.array(old_weights, dtype=np.float64)
+        r = min(old.shape[0], self.layers[0].out_dim)
+        c = min(old.shape[1], self.layers[0].in_dim)
+        self.layers[0].weights[:r, :c] = old[:r, :c]
+        logger.info(f"migrate_weights: copied {r}×{c} old weights into L1")
 
-        Enforces cols=7 (FIXED). The layer's row count is set to match
-        the matrix — there is no upper limit on rows.
-
-        Parameters
-        ----------
-        matrix : np.ndarray  shape (out_dim, in_dim)
-        layer_index : int  must be 0 (single-layer network)
-
-        Raises
-        ------
-        ValueError  if shape is incompatible with fixed constraints.
-        """
-        if layer_index != 0:
-            raise ValueError(
-                f"This network has a single layer; layer_index must be 0, "
-                f"got {layer_index}."
-            )
-
+    def load_custom_weights(self, matrix: np.ndarray,
+                            layer_index: int = 0) -> None:
         m = np.array(matrix, dtype=np.float64)
-        layer = self.layers[0]
-
-        # Enforce fixed column count
-        if m.ndim != 2 or m.shape[1] != L1_COLS:
-            raise ValueError(
-                f"Layer columns are FIXED at {L1_COLS}. "
-                f"Got shape {m.shape}."
-            )
-        new_rows = m.shape[0]
+        if layer_index >= len(self.layers):
+            raise ValueError(f"layer_index {layer_index} out of range")
+        layer = self.layers[layer_index]
+        if layer_index == 0 and m.ndim == 2 and m.shape[1] != INPUT_DIM:
+            raise ValueError(f"L1 cols FIXED at {INPUT_DIM}. Got {m.shape}.")
         layer.weights = m
-        layer.biases  = np.full(new_rows, 0.6, dtype=np.float64)
-        layer.out_dim = new_rows
-        layer.name    = f"L1_{new_rows}x{L1_COLS}_relu"
-
-        logger.info(
-            f"load_custom_weights: layer 0 ('{layer.name}') "
-            f"loaded shape {m.shape} | "
-            f"total params now: {self._count_params()}"
-        )
-
-    # ── Forward pass ─────────────────────────────────────────────────────
+        layer.biases  = np.zeros(m.shape[0], dtype=np.float64)
+        layer.out_dim = m.shape[0]
+        layer.in_dim  = m.shape[1]
 
     def forward(self, x: Union[List[float], np.ndarray]) -> np.ndarray:
-        """
-        Run the forward pass through the single layer.
-
-        Parameters
-        ----------
-        x : array-like of length INPUT_DIM (7)
-            Normalised feature vector from RichDataCollector.
-
-        Returns
-        -------
-        np.ndarray shape (N,) — ReLU activations, N = current row count
-        (108 by default, grows by +6 up to 200).
-        """
-        h = np.array(x, dtype=np.float64)
-        # Pad or truncate to INPUT_DIM (7 — FIXED)
+        h = np.array(x, dtype=np.float64).ravel()
         if h.shape[0] < INPUT_DIM:
             h = np.pad(h, (0, INPUT_DIM - h.shape[0]))
         elif h.shape[0] > INPUT_DIM:
             h = h[:INPUT_DIM]
+        for layer in self.layers:
+            h = layer.forward(h)
+        return h
 
-        return self.layers[0].forward(h)
-
-    def predict_routing_weights(self, x: Union[List[float], np.ndarray]) -> dict:
-        """
-        Forward pass returning the 4-key routing weights dict.
-
-        The 4 routing scalars are derived from rows 0-3 of the layer's
-        output, normalised so they sum to 1 (same convention as the
-        Phase 8 `extract_routing_weights`).
-
-        Returns
-        -------
-        dict with keys: W_SEMANTIC, W_SCORE, W_MEMORY, W_TOPOLOGY
-        """
+    def predict_routing_weights(
+        self, x: Union[List[float], np.ndarray]
+    ) -> dict:
         out = self.forward(x)
-        head = out[:OUTPUT_DIM]
+        head = out[:4]
         total = float(head.sum())
         if total <= 0.0:
-            return {
-                "W_SEMANTIC": 0.30,
-                "W_SCORE":    0.35,
-                "W_MEMORY":   0.25,
-                "W_TOPOLOGY": 0.10,
-            }
+            return {"W_SEMANTIC": 0.30, "W_SCORE": 0.35,
+                    "W_MEMORY": 0.25, "W_TOPOLOGY": 0.10}
         normed = (head / total).tolist()
         return {
             "W_SEMANTIC": round(normed[0], 6),
@@ -510,48 +271,25 @@ class DeepRoutingNetwork:
             "W_TOPOLOGY": round(normed[3], 6),
         }
 
-    # ── Training step (single-layer backpropagation) ──────────────────────
-
     def train_step(
         self,
         input_vector: Union[List[float], np.ndarray],
         target: float,
     ) -> float:
-        """
-        Supervised training step using single-layer backpropagation.
-
-        Loss: MSE between the layer's output vector (N,) and `target`
-        broadcast to all N rows.
-
-        Parameters
-        ----------
-        input_vector : array-like length 7
-        target : float  in [0, 1]
-            Desired composite routing quality score.
-
-        Returns
-        -------
-        float — MSE loss before the update.
-        """
-        x = np.array(input_vector, dtype=np.float64)
+        x = np.array(input_vector, dtype=np.float64).ravel()
         if x.shape[0] < INPUT_DIM:
             x = np.pad(x, (0, INPUT_DIM - x.shape[0]))
         elif x.shape[0] > INPUT_DIM:
             x = x[:INPUT_DIM]
 
-        # Forward
         output = self.forward(x)
-
-        # Target broadcast to every row
-        n_rows = output.shape[0]
-        target_vec = np.full(n_rows, float(target), dtype=np.float64)
-
+        target_vec = np.full(OUTPUT_DIM, float(target), dtype=np.float64)
         error = output - target_vec
-        loss = float(np.mean(error ** 2))
+        loss  = float(np.mean(error ** 2))
 
-        # Backward through the single layer
-        grad = 2.0 * error / n_rows
-        self.layers[0].backward(grad, self.learning_rate)
+        grad = 2.0 * error / OUTPUT_DIM
+        for layer in reversed(self.layers):
+            grad = layer.backward(grad, self.learning_rate)
 
         self._train_steps += 1
         self._steps_since_growth += 1
@@ -559,240 +297,167 @@ class DeepRoutingNetwork:
         self._loss_history.append(loss)
         if len(self._loss_history) > 1000:
             self._loss_history = self._loss_history[-1000:]
-
-        # ── نمو عند ركود التعلّم (انخفاض القدرة على الفهم) ───────────────
-        # يحدث *بين* خطوات التدريب فقط، فلا يكسر صحة التدرجات لهذه الخطوة.
-        grew = self.evolve_if_plateau()
-
-        logger.debug(
-            f"DeepRoutingNetwork train_step #{self._train_steps}  "
-            f"loss={loss:.6f}  grew={grew}"
-        )
+        self.evolve_if_plateau()
         return loss
 
-    # ── التطوّر عند الركود (يتطور عند انخفاض القدرة على الفهم) ─────────────
+    def train_batch(self, vectors: List[List[float]],
+                    targets: List[float]) -> float:
+        if not vectors:
+            return 0.0
+        return sum(self.train_step(v, t) for v, t in zip(vectors, targets)) / len(vectors)
 
     def _is_plateauing(self) -> bool:
-        """
-        يفحص إن كانت الخسارة قد ركدت: يقارن متوسط الخسارة في النافذة
-        الأقدم بمتوسط النافذة الأحدث (كل نافذة حجمها `plateau_window`).
-        إذا كان التحسّن أقل من `plateau_threshold`، فالشبكة "لم تعد تفهم"
-        البيانات بشكل أفضل وتحتاج إلى نمو.
-        """
         hist = self._loss_history
         w = self.plateau_window
         if len(hist) < w * 2:
             return False
         window = hist[-w * 2:]
-        mean_older = float(np.mean(window[:w]))
+        mean_older  = float(np.mean(window[:w]))
         mean_recent = float(np.mean(window[w:]))
         if mean_older == 0.0:
             return False
-        improvement = (mean_older - mean_recent) / mean_older
-        return improvement < self.plateau_threshold
+        return (mean_older - mean_recent) / mean_older < self.plateau_threshold
 
     def evolve_if_plateau(self) -> bool:
-        """
-        إذا ركدت الخسارة (انخفضت القدرة على الفهم) بعد `plateau_cooldown`
-        خطوة من آخر نمو، تنمو الطبقة الوحيدة بمقدار `L1_GROW_BY` صفوف
-        (بدون حد أقصى).
-
-        Returns: True إذا حدث نمو.
-        """
         if self._steps_since_growth < self.plateau_cooldown:
             return False
         if not self._is_plateauing():
             return False
-
         old_rows = self.layers[0].out_dim
         self.grow()
         self._steps_since_growth = 0
-
-        event = {
+        self._growth_events.append({
             "step": self._train_steps,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "old_rows": old_rows,
             "new_rows": self.layers[0].out_dim,
             "loss_at_growth": self._last_loss,
-        }
-        self._growth_events.append(event)
-        logger.info(
-            f"DeepRoutingNetwork.evolve_if_plateau(): plateau detected at "
-            f"step {self._train_steps} — grew {old_rows}→{self.layers[0].out_dim} rows"
-        )
+        })
         return True
 
-    def train_batch(
-        self,
-        vectors: List[List[float]],
-        targets: List[float],
-    ) -> float:
-        """
-        Train on a batch of samples. Returns average loss.
-        """
-        if not vectors:
-            return 0.0
-        total_loss = sum(
-            self.train_step(v, t)
-            for v, t in zip(vectors, targets)
-        )
-        return total_loss / len(vectors)
-
-    # ── Persistence (BrainCheckpoint compatible) ──────────────────────────
-
     def save(self, directory: str = WEIGHTS_DIR) -> str:
-        """
-        Save the layer weights to `directory/deep_network_layer_1_*.npy`.
-        Also saves the current row count so load() can restore growable shape.
-        """
         d = Path(directory)
         d.mkdir(parents=True, exist_ok=True)
         for i, layer in enumerate(self.layers):
-            prefix = str(d / f"deep_network_layer_{i+1}")
-            layer.save(prefix)
-        # Save training state + current row count (for growth persistence)
-        state = np.array([
-            self._train_steps,
-            self._last_loss or 0.0,
-            self.layers[0].out_dim,   # current rows
-        ], dtype=np.float64)
-        np.save(str(d / "deep_network_state.npy"), state)
-        logger.info(
-            f"DeepRoutingNetwork saved to {directory}  "
-            f"steps={self._train_steps}  "
-            f"rows={self.layers[0].out_dim}"
-        )
+            layer.save(str(d / f"deep_network_layer_{i+1}"))
+        np.save(str(d / "deep_network_state.npy"), np.array([
+            self._train_steps, self._last_loss or 0.0,
+            self.layers[0].out_dim, INPUT_DIM, OUTPUT_DIM,
+        ], dtype=np.float64))
         return str(d.resolve())
 
     def load(self, directory: str = WEIGHTS_DIR) -> None:
-        """
-        Load the layer weights from `directory`.
-        Restores the row count from saved state.
-        """
         d = Path(directory)
         for i, layer in enumerate(self.layers):
             prefix = str(d / f"deep_network_layer_{i+1}")
-            w_path = f"{prefix}_weights.npy"
-            if not os.path.exists(w_path):
-                logger.warning(
-                    f"DeepRoutingNetwork: layer {i+1} weights not found at {w_path}"
-                )
-                continue
-            try:
-                layer.load(prefix)
-            except Exception as e:
-                logger.warning(f"DeepRoutingNetwork: failed to load layer {i+1}: {e}")
-        # Load training state
+            if os.path.exists(f"{prefix}_weights.npy"):
+                try:
+                    layer.load(prefix)
+                except Exception as e:
+                    logger.warning(f"layer {i+1} load failed: {e}")
         state_path = str(d / "deep_network_state.npy")
         if os.path.exists(state_path):
             state = np.load(state_path)
             self._train_steps = int(state[0])
             self._last_loss = float(state[1]) if state[1] != 0.0 else None
-            # Layer dims already restored by DenseLayer.load() reading .npy shape
-        logger.info(
-            f"DeepRoutingNetwork loaded from {directory}  "
-            f"steps={self._train_steps}  "
-            f"rows={self.layers[0].out_dim}"
-        )
-
-    # ── Compatibility layer (RoutingEngine / DynamicWeightLayer API) ──────
 
     @property
     def weights(self) -> np.ndarray:
-        """
-        Compatibility shim: returns the single layer's weights so code
-        that reads `net.weights` (e.g., RoutingEngine, extract_routing_weights)
-        works. Shape: (rows, 7) — cols always 7.
-        """
         return self.layers[0].weights
 
     @property
     def SHAPE(self) -> Tuple[int, int]:
-        """Compatibility shim — (rows, 7)."""
         return (self.layers[0].out_dim, self.layers[0].in_dim)
 
     def get_weights_list(self) -> List[List[float]]:
-        """Return the layer's weights as list of lists (Phase 8 compatible)."""
         return self.layers[0].weights.tolist()
 
     def get_all_weights(self) -> Dict[str, List[List[float]]]:
-        """Return the layer's weights (kept as dict for API compatibility)."""
-        return {
-            layer.name: layer.weights.tolist()
-            for layer in self.layers
-        }
-
-    # ── Introspection ─────────────────────────────────────────────────────
+        return {l.name: l.weights.tolist() for l in self.layers}
 
     def _count_params(self) -> int:
         return sum(l.weights.size + l.biases.size for l in self.layers)
 
     def architecture_str(self) -> str:
-        """Human-readable architecture description."""
-        parts = [f"Input ({INPUT_DIM})"]
+        parts = [f"Input({INPUT_DIM})"]
         for layer in self.layers:
-            parts.append(f"{layer.name} ({layer.in_dim}→{layer.out_dim})")
-        parts.append(f"Routing weights ({OUTPUT_DIM}, derived from output rows 0-3)")
+            parts.append(f"{layer.name}")
+        parts.append(f"RoutingWeights({OUTPUT_DIM}→first4=W_SEMANTIC/SCORE/MEMORY/TOPOLOGY)")
         return " → ".join(parts)
 
     def summary(self) -> dict:
-        recent_losses = self._loss_history[-50:] if self._loss_history else []
-        total_params = self._count_params()
+        recent = self._loss_history[-50:] if self._loss_history else []
         return {
-            "name": self.name,
+            "name": self.name, "version": "v18",
             "architecture": self.architecture_str(),
             "layer_count": len(self.layers),
             "layers": [l.summary() for l in self.layers],
-            "total_parameters": total_params,
+            "total_parameters": self._count_params(),
+            "input_dim": INPUT_DIM, "output_dim": OUTPUT_DIM,
             "layer1_rows": self.layers[0].out_dim,
-            "layer1_cols_fixed": L1_COLS,
-            "layer1_max_rows": None,  # NO upper limit — grows indefinitely
+            "layer1_cols_fixed": INPUT_DIM,
             "layer1_grow_by": L1_GROW_BY,
             "train_steps": self._train_steps,
             "last_loss": round(self._last_loss, 8) if self._last_loss else None,
-            "avg_recent_loss": round(
-                sum(recent_losses) / len(recent_losses), 8
-            ) if recent_losses else None,
+            "avg_recent_loss": round(sum(recent)/len(recent), 8) if recent else None,
             "learning_rate": self.learning_rate,
-            "plateau_window": self.plateau_window,
-            "plateau_threshold": self.plateau_threshold,
-            "plateau_cooldown": self.plateau_cooldown,
             "steps_since_growth": self._steps_since_growth,
             "growth_events": len(self._growth_events),
         }
 
     def __repr__(self) -> str:
         return (
-            f"<DeepRoutingNetwork '{self.name}'  "
-            f"layers={len(self.layers)}  "
-            f"params={self._count_params()}  "
-            f"L1_shape=({self.layers[0].out_dim},{self.layers[0].in_dim})  "
+            f"<DeepRoutingNetwork '{self.name}' v18  "
+            f"params={self._count_params():,}  "
+            f"arch=128→{self.layers[0].out_dim}→"
+            f"{self.layers[1].out_dim}→{self.layers[2].out_dim}  "
             f"steps={self._train_steps}>"
         )
+
+
+# ── CKG query encoder ─────────────────────────────────────────────────────────
+
+def encode_query_to_ckg_vector(
+    query: str,
+    ckg_concepts: dict,
+    dim: int = INPUT_DIM,
+) -> np.ndarray:
+    """
+    Encode an Arabic query into a 128-dim CKG concept vector (L2-normalised).
+    Each position = one CKG concept, weighted by name-match × strength.
+    """
+    import re
+    def clean(t: str) -> str:
+        t = re.sub(r'[ٱ]', 'ا', t)
+        t = re.sub(r'[ًٌٍَُِّْٰ]', '', t)
+        t = re.sub(r'[^\u0600-\u06FF\s]', ' ', t)
+        return t.strip()
+
+    q_words = set(clean(query).split())
+    vec = np.zeros(dim, dtype=np.float64)
+    for i, (name, meta) in enumerate(list(ckg_concepts.items())[:dim]):
+        name_clean = clean(name)
+        strength   = meta.get("strength", 0.1)
+        freq_norm  = min(1.0, meta.get("frequency", 1) / 500)
+        match = 1.0 if (name_clean in q_words or
+                        any(w in name_clean for w in q_words if len(w) >= 3)) else 0.0
+        vec[i] = match * strength * (1.0 + freq_norm)
+    norm = np.linalg.norm(vec)
+    if norm > 0:
+        vec /= norm
+    return vec
 
 
 # ── Routing weight extractor (Phase 8 API compatible) ────────────────────────
 
 def extract_deep_routing_weights(net: DeepRoutingNetwork) -> dict:
-    """
-    Derive routing scalars from a DeepRoutingNetwork.
-
-    Unlike the Phase 8 extractor (which reads from the weight matrix),
-    this does a full forward pass with a *neutral* input vector so that
-    all layers contribute to the output.
-    """
-    # Neutral input: all 0.5 (represents an average-quality route)
     neutral = np.full(INPUT_DIM, 0.5, dtype=np.float64)
     try:
         return net.predict_routing_weights(neutral)
     except Exception as e:
         logger.warning(f"extract_deep_routing_weights failed: {e}")
-        return {
-            "W_SEMANTIC": 0.30,
-            "W_SCORE":    0.35,
-            "W_MEMORY":   0.25,
-            "W_TOPOLOGY": 0.10,
-        }
+        return {"W_SEMANTIC": 0.30, "W_SCORE": 0.35,
+                "W_MEMORY": 0.25, "W_TOPOLOGY": 0.10}
 
 
 # ── Module-level singleton ────────────────────────────────────────────────────
@@ -800,22 +465,21 @@ def extract_deep_routing_weights(net: DeepRoutingNetwork) -> dict:
 _default_deep_network: Optional[DeepRoutingNetwork] = None
 
 
-def get_default_deep_network(
-    weights_dir: str = WEIGHTS_DIR,
-) -> DeepRoutingNetwork:
-    """
-    Return (and cache) the module-level default DeepRoutingNetwork.
-
-    Loads persisted weights from `weights_dir` if available.
-    """
+def get_default_deep_network(weights_dir: str = WEIGHTS_DIR) -> DeepRoutingNetwork:
     global _default_deep_network
     if _default_deep_network is None:
         _default_deep_network = DeepRoutingNetwork(name="default_deep_router")
         layer1_path = os.path.join(weights_dir, "deep_network_layer_1_weights.npy")
         if os.path.exists(layer1_path):
             try:
-                _default_deep_network.load(weights_dir)
-                logger.info(f"DeepRoutingNetwork restored from {weights_dir}")
+                old_w = np.load(layer1_path).astype(np.float64)
+                if old_w.shape[1] <= 7:
+                    # v17 weights → migrate
+                    _default_deep_network.migrate_weights(old_w)
+                    logger.info(f"Migrated v17 weights {old_w.shape} into v18 L1")
+                else:
+                    _default_deep_network.load(weights_dir)
+                    logger.info(f"DeepRoutingNetwork v18 restored from {weights_dir}")
             except Exception as e:
-                logger.warning(f"Could not load deep network from {weights_dir}: {e}")
+                logger.warning(f"Could not load weights: {e}")
     return _default_deep_network
