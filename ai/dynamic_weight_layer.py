@@ -59,15 +59,15 @@ logger = logging.getLogger(__name__)
 
 # Starting dimensions — rows=9 matches Phase 8 NeuralWeightLayer base
 INITIAL_ROWS = 9       # start at 9 rows (same as Phase 8 base matrix)
-INITIAL_COLS = 7       # FIXED — equals the input feature vector size (INPUT_DIM)
+INITIAL_COLS = 256     # FIXED — equals the input feature vector size (256 = 7 + 249 TF-IDF)
 
 # Growth parameters
 GROW_ROWS = 23         # +23 rows per plateau event (was 3)
-GROW_COLS = 0          # columns NEVER grow (fixed at INPUT_DIM=7)
+GROW_COLS = 0          # columns NEVER grow (fixed at INPUT_DIM=256)
 
 # Limits
 MAX_ROWS = 200         # raised from 50 to accommodate +23 growth cadence
-MAX_COLS = 7           # hard ceiling = INITIAL_COLS (columns locked)
+MAX_COLS = 256         # hard ceiling = INITIAL_COLS (columns locked)
 
 # Plateau detection
 PLATEAU_CHECK_STEPS = 20    # look at last 20 training steps
@@ -91,7 +91,7 @@ class DynamicWeightLayer:
     initial_rows : int
         Starting row count (default: INITIAL_ROWS = 9).
     initial_cols : int
-        Input feature dimension — must stay 7 (default: INITIAL_COLS = 7).
+        Input feature dimension — must stay 256 (default: INITIAL_COLS = 256).
     learning_rate : float
         Step size for gradient updates. Default 0.01.
     name : str
@@ -109,7 +109,7 @@ class DynamicWeightLayer:
         if initial_cols != INITIAL_COLS:
             logger.warning(
                 f"DynamicWeightLayer: initial_cols={initial_cols} overridden "
-                f"to {INITIAL_COLS} (columns are fixed to input feature dim)."
+                f"to {INITIAL_COLS} (columns fixed = input_dim=256)."
             )
             initial_cols = INITIAL_COLS
 
