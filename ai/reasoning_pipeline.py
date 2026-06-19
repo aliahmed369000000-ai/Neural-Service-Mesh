@@ -1,7 +1,7 @@
 """
 Reasoning Pipeline — Question → CKG → Neural Core → Decision → Answer
 ========================================================================
-يربط NeuralCore (ai/neural_core.py — بنية 7→112→32→4) بالـ Cognitive Knowledge Graph الفعلي
+يربط NeuralCore (ai/neural_core.py — بنية 256→112→112→32→4) بالـ Cognitive Knowledge Graph الفعلي
 (knowledge/cognitive_graph.json عبر CKGManager في ai/knowledge_trainer.py).
 
 التدفق
@@ -16,7 +16,7 @@ Reasoning Pipeline — Question → CKG → Neural Core → Decision → Answer
        ArabicNLP → متجه سياق نهائي (7,) — "context_vector"
 
 3. Neural Core
-     → NeuralCore.forward(context_vector[7]) → L1(112×7,مدروسة) → L2(32×112,متعلَّمة) → L3(4×32,softmax) → 4 أوزان توجيه
+     → NeuralCore.forward(context_vector[256]) → L_embed(112×256,Xavier) → L1(112×112,مدروسة) → L2(32×112) → L3(4×32) → 4 أوزان توجيه
        (W_SEMANTIC, W_SCORE, W_MEMORY, W_TOPOLOGY) [Decision]
      → NeuralCore.recall(context_vector) → ذكريات سابقة ذات صلة
 
@@ -58,8 +58,8 @@ import numpy as np
 
 from ai.neural_core import (
     NeuralCore, get_default_core, auto_dims,
-    DEFAULT_INPUT_DIM,    # 7  — ثابت
-    DEFAULT_HIDDEN_DIMS,  # [112, 32] — الطبقة الأولى مدروسة (nnn_112.csv)
+    DEFAULT_INPUT_DIM,    # 256 — 7 دلالي + 249 TF-IDF hash
+    DEFAULT_HIDDEN_DIMS,  # [112, 112, 32] — L_embed + L1_مدروسة + L2
     DEFAULT_OUTPUT_DIM,   # 4  — ثابت
 )
 from ai.knowledge_trainer import CKGManager, VectorEncoder, DOMAIN_CODES
@@ -296,9 +296,9 @@ class ReasoningPipeline:
         matched: List[MatchedConcept],
     ) -> np.ndarray:
         """
-        يبني متجه السياق (7,) بدمج:
-          - متجه ArabicNLP (نحوي/صرفي/دلالي) إن كان متاحاً
-          - متوسط متجهات VectorEncoder للمفاهيم المطابقة (مرجّح بـ strength)
+        يبني متجه السياق (256,) بدمج:
+          - متجه ArabicNLP (256 بعد: 7 صرفي + 249 TF-IDF) إن كان متاحاً
+          - متوسط متجهات VectorEncoder (256 بعد) للمفاهيم المطابقة
         """
         vectors: List[np.ndarray] = []
         weights: List[float] = []
