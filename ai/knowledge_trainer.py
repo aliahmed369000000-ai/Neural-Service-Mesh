@@ -32,7 +32,7 @@ import numpy as np
 logger = logging.getLogger("KnowledgeTrainer")
 
 # ── ثوابت الأبعاد ──────────────────────────────────────────────────────────
-VECTOR_DIM = 7  # ثابت لا يتغير أبداً
+VECTOR_DIM = 256  # 7 قيم دلالية + 249 من TF-IDF hash النص
 
 DOMAIN_CODES: Dict[str, float] = {
     "physics":        0.14,
@@ -69,22 +69,29 @@ class VectorEncoder:
         known_concepts: Optional[set] = None,
         related_count: int = 0,
     ) -> np.ndarray:
-        vec = np.zeros(VECTOR_DIM, dtype=np.float64)
+        """
+        يُنتج متجه 256 بعداً:
+          [0:7]   — 7 قيم دلالية أصلية (importance, certainty, ...)
+          [7:256] — 249 قيمة من TF-IDF character n-gram hash للنص
+        الـ 256 بعداً تدخل مباشرة إلى L_embed(112×256) في NeuralCore.
+        """
+        vec = np.zeros(VECTOR_DIM, dtype=np.float64)  # (256,)
 
+        # ── [0:7] القيم الدلالية الأصلية السبع ──────────────────────
         # [0] IMPORTANCE
         vec[0] = float(np.clip(importance, 0.0, 1.0))
 
         # [1] CERTAINTY
         vec[1] = float(np.clip(certainty, 0.0, 1.0))
 
-        # [2] ABSTRACTION — نستنتجه من طول النص ومحتواه
+        # [2] ABSTRACTION
         words = text.split()
         has_numbers = any(ch.isdigit() for ch in text)
         abst = abstraction
         if has_numbers:
-            abst = max(0.0, abst - 0.2)  # أرقام = أكثر ملموسية
+            abst = max(0.0, abst - 0.2)
         if len(words) > 20:
-            abst = min(1.0, abst + 0.1)  # نص طويل = أكثر تجريداً
+            abst = min(1.0, abst + 0.1)
         vec[2] = float(np.clip(abst, 0.0, 1.0))
 
         # [3] DOMAIN
@@ -106,6 +113,30 @@ class VectorEncoder:
         else:
             vec[6] = 0.8
 
+        # ── [7:256] TF-IDF character n-gram hash (249 بعد) ───────────
+        # بدون مكتبات خارجية — hashing trick بسيط وسريع
+        # يُنتج تمثيلاً نصياً حقيقياً قابلاً للتعلم
+        text_lower = text.lower().strip()
+        n_hash = VECTOR_DIM - 7  # = 249
+        hash_vec = np.zeros(n_hash, dtype=np.float64)
+
+        # character bigrams + trigrams
+        for n in (2, 3):
+            for i in range(len(text_lower) - n + 1):
+                gram = text_lower[i:i + n]
+                # hash بسيط بدون تصادمات كبيرة
+                h = abs(hash(gram)) % n_hash
+                hash_vec[h] += 1.0
+
+        # تطبيع TF: قسمة على عدد n-grams
+        total = hash_vec.sum()
+        if total > 0:
+            hash_vec = hash_vec / total
+
+        # IDF-like: تخفيف الأبعاد المرتفعة (log dampening)
+        hash_vec = np.log1p(hash_vec * 10.0) / np.log1p(10.0)
+
+        vec[7:] = hash_vec
         return vec
 
 
