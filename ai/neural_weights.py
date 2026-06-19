@@ -152,12 +152,12 @@ _INITIAL_WEIGHTS: List[List[float]] = [
 
 class NeuralWeightLayer:
     """
-    Neural weight layer backed by a (108 × 7) numpy matrix with scalar bias.
+    Neural weight layer backed by a (112 × 256) numpy matrix with scalar bias.
 
     Design contract
     ---------------
-    • COLUMNS are FIXED at 7 — they represent the 7 input features.
-    • ROWS are 108 (expanded matrix imported externally).
+    • COLUMNS are FIXED at 256 — input_dim = 7 دلالي + 249 TF-IDF hash.
+    • ROWS are 112 (أوزان مدروسة من المصفوفة الأصلية).
     • bias is a scalar applied after the matrix multiply (default 0.6).
 
     Parameters
@@ -172,7 +172,7 @@ class NeuralWeightLayer:
         Human-readable label stored in saved artefacts.
     """
 
-    COLS = 7
+    COLS = 256  # input_dim = 256 (7 دلالي + 249 TF-IDF hash)
 
     def __init__(
         self,
@@ -185,7 +185,7 @@ class NeuralWeightLayer:
             w = np.array(initial_weights, dtype=np.float64)
             if w.ndim != 2 or w.shape[1] != self.COLS:
                 raise ValueError(
-                    f"NeuralWeightLayer expects shape (N, {self.COLS}), got {w.shape}"
+                    f"NeuralWeightLayer expects shape (N, {self.COLS}=256), got {w.shape}"
                 )
             self.weights: np.ndarray = w.copy()
         else:
