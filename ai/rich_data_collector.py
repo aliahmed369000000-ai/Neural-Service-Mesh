@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 # ── Feature-vector length produced by this collector ─────────────────────────
-RICH_FEATURE_DIM = 7
+RICH_FEATURE_DIM = 256  # 42 قيمة (6 sources × 7) + 214 TF-IDF hash
 
 
 class NodePerformanceTracker:
@@ -401,7 +401,8 @@ class RichDataCollector:
     The `collect(route_breakdown, node_id)` method returns a rich
     feature vector suitable for the Phase 9 multi-layer network.
 
-    The vector is always of length RICH_FEATURE_DIM (7), computed as
+    The vector is always of length RICH_FEATURE_DIM (256), computed as
+        42 weighted source values + 214 TF-IDF hash values,
     the *weighted average* of the 7 source sub-vectors so it remains
     compatible with the existing NeuralWeightLayer input contract.
 
@@ -503,23 +504,36 @@ class RichDataCollector:
             "external_signals": self.ext_signals.feature_vector(),
         }
 
-        # Weighted average across all 7 sources
-        merged = [0.0] * RICH_FEATURE_DIM
-        for source_name, vec in sources.items():
+        # Weighted average across sources → BASE_DIM values (n_sources × 7)
+        src_list = list(sources.items())
+        BASE_DIM = len(src_list) * 7  # 7 sources × 7 = 49
+        merged_base = [0.0] * BASE_DIM
+        for si, (source_name, vec) in enumerate(src_list):
             w = self.SOURCE_WEIGHTS[source_name]
-            for i in range(RICH_FEATURE_DIM):
-                merged[i] += w * vec[i]
+            base_idx = si * 7
+            for i in range(min(7, len(vec))):
+                merged_base[base_idx + i] = max(0.0, min(1.0, w * vec[i]))
 
-        # Clip to [0, 1]
-        merged = [max(0.0, min(1.0, v)) for v in merged]
+        # توسيع إلى 256 بإضافة 214 قيمة TF-IDF hash
+        import math
+        n_hash = max(1, RICH_FEATURE_DIM - BASE_DIM)  # متغير حسب عدد المصادر
+        hash_vec = [0.0] * n_hash
+        text_key = (node_id or "") + "|" + "|".join(f"{v:.2f}" for v in merged_base[:7])
+        for i in range(len(text_key) - 1):
+            h = abs(hash(text_key[i:i+2])) % n_hash
+            hash_vec[h] += 1.0
+        total_h = sum(hash_vec)
+        if total_h > 0:
+            hash_vec = [math.log1p(v * 10.0 / total_h) / math.log1p(10.0) for v in hash_vec]
+        merged = merged_base + hash_vec  # len=256
 
         self._total_collections += 1
         logger.debug(
             f"RichDataCollector.collect: node={node_id!r}  "
-            f"merged={[round(v, 3) for v in merged]}  "
-            f"total={self._total_collections}"
+            f"merged_base={[round(v, 3) for v in merged_base[:7]]}  "
+            f"total={self._total_collections}  dim={len(merged)}"
         )
-        return merged
+        return merged  # len=256
 
     def summary(self) -> dict:
         """Serialisable summary for status reporting."""
