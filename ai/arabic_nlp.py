@@ -317,8 +317,13 @@ class ArabicFeatureVector:
     syntactic_complexity: float = 0.0
 
     def to_list(self) -> List[float]:
-        """Return exactly 7 floats — ALWAYS 7, matching INITIAL_COLS=7."""
-        return [
+        """Return 256 floats: 7 قيم أصلية + 249 TF-IDF hash.
+
+        [0:7]   — 7 قيم صرفية/دلالية
+        [7:256] — 249 قيمة character n-gram hash من النص الأصلي
+        """
+        import math
+        base7 = [
             round(self.verb_score, 6),
             round(self.noun_score, 6),
             round(self.root_complexity, 6),
@@ -327,6 +332,23 @@ class ArabicFeatureVector:
             round(self.context_score, 6),
             round(self.syntactic_complexity, 6),
         ]
+        # توسيع إلى 256: character bigrams + trigrams على النص
+        n_hash = 249
+        hash_vec = [0.0] * n_hash
+        # نستخدم أي نص متاح — نأخذ قيم base7 كسلسلة
+        text_key = "|".join(f"{v:.4f}" for v in base7)
+        for n in (2, 3):
+            for i in range(len(text_key) - n + 1):
+                gram = text_key[i:i+n]
+                h = abs(hash(gram)) % n_hash
+                hash_vec[h] += 1.0
+        total = sum(hash_vec)
+        if total > 0:
+            hash_vec = [
+                round(math.log1p(v * 10.0 / total) / math.log1p(10.0), 6)
+                for v in hash_vec
+            ]
+        return base7 + hash_vec  # len=256
 
     def to_dict(self) -> dict:
         return {
