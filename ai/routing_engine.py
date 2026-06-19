@@ -186,24 +186,36 @@ class RoutingEngine:
 
     def _build_feature_vector(self, breakdown: dict, node_id: str = "") -> list:
         """
-        Construct a 7-element feature vector from a route score breakdown.
+        Construct a 256-element feature vector from a route score breakdown.
         Used as input to NeuralWeightLayer.forward() / train_step().
 
-        Phase 9: When RichDataCollector is available, returns enriched vector
-        merging all 7 data sources for 10x stronger learning signal.
+        [0:7]   — 7 basic semantic features
+        [7:256] — 249 TF-IDF hash features from node_id
+        Phase 9: RichDataCollector returns full 256-dim enriched vector.
         """
         if self._rich_data is not None:
-            return self._rich_data.collect(breakdown, node_id)
-        # Phase 8 fallback: basic 7-element vector
+            return self._rich_data.collect(breakdown, node_id)  # → 256
+        # Fallback: basic 7 values + 249 zeros → total 256
         sem   = breakdown.get("semantic", 50.0) / 100.0
         score = breakdown.get("score",    50.0) / 100.0
         mem   = breakdown.get("memory",   50.0) / 100.0
         topo  = breakdown.get("topology", 50.0) / 100.0
-        # Additional engineered features
         avg         = (sem + score + mem + topo) / 4.0
         sem_x_score = sem * score
         mem_x_topo  = mem * topo
-        return [sem, score, mem, topo, avg, sem_x_score, mem_x_topo]
+        base7 = [sem, score, mem, topo, avg, sem_x_score, mem_x_topo]
+        # توسيع إلى 256: TF-IDF hash بسيط على node_id
+        import math
+        n_hash = 249
+        hash_vec = [0.0] * n_hash
+        text_key = (node_id or "default") + f"|{sem:.2f}|{score:.2f}"
+        for i in range(len(text_key) - 1):
+            h = abs(hash(text_key[i:i+2])) % n_hash
+            hash_vec[h] += 1.0
+        total = sum(hash_vec)
+        if total > 0:
+            hash_vec = [math.log1p(v * 10.0 / total) / math.log1p(10.0) for v in hash_vec]
+        return base7 + hash_vec  # len=256
 
     def _neural_train_on_route(self, breakdown: dict, composite: float,
                                node_id: str = "") -> None:
