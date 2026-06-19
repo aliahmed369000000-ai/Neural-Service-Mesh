@@ -23,7 +23,7 @@ predict_routing_weights(), grow(), load_custom_weights(), save(), load(),
 summary(), architecture_str(), .layers[0], .weights, .SHAPE,
 get_default_deep_network(), extract_deep_routing_weights()
 
-Old 7-feature vectors are zero-padded to 128 automatically.
+Old 7-feature vectors are zero-padded to 256 automatically.
 Old v17 weights (108×7 or 112×7 from nnn_112.csv) are migrated via migrate_weights().
 """
 from __future__ import annotations
@@ -40,14 +40,14 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # ── Architecture constants (v18) ──────────────────────────────────────────────
-INPUT_DIM      = 128
-HIDDEN1_DIM    = 512
-HIDDEN2_DIM    = 256
-OUTPUT_DIM     = 16
+INPUT_DIM      = 256   # موحّد: 7 دلالي + 249 TF-IDF hash
+HIDDEN1_DIM    = 112   # L1: 112×256
+HIDDEN2_DIM    = 32    # L2: 32×112
+OUTPUT_DIM     = 4     # L3: 4×32 → 4 routing weights
 LEARNING_RATE  = 0.003
 WEIGHTS_DIR    = "models/classifiers"
 
-L1_INITIAL_ROWS = 512
+L1_INITIAL_ROWS = 112  # موحّد مع neural_core
 L1_GROW_BY      = 8
 L1_MAX_ROWS     = None
 L1_COLS         = INPUT_DIM  # FIXED at 128
