@@ -6,21 +6,22 @@ Replaces the fixed 9×7 NeuralWeightLayer (Phase 8) with a layer that
 
 Growth strategy (updated v15+)
 -------------------------------
-  • COLUMNS are FIXED at 7 — they represent the 7 input features coming
-    from _build_feature_vector() / RichDataCollector.  Changing columns
-    would break every upstream caller.  Columns NEVER grow.
+  • COLUMNS are FIXED at 784 — they represent the 784 input features coming
+    from _build_feature_vector() / RichDataCollector (matches neural_core.py
+    L_embed input dimension). Changing columns would break every upstream
+    caller. Columns NEVER grow.
 
   • ROWS start at 9 (matching the Phase 8 base matrix) and grow by +23
     on every plateau event.  +23 gives the network a meaningful capacity
     jump instead of the old +3 trickle.
 
   • Growth trajectory:
-        Start:            9  rows × 7 cols
-        After plateau 1: 32  rows × 7 cols  (+23)
-        After plateau 2: 55  rows × 7 cols  (+23)
-        After plateau 3: 78  rows × 7 cols  (+23)
+        Start:            9  rows × 784 cols
+        After plateau 1: 32  rows × 784 cols  (+23)
+        After plateau 2: 55  rows × 784 cols  (+23)
+        After plateau 3: 78  rows × 784 cols  (+23)
         ...
-        Cap:            200  rows × 7 cols
+        Cap:            200  rows × 784 cols
 
   • COOLDOWN_STEPS raised to 120 (was 30) so the network fully absorbs
     each +23 expansion before growing again.
@@ -59,15 +60,15 @@ logger = logging.getLogger(__name__)
 
 # Starting dimensions — rows=9 matches Phase 8 NeuralWeightLayer base
 INITIAL_ROWS = 9       # start at 9 rows (same as Phase 8 base matrix)
-INITIAL_COLS = 256     # FIXED — equals the input feature vector size (256 = 7 + 249 TF-IDF)
+INITIAL_COLS = 784     # FIXED — equals the input feature vector size (784 = 7 + 777 TF-IDF, matches neural_core.py)
 
 # Growth parameters
 GROW_ROWS = 23         # +23 rows per plateau event (was 3)
-GROW_COLS = 0          # columns NEVER grow (fixed at INPUT_DIM=256)
+GROW_COLS = 0          # columns NEVER grow (fixed at INPUT_DIM=784)
 
 # Limits
 MAX_ROWS = 200         # raised from 50 to accommodate +23 growth cadence
-MAX_COLS = 256         # hard ceiling = INITIAL_COLS (columns locked)
+MAX_COLS = 784         # hard ceiling = INITIAL_COLS (columns locked)
 
 # Plateau detection
 PLATEAU_CHECK_STEPS = 20    # look at last 20 training steps
@@ -82,16 +83,16 @@ class DynamicWeightLayer:
     """
     Phase 9 Axis-2: Self-growing neural weight layer.
 
-    The weight matrix starts at INITIAL_ROWS × INITIAL_COLS (9×7) and
+    The weight matrix starts at INITIAL_ROWS × INITIAL_COLS (9×784) and
     expands its ROW count automatically when learning stagnates.
-    Column count is permanently fixed at 7 (= input feature dimension).
+    Column count is permanently fixed at 784 (= input feature dimension).
 
     Parameters
     ----------
     initial_rows : int
         Starting row count (default: INITIAL_ROWS = 9).
     initial_cols : int
-        Input feature dimension — must stay 256 (default: INITIAL_COLS = 256).
+        Input feature dimension — must stay 784 (default: INITIAL_COLS = 784).
     learning_rate : float
         Step size for gradient updates. Default 0.01.
     name : str
@@ -109,12 +110,12 @@ class DynamicWeightLayer:
         if initial_cols != INITIAL_COLS:
             logger.warning(
                 f"DynamicWeightLayer: initial_cols={initial_cols} overridden "
-                f"to {INITIAL_COLS} (columns fixed = input_dim=256)."
+                f"to {INITIAL_COLS} (columns fixed = input_dim=784)."
             )
             initial_cols = INITIAL_COLS
 
         self._rows = initial_rows
-        self._cols = initial_cols          # always 7, never changes
+        self._cols = initial_cols          # always 784, never changes
         self.learning_rate = learning_rate
         self.name = name
 
@@ -159,19 +160,19 @@ class DynamicWeightLayer:
         """
         Pass input vector through the dynamic weight matrix.
 
-        Input is always expected to be exactly 7 elements (INITIAL_COLS).
+        Input is always expected to be exactly 784 elements (INITIAL_COLS).
         Shorter vectors are zero-padded; longer vectors are truncated.
 
         Returns np.ndarray of shape (current_rows,).
         """
         x_arr = np.array(x, dtype=np.float64)
-        # Normalise input to exactly self._cols (= 7, always)
+        # Normalise input to exactly self._cols (= 784, always)
         if x_arr.shape[0] < self._cols:
             x_arr = np.pad(x_arr, (0, self._cols - x_arr.shape[0]))
         elif x_arr.shape[0] > self._cols:
             x_arr = x_arr[:self._cols]
 
-        output = self.weights @ x_arr          # (rows, 7) × (7,) → (rows,)
+        output = self.weights @ x_arr          # (rows, 784) × (784,) → (rows,)
         return np.maximum(0.0, output)         # ReLU activation
 
     # ── Training step ─────────────────────────────────────────────────────
@@ -252,7 +253,7 @@ class DynamicWeightLayer:
     def _grow(self) -> None:
         """
         Expand the weight matrix by adding GROW_ROWS=23 new rows.
-        Column count stays fixed at 7 (GROW_COLS=0).
+        Column count stays fixed at 784 (GROW_COLS=0).
         New rows are Xavier-initialised.
         """
         old_shape = (self._rows, self._cols)
@@ -473,8 +474,8 @@ if __name__ == "__main__":
 
     layer = DynamicWeightLayer(name="test_layer")
     print(f"\n  Initial shape: {layer.shape}")
-    assert layer.shape == (9, 7), f"Expected (9,7) got {layer.shape}"
-    assert layer._cols == 7, "Cols must be 7"
+    assert layer.shape == (9, 784), f"Expected (9,784) got {layer.shape}"
+    assert layer._cols == 784, "Cols must be 784"
 
     # Simulate plateau: inject a flat loss history
     for i in range(COOLDOWN_STEPS + PLATEAU_CHECK_STEPS * 2 + 5):
@@ -485,18 +486,18 @@ if __name__ == "__main__":
     if layer._is_plateauing():
         layer._grow()
         print(f"  After growth:  {layer.shape}  (+{GROW_ROWS} rows)")
-        assert layer.shape == (9 + GROW_ROWS, 7), f"Expected ({9+GROW_ROWS},7) got {layer.shape}"
-        assert layer._cols == 7, "Cols must stay 7 after growth"
+        assert layer.shape == (9 + GROW_ROWS, 784), f"Expected ({9+GROW_ROWS},784) got {layer.shape}"
+        assert layer._cols == 784, "Cols must stay 784 after growth"
     else:
         print("  (plateau not triggered in static test — OK)")
 
-    # Forward pass with 7-element input
-    out = layer.forward([0.5] * 7)
+    # Forward pass with 784-element input
+    out = layer.forward([0.5] * 784)
     assert out.shape == (layer._rows,), f"Forward output shape wrong: {out.shape}"
-    print(f"  Forward pass:  input=(7,) → output=({out.shape[0]},)  ✓")
+    print(f"  Forward pass:  input=(784,) → output=({out.shape[0]},)  ✓")
 
     # Train step
-    loss = layer.train_step([0.3, 0.7, 0.5, 0.2, 0.4, 0.6, 0.1], target=0.8)
+    loss = layer.train_step([0.3, 0.7, 0.5, 0.2, 0.4, 0.6, 0.1] + [0.1] * 777, target=0.8)
     print(f"  Train step:    loss={loss:.6f}  steps={layer._train_steps}  ✓")
 
     # Routing extraction

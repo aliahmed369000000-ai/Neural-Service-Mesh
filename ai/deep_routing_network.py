@@ -1,20 +1,20 @@
 """
 Phase 9 — Axis 3: Deep Routing Network (v18 — three layers, expanded)
 ======================================================================
-Upgraded from v17 (single layer 7→108) to a proper 3-layer network:
+Upgraded from v17 (single layer 7→108) to a proper 3-layer network,
+unified (v19) with neural_core.py's L1 weight matrix:
 
-Architecture (v18):
-    Input (128 features — CKG concept vector)
+Architecture (v19 — unified with neural_core.py):
+    Input (784 features — CKG concept vector)
         ↓
-    Layer 1: 512×128  relu   (rows growable +8, no upper limit)
+    Layer 1: 5×784    relu   (مدروسة ثابتة — أول 5 صفوف من weights_784x784.csv)
         ↓
-    Layer 2: 256×512  relu
+    Layer 2: 32×5     relu   (Xavier, تتعلم)
         ↓
-    Layer 3:  16×256  softmax
+    Layer 3:  4×32    softmax (Xavier, تتعلم)
         ↓
-    Output: 16-dim routing weight vector
-      → 4 primary weights (W_SEMANTIC, W_SCORE, W_MEMORY, W_TOPOLOGY)
-        derived from rows 0-3, normalised to sum=1 (backward compatible).
+    Output: 4-dim routing weight vector
+      → W_SEMANTIC, W_SCORE, W_MEMORY, W_TOPOLOGY, normalised to sum=1.
 
 Backward compatibility
 ----------------------
@@ -23,8 +23,8 @@ predict_routing_weights(), grow(), load_custom_weights(), save(), load(),
 summary(), architecture_str(), .layers[0], .weights, .SHAPE,
 get_default_deep_network(), extract_deep_routing_weights()
 
-Old 7-feature vectors are zero-padded to 256 automatically.
-Old v17 weights (108×7 or 112×7 from nnn_112.csv) are migrated via migrate_weights().
+Old 7-feature vectors are zero-padded to 784 automatically.
+Old v17/v18 weights are migrated via migrate_weights().
 """
 from __future__ import annotations
 
@@ -40,17 +40,17 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # ── Architecture constants (v18) ──────────────────────────────────────────────
-INPUT_DIM      = 256   # موحّد: 7 دلالي + 249 TF-IDF hash
-HIDDEN1_DIM    = 112   # L1: 112×256
-HIDDEN2_DIM    = 32    # L2: 32×112
+INPUT_DIM      = 784   # موحّد: 7 دلالي + 777 TF-IDF hash (يطابق neural_core.py)
+HIDDEN1_DIM    = 5     # L1: 5×784 (مصفوفة مدروسة — أول 5 صفوف من weights_784x784.csv)
+HIDDEN2_DIM    = 32    # L2: 32×5
 OUTPUT_DIM     = 4     # L3: 4×32 → 4 routing weights
 LEARNING_RATE  = 0.003
 WEIGHTS_DIR    = "models/classifiers"
 
-L1_INITIAL_ROWS = 112  # موحّد مع neural_core
+L1_INITIAL_ROWS = 5    # موحّد مع neural_core (L1 المدروسة الثابتة)
 L1_GROW_BY      = 8
 L1_MAX_ROWS     = None
-L1_COLS         = INPUT_DIM  # FIXED at 128
+L1_COLS         = INPUT_DIM  # FIXED at 784
 
 PLATEAU_WINDOW    = 50
 PLATEAU_THRESHOLD = 0.01
@@ -160,8 +160,8 @@ class DenseLayer:
 
 class DeepRoutingNetwork:
     """
-    Phase 9 Axis-3: Three-layer routing network (v18).
-    Input(128) → L1(512,relu) → L2(256,relu) → L3(16,softmax)
+    Phase 9 Axis-3: Three-layer routing network (v19 — unified with neural_core.py).
+    Input(784) → L1(5,relu,مدروسة) → L2(32,relu) → L3(4,softmax)
     """
 
     def __init__(
@@ -193,8 +193,8 @@ class DeepRoutingNetwork:
         self.layers: List[DenseLayer] = [l1, l2, l3]
 
         logger.info(
-            f"DeepRoutingNetwork '{self.name}' v18 — "
-            f"128→512(relu)→256(relu)→16(softmax) | "
+            f"DeepRoutingNetwork '{self.name}' v19 — "
+            f"784→5(relu,مدروسة)→32(relu)→4(softmax) | "
             f"params: {self._count_params():,}"
         )
 
@@ -222,8 +222,9 @@ class DeepRoutingNetwork:
         return True
 
     def migrate_weights(self, old_weights: np.ndarray) -> None:
-        """Migrate old weights (any shape: 108×7, 112×7, etc.) into new L1 (128-dim).
-        الأوزان المدروسة من nnn_112.csv (112×7) تُدمج تلقائياً في أول 112 صف من L1.
+        """Migrate old weights (any shape) into new L1 (784-dim cols).
+        أوزان L1 المدروسة من weights_784x784.csv (أول 5×784) تُدمج تلقائياً
+        في أول 5 صفوف من L1.
         """
         old = np.array(old_weights, dtype=np.float64)
         r = min(old.shape[0], self.layers[0].out_dim)
@@ -407,9 +408,9 @@ class DeepRoutingNetwork:
 
     def __repr__(self) -> str:
         return (
-            f"<DeepRoutingNetwork '{self.name}' v18  "
+            f"<DeepRoutingNetwork '{self.name}' v19  "
             f"params={self._count_params():,}  "
-            f"arch=128→{self.layers[0].out_dim}→"
+            f"arch=784→{self.layers[0].out_dim}→"
             f"{self.layers[1].out_dim}→{self.layers[2].out_dim}  "
             f"steps={self._train_steps}>"
         )
@@ -423,7 +424,7 @@ def encode_query_to_ckg_vector(
     dim: int = INPUT_DIM,
 ) -> np.ndarray:
     """
-    Encode an Arabic query into a 128-dim CKG concept vector (L2-normalised).
+    Encode an Arabic query into a 784-dim CKG concept vector (L2-normalised).
     Each position = one CKG concept, weighted by name-match × strength.
     """
     import re
