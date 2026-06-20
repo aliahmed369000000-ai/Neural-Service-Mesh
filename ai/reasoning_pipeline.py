@@ -1,7 +1,7 @@
 """
 Reasoning Pipeline — Question → CKG → Neural Core → Decision → Answer
 ========================================================================
-يربط NeuralCore (ai/neural_core.py — بنية 256→112→112→32→4) بالـ Cognitive Knowledge Graph الفعلي
+يربط NeuralCore (ai/neural_core.py — بنية 784→784→5→32→4) بالـ Cognitive Knowledge Graph الفعلي
 (knowledge/cognitive_graph.json عبر CKGManager في ai/knowledge_trainer.py).
 
 التدفق
@@ -16,7 +16,7 @@ Reasoning Pipeline — Question → CKG → Neural Core → Decision → Answer
        ArabicNLP → متجه سياق نهائي (7,) — "context_vector"
 
 3. Neural Core
-     → NeuralCore.forward(context_vector[256]) → L_embed(112×256,Xavier) → L1(112×112,مدروسة) → L2(32×112) → L3(4×32) → 4 أوزان توجيه
+     → NeuralCore.forward(context_vector[784]) → L_embed(784×784,Xavier) → L1(5×784,مدروسة) → L2(32×5) → L3(4×32) → 4 أوزان توجيه
        (W_SEMANTIC, W_SCORE, W_MEMORY, W_TOPOLOGY) [Decision]
      → NeuralCore.recall(context_vector) → ذكريات سابقة ذات صلة
 
@@ -58,8 +58,8 @@ import numpy as np
 
 from ai.neural_core import (
     NeuralCore, get_default_core, auto_dims,
-    DEFAULT_INPUT_DIM,    # 256 — 7 دلالي + 249 TF-IDF hash
-    DEFAULT_HIDDEN_DIMS,  # [112, 112, 32] — L_embed + L1_مدروسة + L2
+    DEFAULT_INPUT_DIM,    # 784 — 7 دلالي + 777 TF-IDF hash
+    DEFAULT_HIDDEN_DIMS,  # [784, 5, 32] — L_embed + L1_مدروسة(5×784) + L2
     DEFAULT_OUTPUT_DIM,   # 4  — ثابت
 )
 from ai.knowledge_trainer import CKGManager, VectorEncoder, DOMAIN_CODES
@@ -128,7 +128,7 @@ class PipelineResult:
     memory_index: Optional[int] = None
     episode_id: Optional[str] = None
     quality: Optional[Dict[str, float]] = None
-    net_architecture: Optional[str] = None   # مثال: "7→112→32→4" (يتحدث مع النمو)
+    net_architecture: Optional[str] = None   # مثال: "784→784→5→32→4" (يتحدث مع النمو)
     grew: bool = False                        # True إذا نمت الشبكة في هذه الخطوة
 
     def to_dict(self) -> dict:
@@ -192,9 +192,9 @@ class ReasoningPipeline:
             self.core = core
         else:
             # نستخدم DEFAULT_* من neural_core.py مباشرة لضمان تحميل الأوزان
-            # المدروسة (nnn_112.csv — 112 صف × 7 أعمدة) في الطبقة الأولى.
-            # auto_dims() تحسب h1=input_dim*10=70 وهو غير صحيح لهذه البنية.
-            # L1(112×7) مدروسة، L2(32×112) و L3(4×32) تتعلمان بالتدريب.
+            # المدروسة (weights_784x784.csv — أول 5 صفوف × 784 عمود) في L1.
+            # auto_dims() تحسب h1=input_dim*10 وهو غير صحيح لهذه البنية.
+            # L1(5×784) مدروسة، L_embed(784×784) وL2(32×5) وL3(4×32) تتعلمان بالتدريب.
             self.core = get_default_core(
                 core_save_path or "models/neural_core",
                 input_dim=DEFAULT_INPUT_DIM,
@@ -296,9 +296,9 @@ class ReasoningPipeline:
         matched: List[MatchedConcept],
     ) -> np.ndarray:
         """
-        يبني متجه السياق (256,) بدمج:
-          - متجه ArabicNLP (256 بعد: 7 صرفي + 249 TF-IDF) إن كان متاحاً
-          - متوسط متجهات VectorEncoder (256 بعد) للمفاهيم المطابقة
+        يبني متجه السياق (784,) بدمج:
+          - متجه ArabicNLP (784 بعد: 7 صرفي + 777 TF-IDF) إن كان متاحاً
+          - متوسط متجهات VectorEncoder (784 بعد) للمفاهيم المطابقة
         """
         vectors: List[np.ndarray] = []
         weights: List[float] = []

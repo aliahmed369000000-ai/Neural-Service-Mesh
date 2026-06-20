@@ -20,8 +20,9 @@ Architecture: 3 analysis layers → 7-element feature vector → weight matrix
 
 Output contract
 ---------------
-  Every analysis produces an ArabicFeatureVector with exactly 7 elements
-  (matching INITIAL_COLS=7 of the weight matrix — NEVER change this):
+  Every analysis produces an ArabicFeatureVector with exactly 7 core elements,
+  expanded to 784 via to_list() (matching INPUT_DIM=784 of neural_core.py —
+  NEVER change the 7 core elements' order/meaning):
 
     [0] verb_score          — proportion of verb-form tokens (0-1)
     [1] noun_score          — proportion of noun-form tokens (0-1)
@@ -33,7 +34,8 @@ Output contract
 
 Constraints (must never be violated)
 -------------------------------------
-  • Output vector is ALWAYS 7 elements (matches neural weight matrix columns).
+  • to_list() output is ALWAYS 784 elements (7 core + 777 hash-expanded,
+    matches neural_core.py L_embed input dimension).
   • This module never modifies NeuralWeightLayer or DynamicWeightLayer shape.
   • All three layers run without external Arabic NLP libraries (pure Python).
   • The module is safe to import even when numpy is unavailable.
@@ -317,10 +319,11 @@ class ArabicFeatureVector:
     syntactic_complexity: float = 0.0
 
     def to_list(self) -> List[float]:
-        """Return 256 floats: 7 قيم أصلية + 249 TF-IDF hash.
+        """Return 784 floats: 7 قيم أصلية + 777 TF-IDF hash.
 
         [0:7]   — 7 قيم صرفية/دلالية
-        [7:256] — 249 قيمة character n-gram hash من النص الأصلي
+        [7:784] — 777 قيمة character n-gram hash من النص الأصلي
+        (موسَّعة من 256→784 لتطابق L_embed(784×784) الجديدة في neural_core.py)
         """
         import math
         base7 = [
@@ -332,8 +335,8 @@ class ArabicFeatureVector:
             round(self.context_score, 6),
             round(self.syntactic_complexity, 6),
         ]
-        # توسيع إلى 256: character bigrams + trigrams على النص
-        n_hash = 249
+        # توسيع إلى 784: character bigrams + trigrams على النص
+        n_hash = 777
         hash_vec = [0.0] * n_hash
         # نستخدم أي نص متاح — نأخذ قيم base7 كسلسلة
         text_key = "|".join(f"{v:.4f}" for v in base7)
@@ -348,7 +351,7 @@ class ArabicFeatureVector:
                 round(math.log1p(v * 10.0 / total) / math.log1p(10.0), 6)
                 for v in hash_vec
             ]
-        return base7 + hash_vec  # len=256
+        return base7 + hash_vec  # len=784
 
     def to_dict(self) -> dict:
         return {
