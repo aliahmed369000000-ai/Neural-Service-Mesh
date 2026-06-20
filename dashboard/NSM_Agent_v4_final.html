@@ -900,8 +900,7 @@ function runJS(code,oid){const el=document.getElementById(oid);el.style.display=
 
 // ══ FORMAT ══
 function fmtR(text){
-  text=text.replace(/```(\w*)
-?([\s\S]*?)```/g,(_,lang,code)=>{
+  text=text.replace(/```(\w*)\n?([\s\S]*?)```/g,(_,lang,code)=>{
     const id="cb"+(++cbC),oid="ob"+cbC;const tr=code.trim(),lo=lang.toLowerCase();
     const isPy=["python","py",""].includes(lo),isJs=["javascript","js"].includes(lo);
     const canRun=isPy||isJs;
