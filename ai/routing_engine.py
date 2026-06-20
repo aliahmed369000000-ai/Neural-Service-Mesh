@@ -28,6 +28,17 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+
+def _fnv1a_hash(s: str) -> int:
+    """FNV-1a حتمية 32-بت — بديل ثابت عن hash() المدمجة (عشوائية بين العمليات).
+    مطابقة حرفياً لنفس الخوارزمية في NSM_Agent (JavaScript)."""
+    h = 0x811c9dc5
+    for ch in s:
+        h ^= ord(ch)
+        h = (h * 0x01000193) & 0xFFFFFFFF
+    return h
+
+
 # ── Phase 8: import neural weight utilities ──────────────────────────────────
 try:
     from ai.neural_weights import NeuralWeightLayer, extract_routing_weights, get_default_layer
@@ -211,7 +222,7 @@ class RoutingEngine:
         hash_vec = [0.0] * n_hash
         text_key = (node_id or "default") + f"|{sem:.2f}|{score:.2f}"
         for i in range(len(text_key) - 1):
-            h = abs(hash(text_key[i:i+2])) % n_hash
+            h = _fnv1a_hash(text_key[i:i+2]) % n_hash
             hash_vec[h] += 1.0
         total = sum(hash_vec)
         if total > 0:
