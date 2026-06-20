@@ -53,8 +53,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);height:100vh
 /* HEADER */
 header{height:50px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;padding:0 14px;flex-shrink:0;}
 .h-logo{width:30px;height:30px;border-radius:7px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:12px;font-weight:700;color:#080b0f;flex-shrink:0;}
-.h-title{flex:1;}
-.h-title h1{font-size:13px;font-weight:700;}
+.h-title{flex:1;min-width:0;}
+.h-title h1{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .h-title p{font-size:10px;color:var(--muted);font-family:var(--mono);}
 .prov-indicator{display:flex;align-items:center;gap:5px;font-size:10px;font-family:var(--mono);padding:3px 9px;border-radius:4px;cursor:pointer;border:1px solid var(--border);color:var(--muted);transition:all .15s;}
 .prov-indicator:hover{border-color:var(--accent);color:var(--accent);}
@@ -233,6 +233,32 @@ pre{background:rgba(0,0,0,.4);padding:12px;font-family:var(--mono);font-size:11p
 ::-webkit-scrollbar{width:3px;height:3px;}
 ::-webkit-scrollbar-track{background:transparent;}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+
+/* DEFAULT-KEY NOTE */
+.dk-note{display:none;background:rgba(227,179,65,.07);border:1px solid rgba(227,179,65,.25);color:var(--warn);font-size:11px;line-height:1.7;padding:9px 10px;border-radius:7px;margin-bottom:10px;font-family:var(--sans);}
+.dk-note a{color:var(--accent2);}
+
+/* DRAWER TOGGLES (mobile only) */
+.drawer-btn{display:none;}
+.drawer-overlay{position:fixed;inset:0;background:rgba(8,11,15,.6);z-index:150;display:none;backdrop-filter:blur(2px);}
+.drawer-overlay.show{display:block;}
+
+/* RESPONSIVE / MOBILE */
+@media (max-width:860px){
+  header{padding:0 8px;gap:6px;}
+  .h-title p{display:none;}
+  .h-badge{display:none;}
+  .drawer-btn{display:flex;}
+  .workspace{display:flex;grid-template-columns:none;position:relative;}
+  .chat-area{flex:1;width:100%;min-width:0;}
+  .l-panel,.r-panel{position:fixed;top:50px;bottom:0;width:84%;max-width:320px;z-index:200;transition:transform .25s ease;box-shadow:0 0 28px rgba(0,0,0,.45);border:none;}
+  .l-panel{inset-inline-end:0;transform:translateX(110%);}
+  .r-panel{inset-inline-start:0;transform:translateX(-110%);}
+  .l-panel.open,.r-panel.open{transform:translateX(0);}
+  .sc{padding:22px 18px;}
+  .irow textarea,.field input,.field select,.ghf input,.pf input,.pf select{font-size:16px;}
+  .bubble{max-width:90%;}
+}
 </style>
 </head>
 <body>
@@ -399,6 +425,7 @@ pre{background:rgba(0,0,0,.4);padding:12px;font-family:var(--mono);font-size:11p
 <!-- APP -->
 <div id="app" style="display:none;flex:1;flex-direction:column;">
 <header>
+  <button class="h-btn drawer-btn" onclick="toggleLPanel()" title="المحادثات">☰</button>
   <div class="h-logo">N</div>
   <div class="h-title">
     <h1>Neural Service Mesh <span style="color:var(--accent);font-size:10px;">Agent</span></h1>
@@ -410,16 +437,23 @@ pre{background:rgba(0,0,0,.4);padding:12px;font-family:var(--mono);font-size:11p
     <span style="font-size:9px;opacity:.5;">▼</span>
   </div>
   <button class="gh-hbtn" id="gh-hbtn" onclick="ghPush()">↑ GitHub</button>
-  <button class="h-btn" onclick="exportSess()">تصدير</button>
-  <button class="h-btn" style="color:var(--danger);" onclick="clearAll()">مسح الكل</button>
   <span class="h-badge">NSM v4</span>
+  <button class="h-btn drawer-btn" onclick="toggleRPanel()" title="الأدوات والإعدادات">⚙</button>
 </header>
 
 <div class="workspace">
+<div class="drawer-overlay" id="drawer-overlay" onclick="closeDrawers()"></div>
 
   <!-- Left Sessions -->
-  <div class="l-panel">
-    <div class="phdr"><span>المحادثات</span><span id="sc" style="color:var(--accent)">0</span></div>
+  <div class="l-panel" id="l-panel">
+    <div class="phdr">
+      <span>المحادثات <span id="sc" style="color:var(--accent)">0</span></span>
+      <span style="display:flex;align-items:center;gap:8px;">
+        <span style="cursor:pointer;" title="تصدير المحادثة" onclick="exportSess()">⤓</span>
+        <span style="cursor:pointer;color:var(--danger);" title="مسح الكل" onclick="clearAll()">🗑</span>
+        <span class="drawer-btn" style="cursor:pointer;" title="إغلاق" onclick="closeDrawers()">✕</span>
+      </span>
+    </div>
     <div class="pbody">
       <button class="nsb" onclick="newSess()">+ جديدة</button>
       <div id="slist"></div>
@@ -476,13 +510,14 @@ pre{background:rgba(0,0,0,.4);padding:12px;font-family:var(--mono);font-size:11p
   </div>
 
   <!-- Right Panel -->
-  <div class="r-panel">
+  <div class="r-panel" id="r-panel">
     <div class="rtabs">
       <div class="rtab active" onclick="rTab('trace',this)">السجل</div>
       <div class="rtab" onclick="rTab('files',this)">الملفات</div>
       <div class="rtab" onclick="rTab('github',this)">GitHub</div>
       <div class="rtab" onclick="rTab('prov',this)">المزوّد</div>
       <div class="rtab" onclick="rTab('nn',this)">الشبكة</div>
+      <div class="drawer-btn" style="flex:0 0 auto;align-items:center;justify-content:center;padding:0 8px;cursor:pointer;color:var(--muted);" title="إغلاق" onclick="closeDrawers()">✕</div>
     </div>
 
     <div class="rbody active" id="rt-trace">
@@ -525,10 +560,12 @@ pre{background:rgba(0,0,0,.4);padding:12px;font-family:var(--mono);font-size:11p
         <div class="sep" style="margin:12px 0;"></div>
         <label class="gbchk"><input type="checkbox" id="gb-autobrowse" checked onchange="toggleAutoBrowse(this.checked)"> تفعيل التصفح الذاتي للوكيل — يقرأ ملفات المستودع تلقائياً أثناء الرد عند الحاجة، بدون انقطاع</label>
         <label class="gbchk"><input type="checkbox" id="gb-autowrite" onchange="toggleAutoWrite(this.checked)"> تفعيل الكتابة الذاتية للوكيل — يسمح له بتعديل/إنشاء ملفات على GitHub مباشرة (استخدم بحذر)</label>
+        <label class="gbchk"><input type="checkbox" id="gb-autosave" onchange="toggleAutoSave(this.checked)"> حفظ كل محادثة تلقائياً كملف على GitHub بعد كل رد (معطّل افتراضياً لتجنّب الرفع المتكرر)</label>
       </div>
     </div>
 
     <div class="rbody" id="rt-prov">
+      <div class="dk-note" id="dk-note">🔑 تستخدم حالياً مفتاح Groq الافتراضي لهذا الموقع (مشترك بين الزوار، وقد يصل أحياناً لحدّه الأقصى). لتجربة أسرع وخاصة بك، أدخل مفتاحك المجاني من <a href="https://console.groq.com/keys" target="_blank">console.groq.com/keys</a> في البطاقة أدناه ثم اضغط «حفظ وتفعيل».</div>
       <!-- Groq settings -->
       <div class="prov-card">
         <h4>⚡ Groq</h4>
@@ -723,7 +760,15 @@ let sessions={},sid=null,cbC=0;
 let pyodide=null,pyoL=false;
 // ── Repo browsing / autonomous agent state ──
 let ghTreeCache=null, ghContentCache={}, ghDefaultBranchCache=null, gbList=[];
-let ghAutoBrowse=true, ghAutoWrite=false;
+let ghAutoBrowse=true, ghAutoWrite=false, ghAutoSave=false;
+
+// ── Site-wide default key (filled in automatically when this file is embedded
+//    in a website backend; stays as a harmless placeholder when the .html
+//    file is opened on its own, so no real key is ever committed to GitHub) ──
+const SITE_DEFAULTS={ groq:{ key:"__NSM_DEFAULT_GROQ_KEY__", model:"llama-3.3-70b-versatile" } };
+function siteDefaultKey(){ const k=SITE_DEFAULTS.groq.key; return (k&&!k.startsWith("__"))?k:""; }
+function isUsingDefaultKey(){ const dk=siteDefaultKey(); return !!dk && currentProv==="groq" && provCfg.groq.key===dk; }
+function hasValidCfg(p){ const c=provCfg[p]||{}; return p==="cloudflare" ? !!(c.acct&&c.tok) : !!c.key; }
 
 const SK="nsm_v4_sess",CK="nsm_v4_cfg";
 const setupProvSel={groq:null,openrouter:null,cloudflare:null,gemini:null};
@@ -744,7 +789,12 @@ window.addEventListener("DOMContentLoaded",()=>{
     const cfg=JSON.parse(localStorage.getItem(CK)||"{}");
     if(cfg.prov)currentProv=cfg.prov;
     if(cfg.provCfg)provCfg=cfg.provCfg;
-    if(cfg.gh){GH_TOK=cfg.gh.t||"";GH_REM=cfg.gh.r||"";GH_USR=cfg.gh.u||"";if(cfg.gh.ab!==undefined)ghAutoBrowse=cfg.gh.ab;if(cfg.gh.aw!==undefined)ghAutoWrite=cfg.gh.aw;}
+    if(cfg.gh){GH_TOK=cfg.gh.t||"";GH_REM=cfg.gh.r||"";GH_USR=cfg.gh.u||"";if(cfg.gh.ab!==undefined)ghAutoBrowse=cfg.gh.ab;if(cfg.gh.aw!==undefined)ghAutoWrite=cfg.gh.aw;if(cfg.gh.as!==undefined)ghAutoSave=cfg.gh.as;}
+    // First-time visitor with no saved key of their own → fall back to the site's shared default key (if one was injected)
+    const dk=siteDefaultKey();
+    if(dk&&!hasValidCfg("groq")&&!hasValidCfg(currentProv)){
+      provCfg.groq.key=dk;provCfg.groq.model=provCfg.groq.model||SITE_DEFAULTS.groq.model;currentProv="groq";
+    }
     // Pre-fill setup fields
     if(provCfg.groq.key)document.getElementById("groq-key").value=provCfg.groq.key;
     if(provCfg.openrouter.key)document.getElementById("or-key").value=provCfg.openrouter.key;
@@ -755,7 +805,14 @@ window.addEventListener("DOMContentLoaded",()=>{
     if(GH_REM)document.getElementById("gh-rem-s").value=GH_REM;
   }catch(e){}
   loadSess();buildNNViz();
+  // Skip the setup gate entirely when credentials are already available (default or personal)
+  if(hasValidCfg(currentProv))autoStart();
 });
+
+// ── Mobile drawers ──
+function toggleLPanel(){const o=document.getElementById("drawer-overlay");const p=document.getElementById("l-panel");const isOpen=p.classList.contains("open");closeDrawers();if(!isOpen){p.classList.add("open");o.classList.add("show");}}
+function toggleRPanel(){const o=document.getElementById("drawer-overlay");const p=document.getElementById("r-panel");const isOpen=p.classList.contains("open");closeDrawers();if(!isOpen){p.classList.add("open");o.classList.add("show");}}
+function closeDrawers(){document.getElementById("l-panel").classList.remove("open");document.getElementById("r-panel").classList.remove("open");document.getElementById("drawer-overlay").classList.remove("show");}
 
 function startApp(){
   // Collect from active provider
@@ -786,6 +843,10 @@ function startApp(){
   GH_TOK=document.getElementById("gh-tok-s").value.trim();
   GH_REM=document.getElementById("gh-rem-s").value.trim();
   saveCfg();
+  autoStart();
+}
+
+function autoStart(){
   document.getElementById("setup").style.display="none";
   document.getElementById("app").style.cssText="display:flex;flex:1;flex-direction:column;";
   // Fill settings panel
@@ -794,8 +855,9 @@ function startApp(){
   if(GH_REM){document.getElementById("gh-rem").value=GH_REM;}
   document.getElementById("gb-autobrowse").checked=ghAutoBrowse;
   document.getElementById("gb-autowrite").checked=ghAutoWrite;
+  document.getElementById("gb-autosave").checked=ghAutoSave;
   updateGH();updateProvUI();
-  tLog("info","NSM Agent · "+PROVS[currentProv].name+" · Online");
+  tLog("info","NSM Agent · "+PROVS[currentProv].name+(isUsingDefaultKey()?" (مفتاح افتراضي للموقع)":"")+" · Online");
   tLog("plan","شبكة 784→784→32→4 · 640,692 params جاهزة (L1 مدروسة كاملة 784×784)");
   renderSL();if(!sid)newSess();else renderMsgs();
 }
@@ -809,7 +871,7 @@ function fillSettingsPanel(){
 }
 
 function saveCfg(){
-  localStorage.setItem(CK,JSON.stringify({prov:currentProv,provCfg,gh:{t:GH_TOK,r:GH_REM,u:GH_USR,ab:ghAutoBrowse,aw:ghAutoWrite}}));
+  localStorage.setItem(CK,JSON.stringify({prov:currentProv,provCfg,gh:{t:GH_TOK,r:GH_REM,u:GH_USR,ab:ghAutoBrowse,aw:ghAutoWrite,as:ghAutoSave}}));
 }
 
 function saveProvSettings(p){
@@ -835,9 +897,10 @@ document.getElementById("switch-modal").addEventListener("click",e=>{if(e.target
 
 function updateProvUI(){
   const pr=PROVS[currentProv];
-  document.getElementById("prov-name").textContent=pr.name;
+  document.getElementById("prov-name").textContent=pr.name+(isUsingDefaultKey()?" · افتراضي":"");
   document.getElementById("prov-dot").style.background=pr.color;
-  document.getElementById("prov-ind").title="المزوّد الحالي: "+pr.name+" — اضغط للتغيير";
+  document.getElementById("prov-ind").title=isUsingDefaultKey()?"مفتاح Groq الافتراضي للموقع — اضغط لاستخدام مفتاحك الخاص":("المزوّد الحالي: "+pr.name+" — اضغط للتغيير");
+  const note=document.getElementById("dk-note");if(note)note.style.display=isUsingDefaultKey()?"block":"none";
 }
 
 // ══ GITHUB ══
@@ -854,6 +917,7 @@ function updateGH(){
 }
 function toggleAutoBrowse(v){ghAutoBrowse=v;saveCfg();tLog("info","التصفح الذاتي للوكيل: "+(v?"مفعّل ✓":"معطّل"));}
 function toggleAutoWrite(v){ghAutoWrite=v;saveCfg();tLog(v?"warn":"info","الكتابة الذاتية للوكيل: "+(v?"مفعّلة ⚠️ — سيستطيع التعديل المباشر على GitHub":"معطّلة"));}
+function toggleAutoSave(v){ghAutoSave=v;saveCfg();tLog("info","الحفظ التلقائي للمحادثات على GitHub: "+(v?"مفعّل ✓":"معطّل"));}
 
 // ── Repo reading (browsing) helpers ──
 function ghRepoSlug(){
@@ -1240,7 +1304,7 @@ L1 مصفوفة أوزان مدروسة فعلياً بالكامل (784×784 م
     rmTyping();const aHtml=fmtR(reply);
     appendBubble("agent",aHtml);s.messages.push({role:"agent",html:aHtml,raw:reply});
     saveSess();renderSL();tLog("done","✓ ["+PROVS[currentProv].name+" · "+RA[ri]+(turns?" · تصفح×"+turns:"")+"]");
-    if(GH_TOK&&GH_REM&&!degenerate)setTimeout(()=>ghPush(),700);
+    if(GH_TOK&&GH_REM&&!degenerate&&ghAutoSave)setTimeout(()=>ghPush(),700);
   }catch(err){
     rmTyping();tLog("err",err.message);
     appendBubble("agent","<span style=\"color:var(--danger)\">⚠️ "+esc(err.message)+"</span>");
