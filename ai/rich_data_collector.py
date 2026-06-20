@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 # ── Feature-vector length produced by this collector ─────────────────────────
-RICH_FEATURE_DIM = 256  # 42 قيمة (6 sources × 7) + 214 TF-IDF hash
+RICH_FEATURE_DIM = 784  # 49 قيمة (7 sources × 7) + 735 TF-IDF hash (يطابق neural_core.py INPUT_DIM=784)
 
 
 class NodePerformanceTracker:
@@ -401,8 +401,8 @@ class RichDataCollector:
     The `collect(route_breakdown, node_id)` method returns a rich
     feature vector suitable for the Phase 9 multi-layer network.
 
-    The vector is always of length RICH_FEATURE_DIM (256), computed as
-        42 weighted source values + 214 TF-IDF hash values,
+    The vector is always of length RICH_FEATURE_DIM (784), computed as
+        49 weighted source values (7 sources × 7) + 735 TF-IDF hash values,
     the *weighted average* of the 7 source sub-vectors so it remains
     compatible with the existing NeuralWeightLayer input contract.
 
@@ -514,7 +514,7 @@ class RichDataCollector:
             for i in range(min(7, len(vec))):
                 merged_base[base_idx + i] = max(0.0, min(1.0, w * vec[i]))
 
-        # توسيع إلى 256 بإضافة 214 قيمة TF-IDF hash
+        # توسيع إلى 784 بإضافة 735 قيمة TF-IDF hash
         import math
         n_hash = max(1, RICH_FEATURE_DIM - BASE_DIM)  # متغير حسب عدد المصادر
         hash_vec = [0.0] * n_hash
@@ -525,7 +525,7 @@ class RichDataCollector:
         total_h = sum(hash_vec)
         if total_h > 0:
             hash_vec = [math.log1p(v * 10.0 / total_h) / math.log1p(10.0) for v in hash_vec]
-        merged = merged_base + hash_vec  # len=256
+        merged = merged_base + hash_vec  # len=784
 
         self._total_collections += 1
         logger.debug(
@@ -533,7 +533,7 @@ class RichDataCollector:
             f"merged_base={[round(v, 3) for v in merged_base[:7]]}  "
             f"total={self._total_collections}  dim={len(merged)}"
         )
-        return merged  # len=256
+        return merged  # len=784
 
     def summary(self) -> dict:
         """Serialisable summary for status reporting."""

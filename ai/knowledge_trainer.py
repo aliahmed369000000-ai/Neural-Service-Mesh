@@ -32,7 +32,7 @@ import numpy as np
 logger = logging.getLogger("KnowledgeTrainer")
 
 # ── ثوابت الأبعاد ──────────────────────────────────────────────────────────
-VECTOR_DIM = 256  # 7 قيم دلالية + 249 من TF-IDF hash النص
+VECTOR_DIM = 784  # 7 قيم دلالية + 777 من TF-IDF hash النص (يطابق neural_core.py INPUT_DIM=784)
 
 DOMAIN_CODES: Dict[str, float] = {
     "physics":        0.14,
@@ -70,12 +70,12 @@ class VectorEncoder:
         related_count: int = 0,
     ) -> np.ndarray:
         """
-        يُنتج متجه 256 بعداً:
+        يُنتج متجه 784 بعداً:
           [0:7]   — 7 قيم دلالية أصلية (importance, certainty, ...)
-          [7:256] — 249 قيمة من TF-IDF character n-gram hash للنص
-        الـ 256 بعداً تدخل مباشرة إلى L_embed(112×256) في NeuralCore.
+          [7:784] — 777 قيمة من TF-IDF character n-gram hash للنص
+        الـ 784 بعداً تدخل مباشرة إلى L_embed(784×784) في NeuralCore.
         """
-        vec = np.zeros(VECTOR_DIM, dtype=np.float64)  # (256,)
+        vec = np.zeros(VECTOR_DIM, dtype=np.float64)  # (784,)
 
         # ── [0:7] القيم الدلالية الأصلية السبع ──────────────────────
         # [0] IMPORTANCE
@@ -113,11 +113,11 @@ class VectorEncoder:
         else:
             vec[6] = 0.8
 
-        # ── [7:256] TF-IDF character n-gram hash (249 بعد) ───────────
+        # ── [7:784] TF-IDF character n-gram hash (777 بعد) ───────────
         # بدون مكتبات خارجية — hashing trick بسيط وسريع
         # يُنتج تمثيلاً نصياً حقيقياً قابلاً للتعلم
         text_lower = text.lower().strip()
-        n_hash = VECTOR_DIM - 7  # = 249
+        n_hash = VECTOR_DIM - 7  # = 777
         hash_vec = np.zeros(n_hash, dtype=np.float64)
 
         # character bigrams + trigrams
