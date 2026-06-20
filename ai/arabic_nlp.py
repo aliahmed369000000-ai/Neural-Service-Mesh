@@ -51,6 +51,24 @@ from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+
+def _fnv1a_hash(s: str) -> int:
+    """
+    FNV-1a hash حتمية 32-بت — بديل ثابت عن hash() المدمجة في بايثون.
+
+    hash() المدمجة في بايثون عشوائية بين كل عملية تشغيل (PYTHONHASHSEED
+    عشوائي افتراضياً)، فنفس النص يعطي قيمة مختلفة كل مرة، مما يكسر إعادة
+    إنتاج نتائج TF-IDF hash بثبات. FNV-1a حتمية 100% ومطابقة حرفياً
+    لنفس الخوارزمية المطبَّقة في NSM_Agent (JavaScript) — هذا يضمن أن
+    نفس النص ينتج نفس متجه الخصائص في كل من Python وJavaScript.
+    """
+    h = 0x811c9dc5  # FNV offset basis (32-bit)
+    for ch in s:
+        h ^= ord(ch)
+        h = (h * 0x01000193) & 0xFFFFFFFF  # FNV prime (32-bit), wrap to uint32
+    return h
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Arabic constants
 # ═══════════════════════════════════════════════════════════════════════════
@@ -343,7 +361,7 @@ class ArabicFeatureVector:
         for n in (2, 3):
             for i in range(len(text_key) - n + 1):
                 gram = text_key[i:i+n]
-                h = abs(hash(gram)) % n_hash
+                h = _fnv1a_hash(gram) % n_hash
                 hash_vec[h] += 1.0
         total = sum(hash_vec)
         if total > 0:
