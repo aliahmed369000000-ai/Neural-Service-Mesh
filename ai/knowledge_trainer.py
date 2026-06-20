@@ -31,6 +31,17 @@ import numpy as np
 
 logger = logging.getLogger("KnowledgeTrainer")
 
+
+def _fnv1a_hash(s: str) -> int:
+    """FNV-1a حتمية 32-بت — بديل ثابت عن hash() المدمجة (عشوائية بين العمليات).
+    مطابقة حرفياً لنفس الخوارزمية في NSM_Agent (JavaScript)."""
+    h = 0x811c9dc5
+    for ch in s:
+        h ^= ord(ch)
+        h = (h * 0x01000193) & 0xFFFFFFFF
+    return h
+
+
 # ── ثوابت الأبعاد ──────────────────────────────────────────────────────────
 VECTOR_DIM = 784  # 7 قيم دلالية + 777 من TF-IDF hash النص (يطابق neural_core.py INPUT_DIM=784)
 
@@ -125,7 +136,7 @@ class VectorEncoder:
             for i in range(len(text_lower) - n + 1):
                 gram = text_lower[i:i + n]
                 # hash بسيط بدون تصادمات كبيرة
-                h = abs(hash(gram)) % n_hash
+                h = _fnv1a_hash(gram) % n_hash
                 hash_vec[h] += 1.0
 
         # تطبيع TF: قسمة على عدد n-grams

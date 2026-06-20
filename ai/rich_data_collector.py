@@ -30,6 +30,17 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+
+def _fnv1a_hash(s: str) -> int:
+    """FNV-1a حتمية 32-بت — بديل ثابت عن hash() المدمجة (عشوائية بين العمليات).
+    مطابقة حرفياً لنفس الخوارزمية في NSM_Agent (JavaScript)."""
+    h = 0x811c9dc5
+    for ch in s:
+        h ^= ord(ch)
+        h = (h * 0x01000193) & 0xFFFFFFFF
+    return h
+
+
 # ── Feature-vector length produced by this collector ─────────────────────────
 RICH_FEATURE_DIM = 784  # 49 قيمة (7 sources × 7) + 735 TF-IDF hash (يطابق neural_core.py INPUT_DIM=784)
 
@@ -520,7 +531,7 @@ class RichDataCollector:
         hash_vec = [0.0] * n_hash
         text_key = (node_id or "") + "|" + "|".join(f"{v:.2f}" for v in merged_base[:7])
         for i in range(len(text_key) - 1):
-            h = abs(hash(text_key[i:i+2])) % n_hash
+            h = _fnv1a_hash(text_key[i:i+2]) % n_hash
             hash_vec[h] += 1.0
         total_h = sum(hash_vec)
         if total_h > 0:
