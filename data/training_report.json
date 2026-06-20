@@ -1,21 +1,82 @@
 {
-  "version": "18.0.0",
-  "timestamp": "2026-06-11T04:54:00Z",
-  "engine": "DynamicWeightLayer + NeuralWeightLayer",
-  "training_mode": "intensive_direct",
+  "version": "19.0.0",
+  "timestamp": "2026-06-20T00:28:25.959363+00:00",
+  "engine": "DeepRoutingNetwork (256→112→32→4)",
+  "training_mode": "full_quran_from_scratch_colab",
+  "quran": {
+    "total_ayahs": 6236,
+    "target_ayahs": 6236,
+    "completion_pct": 100.0,
+    "started_from": 1
+  },
   "results": {
-    "steps_done": 3001,
-    "final_loss": 0.06464062,
-    "avg_loss_50": 0.06794308,
-    "target_loss": 0.09,
-    "target_reached": true,
-    "lr_used": 0.05,
-    "elapsed_s": 1.62
+    "total_training_steps": 6236,
+    "total_concepts": 7338,
+    "avg_loss": 0.234325,
+    "elapsed_s": 272.07,
+    "elapsed_min": 4.53
   },
-  "weights_saved": {
-    "neural_weights": "checkpoints/neural_weights.npy",
-    "routing_weights": "models/classifiers/routing_weights.npy",
-    "neural_bias": "checkpoints/neural_bias.npy"
+  "architecture": {
+    "name": "quran_deep_net",
+    "version": "v18",
+    "architecture": "Input(256) → L1_864x256_relu → L2_32x864_relu → L3_4x32_softmax → RoutingWeights(4→first4=W_SEMANTIC/SCORE/MEMORY/TOPOLOGY)",
+    "layer_count": 3,
+    "layers": [
+      {
+        "name": "L1_864x256_relu",
+        "shape": [
+          864,
+          256
+        ],
+        "activation": "relu",
+        "weight_stats": {
+          "min": -0.398493,
+          "max": 5.0,
+          "mean": 0.511606,
+          "std": 1.086311
+        }
+      },
+      {
+        "name": "L2_32x864_relu",
+        "shape": [
+          32,
+          864
+        ],
+        "activation": "relu",
+        "weight_stats": {
+          "min": -2.097834,
+          "max": 5.0,
+          "mean": 0.930734,
+          "std": 1.995986
+        }
+      },
+      {
+        "name": "L3_4x32_softmax",
+        "shape": [
+          4,
+          32
+        ],
+        "activation": "softmax",
+        "weight_stats": {
+          "min": -5.0,
+          "max": 0.402033,
+          "mean": -1.570683,
+          "std": 1.906232
+        }
+      }
+    ],
+    "total_parameters": 249860,
+    "input_dim": 256,
+    "output_dim": 4,
+    "layer1_rows": 864,
+    "layer1_cols_fixed": 256,
+    "layer1_grow_by": 8,
+    "train_steps": 18811,
+    "last_loss": 0.23462495,
+    "avg_recent_loss": 0.2344958,
+    "learning_rate": 0.0005,
+    "steps_since_growth": 11,
+    "growth_events": 94
   },
-  "notes": "Intensive training: 200 structured 7-dim vectors, lr_boost=5x, early stop at avg_50 < 0.09. Loss converged from ~0.27 to 0.0646 in 3001 steps."
+  "notes": "تدريب من الصفر على القرآن الكريم كاملاً — Google Colab"
 }
