@@ -16,7 +16,7 @@ Reasoning Pipeline — Question → CKG → Neural Core → Decision → Answer
        ArabicNLP → متجه سياق نهائي (7,) — "context_vector"
 
 3. Neural Core
-     → NeuralCore.forward(context_vector[784]) → L_embed(784×784,Xavier) → L1(5×784,مدروسة) → L2(32×5) → L3(4×32) → 4 أوزان توجيه
+     → NeuralCore.forward(context_vector[784]) → L1(784×784,مدروسة بالكامل) → L2(32×784,Xavier) → L3(4×32,Xavier) → 4 أوزان توجيه
        (W_SEMANTIC, W_SCORE, W_MEMORY, W_TOPOLOGY) [Decision]
      → NeuralCore.recall(context_vector) → ذكريات سابقة ذات صلة
 
@@ -59,7 +59,7 @@ import numpy as np
 from ai.neural_core import (
     NeuralCore, get_default_core, auto_dims,
     DEFAULT_INPUT_DIM,    # 784 — 7 دلالي + 777 TF-IDF hash
-    DEFAULT_HIDDEN_DIMS,  # [784, 5, 32] — L_embed + L1_مدروسة(5×784) + L2
+    DEFAULT_HIDDEN_DIMS,  # [784, 32] — L1_مدروسة(784×784 كاملة) + L2
     DEFAULT_OUTPUT_DIM,   # 4  — ثابت
 )
 from ai.knowledge_trainer import CKGManager, VectorEncoder, DOMAIN_CODES
@@ -192,9 +192,9 @@ class ReasoningPipeline:
             self.core = core
         else:
             # نستخدم DEFAULT_* من neural_core.py مباشرة لضمان تحميل الأوزان
-            # المدروسة (weights_784x784.csv — أول 5 صفوف × 784 عمود) في L1.
+            # المدروسة (weights_784x784.csv — كاملة 784×784) في L1.
             # auto_dims() تحسب h1=input_dim*10 وهو غير صحيح لهذه البنية.
-            # L1(5×784) مدروسة، L_embed(784×784) وL2(32×5) وL3(4×32) تتعلمان بالتدريب.
+            # L1(784×784) مدروسة بالكامل، L2(32×784) وL3(4×32) تتعلمان بالتدريب.
             self.core = get_default_core(
                 core_save_path or "models/neural_core",
                 input_dim=DEFAULT_INPUT_DIM,
