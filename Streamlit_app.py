@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 # ── محرك الأسئلة والأجوبة القرآني ────────────────────────────────────────
 import sys as _sys
@@ -41,6 +42,8 @@ BASE = Path(__file__).parent
 KNOWLEDGE_DIR  = BASE / "knowledge"
 CHECKPOINTS_DIR = BASE / "checkpoints"
 MEMORY_DIR     = BASE / "memory"
+AGENT_HTML_PATH = BASE / "NSM_Agent_v7.html"
+AGENT_KEY_PLACEHOLDER = "__NSM_DEFAULT_GROQ_KEY__"
 
 # ── CSS مخصص ──────────────────────────────────────────────────────────────
 st.markdown("""
@@ -177,15 +180,6 @@ html, body, [class*="css"] {
     padding: 0.6rem 1rem;
     margin: 0.3rem 0;
     direction: rtl;
-    color: #14532d;
-}
-
-.root-item strong, .root-item b {
-    color: #14532d;
-}
-
-.root-item small {
-    color: #4b6358;
 }
 
 .badge {
@@ -294,6 +288,20 @@ def load_ckg() -> Dict:
         return data
     except Exception:
         return _empty
+
+
+@st.cache_data(ttl=60)
+def load_entities() -> Dict:
+    """تحميل طبقة الكيانات المعرفية (entities.json) — يعود بـ {} إن لم تكن موجودة."""
+    path = KNOWLEDGE_DIR / "entities.json"
+    try:
+        content = path.read_text(encoding="utf-8").strip()
+        if not content:
+            return {}
+        data = json.loads(content)
+        return data.get("entities", {}) if isinstance(data, dict) else {}
+    except Exception:
+        return {}
 
 
 def get_episodic_stats() -> Dict:
@@ -754,10 +762,10 @@ def render_qa():
     # ── أمثلة جاهزة ──
     st.markdown("**أمثلة:**")
     examples = [
+        "من هو محمد ﷺ؟",
         "ما علاقة الصبر بالإيمان؟",
         "ماذا يقول القرآن عن العدل؟",
-        "ما هي علامات التقوى؟",
-        "ما العلاقة بين العلم والحكمة؟",
+        "ما قصة يوسف؟",
     ]
     ex_cols = st.columns(len(examples))
     chosen_example = None
@@ -788,7 +796,8 @@ def render_qa():
         return
 
     with st.spinner("يتم تحليل السؤال والبحث في قاعدة المعرفة..."):
-        result = answer_question(question, ckg, ayat)
+        entities = load_entities()
+        result = answer_question(question, ckg, ayat, entities=entities)
 
     # ── حفظ الحلقة في الذاكرة التجريبية ──
     db_path = MEMORY_DIR / "episodic.db"
@@ -820,7 +829,15 @@ def render_qa():
         st.markdown("")
 
     # ── ملخص الإجابة ──
-    st.markdown('<div class="section-header">📝 ملخص الإجابة</div>', unsafe_allow_html=True)
+    entity_info = result.get("entity")
+    if entity_info:
+        st.markdown(
+            f'<div class="section-header">📝 ملخص الإجابة '
+            f'<span class="badge badge-purple">كيان: {entity_info["name"]} ({entity_info["type"]})</span></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown('<div class="section-header">📝 ملخص الإجابة</div>', unsafe_allow_html=True)
     st.markdown(f"""
     <div class="root-item" style="font-size:1.05rem; line-height:1.8">
         {result['summary']}
@@ -841,22 +858,41 @@ def render_qa():
     st.markdown("")
     st.markdown('<div class="section-header">🧩 المفاهيم المستخرجة من السؤال</div>', unsafe_allow_html=True)
     for c in result["primary_concepts"]:
-        st.markdown(f"""
-        <div class="root-item">
-            <strong>{c['name']}</strong>
-            <span class="badge badge-purple" style="margin-right:8px">{c['cluster']}</span>
-            <span class="badge badge-blue">تكرار في القرآن: {c['frequency']}</span>
-            <span class="badge badge-amber">درجة التطابق: {c['match']:.0%}</span>
-        </div>
-        """, unsafe_allow_html=True)
+        if entity_info:
+            # في إجابات الكيانات، أرقام "تكرار/تطابق" التقنية لا تضيف
+            # قيمة للمستخدم — نعرض فقط الاسم والمجموعة المعرفية
+            st.markdown(f"""
+            <div class="root-item">
+                <strong>{c['name']}</strong>
+                <span class="badge badge-purple" style="margin-right:8px">{c['cluster']}</span>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div class="root-item">
+                <strong>{c['name']}</strong>
+                <span class="badge badge-purple" style="margin-right:8px">{c['cluster']}</span>
+                <span class="badge badge-blue">تكرار في القرآن: {c['frequency']}</span>
+                <span class="badge badge-amber">درجة التطابق: {c['match']:.0%}</span>
+            </div>
+            """, unsafe_allow_html=True)
 
     # ── المفاهيم المرتبطة (من العلاقات) ──
     related = result.get("related_concepts", [])
     if related:
         st.markdown("")
         st.markdown('<div class="section-header">🔗 مفاهيم مرتبطة (من الذاكرة الدلالية)</div>', unsafe_allow_html=True)
+        rel_type_labels = {
+            "co_occurrence":     "تزامن في الآية",
+            "semantic":          "علاقة دلالية",
+            "thematic_cluster":  "تجمّع موضوعي",
+            "root_link":         "ربط بجذر",
+            "narrative_sequence": "تسلسل سردي",
+            "episodic_rule":     "قاعدة من الذاكرة التجريبية",
+            "entity_attribute":  "صفة الكيان",
+        }
         for r in related[:6]:
-            rtype = "تزامن" if r["relation_type"] == "co_occurrence" else "دلالية"
+            rtype = rel_type_labels.get(r["relation_type"], r["relation_type"])
             st.markdown(f"""
             <div class="root-item">
                 <strong>{r['concept']}</strong>
@@ -1227,6 +1263,33 @@ def render_health():
         """, unsafe_allow_html=True)
 
 
+def _get_default_groq_key() -> str:
+    """يقرأ مفتاح Groq الافتراضي من Secrets أولاً، ثم من متغيرات البيئة كبديل."""
+    try:
+        key = st.secrets.get("GROQ_API_KEY", "")
+        if key:
+            return key
+    except Exception:
+        pass
+    return os.environ.get("GROQ_API_KEY", "")
+
+
+def render_agent():
+    """تبويب الوكيل — يضمّن NSM_Agent_v7.html كاملاً (إعداد + محادثة + GitHub)."""
+    st.markdown('<div class="section-header">🤖 الوكيل</div>', unsafe_allow_html=True)
+
+    if not AGENT_HTML_PATH.exists():
+        st.error(
+            f"⚠️ لم يتم العثور على ملف {AGENT_HTML_PATH.name} بجانب streamlit_app.py — "
+            "ارفعه إلى جذر المستودع (نفس مجلد streamlit_app.py) على GitHub."
+        )
+        return
+
+    html = AGENT_HTML_PATH.read_text(encoding="utf-8")
+    html = html.replace(AGENT_KEY_PLACEHOLDER, _get_default_groq_key())
+    components.html(html, height=820, scrolling=False)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # التطبيق الرئيسي
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1240,7 +1303,8 @@ def main():
 
     # ── التبويبات ─────────────────────────────────────────────────────────
     tabs = st.tabs(["🏠 الرئيسية", "🔍 البحث المعرفي", "📖 القرآن الكريم",
-                    "❓ الأسئلة والأجوبة", "🎓 التدريب", "🧠 الذاكرة", "🏥 صحة النظام"])
+                    "❓ الأسئلة والأجوبة", "🎓 التدريب", "🧠 الذاكرة", "🏥 صحة النظام",
+                    "🤖 الوكيل"])
 
     with tabs[0]: render_home()
     with tabs[1]: render_search()
@@ -1249,6 +1313,7 @@ def main():
     with tabs[4]: render_training()
     with tabs[5]: render_memory()
     with tabs[6]: render_health()
+    with tabs[7]: render_agent()
 
     # ── تذييل الصفحة ─────────────────────────────────────────────────────
     st.markdown("---")
