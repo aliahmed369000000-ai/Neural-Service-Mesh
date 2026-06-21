@@ -1,29 +1,80 @@
+"""
+Neural Service Mesh — لوحة المراقبة + الوكيل (Streamlit، بدون Gradio)
+
+تشغيل محلي:
+    streamlit run app.py
+
+متغيرات البيئة / Secrets:
+    API_BASE       — رابط الـ backend (افتراضياً http://localhost:5000)
+    GROQ_API_KEY   — مفتاح Groq المجاني المستخدم كافتراضي داخل تبويب الوكيل
+                     (ضعه في .streamlit/secrets.toml محلياً، أو في
+                     Settings → Secrets على Streamlit Community Cloud)
+"""
+
 from __future__ import annotations
-import sys
-sys.modules['audioop'] = type('MockModule', (), {'__file__': ''})()
+
 import os
 import math
 import json
 from datetime import datetime
 
 import requests
-import gradio as gr
+import streamlit as st
 import plotly.graph_objects as go
-from html import escape as _esc_attr
 
-API_BASE = os.environ.get("API_BASE", "http://localhost:5000")
+from agent_page import render_agent_page
+
+# ── إعداد الصفحة ────────────────────────────────────────────────────────────
+
+st.set_page_config(
+    page_title="Neural Service Mesh — لوحة المراقبة",
+    page_icon="🧠",
+    layout="wide",
+)
+
+try:
+    API_BASE = os.environ.get("API_BASE") or st.secrets.get("API_BASE", "http://localhost:5000")
+except Exception:
+    API_BASE = os.environ.get("API_BASE", "http://localhost:5000")
+
+REFRESH_SECONDS = 30
 
 DARK_CSS = """
-body, .gradio-container {
-    background: #11111b !important;
+<style>
+.stApp {
+    background: #11111b;
     direction: rtl;
     font-family: 'Segoe UI', Tahoma, sans-serif;
 }
-.gr-panel, .block { background: #1e1e2e !important; border-color: #313244 !important; }
-.gr-button-primary { background: #cba6f7 !important; color: #1e1e2e !important; border: none !important; }
-.gr-button { background: #313244 !important; color: #cdd6f4 !important; border: none !important; }
-h1, h2, h3, label, .label-wrap { color: #cdd6f4 !important; }
-input, textarea { background: #181825 !important; color: #cdd6f4 !important; border-color: #45475a !important; }
+.block-container { padding-top: 2rem; max-width: 1200px; }
+h1, h2, h3, h4, p, label, span, div { font-family: 'Segoe UI', Tahoma, sans-serif; }
+.stButton > button {
+    background: #313244 !important;
+    color: #cdd6f4 !important;
+    border: none !important;
+    border-radius: 8px !important;
+}
+.stButton > button[kind="primary"] {
+    background: #cba6f7 !important;
+    color: #1e1e2e !important;
+    font-weight: 700 !important;
+}
+.stTextInput input, .stTextArea textarea {
+    background: #181825 !important;
+    color: #cdd6f4 !important;
+    border-color: #45475a !important;
+    direction: rtl;
+}
+div[data-testid="stExpander"] {
+    background: #1e1e2e;
+    border: 1px solid #313244;
+    border-radius: 10px;
+}
+div[data-baseweb="tab-list"] { direction: rtl; }
+div[data-baseweb="tab-highlight"] { background-color: #cba6f7 !important; }
+button[data-baseweb="tab"] { color: #a6adc8 !important; }
+button[data-baseweb="tab"][aria-selected="true"] { color: #cba6f7 !important; }
+
 .metric-card {
     background: #1e1e2e;
     border: 1px solid #313244;
@@ -80,8 +131,10 @@ input, textarea { background: #181825 !important; color: #cdd6f4 !important; bor
 .confidence-bar { height: 8px; border-radius: 4px; background: #313244; margin-top: 6px; }
 .confidence-fill { height: 8px; border-radius: 4px; }
 .section-divider { border-top: 1px solid #313244; margin: 1rem 0; }
-footer { display: none !important; }
+#MainMenu, footer { visibility: hidden; }
+</style>
 """
+st.markdown(DARK_CSS, unsafe_allow_html=True)
 
 
 # ── HTTP helpers ──────────────────────────────────────────────────────────────
@@ -118,33 +171,25 @@ def _fmt_date(raw):
         return str(raw)[:16]
 
 
-def _fmt_num(v):
-    if v is None:
-        return "—"
-    if isinstance(v, float):
-        return f"{v:.6f}"
-    return str(v)
-
-
 # ── /train/status renderer ───────────────────────────────────────────────────
 
 def _render_train_status(tstat: dict) -> str:
     if not tstat:
         return "<div class='status-card' style='color:#f38ba8;'>⚠️ تعذّر الاتصال بـ /train/status</div>"
 
-    layer   = tstat.get("layer", {})
+    layer = tstat.get("layer", {})
     db_info = tstat.get("db", {})
 
     shape_raw = layer.get("shape")
     shape_str = f"{shape_raw[0]}×{shape_raw[1]}" if isinstance(shape_raw, list) and len(shape_raw) == 2 else "—"
     train_steps = layer.get("train_steps", "—")
     last_loss_raw = layer.get("last_loss")
-    last_loss   = f"{last_loss_raw:.6f}" if isinstance(last_loss_raw, float) else "—"
-    ckg_concepts= tstat.get("ckg_concepts", "—")
+    last_loss = f"{last_loss_raw:.6f}" if isinstance(last_loss_raw, float) else "—"
+    ckg_concepts = tstat.get("ckg_concepts", "—")
 
-    db_total    = db_info.get("total_items", "—")
+    db_total = db_info.get("total_items", "—")
     db_sessions = db_info.get("total_sessions", "—")
-    db_domains  = db_info.get("domains", {})
+    db_domains = db_info.get("domains", {})
 
     domains_html = ""
     if db_domains:
@@ -199,21 +244,20 @@ def _render_train_audit(audit: dict) -> str:
     if not audit:
         return "<div class='status-card' style='color:#f38ba8;'>⚠️ تعذّر الاتصال بـ /train/audit</div>"
 
-    steps       = audit.get("training_steps", "—")
-    sessions    = audit.get("training_sessions", "—")
-    avg_loss    = audit.get("recent_avg_loss")
-    avg_loss_str= f"{avg_loss:.6f}" if isinstance(avg_loss, float) else "—"
-    concepts    = audit.get("concepts", "—")
-    relations   = audit.get("relations", "—")
-    w_saved     = audit.get("weights_saved", False)
-    w_path      = audit.get("weights_path") or "—"
-    by_domain   = audit.get("training_by_domain", {})
-    cursor      = audit.get("quran_training_cursor", {})
+    steps = audit.get("training_steps", "—")
+    sessions = audit.get("training_sessions", "—")
+    avg_loss = audit.get("recent_avg_loss")
+    avg_loss_str = f"{avg_loss:.6f}" if isinstance(avg_loss, float) else "—"
+    concepts = audit.get("concepts", "—")
+    relations = audit.get("relations", "—")
+    w_saved = audit.get("weights_saved", False)
+    w_path = audit.get("weights_path") or "—"
+    by_domain = audit.get("training_by_domain", {})
+    cursor = audit.get("quran_training_cursor", {})
 
-    w_class  = "status-val-green" if w_saved else "status-val-red"
-    w_label  = "✅ محفوظة" if w_saved else "❌ غير محفوظة"
+    w_class = "status-val-green" if w_saved else "status-val-red"
+    w_label = "✅ محفوظة" if w_saved else "❌ غير محفوظة"
 
-    # domain breakdown
     domain_rows = ""
     if by_domain:
         max_v = max(by_domain.values()) if by_domain else 1
@@ -227,13 +271,12 @@ def _render_train_audit(audit: dict) -> str:
                 </div>
             </div>"""
 
-    # quran cursor
     cursor_html = ""
     if cursor:
         cur_start = cursor.get("start_index", "—")
         cur_total = cursor.get("total_ayahs", "—")
-        cur_ts    = _fmt_date(cursor.get("last_updated", ""))
-        pct_done  = int(int(cur_start) / max(1, int(cur_total)) * 100) if isinstance(cur_start, int) and isinstance(cur_total, int) else 0
+        cur_ts = _fmt_date(cursor.get("last_updated", ""))
+        pct_done = int(int(cur_start) / max(1, int(cur_total)) * 100) if isinstance(cur_start, int) and isinstance(cur_total, int) else 0
         cursor_html = f"""
         <div class='section-divider'></div>
         <b style='color:#a6adc8; font-size:0.85rem;'>📿 مؤشر تدريب القرآن</b>
@@ -290,60 +333,12 @@ def _render_train_audit(audit: dict) -> str:
     return html
 
 
-# ── Main dashboard load ───────────────────────────────────────────────────────
-
-def load_dashboard():
-    ckg   = _get("/train/ckg")
-    mat   = _get("/train/matrix")
-    stat  = _get("/status")
-    tstat = _get("/train/status")
-    audit = _get("/train/audit")
-
-    # ── KPI bar ──
-    total_concepts = ckg.get("total_concepts") or (len(ckg.get("concepts", {})) or "—")
-    train_steps    = mat.get("train_steps", "—")
-    last_loss_raw  = mat.get("last_loss")
-    last_loss      = f"{last_loss_raw:.4f}" if isinstance(last_loss_raw, (int, float)) else "—"
-    last_update    = _fmt_date(
-        ckg.get("_meta", {}).get("saved_at")
-        or stat.get("started_at")
-        or stat.get("timestamp")
-        or tstat.get("db", {}).get("last_trained_at")
-    )
-
-    kpi_html = f"""
-    <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:space-between; direction:rtl;">
-        <div class="metric-card" style="flex:1; min-width:160px;">
-            <div class="metric-value">{total_concepts}</div>
-            <div class="metric-label">📚 مفاهيم في CKG</div>
-        </div>
-        <div class="metric-card" style="flex:1; min-width:160px;">
-            <div class="metric-value">{train_steps}</div>
-            <div class="metric-label">🔁 خطوات التدريب</div>
-        </div>
-        <div class="metric-card" style="flex:1; min-width:160px;">
-            <div class="metric-value">{last_loss}</div>
-            <div class="metric-label">📉 آخر خسارة (loss)</div>
-        </div>
-        <div class="metric-card" style="flex:1; min-width:160px;">
-            <div class="metric-value" style="font-size:1.2rem;">{last_update}</div>
-            <div class="metric-label">🕐 آخر تحديث للنظام</div>
-        </div>
-    </div>
-    """
-
-    status_html = _render_train_status(tstat)
-    audit_html  = _render_train_audit(audit)
-    loss_fig    = _build_loss_fig(mat)
-    cluster_fig = _build_cluster_fig(ckg)
-
-    return kpi_html, status_html, audit_html, loss_fig, cluster_fig
-
+# ── الرسوم البيانية ──────────────────────────────────────────────────────────
 
 def _build_loss_fig(mat: dict):
     weight_stats = mat.get("weight_stats", {})
-    train_steps  = mat.get("train_steps", 0)
-    steps_val    = train_steps if isinstance(train_steps, int) else 0
+    train_steps = mat.get("train_steps", 0)
+    steps_val = train_steps if isinstance(train_steps, int) else 0
 
     if weight_stats and steps_val > 0:
         w_max = weight_stats.get("max", 1.0)
@@ -394,7 +389,7 @@ def _build_cluster_fig(ckg: dict):
         return fig
 
     sorted_clusters = sorted(clusters.items(), key=lambda x: -x[1])
-    names  = [c[0] for c in sorted_clusters[:12]]
+    names = [c[0] for c in sorted_clusters[:12]]
     counts = [c[1] for c in sorted_clusters[:12]]
 
     fig = go.Figure(go.Bar(
@@ -420,7 +415,56 @@ def _build_cluster_fig(ckg: dict):
     return fig
 
 
-# ── Concept search ────────────────────────────────────────────────────────────
+# ── تحميل بيانات اللوحة ──────────────────────────────────────────────────────
+
+def load_dashboard():
+    ckg = _get("/train/ckg")
+    mat = _get("/train/matrix")
+    stat = _get("/status")
+    tstat = _get("/train/status")
+    audit = _get("/train/audit")
+
+    total_concepts = ckg.get("total_concepts") or (len(ckg.get("concepts", {})) or "—")
+    train_steps = mat.get("train_steps", "—")
+    last_loss_raw = mat.get("last_loss")
+    last_loss = f"{last_loss_raw:.4f}" if isinstance(last_loss_raw, (int, float)) else "—"
+    last_update = _fmt_date(
+        ckg.get("_meta", {}).get("saved_at")
+        or stat.get("started_at")
+        or stat.get("timestamp")
+        or tstat.get("db", {}).get("last_trained_at")
+    )
+
+    kpi_html = f"""
+    <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:space-between; direction:rtl;">
+        <div class="metric-card" style="flex:1; min-width:160px;">
+            <div class="metric-value">{total_concepts}</div>
+            <div class="metric-label">📚 مفاهيم في CKG</div>
+        </div>
+        <div class="metric-card" style="flex:1; min-width:160px;">
+            <div class="metric-value">{train_steps}</div>
+            <div class="metric-label">🔁 خطوات التدريب</div>
+        </div>
+        <div class="metric-card" style="flex:1; min-width:160px;">
+            <div class="metric-value">{last_loss}</div>
+            <div class="metric-label">📉 آخر خسارة (loss)</div>
+        </div>
+        <div class="metric-card" style="flex:1; min-width:160px;">
+            <div class="metric-value" style="font-size:1.2rem;">{last_update}</div>
+            <div class="metric-label">🕐 آخر تحديث للنظام</div>
+        </div>
+    </div>
+    """
+
+    status_html = _render_train_status(tstat)
+    audit_html = _render_train_audit(audit)
+    loss_fig = _build_loss_fig(mat)
+    cluster_fig = _build_cluster_fig(ckg)
+
+    return kpi_html, status_html, audit_html, loss_fig, cluster_fig
+
+
+# ── البحث عن مفهوم ───────────────────────────────────────────────────────────
 
 def search_concept(concept: str):
     if not concept or not concept.strip():
@@ -434,14 +478,14 @@ def search_concept(concept: str):
             json.dumps(result, ensure_ascii=False, indent=2),
         )
 
-    found      = result.get("found_in_ckg", False)
-    conf       = result.get("confidence_score", 0.0)
-    related    = result.get("related_concepts", [])
-    sources    = result.get("sources", [])
-    cross      = result.get("cross_domain_connections", [])
+    found = result.get("found_in_ckg", False)
+    conf = result.get("confidence_score", 0.0)
+    related = result.get("related_concepts", [])
+    sources = result.get("sources", [])
+    cross = result.get("cross_domain_connections", [])
     quran_refs = result.get("quran_references", [])
 
-    conf_pct   = int(conf * 100)
+    conf_pct = int(conf * 100)
     conf_color = "#a6e3a1" if conf > 0.6 else ("#f9e2af" if conf > 0.3 else "#f38ba8")
     found_html = (
         '<span style="color:#a6e3a1; margin-right:10px;">✓ موجود في CKG</span>'
@@ -456,7 +500,7 @@ def search_concept(concept: str):
 
     html = f"""
     <div class="result-box">
-        <b style="color:#cba6f7; font-size:1.1rem;">📖 {result.get("concept","")}</b>
+        <b style="color:#cba6f7; font-size:1.1rem;">📖 {result.get("concept", "")}</b>
         {found_html}
         <br><br>
         <b>درجة الثقة:</b>
@@ -475,144 +519,119 @@ def search_concept(concept: str):
     return html, raw_json
 
 
-# ── Agent (NSM_Agent_v6_repo_agent.html) embed ────────────────────────────────
+# ── الترويسة ─────────────────────────────────────────────────────────────────
 
-_AGENT_HTML_FILENAME = "NSM_Agent_v6_repo_agent.html"
-_AGENT_KEY_PLACEHOLDER = "__NSM_DEFAULT_GROQ_KEY__"
+st.markdown(
+    """
+    <div style="text-align:center; padding: 0.5rem 0 1rem 0; direction:rtl;">
+        <h1 style="color:#cba6f7; margin-bottom:4px; font-size:2rem;">🧠 Neural Service Mesh</h1>
+        <p style="color:#a6adc8; margin:0; font-size:1rem;">لوحة المراقبة المعرفية — v18.0.0 (Streamlit)</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
+tab_dashboard, tab_agent = st.tabs(["📊 لوحة المراقبة", "🤖 الوكيل"])
 
-def _load_agent_html() -> str | None:
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), _AGENT_HTML_FILENAME)
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            raw = f.read()
-    except FileNotFoundError:
-        return None
-    # GROQ_API_KEY يُقرأ من متغيرات البيئة (Secrets على Streamlit Cloud تُصبح
-    # متغيرات بيئة تلقائياً؛ على منصات أخرى أضِفه كـ Environment Variable عادي).
-    default_key = os.environ.get("GROQ_API_KEY", "")
-    return raw.replace(_AGENT_KEY_PLACEHOLDER, default_key)
+# ── تبويب لوحة المراقبة ─────────────────────────────────────────────────────
 
+with tab_dashboard:
+    if "auto_refresh" not in st.session_state:
+        st.session_state.auto_refresh = True
 
-def _render_agent_tab() -> str:
-    agent_html = _load_agent_html()
-    if agent_html is None:
-        return (
-            "<div class='status-card' style='color:#f38ba8; direction:rtl;'>"
-            f"⚠️ لم يتم العثور على {_AGENT_HTML_FILENAME} بجانب app.py — "
-            "ارفعه لنفس مجلد هذا الملف على GitHub."
-            "</div>"
+    ctrl_l, ctrl_r = st.columns([3, 1])
+    with ctrl_l:
+        c1, c2 = st.columns([1, 2])
+        with c1:
+            manual_refresh = st.button("🔄 تحديث الآن", type="primary", use_container_width=True)
+        with c2:
+            st.toggle("تحديث تلقائي كل 30 ثانية", key="auto_refresh")
+
+    run_every = REFRESH_SECONDS if st.session_state.auto_refresh else None
+
+    @st.fragment(run_every=run_every)
+    def dashboard_fragment():
+        kpi_html, status_html, audit_html, loss_fig, cluster_fig = load_dashboard()
+        now = datetime.now().strftime("%H:%M:%S")
+        st.markdown(
+            f"<span style='color:#a6adc8; font-size:0.82rem; direction:rtl;'>"
+            f"✅ آخر تحديث: {now}"
+            f"{' — تحديث تلقائي كل 30 ثانية' if st.session_state.auto_refresh else ' — التحديث التلقائي متوقف'}"
+            f"</span>",
+            unsafe_allow_html=True,
         )
-    srcdoc = _esc_attr(agent_html, quote=True)
-    return (
-        f'<iframe srcdoc="{srcdoc}" '
-        'style="width:100%; height:820px; border:none; border-radius:10px; '
-        'background:#080b0f;"></iframe>'
+
+        st.markdown(kpi_html, unsafe_allow_html=True)
+        st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
+
+        st.markdown(
+            "<p style='color:#a6adc8; font-weight:600; direction:rtl; margin:4px 0;'>"
+            "📊 بيانات التدريب المباشرة</p>",
+            unsafe_allow_html=True,
+        )
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(status_html, unsafe_allow_html=True)
+        with col2:
+            st.markdown(audit_html, unsafe_allow_html=True)
+
+        st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
+        st.markdown(
+            "<p style='color:#a6adc8; font-weight:600; direction:rtl;'>📉 منحنى الخسارة (Loss Curve)</p>",
+            unsafe_allow_html=True,
+        )
+        st.plotly_chart(loss_fig, use_container_width=True, key="loss_chart")
+
+        st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
+        st.markdown(
+            "<p style='color:#a6adc8; font-weight:600; direction:rtl;'>🗂 توزيع المجموعات المعرفية</p>",
+            unsafe_allow_html=True,
+        )
+        st.plotly_chart(cluster_fig, use_container_width=True, key="cluster_chart")
+
+    dashboard_fragment()
+
+    st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
+    st.markdown(
+        "<p style='color:#a6adc8; font-weight:600; direction:rtl;'>🔍 استعلام عن مفهوم</p>",
+        unsafe_allow_html=True,
     )
 
+    @st.fragment
+    def concept_search_fragment():
+        c1, c2 = st.columns([5, 1])
+        with c1:
+            concept = st.text_input(
+                "concept",
+                placeholder="مثال: الجاذبية، الإيمان، الكم، الفلك...",
+                label_visibility="collapsed",
+                key="concept_input",
+            )
+        with c2:
+            search_clicked = st.button("🔎 بحث", type="primary", use_container_width=True)
 
-# ── Build UI ──────────────────────────────────────────────────────────────────
+        if search_clicked:
+            html, raw = search_concept(concept)
+            st.session_state["search_html"] = html
+            st.session_state["search_raw"] = raw
 
-with gr.Blocks(title="Neural Service Mesh — لوحة المراقبة", css=DARK_CSS,
-               theme=gr.themes.Base(primary_hue="purple", secondary_hue="gray", neutral_hue="gray")) as demo:
+        if "search_html" in st.session_state:
+            st.markdown(st.session_state["search_html"], unsafe_allow_html=True)
+            with st.expander("📋 JSON الخام", expanded=False):
+                st.code(st.session_state.get("search_raw", "{}"), language="json")
 
-    gr.HTML("""
-    <div style="text-align:center; padding: 1rem 0; direction:rtl;">
-        <h1 style="color:#cba6f7; margin-bottom:4px; font-size:2rem;">🧠 Neural Service Mesh</h1>
-        <p style="color:#a6adc8; margin:0; font-size:1rem;">لوحة المراقبة المعرفية — v18.0.0</p>
-    </div>
-    """)
+    concept_search_fragment()
 
-    with gr.Tabs():
-        with gr.Tab("📊 لوحة المراقبة"):
-            with gr.Row():
-                refresh_btn  = gr.Button("🔄 تحديث", variant="primary", scale=0)
-                pause_btn    = gr.Button("⏸ إيقاف التحديث التلقائي", variant="secondary", scale=0)
-                last_updated = gr.HTML(
-                    value="<span style='color:#6c7086; font-size:0.82rem; direction:rtl;'>⏱ لم يتم التحديث بعد</span>",
-                    label="",
-                )
+    st.markdown(
+        """
+        <div style="text-align:center; color:#585b70; font-size:0.8rem; margin-top:2rem; direction:rtl;">
+            Neural Service Mesh v18 — لوحة المراقبة المعرفية — Streamlit
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-            # ── KPI row ──
-            kpi_html_out = gr.HTML(label="")
+# ── تبويب الوكيل ─────────────────────────────────────────────────────────────
 
-            gr.HTML('<div class="section-divider"></div>')
-
-            # ── Training Status + Audit (side by side on wide screens) ──
-            gr.HTML('<p style="color:#a6adc8; font-weight:600; direction:rtl; margin:4px 0;">📊 بيانات التدريب المباشرة</p>')
-            with gr.Row():
-                with gr.Column(scale=1):
-                    train_status_html = gr.HTML(label="")
-                with gr.Column(scale=1):
-                    train_audit_html  = gr.HTML(label="")
-
-            gr.HTML('<div class="section-divider"></div>')
-
-            # ── Charts ──
-            gr.HTML('<p style="color:#a6adc8; font-weight:600; direction:rtl;">📉 منحنى الخسارة (Loss Curve)</p>')
-            loss_plot = gr.Plot(label="")
-
-            gr.HTML('<div class="section-divider"></div>')
-            gr.HTML('<p style="color:#a6adc8; font-weight:600; direction:rtl;">🗂 توزيع المجموعات المعرفية</p>')
-            cluster_plot = gr.Plot(label="")
-
-            gr.HTML('<div class="section-divider"></div>')
-
-            # ── Concept search ──
-            gr.HTML('<p style="color:#a6adc8; font-weight:600; direction:rtl;">🔍 استعلام عن مفهوم</p>')
-            with gr.Row():
-                concept_input = gr.Textbox(
-                    placeholder="مثال: الجاذبية، الإيمان، الكم، الفلك...",
-                    label="",
-                    scale=5,
-                )
-                search_btn = gr.Button("🔎 بحث", variant="primary", scale=1)
-
-            search_result = gr.HTML(label="")
-            with gr.Accordion("📋 JSON الخام", open=False):
-                raw_json_out = gr.Code(language="json", label="")
-
-            gr.HTML("""
-            <div style="text-align:center; color:#585b70; font-size:0.8rem; margin-top:2rem; direction:rtl;">
-                Neural Service Mesh v18 — لوحة المراقبة المعرفية — تحديث تلقائي كل 30 ثانية
-            </div>
-            """)
-
-        with gr.Tab("🤖 الوكيل"):
-            gr.HTML(_render_agent_tab())
-
-    # ── Auto-refresh timer (every 30 s) ──────────────────────────────────────
-    timer = gr.Timer(value=30, active=True)
-
-    _OUTPUTS = [kpi_html_out, train_status_html, train_audit_html, loss_plot, cluster_plot, last_updated]
-
-    def _refresh():
-        kpi, status_h, audit_h, loss, cluster = load_dashboard()
-        now = datetime.now().strftime("%H:%M:%S")
-        ts  = f"<span style='color:#a6adc8; font-size:0.82rem; direction:rtl;'>✅ آخر تحديث: {now} — كل 30 ثانية</span>"
-        return kpi, status_h, audit_h, loss, cluster, ts
-
-    def _manual_refresh():
-        kpi, status_h, audit_h, loss, cluster = load_dashboard()
-        now = datetime.now().strftime("%H:%M:%S")
-        ts  = f"<span style='color:#cba6f7; font-size:0.82rem; direction:rtl;'>🔄 تحديث يدوي: {now}</span>"
-        return kpi, status_h, audit_h, loss, cluster, ts
-
-    _paused = gr.State(value=False)
-
-    def _toggle_pause(paused: bool):
-        new_paused = not paused
-        new_label  = "▶ استئناف التحديث التلقائي" if new_paused else "⏸ إيقاف التحديث التلقائي"
-        return gr.Timer(active=not new_paused), gr.Button(value=new_label), new_paused
-
-    timer.tick(fn=_refresh, outputs=_OUTPUTS)
-    refresh_btn.click(fn=_manual_refresh, outputs=_OUTPUTS)
-    pause_btn.click(fn=_toggle_pause, inputs=[_paused], outputs=[timer, pause_btn, _paused])
-    search_btn.click(fn=search_concept, inputs=[concept_input], outputs=[search_result, raw_json_out])
-    concept_input.submit(fn=search_concept, inputs=[concept_input], outputs=[search_result, raw_json_out])
-
-    demo.load(fn=_refresh, outputs=_OUTPUTS)
-
-
-if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=8000)
+with tab_agent:
+    render_agent_page()
