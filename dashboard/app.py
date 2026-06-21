@@ -9,6 +9,7 @@ from datetime import datetime
 import requests
 import gradio as gr
 import plotly.graph_objects as go
+from html import escape as _esc_attr
 
 API_BASE = os.environ.get("API_BASE", "http://localhost:5000")
 
@@ -474,6 +475,42 @@ def search_concept(concept: str):
     return html, raw_json
 
 
+# ── Agent (NSM_Agent_v6_repo_agent.html) embed ────────────────────────────────
+
+_AGENT_HTML_FILENAME = "NSM_Agent_v6_repo_agent.html"
+_AGENT_KEY_PLACEHOLDER = "__NSM_DEFAULT_GROQ_KEY__"
+
+
+def _load_agent_html() -> str | None:
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), _AGENT_HTML_FILENAME)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = f.read()
+    except FileNotFoundError:
+        return None
+    # GROQ_API_KEY يُقرأ من متغيرات البيئة (Secrets على Streamlit Cloud تُصبح
+    # متغيرات بيئة تلقائياً؛ على منصات أخرى أضِفه كـ Environment Variable عادي).
+    default_key = os.environ.get("GROQ_API_KEY", "")
+    return raw.replace(_AGENT_KEY_PLACEHOLDER, default_key)
+
+
+def _render_agent_tab() -> str:
+    agent_html = _load_agent_html()
+    if agent_html is None:
+        return (
+            "<div class='status-card' style='color:#f38ba8; direction:rtl;'>"
+            f"⚠️ لم يتم العثور على {_AGENT_HTML_FILENAME} بجانب app.py — "
+            "ارفعه لنفس مجلد هذا الملف على GitHub."
+            "</div>"
+        )
+    srcdoc = _esc_attr(agent_html, quote=True)
+    return (
+        f'<iframe srcdoc="{srcdoc}" '
+        'style="width:100%; height:820px; border:none; border-radius:10px; '
+        'background:#080b0f;"></iframe>'
+    )
+
+
 # ── Build UI ──────────────────────────────────────────────────────────────────
 
 with gr.Blocks(title="Neural Service Mesh — لوحة المراقبة", css=DARK_CSS,
@@ -486,58 +523,63 @@ with gr.Blocks(title="Neural Service Mesh — لوحة المراقبة", css=DA
     </div>
     """)
 
-    with gr.Row():
-        refresh_btn  = gr.Button("🔄 تحديث", variant="primary", scale=0)
-        pause_btn    = gr.Button("⏸ إيقاف التحديث التلقائي", variant="secondary", scale=0)
-        last_updated = gr.HTML(
-            value="<span style='color:#6c7086; font-size:0.82rem; direction:rtl;'>⏱ لم يتم التحديث بعد</span>",
-            label="",
-        )
+    with gr.Tabs():
+        with gr.Tab("📊 لوحة المراقبة"):
+            with gr.Row():
+                refresh_btn  = gr.Button("🔄 تحديث", variant="primary", scale=0)
+                pause_btn    = gr.Button("⏸ إيقاف التحديث التلقائي", variant="secondary", scale=0)
+                last_updated = gr.HTML(
+                    value="<span style='color:#6c7086; font-size:0.82rem; direction:rtl;'>⏱ لم يتم التحديث بعد</span>",
+                    label="",
+                )
 
-    # ── KPI row ──
-    kpi_html_out = gr.HTML(label="")
+            # ── KPI row ──
+            kpi_html_out = gr.HTML(label="")
 
-    gr.HTML('<div class="section-divider"></div>')
+            gr.HTML('<div class="section-divider"></div>')
 
-    # ── Training Status + Audit (side by side on wide screens) ──
-    gr.HTML('<p style="color:#a6adc8; font-weight:600; direction:rtl; margin:4px 0;">📊 بيانات التدريب المباشرة</p>')
-    with gr.Row():
-        with gr.Column(scale=1):
-            train_status_html = gr.HTML(label="")
-        with gr.Column(scale=1):
-            train_audit_html  = gr.HTML(label="")
+            # ── Training Status + Audit (side by side on wide screens) ──
+            gr.HTML('<p style="color:#a6adc8; font-weight:600; direction:rtl; margin:4px 0;">📊 بيانات التدريب المباشرة</p>')
+            with gr.Row():
+                with gr.Column(scale=1):
+                    train_status_html = gr.HTML(label="")
+                with gr.Column(scale=1):
+                    train_audit_html  = gr.HTML(label="")
 
-    gr.HTML('<div class="section-divider"></div>')
+            gr.HTML('<div class="section-divider"></div>')
 
-    # ── Charts ──
-    gr.HTML('<p style="color:#a6adc8; font-weight:600; direction:rtl;">📉 منحنى الخسارة (Loss Curve)</p>')
-    loss_plot = gr.Plot(label="")
+            # ── Charts ──
+            gr.HTML('<p style="color:#a6adc8; font-weight:600; direction:rtl;">📉 منحنى الخسارة (Loss Curve)</p>')
+            loss_plot = gr.Plot(label="")
 
-    gr.HTML('<div class="section-divider"></div>')
-    gr.HTML('<p style="color:#a6adc8; font-weight:600; direction:rtl;">🗂 توزيع المجموعات المعرفية</p>')
-    cluster_plot = gr.Plot(label="")
+            gr.HTML('<div class="section-divider"></div>')
+            gr.HTML('<p style="color:#a6adc8; font-weight:600; direction:rtl;">🗂 توزيع المجموعات المعرفية</p>')
+            cluster_plot = gr.Plot(label="")
 
-    gr.HTML('<div class="section-divider"></div>')
+            gr.HTML('<div class="section-divider"></div>')
 
-    # ── Concept search ──
-    gr.HTML('<p style="color:#a6adc8; font-weight:600; direction:rtl;">🔍 استعلام عن مفهوم</p>')
-    with gr.Row():
-        concept_input = gr.Textbox(
-            placeholder="مثال: الجاذبية، الإيمان، الكم، الفلك...",
-            label="",
-            scale=5,
-        )
-        search_btn = gr.Button("🔎 بحث", variant="primary", scale=1)
+            # ── Concept search ──
+            gr.HTML('<p style="color:#a6adc8; font-weight:600; direction:rtl;">🔍 استعلام عن مفهوم</p>')
+            with gr.Row():
+                concept_input = gr.Textbox(
+                    placeholder="مثال: الجاذبية، الإيمان، الكم، الفلك...",
+                    label="",
+                    scale=5,
+                )
+                search_btn = gr.Button("🔎 بحث", variant="primary", scale=1)
 
-    search_result = gr.HTML(label="")
-    with gr.Accordion("📋 JSON الخام", open=False):
-        raw_json_out = gr.Code(language="json", label="")
+            search_result = gr.HTML(label="")
+            with gr.Accordion("📋 JSON الخام", open=False):
+                raw_json_out = gr.Code(language="json", label="")
 
-    gr.HTML("""
-    <div style="text-align:center; color:#585b70; font-size:0.8rem; margin-top:2rem; direction:rtl;">
-        Neural Service Mesh v18 — لوحة المراقبة المعرفية — تحديث تلقائي كل 30 ثانية
-    </div>
-    """)
+            gr.HTML("""
+            <div style="text-align:center; color:#585b70; font-size:0.8rem; margin-top:2rem; direction:rtl;">
+                Neural Service Mesh v18 — لوحة المراقبة المعرفية — تحديث تلقائي كل 30 ثانية
+            </div>
+            """)
+
+        with gr.Tab("🤖 الوكيل"):
+            gr.HTML(_render_agent_tab())
 
     # ── Auto-refresh timer (every 30 s) ──────────────────────────────────────
     timer = gr.Timer(value=30, active=True)
