@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 # ── محرك الأسئلة والأجوبة القرآني ────────────────────────────────────────
 import sys as _sys
@@ -24,6 +23,23 @@ _KNOWLEDGE_MODULE_DIR = str(Path(__file__).parent / "knowledge")
 if _KNOWLEDGE_MODULE_DIR not in _sys.path:
     _sys.path.insert(0, _KNOWLEDGE_MODULE_DIR)
 from qa_engine import answer_question  # noqa: E402
+
+# ── ReasoningPipeline — الشبكة العصبية الحقيقية ──
+try:
+    from ai.reasoning_pipeline import ReasoningPipeline as _ReasoningPipeline
+    _RP_AVAILABLE = True
+except Exception:
+    _RP_AVAILABLE = False
+
+@st.cache_resource
+def load_reasoning_pipeline():
+    """تحميل ReasoningPipeline مرة واحدة مع تفعيل التدريب الفوري."""
+    if not _RP_AVAILABLE:
+        return None
+    try:
+        return _ReasoningPipeline(train_on_query=True)
+    except Exception:
+        return None
 from episodic_memory import (  # noqa: E402
     store_episode, find_similar_episodes, get_memory_stats,
     consolidate_memory, get_semantic_rules,
@@ -42,8 +58,6 @@ BASE = Path(__file__).parent
 KNOWLEDGE_DIR  = BASE / "knowledge"
 CHECKPOINTS_DIR = BASE / "checkpoints"
 MEMORY_DIR     = BASE / "memory"
-AGENT_HTML_PATH = BASE / "NSM_Agent_v7.html"
-AGENT_KEY_PLACEHOLDER = "__NSM_DEFAULT_GROQ_KEY__"
 
 # ── CSS مخصص ──────────────────────────────────────────────────────────────
 st.markdown("""
@@ -799,6 +813,26 @@ def render_qa():
         entities = load_entities()
         result = answer_question(question, ckg, ayat, entities=entities)
 
+    # ── وصل الشبكة العصبية الحقيقية (المرحلة 2+3) ──
+    try:
+        pipeline = load_reasoning_pipeline()
+        if pipeline is not None:
+            neural_result = pipeline.answer(question)
+            result["neural_confidence"] = round(float(
+                neural_result.weights.get("W_SEMANTIC", 0) * 0.4 +
+                neural_result.weights.get("W_SCORE", 0) * 0.3 +
+                neural_result.weights.get("W_MEMORY", 0) * 0.3
+            ), 4)
+            result["neural_label"] = neural_result.ranked_concepts[0].name if neural_result.ranked_concepts else ""
+            result["neural_loss"]  = neural_result.train_loss
+            result["neural_steps"] = pipeline.core.net.train_steps if hasattr(pipeline.core, "net") else 0
+        else:
+            result["neural_confidence"] = 0.0
+            result["neural_label"] = "غير متاح"
+    except Exception as _ne:
+        result["neural_confidence"] = 0.0
+        result["neural_label"] = f"خطأ: {_ne}"
+
     # ── حفظ الحلقة في الذاكرة التجريبية ──
     db_path = MEMORY_DIR / "episodic.db"
     try:
@@ -849,6 +883,19 @@ def render_qa():
     st.markdown("")
     st.markdown(f"**درجة الثقة:** {confidence:.0%}")
     st.progress(confidence)
+
+    # ── مقاييس الشبكة العصبية ──
+    _nc = result.get("neural_confidence", 0.0)
+    _nl = result.get("neural_label", "")
+    _ns = result.get("neural_steps", 0)
+    _nloss = result.get("neural_loss")
+    if _nc > 0:
+        _c1, _c2, _c3 = st.columns(3)
+        _c1.metric("🧠 ثقة الشبكة العصبية", f"{_nc:.1%}")
+        _c2.metric("🎯 المفهوم المُختار", _nl or "—")
+        _c3.metric("📈 خطوات التدريب", f"{_ns:,}")
+        if _nloss is not None:
+            st.caption(f"آخر خسارة (loss): {_nloss:.6f}")
 
     if not result["primary_concepts"]:
         st.info("لم يتم العثور على مفاهيم مرتبطة بهذا السؤال في قاعدة المعرفة الحالية.")
@@ -1263,33 +1310,6 @@ def render_health():
         """, unsafe_allow_html=True)
 
 
-def _get_default_groq_key() -> str:
-    """يقرأ مفتاح Groq الافتراضي من Secrets أولاً، ثم من متغيرات البيئة كبديل."""
-    try:
-        key = st.secrets.get("GROQ_API_KEY", "")
-        if key:
-            return key
-    except Exception:
-        pass
-    return os.environ.get("GROQ_API_KEY", "")
-
-
-def render_agent():
-    """تبويب الوكيل — يضمّن NSM_Agent_v7.html كاملاً (إعداد + محادثة + GitHub)."""
-    st.markdown('<div class="section-header">🤖 الوكيل</div>', unsafe_allow_html=True)
-
-    if not AGENT_HTML_PATH.exists():
-        st.error(
-            f"⚠️ لم يتم العثور على ملف {AGENT_HTML_PATH.name} بجانب streamlit_app.py — "
-            "ارفعه إلى جذر المستودع (نفس مجلد streamlit_app.py) على GitHub."
-        )
-        return
-
-    html = AGENT_HTML_PATH.read_text(encoding="utf-8")
-    html = html.replace(AGENT_KEY_PLACEHOLDER, _get_default_groq_key())
-    components.html(html, height=820, scrolling=False)
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # التطبيق الرئيسي
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1303,8 +1323,7 @@ def main():
 
     # ── التبويبات ─────────────────────────────────────────────────────────
     tabs = st.tabs(["🏠 الرئيسية", "🔍 البحث المعرفي", "📖 القرآن الكريم",
-                    "❓ الأسئلة والأجوبة", "🎓 التدريب", "🧠 الذاكرة", "🏥 صحة النظام",
-                    "🤖 الوكيل"])
+                    "❓ الأسئلة والأجوبة", "🎓 التدريب", "🧠 الذاكرة", "🏥 صحة النظام"])
 
     with tabs[0]: render_home()
     with tabs[1]: render_search()
@@ -1313,7 +1332,6 @@ def main():
     with tabs[4]: render_training()
     with tabs[5]: render_memory()
     with tabs[6]: render_health()
-    with tabs[7]: render_agent()
 
     # ── تذييل الصفحة ─────────────────────────────────────────────────────
     st.markdown("---")
