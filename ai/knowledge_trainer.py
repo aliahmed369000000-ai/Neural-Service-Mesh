@@ -327,74 +327,19 @@ class CKGManager:
         }
 
     def _save(self):
-        meta = self._data.setdefault("_meta", {})
-        meta["saved_at"]       = _NOW()
-        meta["total_concepts"] = len(self._data.get("concepts", {}))
-        meta["total_relations"]= len(self._data.get("relations", {}))
-        tmp = self.path.with_suffix(".tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(self._data, f, ensure_ascii=False, indent=2)
-        tmp.replace(self.path)
+        # ══ CKG FROZEN — READ-ONLY since 2026-06-22 ══
+        import logging
+        logging.getLogger("CKGManager").warning(
+            "CKG write blocked: cognitive_graph.json is frozen (read-only since 2026-06-22). "
+            "No new data will be written."
+        )
+        return  # لا كتابة إطلاقاً
 
-    def add_concept(
-        self,
-        name: str,
-        cluster: str,
-        source: str,
-        vector: Optional[np.ndarray] = None,
-    ):
-        concepts = self._data.setdefault("concepts", {})
-        if name not in concepts:
-            entry: Dict[str, Any] = {
-                "name":       name,
-                "cluster":    cluster,
-                "sources":    [source],
-                "frequency":  1,
-                "strength":   0.1,
-                "first_seen": _NOW(),
-                "last_seen":  _NOW(),
-            }
-            if vector is not None:
-                entry["vector"] = vector.tolist()
-            concepts[name] = entry
-        else:
-            c = concepts[name]
-            if source not in c.get("sources", []):
-                c.setdefault("sources", []).append(source)
-            c["frequency"] = c.get("frequency", 0) + 1
-            c["strength"]  = round(
-                min(1.0, 0.1 * math.log1p(c["frequency"])), 4)
-            c["last_seen"] = _NOW()
-            if vector is not None:
-                c["vector"] = vector.tolist()
+    def add_concept(self, *args, **kwargs):
+        return  # CKG frozen — 2026-06-22
 
-    def add_relation(
-        self,
-        src: str,
-        tgt: str,
-        relation_type: str,
-        evidence: str,
-        weight: float = 0.5,
-    ):
-        if src == tgt:
-            return
-        key = f"{src}|||{tgt}"
-        relations = self._data.setdefault("relations", {})
-        if key not in relations:
-            relations[key] = {
-                "source":        src,
-                "target":        tgt,
-                "weight":        round(weight, 4),
-                "relation_type": relation_type,
-                "evidence":      [evidence],
-                "count":         1,
-            }
-        else:
-            r = relations[key]
-            r["count"]  = r.get("count", 0) + 1
-            r["weight"] = round(min(1.0, r["weight"] + 0.02), 4)
-            if evidence not in r.get("evidence", []):
-                r["evidence"].append(evidence)
+    def add_relation(self, *args, **kwargs):
+        return  # CKG frozen — 2026-06-22
 
     def ingest_batch(
         self,
