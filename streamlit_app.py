@@ -28,6 +28,14 @@ from episodic_memory import (  # noqa: E402
     consolidate_memory, get_semantic_rules,
 )
 
+# ── NSM Chat ──────────────────────────────────────────────────────────────
+try:
+    from nsm_chat import NSMChat
+    from nsm_memory import ConversationMemory
+    _NSM_CHAT_OK = True
+except ImportError:
+    _NSM_CHAT_OK = False
+
 # ── إعداد الصفحة ──────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="النظام المعرفي العربي | Neural Service Mesh",
@@ -1273,15 +1281,16 @@ def main():
 
     # ── التبويبات ─────────────────────────────────────────────────────────
     tabs = st.tabs(["🏠 الرئيسية", "🔍 البحث المعرفي", "📖 القرآن الكريم",
-                    "❓ الأسئلة والأجوبة", "🎓 التدريب", "🧠 الذاكرة", "🏥 صحة النظام"])
+                    "❓ الأسئلة والأجوبة", "💬 المحادثة", "🎓 التدريب", "🧠 الذاكرة", "🏥 صحة النظام"])
 
     with tabs[0]: render_home()
     with tabs[1]: render_search()
     with tabs[2]: render_quran()
     with tabs[3]: render_qa()
-    with tabs[4]: render_training()
-    with tabs[5]: render_memory()
-    with tabs[6]: render_health()
+    with tabs[4]: render_chat()
+    with tabs[5]: render_training()
+    with tabs[6]: render_memory()
+    with tabs[7]: render_health()
 
     # ── تذييل الصفحة ─────────────────────────────────────────────────────
     st.markdown("---")
@@ -1290,6 +1299,141 @@ def main():
         Neural Service Mesh · نظام معرفي عربي ذاتي التعلم · مبني بـ Python & Streamlit
     </div>
     """, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# تبويب المحادثة الذكية
+# ══════════════════════════════════════════════════════════════════════════
+def render_chat():
+    """تبويب المحادثة الذكية مع ذاكرة السياق"""
+
+    if not _NSM_CHAT_OK:
+        st.error("⚠️ تعذّر تحميل NSM Chat. تأكد من وجود nsm_chat.py و nsm_embedding.npz في نفس المجلد.")
+        return
+
+    # تهيئة النموذج مرة واحدة
+    if "nsm_bot" not in st.session_state:
+        with st.spinner("⟳ تحميل محرك المحادثة..."):
+            st.session_state.nsm_bot = NSMChat()
+        st.session_state.nsm_messages = []
+        st.session_state.nsm_count = 0
+
+    bot = st.session_state.nsm_bot
+
+    # CSS خاص بالمحادثة
+    st.markdown("""
+    <style>
+    .chat-user {display:flex;justify-content:flex-end;margin:0.4rem 0;}
+    .chat-user .bbl {
+        background:linear-gradient(135deg,#1a73e8,#0d47a1);
+        color:#fff;padding:0.65rem 1.1rem;
+        border-radius:18px 18px 4px 18px;max-width:72%;
+        font-size:0.97rem;line-height:1.6;text-align:right;direction:rtl;
+        box-shadow:0 2px 8px rgba(26,115,232,.3);
+    }
+    .chat-nsm {display:flex;justify-content:flex-start;margin:0.4rem 0;gap:0.5rem;align-items:flex-start;}
+    .chat-nsm .bbl {
+        background:linear-gradient(135deg,#1e2a3a,#162032);
+        color:#e2e8f0;padding:0.65rem 1.1rem;
+        border-radius:18px 18px 18px 4px;max-width:72%;
+        font-size:0.97rem;line-height:1.7;text-align:right;direction:rtl;
+        border:1px solid #2d4a6e;
+    }
+    .ctx-tag {
+        display:inline-block;background:#0f1923;border:1px solid #2d4a6e;
+        border-radius:20px;padding:0.15rem 0.65rem;font-size:0.72rem;
+        color:#90cdf4;margin-bottom:0.3rem;direction:rtl;
+    }
+    .chat-box {
+        max-height:460px;overflow-y:auto;padding:0.8rem;
+        background:#0a0f1a;border-radius:12px;
+        border:1px solid #1e2a3a;margin-bottom:0.8rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # رأس التبويب
+    col_t, col_s = st.columns([3,1])
+    with col_t:
+        st.markdown("### 💬 المحادثة الذكية")
+        st.caption("يتذكر السياق · بدون قاعدة بيانات · الذكاء في الأوزان")
+    with col_s:
+        ctx = bot.context_info()
+        if ctx:
+            st.markdown(f'<div class="ctx-tag">📎 {ctx}</div>', unsafe_allow_html=True)
+        st.metric("رسائل الجلسة", st.session_state.nsm_count)
+
+    # عرض المحادثة
+    html = '<div class="chat-box">'
+    if not st.session_state.nsm_messages:
+        html += '<div style="text-align:center;color:#2d4a6e;padding:2rem">🧠<br>ابدأ محادثتك — أسألني أي شيء</div>'
+    else:
+        for role, text, ctx_tag in st.session_state.nsm_messages:
+            if role == "user":
+                html += f'<div class="chat-user"><div class="bbl">{text}</div></div>'
+            else:
+                ctx_html = f'<div class="ctx-tag">📎 {ctx_tag}</div>' if ctx_tag else ""
+                html += f'''<div class="chat-nsm">
+                    <span style="font-size:1.4rem;margin-top:3px">🧠</span>
+                    <div class="bbl">{ctx_html}{text}</div>
+                </div>'''
+    html += "</div>"
+    st.markdown(html, unsafe_allow_html=True)
+
+    # صندوق الإدخال
+    c1, c2 = st.columns([5, 1])
+    with c1:
+        user_input = st.text_input(
+            label="",
+            placeholder="اكتب سؤالك... (مثال: وكم ركعاتها؟)",
+            key="nsm_input",
+            label_visibility="collapsed",
+        )
+    with c2:
+        send = st.button("إرسال ➤", key="nsm_send", use_container_width=True)
+
+    # أسئلة سريعة
+    st.markdown("**⚡ أسئلة سريعة:**")
+    quick_cols = st.columns(4)
+    quick_qs = [
+        "ما هي أركان الإسلام؟",
+        "ما هو الذكاء الاصطناعي؟",
+        "ما هي سورة الفاتحة؟",
+        "ما هو الجبر الخطي؟",
+        "من هم الخلفاء الراشدون؟",
+        "ما هي لغة Python؟",
+        "ما هي سورة الكهف؟",
+        "ما هي التغذية السليمة؟",
+    ]
+    for i, q in enumerate(quick_qs):
+        with quick_cols[i % 4]:
+            if st.button(q, key=f"chat_q_{i}", use_container_width=True):
+                st.session_state._chat_pending = q
+
+    # مسح المحادثة
+    if st.button("🗑 مسح المحادثة", key="nsm_clear"):
+        st.session_state.nsm_messages = []
+        st.session_state.nsm_count = 0
+        bot.clear_history()
+        st.rerun()
+
+    # معالجة الإدخال
+    def _process(text: str):
+        if not text.strip(): return
+        response = bot.chat(text.strip())
+        ctx_tag  = bot.context_info()
+        st.session_state.nsm_messages.append(("user", text.strip(), ""))
+        st.session_state.nsm_messages.append(("nsm",  response,    ctx_tag))
+        st.session_state.nsm_count += 1
+        st.rerun()
+
+    if send and user_input:
+        _process(user_input)
+
+    if hasattr(st.session_state, "_chat_pending"):
+        q = st.session_state._chat_pending
+        del st.session_state._chat_pending
+        _process(q)
 
 
 if __name__ == "__main__":
