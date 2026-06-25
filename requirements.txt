@@ -3,10 +3,3 @@ numpy>=1.24.0
 scikit-learn>=1.3.0
 plotly>=5.0.0
 requests>=2.31.0
-episodic-memory
-numpy
-plotly
-prowler
-requests
-scikit-learn
-streamlit
