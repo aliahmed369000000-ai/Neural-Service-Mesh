@@ -28,13 +28,21 @@ from episodic_memory import (  # noqa: E402
     consolidate_memory, get_semantic_rules,
 )
 
-# ── NSM Chat ──────────────────────────────────────────────────────────────
+# ── NSM Chat (+ Generative Fallback) ──────────────────────────────────────
 try:
-    from nsm_chat import NSMChat
+    from nsm_chat_plus import NSMChatPlus as NSMChat   # generative wrapper
     from nsm_memory import ConversationMemory
-    _NSM_CHAT_OK = True
+    _NSM_CHAT_OK   = True
+    _NSM_CHAT_PLUS = True
 except ImportError:
-    _NSM_CHAT_OK = False
+    try:
+        from nsm_chat import NSMChat                   # fallback to original
+        from nsm_memory import ConversationMemory
+        _NSM_CHAT_OK   = True
+        _NSM_CHAT_PLUS = False
+    except ImportError:
+        _NSM_CHAT_OK   = False
+        _NSM_CHAT_PLUS = False
 
 # ── إعداد الصفحة ──────────────────────────────────────────────────────────
 st.set_page_config(
@@ -1316,7 +1324,7 @@ def render_chat():
         with st.spinner("⟳ تحميل محرك المحادثة..."):
             st.session_state.nsm_bot = NSMChat()
         st.session_state.nsm_messages = []
-        st.session_state.nsm_count = 0
+        st.session_state.nsm_count    = 0
 
     bot = st.session_state.nsm_bot
 
@@ -1356,7 +1364,8 @@ def render_chat():
     col_t, col_s = st.columns([3,1])
     with col_t:
         st.markdown("### 💬 المحادثة الذكية")
-        st.caption("يتذكر السياق · بدون قاعدة بيانات · الذكاء في الأوزان")
+        _mode = "قاموس NSM + توليد LLM" if _NSM_CHAT_PLUS else "قاموس NSM"
+        st.caption(f"يتذكر السياق · {_mode} · الذكاء في الأوزان")
     with col_s:
         ctx = bot.context_info()
         if ctx:
@@ -1368,14 +1377,21 @@ def render_chat():
     if not st.session_state.nsm_messages:
         html += '<div style="text-align:center;color:#2d4a6e;padding:2rem">🧠<br>ابدأ محادثتك — أسألني أي شيء</div>'
     else:
-        for role, text, ctx_tag in st.session_state.nsm_messages:
+        for msg in st.session_state.nsm_messages:
+            role, text = msg[0], msg[1]
+            ctx_tag    = msg[2] if len(msg) > 2 else ""
+            src_badge  = msg[3] if len(msg) > 3 else ""
             if role == "user":
                 html += f'<div class="chat-user"><div class="bbl">{text}</div></div>'
             else:
                 ctx_html = f'<div class="ctx-tag">📎 {ctx_tag}</div>' if ctx_tag else ""
+                src_html = (
+                    f'<div class="ctx-tag" style="color:#81e6d9">{src_badge}</div>'
+                    if src_badge else ""
+                )
                 html += f'''<div class="chat-nsm">
                     <span style="font-size:1.4rem;margin-top:3px">🧠</span>
-                    <div class="bbl">{ctx_html}{text}</div>
+                    <div class="bbl">{ctx_html}{src_html}{text}</div>
                 </div>'''
     html += "</div>"
     st.markdown(html, unsafe_allow_html=True)
@@ -1420,10 +1436,14 @@ def render_chat():
     # معالجة الإدخال
     def _process(text: str):
         if not text.strip(): return
-        response = bot.chat(text.strip())
-        ctx_tag  = bot.context_info()
-        st.session_state.nsm_messages.append(("user", text.strip(), ""))
-        st.session_state.nsm_messages.append(("nsm",  response,    ctx_tag))
+        response  = bot.chat(text.strip())
+        ctx_tag   = bot.context_info()
+        src_badge = (
+            bot.source_badge()
+            if hasattr(bot, "source_badge") else ""
+        )
+        st.session_state.nsm_messages.append(("user", text.strip(), "", ""))
+        st.session_state.nsm_messages.append(("nsm",  response, ctx_tag, src_badge))
         st.session_state.nsm_count += 1
         st.rerun()
 
