@@ -19,10 +19,18 @@ Continual Learner — EWC (Elastic Weight Consolidation)
 
 الاستخدام:
     from ai.continual_learner import EWCLearner
-    ewc = EWCLearner(lambda_reg=400.0)
+    ewc = EWCLearner(lambda_reg=20.0)
     ewc.compute_fisher(E_matrix, old_episodes)  # بعد المهمة الأولى
     penalty = ewc.penalty(E_matrix)             # أثناء تدريب المهمة الجديدة
     total_loss = new_task_loss + penalty
+
+ملاحظة معايرة (محدّثة):
+  كانت compute_fisher() تحتوي خللاً رياضياً جعل قيمة Fisher تساوي صفراً
+  دائماً (grad_z=-z_hat ينعدم هندسياً عند إسقاطه على المستوى العمودي)،
+  أي أن EWC لم يكن يحمي شيئاً فعلياً منذ كتابته. تم تصحيح الصيغة باستخدام
+  حيلة "Empirical Fisher" المعروفة، وبالتبعية أُعيدت معايرة lambda_reg
+  الافتراضية من 400.0 إلى 20.0 (القيمة القديمة كانت غير مؤثرة وقت الخلل،
+  وتُسبب الآن انفجاراً عددياً (inf/nan) مع القيم الحقيقية غير الصفرية).
 """
 from __future__ import annotations
 
@@ -77,7 +85,7 @@ class EWCLearner:
     يمنع Catastrophic Forgetting باستخدام Elastic Weight Consolidation.
 
     الاستخدام النموذجي:
-        ewc = EWCLearner(lambda_reg=400.0)
+        ewc = EWCLearner(lambda_reg=20.0)
 
         # بعد الانتهاء من المهمة A:
         ewc.compute_fisher(E, episodes_A, task_label="arabic_islamic")
@@ -94,7 +102,7 @@ class EWCLearner:
 
     def __init__(
         self,
-        lambda_reg: float = 400.0,
+        lambda_reg: float = 20.0,
         fisher_path: Path | str = _DEFAULT_FISHER_PATH,
         anchor_path: Path | str = _DEFAULT_ANCHOR_PATH,
         max_snapshots: int = 5,
@@ -158,8 +166,21 @@ class EWCLearner:
             z_hat = z / norm           # L2 normalised
 
             # الخسارة التقريبية: 1 - max_cosine (نحاكي log-softmax)
-            # التدرج: ∂L/∂E ≈ -x ⊗ z_hat  (نظرًا لـ L2 norm)
-            grad_z = -z_hat                      # (128,)
+            # ★ إصلاح: الصيغة السابقة كانت grad_z = -z_hat، وهذا يجعل
+            # ناتج الإسقاط على المستوى العمودي (tangent space) صفراً
+            # رياضياً *دائماً* — لأن z_hat متجه وحدة، فإن
+            # z_hat·(-z_hat) = -1 ثابتة، فيتلاشى الإسقاط تماماً لأي مدخل
+            # (تم التحقق رقمياً: fisher_accum كانت تساوي صفراً دائماً،
+            # أي أن EWC لم يكن يحمي أي شيء فعلياً منذ كتابته).
+            # الإصلاح: نستخدم حيلة "Empirical Fisher" المعروفة (استعمال
+            # أقوى بُعد في z_hat نفسه كـ pseudo-label بدل افتراض هدف
+            # مضاد تماماً لـ z_hat) — هذا يُعطي تدرجاً غير متلاشٍ ومعبّراً
+            # فعلاً عن حساسية كل وزن تجاه هذا المدخل، دون الحاجة لأي
+            # تصنيف حقيقي (يطابق نفس فكرة الكود الأصلي بدون الخلل الرياضي).
+            k = int(np.argmax(z_hat))
+            one_hot = np.zeros_like(z_hat)
+            one_hot[k] = 1.0
+            grad_z = z_hat - one_hot              # (128,) — لا يتلاشى عمومياً
             # chain rule عبر L2 norm
             grad_raw = (grad_z - z_hat * float(z_hat @ grad_z)) / norm
             dE = np.outer(ctx_vec, grad_raw)    # (784, 128)
@@ -240,7 +261,7 @@ class EWCLearner:
         cls,
         E: np.ndarray,
         db_path: str | Path = "memory/experience.db",
-        lambda_reg: float = 400.0,
+        lambda_reg: float = 20.0,
         task_label: str = "nsm_base",
         n_samples: int = 200,
     ) -> "EWCLearner":
