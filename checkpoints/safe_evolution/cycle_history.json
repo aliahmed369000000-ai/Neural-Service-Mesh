@@ -1,0 +1,16 @@
+[
+  {
+    "cycle_number": 1,
+    "status": "skipped",
+    "performance_before": 0.9,
+    "performance_after": 0.9,
+    "performance_delta": 0.0,
+    "snapshot_id_before": "snap_cdbbf57d1295",
+    "snapshot_id_after": null,
+    "was_rolled_back": false,
+    "rollback_reason": "",
+    "errors": [],
+    "duration_seconds": 0.003,
+    "timestamp": "2026-06-25T03:01:29.899899+00:00"
+  }
+]
