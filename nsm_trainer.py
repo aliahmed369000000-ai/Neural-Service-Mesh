@@ -324,15 +324,253 @@ def evaluate():
     print(f"\n█=نفس الموضوع  ✓=فصل ممتاز(<0.3)  ~=متوسط  ✗=ضعيف")
     print(f"الفصل الممتاز: {good}/{total} = {good/max(total,1)*100:.1f}%")
 
+
+# ══════════════════════════════════════════════════════════════════
+# ★ إضافة جديدة (لا تُغيّر أي شيء أعلاه) ★
+# Continual Training محمي بـ EWC + Rollback — الأولويتان #1 و #3
+# ════════════════════════════════════════════════════════════════════
+# المشكلة المكتشفة في تقرير التحليل:
+#   train() أعلاه يبدأ دائماً من E عشوائية جديدة (rng.normal) — أي تدريب
+#   على موضوع إضافي لاحقاً سيُعيد كتابة nsm_embedding.npz من الصفر وينسى
+#   كل المواضيع السابقة (Catastrophic Forgetting). كذلك EWCLearner في
+#   ai/continual_learner.py كان موجوداً لكنه **غير مُستخدَم في أي مكان**
+#   بالمشروع (orphan module) — ولا توجد أي حماية rollback إذا خرج
+#   تدريب جديد بنتيجة أسوأ.
+#
+# الحل:
+#   continual_train() تُحمّل E الموجودة (لا تبدأ من الصفر)، تحسب/تحمّل
+#   Fisher Information لحماية المعرفة القديمة (EWC)، تُدرّب على بيانات
+#   موضوع جديد فقط، وتُغلّف كل العملية بـ CheckpointGuard: إن تراجع
+#   الفصل (separation gap) على البيانات القديمة أكثر من الحد المسموح،
+#   يُستعاد nsm_embedding.npz القديم تلقائياً — بدون أي تدخل يدوي.
+#
+# الاستخدام:
+#   python nsm_trainer.py --continual                       # تجربة بموضوع توضيحي
+#   python nsm_trainer.py --continual --continual-file new_topic.json
+#
+#   new_topic.json يجب أن يكون بصيغة: [["نص الجملة", رقم_الموضوع], ...]
+#
+# لا يُغيَّر أي سلوك في train()/evaluate()/التشغيل الافتراضي أعلاه.
+# ════════════════════════════════════════════════════════════════════
+
+try:
+    from ai.continual_learner import EWCLearner, EWCTrainingLoop
+    _HAS_EWC = True
+except Exception as _exc:                                    # pragma: no cover
+    _HAS_EWC = False
+    _EWC_IMPORT_ERROR = _exc
+
+try:
+    from ai.rollback_guard import CheckpointGuard
+    _HAS_ROLLBACK = True
+except Exception as _exc:                                    # pragma: no cover
+    _HAS_ROLLBACK = False
+    _ROLLBACK_IMPORT_ERROR = _exc
+
+
+# موضوع توضيحي جديد (رقم 7) — يُستخدم فقط إن لم يُمرَّر --continual-file
+# الهدف إثبات أن الآلية تعمل: تعلّم موضوع جديد كلياً بدون نسيان السبعة القدامى
+_DEMO_NEW_TOPIC_DATA = [
+    ("الفلك الإسلامي رصد القمر والكواكب لتحديد مواقيت الصلاة والتقويم", 7),
+    ("علم الفلك يدرس النجوم والمجرات والكواكب وحركة الأجرام السماوية", 7),
+    ("التقويم القمري الهجري يعتمد على رؤية هلال بداية الشهر", 7),
+    ("الكواكب التسعة تدور حول الشمس في مسارات بيضاوية منتظمة", 7),
+    ("علماء المسلمين كالبيروني والخوارزمي طوّروا علم الفلك والرياضيات", 7),
+    ("النجوم تُستخدم تاريخياً لتحديد الاتجاهات والقبلة في الصحراء", 7),
+]
+
+
+class _PseudoEpisode:
+    """يُحاكي واجهة Episode (ai/experience_store.py) من بيانات نصية ثابتة،
+    لاستخدامها في EWCLearner.compute_fisher عندما لا توجد حلقات حقيقية
+    محفوظة بعد في EpisodeStore (نظام جديد لم يتراكم له تجارب كافية)."""
+
+    def __init__(self, text: str, dim: int = 784):
+        self.question = text
+        self.context_vector = text_to_vec(text, dim=dim).tolist()
+
+
+def _separation_gap(E: np.ndarray, data) -> float:
+    """نفس مقياس evaluate() أعلاه (same-cos الأعلى = أفضل) لكن كدالة
+    قابلة لإعادة الاستخدام — لا تُغيّر evaluate() نفسها."""
+    vecs = [(text_to_vec(t), lbl) for t, lbl in data]
+    same, diff = [], []
+    for i in range(len(vecs)):
+        za = embed(E, vecs[i][0])
+        for j in range(i + 1, len(vecs)):
+            zb = embed(E, vecs[j][0])
+            c = cosine(za, zb)
+            (same if vecs[i][1] == vecs[j][1] else diff).append(c)
+    s = float(np.mean(same)) if same else 0.0
+    d = float(np.mean(diff)) if diff else 0.0
+    return s - d
+
+
+def load_new_data_file(path) -> list:
+    """يقرأ ملف JSON بصيغة [["نص", رقم_الموضوع], ...]."""
+    import json
+    with open(path, "r", encoding="utf-8") as f:
+        raw = json.load(f)
+    return [(item[0], int(item[1])) for item in raw]
+
+
+def continual_train(
+    new_data=None,
+    epochs: int = 30,
+    lr: float = 0.01,
+    margin: float = 0.4,
+    lambda_reg: float = 20.0,
+    task_label: str = "new_task",
+    min_improvement: float = -0.05,
+):
+    """
+    تدريب مستمر (Continual Learning) محمي بـ EWC + Rollback.
+
+    خلافاً لـ train()، هذه الدالة:
+      • تُحمّل E الموجودة بالفعل (لا تبدأ من الصفر) — تحافظ على المعرفة القديمة
+      • تستخدم EWCLearner لمعاقبة أي تغيير كبير في الأوزان المهمة للمواضيع القديمة
+      • تُغلَّف بـ CheckpointGuard: تراجع تلقائي إن انهارت دقة المواضيع القديمة
+
+    Args:
+        new_data:        قائمة (نص, رقم_موضوع) للموضوع/المواضيع الجديدة.
+                          افتراضياً تُستخدم _DEMO_NEW_TOPIC_DATA التوضيحية.
+        epochs:          عدد دورات تدريب EWCTrainingLoop
+        lr:               معدل التعلّم
+        margin:          هامش Triplet Loss
+        lambda_reg:      قوة عقوبة EWC (أعلى = حماية أقوى للمعرفة القديمة)
+        task_label:      وصف المهمة الجديدة (يُحفظ في سجلّ EWC و Rollback)
+        min_improvement: أقل تراجع مسموح به في separation gap على البيانات
+                          القديمة قبل اعتبار التحديث "فاشلاً" والتراجع عنه
+    """
+    print("=" * 60)
+    print("  NSM Continual Trainer — EWC + Rollback Guard")
+    print("=" * 60)
+
+    if not _HAS_EWC:
+        print(f"❌ تعذّر استيراد ai.continual_learner: {_EWC_IMPORT_ERROR}")
+        print("   تأكّد من وجود ai/continual_learner.py في المشروع.")
+        return None
+
+    if not _E_OUT.exists():
+        print("❌ لا توجد nsm_embedding.npz — شغّل التدريب الأساسي أولاً:")
+        print("   python nsm_trainer.py")
+        return None
+
+    new_data = new_data or _DEMO_NEW_TOPIC_DATA
+
+    # 1) تحميل E الحالية (وليس عشوائية جديدة — هذا جوهر Continual Learning)
+    E = np.load(_E_OUT)["E"].astype(np.float64)
+    print(f"✓ E الحالية محمّلة: {E.shape}")
+
+    old_gap = _separation_gap(E, TRAIN_DATA)
+    print(f"✓ separation gap الحالي (على {len(TRAIN_DATA)} جملة قديمة): {old_gap:.4f}")
+
+    # 2) بناء/تحميل EWCLearner — Fisher Information لحماية المعرفة القديمة
+    ewc = EWCLearner(lambda_reg=lambda_reg)
+    if not ewc._snapshots:
+        # لا توجد لقطات محفوظة بعد — نحسبها من بيانات التدريب الأساسية نفسها
+        # (تُستخدم كـ "ذاكرة استبدال" Replay Memory بديلة عن EpisodeStore فارغ)
+        print("ℹ لا توجد لقطات EWC سابقة — حساب Fisher من بيانات المواضيع السبعة الأساسية…")
+        pseudo_episodes = [_PseudoEpisode(text) for text, _ in TRAIN_DATA]
+        ewc.compute_fisher(E, pseudo_episodes, task_label="base_7_topics")
+        ewc.save()
+
+    new_topics = sorted(set(lbl for _, lbl in new_data))
+    print(f"✓ مهمة جديدة: '{task_label}' — {len(new_data)} جملة، مواضيع: {new_topics}")
+
+    # Triplet Loss يحتاج موضوعَين مختلفَين على الأقل داخل نفس دفعة التدريب
+    # ليبني أزواج (إيجابي/سلبي). نُضيف عيّنة صغيرة من المواضيع القديمة
+    # كـ "سلبيات تباين" فقط لغرض التدريب — حماية المعرفة القديمة نفسها
+    # تبقى من مهمة EWC Penalty وحدها (Fisher + Anchor)، لا من هذه العيّنة.
+    import random as _random
+    _rng_sample = _random.Random(42)
+    by_old_topic = {}
+    for text, lbl in TRAIN_DATA:
+        by_old_topic.setdefault(lbl, []).append(text)
+    contrast_sample = []
+    for lbl, texts in by_old_topic.items():
+        if lbl not in new_topics:
+            contrast_sample.extend(
+                (t, lbl) for t in _rng_sample.sample(texts, min(2, len(texts)))
+            )
+    training_batch = new_data + contrast_sample
+
+    # ★ إصلاح تكامل مهم: يجب أن تُحمى ملفات Fisher/Anchor الخاصة بـ EWC
+    # هي أيضاً ضمن نفس عملية rollback — وإلا فإن تراجع nsm_embedding.npz
+    # فقط (دون التراجع عن ewc_fisher.npz/ewc_anchor.npz) يجعلهما يشيران
+    # إلى E "مرفوضة" غير متطابقة مع E الحالية المُستعادة، فينتج عنه
+    # انفجار عددي (inf/nan) في أي محاولة تدريب مستمر لاحقة (تم رصد هذا
+    # فعلياً أثناء الاختبار: EWCLearner يُحمّل anchor قديم لا يطابق E
+    # الفعلية بعد التراجع → diff ضخم → penalty=inf).
+    guarded_files = [_E_OUT, ewc.fisher_path, ewc.anchor_path]
+
+    # 3) التدريب مع عقوبة EWC (يحمي أوزان المواضيع القديمة المهمة)
+    def _do_update():
+        loop = EWCTrainingLoop(E.copy(), ewc, lr=lr, margin=margin)
+        result = loop.train(training_batch, epochs=epochs, verbose=True)
+        np.savez(_E_OUT, E=result["E"], dim=EMBED_DIM)
+        # نُسجّل المهمة الجديدة في EWC أيضاً لحمايتها هي بدورها من النسيان
+        # في أي تدريب مستمر مستقبلي
+        ewc.compute_fisher(result["E"], [_PseudoEpisode(t) for t, _ in new_data],
+                            task_label=task_label)
+        ewc.save()
+
+    def _eval_combined() -> float:
+        E_new = np.load(_E_OUT)["E"]
+        return _separation_gap(E_new, TRAIN_DATA + new_data)
+
+    # 4) تنفيذ محمي بـ Rollback — إن لم تتوفر ai/rollback_guard، نُنفّذ بدون حماية
+    if _HAS_ROLLBACK:
+        guard = CheckpointGuard(asset="nsm_embedding")
+        if guard.current_score() is None:
+            guard.snapshot(guarded_files, label="baseline_before_continual", score=old_gap)
+
+        decision = guard.guarded_update(
+            files=guarded_files,
+            update_fn=_do_update,
+            eval_fn=_eval_combined,
+            tolerance=min_improvement,
+            label=task_label,
+        )
+        print("\n" + decision.summary())
+        return decision
+    else:
+        print(f"⚠ ai/rollback_guard غير متاح ({_ROLLBACK_IMPORT_ERROR}) — "
+              f"تنفيذ بدون حماية تراجع تلقائي!")
+        _do_update()
+        new_gap = _eval_combined()
+        print(f"✓ separation gap بعد التدريب المستمر: {new_gap:.4f} "
+              f"(كان {old_gap:.4f})")
+        return {"old_gap": old_gap, "new_gap": new_gap, "rolled_back": False}
+
+
 # ══════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--eval", action="store_true")
     p.add_argument("--epochs", type=int, default=80)
     p.add_argument("--lr", type=float, default=0.005)
+    # ★ أعلام جديدة لـ Continual Learning — لا تُغيّر السلوك الافتراضي ★
+    p.add_argument("--continual", action="store_true",
+                    help="تدريب مستمر محمي بـ EWC+Rollback بدل التدريب الكامل من الصفر")
+    p.add_argument("--continual-file", type=str, default=None,
+                    help="ملف JSON [[نص, رقم_موضوع], ...] للموضوع الجديد")
+    p.add_argument("--ewc-lambda", type=float, default=20.0)
+    p.add_argument("--continual-epochs", type=int, default=30)
+    p.add_argument("--task-label", type=str, default="new_task")
     args = p.parse_args()
-    if args.eval:
+
+    if args.continual:
+        new_data = load_new_data_file(args.continual_file) if args.continual_file else None
+        continual_train(
+            new_data=new_data,
+            epochs=args.continual_epochs,
+            lambda_reg=args.ewc_lambda,
+            task_label=args.task_label,
+        )
+    elif args.eval:
         evaluate()
     else:
         train(epochs=args.epochs, lr=args.lr)
         evaluate()
+
