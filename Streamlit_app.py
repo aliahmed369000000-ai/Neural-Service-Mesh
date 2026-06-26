@@ -17,33 +17,47 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import streamlit as st
 
+# ══════════════════════════════════════════════════════════════════
+# حقن Streamlit Secrets → os.environ (يجب أن يكون هنا قبل أي import آخر)
+# هذا يجعل GROQ_API_KEY وغيره متاحاً لـ os.getenv() في كل الوحدات
+# ══════════════════════════════════════════════════════════════════
+def _inject_streamlit_secrets():
+    """يحقن st.secrets في os.environ حتى تعمل os.getenv() في الوحدات الفرعية."""
+    try:
+        for _key, _val in st.secrets.items():
+            if isinstance(_val, str) and _key not in os.environ:
+                os.environ[_key] = _val
+    except Exception:
+        pass  # لا secrets موجودة (بيئة محلية)
+
+_inject_streamlit_secrets()
+
 # ── محرك الأسئلة والأجوبة القرآني ────────────────────────────────────────
 import sys as _sys
 _KNOWLEDGE_MODULE_DIR = str(Path(__file__).parent / "knowledge")
 if _KNOWLEDGE_MODULE_DIR not in _sys.path:
     _sys.path.insert(0, _KNOWLEDGE_MODULE_DIR)
 from qa_engine import answer_question  # noqa: E402
-
-# ── ReasoningPipeline — الشبكة العصبية الحقيقية ──
-try:
-    from ai.reasoning_pipeline import ReasoningPipeline as _ReasoningPipeline
-    _RP_AVAILABLE = True
-except Exception:
-    _RP_AVAILABLE = False
-
-@st.cache_resource
-def load_reasoning_pipeline():
-    """تحميل ReasoningPipeline مرة واحدة مع تفعيل التدريب الفوري."""
-    if not _RP_AVAILABLE:
-        return None
-    try:
-        return _ReasoningPipeline(train_on_query=True)
-    except Exception:
-        return None
 from episodic_memory import (  # noqa: E402
     store_episode, find_similar_episodes, get_memory_stats,
     consolidate_memory, get_semantic_rules,
 )
+
+# ── NSM Chat (+ Generative Fallback) ──────────────────────────────────────
+try:
+    from nsm_chat_plus import NSMChatPlus as NSMChat   # generative wrapper
+    from nsm_memory import ConversationMemory
+    _NSM_CHAT_OK   = True
+    _NSM_CHAT_PLUS = True
+except ImportError:
+    try:
+        from nsm_chat import NSMChat                   # fallback to original
+        from nsm_memory import ConversationMemory
+        _NSM_CHAT_OK   = True
+        _NSM_CHAT_PLUS = False
+    except ImportError:
+        _NSM_CHAT_OK   = False
+        _NSM_CHAT_PLUS = False
 
 # ── إعداد الصفحة ──────────────────────────────────────────────────────────
 st.set_page_config(
@@ -519,7 +533,7 @@ def render_home():
 
     col_s, col_b = st.columns([4, 1])
     with col_s:
-        quick_q = st.text_input("", placeholder="مثال: الصبر، الجاذبية، الرحمة، العدل...",
+        quick_q = st.text_input("بحث", placeholder="مثال: الصبر، الجاذبية، الرحمة، العدل...",
                                 key="home_search", label_visibility="collapsed")
     with col_b:
         if st.button("🔍 بحث", use_container_width=True, key="home_btn"):
@@ -744,7 +758,7 @@ def render_quran():
 
     # بحث داخل القرآن
     st.markdown('<div class="section-header">🔍 البحث في آيات القرآن</div>', unsafe_allow_html=True)
-    quran_q = st.text_input("", placeholder="ابحث عن كلمة أو مفهوم...", key="quran_search",
+    quran_q = st.text_input("بحث قرآن", placeholder="ابحث عن كلمة أو مفهوم...", key="quran_search",
                              label_visibility="collapsed")
     if quran_q.strip():
         matches = search_quran_for_concept(quran_q.strip(), ayat, max_results=20)
@@ -813,26 +827,6 @@ def render_qa():
         entities = load_entities()
         result = answer_question(question, ckg, ayat, entities=entities)
 
-    # ── وصل الشبكة العصبية الحقيقية (المرحلة 2+3) ──
-    try:
-        pipeline = load_reasoning_pipeline()
-        if pipeline is not None:
-            neural_result = pipeline.answer(question)
-            result["neural_confidence"] = round(float(
-                neural_result.weights.get("W_SEMANTIC", 0) * 0.4 +
-                neural_result.weights.get("W_SCORE", 0) * 0.3 +
-                neural_result.weights.get("W_MEMORY", 0) * 0.3
-            ), 4)
-            result["neural_label"] = neural_result.ranked_concepts[0].name if neural_result.ranked_concepts else ""
-            result["neural_loss"]  = neural_result.train_loss
-            result["neural_steps"] = pipeline.core.net.train_steps if hasattr(pipeline.core, "net") else 0
-        else:
-            result["neural_confidence"] = 0.0
-            result["neural_label"] = "غير متاح"
-    except Exception as _ne:
-        result["neural_confidence"] = 0.0
-        result["neural_label"] = f"خطأ: {_ne}"
-
     # ── حفظ الحلقة في الذاكرة التجريبية ──
     db_path = MEMORY_DIR / "episodic.db"
     try:
@@ -883,19 +877,6 @@ def render_qa():
     st.markdown("")
     st.markdown(f"**درجة الثقة:** {confidence:.0%}")
     st.progress(confidence)
-
-    # ── مقاييس الشبكة العصبية ──
-    _nc = result.get("neural_confidence", 0.0)
-    _nl = result.get("neural_label", "")
-    _ns = result.get("neural_steps", 0)
-    _nloss = result.get("neural_loss")
-    if _nc > 0:
-        _c1, _c2, _c3 = st.columns(3)
-        _c1.metric("🧠 ثقة الشبكة العصبية", f"{_nc:.1%}")
-        _c2.metric("🎯 المفهوم المُختار", _nl or "—")
-        _c3.metric("📈 خطوات التدريب", f"{_ns:,}")
-        if _nloss is not None:
-            st.caption(f"آخر خسارة (loss): {_nloss:.6f}")
 
     if not result["primary_concepts"]:
         st.info("لم يتم العثور على مفاهيم مرتبطة بهذا السؤال في قاعدة المعرفة الحالية.")
@@ -1323,15 +1304,16 @@ def main():
 
     # ── التبويبات ─────────────────────────────────────────────────────────
     tabs = st.tabs(["🏠 الرئيسية", "🔍 البحث المعرفي", "📖 القرآن الكريم",
-                    "❓ الأسئلة والأجوبة", "🎓 التدريب", "🧠 الذاكرة", "🏥 صحة النظام"])
+                    "❓ الأسئلة والأجوبة", "💬 المحادثة", "🎓 التدريب", "🧠 الذاكرة", "🏥 صحة النظام"])
 
     with tabs[0]: render_home()
     with tabs[1]: render_search()
     with tabs[2]: render_quran()
     with tabs[3]: render_qa()
-    with tabs[4]: render_training()
-    with tabs[5]: render_memory()
-    with tabs[6]: render_health()
+    with tabs[4]: render_chat()
+    with tabs[5]: render_training()
+    with tabs[6]: render_memory()
+    with tabs[7]: render_health()
 
     # ── تذييل الصفحة ─────────────────────────────────────────────────────
     st.markdown("---")
@@ -1340,6 +1322,217 @@ def main():
         Neural Service Mesh · نظام معرفي عربي ذاتي التعلم · مبني بـ Python & Streamlit
     </div>
     """, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# تبويب المحادثة الذكية
+# ══════════════════════════════════════════════════════════════════════════
+def render_chat():
+    """تبويب المحادثة الذكية مع ذاكرة السياق"""
+
+    if not _NSM_CHAT_OK:
+        st.error("⚠️ تعذّر تحميل NSM Chat. تأكد من وجود nsm_chat.py و nsm_embedding.npz في نفس المجلد.")
+        return
+
+    # تهيئة النموذج مرة واحدة
+    if "nsm_bot" not in st.session_state:
+        with st.spinner("⟳ تحميل محرك المحادثة..."):
+            st.session_state.nsm_bot = NSMChat()
+        st.session_state.nsm_messages = []
+        st.session_state.nsm_count    = 0
+
+    bot = st.session_state.nsm_bot
+
+    # CSS خاص بالمحادثة
+    st.markdown("""
+    <style>
+    .chat-user {display:flex;justify-content:flex-end;margin:0.5rem 0;}
+    .chat-user .bbl {
+        background:linear-gradient(135deg,#1a73e8,#0d47a1);
+        color:#fff;padding:0.7rem 1.2rem;
+        border-radius:18px 18px 4px 18px;max-width:78%;
+        font-size:0.97rem;line-height:1.7;text-align:right;direction:rtl;
+        box-shadow:0 2px 10px rgba(26,115,232,.35);
+        white-space:pre-wrap;word-break:break-word;
+    }
+    .chat-nsm {display:flex;justify-content:flex-start;margin:0.5rem 0;gap:0.6rem;align-items:flex-start;}
+    .chat-nsm .bbl {
+        background:linear-gradient(135deg,#1e2a3a,#162032);
+        color:#e2e8f0;padding:0.7rem 1.2rem;
+        border-radius:18px 18px 18px 4px;max-width:78%;
+        font-size:0.97rem;line-height:1.8;text-align:right;direction:rtl;
+        border:1px solid #2d4a6e;
+        white-space:pre-wrap;word-break:break-word;
+    }
+    .chat-nsm .bbl code {
+        background:#0d1b2a;color:#81e6d9;padding:0.15rem 0.4rem;
+        border-radius:4px;font-size:0.88rem;font-family:monospace;
+        white-space:pre-wrap;
+    }
+    .chat-nsm .bbl pre {
+        background:#0d1b2a;border:1px solid #2d4a6e;border-radius:8px;
+        padding:0.8rem;overflow-x:auto;margin:0.5rem 0;
+        font-size:0.85rem;color:#a8d8ea;
+        white-space:pre;
+    }
+    .ctx-tag {
+        display:inline-block;background:#0f1923;border:1px solid #2d4a6e;
+        border-radius:20px;padding:0.15rem 0.65rem;font-size:0.72rem;
+        color:#90cdf4;margin-bottom:0.4rem;direction:rtl;
+    }
+    .chat-box {
+        max-height:500px;overflow-y:auto;padding:1rem;
+        background:#0a0f1a;border-radius:14px;
+        border:1px solid #1e2a3a;margin-bottom:0.8rem;
+        scroll-behavior:smooth;
+    }
+    .chat-box::-webkit-scrollbar{width:4px;}
+    .chat-box::-webkit-scrollbar-track{background:#0a0f1a;}
+    .chat-box::-webkit-scrollbar-thumb{background:#2d4a6e;border-radius:4px;}
+    .typing-indicator {
+        display:inline-block;color:#90cdf4;font-size:0.85rem;
+        animation:pulse 1.2s infinite;
+    }
+    @keyframes pulse{0%,100%{opacity:.4;}50%{opacity:1;}}
+    </style>
+    """, unsafe_allow_html=True)
+
+    # رأس التبويب
+    col_t, col_s = st.columns([3,1])
+    with col_t:
+        st.markdown("### 💬 المحادثة الذكية")
+        _mode = "قاموس NSM + توليد LLM" if _NSM_CHAT_PLUS else "قاموس NSM"
+        st.caption(f"يتذكر السياق · {_mode} · الذكاء في الأوزان")
+    with col_s:
+        ctx = bot.context_info()
+        if ctx:
+            st.markdown(f'<div class="ctx-tag">📎 {ctx}</div>', unsafe_allow_html=True)
+        st.metric("رسائل الجلسة", st.session_state.nsm_count)
+
+    # عرض المحادثة
+    html = '<div class="chat-box">'
+    if not st.session_state.nsm_messages:
+        html += '<div style="text-align:center;color:#2d4a6e;padding:2rem">🧠<br>ابدأ محادثتك — أسألني أي شيء</div>'
+    else:
+        for msg in st.session_state.nsm_messages:
+            role, text = msg[0], msg[1]
+            ctx_tag    = msg[2] if len(msg) > 2 else ""
+            src_badge  = msg[3] if len(msg) > 3 else ""
+            if role == "user":
+                import html as _html
+                safe_text = _html.escape(text).replace("\n", "<br>")
+                html += f'<div class="chat-user"><div class="bbl">{safe_text}</div></div>
+            else:
+                ctx_html = f'<div class="ctx-tag">📎 {ctx_tag}</div>' if ctx_tag else ""
+                src_html = (
+                    f'<div class="ctx-tag" style="color:#81e6d9">{src_badge}</div>'
+                    if src_badge else ""
+                )
+                import html as _html
+                if "<" not in text and ">" not in text:
+                    safe_reply = _html.escape(text).replace("\n", "<br>")
+                else:
+                    safe_reply = text
+                html += f'''<div class="chat-nsm">
+                    <span style="font-size:1.4rem;margin-top:3px">🧠</span>
+                    <div class="bbl">{ctx_html}{src_html}{safe_reply}</div>
+                </div>'''
+    html += "</div>"
+    st.markdown(html, unsafe_allow_html=True)
+
+    # صندوق الإدخال
+    c1, c2 = st.columns([5, 1])
+    with c1:
+        user_input = st.text_input(
+            label="سؤالك",
+            placeholder="اكتب سؤالك... (مثال: وكم ركعاتها؟)",
+            key="nsm_input",
+            label_visibility="collapsed",
+        )
+    with c2:
+        send = st.button("إرسال ➤", key="nsm_send", use_container_width=True)
+
+    # أسئلة سريعة
+    st.markdown("**⚡ أسئلة سريعة:**")
+    quick_cols = st.columns(4)
+    quick_qs = [
+        "ما هي أركان الإسلام؟",
+        "ما هو الذكاء الاصطناعي؟",
+        "ما هي سورة الفاتحة؟",
+        "ما هو الجبر الخطي؟",
+        "من هم الخلفاء الراشدون؟",
+        "ما هي لغة Python؟",
+        "ما هي سورة الكهف؟",
+        "ما هي التغذية السليمة؟",
+    ]
+    for i, q in enumerate(quick_qs):
+        with quick_cols[i % 4]:
+            if st.button(q, key=f"chat_q_{i}", use_container_width=True):
+                st.session_state._chat_pending = q
+
+    # ── أزرار تحليل المشروع (NSM Agent) ──────────────────────────
+    st.markdown("---")
+    st.markdown("**🤖 تحليل المشروع:**")
+    agent_cols = st.columns(6)
+    agent_btns = [
+        ("📋 اقترح (كل)",      "اقترح"),
+        ("🗂 غير مستخدم",      "اقترح غير مستخدم"),
+        ("⚠️ أخطاء",           "اقترح أخطاء"),
+        ("📦 ملفات كبيرة",     "اقترح كبير"),
+        ("📁 قائمة الملفات",   "قائمة"),
+        ("🔁 مكررة",           "اقترح مكررة"),
+    ]
+    for i, (label, cmd) in enumerate(agent_btns):
+        with agent_cols[i]:
+            if st.button(label, key=f"agent_btn_{i}", use_container_width=True):
+                st.session_state._chat_pending = cmd
+
+    # أزرار تحليل ملف محدد
+    st.markdown("**🔍 تحليل ملف محدد** — اكتب المسار ثم اختر العملية:")
+    file_path_input = st.text_input(
+        "مسار الملف", placeholder="مثال: ai/code_agent.py",
+        key="agent_file_path", label_visibility="collapsed"
+    )
+    if file_path_input.strip():
+        fc1, fc2, fc3 = st.columns(3)
+        with fc1:
+            if st.button("📄 ملخص", key="btn_summary", use_container_width=True):
+                st.session_state._chat_pending = f"ملخص {file_path_input.strip()}"
+        with fc2:
+            if st.button("🔧 صحح", key="btn_fix", use_container_width=True):
+                st.session_state._chat_pending = f"صحح {file_path_input.strip()}"
+        with fc3:
+            if st.button("👁 افحص", key="btn_inspect", use_container_width=True):
+                st.session_state._chat_pending = f"افحص {file_path_input.strip()}"
+
+    # مسح المحادثة
+    if st.button("🗑 مسح المحادثة", key="nsm_clear"):
+        st.session_state.nsm_messages = []
+        st.session_state.nsm_count = 0
+        bot.clear_history()
+        st.rerun()
+
+    # معالجة الإدخال
+    def _process(text: str):
+        if not text.strip(): return
+        response  = bot.chat(text.strip())
+        ctx_tag   = bot.context_info()
+        src_badge = (
+            bot.source_badge()
+            if hasattr(bot, "source_badge") else ""
+        )
+        st.session_state.nsm_messages.append(("user", text.strip(), "", ""))
+        st.session_state.nsm_messages.append(("nsm",  response, ctx_tag, src_badge))
+        st.session_state.nsm_count += 1
+        st.rerun()
+
+    if send and user_input:
+        _process(user_input)
+
+    if hasattr(st.session_state, "_chat_pending"):
+        q = st.session_state._chat_pending
+        del st.session_state._chat_pending
+        _process(q)
 
 
 if __name__ == "__main__":
