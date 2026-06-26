@@ -345,16 +345,24 @@ class LoRAFFNAdapter:
 
     def backward(self, grad: np.ndarray, lr: float) -> np.ndarray:
         ffn = self.ffn
+        # grad: (seq, d_model)
 
-        # backward عبر W2 + LoRA_2
-        g_lora2 = self.l2.backward(grad, lr)
-        g_h     = (grad + g_lora2) @ ffn.W2 * (ffn._h > 0)
+        # backward عبر layer2:  out = h @ W2.T + lora2(h)
+        #   dL/dh  = grad @ W2            (seq, d_ff)
+        #   lora2.backward يُعيد dL/dh من المسار الـ LoRA  (seq, d_ff)
+        g_h_base  = grad @ ffn.W2                    # (seq, d_ff)
+        g_h_lora2 = self.l2.backward(grad, lr)       # (seq, d_ff)
 
-        # backward عبر W1 + LoRA_1
-        g_lora1 = self.l1.backward(g_h, lr)
-        gX      = g_h @ ffn.W1 + g_lora1
+        # relu mask على مجموع التدفقين
+        g_h = (g_h_base + g_h_lora2) * (ffn._h > 0)  # (seq, d_ff)
 
-        return gX
+        # backward عبر layer1:  h = relu(X @ W1.T + lora1(X))
+        #   dL/dX  = g_h @ W1            (seq, d_model)
+        #   lora1.backward يُعيد dL/dX من المسار الـ LoRA  (seq, d_model)
+        g_x_base  = g_h @ ffn.W1                     # (seq, d_model)
+        g_x_lora1 = self.l1.backward(g_h, lr)        # (seq, d_model)
+
+        return g_x_base + g_x_lora1
 
     def param_count(self) -> int:
         return self.l1.param_count() + self.l2.param_count()
