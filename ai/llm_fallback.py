@@ -41,10 +41,11 @@ logger = logging.getLogger("LLMFallback")
 # ════════════════════════════════════════════════════════════════════════════
 
 class Provider(Enum):
+    OPENROUTER = "openrouter"  # يعمل من كل مكان بما فيها اليمن ✅
     OPENAI    = "openai"
     TOGETHER  = "together"
     GEMINI    = "gemini"
-    GROQ      = "groq"        # متاح خارج Replit فقط
+    GROQ      = "groq"
     CKG_SYNTH = "ckg_synthesis"
 
 
@@ -64,10 +65,12 @@ _SYSTEM_PROMPT = (
     "4. لا تُشر إلى نفسك كـ GPT أو Claude أو أي نموذج آخر — أنت NSM"
 )
 
+_OPENROUTER_MODEL = "meta-llama/llama-3.1-8b-instruct:free"  # مجاني
+_OPENROUTER_URL   = "https://openrouter.ai/api/v1/chat/completions"
 _OPENAI_MODEL   = "gpt-4o-mini"
 _TOGETHER_MODEL = "meta-llama/Llama-3-8b-chat-hf"
 _GEMINI_MODEL   = "gemini-1.5-flash"
-_GROQ_MODELS    = ["llama-3.1-8b-instant", "mixtral-8x7b-32768"]
+_GROQ_MODELS    = ["llama-3.1-8b-instant", "llama3-8b-8192", "gemma2-9b-it"]
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -201,27 +204,32 @@ class LLMFallback:
     # ── اكتشاف المزوّد تلقائياً ─────────────────────────────────────────
 
     def _detect_provider(self) -> Tuple[Provider, str, str]:
-        # 1) Groq — الأسرع والمجاني، يعمل على Streamlit Cloud
+        # 1) OpenRouter — يعمل من كل مكان بما فيها اليمن ✅
+        k = os.getenv("OPENROUTER_API_KEY", "").strip()
+        if k:
+            return Provider.OPENROUTER, k, _OPENROUTER_MODEL
+
+        # 2) Groq — سريع ومجاني (قد يكون محجوباً في بعض الدول)
         k = os.getenv("GROQ_API_KEY", "").strip()
         if k:
             return Provider.GROQ, k, _GROQ_MODELS[0]
 
-        # 2) OpenAI
+        # 3) OpenAI
         k = os.getenv("OPENAI_API_KEY", "").strip()
         if k:
             return Provider.OPENAI, k, _OPENAI_MODEL
 
-        # 3) Together.xyz — مجاني
+        # 4) Together.xyz — مجاني
         k = os.getenv("TOGETHER_API_KEY", "").strip()
         if k:
             return Provider.TOGETHER, k, _TOGETHER_MODEL
 
-        # 4) Google Gemini — مجاني
+        # 5) Google Gemini — مجاني
         k = os.getenv("GOOGLE_API_KEY", "").strip()
         if k:
             return Provider.GEMINI, k, _GEMINI_MODEL
 
-        # 5) CKG Synthesis — لا مفتاح مطلوب
+        # 6) CKG Synthesis — لا مفتاح مطلوب
         return Provider.CKG_SYNTH, "", "ckg-synthesis-v1"
 
     # ── الواجهة العامة ───────────────────────────────────────────────────
@@ -248,7 +256,9 @@ class LLMFallback:
         history = history or []
 
         try:
-            if self._provider == Provider.OPENAI:
+            if self._provider == Provider.OPENROUTER:
+                result = self._call_openrouter(query, history)
+            elif self._provider == Provider.OPENAI:
                 result = self._call_openai(query, history)
             elif self._provider == Provider.TOGETHER:
                 result = self._call_together(query, history)
@@ -299,6 +309,41 @@ class LLMFallback:
             "live_llm": "✅" if self.has_live_llm() else "❌ (CKG synthesis)",
             "api_key":  "✅ موجود" if self._api_key else "❌ غير موجود",
         }
+
+    # ── OpenRouter (يعمل من كل مكان ✅) ─────────────────────────────────
+
+    def _call_openrouter(
+        self, query: str, history: List[Tuple[str, str]]
+    ) -> FallbackResult:
+        messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+        for u, a in history[-4:]:
+            messages += [
+                {"role": "user",      "content": u},
+                {"role": "assistant", "content": a},
+            ]
+        messages.append({"role": "user", "content": query})
+
+        data = _post_json(
+            _OPENROUTER_URL,
+            {
+                "model":       self._model,
+                "messages":    messages,
+                "max_tokens":  self.max_tokens,
+                "temperature": self.temperature,
+            },
+            {
+                "Authorization":  f"Bearer {self._api_key}",
+                "Content-Type":   "application/json",
+                "HTTP-Referer":   "https://neural-service-mesh.streamlit.app",
+                "X-Title":        "Neural Service Mesh",
+            },
+            self.timeout,
+        )
+        return FallbackResult(
+            text=data["choices"][0]["message"]["content"].strip(),
+            provider=Provider.OPENROUTER,
+            model=self._model,
+        )
 
     # ── OpenAI ───────────────────────────────────────────────────────────
 
