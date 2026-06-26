@@ -58,11 +58,11 @@ except Exception as _agent_err:
 try:
     from ai.nsm_agent_core import NSMAgent as _NSMAgentClass
     _nsm_agent = _NSMAgentClass()
-    _HAS_NSM_AGENT = _nsm_agent.available
-    if _HAS_NSM_AGENT:
+    _HAS_NSM_AGENT = True   # الكلاس محمَّل — سيتحقق من المفتاح عند run()
+    if _nsm_agent.available:
         print("✓ NSM Agent مُفعَّل — Groq جاهز")
     else:
-        print("⚠ NSM Agent: GROQ_API_KEY غير موجود")
+        print("⚠ NSM Agent محمَّل — سيعمل بعد حقن GROQ_API_KEY")
 except Exception as _na_err:
     _HAS_NSM_AGENT = False
     _nsm_agent = None

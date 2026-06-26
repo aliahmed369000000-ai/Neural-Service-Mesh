@@ -13,12 +13,11 @@ from __future__ import annotations
 import logging
 from typing import Dict, List, Optional, Tuple
 
+import nsm_chat as _nsm_chat_module
 from nsm_chat import (
     NSMChat,
     _handle_code_command,
     _AGENT_TRIGGERS,
-    _HAS_NSM_AGENT,
-    _nsm_agent,
 )
 from ai.llm_fallback import LLMFallback, Provider
 
@@ -79,10 +78,10 @@ class NSMChatPlus(NSMChat):
             return agent_response
 
         # ❷ NSM Agent الذكي (Groq) للطلبات البرمجية (أولوية 2)
-        if _HAS_NSM_AGENT and _nsm_agent and any(
+        if _nsm_chat_module._HAS_NSM_AGENT and _nsm_chat_module._nsm_agent and any(
             user_input.strip().startswith(t) for t in _AGENT_TRIGGERS
         ):
-            response = _nsm_agent.run(user_input)
+            response = _nsm_chat_module._nsm_agent.run(user_input)
             self._last_source = "nsm_agent:groq"
             self.history.append((user_input, response))
             return response
