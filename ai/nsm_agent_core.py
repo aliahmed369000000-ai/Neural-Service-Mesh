@@ -48,33 +48,59 @@ _AGENT_SYSTEM = """أنت وكيل برمجي ذكي متخصص في مشروع 
 5. اكتب الكود بالكامل وليس مجرد مثال"""
 
 _GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-_MODEL = "llama-3.1-8b-instant"
+# قائمة نماذج بديلة — يُجرَّب الأول، ثم الثاني عند الفشل
+_GROQ_MODELS = [
+    "llama-3.1-8b-instant",
+    "llama3-8b-8192",
+    "gemma2-9b-it",
+    "llama-3.3-70b-versatile",
+]
 
 
 # ══════════════════════════════════════════════════════════════════
-# استدعاء Groq
+# استدعاء Groq مع Fallback للنماذج
 # ══════════════════════════════════════════════════════════════════
 def _call_groq(messages: List[Dict], api_key: str) -> str:
-    payload = json.dumps({
-        "model": _MODEL,
-        "messages": messages,
-        "max_tokens": 2048,
-        "temperature": 0.3,
-        "stream": False,
-    }).encode("utf-8")
+    last_err = None
+    for model in _GROQ_MODELS:
+        payload = json.dumps({
+            "model": model,
+            "messages": messages,
+            "max_tokens": 2048,
+            "temperature": 0.3,
+            "stream": False,
+        }).encode("utf-8")
 
-    req = urllib.request.Request(
-        _GROQ_URL,
-        data=payload,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    return data["choices"][0]["message"]["content"].strip()
+        req = urllib.request.Request(
+            _GROQ_URL,
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            return data["choices"][0]["message"]["content"].strip()
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", errors="replace")
+            if e.code == 401:
+                raise Exception(f"❌ GROQ_API_KEY غير صالح (401 Unauthorized)")
+            elif e.code == 403:
+                last_err = f"403 Forbidden على {model}"
+                continue  # جرب النموذج التالي
+            elif e.code == 429:
+                raise Exception(f"❌ تجاوزت حد الطلبات — انتظر قليلاً (429 Rate Limit)")
+            else:
+                last_err = f"HTTP {e.code} على {model}: {body[:200]}"
+                continue
+        except Exception as e:
+            last_err = str(e)
+            continue
+
+    raise Exception(f"❌ فشلت كل نماذج Groq. آخر خطأ: {last_err}")
 
 
 # ══════════════════════════════════════════════════════════════════
