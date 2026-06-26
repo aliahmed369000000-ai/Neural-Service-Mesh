@@ -58,11 +58,11 @@ except Exception as _agent_err:
 try:
     from ai.nsm_agent_core import NSMAgent as _NSMAgentClass
     _nsm_agent = _NSMAgentClass()
-    _HAS_NSM_AGENT = True   # الكلاس محمَّل — سيتحقق من المفتاح عند run()
+    _HAS_NSM_AGENT = True
     if _nsm_agent.available:
-        print("✓ NSM Agent مُفعَّل — Groq جاهز")
+        print("✓ NSM Agent مُفعَّل — AI جاهز")
     else:
-        print("⚠ NSM Agent محمَّل — سيعمل بعد حقن GROQ_API_KEY")
+        print("⚠ NSM Agent محمَّل — أضف GOOGLE_API_KEY في Secrets")
 except Exception as _na_err:
     _HAS_NSM_AGENT = False
     _nsm_agent = None
@@ -474,13 +474,13 @@ class NSMChat:
         if not user_input.strip():
             return "الرجاء كتابة سؤالك."
 
-        # ── NSM Agent الذكي (Groq) — أولوية 1 للطلبات الطبيعية ──
-        # يلتقط كل طلب يبدأ بكلمة trigger بدون اشتراط صيغة معينة
+        # ── NSM Agent الذكي — أولوية 1 للطلبات البرمجية ──
+        # يُستدعى دائماً عند trigger — run() نفسه يتحقق من المفتاح
         if _HAS_NSM_AGENT and _nsm_agent and any(
             user_input.strip().startswith(t) for t in _AGENT_TRIGGERS
         ):
             response = _nsm_agent.run(user_input)
-            self._last_source = "nsm_agent:groq"
+            self._last_source = "nsm_agent"
             self.history.append((user_input, response))
             return response
 
