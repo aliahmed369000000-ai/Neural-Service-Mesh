@@ -41,10 +41,11 @@ logger = logging.getLogger("LLMFallback")
 # ════════════════════════════════════════════════════════════════════════════
 
 class Provider(Enum):
-    OPENROUTER = "openrouter"  # يعمل من كل مكان بما فيها اليمن ✅
+    CLOUDFLARE = "cloudflare"  # مجاني 10k/يوم ويعمل من اليمن ✅
+    GEMINI    = "gemini"
+    OPENROUTER = "openrouter"
     OPENAI    = "openai"
     TOGETHER  = "together"
-    GEMINI    = "gemini"
     GROQ      = "groq"
     CKG_SYNTH = "ckg_synthesis"
 
@@ -65,6 +66,7 @@ _SYSTEM_PROMPT = (
     "4. لا تُشر إلى نفسك كـ GPT أو Claude أو أي نموذج آخر — أنت NSM"
 )
 
+_CF_MODEL        = "@cf/meta/llama-3.1-8b-instruct"  # مجاني 10k/يوم ✅
 _OPENROUTER_MODEL = "meta-llama/llama-3.1-8b-instruct:free"  # مجاني
 _OPENROUTER_URL   = "https://openrouter.ai/api/v1/chat/completions"
 _OPENAI_MODEL   = "gpt-4o-mini"
@@ -204,32 +206,38 @@ class LLMFallback:
     # ── اكتشاف المزوّد تلقائياً ─────────────────────────────────────────
 
     def _detect_provider(self) -> Tuple[Provider, str, str]:
-        # 1) OpenRouter — يعمل من كل مكان بما فيها اليمن ✅
+        # 1) Cloudflare Workers AI — مجاني 10k/يوم ويعمل من اليمن ✅
+        cf_token = os.getenv("CF_API_TOKEN", "").strip()
+        cf_account = os.getenv("CF_ACCOUNT_ID", "").strip()
+        if cf_token and cf_account:
+            return Provider.CLOUDFLARE, cf_token, _CF_MODEL
+
+        # 2) Google Gemini — مجاني (قد لا يعمل من اليمن)
+        k = os.getenv("GOOGLE_API_KEY", "").strip()
+        if k and k.startswith("AIzaSy"):
+            return Provider.GEMINI, k, _GEMINI_MODEL
+
+        # 3) OpenRouter
         k = os.getenv("OPENROUTER_API_KEY", "").strip()
         if k:
             return Provider.OPENROUTER, k, _OPENROUTER_MODEL
 
-        # 2) Groq — سريع ومجاني (قد يكون محجوباً في بعض الدول)
+        # 4) Groq (محجوب في اليمن)
         k = os.getenv("GROQ_API_KEY", "").strip()
         if k:
             return Provider.GROQ, k, _GROQ_MODELS[0]
 
-        # 3) OpenAI
+        # 5) OpenAI
         k = os.getenv("OPENAI_API_KEY", "").strip()
         if k:
             return Provider.OPENAI, k, _OPENAI_MODEL
 
-        # 4) Together.xyz — مجاني
+        # 6) Together
         k = os.getenv("TOGETHER_API_KEY", "").strip()
         if k:
             return Provider.TOGETHER, k, _TOGETHER_MODEL
 
-        # 5) Google Gemini — مجاني
-        k = os.getenv("GOOGLE_API_KEY", "").strip()
-        if k:
-            return Provider.GEMINI, k, _GEMINI_MODEL
-
-        # 6) CKG Synthesis — لا مفتاح مطلوب
+        # 7) CKG فقط
         return Provider.CKG_SYNTH, "", "ckg-synthesis-v1"
 
     # ── الواجهة العامة ───────────────────────────────────────────────────
@@ -256,7 +264,9 @@ class LLMFallback:
         history = history or []
 
         try:
-            if self._provider == Provider.OPENROUTER:
+            if self._provider == Provider.CLOUDFLARE:
+                result = self._call_cloudflare(query, history)
+            elif self._provider == Provider.OPENROUTER:
                 result = self._call_openrouter(query, history)
             elif self._provider == Provider.OPENAI:
                 result = self._call_openai(query, history)
@@ -309,6 +319,43 @@ class LLMFallback:
             "live_llm": "✅" if self.has_live_llm() else "❌ (CKG synthesis)",
             "api_key":  "✅ موجود" if self._api_key else "❌ غير موجود",
         }
+
+    # ── Cloudflare Workers AI (مجاني 10k/يوم ✅) ────────────────────────
+
+    def _call_cloudflare(
+        self, query: str, history: List[Tuple[str, str]]
+    ) -> FallbackResult:
+        account_id = os.getenv("CF_ACCOUNT_ID", "").strip()
+        cf_url = (
+            f"https://api.cloudflare.com/client/v4/accounts/"
+            f"{account_id}/ai/run/{self._model}"
+        )
+        messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+        for u, a in history[-4:]:
+            messages += [
+                {"role": "user",      "content": u},
+                {"role": "assistant", "content": a},
+            ]
+        messages.append({"role": "user", "content": query})
+
+        data = _post_json(
+            cf_url,
+            {"messages": messages, "max_tokens": self.max_tokens},
+            {
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type":  "application/json",
+            },
+            self.timeout,
+        )
+        text = (
+            data.get("result", {}).get("response", "")
+            or data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        ).strip()
+        return FallbackResult(
+            text=text,
+            provider=Provider.CLOUDFLARE,
+            model=self._model,
+        )
 
     # ── OpenRouter (يعمل من كل مكان ✅) ─────────────────────────────────
 
