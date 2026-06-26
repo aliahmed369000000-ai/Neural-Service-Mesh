@@ -1426,6 +1426,41 @@ def render_chat():
             if st.button(q, key=f"chat_q_{i}", use_container_width=True):
                 st.session_state._chat_pending = q
 
+    # ── أزرار تحليل المشروع (NSM Agent) ──────────────────────────
+    st.markdown("---")
+    st.markdown("**🤖 تحليل المشروع:**")
+    agent_cols = st.columns(6)
+    agent_btns = [
+        ("📋 اقترح (كل)",      "اقترح"),
+        ("🗂 غير مستخدم",      "اقترح غير مستخدم"),
+        ("⚠️ أخطاء",           "اقترح أخطاء"),
+        ("📦 ملفات كبيرة",     "اقترح كبير"),
+        ("📁 قائمة الملفات",   "قائمة"),
+        ("🔁 مكررة",           "اقترح مكررة"),
+    ]
+    for i, (label, cmd) in enumerate(agent_btns):
+        with agent_cols[i]:
+            if st.button(label, key=f"agent_btn_{i}", use_container_width=True):
+                st.session_state._chat_pending = cmd
+
+    # أزرار تحليل ملف محدد
+    st.markdown("**🔍 تحليل ملف محدد** — اكتب المسار ثم اختر العملية:")
+    file_path_input = st.text_input(
+        "", placeholder="مثال: ai/code_agent.py",
+        key="agent_file_path", label_visibility="collapsed"
+    )
+    if file_path_input.strip():
+        fc1, fc2, fc3 = st.columns(3)
+        with fc1:
+            if st.button("📄 ملخص", key="btn_summary", use_container_width=True):
+                st.session_state._chat_pending = f"ملخص {file_path_input.strip()}"
+        with fc2:
+            if st.button("🔧 صحح", key="btn_fix", use_container_width=True):
+                st.session_state._chat_pending = f"صحح {file_path_input.strip()}"
+        with fc3:
+            if st.button("👁 افحص", key="btn_inspect", use_container_width=True):
+                st.session_state._chat_pending = f"افحص {file_path_input.strip()}"
+
     # مسح المحادثة
     if st.button("🗑 مسح المحادثة", key="nsm_clear"):
         st.session_state.nsm_messages = []
