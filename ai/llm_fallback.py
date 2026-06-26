@@ -398,7 +398,7 @@ class LLMFallback:
             text=text, provider=Provider.GEMINI, model=self._model
         )
 
-    # ── Groq (خارج Replit فقط) ────────────────────────────────────────────
+    # ── Groq ────────────────────────────────────────────────────────────
 
     def _call_groq(
         self, query: str, history: List[Tuple[str, str]]
@@ -411,23 +411,47 @@ class LLMFallback:
             ]
         messages.append({"role": "user", "content": query})
 
-        data = _post_json(
-            "https://api.groq.com/openai/v1/chat/completions",
-            {
-                "model":       self._model,
-                "messages":    messages,
-                "max_tokens":  self.max_tokens,
-                "temperature": self.temperature,
-                "stream":      False,
-            },
-            {
-                "Authorization": f"Bearer {self._api_key}",
-                "Content-Type":  "application/json",
-            },
-            self.timeout,
-        )
-        return FallbackResult(
-            text=data["choices"][0]["message"]["content"].strip(),
-            provider=Provider.GROQ,
-            model=self._model,
-        )
+        # نماذج بديلة عند 403
+        groq_models = [
+            self._model,
+            "llama3-8b-8192",
+            "gemma2-9b-it",
+            "llama-3.3-70b-versatile",
+        ]
+        # إزالة المكررات مع الحفاظ على الترتيب
+        seen = set()
+        groq_models = [m for m in groq_models if not (m in seen or seen.add(m))]
+
+        last_err = None
+        for model in groq_models:
+            try:
+                data = _post_json(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    {
+                        "model":       model,
+                        "messages":    messages,
+                        "max_tokens":  self.max_tokens,
+                        "temperature": self.temperature,
+                        "stream":      False,
+                    },
+                    {
+                        "Authorization": f"Bearer {self._api_key}",
+                        "Content-Type":  "application/json",
+                    },
+                    self.timeout,
+                )
+                return FallbackResult(
+                    text=data["choices"][0]["message"]["content"].strip(),
+                    provider=Provider.GROQ,
+                    model=model,
+                )
+            except urllib.error.HTTPError as e:
+                if e.code == 403:
+                    last_err = f"403 على {model}"
+                    continue
+                raise
+            except Exception as e:
+                last_err = str(e)
+                continue
+
+        raise Exception(f"فشلت كل نماذج Groq: {last_err}")
