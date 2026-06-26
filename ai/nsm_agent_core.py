@@ -48,59 +48,76 @@ _AGENT_SYSTEM = """أنت وكيل برمجي ذكي متخصص في مشروع 
 5. اكتب الكود بالكامل وليس مجرد مثال"""
 
 _GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-# قائمة نماذج بديلة — يُجرَّب الأول، ثم الثاني عند الفشل
+_OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+# نماذج بديلة — يُجرَّب الأول، ثم الثاني عند الفشل
 _GROQ_MODELS = [
     "llama-3.1-8b-instant",
     "llama3-8b-8192",
     "gemma2-9b-it",
     "llama-3.3-70b-versatile",
 ]
+_OPENROUTER_MODELS = [
+    "meta-llama/llama-3.1-8b-instruct:free",
+    "mistralai/mistral-7b-instruct:free",
+    "google/gemma-2-9b-it:free",
+]
 
 
 # ══════════════════════════════════════════════════════════════════
-# استدعاء Groq مع Fallback للنماذج
+# استدعاء API مع Fallback للنماذج
 # ══════════════════════════════════════════════════════════════════
-def _call_groq(messages: List[Dict], api_key: str) -> str:
-    last_err = None
+def _call_api(messages: List[Dict], api_key: str) -> str:
+    """يجرب Groq أولاً، ثم OpenRouter، ثم يفشل برسالة واضحة."""
+    errors = []
+
+    # 1) جرب Groq
+    groq_key = api_key  # GROQ_API_KEY
     for model in _GROQ_MODELS:
         payload = json.dumps({
-            "model": model,
-            "messages": messages,
-            "max_tokens": 2048,
-            "temperature": 0.3,
-            "stream": False,
+            "model": model, "messages": messages,
+            "max_tokens": 2048, "temperature": 0.3, "stream": False,
         }).encode("utf-8")
-
         req = urllib.request.Request(
-            _GROQ_URL,
-            data=payload,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
+            _GROQ_URL, data=payload,
+            headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            return data["choices"][0]["message"]["content"].strip()
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                return json.loads(resp.read())["choices"][0]["message"]["content"].strip()
         except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8", errors="replace")
-            if e.code == 401:
-                raise Exception(f"❌ GROQ_API_KEY غير صالح (401 Unauthorized)")
-            elif e.code == 403:
-                last_err = f"403 Forbidden على {model}"
-                continue  # جرب النموذج التالي
-            elif e.code == 429:
-                raise Exception(f"❌ تجاوزت حد الطلبات — انتظر قليلاً (429 Rate Limit)")
-            else:
-                last_err = f"HTTP {e.code} على {model}: {body[:200]}"
-                continue
+            if e.code in (401, 403):
+                errors.append(f"Groq {e.code}")
+                break  # المفتاح خاطئ أو محجوب — لا جدوى من التكرار
+            errors.append(f"Groq/{model} {e.code}")
         except Exception as e:
-            last_err = str(e)
-            continue
+            errors.append(f"Groq/{model}: {e}")
 
-    raise Exception(f"❌ فشلت كل نماذج Groq. آخر خطأ: {last_err}")
+    # 2) جرب OpenRouter
+    or_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    if or_key:
+        for model in _OPENROUTER_MODELS:
+            payload = json.dumps({
+                "model": model, "messages": messages,
+                "max_tokens": 2048, "temperature": 0.3,
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                _OPENROUTER_URL, data=payload,
+                headers={
+                    "Authorization": f"Bearer {or_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://neural-service-mesh.streamlit.app",
+                    "X-Title": "Neural Service Mesh",
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=25) as resp:
+                    return json.loads(resp.read())["choices"][0]["message"]["content"].strip()
+            except Exception as e:
+                errors.append(f"OpenRouter/{model}: {e}")
+
+    raise Exception(" | ".join(errors) or "لا يوجد مزوّد متاح")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -216,7 +233,7 @@ class NSMAgent:
         groq_error = None
 
         try:
-            raw = _call_groq(messages, api_key)
+            raw = _call_api(messages, api_key)
         except Exception as e:
             groq_error = str(e)
 
