@@ -159,8 +159,17 @@ class NSMAgent:
         self.available = bool(self.api_key)
         self.history: List[Dict] = []
 
+    def _get_api_key(self) -> str:
+        """يُعيد قراءة المفتاح في كل مرة (يدعم الحقن المتأخر من Streamlit Secrets)."""
+        key = os.getenv("GROQ_API_KEY", "").strip()
+        if key:
+            self.api_key = key
+            self.available = True
+        return self.api_key
+
     def run(self, user_input: str) -> str:
-        if not self.available:
+        api_key = self._get_api_key()
+        if not api_key:
             return "⚠️ GROQ_API_KEY غير موجود في Secrets"
 
         # بناء الرسائل
@@ -169,7 +178,7 @@ class NSMAgent:
         messages.append({"role": "user", "content": user_input})
 
         try:
-            raw = _call_groq(messages, self.api_key)
+            raw = _call_groq(messages, api_key)
 
             # تنظيف JSON
             raw = raw.strip()
