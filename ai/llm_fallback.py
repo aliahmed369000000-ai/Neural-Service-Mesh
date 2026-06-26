@@ -240,6 +240,10 @@ class LLMFallback:
         Returns:
             FallbackResult
         """
+        # إعادة فحص المفتاح (يدعم الحقن المتأخر من Streamlit Secrets)
+        if not self._api_key or self._provider.value == "ckg_synthesis":
+            self._provider, self._api_key, self._model = self._detect_provider()
+
         t0      = time.time()
         history = history or []
 
