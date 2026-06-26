@@ -283,6 +283,11 @@ class LLMFallback:
     def model(self) -> str:
         return self._model
 
+    @property
+    def available(self) -> bool:
+        """هل يوجد مزوّد LLM حقيقي متاح؟ (يُستخدم من nsm_chat.py)"""
+        return self._provider != Provider.CKG_SYNTH and bool(self._api_key)
+
     def has_live_llm(self) -> bool:
         """هل يوجد LLM حقيقي يعمل (وليس CKG synthesis فقط)؟"""
         return self._provider != Provider.CKG_SYNTH
