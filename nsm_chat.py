@@ -474,14 +474,8 @@ class NSMChat:
         if not user_input.strip():
             return "الرجاء كتابة سؤالك."
 
-        # ── أوامر Code Agent المباشرة (أولوية 1) ──
-        agent_response = _handle_code_command(user_input)
-        if agent_response is not None:
-            self._last_source = "code_agent"
-            self.history.append((user_input, agent_response))
-            return agent_response
-
-        # ── NSM Agent الذكي لطلبات البناء (أولوية 2) ──
+        # ── NSM Agent الذكي (Groq) — أولوية 1 للطلبات الطبيعية ──
+        # يلتقط كل طلب يبدأ بكلمة trigger بدون اشتراط صيغة معينة
         if _HAS_NSM_AGENT and _nsm_agent and any(
             user_input.strip().startswith(t) for t in _AGENT_TRIGGERS
         ):
@@ -489,6 +483,13 @@ class NSMChat:
             self._last_source = "nsm_agent:groq"
             self.history.append((user_input, response))
             return response
+
+        # ── Code Agent المباشر — أولوية 2 للأوامر الدقيقة (افحص/قائمة/ارفع/عدل path|old|new) ──
+        agent_response = _handle_code_command(user_input)
+        if agent_response is not None:
+            self._last_source = "code_agent"
+            self.history.append((user_input, agent_response))
+            return agent_response
 
         # تغنية الاستعلام بالسياق إذا لزم
         query = user_input

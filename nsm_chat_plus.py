@@ -70,14 +70,7 @@ class NSMChatPlus(NSMChat):
         if not user_input.strip():
             return "الرجاء كتابة سؤالك."
 
-        # ❶ أوامر Code Agent المباشرة (أولوية 1 — بدون Groq)
-        agent_response = _handle_code_command(user_input)
-        if agent_response is not None:
-            self._last_source = "code_agent"
-            self.history.append((user_input, agent_response))
-            return agent_response
-
-        # ❷ NSM Agent الذكي (Groq) للطلبات البرمجية (أولوية 2)
+        # ❶ NSM Agent الذكي (Groq) — أولوية 1 للطلبات الطبيعية
         if _nsm_chat_module._HAS_NSM_AGENT and _nsm_chat_module._nsm_agent and any(
             user_input.strip().startswith(t) for t in _AGENT_TRIGGERS
         ):
@@ -85,6 +78,13 @@ class NSMChatPlus(NSMChat):
             self._last_source = "nsm_agent:groq"
             self.history.append((user_input, response))
             return response
+
+        # ❷ Code Agent المباشر — أولوية 2 للأوامر الدقيقة (افحص/قائمة/ارفع)
+        agent_response = _handle_code_command(user_input)
+        if agent_response is not None:
+            self._last_source = "code_agent"
+            self.history.append((user_input, agent_response))
+            return agent_response
 
         # ❸ تغنية الاستعلام بالسياق (pronoun resolution)
         query = user_input
