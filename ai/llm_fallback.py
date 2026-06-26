@@ -201,29 +201,25 @@ class LLMFallback:
     # ── اكتشاف المزوّد تلقائياً ─────────────────────────────────────────
 
     def _detect_provider(self) -> Tuple[Provider, str, str]:
-        # 1) OpenAI — يعمل من Replit
+        # 1) Groq — الأسرع والمجاني، يعمل على Streamlit Cloud
+        k = os.getenv("GROQ_API_KEY", "").strip()
+        if k:
+            return Provider.GROQ, k, _GROQ_MODELS[0]
+
+        # 2) OpenAI
         k = os.getenv("OPENAI_API_KEY", "").strip()
         if k:
             return Provider.OPENAI, k, _OPENAI_MODEL
 
-        # 2) Together.xyz — يعمل من Replit، مجاني
+        # 3) Together.xyz — مجاني
         k = os.getenv("TOGETHER_API_KEY", "").strip()
         if k:
             return Provider.TOGETHER, k, _TOGETHER_MODEL
 
-        # 3) Google Gemini — يعمل من Replit
+        # 4) Google Gemini — مجاني
         k = os.getenv("GOOGLE_API_KEY", "").strip()
         if k:
             return Provider.GEMINI, k, _GEMINI_MODEL
-
-        # 4) Groq — يعمل خارج Replit (Streamlit Cloud، VPS، إلخ)
-        k = os.getenv("GROQ_API_KEY", "").strip()
-        if k:
-            logger.warning(
-                "[LLMFallback] GROQ_API_KEY موجود لكن Groq محجوب من Replit IPs. "
-                "سيعمل على Streamlit Community Cloud أو أي خادم خارجي."
-            )
-            return Provider.GROQ, k, _GROQ_MODELS[0]
 
         # 5) CKG Synthesis — لا مفتاح مطلوب
         return Provider.CKG_SYNTH, "", "ckg-synthesis-v1"
