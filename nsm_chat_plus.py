@@ -70,12 +70,12 @@ class NSMChatPlus(NSMChat):
         if not user_input.strip():
             return "الرجاء كتابة سؤالك."
 
-        # ❶ NSM Agent الذكي (Groq) — أولوية 1 للطلبات الطبيعية
+        # ❶ NSM Agent الذكي — أولوية 1 للطلبات البرمجية
         if _nsm_chat_module._HAS_NSM_AGENT and _nsm_chat_module._nsm_agent and any(
             user_input.strip().startswith(t) for t in _AGENT_TRIGGERS
         ):
             response = _nsm_chat_module._nsm_agent.run(user_input)
-            self._last_source = "nsm_agent:groq"
+            self._last_source = "nsm_agent"
             self.history.append((user_input, response))
             return response
 
