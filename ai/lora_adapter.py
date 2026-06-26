@@ -482,15 +482,17 @@ class LoRATransformerAdapter:
         t = self.transformer
 
         # Embedding + Positional (من base — لا LoRA هنا)
-        emb  = t.embed.forward(ids)
-        pos  = t.pos_enc.forward(len(ids))
-        X    = emb + pos
+        X  = t.embedding.forward(ids)
+        X += t.pos_enc.forward(len(ids))
 
-        # CoreMatrix (من base)
+        # CoreMatrix مع residual (من base — مجمّدة)
         if hasattr(t, 'core') and t.core is not None:
-            X = t.core.forward(X)
+            X = X + t.core.forward(X)
 
         # Transformer blocks — مع LoRA
+        S    = len(ids)
+        if mask is None:
+            mask = np.triu(np.ones((S, S), bool), k=1)
         for adapter in self.block_adapters:
             X = adapter.forward(X, mask)
 
@@ -578,7 +580,7 @@ class LoRATransformerAdapter:
         targets = tokens[1:]
         """
         t    = self.transformer
-        ids  = t.tok.encode(text)
+        ids  = t.tokenizer.encode(text, t.max_seq)
         if len(ids) < 2:
             return None, None
         return ids[:-1], ids[1:]
