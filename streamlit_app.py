@@ -518,7 +518,7 @@ def render_home():
 
     col_s, col_b = st.columns([4, 1])
     with col_s:
-        quick_q = st.text_input("", placeholder="مثال: الصبر، الجاذبية، الرحمة، العدل...",
+        quick_q = st.text_input("بحث", placeholder="مثال: الصبر، الجاذبية، الرحمة، العدل...",
                                 key="home_search", label_visibility="collapsed")
     with col_b:
         if st.button("🔍 بحث", use_container_width=True, key="home_btn"):
@@ -743,7 +743,7 @@ def render_quran():
 
     # بحث داخل القرآن
     st.markdown('<div class="section-header">🔍 البحث في آيات القرآن</div>', unsafe_allow_html=True)
-    quran_q = st.text_input("", placeholder="ابحث عن كلمة أو مفهوم...", key="quran_search",
+    quran_q = st.text_input("بحث قرآن", placeholder="ابحث عن كلمة أو مفهوم...", key="quran_search",
                              label_visibility="collapsed")
     if quran_q.strip():
         matches = search_quran_for_concept(quran_q.strip(), ayat, max_results=20)
@@ -1400,7 +1400,7 @@ def render_chat():
     c1, c2 = st.columns([5, 1])
     with c1:
         user_input = st.text_input(
-            label="",
+            label="سؤالك",
             placeholder="اكتب سؤالك... (مثال: وكم ركعاتها؟)",
             key="nsm_input",
             label_visibility="collapsed",
@@ -1446,7 +1446,7 @@ def render_chat():
     # أزرار تحليل ملف محدد
     st.markdown("**🔍 تحليل ملف محدد** — اكتب المسار ثم اختر العملية:")
     file_path_input = st.text_input(
-        "", placeholder="مثال: ai/code_agent.py",
+        "مسار الملف", placeholder="مثال: ai/code_agent.py",
         key="agent_file_path", label_visibility="collapsed"
     )
     if file_path_input.strip():
