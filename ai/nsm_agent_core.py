@@ -305,7 +305,7 @@ class NSMAgent:
                     return result.text
                 except Exception:
                     pass
-            # لا يوجد أي مزوّد — أنشئ ملفاً بسيطاً محلياً إذا كان الطلب إنشاء
+            # لا يوجد أي مزوّد
             t = user_input.strip()
             if any(t.startswith(p) for p in ("أنشئ", "انشئ", "اكتب كود", "ابنِ", "ابني")):
                 return (
@@ -321,17 +321,12 @@ class NSMAgent:
                 f"💡 تحقق من GROQ_API_KEY في Streamlit Secrets"
             )
 
-            # تنظيف JSON
-            raw = raw.strip()
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-        # معالجة الرد
+        # تنظيف JSON — يُنفَّذ دائماً بعد نجاح API
         try:
             raw = raw.strip()
             if raw.startswith("```"):
-                raw = raw.split("```")[1]
+                lines = raw.split("```")
+                raw = lines[1] if len(lines) > 1 else raw
                 if raw.startswith("json"):
                     raw = raw[4:]
             raw = raw.strip()
