@@ -67,33 +67,41 @@ _OPENROUTER_MODELS = [
 # استدعاء API مع Fallback للنماذج
 # ══════════════════════════════════════════════════════════════════
 def _call_api(messages: List[Dict], api_key: str) -> str:
-    """يجرب Groq أولاً، ثم OpenRouter، ثم يفشل برسالة واضحة."""
+    """يجرب Gemini أولاً (مجاني ويعمل من اليمن)، ثم OpenRouter، ثم Groq."""
     errors = []
 
-    # 1) جرب Groq
-    groq_key = api_key  # GROQ_API_KEY
-    for model in _GROQ_MODELS:
-        payload = json.dumps({
-            "model": model, "messages": messages,
-            "max_tokens": 2048, "temperature": 0.3, "stream": False,
-        }).encode("utf-8")
+    # 1) Google Gemini — مجاني ويعمل من اليمن ✅
+    gemini_key = os.getenv("GOOGLE_API_KEY", "").strip()
+    if gemini_key:
+        gemini_url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"gemini-1.5-flash:generateContent?key={gemini_key}"
+        )
+        # تحويل messages إلى صيغة Gemini
+        gemini_parts = []
+        for m in messages:
+            if m["role"] == "system":
+                gemini_parts.append({"role": "user", "parts": [{"text": m["content"]}]})
+                gemini_parts.append({"role": "model", "parts": [{"text": "حسناً، سأتبع هذه التعليمات."}]})
+            elif m["role"] == "user":
+                gemini_parts.append({"role": "user", "parts": [{"text": m["content"]}]})
+            elif m["role"] == "assistant":
+                gemini_parts.append({"role": "model", "parts": [{"text": m["content"]}]})
+
+        payload = json.dumps({"contents": gemini_parts}).encode("utf-8")
         req = urllib.request.Request(
-            _GROQ_URL, data=payload,
-            headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+            gemini_url, data=payload,
+            headers={"Content-Type": "application/json"},
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                return json.loads(resp.read())["choices"][0]["message"]["content"].strip()
-        except urllib.error.HTTPError as e:
-            if e.code in (401, 403):
-                errors.append(f"Groq {e.code}")
-                break  # المفتاح خاطئ أو محجوب — لا جدوى من التكرار
-            errors.append(f"Groq/{model} {e.code}")
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                data = json.loads(resp.read())
+            return data["candidates"][0]["content"]["parts"][0]["text"].strip()
         except Exception as e:
-            errors.append(f"Groq/{model}: {e}")
+            errors.append(f"Gemini: {e}")
 
-    # 2) جرب OpenRouter
+    # 2) OpenRouter
     or_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     if or_key:
         for model in _OPENROUTER_MODELS:
@@ -117,7 +125,31 @@ def _call_api(messages: List[Dict], api_key: str) -> str:
             except Exception as e:
                 errors.append(f"OpenRouter/{model}: {e}")
 
-    raise Exception(" | ".join(errors) or "لا يوجد مزوّد متاح")
+    # 3) Groq (قد يكون محجوباً في اليمن)
+    groq_key = api_key
+    if groq_key:
+        for model in _GROQ_MODELS:
+            payload = json.dumps({
+                "model": model, "messages": messages,
+                "max_tokens": 2048, "temperature": 0.3, "stream": False,
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                _GROQ_URL, data=payload,
+                headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=20) as resp:
+                    return json.loads(resp.read())["choices"][0]["message"]["content"].strip()
+            except urllib.error.HTTPError as e:
+                if e.code in (401, 403):
+                    errors.append(f"Groq محجوب أو مفتاح خاطئ ({e.code})")
+                    break
+                errors.append(f"Groq/{model} {e.code}")
+            except Exception as e:
+                errors.append(f"Groq/{model}: {e}")
+
+    raise Exception(" | ".join(errors) or "لا يوجد مزوّد متاح — أضف GOOGLE_API_KEY في Secrets")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -198,17 +230,24 @@ def _git_push(message: str) -> str:
 # ══════════════════════════════════════════════════════════════════
 class NSMAgent:
     def __init__(self):
-        self.api_key = os.getenv("GROQ_API_KEY", "").strip()
-        self.available = bool(self.api_key)
+        self.available = self._check_available()
         self.history: List[Dict] = []
-        self._llm_fallback = None  # يُحمَّل عند الحاجة
+        self._llm_fallback = None
+
+    @staticmethod
+    def _check_available() -> bool:
+        """يتحقق من وجود أي مفتاح API صالح."""
+        return bool(
+            os.getenv("GOOGLE_API_KEY", "").strip() or
+            os.getenv("GROQ_API_KEY", "").strip() or
+            os.getenv("OPENROUTER_API_KEY", "").strip() or
+            os.getenv("OPENAI_API_KEY", "").strip()
+        )
 
     def _get_api_key(self) -> str:
-        key = os.getenv("GROQ_API_KEY", "").strip()
-        if key:
-            self.api_key = key
-            self.available = True
-        return self.api_key
+        """يُعيد قراءة مفتاح Groq (للتوافق مع _call_api)."""
+        self.available = self._check_available()
+        return os.getenv("GROQ_API_KEY", "").strip()
 
     def _get_llm_fallback(self):
         """يحمّل LLMFallback كخيار احتياطي عند فشل Groq."""
@@ -222,8 +261,8 @@ class NSMAgent:
 
     def run(self, user_input: str) -> str:
         api_key = self._get_api_key()
-        if not api_key:
-            return "⚠️ GROQ_API_KEY غير موجود في Secrets — أضفه من لوحة Streamlit"
+        if not self.available:
+            return "⚠️ لا يوجد مفتاح API — أضف GOOGLE_API_KEY في Streamlit Secrets"
 
         messages = [{"role": "system", "content": _AGENT_SYSTEM}]
         messages += self.history[-6:]
