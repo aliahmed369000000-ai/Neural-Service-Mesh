@@ -21,6 +21,22 @@ except ImportError:
     _HAS_MEMORY = False
 import numpy as np
 
+# ══════════════════════════════════════════════════════════════════
+# LLM Fallback — توليد ذكي عند ضعف الثقة في القاموس
+# ══════════════════════════════════════════════════════════════════
+try:
+    from ai.llm_fallback import LLMFallback as _LLMFallbackClass
+    _llm_instance = _LLMFallbackClass()
+    _HAS_LLM = _llm_instance.available
+    if _HAS_LLM:
+        print(f"✓ LLM Fallback مُفعَّل — المزوّد: {_llm_instance.provider.value}")
+    else:
+        print("⚠ LLM Fallback غير متاح (لا يوجد API key). سيعمل NSM بالقاموس فقط.")
+except Exception as _llm_err:
+    _HAS_LLM = False
+    _llm_instance = None
+    print(f"⚠ LLM Fallback غير متاح: {_llm_err}")
+
 _ROOT         = Path(__file__).parent
 _EMBED_PATH   = _ROOT / "nsm_embedding.npz"
 _WEIGHTS_PATH = _ROOT / "weights_784x784.csv"
@@ -371,18 +387,49 @@ class NSMChat:
 
         answer, score = self._find(query)
 
-        if score < 0.12:
+        # ── LLM Fallback: إذا الثقة منخفضة أو السؤال خارج القاموس ──
+        # score < 0.45 → القاموس غير واثق → نفوّض للـ LLM
+        if score < 0.45 and _HAS_LLM and _llm_instance is not None:
+            try:
+                # نمرر تاريخ المحادثة للسياق
+                history_for_llm = [
+                    {"role": "user", "content": u} if i % 2 == 0
+                    else {"role": "assistant", "content": a}
+                    for i, (u, a) in enumerate(self.history[-4:])
+                ]
+                llm_result = _llm_instance.generate(query, history=history_for_llm)
+                answer = llm_result.text
+                # نضيف إشارة المصدر للواجهة (اختياري)
+                self._last_source = f"llm:{llm_result.provider.value}"
+            except Exception as e:
+                # إذا فشل LLM نرجع للقاموس أو رسالة افتراضية
+                if score < 0.12:
+                    answer = (
+                        "سؤالك مثير للاهتمام! يمكنني المساعدة في: "
+                        "الإسلام والقرآن، الذكاء الاصطناعي، الرياضيات، "
+                        "اللغة العربية، التاريخ، الصحة، والبرمجة."
+                    )
+                self._last_source = "kb:fallback_error"
+        elif score < 0.12:
+            # لا LLM ولا قاموس → رسالة افتراضية
             answer = (
                 "سؤالك مثير للاهتمام! يمكنني المساعدة في: "
                 "الإسلام والقرآن، الذكاء الاصطناعي، الرياضيات، "
                 "اللغة العربية، التاريخ، الصحة، والبرمجة."
             )
+            self._last_source = "kb:low_confidence"
+        else:
+            self._last_source = f"kb:{self._last_topic}"
 
         # حفظ في الذاكرة
         if self.memory:
             self.memory.add(user_input, answer, self._last_topic)
         self.history.append((user_input, answer))
         return answer
+
+    def last_source(self) -> str:
+        """من أين جاء الرد الأخير: 'kb:...' أو 'llm:...'"""
+        return getattr(self, "_last_source", "kb:unknown")
 
     def clear_history(self):
         self.history.clear()
