@@ -184,29 +184,68 @@ class NSMAgent:
         self.api_key = os.getenv("GROQ_API_KEY", "").strip()
         self.available = bool(self.api_key)
         self.history: List[Dict] = []
+        self._llm_fallback = None  # يُحمَّل عند الحاجة
 
     def _get_api_key(self) -> str:
-        """يُعيد قراءة المفتاح في كل مرة (يدعم الحقن المتأخر من Streamlit Secrets)."""
         key = os.getenv("GROQ_API_KEY", "").strip()
         if key:
             self.api_key = key
             self.available = True
         return self.api_key
 
+    def _get_llm_fallback(self):
+        """يحمّل LLMFallback كخيار احتياطي عند فشل Groq."""
+        if self._llm_fallback is None:
+            try:
+                from ai.llm_fallback import LLMFallback
+                self._llm_fallback = LLMFallback()
+            except Exception:
+                pass
+        return self._llm_fallback
+
     def run(self, user_input: str) -> str:
         api_key = self._get_api_key()
         if not api_key:
-            return "⚠️ GROQ_API_KEY غير موجود في Secrets"
+            return "⚠️ GROQ_API_KEY غير موجود في Secrets — أضفه من لوحة Streamlit"
 
-        # بناء الرسائل
         messages = [{"role": "system", "content": _AGENT_SYSTEM}]
-        messages += self.history[-6:]  # آخر 3 تبادلات
+        messages += self.history[-6:]
         messages.append({"role": "user", "content": user_input})
+
+        raw = None
+        groq_error = None
 
         try:
             raw = _call_groq(messages, api_key)
+        except Exception as e:
+            groq_error = str(e)
+
+        # إذا فشل Groq — جرب LLMFallback (نص عادي بدون JSON)
+        if raw is None:
+            fb = self._get_llm_fallback()
+            if fb and fb.available:
+                try:
+                    result = fb.generate(user_input)
+                    return result.text
+                except Exception as fb_err:
+                    pass
+            # لا يوجد أي مزوّد يعمل — رسالة واضحة
+            return (
+                f"⚠️ لا يمكن الوصول لأي نموذج AI حالياً.\n"
+                f"السبب: {groq_error}\n\n"
+                f"💡 تحقق من:\n"
+                f"  1. صلاحية GROQ_API_KEY في Streamlit Secrets\n"
+                f"  2. أو أضف OPENAI_API_KEY / GOOGLE_API_KEY كبديل"
+            )
 
             # تنظيف JSON
+            raw = raw.strip()
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+        # معالجة الرد
+        try:
             raw = raw.strip()
             if raw.startswith("```"):
                 raw = raw.split("```")[1]
@@ -215,20 +254,16 @@ class NSMAgent:
             raw = raw.strip()
 
             action_data = json.loads(raw)
-
-            # حفظ في التاريخ
             self.history.append({"role": "user", "content": user_input})
             self.history.append({"role": "assistant", "content": raw})
-
             return _execute(action_data)
 
         except json.JSONDecodeError:
-            # Groq أجاب نصاً عادياً
             self.history.append({"role": "user", "content": user_input})
             self.history.append({"role": "assistant", "content": raw})
             return raw
         except Exception as e:
-            return f"❌ خطأ في الوكيل: {e}"
+            return f"❌ خطأ في معالجة الرد: {e}"
 
     def clear(self):
         self.history.clear()
