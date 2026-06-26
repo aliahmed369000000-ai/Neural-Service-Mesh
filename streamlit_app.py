@@ -17,6 +17,21 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import streamlit as st
 
+# ══════════════════════════════════════════════════════════════════
+# حقن Streamlit Secrets → os.environ (يجب أن يكون هنا قبل أي import آخر)
+# هذا يجعل GROQ_API_KEY وغيره متاحاً لـ os.getenv() في كل الوحدات
+# ══════════════════════════════════════════════════════════════════
+def _inject_streamlit_secrets():
+    """يحقن st.secrets في os.environ حتى تعمل os.getenv() في الوحدات الفرعية."""
+    try:
+        for _key, _val in st.secrets.items():
+            if isinstance(_val, str) and _key not in os.environ:
+                os.environ[_key] = _val
+    except Exception:
+        pass  # لا secrets موجودة (بيئة محلية)
+
+_inject_streamlit_secrets()
+
 # ── محرك الأسئلة والأجوبة القرآني ────────────────────────────────────────
 import sys as _sys
 _KNOWLEDGE_MODULE_DIR = str(Path(__file__).parent / "knowledge")
