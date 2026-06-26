@@ -37,6 +37,100 @@ except Exception as _llm_err:
     _llm_instance = None
     print(f"⚠ LLM Fallback غير متاح: {_llm_err}")
 
+# ══════════════════════════════════════════════════════════════════
+# Code Agent — أوامر التحكم في المشروع
+# ══════════════════════════════════════════════════════════════════
+try:
+    from ai.code_agent import (
+        read_file, list_files, edit_file,
+        create_file, git_push, project_suggestions,
+        fix_file, summarize_file
+    )
+    _HAS_AGENT = True
+    print("✓ Code Agent مُفعَّل")
+except Exception as _agent_err:
+    _HAS_AGENT = False
+    print(f"⚠ Code Agent غير متاح: {_agent_err}")
+
+# ══════════════════════════════════════════════════════════════════
+# NSM Agent — وكيل ذكي يكتب الكود ويرفع لـ GitHub
+# ══════════════════════════════════════════════════════════════════
+try:
+    from ai.nsm_agent_core import NSMAgent as _NSMAgentClass
+    _nsm_agent = _NSMAgentClass()
+    _HAS_NSM_AGENT = _nsm_agent.available
+    if _HAS_NSM_AGENT:
+        print("✓ NSM Agent مُفعَّل — Groq جاهز")
+    else:
+        print("⚠ NSM Agent: GROQ_API_KEY غير موجود")
+except Exception as _na_err:
+    _HAS_NSM_AGENT = False
+    _nsm_agent = None
+    print(f"⚠ NSM Agent غير متاح: {_na_err}")
+
+# كلمات تدل على طلب برمجي → يذهب للوكيل
+_AGENT_TRIGGERS = (
+    "أنشئ", "انشئ", "اكتب كود", "ابنِ", "ابني", "طور",
+    "أضف ميزة", "اضف ميزة", "عدّل", "حسّن", "احذف دالة",
+    "ارفع", "افحص", "قائمة", "ملخص", "صحح", "اقترح",
+    "عدل ", "أنشئ "
+)
+
+
+def _handle_code_command(user_input: str) -> str | None:
+    """يعالج أوامر Code Agent — يُرجع رداً أو None إذا لم يكن أمراً."""
+    if not _HAS_AGENT:
+        return None
+    t = user_input.strip()
+
+    # افحص <path>
+    if t.startswith("افحص "):
+        path = t[5:].strip()
+        return read_file(path)
+
+    # قائمة [folder]
+    if t.startswith("قائمة"):
+        folder = t[5:].strip() or "."
+        return list_files(folder)
+
+    # ملخص <path>
+    if t.startswith("ملخص "):
+        path = t[5:].strip()
+        return summarize_file(path)
+
+    # صحح <path>
+    if t.startswith("صحح "):
+        path = t[4:].strip()
+        return fix_file(path)
+
+    # اقترح [فلتر]
+    if t.startswith("اقترح"):
+        flt = t[5:].strip()
+        return project_suggestions(flt)
+
+    # ارفع [رسالة]
+    if t.startswith("ارفع"):
+        msg = t[4:].strip() or "NSM auto-commit"
+        return git_push(msg)
+
+    # عدل path | old | new
+    if t.startswith("عدل ") and "|" in t:
+        parts = t[4:].split("|", 2)
+        if len(parts) == 3:
+            return edit_file(parts[0].strip(), parts[1].strip(), parts[2].strip())
+        elif len(parts) == 1:
+            return read_file(parts[0].strip())
+
+    # أنشئ path | محتوى
+    if t.startswith("أنشئ ") or t.startswith("انشئ "):
+        rest = t[4:].strip()
+        if "|" in rest:
+            parts = rest.split("|", 1)
+            return create_file(parts[0].strip(), parts[1].strip())
+        return f"💡 الصيغة: أنشئ path | المحتوى"
+
+    return None
+
 _ROOT         = Path(__file__).parent
 _EMBED_PATH   = _ROOT / "nsm_embedding.npz"
 _WEIGHTS_PATH = _ROOT / "weights_784x784.csv"
@@ -379,6 +473,22 @@ class NSMChat:
     def chat(self, user_input: str) -> str:
         if not user_input.strip():
             return "الرجاء كتابة سؤالك."
+
+        # ── أوامر Code Agent المباشرة (أولوية 1) ──
+        agent_response = _handle_code_command(user_input)
+        if agent_response is not None:
+            self._last_source = "code_agent"
+            self.history.append((user_input, agent_response))
+            return agent_response
+
+        # ── NSM Agent الذكي لطلبات البناء (أولوية 2) ──
+        if _HAS_NSM_AGENT and _nsm_agent and any(
+            user_input.strip().startswith(t) for t in _AGENT_TRIGGERS
+        ):
+            response = _nsm_agent.run(user_input)
+            self._last_source = "nsm_agent:groq"
+            self.history.append((user_input, response))
+            return response
 
         # تغنية الاستعلام بالسياق إذا لزم
         query = user_input
