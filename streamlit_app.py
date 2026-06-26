@@ -1421,7 +1421,7 @@ def render_chat():
             if role == "user":
                 import html as _html
                 safe_text = _html.escape(text).replace("\n", "<br>")
-                html += f'<div class="chat-user"><div class="bbl">{safe_text}</div></div>
+                html += f'<div class="chat-user"><div class="bbl">{safe_text}</div></div>'
             else:
                 ctx_html = f'<div class="ctx-tag">📎 {ctx_tag}</div>' if ctx_tag else ""
                 src_html = (
