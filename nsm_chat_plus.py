@@ -13,7 +13,13 @@ from __future__ import annotations
 import logging
 from typing import Dict, List, Optional, Tuple
 
-from nsm_chat import NSMChat
+from nsm_chat import (
+    NSMChat,
+    _handle_code_command,
+    _AGENT_TRIGGERS,
+    _HAS_NSM_AGENT,
+    _nsm_agent,
+)
 from ai.llm_fallback import LLMFallback, Provider
 
 logger = logging.getLogger("NSMChatPlus")
@@ -65,12 +71,28 @@ class NSMChatPlus(NSMChat):
         if not user_input.strip():
             return "الرجاء كتابة سؤالك."
 
-        # ❶ تغنية الاستعلام بالسياق (pronoun resolution)
+        # ❶ أوامر Code Agent المباشرة (أولوية 1 — بدون Groq)
+        agent_response = _handle_code_command(user_input)
+        if agent_response is not None:
+            self._last_source = "code_agent"
+            self.history.append((user_input, agent_response))
+            return agent_response
+
+        # ❷ NSM Agent الذكي (Groq) للطلبات البرمجية (أولوية 2)
+        if _HAS_NSM_AGENT and _nsm_agent and any(
+            user_input.strip().startswith(t) for t in _AGENT_TRIGGERS
+        ):
+            response = _nsm_agent.run(user_input)
+            self._last_source = "nsm_agent:groq"
+            self.history.append((user_input, response))
+            return response
+
+        # ❸ تغنية الاستعلام بالسياق (pronoun resolution)
         query = user_input
         if self.memory and self.memory.needs_context(user_input):
             query = self.memory.enrich_query(user_input)
 
-        # ❷ بحث في القاموس الثابت
+        # ❹ بحث في القاموس الثابت
         answer, score = self._find(query)
         self._last_score = score
 
@@ -79,7 +101,7 @@ class NSMChatPlus(NSMChat):
             self._last_source = "kb"
 
         else:
-            # ❸ اللجوء إلى طبقة التوليد
+            # ❺ اللجوء إلى طبقة التوليد
             result = self.fallback.generate(
                 query=query,
                 history=self.history[-4:],
@@ -90,7 +112,8 @@ class NSMChatPlus(NSMChat):
                 if result.provider in (
                     Provider.GROQ,
                     Provider.OPENAI,
-                    Provider.HUGGINGFACE,
+                    Provider.TOGETHER,
+                    Provider.GEMINI,
                 )
                 else "ckg"
             )
@@ -100,7 +123,7 @@ class NSMChatPlus(NSMChat):
                     f"[NSMChatPlus] LLM latency: {result.latency_ms}ms"
                 )
 
-        # ❹ حفظ في الذاكرة
+        # ❻ حفظ في الذاكرة
         if self.memory:
             self.memory.add(user_input, answer, self._last_topic)
         self.history.append((user_input, answer))
