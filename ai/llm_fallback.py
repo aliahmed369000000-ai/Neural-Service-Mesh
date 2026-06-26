@@ -1,21 +1,24 @@
 """
-LLM Generative Fallback Engine — NSM v18.1
+LLM Generative Fallback Engine — NSM v18.2
 ============================================
 يوفر طبقة توليد نصي حقيقي عندما لا يجد NSMChat إجابة كافية في قاموسه الثابت.
 
 الأولوية في اختيار المزوّد (auto-detect من env vars):
-  1. Groq API       (GROQ_API_KEY)   — مجاني، سريع جداً، Llama-3 / Mixtral
-  2. OpenAI API     (OPENAI_API_KEY) — GPT-4o-mini
-  3. HuggingFace    (HF_API_TOKEN)   — Mistral-7B-Instruct
-  4. CKG Synthesis  (بدون مفتاح)    — يولّد من الرسم المعرفي (cognitive_graph.json)
+  1. OpenAI API      (OPENAI_API_KEY)   — GPT-4o-mini  ✅ متاح من Replit
+  2. Together.xyz    (TOGETHER_API_KEY) — Llama-3/Mixtral مجاني  ✅ متاح من Replit
+  3. Google Gemini   (GOOGLE_API_KEY)   — Gemini 1.5 Flash  ✅ متاح من Replit
+  4. CKG Synthesis   (بدون مفتاح)      — يولّد من الرسم المعرفي دائماً
+
+ملاحظة: Groq (GROQ_API_KEY) محجوب من Replit IPs عبر Cloudflare (error 1010).
+         للاستخدام على Streamlit Community Cloud أو server خاص — يعمل بلا مشكلة.
 
 الاستخدام:
     from ai.llm_fallback import LLMFallback
 
     fb = LLMFallback(ckg=my_ckg_instance)
     result = fb.generate("ما هو مفهوم التوحيد في الإسلام؟", history=[...])
-    print(result.text)          # النص المولَّد
-    print(result.provider.value) # "groq" | "openai" | "huggingface" | "ckg_synthesis"
+    print(result.text)
+    print(result.provider.value)  # "openai" | "together" | "gemini" | "ckg_synthesis"
 """
 
 from __future__ import annotations
@@ -26,9 +29,9 @@ import os
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger("LLMFallback")
 
@@ -38,10 +41,11 @@ logger = logging.getLogger("LLMFallback")
 # ════════════════════════════════════════════════════════════════════════════
 
 class Provider(Enum):
-    GROQ        = "groq"
-    OPENAI      = "openai"
-    HUGGINGFACE = "huggingface"
-    CKG_SYNTH   = "ckg_synthesis"
+    OPENAI    = "openai"
+    TOGETHER  = "together"
+    GEMINI    = "gemini"
+    GROQ      = "groq"        # متاح خارج Replit فقط
+    CKG_SYNTH = "ckg_synthesis"
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -60,9 +64,10 @@ _SYSTEM_PROMPT = (
     "4. لا تُشر إلى نفسك كـ GPT أو Claude أو أي نموذج آخر — أنت NSM"
 )
 
-_GROQ_MODELS  = ["llama-3.1-8b-instant", "mixtral-8x7b-32768", "llama3-8b-8192"]
-_OPENAI_MODEL = "gpt-4o-mini"
-_HF_MODEL     = "mistralai/Mistral-7B-Instruct-v0.2"
+_OPENAI_MODEL   = "gpt-4o-mini"
+_TOGETHER_MODEL = "meta-llama/Llama-3-8b-chat-hf"
+_GEMINI_MODEL   = "gemini-1.5-flash"
+_GROQ_MODELS    = ["llama-3.1-8b-instant", "mixtral-8x7b-32768"]
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -95,29 +100,25 @@ def _post_json(url: str, payload: dict, headers: dict, timeout: int = 15) -> dic
 
 def _ckg_synthesize(query: str, ckg) -> str:
     """
-    يبني إجابة من الرسم المعرفي المحلي (cognitive_graph.json).
-    يُفعَّل تلقائياً عندما لا يوجد مفتاح API.
-
-    الخوارزمية:
-      1. استخراج الكلمات المفتاحية من الاستعلام
-      2. البحث عن المفاهيم المرتبطة في CKG بالكلمات المفتاحية
-      3. ترتيب المفاهيم بالوزن والقوة
-      4. تركيب جملة معلوماتية عربية من المفاهيم المُسترجَعة
+    يبني إجابة من cognitive_graph.json بدون LLM.
+    الخوارزمية: استخراج كلمات مفتاحية → بحث في CKG → تركيب جملة عربية.
     """
     if ckg is None:
         return _generic_fallback()
-
     try:
-        # استخراج الكلمات الجوهرية (أكثر من حرفين)
-        stop_words = {"هل", "ما", "من", "في", "عن", "على", "إلى", "هو", "هي", "كيف", "لماذا", "متى"}
-        words = [w.strip("؟.,!") for w in query.split() if len(w) > 2 and w not in stop_words]
+        stop_words = {
+            "هل", "ما", "من", "في", "عن", "على", "إلى", "هو", "هي",
+            "كيف", "لماذا", "متى", "أين", "ماذا", "التي", "الذي",
+        }
+        words = [
+            w.strip("؟.,!:;") for w in query.split()
+            if len(w) > 2 and w not in stop_words
+        ]
 
-        # جمع المفاهيم المرتبطة
         candidates: Dict[str, float] = {}
         for word in words[:6]:
             try:
-                related = ckg.query_related(word, top_k=5)
-                for name, weight in related:
+                for name, weight in ckg.query_related(word, top_k=5):
                     candidates[name] = max(candidates.get(name, 0.0), weight)
             except Exception:
                 pass
@@ -125,38 +126,28 @@ def _ckg_synthesize(query: str, ckg) -> str:
         if not candidates:
             return _generic_fallback()
 
-        # ترتيب بالوزن
-        ranked = sorted(candidates.items(), key=lambda x: -x[1])[:8]
-        top_names = [name for name, _ in ranked]
+        ranked   = sorted(candidates.items(), key=lambda x: -x[1])[:8]
+        top      = [n for n, _ in ranked]
 
-        # استخراج المجموعات (clusters) لأبرز المفاهيم
         clusters: Dict[str, str] = {}
         for name, _ in ranked[:4]:
-            concept = ckg._concepts.get(name)
-            if concept and concept.cluster:
-                clusters[name] = concept.cluster
+            c = ckg._concepts.get(name)
+            if c and c.cluster:
+                clusters[name] = c.cluster
 
-        # بناء جملة الإجابة
-        if len(top_names) >= 3:
-            core     = "، ".join(top_names[:3])
-            extended = "، ".join(top_names[3:6]) if len(top_names) > 3 else ""
-            answer   = f"يرتبط سؤالك بالمفاهيم المعرفية التالية في الرسم المعرفي للنظام: {core}."
-            if extended:
-                answer += f" كما يتصل بـ: {extended}."
-            # إضافة المجموعة المعرفية إذا كانت موحّدة
-            unique_clusters = list(set(clusters.values()))
-            if len(unique_clusters) == 1:
-                answer += f" هذه المفاهيم تنتمي إلى مجال: {unique_clusters[0]}."
-            elif unique_clusters:
-                answer += f" تغطي مجالات: {' | '.join(unique_clusters[:3])}."
-        else:
-            answer = f"المعرفة المتاحة عن سؤالك تتمحور حول: {' ، '.join(top_names)}."
-
-        answer += " (مُستخلَص من الرسم المعرفي — لمزيد من الدقة أضف مفتاح API)"
-        return answer
-
+        core = "، ".join(top[:3])
+        ans  = f"يرتبط سؤالك بالمفاهيم المعرفية التالية: {core}."
+        if len(top) > 3:
+            ans += f" كما يتصل بـ: {' ، '.join(top[3:6])}."
+        unique_cl = list(set(clusters.values()))
+        if len(unique_cl) == 1:
+            ans += f" هذه المفاهيم تنتمي إلى مجال: {unique_cl[0]}."
+        elif unique_cl:
+            ans += f" تغطي مجالات: {' | '.join(unique_cl[:3])}."
+        ans += " (مُستخلَص من الرسم المعرفي — للحصول على إجابة أدق أضف OPENAI_API_KEY)"
+        return ans
     except Exception as exc:
-        logger.warning(f"[CKGSynth] فشل التوليد: {exc}")
+        logger.warning(f"[CKGSynth] {exc}")
         return _generic_fallback()
 
 
@@ -165,7 +156,7 @@ def _generic_fallback() -> str:
         "سؤالك خارج نطاق معرفتي المباشرة حالياً. "
         "يمكنني المساعدة في: الإسلام والقرآن الكريم، الذكاء الاصطناعي، "
         "الرياضيات، اللغة العربية، التاريخ الإسلامي، والبرمجة. "
-        "لتفعيل التوليد الكامل، أضف مفتاح GROQ_API_KEY في إعدادات البيئة."
+        "لتفعيل التوليد الكامل، أضف OPENAI_API_KEY أو TOGETHER_API_KEY في الـ Secrets."
     )
 
 
@@ -175,12 +166,19 @@ def _generic_fallback() -> str:
 
 class LLMFallback:
     """
-    طبقة التوليد الذكي تُفعَّل عند فشل NSMChat في إيجاد إجابة بنتيجة كافية.
+    طبقة التوليد الذكي. تُفعَّل عند score < threshold في NSMChat.
+
+    أولوية المزوّدين (حسب الإمكانية من Replit):
+      1. OpenAI   (OPENAI_API_KEY)   ← أفضل جودة
+      2. Together (TOGETHER_API_KEY) ← مجاني، نماذج مفتوحة
+      3. Gemini   (GOOGLE_API_KEY)   ← سريع ومجاني
+      4. Groq     (GROQ_API_KEY)     ← يعمل خارج Replit فقط
+      5. CKG Synthesis               ← دائماً متاح
 
     مثال:
         fb = LLMFallback(ckg=my_ckg)
-        result = fb.generate("اشرح مفهوم التوحيد", history=[("كيف حالك؟","بخير!")])
-        print(result.text)
+        r  = fb.generate("ما حكم الزكاة في الإسلام؟", history=[...])
+        print(r.text, r.provider.value, r.latency_ms)
     """
 
     def __init__(
@@ -203,18 +201,31 @@ class LLMFallback:
     # ── اكتشاف المزوّد تلقائياً ─────────────────────────────────────────
 
     def _detect_provider(self) -> Tuple[Provider, str, str]:
-        key = os.getenv("GROQ_API_KEY", "").strip()
-        if key:
-            return Provider.GROQ, key, _GROQ_MODELS[0]
+        # 1) OpenAI — يعمل من Replit
+        k = os.getenv("OPENAI_API_KEY", "").strip()
+        if k:
+            return Provider.OPENAI, k, _OPENAI_MODEL
 
-        key = os.getenv("OPENAI_API_KEY", "").strip()
-        if key:
-            return Provider.OPENAI, key, _OPENAI_MODEL
+        # 2) Together.xyz — يعمل من Replit، مجاني
+        k = os.getenv("TOGETHER_API_KEY", "").strip()
+        if k:
+            return Provider.TOGETHER, k, _TOGETHER_MODEL
 
-        key = os.getenv("HF_API_TOKEN", "").strip()
-        if key:
-            return Provider.HUGGINGFACE, key, _HF_MODEL
+        # 3) Google Gemini — يعمل من Replit
+        k = os.getenv("GOOGLE_API_KEY", "").strip()
+        if k:
+            return Provider.GEMINI, k, _GEMINI_MODEL
 
+        # 4) Groq — يعمل خارج Replit (Streamlit Cloud، VPS، إلخ)
+        k = os.getenv("GROQ_API_KEY", "").strip()
+        if k:
+            logger.warning(
+                "[LLMFallback] GROQ_API_KEY موجود لكن Groq محجوب من Replit IPs. "
+                "سيعمل على Streamlit Community Cloud أو أي خادم خارجي."
+            )
+            return Provider.GROQ, k, _GROQ_MODELS[0]
+
+        # 5) CKG Synthesis — لا مفتاح مطلوب
         return Provider.CKG_SYNTH, "", "ckg-synthesis-v1"
 
     # ── الواجهة العامة ───────────────────────────────────────────────────
@@ -225,34 +236,35 @@ class LLMFallback:
         history: Optional[List[Tuple[str, str]]] = None,
     ) -> FallbackResult:
         """
-        يولّد إجابة للاستعلام.
+        يولّد إجابة للاستعلام مع السياق متعدد الأدوار.
 
         Args:
             query:   نص سؤال المستخدم
-            history: قائمة (user_msg, bot_msg) لآخر N رسائل
+            history: [(user_msg, bot_msg), ...] آخر N رسائل
         Returns:
-            FallbackResult مع النص والمزوّد والكمون
+            FallbackResult
         """
         t0      = time.time()
         history = history or []
 
         try:
-            if self._provider == Provider.GROQ:
-                result = self._call_groq(query, history)
-            elif self._provider == Provider.OPENAI:
+            if self._provider == Provider.OPENAI:
                 result = self._call_openai(query, history)
-            elif self._provider == Provider.HUGGINGFACE:
-                result = self._call_hf(query, history)
+            elif self._provider == Provider.TOGETHER:
+                result = self._call_together(query, history)
+            elif self._provider == Provider.GEMINI:
+                result = self._call_gemini(query, history)
+            elif self._provider == Provider.GROQ:
+                result = self._call_groq(query, history)
             else:
                 text   = _ckg_synthesize(query, self.ckg)
                 result = FallbackResult(
                     text=text, provider=Provider.CKG_SYNTH, model=self._model
                 )
-        except (urllib.error.URLError, TimeoutError, KeyError, IndexError) as exc:
+        except Exception as exc:
             logger.error(f"[LLMFallback] {self._provider.value} فشل: {exc}")
-            text   = _ckg_synthesize(query, self.ckg)
             result = FallbackResult(
-                text=text,
+                text=_ckg_synthesize(query, self.ckg),
                 provider=Provider.CKG_SYNTH,
                 model="ckg-synthesis-v1",
                 error=str(exc),
@@ -272,7 +284,7 @@ class LLMFallback:
         return self._model
 
     def has_live_llm(self) -> bool:
-        """هل يوجد نموذج LLM حقيقي (وليس CKG synthesis فقط)؟"""
+        """هل يوجد LLM حقيقي يعمل (وليس CKG synthesis فقط)؟"""
         return self._provider != Provider.CKG_SYNTH
 
     def info(self) -> Dict[str, str]:
@@ -283,35 +295,6 @@ class LLMFallback:
             "api_key":  "✅ موجود" if self._api_key else "❌ غير موجود",
         }
 
-    # ── Groq ─────────────────────────────────────────────────────────────
-
-    def _call_groq(
-        self, query: str, history: List[Tuple[str, str]]
-    ) -> FallbackResult:
-        messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
-        for u, a in history[-4:]:
-            messages.append({"role": "user",      "content": u})
-            messages.append({"role": "assistant",  "content": a})
-        messages.append({"role": "user", "content": query})
-
-        payload = {
-            "model":       self._model,
-            "messages":    messages,
-            "max_tokens":  self.max_tokens,
-            "temperature": self.temperature,
-            "stream":      False,
-        }
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type":  "application/json",
-        }
-        data = _post_json(
-            "https://api.groq.com/openai/v1/chat/completions",
-            payload, headers, self.timeout,
-        )
-        text = data["choices"][0]["message"]["content"].strip()
-        return FallbackResult(text=text, provider=Provider.GROQ, model=self._model)
-
     # ── OpenAI ───────────────────────────────────────────────────────────
 
     def _call_openai(
@@ -319,57 +302,127 @@ class LLMFallback:
     ) -> FallbackResult:
         messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
         for u, a in history[-4:]:
-            messages.append({"role": "user",      "content": u})
-            messages.append({"role": "assistant",  "content": a})
+            messages += [
+                {"role": "user",      "content": u},
+                {"role": "assistant", "content": a},
+            ]
         messages.append({"role": "user", "content": query})
 
-        payload = {
-            "model":       self._model,
-            "messages":    messages,
-            "max_tokens":  self.max_tokens,
-            "temperature": self.temperature,
-        }
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type":  "application/json",
-        }
         data = _post_json(
             "https://api.openai.com/v1/chat/completions",
-            payload, headers, self.timeout,
-        )
-        text = data["choices"][0]["message"]["content"].strip()
-        return FallbackResult(text=text, provider=Provider.OPENAI, model=self._model)
-
-    # ── HuggingFace Inference API ─────────────────────────────────────────
-
-    def _call_hf(
-        self, query: str, history: List[Tuple[str, str]]
-    ) -> FallbackResult:
-        conv = ""
-        for u, a in history[-3:]:
-            conv += f"[INST] {u} [/INST] {a} </s>"
-        conv += f"[INST] {query} [/INST]"
-        full_prompt = f"<s>{_SYSTEM_PROMPT}\n\n{conv}"
-
-        payload = {
-            "inputs": full_prompt,
-            "parameters": {
-                "max_new_tokens":  self.max_tokens,
-                "temperature":     self.temperature,
-                "return_full_text": False,
+            {
+                "model":       self._model,
+                "messages":    messages,
+                "max_tokens":  self.max_tokens,
+                "temperature": self.temperature,
             },
-        }
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type":  "application/json",
-        }
-        url  = f"https://api-inference.huggingface.co/models/{self._model}"
-        data = _post_json(url, payload, headers, self.timeout)
-        text = (
-            data[0]["generated_text"].strip()
-            if isinstance(data, list)
-            else str(data)
+            {
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type":  "application/json",
+            },
+            self.timeout,
         )
         return FallbackResult(
-            text=text, provider=Provider.HUGGINGFACE, model=self._model
+            text=data["choices"][0]["message"]["content"].strip(),
+            provider=Provider.OPENAI,
+            model=self._model,
+        )
+
+    # ── Together.xyz ─────────────────────────────────────────────────────
+
+    def _call_together(
+        self, query: str, history: List[Tuple[str, str]]
+    ) -> FallbackResult:
+        messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+        for u, a in history[-4:]:
+            messages += [
+                {"role": "user",      "content": u},
+                {"role": "assistant", "content": a},
+            ]
+        messages.append({"role": "user", "content": query})
+
+        data = _post_json(
+            "https://api.together.xyz/v1/chat/completions",
+            {
+                "model":       self._model,
+                "messages":    messages,
+                "max_tokens":  self.max_tokens,
+                "temperature": self.temperature,
+            },
+            {
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type":  "application/json",
+            },
+            self.timeout,
+        )
+        return FallbackResult(
+            text=data["choices"][0]["message"]["content"].strip(),
+            provider=Provider.TOGETHER,
+            model=self._model,
+        )
+
+    # ── Google Gemini ─────────────────────────────────────────────────────
+
+    def _call_gemini(
+        self, query: str, history: List[Tuple[str, str]]
+    ) -> FallbackResult:
+        # بناء تاريخ المحادثة بصيغة Gemini
+        contents = []
+        for u, a in history[-4:]:
+            contents += [
+                {"role": "user",  "parts": [{"text": u}]},
+                {"role": "model", "parts": [{"text": a}]},
+            ]
+        contents.append({"role": "user", "parts": [{"text": query}]})
+
+        url  = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{self._model}:generateContent?key={self._api_key}"
+        )
+        body = {
+            "system_instruction": {"parts": [{"text": _SYSTEM_PROMPT}]},
+            "contents": contents,
+            "generationConfig": {
+                "maxOutputTokens": self.max_tokens,
+                "temperature":     self.temperature,
+            },
+        }
+        data = _post_json(url, body, {"Content-Type": "application/json"}, self.timeout)
+        text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        return FallbackResult(
+            text=text, provider=Provider.GEMINI, model=self._model
+        )
+
+    # ── Groq (خارج Replit فقط) ────────────────────────────────────────────
+
+    def _call_groq(
+        self, query: str, history: List[Tuple[str, str]]
+    ) -> FallbackResult:
+        messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+        for u, a in history[-4:]:
+            messages += [
+                {"role": "user",      "content": u},
+                {"role": "assistant", "content": a},
+            ]
+        messages.append({"role": "user", "content": query})
+
+        data = _post_json(
+            "https://api.groq.com/openai/v1/chat/completions",
+            {
+                "model":       self._model,
+                "messages":    messages,
+                "max_tokens":  self.max_tokens,
+                "temperature": self.temperature,
+                "stream":      False,
+            },
+            {
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type":  "application/json",
+            },
+            self.timeout,
+        )
+        return FallbackResult(
+            text=data["choices"][0]["message"]["content"].strip(),
+            provider=Provider.GROQ,
+            model=self._model,
         )
