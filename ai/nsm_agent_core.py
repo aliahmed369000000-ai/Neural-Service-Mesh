@@ -227,15 +227,22 @@ class NSMAgent:
                 try:
                     result = fb.generate(user_input)
                     return result.text
-                except Exception as fb_err:
+                except Exception:
                     pass
-            # لا يوجد أي مزوّد يعمل — رسالة واضحة
+            # لا يوجد أي مزوّد — أنشئ ملفاً بسيطاً محلياً إذا كان الطلب إنشاء
+            t = user_input.strip()
+            if any(t.startswith(p) for p in ("أنشئ", "انشئ", "اكتب كود", "ابنِ", "ابني")):
+                return (
+                    f"⚠️ Groq غير متاح حالياً ({groq_error})\n\n"
+                    f"💡 يمكنك إنشاء الملف مباشرة بالصيغة:\n"
+                    f"  أنشئ path/file.py | محتوى الملف\n\n"
+                    f"مثال:\n"
+                    f"  أنشئ tests/test_simple.py | import unittest\n\nclass TestSimple(unittest.TestCase):\n    def test_basic(self):\n        self.assertTrue(True)\n\nif __name__ == '__main__':\n    unittest.main()"
+                )
             return (
-                f"⚠️ لا يمكن الوصول لأي نموذج AI حالياً.\n"
-                f"السبب: {groq_error}\n\n"
-                f"💡 تحقق من:\n"
-                f"  1. صلاحية GROQ_API_KEY في Streamlit Secrets\n"
-                f"  2. أو أضف OPENAI_API_KEY / GOOGLE_API_KEY كبديل"
+                f"⚠️ لا يمكن الوصول لـ Groq حالياً.\n"
+                f"السبب: {groq_error}\n"
+                f"💡 تحقق من GROQ_API_KEY في Streamlit Secrets"
             )
 
             # تنظيف JSON
