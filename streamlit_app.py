@@ -1346,32 +1346,54 @@ def render_chat():
     # CSS خاص بالمحادثة
     st.markdown("""
     <style>
-    .chat-user {display:flex;justify-content:flex-end;margin:0.4rem 0;}
+    .chat-user {display:flex;justify-content:flex-end;margin:0.5rem 0;}
     .chat-user .bbl {
         background:linear-gradient(135deg,#1a73e8,#0d47a1);
-        color:#fff;padding:0.65rem 1.1rem;
-        border-radius:18px 18px 4px 18px;max-width:72%;
-        font-size:0.97rem;line-height:1.6;text-align:right;direction:rtl;
-        box-shadow:0 2px 8px rgba(26,115,232,.3);
+        color:#fff;padding:0.7rem 1.2rem;
+        border-radius:18px 18px 4px 18px;max-width:78%;
+        font-size:0.97rem;line-height:1.7;text-align:right;direction:rtl;
+        box-shadow:0 2px 10px rgba(26,115,232,.35);
+        white-space:pre-wrap;word-break:break-word;
     }
-    .chat-nsm {display:flex;justify-content:flex-start;margin:0.4rem 0;gap:0.5rem;align-items:flex-start;}
+    .chat-nsm {display:flex;justify-content:flex-start;margin:0.5rem 0;gap:0.6rem;align-items:flex-start;}
     .chat-nsm .bbl {
         background:linear-gradient(135deg,#1e2a3a,#162032);
-        color:#e2e8f0;padding:0.65rem 1.1rem;
-        border-radius:18px 18px 18px 4px;max-width:72%;
-        font-size:0.97rem;line-height:1.7;text-align:right;direction:rtl;
+        color:#e2e8f0;padding:0.7rem 1.2rem;
+        border-radius:18px 18px 18px 4px;max-width:78%;
+        font-size:0.97rem;line-height:1.8;text-align:right;direction:rtl;
         border:1px solid #2d4a6e;
+        white-space:pre-wrap;word-break:break-word;
+    }
+    .chat-nsm .bbl code {
+        background:#0d1b2a;color:#81e6d9;padding:0.15rem 0.4rem;
+        border-radius:4px;font-size:0.88rem;font-family:monospace;
+        white-space:pre-wrap;
+    }
+    .chat-nsm .bbl pre {
+        background:#0d1b2a;border:1px solid #2d4a6e;border-radius:8px;
+        padding:0.8rem;overflow-x:auto;margin:0.5rem 0;
+        font-size:0.85rem;color:#a8d8ea;
+        white-space:pre;
     }
     .ctx-tag {
         display:inline-block;background:#0f1923;border:1px solid #2d4a6e;
         border-radius:20px;padding:0.15rem 0.65rem;font-size:0.72rem;
-        color:#90cdf4;margin-bottom:0.3rem;direction:rtl;
+        color:#90cdf4;margin-bottom:0.4rem;direction:rtl;
     }
     .chat-box {
-        max-height:460px;overflow-y:auto;padding:0.8rem;
-        background:#0a0f1a;border-radius:12px;
+        max-height:500px;overflow-y:auto;padding:1rem;
+        background:#0a0f1a;border-radius:14px;
         border:1px solid #1e2a3a;margin-bottom:0.8rem;
+        scroll-behavior:smooth;
     }
+    .chat-box::-webkit-scrollbar{width:4px;}
+    .chat-box::-webkit-scrollbar-track{background:#0a0f1a;}
+    .chat-box::-webkit-scrollbar-thumb{background:#2d4a6e;border-radius:4px;}
+    .typing-indicator {
+        display:inline-block;color:#90cdf4;font-size:0.85rem;
+        animation:pulse 1.2s infinite;
+    }
+    @keyframes pulse{0%,100%{opacity:.4;}50%{opacity:1;}}
     </style>
     """, unsafe_allow_html=True)
 
@@ -1397,31 +1419,106 @@ def render_chat():
             ctx_tag    = msg[2] if len(msg) > 2 else ""
             src_badge  = msg[3] if len(msg) > 3 else ""
             if role == "user":
-                html += f'<div class="chat-user"><div class="bbl">{text}</div></div>'
+                import html as _html
+                safe_text = _html.escape(text).replace("\n", "<br>")
+                html += f'<div class="chat-user"><div class="bbl">{safe_text}</div></div>
             else:
                 ctx_html = f'<div class="ctx-tag">📎 {ctx_tag}</div>' if ctx_tag else ""
                 src_html = (
                     f'<div class="ctx-tag" style="color:#81e6d9">{src_badge}</div>'
                     if src_badge else ""
                 )
+                import html as _html
+                if "<" not in text and ">" not in text:
+                    safe_reply = _html.escape(text).replace("\n", "<br>")
+                else:
+                    safe_reply = text
                 html += f'''<div class="chat-nsm">
                     <span style="font-size:1.4rem;margin-top:3px">🧠</span>
-                    <div class="bbl">{ctx_html}{src_html}{text}</div>
+                    <div class="bbl">{ctx_html}{src_html}{safe_reply}</div>
                 </div>'''
     html += "</div>"
     st.markdown(html, unsafe_allow_html=True)
 
-    # صندوق الإدخال
-    c1, c2 = st.columns([5, 1])
-    with c1:
-        user_input = st.text_input(
-            label="سؤالك",
-            placeholder="اكتب سؤالك... (مثال: وكم ركعاتها؟)",
-            key="nsm_input",
-            label_visibility="collapsed",
-        )
-    with c2:
-        send = st.button("إرسال ➤", key="nsm_send", use_container_width=True)
+    # صندوق الإدخال — تصميم مثل Claude
+    st.markdown("""
+    <style>
+    /* إخفاء زر Streamlit الافتراضي واستبداله */
+    div[data-testid="column"]:has(button[kind="primary"]) {
+        display:none !important;
+    }
+    /* تصميم textarea */
+    div[data-testid="stTextArea"] {
+        position:relative;
+    }
+    div[data-testid="stTextArea"] textarea {
+        min-height:56px !important;
+        max-height:160px !important;
+        font-size:1rem !important;
+        direction:rtl;
+        text-align:right;
+        resize:none !important;
+        border-radius:24px !important;
+        padding:14px 56px 14px 18px !important;
+        background:#1e2a3a !important;
+        border:1px solid #2d4a6e !important;
+        color:#e2e8f0 !important;
+        line-height:1.6 !important;
+        box-shadow:0 2px 12px rgba(0,0,0,.3) !important;
+    }
+    div[data-testid="stTextArea"] textarea:focus {
+        border-color:#1a73e8 !important;
+        box-shadow:0 0 0 2px rgba(26,115,232,.25) !important;
+        outline:none !important;
+    }
+    /* زر الإرسال الدائري */
+    button[key="nsm_send"], button[data-testid="nsm_send"] {
+        display:none !important;
+    }
+    .send-fab {
+        position:absolute;
+        left:10px;
+        bottom:10px;
+        width:40px; height:40px;
+        border-radius:50%;
+        background:linear-gradient(135deg,#1a73e8,#0d47a1);
+        border:none; cursor:pointer;
+        display:flex; align-items:center; justify-content:center;
+        box-shadow:0 3px 10px rgba(26,115,232,.5);
+        font-size:1.1rem; color:white;
+        transition:transform .15s, box-shadow .15s;
+        z-index:10;
+    }
+    .send-fab:hover { transform:scale(1.08); box-shadow:0 4px 14px rgba(26,115,232,.7); }
+    .send-fab:active { transform:scale(.95); }
+    .input-wrapper { position:relative; }
+    /* Enter label */
+    .enter-hint {
+        font-size:0.72rem; color:#4a6080;
+        text-align:left; margin-top:3px; padding-left:4px;
+    }
+    </style>""", unsafe_allow_html=True)
+
+    # الغلاف + textarea + زر دائري
+    st.markdown('<div class="input-wrapper">', unsafe_allow_html=True)
+    user_input = st.text_area(
+        label="سؤالك",
+        placeholder="اكتب رسالتك...",
+        key="nsm_input",
+        label_visibility="collapsed",
+        height=56,
+    )
+    send = st.button("↑", key="nsm_send", type="primary")
+    st.markdown("""
+    <div style="position:relative;margin-top:-3.2rem;margin-left:8px;float:left;z-index:100">
+      <button class="send-fab" onclick="
+        var btn = window.parent.document.querySelector('button[kind=primary]');
+        if(btn) btn.click();
+      ">↑</button>
+    </div>
+    <div style="clear:both"></div>
+    <div class="enter-hint">Enter = سطر جديد &nbsp;|&nbsp; اضغط ↑ للإرسال</div>
+    </div>""", unsafe_allow_html=True)
 
     # أسئلة سريعة
     st.markdown("**⚡ أسئلة سريعة:**")
