@@ -67,28 +67,49 @@ _OPENROUTER_MODELS = [
 # استدعاء API مع Fallback للنماذج
 # ══════════════════════════════════════════════════════════════════
 def _call_api(messages: List[Dict], api_key: str) -> str:
-    """يجرب Gemini أولاً (مجاني ويعمل من اليمن)، ثم OpenRouter، ثم Groq."""
+    """يجرب Cloudflare أولاً (مجاني ويعمل من اليمن)، ثم Gemini، ثم OpenRouter."""
     errors = []
 
-    # 1) Google Gemini — مجاني ويعمل من اليمن ✅
+    # 1) Cloudflare Workers AI — مجاني 10k/يوم ✅
+    cf_token   = os.getenv("CF_API_TOKEN", "").strip()
+    cf_account = os.getenv("CF_ACCOUNT_ID", "").strip()
+    if cf_token and cf_account:
+        cf_url = (
+            f"https://api.cloudflare.com/client/v4/accounts/"
+            f"{cf_account}/ai/run/@cf/meta/llama-3.1-8b-instruct"
+        )
+        payload = json.dumps({"messages": messages, "max_tokens": 2048}).encode()
+        req = urllib.request.Request(
+            cf_url, data=payload,
+            headers={"Authorization": f"Bearer {cf_token}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                data = json.loads(resp.read())
+            text = data.get("result", {}).get("response", "").strip()
+            if text:
+                return text
+        except Exception as e:
+            errors.append(f"Cloudflare: {e}")
+
+    # 2) Google Gemini — مجاني (قد لا يعمل من اليمن)
     gemini_key = os.getenv("GOOGLE_API_KEY", "").strip()
-    if gemini_key:
+    if gemini_key and gemini_key.startswith("AIzaSy"):
         gemini_url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
             f"gemini-1.5-flash:generateContent?key={gemini_key}"
         )
-        # تحويل messages إلى صيغة Gemini
         gemini_parts = []
         for m in messages:
             if m["role"] == "system":
                 gemini_parts.append({"role": "user", "parts": [{"text": m["content"]}]})
-                gemini_parts.append({"role": "model", "parts": [{"text": "حسناً، سأتبع هذه التعليمات."}]})
+                gemini_parts.append({"role": "model", "parts": [{"text": "حسناً."}]})
             elif m["role"] == "user":
                 gemini_parts.append({"role": "user", "parts": [{"text": m["content"]}]})
             elif m["role"] == "assistant":
                 gemini_parts.append({"role": "model", "parts": [{"text": m["content"]}]})
-
-        payload = json.dumps({"contents": gemini_parts}).encode("utf-8")
+        payload = json.dumps({"contents": gemini_parts}).encode()
         req = urllib.request.Request(
             gemini_url, data=payload,
             headers={"Content-Type": "application/json"},
@@ -101,14 +122,14 @@ def _call_api(messages: List[Dict], api_key: str) -> str:
         except Exception as e:
             errors.append(f"Gemini: {e}")
 
-    # 2) OpenRouter
+    # 3) OpenRouter
     or_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     if or_key:
         for model in _OPENROUTER_MODELS:
             payload = json.dumps({
                 "model": model, "messages": messages,
                 "max_tokens": 2048, "temperature": 0.3,
-            }).encode("utf-8")
+            }).encode()
             req = urllib.request.Request(
                 _OPENROUTER_URL, data=payload,
                 headers={
@@ -125,17 +146,16 @@ def _call_api(messages: List[Dict], api_key: str) -> str:
             except Exception as e:
                 errors.append(f"OpenRouter/{model}: {e}")
 
-    # 3) Groq (قد يكون محجوباً في اليمن)
-    groq_key = api_key
-    if groq_key:
+    # 4) Groq (محجوب في اليمن لكن نحاول)
+    if api_key:
         for model in _GROQ_MODELS:
             payload = json.dumps({
                 "model": model, "messages": messages,
                 "max_tokens": 2048, "temperature": 0.3, "stream": False,
-            }).encode("utf-8")
+            }).encode()
             req = urllib.request.Request(
                 _GROQ_URL, data=payload,
-                headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 method="POST",
             )
             try:
@@ -143,13 +163,13 @@ def _call_api(messages: List[Dict], api_key: str) -> str:
                     return json.loads(resp.read())["choices"][0]["message"]["content"].strip()
             except urllib.error.HTTPError as e:
                 if e.code in (401, 403):
-                    errors.append(f"Groq محجوب أو مفتاح خاطئ ({e.code})")
+                    errors.append(f"Groq محجوب ({e.code})")
                     break
-                errors.append(f"Groq/{model} {e.code}")
+                errors.append(f"Groq/{model}: {e.code}")
             except Exception as e:
-                errors.append(f"Groq/{model}: {e}")
+                errors.append(f"Groq: {e}")
 
-    raise Exception(" | ".join(errors) or "لا يوجد مزوّد متاح — أضف GOOGLE_API_KEY في Secrets")
+    raise Exception(" | ".join(errors) or "لا يوجد مزوّد — أضف CF_API_TOKEN وCF_ACCOUNT_ID")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -236,8 +256,8 @@ class NSMAgent:
 
     @staticmethod
     def _check_available() -> bool:
-        """يتحقق من وجود أي مفتاح API صالح."""
         return bool(
+            (os.getenv("CF_API_TOKEN", "").strip() and os.getenv("CF_ACCOUNT_ID", "").strip()) or
             os.getenv("GOOGLE_API_KEY", "").strip() or
             os.getenv("GROQ_API_KEY", "").strip() or
             os.getenv("OPENROUTER_API_KEY", "").strip() or
