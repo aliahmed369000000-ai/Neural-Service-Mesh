@@ -91,38 +91,24 @@ class NSMChatPlus(NSMChat):
         if self.memory and self.memory.needs_context(user_input):
             query = self.memory.enrich_query(user_input)
 
-        # ❹ بحث في القاموس الثابت
-        answer, score = self._find(query)
-        self._last_score = score
-
-        if score >= _KB_THRESHOLD:
-            # ✅ إجابة جيدة من القاموس
-            self._last_source = "kb"
-
-        else:
-            # ❺ اللجوء إلى طبقة التوليد
-            result = self.fallback.generate(
-                query=query,
-                history=self.history[-4:],
+        # ❹ LLM مباشرة — القاموس محذوف من مسار الردود
+        result = self.fallback.generate(
+            query=query,
+            history=self.history[-4:],
+        )
+        answer = result.text
+        self._last_source = (
+            "llm"
+            if result.provider in (
+                Provider.GROQ,
+                Provider.OPENAI,
+                Provider.TOGETHER,
+                Provider.GEMINI,
             )
-            answer = result.text
-            self._last_source = (
-                "llm"
-                if result.provider in (
-                    Provider.GROQ,
-                    Provider.OPENAI,
-                    Provider.TOGETHER,
-                    Provider.GEMINI,
-                )
-                else "ckg"
-            )
-            # إلحاق بيان الكمون إذا كان LLM حقيقياً
-            if result.latency_ms and self._last_source == "llm":
-                logger.debug(
-                    f"[NSMChatPlus] LLM latency: {result.latency_ms}ms"
-                )
+            else "ckg"
+        )
 
-        # ❻ حفظ في الذاكرة
+        # ❺ حفظ في الذاكرة
         if self.memory:
             self.memory.add(user_input, answer, self._last_topic)
         self.history.append((user_input, answer))
