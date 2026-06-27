@@ -483,73 +483,43 @@ class NSMChat:
 
         t = user_input.strip()
 
-        # ── NSM Agent الذكي — أولوية 1 ──
-        # يُفعَّل إذا: يبدأ بـ trigger، أو السؤال طويل (+120 حرف) وفيه علامة استفهام
-        _is_trigger  = any(t.startswith(kw) for kw in _AGENT_TRIGGERS)
-        _is_long_q   = len(t) > 120 and ("؟" in t or "?" in t)
-        # نُعيد التحقق من المفاتيح في كل مرة (Streamlit يُحمّلها بعد البداية)
-        if _HAS_NSM_AGENT and _nsm_agent:
-            _nsm_agent.available = _nsm_agent._check_available()
-        _agent_ready = _HAS_NSM_AGENT and _nsm_agent and _nsm_agent.available
-
-        if _agent_ready and (_is_trigger or _is_long_q):
-            response = _nsm_agent.run(user_input)
-            self._last_source = "nsm_agent"
-            self.history.append((user_input, response))
-            return response
-
-        # ── Code Agent المباشر — أولوية 2 للأوامر الدقيقة (افحص/قائمة/ارفع/عدل path|old|new) ──
-        agent_response = _handle_code_command(user_input)
+        # ── Code Agent — أولوية 1 للأوامر المباشرة فقط (افحص/قائمة/ارفع/عدل) ──
+        agent_response = _handle_code_command(t)
         if agent_response is not None:
             self._last_source = "code_agent"
-            self.history.append((user_input, agent_response))
+            self.history.append((t, agent_response))
             return agent_response
 
-        # تغنية الاستعلام بالسياق إذا لزم
-        query = user_input
-        if self.memory and self.memory.needs_context(user_input):
-            query = self.memory.enrich_query(user_input)
+        # ── NSM Agent / LLM — كل شيء آخر يذهب هنا ──
+        if _HAS_NSM_AGENT and _nsm_agent:
+            _nsm_agent.available = _nsm_agent._check_available()
 
-        answer, score = self._find(query)
+        if _HAS_NSM_AGENT and _nsm_agent and _nsm_agent.available:
+            response = _nsm_agent.run(t)
+            self._last_source = "nsm_agent"
+            self.history.append((t, response))
+            return response
 
-        # ── LLM Fallback: إذا الثقة منخفضة أو السؤال خارج القاموس ──
-        # score < 0.45 → القاموس غير واثق → نفوّض للـ LLM
-        if score < 0.45 and _HAS_LLM and _llm_instance is not None:
+        # ── LLM مباشر إذا لم يكن NSM Agent متاحاً ──
+        if _HAS_LLM and _llm_instance is not None:
             try:
-                # نمرر تاريخ المحادثة للسياق
                 history_for_llm = [
                     {"role": "user", "content": u} if i % 2 == 0
                     else {"role": "assistant", "content": a}
                     for i, (u, a) in enumerate(self.history[-4:])
                 ]
-                llm_result = _llm_instance.generate(query, history=history_for_llm)
+                llm_result = _llm_instance.generate(t, history=history_for_llm)
                 answer = llm_result.text
-                # نضيف إشارة المصدر للواجهة (اختياري)
                 self._last_source = f"llm:{llm_result.provider.value}"
-            except Exception as e:
-                # إذا فشل LLM نرجع للقاموس أو رسالة افتراضية
-                if score < 0.12:
-                    answer = (
-                        "سؤالك مثير للاهتمام! يمكنني المساعدة في: "
-                        "الإسلام والقرآن، الذكاء الاصطناعي، الرياضيات، "
-                        "اللغة العربية، التاريخ، الصحة، والبرمجة."
-                    )
-                self._last_source = "kb:fallback_error"
-        elif score < 0.12:
-            # لا LLM ولا قاموس → رسالة افتراضية
-            answer = (
-                "سؤالك مثير للاهتمام! يمكنني المساعدة في: "
-                "الإسلام والقرآن، الذكاء الاصطناعي، الرياضيات، "
-                "اللغة العربية، التاريخ، الصحة، والبرمجة."
-            )
-            self._last_source = "kb:low_confidence"
-        else:
-            self._last_source = f"kb:{self._last_topic}"
+                self.history.append((t, answer))
+                return answer
+            except Exception:
+                pass
 
-        # حفظ في الذاكرة
-        if self.memory:
-            self.memory.add(user_input, answer, self._last_topic)
-        self.history.append((user_input, answer))
+        # ── احتياطي أخير: رسالة بدون API ──
+        answer = "⚠️ لا يوجد اتصال بـ LLM حالياً. تحقق من API Key في Streamlit Secrets."
+        self._last_source = "no_llm"
+        self.history.append((t, answer))
         return answer
 
     def last_source(self) -> str:
