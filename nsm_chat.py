@@ -487,6 +487,9 @@ class NSMChat:
         # يُفعَّل إذا: يبدأ بـ trigger، أو السؤال طويل (+120 حرف) وفيه علامة استفهام
         _is_trigger  = any(t.startswith(kw) for kw in _AGENT_TRIGGERS)
         _is_long_q   = len(t) > 120 and ("؟" in t or "?" in t)
+        # نُعيد التحقق من المفاتيح في كل مرة (Streamlit يُحمّلها بعد البداية)
+        if _HAS_NSM_AGENT and _nsm_agent:
+            _nsm_agent.available = _nsm_agent._check_available()
         _agent_ready = _HAS_NSM_AGENT and _nsm_agent and _nsm_agent.available
 
         if _agent_ready and (_is_trigger or _is_long_q):
