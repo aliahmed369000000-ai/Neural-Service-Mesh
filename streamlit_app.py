@@ -1576,13 +1576,40 @@ def render_chat():
     # معالجة الإدخال
     def _process(text: str):
         if not text.strip(): return
-        response  = bot.chat(text.strip())
+
+        # ── أضف رسالة المستخدم فوراً ──
+        st.session_state.nsm_messages.append(("user", text.strip(), "", ""))
+
+        # ── Streaming عبر NSM Agent مباشرة إذا كان متاحاً ──
+        try:
+            from ai.nsm_agent_core import NSMAgent as _AgentCls
+            _agent = getattr(st.session_state, "_nsm_agent_instance", None)
+            if _agent is None:
+                _agent = _AgentCls()
+                st.session_state._nsm_agent_instance = _agent
+            _agent.available = _agent._check_available()
+        except Exception:
+            _agent = None
+
+        if _agent and _agent.available:
+            # ── Streaming: يظهر الرد حرفاً بحرف ──
+            with st.chat_message("assistant", avatar="🧠"):
+                placeholder = st.empty()
+                full_response = ""
+                for chunk in _agent.run_stream(text.strip()):
+                    full_response += chunk
+                    placeholder.markdown(full_response + "▌")
+                placeholder.markdown(full_response)
+            response = full_response.replace("⏳ *أفكر...*\n\n", "", 1)
+        else:
+            # ── fallback: bot.chat العادي ──
+            response = bot.chat(text.strip())
+
         ctx_tag   = bot.context_info()
         src_badge = (
             bot.source_badge()
-            if hasattr(bot, "source_badge") else ""
+            if hasattr(bot, "source_badge") else "🤖 NSM Agent v3"
         )
-        st.session_state.nsm_messages.append(("user", text.strip(), "", ""))
         st.session_state.nsm_messages.append(("nsm",  response, ctx_tag, src_badge))
         st.session_state.nsm_count += 1
         st.rerun()
