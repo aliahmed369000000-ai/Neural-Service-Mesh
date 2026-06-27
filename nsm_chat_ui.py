@@ -240,12 +240,38 @@ def process(text: str):
     if not text.strip():
         return
     bot = st.session_state.bot
-    response = bot.chat(text.strip())
-    ctx = bot.context_info()
+
+    # أضف رسالة المستخدم فوراً
     st.session_state.messages.append(("user", text.strip(), ""))
+
+    # ── Streaming عبر NSM Agent ──
+    try:
+        from ai.nsm_agent_core import NSMAgent as _AgentCls
+        _agent = getattr(st.session_state, "_nsm_agent_instance", None)
+        if _agent is None:
+            _agent = _AgentCls()
+            st.session_state._nsm_agent_instance = _agent
+        _agent.available = _agent._check_available()
+    except Exception:
+        _agent = None
+
+    if _agent and _agent.available:
+        with st.chat_message("assistant", avatar="🧠"):
+            placeholder = st.empty()
+            full_response = ""
+            for chunk in _agent.run_stream(text.strip()):
+                full_response += chunk
+                placeholder.markdown(full_response + "▌")
+            placeholder.markdown(full_response)
+        response = full_response.replace("⏳ *أفكر...*\n\n", "", 1)
+    else:
+        response = bot.chat(text.strip())
+
+    ctx = bot.context_info()
     st.session_state.messages.append(("nsm", response, ctx))
     st.session_state.msg_count += 1
     st.rerun()
+
 
 if send and user_input:
     process(user_input)
