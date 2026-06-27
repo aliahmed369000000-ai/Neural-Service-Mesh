@@ -1471,9 +1471,13 @@ def render_chat():
         box-shadow:0 0 0 2px rgba(26,115,232,.25) !important;
         outline:none !important;
     }
-    /* زر الإرسال الدائري */
-    button[key="nsm_send"], button[data-testid="nsm_send"] {
+    /* إخفاء زر Streamlit الأحمر/الافتراضي نهائياً */
+    button[kind="primary"]#nsm_send,
+    div.stButton button[kind="primary"] {
         display:none !important;
+        visibility:hidden !important;
+        width:0 !important; height:0 !important;
+        position:absolute !important; pointer-events:none !important;
     }
     .send-fab {
         position:absolute;
