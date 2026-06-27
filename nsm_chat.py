@@ -481,11 +481,15 @@ class NSMChat:
         if not user_input.strip():
             return "الرجاء كتابة سؤالك."
 
-        # ── NSM Agent الذكي — أولوية 1 للطلبات البرمجية ──
-        # يُستدعى دائماً عند trigger — run() نفسه يتحقق من المفتاح
-        if _HAS_NSM_AGENT and _nsm_agent and any(
-            user_input.strip().startswith(t) for t in _AGENT_TRIGGERS
-        ):
+        t = user_input.strip()
+
+        # ── NSM Agent الذكي — أولوية 1 ──
+        # يُفعَّل إذا: يبدأ بـ trigger، أو السؤال طويل (+120 حرف) وفيه علامة استفهام
+        _is_trigger  = any(t.startswith(kw) for kw in _AGENT_TRIGGERS)
+        _is_long_q   = len(t) > 120 and ("؟" in t or "?" in t)
+        _agent_ready = _HAS_NSM_AGENT and _nsm_agent and _nsm_agent.available
+
+        if _agent_ready and (_is_trigger or _is_long_q):
             response = _nsm_agent.run(user_input)
             self._last_source = "nsm_agent"
             self.history.append((user_input, response))
