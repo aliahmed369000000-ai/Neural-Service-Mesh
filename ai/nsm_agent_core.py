@@ -649,6 +649,16 @@ class NSMAgent:
             yield "⚠️ لا يوجد مفتاح API — أضف GOOGLE_API_KEY في Streamlit Secrets"
             return
 
+        # 🆕 Planning Engine — يكشف طلبات بناء التطبيقات
+        try:
+            from ai.nsm_planner import NSMPlanner, is_planning_request
+            if is_planning_request(user_input):
+                planner = NSMPlanner(self)
+                yield from planner.build(user_input)
+                return
+        except ImportError:
+            pass  # إذا لم يكن الـ Planner موجوداً، تابع عادياً
+
         # بناء رسائل API
         system   = _build_system_prompt()
         messages: List[Dict] = [{"role": "system", "content": system}]
@@ -717,6 +727,10 @@ class NSMAgent:
         for chunk in self.run_stream(user_input):
             parts.append(chunk)
         return "".join(parts).replace("⏳ *أفكر...*\n\n", "", 1)
+
+    def _call_api_bound(self):
+        """يُعيد دالة _call_api للاستخدام من الـ Planner"""
+        return _call_api
 
     def clear(self) -> None:
         self.history.clear()
