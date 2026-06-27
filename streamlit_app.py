@@ -1401,7 +1401,7 @@ def render_chat():
     col_t, col_s = st.columns([3,1])
     with col_t:
         st.markdown("### 💬 المحادثة الذكية")
-        _mode = "قاموس NSM + توليد LLM" if _NSM_CHAT_PLUS else "قاموس NSM"
+        _mode = "🤖 LLM · Cloudflare / Gemini / Groq"
         st.caption(f"يتذكر السياق · {_mode} · الذكاء في الأوزان")
     with col_s:
         ctx = bot.context_info()
