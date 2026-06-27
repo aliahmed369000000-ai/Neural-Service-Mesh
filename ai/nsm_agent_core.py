@@ -230,6 +230,15 @@ def _execute(action_data: Dict[str, Any]) -> str:
 
 def _git_push(message: str) -> str:
     try:
+        # ضبط هوية git تلقائياً إذا لم تكن موجودة
+        subprocess.run(
+            ["git", "-C", str(ROOT), "config", "--local", "user.email", "nsm-agent@neural-service-mesh.app"],
+            capture_output=True
+        )
+        subprocess.run(
+            ["git", "-C", str(ROOT), "config", "--local", "user.name", "NSM Agent"],
+            capture_output=True
+        )
         for cmd in [
             ["git", "-C", str(ROOT), "add", "-A"],
             ["git", "-C", str(ROOT), "commit", "-m", message],
