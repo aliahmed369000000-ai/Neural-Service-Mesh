@@ -1440,89 +1440,30 @@ def render_chat():
     html += "</div>"
     st.markdown(html, unsafe_allow_html=True)
 
-    # صندوق الإدخال — تصميم مثل Claude
+    # صندوق الإدخال
     st.markdown("""
     <style>
-    /* إخفاء زر Streamlit الافتراضي واستبداله */
-    div[data-testid="column"]:has(button[kind="primary"]) {
-        display:none !important;
-    }
-    /* تصميم textarea */
-    div[data-testid="stTextArea"] {
-        position:relative;
-    }
     div[data-testid="stTextArea"] textarea {
-        min-height:56px !important;
+        min-height:70px !important;
         max-height:160px !important;
         font-size:1rem !important;
         direction:rtl;
         text-align:right;
         resize:none !important;
-        border-radius:24px !important;
-        padding:14px 56px 14px 18px !important;
-        background:#1e2a3a !important;
-        border:1px solid #2d4a6e !important;
-        color:#e2e8f0 !important;
-        line-height:1.6 !important;
-        box-shadow:0 2px 12px rgba(0,0,0,.3) !important;
-    }
-    div[data-testid="stTextArea"] textarea:focus {
-        border-color:#1a73e8 !important;
-        box-shadow:0 0 0 2px rgba(26,115,232,.25) !important;
-        outline:none !important;
-    }
-    /* إخفاء زر Streamlit الأحمر/الافتراضي نهائياً */
-    button[kind="primary"]#nsm_send,
-    div.stButton button[kind="primary"] {
-        display:none !important;
-        visibility:hidden !important;
-        width:0 !important; height:0 !important;
-        position:absolute !important; pointer-events:none !important;
-    }
-    .send-fab {
-        position:absolute;
-        left:10px;
-        bottom:10px;
-        width:40px; height:40px;
-        border-radius:50%;
-        background:linear-gradient(135deg,#1a73e8,#0d47a1);
-        border:none; cursor:pointer;
-        display:flex; align-items:center; justify-content:center;
-        box-shadow:0 3px 10px rgba(26,115,232,.5);
-        font-size:1.1rem; color:white;
-        transition:transform .15s, box-shadow .15s;
-        z-index:10;
-    }
-    .send-fab:hover { transform:scale(1.08); box-shadow:0 4px 14px rgba(26,115,232,.7); }
-    .send-fab:active { transform:scale(.95); }
-    .input-wrapper { position:relative; }
-    /* Enter label */
-    .enter-hint {
-        font-size:0.72rem; color:#4a6080;
-        text-align:left; margin-top:3px; padding-left:4px;
     }
     </style>""", unsafe_allow_html=True)
-
-    # الغلاف + textarea + زر دائري
-    st.markdown('<div class="input-wrapper">', unsafe_allow_html=True)
-    user_input = st.text_area(
-        label="سؤالك",
-        placeholder="اكتب رسالتك...",
-        key="nsm_input",
-        label_visibility="collapsed",
-        height=56,
-    )
-    send = st.button("↑", key="nsm_send", type="primary")
-    st.markdown("""
-    <div style="position:relative;margin-top:-3.2rem;margin-left:8px;float:left;z-index:100">
-      <button class="send-fab" onclick="
-        var btn = window.parent.document.querySelector('button[kind=primary]');
-        if(btn) btn.click();
-      ">↑</button>
-    </div>
-    <div style="clear:both"></div>
-    <div class="enter-hint">Enter = سطر جديد &nbsp;|&nbsp; اضغط ↑ للإرسال</div>
-    </div>""", unsafe_allow_html=True)
+    c1, c2 = st.columns([5, 1])
+    with c1:
+        user_input = st.text_area(
+            label="سؤالك",
+            placeholder="اكتب سؤالك... (Enter = سطر جديد)",
+            key="nsm_input",
+            label_visibility="collapsed",
+            height=80,
+        )
+    with c2:
+        st.markdown("<div style='margin-top:1.7rem'></div>", unsafe_allow_html=True)
+        send = st.button("إرسال ➤", key="nsm_send", use_container_width=True)
 
     # أسئلة سريعة
     st.markdown("**⚡ أسئلة سريعة:**")
