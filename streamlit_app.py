@@ -1346,22 +1346,27 @@ def render_chat():
     # CSS خاص بالمحادثة
     st.markdown("""
     <style>
-    .chat-user {display:flex;justify-content:flex-end;margin:0.5rem 0;}
+    @keyframes bubbleIn {
+        from {opacity:0;transform:translateY(6px);}
+        to   {opacity:1;transform:translateY(0);}
+    }
+    .chat-user {display:flex;justify-content:flex-end;margin:0.55rem 0;animation:bubbleIn .25s ease-out;}
     .chat-user .bbl {
         background:linear-gradient(135deg,#1a73e8,#0d47a1);
-        color:#fff;padding:0.7rem 1.2rem;
-        border-radius:18px 18px 4px 18px;max-width:78%;
-        font-size:0.97rem;line-height:1.7;text-align:right;direction:rtl;
-        box-shadow:0 2px 10px rgba(26,115,232,.35);
+        color:#fff;padding:0.75rem 1.15rem;
+        border-radius:18px 18px 4px 18px;max-width:85%;
+        font-size:0.98rem;line-height:1.75;text-align:right;direction:rtl;
+        box-shadow:0 3px 12px rgba(26,115,232,.3);
         white-space:pre-wrap;word-break:break-word;
     }
-    .chat-nsm {display:flex;justify-content:flex-start;margin:0.5rem 0;gap:0.6rem;align-items:flex-start;}
+    .chat-nsm {display:flex;justify-content:flex-start;margin:0.55rem 0;gap:0.55rem;align-items:flex-start;animation:bubbleIn .25s ease-out;}
     .chat-nsm .bbl {
         background:linear-gradient(135deg,#1e2a3a,#162032);
-        color:#e2e8f0;padding:0.7rem 1.2rem;
-        border-radius:18px 18px 18px 4px;max-width:78%;
-        font-size:0.97rem;line-height:1.8;text-align:right;direction:rtl;
+        color:#e2e8f0;padding:0.75rem 1.15rem;
+        border-radius:18px 18px 18px 4px;max-width:85%;
+        font-size:0.98rem;line-height:1.85;text-align:right;direction:rtl;
         border:1px solid #2d4a6e;
+        box-shadow:0 2px 8px rgba(0,0,0,.25);
         white-space:pre-wrap;word-break:break-word;
     }
     .chat-nsm .bbl code {
@@ -1377,18 +1382,21 @@ def render_chat():
     }
     .ctx-tag {
         display:inline-block;background:#0f1923;border:1px solid #2d4a6e;
-        border-radius:20px;padding:0.15rem 0.65rem;font-size:0.72rem;
-        color:#90cdf4;margin-bottom:0.4rem;direction:rtl;
+        border-radius:20px;padding:0.18rem 0.7rem;font-size:0.72rem;
+        color:#90cdf4;margin-bottom:0.45rem;direction:rtl;
     }
     .chat-box {
-        max-height:500px;overflow-y:auto;padding:1rem;
-        background:#0a0f1a;border-radius:14px;
-        border:1px solid #1e2a3a;margin-bottom:0.8rem;
+        height:62vh;min-height:420px;max-height:680px;
+        overflow-y:auto;padding:1.1rem;
+        background:#0a0f1a;border-radius:18px;
+        border:1px solid #1e2a3a;margin-bottom:0.9rem;
         scroll-behavior:smooth;
+        box-shadow:inset 0 0 24px rgba(0,0,0,.25);
     }
-    .chat-box::-webkit-scrollbar{width:4px;}
+    .chat-box::-webkit-scrollbar{width:5px;}
     .chat-box::-webkit-scrollbar-track{background:#0a0f1a;}
-    .chat-box::-webkit-scrollbar-thumb{background:#2d4a6e;border-radius:4px;}
+    .chat-box::-webkit-scrollbar-thumb{background:#2d4a6e;border-radius:6px;}
+    .chat-box::-webkit-scrollbar-thumb:hover{background:#3d6a9e;}
     .typing-indicator {
         display:inline-block;color:#90cdf4;font-size:0.85rem;
         animation:pulse 1.2s infinite;
@@ -1410,9 +1418,9 @@ def render_chat():
         st.metric("رسائل الجلسة", st.session_state.nsm_count)
 
     # عرض المحادثة
-    html = '<div class="chat-box">'
+    html = '<div class="chat-box" id="nsm-chat-box">'
     if not st.session_state.nsm_messages:
-        html += '<div style="text-align:center;color:#2d4a6e;padding:2rem">🧠<br>ابدأ محادثتك — أسألني أي شيء</div>'
+        html += '<div style="text-align:center;color:#2d4a6e;padding:2.5rem 1rem">🧠<br><br>ابدأ محادثتك — أسألني أي شيء</div>'
     else:
         for msg in st.session_state.nsm_messages:
             role, text = msg[0], msg[1]
@@ -1439,31 +1447,71 @@ def render_chat():
                 </div>'''
     html += "</div>"
     st.markdown(html, unsafe_allow_html=True)
+    st.markdown("""
+    <script>
+    (function() {
+        const box = window.parent.document.getElementById('nsm-chat-box');
+        if (box) { box.scrollTop = box.scrollHeight; }
+    })();
+    </script>
+    """, unsafe_allow_html=True)
 
     # صندوق الإدخال
     st.markdown("""
     <style>
     div[data-testid="stTextArea"] textarea {
-        min-height:70px !important;
-        max-height:160px !important;
-        font-size:1rem !important;
+        min-height:96px !important;
+        max-height:220px !important;
+        font-size:1.05rem !important;
+        line-height:1.6 !important;
         direction:rtl;
         text-align:right;
         resize:none !important;
+        background:#0f1923 !important;
+        border:1.5px solid #2d4a6e !important;
+        border-radius:18px !important;
+        padding:0.9rem 1.1rem !important;
+        color:#e2e8f0 !important;
+        transition:border-color .15s ease, box-shadow .15s ease;
+    }
+    div[data-testid="stTextArea"] textarea:focus {
+        border-color:#1a73e8 !important;
+        box-shadow:0 0 0 3px rgba(26,115,232,.25) !important;
+    }
+    div[data-testid="stTextArea"] textarea::placeholder {
+        color:#5a7a9e;
+    }
+    .st-key-nsm_send_wrap button {
+        height:96px !important;
+        border-radius:18px !important;
+        background:linear-gradient(135deg,#1a73e8,#0d47a1) !important;
+        color:#fff !important;
+        font-size:1.02rem !important;
+        font-weight:600 !important;
+        border:none !important;
+        box-shadow:0 3px 12px rgba(26,115,232,.35) !important;
+        transition:transform .12s ease, box-shadow .12s ease;
+    }
+    .st-key-nsm_send_wrap button:hover {
+        transform:translateY(-1px);
+        box-shadow:0 5px 16px rgba(26,115,232,.45) !important;
+    }
+    .st-key-nsm_send_wrap button:active {
+        transform:translateY(0);
     }
     </style>""", unsafe_allow_html=True)
-    c1, c2 = st.columns([5, 1])
+    c1, c2 = st.columns([5, 1.2], gap="small")
     with c1:
         user_input = st.text_area(
             label="سؤالك",
-            placeholder="اكتب سؤالك... (Enter = سطر جديد)",
+            placeholder="اكتب سؤالك هنا… (Enter = سطر جديد)",
             key="nsm_input",
             label_visibility="collapsed",
-            height=80,
+            height=96,
         )
     with c2:
-        st.markdown("<div style='margin-top:1.7rem'></div>", unsafe_allow_html=True)
-        send = st.button("إرسال ➤", key="nsm_send", use_container_width=True)
+        with st.container(key="nsm_send_wrap"):
+            send = st.button("➤\nإرسال", key="nsm_send", use_container_width=True)
 
     # أسئلة سريعة
     st.markdown("**⚡ أسئلة سريعة:**")
