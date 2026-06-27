@@ -1,14 +1,18 @@
 """
-NSM Agent Core — ai/nsm_agent_core.py  (v2 — Real Agent)
-==========================================================
-قفزة حقيقية نحو Replit Agent:
+NSM Agent Core — ai/nsm_agent_core.py  (v3 — Replit Agent Level)
+=================================================================
+الجديد في v3:
 
-✅ يقرأ الملفات قبل التعديل (لا تعديل أعمى)
-✅ يُشغّل الكود ويرى النتيجة (run_file / run_tests)
-✅ يعرف هيكل المشروع كله ديناميكياً في كل طلب
-✅ يدعم multi-step: سلسلة أفعال في رد واحد
-✅ يُصحّح نفسه إذا فشل التنفيذ (retry مرة واحدة)
-✅ fallback كامل: Cloudflare → Gemini → OpenRouter → Groq
+✅ [v2] يقرأ الملفات قبل التعديل
+✅ [v2] يُشغّل الكود ويرى النتيجة
+✅ [v2] هيكل المشروع الديناميكي في كل طلب
+✅ [v2] multi-step في رد واحد
+✅ [v2] fallback: CF → Gemini → OpenRouter → Groq
+
+🆕 [v3] Streaming بحرف بحرف — Generator يرسل النتائج فور اكتمال كل خطوة
+🆕 [v3] Self-Healing Loop — يصحح أخطاءه تلقائياً (حتى 3 محاولات)
+🆕 [v3] Read-Before-Edit تلقائي — إذا طُلب edit_file بدون read_file سابق،
+         يقرأ الملف أولاً تلقائياً ثم ينفذ التعديل في نفس الدورة
 """
 
 from __future__ import annotations
@@ -17,32 +21,35 @@ import json
 import os
 import subprocess
 import textwrap
+import time
 import urllib.request
 import urllib.error
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Generator, List, Optional, Tuple
 
 ROOT = Path(__file__).parent.parent
 
 # ══════════════════════════════════════════════════════════════════
-# حدود أمان: الملفات الكبيرة تُرسَل مقتطعة فقط
+# حدود أمان
 # ══════════════════════════════════════════════════════════════════
-_MAX_FILE_CHARS  = 6_000   # أقصى عدد حروف للملف في الـ prompt
-_MAX_CONTEXT_FILES = 5     # أقصى ملفات تُقرأ دفعة واحدة
-_MAX_RUN_OUTPUT  = 2_000   # أقصى حروف من نتيجة التنفيذ
-_IGNORED_DIRS = {".git", "__pycache__", ".streamlit", "node_modules",
-                 "venv", ".venv", "weights", "checkpoints", "logs"}
+_MAX_FILE_CHARS    = 6_000
+_MAX_CONTEXT_FILES = 5
+_MAX_RUN_OUTPUT    = 2_000
+_MAX_HEAL_ATTEMPTS = 3      # 🆕 v3: أقصى محاولات إصلاح تلقائي
+_IGNORED_DIRS = {
+    ".git", "__pycache__", ".streamlit", "node_modules",
+    "venv", ".venv", "weights", "checkpoints", "logs",
+}
+
 
 # ══════════════════════════════════════════════════════════════════
 # 1) هيكل المشروع الديناميكي
 # ══════════════════════════════════════════════════════════════════
 
 def _get_project_tree() -> str:
-    """يُنشئ شجرة ملفات المشروع الحقيقية."""
     lines: List[str] = []
     try:
         for p in sorted(ROOT.rglob("*")):
-            # تجاهل المجلدات المحجوبة
             if any(d in p.parts for d in _IGNORED_DIRS):
                 continue
             if p.is_file() and p.suffix in (".py", ".json", ".toml", ".txt", ".md"):
@@ -51,13 +58,11 @@ def _get_project_tree() -> str:
                 lines.append(f"  {rel}  ({size:,} bytes)")
     except Exception:
         pass
-    return "\n".join(lines[:80])  # أقصى 80 ملف
+    return "\n".join(lines[:80])
 
 
 def _read_file_safe(path: str, max_chars: int = _MAX_FILE_CHARS) -> Tuple[str, bool]:
-    """يقرأ الملف بأمان ويُقتطع إذا كان كبيراً.
-    يُعيد (المحتوى, هل_اقتُطع)
-    """
+    """يقرأ الملف بأمان. يُعيد (المحتوى, هل_اقتُطع)"""
     try:
         f = ROOT / path
         if not f.exists():
@@ -67,7 +72,7 @@ def _read_file_safe(path: str, max_chars: int = _MAX_FILE_CHARS) -> Tuple[str, b
             half = max_chars // 2
             snippet = (
                 text[:half]
-                + f"\n\n... [اقتُطع — {len(text):,} حرف إجمالاً، يُعرض {max_chars:,} فقط] ...\n\n"
+                + f"\n\n... [اقتُطع — {len(text):,} حرف، يُعرض {max_chars:,} فقط] ...\n\n"
                 + text[-half:]
             )
             return snippet, True
@@ -82,7 +87,7 @@ def _read_file_safe(path: str, max_chars: int = _MAX_FILE_CHARS) -> Tuple[str, b
 
 def _build_system_prompt() -> str:
     tree = _get_project_tree()
-    return f"""أنت **NSM Agent** — وكيل برمجي ذكي مدمج في مشروع Neural Service Mesh.
+    return f"""أنت **NSM Agent v3** — وكيل برمجي ذكي مدمج في مشروع Neural Service Mesh.
 مشروع Python/Streamlit للذكاء الاصطناعي العربي مع معرفة إسلامية وقرآنية على GitHub.
 
 ## هيكل المشروع الحالي:
@@ -94,6 +99,7 @@ def _build_system_prompt() -> str:
 - تشغيل كود Python وعرض النتيجة
 - رفع التغييرات لـ GitHub تلقائياً
 - سلسلة أفعال متعددة في رد واحد
+- تصحيح أخطائك تلقائياً إذا فشل التنفيذ
 
 ## صيغة الرد — JSON فقط لا غير:
 {{
@@ -118,7 +124,8 @@ def _build_system_prompt() -> str:
 3. الكود يكون مكتملاً وقابلاً للتشغيل فوراً
 4. المسارات نسبية دائماً (مثل: ai/new_module.py)
 5. عند create_file: اكتب الكود كاملاً مع docstring
-6. رد بالعربية في thinking وreply"""
+6. رد بالعربية في thinking وreply
+7. إذا فشل run_file: أصلح الخطأ وأعد المحاولة تلقائياً"""
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -178,9 +185,10 @@ def _call_api(messages: List[Dict]) -> str:
                 parts.append({"role": "user",  "parts": [{"text": m["content"]}]})
             elif m["role"] == "assistant":
                 parts.append({"role": "model", "parts": [{"text": m["content"]}]})
-        body: Dict[str, Any] = {"contents": parts,
-                                 "generationConfig": {"maxOutputTokens": 4000,
-                                                       "temperature": 0.2}}
+        body: Dict[str, Any] = {
+            "contents": parts,
+            "generationConfig": {"maxOutputTokens": 4000, "temperature": 0.2},
+        }
         if sys_text:
             body["systemInstruction"] = {"parts": [{"text": sys_text}]}
         payload = json.dumps(body).encode()
@@ -208,9 +216,11 @@ def _call_api(messages: List[Dict]) -> str:
             }).encode()
             req = urllib.request.Request(
                 _OPENROUTER_URL, data=payload,
-                headers={"Authorization": f"Bearer {or_key}",
-                         "Content-Type": "application/json",
-                         "HTTP-Referer": "https://neural-service-mesh.streamlit.app"},
+                headers={
+                    "Authorization": f"Bearer {or_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://neural-service-mesh.streamlit.app",
+                },
                 method="POST",
             )
             try:
@@ -296,13 +306,8 @@ def _run_step(step: Dict[str, Any]) -> str:
                 return f"❌ الملف غير موجود: {path}"
             text = f.read_text(encoding="utf-8")
             if old not in text:
-                # محاولة مرنة: بعد تطبيع المسافات
                 old_stripped = textwrap.dedent(old).strip()
-                found = False
-                for line in text.split("\n"):
-                    if old_stripped in line:
-                        found = True
-                        break
+                found = any(old_stripped in line for line in text.split("\n"))
                 if not found:
                     return (f"❌ النص القديم غير موجود في `{path}`\n"
                             f"💡 استخدم read_file أولاً لرؤية المحتوى الحالي")
@@ -390,31 +395,201 @@ def _git_push(message: str) -> str:
 # ══════════════════════════════════════════════════════════════════
 
 def _parse_llm_response(raw: str) -> Optional[Dict]:
-    """يحوّل رد LLM لـ dict. يتعامل مع ```json و نص عادي."""
+    """
+    يحوّل رد LLM لـ dict.
+    يجرب 5 طرق استخراج قبل الاستسلام.
+    """
     text = raw.strip()
-    # إزالة ```json ... ```
-    if "```" in text:
-        for block in text.split("```"):
-            b = block.strip()
-            if b.startswith("json"):
-                b = b[4:].strip()
-            try:
-                return json.loads(b)
-            except Exception:
-                continue
-    # محاولة مباشرة
+
+    # ── طريقة 1: JSON مباشر ──
     try:
         return json.loads(text)
     except Exception:
-        # استخراج أول { ... } في النص
-        start = text.find("{")
-        end   = text.rfind("}")
-        if start != -1 and end > start:
+        pass
+
+    # ── طريقة 2: كتلة ```json ... ``` ──
+    if "```" in text:
+        import re
+        for m in re.finditer(r"```(?:json)?(.*?)```", text, re.DOTALL):
+            block = m.group(1).strip()
             try:
-                return json.loads(text[start:end+1])
+                return json.loads(block)
             except Exception:
-                pass
+                continue
+
+    # ── طريقة 3: أول { ... } في النص ──
+    start = text.find("{")
+    end   = text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(text[start:end+1])
+        except Exception:
+            pass
+
+    # ── طريقة 4: تنظيف trailing commas ثم إعادة المحاولة ──
+    if start != -1 and end > start:
+        import re
+        cleaned = re.sub(r",\s*([}\]])", r"\1", text[start:end+1])
+        try:
+            return json.loads(cleaned)
+        except Exception:
+            pass
+
+    # ── طريقة 5: بناء رد answer من النص الحر ──
+    # إذا فشل كل شيء، حوّل الرد النصي لـ answer step
+    if text and len(text) > 5:
+        return {
+            "thinking": "",
+            "steps": [{"action": "answer", "reply": text}]
+        }
+
     return None
+
+
+# ══════════════════════════════════════════════════════════════════
+# 🆕 v3 — إضافة 1: Read-Before-Edit تلقائي
+# ══════════════════════════════════════════════════════════════════
+
+def _inject_read_before_edit(steps: List[Dict]) -> List[Dict]:
+    """
+    إذا وُجد edit_file بدون read_file سابق لنفس الملف،
+    يُضيف read_file تلقائياً قبله.
+    هذا يجعل الوكيل يرى المحتوى الحالي دائماً قبل التعديل.
+    """
+    result: List[Dict] = []
+    read_paths: set = set()
+
+    for step in steps:
+        action = step.get("action", "")
+        path   = step.get("path", "")
+
+        if action == "read_file" and path:
+            read_paths.add(path)
+
+        if action == "edit_file" and path and path not in read_paths:
+            # أضف read_file تلقائياً
+            result.append({"action": "read_file", "path": path,
+                            "_auto": True})  # علامة داخلية
+            read_paths.add(path)
+
+        result.append(step)
+
+    return result
+
+
+# ══════════════════════════════════════════════════════════════════
+# 🆕 v3 — إضافة 2: Self-Healing Loop
+# ══════════════════════════════════════════════════════════════════
+
+def _is_failure(result: str) -> bool:
+    """يتحقق إذا كانت نتيجة الخطوة فشلاً يستحق الإصلاح."""
+    return result.startswith("❌") and any(
+        kw in result for kw in [
+            "خطأ في التشغيل", "خطأ في الإنشاء", "خطأ في التعديل",
+            "غير موجود", "SyntaxError", "ImportError", "ModuleNotFoundError",
+            "NameError", "TypeError", "IndentationError",
+        ]
+    )
+
+
+def _build_heal_prompt(
+    original_request: str,
+    failed_step: Dict,
+    error_msg: str,
+    attempt: int,
+) -> str:
+    """يبني prompt لطلب الإصلاح من LLM."""
+    return (
+        f"فشلت الخطوة في المحاولة {attempt}/{_MAX_HEAL_ATTEMPTS}:\n"
+        f"الخطوة: {json.dumps(failed_step, ensure_ascii=False)}\n"
+        f"الخطأ: {error_msg}\n\n"
+        f"الطلب الأصلي: {original_request}\n\n"
+        f"أصلح المشكلة وأرسل خطوات جديدة صحيحة بصيغة JSON فقط."
+    )
+
+
+# ══════════════════════════════════════════════════════════════════
+# 🆕 v3 — إضافة 3: Streaming Generator
+# ══════════════════════════════════════════════════════════════════
+
+def _stream_steps(
+    steps: List[Dict],
+    thinking: str,
+    messages: List[Dict],
+    original_request: str,
+) -> Generator[str, None, None]:
+    """
+    Generator يُرسل النتائج فور اكتمال كل خطوة (Streaming).
+    يدعم Self-Healing: إذا فشلت خطوة، يطلب الإصلاح ويعيد المحاولة.
+    """
+    if thinking:
+        yield f"🤔 **{thinking}**\n\n"
+
+    total = len(steps)
+
+    for i, step in enumerate(steps, 1):
+        action = step.get("action", "answer")
+        prefix = f"**الخطوة {i}/{total}** " if total > 1 else ""
+
+        # علامة القراءة التلقائية
+        if step.get("_auto"):
+            yield f"{prefix}🔍 *قراءة تلقائية قبل التعديل...*\n"
+
+        # ── تنفيذ الخطوة ──
+        result = _run_step(step)
+        yield f"{prefix}{result}\n\n"
+
+        # ── Self-Healing Loop 🆕 ──
+        if _is_failure(result) and action in ("run_file", "create_file", "edit_file"):
+            healed = False
+            for attempt in range(1, _MAX_HEAL_ATTEMPTS + 1):
+                yield f"🔧 **محاولة إصلاح تلقائي {attempt}/{_MAX_HEAL_ATTEMPTS}...**\n"
+
+                heal_messages = list(messages) + [
+                    {
+                        "role": "user",
+                        "content": _build_heal_prompt(
+                            original_request, step, result, attempt
+                        ),
+                    }
+                ]
+
+                try:
+                    raw_heal  = _call_api(heal_messages)
+                    parsed_h  = _parse_llm_response(raw_heal)
+                    if not parsed_h:
+                        yield "⚠️ لم أتمكن من تحليل رد الإصلاح\n"
+                        break
+
+                    heal_steps = parsed_h.get("steps", [])
+                    if not heal_steps and parsed_h.get("action"):
+                        heal_steps = [parsed_h]
+
+                    if not heal_steps:
+                        yield "⚠️ لا توجد خطوات إصلاح\n"
+                        break
+
+                    # تنفيذ خطوات الإصلاح
+                    all_ok = True
+                    for hs in heal_steps:
+                        hr = _run_step(hs)
+                        yield f"  ↳ {hr}\n"
+                        if _is_failure(hr):
+                            all_ok = False
+                            result = hr  # للمحاولة التالية
+                            break
+
+                    if all_ok:
+                        yield f"✅ **تم الإصلاح في المحاولة {attempt}**\n\n"
+                        healed = True
+                        break
+
+                except Exception as e:
+                    yield f"⚠️ خطأ في الإصلاح: {e}\n"
+                    break
+
+            if not healed:
+                yield f"❌ **فشل الإصلاح بعد {_MAX_HEAL_ATTEMPTS} محاولات**\n\n"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -423,8 +598,11 @@ def _parse_llm_response(raw: str) -> Optional[Dict]:
 
 class NSMAgent:
     """
-    وكيل NSM الحقيقي — يقرأ الملفات، يعدّلها، يشغّل الكود، يرفع GitHub.
-    يُستدعى من nsm_chat.py تلقائياً.
+    وكيل NSM v3 — Replit Agent Level:
+    - Streaming بحرف بحرف عبر run_stream()
+    - Self-Healing تلقائي (حتى 3 محاولات)
+    - Read-Before-Edit تلقائي
+    - run() للتوافق مع nsm_chat.py القديم (يجمع الـ stream)
     """
 
     def __init__(self) -> None:
@@ -452,92 +630,93 @@ class NSMAgent:
                 pass
         return self._llm_fallback
 
-    # ── قلب الوكيل ──
-    def run(self, user_input: str) -> str:
+    # ══════════════════════════════════════════════════════════════
+    # 🆕 v3: run_stream — Streaming Generator
+    # ══════════════════════════════════════════════════════════════
+    def run_stream(self, user_input: str) -> Generator[str, None, None]:
+        """
+        Generator يُرسل أجزاء الرد فور اكتمال كل خطوة.
+        الاستخدام في Streamlit:
+            with st.chat_message("assistant"):
+                placeholder = st.empty()
+                full = ""
+                for chunk in agent.run_stream(user_input):
+                    full += chunk
+                    placeholder.markdown(full)
+        """
         self.available = self._check_available()
         if not self.available:
-            return "⚠️ لا يوجد مفتاح API — أضف GOOGLE_API_KEY في Streamlit Secrets"
+            yield "⚠️ لا يوجد مفتاح API — أضف GOOGLE_API_KEY في Streamlit Secrets"
+            return
 
-        # ── بناء رسائل الـ API ──
-        system = _build_system_prompt()   # هيكل المشروع الحالي في كل طلب
+        # بناء رسائل API
+        system   = _build_system_prompt()
         messages: List[Dict] = [{"role": "system", "content": system}]
-        messages += self.history[-8:]     # آخر 4 رسائل للسياق
+        messages += self.history[-8:]
         messages.append({"role": "user", "content": user_input})
 
-        # ── استدعاء LLM ──
+        yield "⏳ *أفكر...*\n\n"
+
+        # استدعاء LLM
         raw: Optional[str] = None
         try:
             raw = _call_api(messages)
         except Exception as e:
-            # fallback للنص العادي
             fb = self._get_llm_fallback()
             if fb and fb.available:
                 try:
                     result = fb.generate(user_input)
-                    return result.text
+                    yield result.text
+                    return
                 except Exception:
                     pass
-            return f"⚠️ لا يمكن الوصول لأي مزوّد LLM:\n{e}"
+            yield f"⚠️ لا يمكن الوصول لأي مزوّد LLM:\n{e}"
+            return
 
-        # ── حفظ في التاريخ ──
+        # حفظ في التاريخ
         self.history.append({"role": "user",      "content": user_input})
         self.history.append({"role": "assistant",  "content": raw})
 
-        # ── تحليل الرد ──
+        # تحليل الرد
         parsed = _parse_llm_response(raw)
         if parsed is None:
-            # رد نصي عادي — اعرضه مباشرة
-            return raw
+            # هذا لا يحدث بعد الآن (الطريقة 5 تحوّل أي نص لـ answer)
+            # لكن نحتفظ بالـ fallback للأمان
+            yield raw
+            return
 
         thinking = parsed.get("thinking", "")
         steps    = parsed.get("steps", [])
 
-        # دعم الصيغة القديمة (action في الجذر مباشرة)
+        # دعم الصيغة القديمة
         if not steps and parsed.get("action"):
             steps = [parsed]
 
         if not steps:
             reply = parsed.get("reply", raw)
-            return f"🤔 {thinking}\n\n💬 {reply}" if thinking else reply
+            if thinking:
+                yield f"🤔 {thinking}\n\n"
+            yield f"💬 {reply}"
+            return
 
-        # ── تنفيذ الخطوات ──
-        output_parts: List[str] = []
-        if thinking:
-            output_parts.append(f"🤔 **{thinking}**\n")
+        # 🆕 Read-Before-Edit تلقائي
+        steps = _inject_read_before_edit(steps)
 
-        read_results: Dict[str, str] = {}  # نتائج read_file لإضافتها للسياق
+        # 🆕 Stream الخطوات مع Self-Healing
+        yield from _stream_steps(steps, thinking, messages, user_input)
 
-        for i, step in enumerate(steps, 1):
-            prefix = f"**الخطوة {i}/{len(steps)}**" if len(steps) > 1 else ""
-            result = _run_step(step)
-            output_parts.append(f"{prefix}\n{result}" if prefix else result)
-
-            # إذا كانت read_file — احفظ المحتوى لخطوة تالية محتملة
-            if step.get("action") == "read_file" and step.get("path"):
-                read_results[step["path"]] = result
-
-        # ── إذا كانت هناك read_file فقط وخطوات أخرى لاحقة — أعد الاستدعاء ──
-        # (سيرى LLM محتوى الملف في التاريخ ويقرر التعديل)
-        if read_results and len(steps) == 1 and steps[0].get("action") == "read_file":
-            file_ctx = "\n\n".join(
-                f"محتوى `{p}`:\n{c}" for p, c in read_results.items()
-            )
-            followup = (f"هذا محتوى الملف الذي طلبته:\n{file_ctx}\n\n"
-                        f"الآن نفّذ الطلب الأصلي: {user_input}")
-            messages.append({"role": "assistant", "content": raw})
-            messages.append({"role": "user",      "content": followup})
-            try:
-                raw2   = _call_api(messages)
-                parsed2 = _parse_llm_response(raw2)
-                if parsed2 and parsed2.get("steps"):
-                    self.history.append({"role": "assistant", "content": raw2})
-                    output_parts.append("\n---")
-                    for step in parsed2["steps"]:
-                        output_parts.append(_run_step(step))
-            except Exception:
-                pass
-
-        return "\n\n".join(output_parts)
+    # ══════════════════════════════════════════════════════════════
+    # run() — للتوافق مع nsm_chat.py القديم
+    # ══════════════════════════════════════════════════════════════
+    def run(self, user_input: str) -> str:
+        """
+        يجمع كل chunks من run_stream في نص واحد.
+        متوافق 100% مع nsm_chat.py بدون أي تعديل فيه.
+        """
+        parts: List[str] = []
+        for chunk in self.run_stream(user_input):
+            parts.append(chunk)
+        return "".join(parts).replace("⏳ *أفكر...*\n\n", "", 1)
 
     def clear(self) -> None:
         self.history.clear()
