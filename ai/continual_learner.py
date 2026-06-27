@@ -570,3 +570,225 @@ class EWCTrainingLoop:
         draw   = (dza - za * float(za @ dza)) / na
         dE     = np.outer(anc, draw)
         return loss, dE
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ConversationLearner — التعلم من المحادثات الحقيقية
+# يُضاف للملف الأصلي دون تعديل EWCLearner
+# ══════════════════════════════════════════════════════════════════════════════
+
+import json
+import re
+import sqlite3
+import time as _time
+from pathlib import Path as _Path
+
+_CONV_DB = "memory/nsm_learning.db"
+_MAX_CACHED_AGE = 86400 * 7
+
+
+def _init_conv_db(path: str):
+    p = _Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(p) as c:
+        c.executescript("""
+            CREATE TABLE IF NOT EXISTS learned_qa (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                question      TEXT NOT NULL,
+                answer        TEXT NOT NULL,
+                domain        TEXT DEFAULT 'عام',
+                quality       REAL DEFAULT 0.5,
+                usage_count   INTEGER DEFAULT 0,
+                positive_fb   INTEGER DEFAULT 0,
+                negative_fb   INTEGER DEFAULT 0,
+                created_at    REAL NOT NULL,
+                last_used     REAL NOT NULL,
+                q_hash        TEXT UNIQUE
+            );
+            CREATE TABLE IF NOT EXISTS response_cache (
+                q_hash    TEXT PRIMARY KEY,
+                query     TEXT NOT NULL,
+                response  TEXT NOT NULL,
+                quality   REAL DEFAULT 0.5,
+                hits      INTEGER DEFAULT 0,
+                created   REAL NOT NULL,
+                last_hit  REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_domain ON learned_qa(domain, quality DESC);
+            CREATE INDEX IF NOT EXISTS idx_usage  ON learned_qa(usage_count DESC);
+        """)
+
+
+def _qhash(text: str) -> str:
+    h = 0x811c9dc5
+    for ch in text.lower()[:100]:
+        h ^= ord(ch); h = (h * 0x01000193) & 0xFFFFFFFF
+    return f"{h:08x}"
+
+
+def _estimate_quality(question: str, answer: str) -> float:
+    if not answer or len(answer) < 20:
+        return 0.1
+    score = 0.5
+    if len(answer) > 80:    score += 0.15
+    if len(question) > 10:  score += 0.10
+    if re.search(r'[\u0600-\u06FF]{50,}', answer): score += 0.10
+    if re.search(r'(لا أعرف|لست متأكد|خطأ|error)', answer, re.I): score -= 0.20
+    return round(min(0.95, max(0.1, score)), 3)
+
+
+class ConversationLearner:
+    """
+    يتعلم من كل محادثة حقيقية ويحفظها في SQLite.
+
+    الاستخدام:
+        learner = ConversationLearner()
+
+        # بعد كل رد
+        learner.learn(question, answer, domain="صلاة")
+
+        # تقييم
+        learner.feedback(question, is_positive=True)
+
+        # قبل الإرسال للـ LLM — ابحث في الذاكرة أولاً
+        recalled = learner.recall(question)
+    """
+
+    def __init__(self, db_path: str = _CONV_DB):
+        self._db = db_path
+        _init_conv_db(db_path)
+        self._session = {"learned": 0, "recalled": 0, "feedback": 0}
+
+    def learn(self, question: str, answer: str, domain: str = "عام",
+              source: str = "conversation") -> float:
+        """يتعلم من تفاعل. يعيد درجة الجودة."""
+        if not question or not answer:
+            return 0.0
+        quality = _estimate_quality(question, answer)
+        if quality < 0.3:
+            return quality
+        qh = _qhash(question)
+        now = _time.time()
+        try:
+            with sqlite3.connect(self._db) as c:
+                c.execute("""
+                    INSERT INTO learned_qa
+                    (question,answer,domain,quality,usage_count,created_at,last_used,q_hash)
+                    VALUES(?,?,?,?,0,?,?,?)
+                    ON CONFLICT(q_hash) DO UPDATE SET
+                        answer      = CASE WHEN excluded.quality > quality
+                                      THEN excluded.answer ELSE answer END,
+                        quality     = MAX(quality, excluded.quality),
+                        usage_count = usage_count + 1,
+                        last_used   = excluded.last_used
+                """, (question[:300], answer[:800], domain, quality, now, now, qh))
+                # كاش
+                c.execute("""
+                    INSERT INTO response_cache(q_hash,query,response,quality,hits,created,last_hit)
+                    VALUES(?,?,?,?,0,?,?)
+                    ON CONFLICT(q_hash) DO UPDATE SET
+                        response = CASE WHEN excluded.quality > quality
+                                   THEN excluded.response ELSE response END,
+                        quality  = MAX(quality, excluded.quality),
+                        hits     = hits + 1, last_hit = excluded.last_hit
+                """, (qh, question[:200], answer[:600], quality, now, now))
+        except Exception as e:
+            logger.debug(f"ConversationLearner.learn: {e}")
+        self._session["learned"] += 1
+        return quality
+
+    def recall(self, query: str, min_quality: float = 0.6) -> Optional[dict]:
+        """يبحث في الكاش والإجابات المتعلَّمة."""
+        qh = _qhash(query)
+        now = _time.time()
+        try:
+            with sqlite3.connect(self._db) as c:
+                # كاش
+                row = c.execute(
+                    "SELECT response,quality FROM response_cache "
+                    "WHERE q_hash=? AND quality>=? AND (?-last_hit)<?",
+                    (qh, min_quality, now, _MAX_CACHED_AGE)
+                ).fetchone()
+                if row:
+                    c.execute("UPDATE response_cache SET hits=hits+1,last_hit=? WHERE q_hash=?",
+                              (now, qh))
+                    self._session["recalled"] += 1
+                    return {"answer": row[0], "quality": row[1], "source": "cache"}
+
+                # بحث بالكلمات المفتاحية
+                words = re.findall(r'[\u0600-\u06FF]{2,}|[a-zA-Z]{3,}', query)[:4]
+                for w in words:
+                    row2 = c.execute(
+                        "SELECT answer,quality FROM learned_qa "
+                        "WHERE question LIKE ? AND quality>=? "
+                        "ORDER BY quality DESC LIMIT 1",
+                        (f"%{w}%", min_quality)
+                    ).fetchone()
+                    if row2:
+                        self._session["recalled"] += 1
+                        return {"answer": row2[0], "quality": row2[1], "source": "learned"}
+        except Exception as e:
+            logger.debug(f"ConversationLearner.recall: {e}")
+        return None
+
+    def feedback(self, question: str, is_positive: bool) -> bool:
+        """تطبيق تقييم 👍/👎"""
+        qh = _qhash(question)
+        col   = "positive_fb" if is_positive else "negative_fb"
+        delta = 0.05 if is_positive else -0.05
+        try:
+            with sqlite3.connect(self._db) as c:
+                c.execute(
+                    f"UPDATE learned_qa SET {col}={col}+1, "
+                    f"quality=MAX(0.1,MIN(1.0,quality+?)) WHERE q_hash=?",
+                    (delta, qh)
+                )
+            self._session["feedback"] += 1
+            return True
+        except Exception:
+            return False
+
+    def infer_implicit_feedback(self, prev_answer: str, followup: str) -> Optional[bool]:
+        """يستنتج التقييم الضمني من سؤال المتابعة"""
+        NEG = ["لماذا","هل أنت متأكد","غير صحيح","خطأ","لا أعتقد","لا أوافق"]
+        POS = ["شكراً","جيد","ممتاز","صحيح","رائع","أحسنت","مفيد"]
+        fl  = followup.lower()
+        if any(s in fl for s in NEG): return False
+        if any(s in fl for s in POS): return True
+        return None
+
+    def learn_batch(self, history: List[Tuple[str, str]], domain: str = "عام") -> int:
+        """تعلم دفعي من قائمة (سؤال، جواب)"""
+        return sum(1 for q,a in history if self.learn(q, a, domain) > 0.3)
+
+    def stats(self) -> dict:
+        try:
+            with sqlite3.connect(self._db) as c:
+                total = c.execute("SELECT COUNT(*) FROM learned_qa").fetchone()[0]
+                avg_q = c.execute("SELECT AVG(quality) FROM learned_qa").fetchone()[0] or 0
+                by_domain = c.execute(
+                    "SELECT domain,COUNT(*),AVG(quality) FROM learned_qa "
+                    "GROUP BY domain ORDER BY COUNT(*) DESC LIMIT 5"
+                ).fetchall()
+            return {
+                "total_learned": total,
+                "avg_quality":   round(avg_q, 3),
+                "session":       self._session,
+                "by_domain":     [{"domain": d,"count": n,"quality": round(q,3)}
+                                  for d,n,q in by_domain],
+            }
+        except Exception:
+            return {"session": self._session}
+
+    def expertise(self) -> Dict[str, float]:
+        """مستوى الخبرة في كل مجال (0-1)"""
+        try:
+            with sqlite3.connect(self._db) as c:
+                rows = c.execute(
+                    "SELECT domain,COUNT(*),AVG(quality) FROM learned_qa GROUP BY domain"
+                ).fetchall()
+            if not rows: return {}
+            mx = max(r[1] for r in rows)
+            return {d: round(n/mx*0.5 + q*0.5, 3) for d,n,q in rows}
+        except Exception:
+            return {}
