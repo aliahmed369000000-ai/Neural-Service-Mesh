@@ -100,6 +100,7 @@ class NSMChatPlus(NSMChat):
         self._last_source = (
             "llm"
             if result.provider in (
+                Provider.CLOUDFLARE,
                 Provider.GROQ,
                 Provider.OPENAI,
                 Provider.TOGETHER,
