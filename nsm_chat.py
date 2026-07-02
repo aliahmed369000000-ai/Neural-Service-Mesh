@@ -44,7 +44,7 @@ try:
     from ai.code_agent import (
         read_file, list_files, edit_file,
         create_file, git_push, project_suggestions,
-        fix_file, summarize_file
+        fix_file, summarize_file, web_search
     )
     _HAS_AGENT = True
     print("✓ Code Agent مُفعَّل")
@@ -119,6 +119,13 @@ def _handle_code_command(user_input: str) -> str | None:
     if t.startswith("ارفع"):
         msg = t[4:].strip() or "NSM auto-commit"
         return git_push(msg)
+
+    # ابحث <نص> — 🆕 بحث حقيقي في الإنترنت
+    if t.startswith("ابحث "):
+        q = t[5:].strip()
+        if not q:
+            return "💡 الصيغة: ابحث <نص البحث>"
+        return web_search(q)
 
     # عدل path | old | new
     if t.startswith("عدل ") and "|" in t:
