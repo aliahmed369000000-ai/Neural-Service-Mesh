@@ -98,6 +98,7 @@ def _build_system_prompt() -> str:
 - كتابة وتعديل الملفات مباشرة على القرص
 - تشغيل كود Python وعرض النتيجة
 - رفع التغييرات لـ GitHub تلقائياً
+- 🆕 بحث حقيقي في الإنترنت (بدون مفتاح API) لمعلومات حديثة أو خارجية
 - سلسلة أفعال متعددة في رد واحد
 - تصحيح أخطائك تلقائياً إذا فشل التنفيذ
 
@@ -106,13 +107,14 @@ def _build_system_prompt() -> str:
   "thinking": "تحليلك للطلب خطوة بخطوة",
   "steps": [
     {{
-      "action": "read_file | create_file | edit_file | run_file | run_tests | git_push | answer",
+      "action": "read_file | create_file | edit_file | run_file | run_tests | git_push | web_search | answer",
       "path": "المسار النسبي من جذر المشروع",
       "content": "محتوى الملف الكامل (لـ create_file)",
       "old": "النص القديم المراد استبداله (لـ edit_file) — يجب أن يكون موجوداً حرفياً",
       "new": "النص الجديد البديل (لـ edit_file)",
       "cmd": "أمر bash للتشغيل (لـ run_file)",
       "message": "رسالة commit (لـ git_push)",
+      "query": "نص البحث (لـ web_search فقط)",
       "reply": "رد للمستخدم بالعربية (لـ answer)"
     }}
   ]
@@ -288,6 +290,7 @@ def _run_step(step: Dict[str, Any]) -> str:
     message = step.get("message", "NSM Agent auto-commit")
     reply   = step.get("reply", "")
     cmd     = step.get("cmd", "")
+    query   = step.get("query", "")
 
     # ── 🆕 حماية: النموذج أحياناً (خصوصاً النماذج الصغيرة/الاحتياطية)
     # ينسخ قيمة الحقل من الـ schema حرفياً بدل اختيار فعل واحد حقيقي،
@@ -296,12 +299,12 @@ def _run_step(step: Dict[str, Any]) -> str:
     # صراحة كخطأ قابل للاكتشاف عبر _is_failure() ليُعاد المحاولة تلقائياً.
     _VALID_ACTIONS = {
         "read_file", "create_file", "edit_file",
-        "run_file", "run_tests", "git_push", "answer",
+        "run_file", "run_tests", "git_push", "web_search", "answer",
     }
     if action not in _VALID_ACTIONS:
         return (f"❌ فعل غير صالح من النموذج: '{action}'\n"
                 f"💡 يجب اختيار فعل واحد بالضبط من: "
-                f"read_file, create_file, edit_file, run_file, run_tests, git_push, answer")
+                f"read_file, create_file, edit_file, run_file, run_tests, git_push, web_search, answer")
 
     # ── read_file ──
     if action == "read_file":
@@ -384,6 +387,16 @@ def _run_step(step: Dict[str, Any]) -> str:
     # ── git_push ──
     if action == "git_push":
         return _git_push(message)
+
+    # ── web_search ── 🆕
+    if action == "web_search":
+        if not query:
+            return "❌ web_search: مطلوب query (نص البحث)"
+        try:
+            from ai.web_search_tool import web_search as _web_search
+            return _web_search(query)
+        except Exception as e:
+            return f"❌ خطأ في أداة البحث: {e}"
 
     # ── answer ──
     if reply:
