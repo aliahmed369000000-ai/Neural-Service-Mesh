@@ -2,8 +2,8 @@
 NSMChat+ — امتداد NSMChat بطبقة التوليد الحقيقي
 =================================================
 Drop-in replacement لـ NSMChat يضيف:
-  - LLM Generative Fallback عندما score < KB_THRESHOLD
-  - شارة مصدر الإجابة: 📚 قاموس | 🤖 LLM | 🕸️ رسم معرفي
+  - كل الردود تمر عبر NSM Agent / Code Agent / LLM حصراً — لا قاموس ثابت
+  - شارة مصدر الإجابة: 🧠 NSM Agent | 🛠️ Code Agent | 🤖 LLM | 🕸️ رسم معرفي
   - دعم Multi-turn context window كامل للـ LLM
   - احتفاظ كامل بتوافق الواجهة مع NSMChat الأصلي
 """
@@ -23,14 +23,15 @@ from ai.llm_fallback import LLMFallback, Provider
 
 logger = logging.getLogger("NSMChatPlus")
 
-# الحد الأدنى لقبول إجابة مباشرة من القاموس الثابت.
-# الأصل في NSMChat هو 0.12 — نرفعه قليلاً لتوسيع نطاق تدخّل الـ LLM.
+# ⚠️ غير مُستخدَم في هذا الملف بعد حذف القاموس — أُبقي عليه فقط لأن
+# nsm_chat_cot.py القديم يستورده. لا تأثير له على مسار الردود هنا.
 _KB_THRESHOLD = 0.18
 
 _SOURCE_BADGES: Dict[str, str] = {
-    "kb":  "📚 قاموس NSM",
-    "llm": "🤖 LLM",
-    "ckg": "🕸️ رسم معرفي",
+    "llm":       "🤖 LLM",
+    "ckg":       "🕸️ رسم معرفي",
+    "nsm_agent": "🧠 NSM Agent",
+    "code_agent":"🛠️ Code Agent",
 }
 
 
@@ -38,26 +39,25 @@ class NSMChatPlus(NSMChat):
     """
     NSMChat مُعزَّز بطبقة توليد LLM حقيقي.
 
-    التسلسل عند كل سؤال:
-      1. يُثري الاستعلام بالسياق (مثل NSMChat الأصلي)
-      2. يبحث في _KB (keyword + embedding cosine)
-      3. إذا score >= KB_THRESHOLD → إجابة القاموس (سريع، دقيق)
-      4. إذا score < KB_THRESHOLD  → LLMFallback:
-           a. Groq / OpenAI / HuggingFace  إذا وُجد GROQ_API_KEY أو ما يعادله
-           b. CKG Synthesis                 إذا لا مفتاح (يولّد من cognitive_graph.json)
+    التسلسل عند كل سؤال (لا يوجد قاموس ثابت — أُزيل نهائياً):
+      1. NSM Agent (أوامر بناء/تعديل عبر _AGENT_TRIGGERS)
+      2. Code Agent (أوامر دقيقة: افحص/قائمة/ارفع/عدل)
+      3. LLMFallback مباشرة لكل ما تبقى:
+           a. Cloudflare / Groq / Gemini / OpenRouter / OpenAI حسب المتاح
+           b. CKG Synthesis فقط إذا لا يوجد أي مفتاح API
 
     الاستخدام المباشر:
         bot = NSMChatPlus()
         reply = bot.chat("ما حكم الصلاة في الإسلام؟")
         print(reply)
-        print(bot.source_badge())   # "📚 قاموس NSM" أو "🤖 llama-3.1-8b-instant" ...
+        print(bot.source_badge())   # "🧠 NSM Agent" أو "🤖 llama-3.1-8b-instant" ...
     """
 
     def __init__(self, ckg=None):
         super().__init__()
         self._ckg         = ckg
         self.fallback     = LLMFallback(ckg=ckg)
-        self._last_source = "kb"
+        self._last_source = "nsm_agent"   # قيمة افتراضية محايدة — لا يوجد قاموس بعد الآن
         self._last_score  = 0.0
         logger.info(
             f"[NSMChatPlus] جاهز | fallback: {self.fallback.provider.value}"
@@ -119,12 +119,12 @@ class NSMChatPlus(NSMChat):
 
     @property
     def last_source(self) -> str:
-        """مصدر آخر إجابة: 'kb' | 'llm' | 'ckg'"""
+        """مصدر آخر إجابة: 'nsm_agent' | 'code_agent' | 'llm' | 'ckg'"""
         return self._last_source
 
     @property
     def last_score(self) -> float:
-        """نتيجة cosine similarity لآخر بحث في القاموس"""
+        """محجوزة للتوافق الخلفي — غير مُستخدَمة بعد حذف القاموس"""
         return self._last_score
 
     def source_badge(self) -> str:

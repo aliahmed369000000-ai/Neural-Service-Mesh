@@ -104,11 +104,12 @@ if str(_ROOT) not in sys.path:
 
 @st.cache_resource(show_spinner="⟳ تحميل NSM Chat...")
 def load_model():
-    from nsm_chat import NSMChat, _KB
-    return NSMChat, len(_KB)
+    from nsm_chat import NSMChat
+    return NSMChat
 
 try:
-    NSMChat, topics_count = load_model()
+    NSMChat = load_model()
+    topics_count = 0  # لا يوجد قاموس ثابت بعد الآن — كل الردود عبر LLM/Agent
     model_ok = True
 except Exception as e:
     model_ok = False
