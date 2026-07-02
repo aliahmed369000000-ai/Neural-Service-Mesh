@@ -2,7 +2,7 @@
 NSM Code Agent — ai/code_agent.py
 ===================================
 أدوات تحكم كاملة في المشروع من المحادثة:
-  افحص / عدل / أنشئ / ارفع / قائمة / اقترح / صحح / ملخص
+  افحص / عدل / أنشئ / ارفع / قائمة / اقترح / صحح / ملخص / ابحث
 """
 
 from __future__ import annotations
@@ -12,6 +12,8 @@ import os
 import subprocess
 from pathlib import Path
 from typing import List, Dict
+
+from ai.web_search_tool import web_search  # 🆕 أداة بحث حقيقية مشتركة (بدون مفتاح API)
 
 ROOT = Path(__file__).parent.parent
 _MAX_READ = 5000  # حد القراءة بالحروف
