@@ -1,16 +1,17 @@
 """
-LLM Generative Fallback Engine — NSM v18.2
+LLM Generative Fallback Engine — NSM v18.3
 ============================================
 يوفر طبقة توليد نصي حقيقي عندما لا يجد NSMChat إجابة كافية في قاموسه الثابت.
 
 الأولوية في اختيار المزوّد (auto-detect من env vars):
-  1. OpenAI API      (OPENAI_API_KEY)   — GPT-4o-mini  ✅ متاح من Replit
-  2. Together.xyz    (TOGETHER_API_KEY) — Llama-3/Mixtral مجاني  ✅ متاح من Replit
-  3. Google Gemini   (GOOGLE_API_KEY)   — Gemini 1.5 Flash  ✅ متاح من Replit
-  4. CKG Synthesis   (بدون مفتاح)      — يولّد من الرسم المعرفي دائماً
-
-ملاحظة: Groq (GROQ_API_KEY) محجوب من Replit IPs عبر Cloudflare (error 1010).
-         للاستخدام على Streamlit Community Cloud أو server خاص — يعمل بلا مشكلة.
+  1. Anthropic Claude (ANTHROPIC_API_KEY) — Claude Sonnet 5 ← الأولوية الأولى ✅
+  2. Cloudflare Workers AI (CF_API_TOKEN + CF_ACCOUNT_ID) — مجاني 10k/يوم
+  3. Google Gemini   (GOOGLE_API_KEY)   — Gemini 1.5 Flash
+  4. OpenRouter      (OPENROUTER_API_KEY)
+  5. Groq            (GROQ_API_KEY)     — قد يُحجب من بعض الشبكات
+  6. OpenAI API      (OPENAI_API_KEY)   — GPT-4o-mini
+  7. Together.xyz    (TOGETHER_API_KEY) — Llama-3/Mixtral
+  8. CKG Synthesis   (بدون مفتاح)      — يولّد من الرسم المعرفي دائماً
 
 الاستخدام:
     from ai.llm_fallback import LLMFallback
@@ -18,7 +19,7 @@ LLM Generative Fallback Engine — NSM v18.2
     fb = LLMFallback(ckg=my_ckg_instance)
     result = fb.generate("ما هو مفهوم التوحيد في الإسلام؟", history=[...])
     print(result.text)
-    print(result.provider.value)  # "openai" | "together" | "gemini" | "ckg_synthesis"
+    print(result.provider.value)  # "anthropic" | "cloudflare" | "gemini" | ... | "ckg_synthesis"
 """
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ logger = logging.getLogger("LLMFallback")
 # ════════════════════════════════════════════════════════════════════════════
 
 class Provider(Enum):
+    ANTHROPIC = "anthropic"    # Claude — الأولوية الأولى ✅
     CLOUDFLARE = "cloudflare"  # مجاني 10k/يوم ويعمل من اليمن ✅
     GEMINI    = "gemini"
     OPENROUTER = "openrouter"
@@ -48,6 +50,14 @@ class Provider(Enum):
     TOGETHER  = "together"
     GROQ      = "groq"
     CKG_SYNTH = "ckg_synthesis"
+
+
+# مصدر وحيد للحقيقة لكل المزوّدين "الحيّين" (ليسوا CKG synthesis).
+# استخدم هذا في أي مكان بالمشروع بدل كتابة قائمة يدوية جديدة، لتفادي
+# نسيان مزوّد جديد (كما حدث سابقاً مع Provider.CLOUDFLARE).
+LIVE_LLM_PROVIDERS = frozenset(
+    p for p in Provider if p is not Provider.CKG_SYNTH
+)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -66,6 +76,7 @@ _SYSTEM_PROMPT = (
     "4. لا تُشر إلى نفسك كـ GPT أو Claude أو أي نموذج آخر — أنت NSM"
 )
 
+_ANTHROPIC_MODEL = "claude-sonnet-5"  # الأولوية الأولى ✅
 _CF_MODEL        = "@cf/meta/llama-3.1-8b-instruct"  # مجاني 10k/يوم ✅
 _OPENROUTER_MODEL = "meta-llama/llama-3.1-8b-instruct:free"  # مجاني
 _OPENROUTER_URL   = "https://openrouter.ai/api/v1/chat/completions"
@@ -173,12 +184,15 @@ class LLMFallback:
     """
     طبقة التوليد الذكي. تُفعَّل عند score < threshold في NSMChat.
 
-    أولوية المزوّدين (حسب الإمكانية من Replit):
-      1. OpenAI   (OPENAI_API_KEY)   ← أفضل جودة
-      2. Together (TOGETHER_API_KEY) ← مجاني، نماذج مفتوحة
+    أولوية المزوّدين:
+      1. Anthropic Claude (ANTHROPIC_API_KEY) ← الأولوية الأولى دائماً
+      2. Cloudflare (CF_API_TOKEN + CF_ACCOUNT_ID) ← مجاني 10k/يوم
       3. Gemini   (GOOGLE_API_KEY)   ← سريع ومجاني
-      4. Groq     (GROQ_API_KEY)     ← يعمل خارج Replit فقط
-      5. CKG Synthesis               ← دائماً متاح
+      4. OpenRouter (OPENROUTER_API_KEY)
+      5. Groq     (GROQ_API_KEY)     ← قد يُحجب من بعض الشبكات
+      6. OpenAI   (OPENAI_API_KEY)
+      7. Together (TOGETHER_API_KEY)
+      8. CKG Synthesis               ← دائماً متاح (fallback أخير)
 
     مثال:
         fb = LLMFallback(ckg=my_ckg)
@@ -206,38 +220,43 @@ class LLMFallback:
     # ── اكتشاف المزوّد تلقائياً ─────────────────────────────────────────
 
     def _detect_provider(self) -> Tuple[Provider, str, str]:
-        # 1) Cloudflare Workers AI — مجاني 10k/يوم ويعمل من اليمن ✅
+        # 1) Anthropic Claude — الأولوية الأولى دائماً ✅
+        k = os.getenv("ANTHROPIC_API_KEY", "").strip()
+        if k:
+            return Provider.ANTHROPIC, k, _ANTHROPIC_MODEL
+
+        # 2) Cloudflare Workers AI — مجاني 10k/يوم ويعمل من اليمن ✅
         cf_token = os.getenv("CF_API_TOKEN", "").strip()
         cf_account = os.getenv("CF_ACCOUNT_ID", "").strip()
         if cf_token and cf_account:
             return Provider.CLOUDFLARE, cf_token, _CF_MODEL
 
-        # 2) Google Gemini — مجاني (قد لا يعمل من اليمن)
+        # 3) Google Gemini — مجاني (قد لا يعمل من اليمن)
         k = os.getenv("GOOGLE_API_KEY", "").strip()
         if k and k.startswith("AIzaSy"):
             return Provider.GEMINI, k, _GEMINI_MODEL
 
-        # 3) OpenRouter
+        # 4) OpenRouter
         k = os.getenv("OPENROUTER_API_KEY", "").strip()
         if k:
             return Provider.OPENROUTER, k, _OPENROUTER_MODEL
 
-        # 4) Groq (محجوب في اليمن)
+        # 5) Groq (قد يُحجب من بعض الشبكات)
         k = os.getenv("GROQ_API_KEY", "").strip()
         if k:
             return Provider.GROQ, k, _GROQ_MODELS[0]
 
-        # 5) OpenAI
+        # 6) OpenAI
         k = os.getenv("OPENAI_API_KEY", "").strip()
         if k:
             return Provider.OPENAI, k, _OPENAI_MODEL
 
-        # 6) Together
+        # 7) Together
         k = os.getenv("TOGETHER_API_KEY", "").strip()
         if k:
             return Provider.TOGETHER, k, _TOGETHER_MODEL
 
-        # 7) CKG فقط
+        # 8) CKG فقط
         return Provider.CKG_SYNTH, "", "ckg-synthesis-v1"
 
     # ── الواجهة العامة ───────────────────────────────────────────────────
@@ -264,7 +283,9 @@ class LLMFallback:
         history = history or []
 
         try:
-            if self._provider == Provider.CLOUDFLARE:
+            if self._provider == Provider.ANTHROPIC:
+                result = self._call_anthropic(query, history)
+            elif self._provider == Provider.CLOUDFLARE:
                 result = self._call_cloudflare(query, history)
             elif self._provider == Provider.OPENROUTER:
                 result = self._call_openrouter(query, history)
@@ -319,6 +340,45 @@ class LLMFallback:
             "live_llm": "✅" if self.has_live_llm() else "❌ (CKG synthesis)",
             "api_key":  "✅ موجود" if self._api_key else "❌ غير موجود",
         }
+
+    # ── Anthropic Claude (الأولوية الأولى ✅) ───────────────────────────
+
+    def _call_anthropic(
+        self, query: str, history: List[Tuple[str, str]]
+    ) -> FallbackResult:
+        messages = []
+        for u, a in history[-4:]:
+            messages += [
+                {"role": "user",      "content": u},
+                {"role": "assistant", "content": a},
+            ]
+        messages.append({"role": "user", "content": query})
+
+        data = _post_json(
+            "https://api.anthropic.com/v1/messages",
+            {
+                "model":      self._model,
+                "system":     _SYSTEM_PROMPT,
+                "messages":   messages,
+                "max_tokens": self.max_tokens,
+                "temperature": self.temperature,
+            },
+            {
+                "x-api-key":         self._api_key,
+                "anthropic-version": "2023-06-01",
+                "Content-Type":      "application/json",
+            },
+            self.timeout,
+        )
+        # رسالة Claude تُرجَع كمصفوفة content blocks — نجمع نصوص type=="text" فقط
+        text = "".join(
+            block.get("text", "")
+            for block in data.get("content", [])
+            if block.get("type") == "text"
+        ).strip()
+        return FallbackResult(
+            text=text, provider=Provider.ANTHROPIC, model=self._model
+        )
 
     # ── Cloudflare Workers AI (مجاني 10k/يوم ✅) ────────────────────────
 
