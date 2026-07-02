@@ -68,6 +68,19 @@ AGENT_CATALOGUE: Dict[str, dict] = {
         "output_schema": {"improvements": "list", "before": "dict", "after": "dict"},
         "tags": ["optimization", "performance", "tuning"],
     },
+    # ── CodingAgent ──────────────────────────────────────────────────
+    # 🆕 الدور الوحيد المربوط فعلياً بمحرك LLM حقيقي (NSMAgent).
+    # عند spawn("CodingAgent") ثم .execute(task) يُنشأ NSMAgent حقيقي
+    # وينفذ المهمة عبر نفس محرك ai/nsm_agent_core.py الذي يعمل بالفعل
+    # في التطبيق (تخطيط → كتابة كود → تشغيل/اختبار → تصحيح ذاتي → git push).
+    "CodingAgent": {
+        "description": "Autonomous coding agent: plans, writes, tests, and debugs code using a real LLM engine (NSMAgent)",
+        "capabilities": ["plan", "write_code", "run_file", "run_tests", "debug", "web_search", "git_push"],
+        "input_schema": {"task": "str"},
+        "output_schema": {"result": "str", "success": "bool"},
+        "tags": ["coding", "engineering", "automation"],
+        "engine": "NSMAgent",   # 🆕 يميّز هذا الدور كدور منفَّذ فعلياً وليس بيانات وصفية فقط
+    },
 }
 
 
@@ -96,6 +109,8 @@ class AgentInstance:
         self.error_count = 0
         self.last_task_at: Optional[str] = None
         self.performance_score: float = 1.0
+        self._engine_name: Optional[str] = spec.get("engine")  # 🆕 اسم المحرك الحقيقي إن وُجد
+        self._engine = None  # 🆕 نسخة المحرك الفعلي (lazy، تُبنى عند أول execute)
 
     @property
     def success_rate(self) -> float:
@@ -113,6 +128,51 @@ class AgentInstance:
         # Rolling performance score (EMA)
         outcome = 1.0 if success else 0.0
         self.performance_score = 0.9 * self.performance_score + 0.1 * outcome
+
+    # ── 🆕 Execute — تنفيذ حقيقي، وليس بيانات وصفية ───────────────────────
+    def is_executable(self) -> bool:
+        """هل هذا الدور مربوط فعلياً بمحرك LLM ينفذ عملاً حقيقياً؟"""
+        return self._engine_name is not None
+
+    def _load_engine(self):
+        """يبني نسخة المحرك الحقيقي مرة واحدة فقط (lazy import لتفادي أي دورة استيراد)."""
+        if self._engine is not None:
+            return self._engine
+        if self._engine_name == "NSMAgent":
+            from ai.nsm_agent_core import NSMAgent
+            self._engine = NSMAgent()
+        else:
+            raise NotImplementedError(
+                f"لا يوجد محرك حقيقي مربوط بالدور '{self.role}'. "
+                f"هذا الدور بيانات وصفية فقط ولا يمكن تنفيذه."
+            )
+        return self._engine
+
+    def execute(self, task: str) -> Dict[str, Any]:
+        """
+        ينفذ مهمة فعلية عبر المحرك الحقيقي المرتبط بهذا الدور.
+        يرفع NotImplementedError صراحة لو الدور غير قابل للتنفيذ فعلياً
+        (بدل أن يعيد نجاحاً وهمياً).
+        """
+        if not self.is_executable():
+            raise NotImplementedError(
+                f"الدور '{self.role}' غير مربوط بمحرك تنفيذ حقيقي بعد. "
+                f"الأدوار القابلة للتنفيذ حالياً: CodingAgent."
+            )
+        if self.status != "active":
+            raise RuntimeError(f"الوكيل {self.agent_id} ليس نشطاً (status={self.status})")
+
+        engine = self._load_engine()
+        try:
+            result_text = engine.run(task)
+        except Exception as e:
+            self.record_task(success=False)
+            return {"result": f"❌ خطأ في التنفيذ: {e}", "success": False}
+
+        # 🆕 ⚠️ يعني المحرك غير متاح (لا مفتاح API) — هذا فشل أيضاً، وليس نجاحاً
+        success = "❌" not in result_text and "⚠️" not in result_text
+        self.record_task(success=success)
+        return {"result": result_text, "success": success}
 
     def retire(self):
         self.status = "retired"
@@ -134,6 +194,7 @@ class AgentInstance:
             "success_rate": round(self.success_rate, 4),
             "performance_score": round(self.performance_score, 4),
             "last_task_at": self.last_task_at,
+            "executable": self.is_executable(),   # 🆕 صريح: هل هذا وكيل حقيقي أم بيانات وصفية؟
         }
 
 
@@ -177,6 +238,25 @@ class AgentFactory:
     def spawn_multiple(self, roles: List[str]) -> List[AgentInstance]:
         """Spawn a list of agents at once."""
         return [self.spawn(r) for r in roles]
+
+    # ── 🆕 Run task — تنفيذ فعلي مباشر عبر المحرك الحقيقي ──────────────────
+    def run_task(self, role: str, task: str, reuse: Optional[AgentInstance] = None) -> Dict[str, Any]:
+        """
+        ينشئ وكيلاً (أو يعيد استخدام وكيل موجود) وينفذ مهمة فعلية عبر
+        محركه الحقيقي. يرفع NotImplementedError لو الدور غير قابل للتنفيذ
+        (مثل ResearchAgent/ReviewAgent إلخ التي مازالت بيانات وصفية فقط).
+
+        مثال:
+            factory = AgentFactory()
+            out = factory.run_task("CodingAgent", "أنشئ دالة add(a, b) في utils/math_utils.py")
+            print(out["result"], out["success"])
+        """
+        agent = reuse or self.spawn(role)
+        if not agent.is_executable():
+            raise NotImplementedError(
+                f"الدور '{role}' بيانات وصفية فقط ولا محرك حقيقي مربوط به بعد."
+            )
+        return agent.execute(task)
 
     # ── Retire ────────────────────────────────────────────────────────────
 
