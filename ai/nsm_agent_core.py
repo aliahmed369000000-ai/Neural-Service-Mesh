@@ -134,6 +134,15 @@ def _build_system_prompt() -> str:
    الأكثر صلة بالسؤال (احكم من الأسماء ووظائفها في هيكل المشروع أعلاه).
 10. ⚠️ آخر خطوة في "steps" يجب أن تكون دائماً "answer" فيها "reply" يلخّص
     ما وجدته ويجاوب على سؤال المستخدم مباشرة — لا تكتفِ بقراءة الملفات فقط.
+11. 🆕 أي سؤال عن معلومة حالية أو حديثة (رئيس/مسؤول حالي، سعر اليوم، تاريخ
+    اليوم، أخبار، آخر إصدار من برنامج، إلخ) — استخدم خطوة "web_search" أولاً
+    ثم اجعل الرد النهائي مبنياً على نتائجها الفعلية فقط. ممنوع تقول "لا
+    أستطيع توفير معلومات عن الأشخاص/الأحداث الحالية" — لديك أداة بحث حقيقية
+    الآن، استخدمها. وممنوع تختلق رقماً أو اسماً من عندك بدون بحث فعلي.
+12. 🆕 في حقل "cmd" (لـ run_file): لا تضع علامات اقتباس مزدوجة متداخلة غير
+    مهرّبة (مثل استخدام " بداخل نص محاط أصلاً بـ "). استخدم علامات اقتباس
+    مفردة ' بالداخل، أو أنشئ ملف Python كامل عبر create_file وشغّله بـ
+    run_file بدل كتابة أكواد معقدة داخل سطر cmd واحد.
 
 ## مثال حقيقي لرد صحيح (وليس نصاً تنسخه — فقط توضيح للصيغة):
 {{
@@ -477,7 +486,20 @@ def _parse_llm_response(raw: str) -> Optional[Dict]:
             pass
 
     # ── طريقة 5: بناء رد answer من النص الحر ──
-    # إذا فشل كل شيء، حوّل الرد النصي لـ answer step
+    # 🆕 مهم: هذا يُستخدم فقط لو النص "حر" فعلاً (بدون أي أثر لمحاولة JSON).
+    # لو النص فيه علامات JSON واضحة (مثل "action" أو "steps" أو يبدأ بـ {)
+    # وفشل تحليله كـ JSON صحيح، فهذا فشل حقيقي في التحليل يجب أن يُعاد
+    # محاولته وليس أن يُعرض كإجابة سليمة على المستخدم كما كان يحدث سابقاً
+    # (كان يُسرّب نص JSON مكسور خام مباشرة للمستخدم).
+    looks_like_json_attempt = (
+        text.lstrip().startswith("{")
+        or '"action"' in text
+        or '"steps"' in text
+        or '"thinking"' in text
+    )
+    if looks_like_json_attempt:
+        return None
+
     if text and len(text) > 5:
         return {
             "thinking": "",
@@ -529,7 +551,7 @@ def _is_failure(result: str) -> bool:
             "خطأ في التشغيل", "خطأ في الإنشاء", "خطأ في التعديل",
             "غير موجود", "SyntaxError", "ImportError", "ModuleNotFoundError",
             "NameError", "TypeError", "IndentationError",
-            "فعل غير صالح",
+            "فعل غير صالح", "فشل البحث", "خطأ في أداة البحث", "مطلوب",
         ]
     )
 
@@ -592,7 +614,9 @@ def _stream_steps(
         yield f"{prefix}{result}\n\n"
 
         # ── Self-Healing Loop 🆕 ──
-        if _is_failure(result) and action in ("run_file", "create_file", "edit_file"):
+        # 🆕 وسّعنا الشرط: أي فشل حقيقي يستحق إصلاحاً، وليس فقط
+        # run_file/create_file/edit_file (كان يفوت حالات مثل "فعل غير صالح").
+        if _is_failure(result):
             healed = False
             for attempt in range(1, _MAX_HEAL_ATTEMPTS + 1):
                 yield f"🔧 **محاولة إصلاح تلقائي {attempt}/{_MAX_HEAL_ATTEMPTS}...**\n"
@@ -755,11 +779,42 @@ class NSMAgent:
 
         # تحليل الرد
         parsed = _parse_llm_response(raw)
+
+        # 🆕 فشل تحليل حقيقي (JSON مكسور، غالباً بسبب اقتباسات غير مهرّبة داخل
+        # حقل مثل cmd) — نصلحه بإعادة سؤال النموذج، بدل ما نسرّب النص الخام
+        # المكسور مباشرة للمستخدم كما كان يحدث سابقاً.
         if parsed is None:
-            # هذا لا يحدث بعد الآن (الطريقة 5 تحوّل أي نص لـ answer)
-            # لكن نحتفظ بالـ fallback للأمان
-            yield raw
-            return
+            healed_parse = None
+            for attempt in range(1, _MAX_HEAL_ATTEMPTS + 1):
+                yield f"🔧 *الرد السابق لم يكن JSON صالحاً — إصلاح تلقائي ({attempt}/{_MAX_HEAL_ATTEMPTS})...*\n"
+                repair_messages = list(messages) + [
+                    {"role": "assistant", "content": raw[:1500]},
+                    {
+                        "role": "user",
+                        "content": (
+                            "ردك السابق لم يكن JSON صالحاً ولا يمكن تحليله (على الأغلب بسبب "
+                            "علامات اقتباس داخلية غير مهرّبة في حقل مثل cmd أو content). "
+                            "أعد الإرسال الآن بصيغة JSON صحيحة فقط، بدون أي نص خارج الأقواس، "
+                            "وتأكد من تهريب أي علامة اقتباس مزدوجة داخل أي قيمة نصية بوضع \\\\ قبلها. "
+                            "إن كان الكود يحتاج علامات اقتباس متداخلة، استخدم علامات اقتباس مفردة "
+                            "بالداخل بدل المزدوجة."
+                        ),
+                    },
+                ]
+                try:
+                    raw_repair = _call_api(repair_messages)
+                except Exception:
+                    continue
+                healed_parse = _parse_llm_response(raw_repair)
+                if healed_parse is not None:
+                    raw = raw_repair
+                    break
+
+            if healed_parse is None:
+                yield ("⚠️ تعذّر تحليل رد النموذج بصيغة صحيحة بعد عدة محاولات. "
+                       "جرّب إعادة صياغة طلبك بشكل أبسط أو أكثر تحديداً.")
+                return
+            parsed = healed_parse
 
         thinking = parsed.get("thinking", "")
         steps    = parsed.get("steps", [])
