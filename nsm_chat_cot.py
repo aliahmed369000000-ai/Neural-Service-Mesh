@@ -40,7 +40,7 @@ from typing import Optional, Tuple
 
 from nsm_chat_plus import NSMChatPlus
 from ai.chain_of_thought import ChainOfThoughtBuilder, ReasoningTrace
-from ai.llm_fallback import Provider
+from ai.llm_fallback import Provider, LIVE_LLM_PROVIDERS
 
 logger = logging.getLogger("NSMChatCoT")
 
@@ -116,9 +116,7 @@ class NSMChatCoT(NSMChatPlus):
             )
             answer = result.text
             self._last_source = (
-                "llm"
-                if result.provider in (Provider.GROQ, Provider.OPENAI, Provider.HUGGINGFACE)
-                else "ckg"
+                "llm" if result.provider in LIVE_LLM_PROVIDERS else "ckg"
             )
 
         # ❹ حفظ في الذاكرة — مطابق تماماً للأصل
