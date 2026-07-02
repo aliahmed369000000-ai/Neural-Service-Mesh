@@ -125,7 +125,17 @@ def _build_system_prompt() -> str:
 4. المسارات نسبية دائماً (مثل: ai/new_module.py)
 5. عند create_file: اكتب الكود كاملاً مع docstring
 6. رد بالعربية في thinking وreply
-7. إذا فشل run_file: أصلح الخطأ وأعد المحاولة تلقائياً"""
+7. إذا فشل run_file: أصلح الخطأ وأعد المحاولة تلقائياً
+8. ⚠️ "action" يجب أن يكون **كلمة واحدة فقط** من القائمة (مثل "read_file")
+   — لا تكتب القائمة كاملة مفصولة بـ | كما هي في الوصف أعلاه، هذا خطأ.
+
+## مثال حقيقي لرد صحيح (وليس نصاً تنسخه — فقط توضيح للصيغة):
+{{
+  "thinking": "المستخدم يريد قراءة agent_factory.py أولاً",
+  "steps": [
+    {{"action": "read_file", "path": "ai/agent_factory.py"}}
+  ]
+}}"""
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -274,6 +284,20 @@ def _run_step(step: Dict[str, Any]) -> str:
     message = step.get("message", "NSM Agent auto-commit")
     reply   = step.get("reply", "")
     cmd     = step.get("cmd", "")
+
+    # ── 🆕 حماية: النموذج أحياناً (خصوصاً النماذج الصغيرة/الاحتياطية)
+    # ينسخ قيمة الحقل من الـ schema حرفياً بدل اختيار فعل واحد حقيقي،
+    # مثل: "action": "read_file | create_file | edit_file | ..."
+    # هذا كان يمر بصمت كـ"✅ تم" بدون تنفيذ أي شيء فعلي. الآن نرفضه
+    # صراحة كخطأ قابل للاكتشاف عبر _is_failure() ليُعاد المحاولة تلقائياً.
+    _VALID_ACTIONS = {
+        "read_file", "create_file", "edit_file",
+        "run_file", "run_tests", "git_push", "answer",
+    }
+    if action not in _VALID_ACTIONS:
+        return (f"❌ فعل غير صالح من النموذج: '{action}'\n"
+                f"💡 يجب اختيار فعل واحد بالضبط من: "
+                f"read_file, create_file, edit_file, run_file, run_tests, git_push, answer")
 
     # ── read_file ──
     if action == "read_file":
@@ -488,6 +512,7 @@ def _is_failure(result: str) -> bool:
             "خطأ في التشغيل", "خطأ في الإنشاء", "خطأ في التعديل",
             "غير موجود", "SyntaxError", "ImportError", "ModuleNotFoundError",
             "NameError", "TypeError", "IndentationError",
+            "فعل غير صالح",
         ]
     )
 
