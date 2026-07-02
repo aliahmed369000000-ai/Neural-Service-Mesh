@@ -8,7 +8,7 @@ Arabic Transformer — NSM v3.0
 
 ما يُحفَظ على disk:
     ✓ أوزان الشبكة (.npy)        ← الذاكرة الحقيقية للنموذج
-    ✓ المصفوفة المدروسة (.csv)   ← ثابتة، قلب الشبكة
+    ✓ المصفوفة المدروسة (.csv/.npy) ← بذرة ابتدائية قابلة للتدريب (لم تعد مجمَّدة)، قلب الشبكة
     ✗ لا نصوص، لا كلمات، لا قواعد بيانات
 
 الـ Tokenizer:
@@ -158,22 +158,35 @@ class PositionalEncoding:
 # ══════════════════════════════════════════════════════════════════════════════
 class CoreMatrixLayer:
     """
-    المصفوفة المدروسة الثابتة 784×784.
+    المصفوفة المدروسة 784×784 — قابلة للتدريب بالكامل (لم تعد مجمَّدة).
 
-    ثابتة تماماً (frozen) — لا تتأثر بالتدريب أبداً.
-    تعمل كـ "anchor" دلالي: تُشكّل الفضاء الذي تتعلم فيه باقي الطبقات.
+    كانت في السابق ثابتة تماماً (frozen) لا تتأثر بالتدريب. الآن تُحدَّث
+    بالـ gradient الحقيقي في backward() مثل بقية الأوزان، لكن بمعدل تعلم
+    أبطأ افتراضياً (core_lr_scale) حفاظاً على استقرارها كـ "anchor" دلالي
+    تتعلم فيه باقي الطبقات دون أن تتذبذب بعنف من أول خطوة تدريب.
+
+    • trainable_core=True (افتراضي)  → تتدرب فعلياً بكل خطوة backward.
+    • core_lr_scale (افتراضي 0.1)    → نسبة معدل تعلمها إلى معدل باقي الطبقات؛
+      اجعلها 1.0 لتدريبها بنفس السرعة، أو 0.0 لتجميدها يدوياً إن احتجت ذلك صراحة.
 
     المسار:
-        X(seq,256) → W_up(256→784) → W_core(784→784)[ثابتة]
+        X(seq,256) → W_up(256→784) → W_core(784→784)[قابلة للتدريب]
                    → sign_flip+relu → W_down(784→256) → out(seq,256)
     """
-    def __init__(self, csv_path: Optional[str] = None, d_model: int = D_MODEL):
-        self.d_model  = d_model
-        self.core_dim = 784
+    def __init__(
+        self,
+        csv_path: Optional[str] = None,
+        d_model: int = D_MODEL,
+        trainable_core: bool = True,
+        core_lr_scale: float = 0.1,
+    ):
+        self.d_model        = d_model
+        self.core_dim        = 784
+        self.trainable_core  = trainable_core
+        self.core_lr_scale   = core_lr_scale
         self._W_core: Optional[np.ndarray] = None
         self._loaded  = False
 
-        # فقط هذين يتدربان
         self.W_up   = _xavier(self.core_dim, d_model)
         self.W_down = _xavier(d_model, self.core_dim)
         self.b_up   = np.zeros(self.core_dim)
@@ -184,13 +197,18 @@ class CoreMatrixLayer:
         if csv_path and os.path.exists(csv_path):
             self._load_csv(csv_path)
 
+        if self._W_core is None:
+            # لا مصفوفة محمَّلة من CSV/NPY — نبدأ ببذرة Xavier قابلة للتدريب
+            # بدل مصفوفة الهوية الثابتة القديمة (كانت تمنع أي تعلّم فعلي).
+            self._W_core = _xavier(self.core_dim, self.core_dim)
+
     def _load_csv(self, path: str) -> bool:
         try:
             W = np.genfromtxt(path, delimiter=',')
             if W.shape == (784, 784):
                 self._W_core = W.astype(np.float64)
                 self._loaded = True
-                logger.info(f"[CoreMatrix] ✓ 784×784 محملة | min={W.min():.3f} max={W.max():.3f}")
+                logger.info(f"[CoreMatrix] ✓ 784×784 محملة (بذرة قابلة للتدريب) | min={W.min():.3f} max={W.max():.3f}")
                 return True
         except Exception as e:
             logger.error(f"[CoreMatrix] {e}")
@@ -202,15 +220,13 @@ class CoreMatrixLayer:
         self._loaded = True
 
     def _core(self) -> np.ndarray:
-        if self._loaded:
-            return self._W_core
-        return np.eye(784)  # fallback هوية
+        return self._W_core
 
     def forward(self, X: np.ndarray) -> np.ndarray:
         self._cx  = X
         up        = X @ self.W_up.T + self.b_up          # (seq,784)
         self._cup = up
-        out       = up @ self._core().T                  # (seq,784) ثابتة
+        out       = up @ self._core().T                  # (seq,784)
         # sign-flip activation (من NSM)
         act       = _relu(out)
         mask      = np.abs(out) > 0.15
@@ -224,11 +240,16 @@ class CoreMatrixLayer:
         g_act = grad @ self.W_down                        # (seq,784)
         # relu grad (تقريبي عبر sign-flip)
         g_out = g_act * (self._cout > 0).astype(float)
-        # عبر W_core الثابتة — نمرر فقط
-        g_up  = g_out @ self._core()                     # (seq,784)
+        g_up  = g_out @ self._core()                      # (seq,784)
         gWu   = g_up.T @ self._cx
         gbu   = g_up.sum(0)
         gX    = g_up @ self.W_up
+
+        if self.trainable_core and self.core_lr_scale > 0.0:
+            # out = up @ core.T  ⇒  dL/dcore = g_out.T @ up
+            gCore = g_out.T @ self._cup                   # (784,784)
+            self._W_core -= (lr * self.core_lr_scale) * np.clip(gCore, -CLIP_GRAD, CLIP_GRAD)
+            np.clip(self._W_core, -5.0, 5.0, out=self._W_core)
 
         for W, g in [(self.W_down, gWd), (self.W_up, gWu)]:
             W -= lr * np.clip(g, -CLIP_GRAD, CLIP_GRAD)
@@ -241,18 +262,20 @@ class CoreMatrixLayer:
         W = self._W_core
         return {
             "loaded": self._loaded,
-            "shape":  [784, 784] if self._loaded else None,
-            "frozen": True,
+            "shape":  [784, 784],
+            "frozen": not self.trainable_core,
+            "core_lr_scale": self.core_lr_scale,
             "stats":  {"min": round(float(W.min()),4),
                        "max": round(float(W.max()),4),
-                       "mean":round(float(W.mean()),4)} if self._loaded else {},
+                       "mean":round(float(W.mean()),4)},
         }
 
     def save(self, prefix: str):
-        np.save(f"{prefix}_Wu.npy",  self.W_up)
-        np.save(f"{prefix}_Wd.npy",  self.W_down)
-        np.save(f"{prefix}_bu.npy",  self.b_up)
-        np.save(f"{prefix}_bd.npy",  self.b_down)
+        np.save(f"{prefix}_Wu.npy",   self.W_up)
+        np.save(f"{prefix}_Wd.npy",   self.W_down)
+        np.save(f"{prefix}_bu.npy",   self.b_up)
+        np.save(f"{prefix}_bd.npy",   self.b_down)
+        np.save(f"{prefix}_core.npy", self._W_core)  # تُحفظ الآن لأنها تتغيّر بالتدريب
 
     def load(self, prefix: str):
         for attr, fname in [("W_up","Wu"),("W_down","Wd"),
@@ -260,6 +283,10 @@ class CoreMatrixLayer:
             p = f"{prefix}_{fname}.npy"
             if os.path.exists(p):
                 setattr(self, attr, np.load(p).astype(np.float64))
+        core_p = f"{prefix}_core.npy"
+        if os.path.exists(core_p):
+            self._W_core = np.load(core_p).astype(np.float64)
+            self._loaded = True
 
 
 # ══════════════════════════════════════════════════════════════════════════════
