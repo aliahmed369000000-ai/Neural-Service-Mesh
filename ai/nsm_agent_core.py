@@ -128,6 +128,10 @@ def _build_system_prompt() -> str:
 7. إذا فشل run_file: أصلح الخطأ وأعد المحاولة تلقائياً
 8. ⚠️ "action" يجب أن يكون **كلمة واحدة فقط** من القائمة (مثل "read_file")
    — لا تكتب القائمة كاملة مفصولة بـ | كما هي في الوصف أعلاه، هذا خطأ.
+9. ⚠️ عند طلب "افحص/اقرأ المشروع": لا تقرأ كل الملفات — اختر فقط 5-8 ملفات
+   الأكثر صلة بالسؤال (احكم من الأسماء ووظائفها في هيكل المشروع أعلاه).
+10. ⚠️ آخر خطوة في "steps" يجب أن تكون دائماً "answer" فيها "reply" يلخّص
+    ما وجدته ويجاوب على سؤال المستخدم مباشرة — لا تكتفِ بقراءة الملفات فقط.
 
 ## مثال حقيقي لرد صحيح (وليس نصاً تنسخه — فقط توضيح للصيغة):
 {{
@@ -537,6 +541,9 @@ def _build_heal_prompt(
 # 🆕 v3 — إضافة 3: Streaming Generator
 # ══════════════════════════════════════════════════════════════════
 
+_MAX_STEPS_PER_RESPONSE = 12  # 🆕 حماية من استجابة تقرأ عشرات الملفات دفعة واحدة بلا خلاصة
+
+
 def _stream_steps(
     steps: List[Dict],
     thinking: str,
@@ -550,7 +557,14 @@ def _stream_steps(
     if thinking:
         yield f"🤔 **{thinking}**\n\n"
 
+    # ── 🆕 سقف عدد الخطوات: يمنع قراءة عشرات الملفات دفعة واحدة ──
+    truncated = False
+    if len(steps) > _MAX_STEPS_PER_RESPONSE:
+        truncated = True
+        steps = steps[:_MAX_STEPS_PER_RESPONSE]
+
     total = len(steps)
+    has_answer = any(s.get("action") == "answer" for s in steps)
 
     for i, step in enumerate(steps, 1):
         action = step.get("action", "answer")
@@ -615,6 +629,20 @@ def _stream_steps(
 
             if not healed:
                 yield f"❌ **فشل الإصلاح بعد {_MAX_HEAL_ATTEMPTS} محاولات**\n\n"
+
+    # ── 🆕 إذا قُصّت الخطوات، أخبر المستخدم صراحة ──
+    if truncated:
+        yield (f"⚠️ **الطلب احتاج أكثر من {_MAX_STEPS_PER_RESPONSE} خطوة "
+               f"(قراءة ملفات كثيرة جداً دفعة واحدة).**\n"
+               f"نفّذت أول {_MAX_STEPS_PER_RESPONSE} فقط لتجنّب استهلاك مفرط للـ API. "
+               f"حدّد الملفات المهمة تحديداً (مثال: \"افحص ai/goal_planner.py و"
+               f"ai/agent_factory.py و ai/github_sync.py فقط\") لتحليل أدق وأسرع.\n\n")
+
+    # ── 🆕 ضمان وجود خلاصة نهائية دائماً (خصوصاً لطلبات القراءة/التحليل) ──
+    elif not has_answer and total > 1:
+        yield ("💬 **انتهت القراءة.** لخّص لي الآن بناءً على ما رأيته أعلاه: "
+               "ماذا ينقص بالضبط، وما هي الخطوات العملية التالية؟ اسأل مباشرة "
+               "وسأجاوب بناءً على الملفات التي قرأتها للتو.")
 
 
 # ══════════════════════════════════════════════════════════════════
