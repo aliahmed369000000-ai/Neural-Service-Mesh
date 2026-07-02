@@ -19,7 +19,7 @@ from nsm_chat import (
     _handle_code_command,
     _AGENT_TRIGGERS,
 )
-from ai.llm_fallback import LLMFallback, Provider
+from ai.llm_fallback import LLMFallback, Provider, LIVE_LLM_PROVIDERS
 
 logger = logging.getLogger("NSMChatPlus")
 
@@ -98,15 +98,7 @@ class NSMChatPlus(NSMChat):
         )
         answer = result.text
         self._last_source = (
-            "llm"
-            if result.provider in (
-                Provider.CLOUDFLARE,
-                Provider.GROQ,
-                Provider.OPENAI,
-                Provider.TOGETHER,
-                Provider.GEMINI,
-            )
-            else "ckg"
+            "llm" if result.provider in LIVE_LLM_PROVIDERS else "ckg"
         )
 
         # ❺ حفظ في الذاكرة
