@@ -18,6 +18,13 @@ Low-Rank Adaptation فوق arabic_transformer.py بدون تعديل أي ملف
     ✓ دمج (merge) في الأوزان الأساسية → inference سريع
     ✓ backprop كامل عبر الـ adapters فقط (base frozen)
 
+ملاحظة مهمة: "base frozen" هنا يعني أن مسار LoRA السريع لا يُحدِّث
+الأوزان الأساسية (بما فيها CoreMatrix 784×784) *أثناء تدريب الـ adapters
+فقط* — توفيراً للذاكرة والحساب، وهذا اختيار تدريبي شائع وليس قيداً
+معمارياً دائماً. الأوزان الأساسية نفسها قابلة للتدريب بالكامل عبر
+ArabicTransformer.train_step() العادي (خارج مسار LoRA)، والذي يُحدِّث
+CoreMatrixLayer فعلياً في كل خطوة (انظر core.backward في arabic_transformer.py).
+
 الاستخدام السريع:
     from ai.lora_adapter import LoRATransformerAdapter
     from ai.arabic_transformer import ArabicTransformer
@@ -26,7 +33,7 @@ Low-Rank Adaptation فوق arabic_transformer.py بدون تعديل أي ملف
     adapter = LoRATransformerAdapter(base, rank=8, alpha=16.0)
 
     out = adapter.forward(tokens)          # inference مع LoRA
-    adapter.train_step(tokens, targets)    # ضبط الـ adapters فقط
+    adapter.train_step(tokens, targets)    # ضبط الـ adapters فقط (base ثابت مؤقتاً لهذا المسار)
     adapter.save("models/lora/nsm_lora")   # يحفظ KB لا MB
     adapter.merge_into_base()              # يدمج ΔW في الأوزان الأساسية
 """
@@ -521,7 +528,9 @@ class LoRATransformerAdapter:
         for adapter in reversed(self.block_adapters):
             grad = adapter.backward(grad, lr)
 
-        # لا تحديث على CoreMatrix أو Embedding (frozen)
+        # هذا المسار (LoRA-only) لا يُحدِّث CoreMatrix أو Embedding — بقصد
+        # توفير الحساب أثناء ضبط الـ adapters فقط. لتدريب CoreMatrix نفسها
+        # استخدم ArabicTransformer.train_step() العادي بدل هذا المسار.
 
     # ── دالة الخسارة (cross-entropy للغة العربية) ────────────────────────
 
