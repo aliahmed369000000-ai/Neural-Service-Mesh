@@ -1601,6 +1601,9 @@ def render_chat():
                     placeholder.markdown(full_response + "▌")
                 placeholder.markdown(full_response)
             response = full_response.replace("⏳ *أفكر...*\n\n", "", 1)
+            # ── مزامنة الشارة: bot.chat() لم يُستدعَ هنا، فنحدّث المصدر يدوياً ──
+            if hasattr(bot, "_last_source"):
+                bot._last_source = "nsm_agent"
         else:
             # ── fallback: bot.chat العادي ──
             response = bot.chat(text.strip())
