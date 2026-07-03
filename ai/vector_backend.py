@@ -167,6 +167,32 @@ class QdrantBackend:
             logger.debug(f"QdrantBackend search error: {e}")
             return []
 
+    # ── مراقبة استهلاك الباقة المجانية (تنبيه مبكر بدل تعدد حسابات) ──
+    def get_usage_stats(self, capacity_estimate: int = 750_000) -> dict:
+        """
+        تقدير تقريبي لاستهلاك الباقة المجانية (1GB RAM / 4GB قرص).
+        الرقم الافتراضي (750 ألف متجه) مبني على تقدير Qdrant الموثَّق
+        (~مليون متجه لأبعاد 768) مُعاد حسابه لأبعاد bge-m3 (1024) —
+        تقريبي وليس دقيقاً 100%، الغرض منه فقط تنبيه مبكر بدل انتظار
+        امتلاء الخادم فعلياً أو اللجوء لتعدد الحسابات من البداية.
+        """
+        if not self.available():
+            return {"active": False}
+        try:
+            info = self._client.get_collection(_COLLECTION)
+            count = int(getattr(info, "points_count", None) or 0)
+            pct = round(min(100.0, (count / capacity_estimate) * 100), 2)
+            return {
+                "active": True,
+                "points_count": count,
+                "capacity_estimate": capacity_estimate,
+                "usage_pct": pct,
+                "warning": pct >= 80.0,   # تنبيه مبكر — وقتها فقط يستحق التفكير بحساب ثانٍ
+            }
+        except Exception as e:
+            logger.debug(f"QdrantBackend get_usage_stats error: {e}")
+            return {"active": True, "points_count": None, "usage_pct": None, "warning": False}
+
 
 _singleton: Optional[QdrantBackend] = None
 
