@@ -86,10 +86,20 @@ class NSMChatPlus(NSMChat):
             self.history.append((user_input, agent_response))
             return agent_response
 
-        # ❸ تغنية الاستعلام بالسياق (pronoun resolution)
+        # ❸ تغنية الاستعلام بالسياق (pronoun resolution + ذاكرة الحقائق)
         query = user_input
         if self.memory and self.memory.needs_context(user_input):
             query = self.memory.enrich_query(user_input)
+
+        # ❸.5 حقن كتلة الذاكرة القوية (حقائق + محادثات ذات صلة دلالياً)
+        #     — best-effort تماماً: أي خطأ يُتجاهل ولا يوقف الرد أبداً
+        if self.memory:
+            try:
+                mem_block = self.memory.build_memory_context(user_input)
+                if mem_block:
+                    query = f"[{mem_block}]\n{query}"
+            except Exception as _mem_err:
+                logger.debug(f"memory context injection skipped: {_mem_err}")
 
         # ❹ LLM مباشرة — القاموس محذوف من مسار الردود
         result = self.fallback.generate(
@@ -104,6 +114,13 @@ class NSMChatPlus(NSMChat):
         # ❺ حفظ في الذاكرة
         if self.memory:
             self.memory.add(user_input, answer, self._last_topic)
+            # استخلاص حقائق جديدة من هذا الحوار (Mem0-style) — لا يوقف الرد أبداً
+            try:
+                self.memory.extract_and_remember_facts(
+                    user_input, answer, llm_fallback=self.fallback
+                )
+            except Exception as _fact_err:
+                logger.debug(f"fact extraction skipped: {_fact_err}")
         self.history.append((user_input, answer))
         return answer
 
