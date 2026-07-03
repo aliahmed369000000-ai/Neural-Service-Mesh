@@ -265,6 +265,7 @@ class LLMFallback:
         self,
         query:   str,
         history: Optional[List[Tuple[str, str]]] = None,
+        system_prompt: Optional[str] = None,
     ) -> FallbackResult:
         """
         يولّد إجابة للاستعلام مع السياق متعدد الأدوار.
@@ -272,6 +273,9 @@ class LLMFallback:
         Args:
             query:   نص سؤال المستخدم
             history: [(user_msg, bot_msg), ...] آخر N رسائل
+            system_prompt: تعليمات نظام مخصّصة (اختياري). إذا لم تُمرَّر،
+                يُستخدم _SYSTEM_PROMPT الافتراضي (عربي/إسلامي عام) — بدون
+                أي تغيير في السلوك الحالي.
         Returns:
             FallbackResult
         """
@@ -281,22 +285,23 @@ class LLMFallback:
 
         t0      = time.time()
         history = history or []
+        sp      = system_prompt or _SYSTEM_PROMPT
 
         try:
             if self._provider == Provider.ANTHROPIC:
-                result = self._call_anthropic(query, history)
+                result = self._call_anthropic(query, history, sp)
             elif self._provider == Provider.CLOUDFLARE:
-                result = self._call_cloudflare(query, history)
+                result = self._call_cloudflare(query, history, sp)
             elif self._provider == Provider.OPENROUTER:
-                result = self._call_openrouter(query, history)
+                result = self._call_openrouter(query, history, sp)
             elif self._provider == Provider.OPENAI:
-                result = self._call_openai(query, history)
+                result = self._call_openai(query, history, sp)
             elif self._provider == Provider.TOGETHER:
-                result = self._call_together(query, history)
+                result = self._call_together(query, history, sp)
             elif self._provider == Provider.GEMINI:
-                result = self._call_gemini(query, history)
+                result = self._call_gemini(query, history, sp)
             elif self._provider == Provider.GROQ:
-                result = self._call_groq(query, history)
+                result = self._call_groq(query, history, sp)
             else:
                 text   = _ckg_synthesize(query, self.ckg)
                 result = FallbackResult(
@@ -344,7 +349,8 @@ class LLMFallback:
     # ── Anthropic Claude (الأولوية الأولى ✅) ───────────────────────────
 
     def _call_anthropic(
-        self, query: str, history: List[Tuple[str, str]]
+        self, query: str, history: List[Tuple[str, str]],
+        system_prompt: str = _SYSTEM_PROMPT,
     ) -> FallbackResult:
         messages = []
         for u, a in history[-4:]:
@@ -358,7 +364,7 @@ class LLMFallback:
             "https://api.anthropic.com/v1/messages",
             {
                 "model":      self._model,
-                "system":     _SYSTEM_PROMPT,
+                "system":     system_prompt,
                 "messages":   messages,
                 "max_tokens": self.max_tokens,
                 "temperature": self.temperature,
@@ -383,14 +389,15 @@ class LLMFallback:
     # ── Cloudflare Workers AI (مجاني 10k/يوم ✅) ────────────────────────
 
     def _call_cloudflare(
-        self, query: str, history: List[Tuple[str, str]]
+        self, query: str, history: List[Tuple[str, str]],
+        system_prompt: str = _SYSTEM_PROMPT,
     ) -> FallbackResult:
         account_id = os.getenv("CF_ACCOUNT_ID", "").strip()
         cf_url = (
             f"https://api.cloudflare.com/client/v4/accounts/"
             f"{account_id}/ai/run/{self._model}"
         )
-        messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+        messages = [{"role": "system", "content": system_prompt}]
         for u, a in history[-4:]:
             messages += [
                 {"role": "user",      "content": u},
@@ -420,9 +427,10 @@ class LLMFallback:
     # ── OpenRouter (يعمل من كل مكان ✅) ─────────────────────────────────
 
     def _call_openrouter(
-        self, query: str, history: List[Tuple[str, str]]
+        self, query: str, history: List[Tuple[str, str]],
+        system_prompt: str = _SYSTEM_PROMPT,
     ) -> FallbackResult:
-        messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+        messages = [{"role": "system", "content": system_prompt}]
         for u, a in history[-4:]:
             messages += [
                 {"role": "user",      "content": u},
@@ -455,9 +463,10 @@ class LLMFallback:
     # ── OpenAI ───────────────────────────────────────────────────────────
 
     def _call_openai(
-        self, query: str, history: List[Tuple[str, str]]
+        self, query: str, history: List[Tuple[str, str]],
+        system_prompt: str = _SYSTEM_PROMPT,
     ) -> FallbackResult:
-        messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+        messages = [{"role": "system", "content": system_prompt}]
         for u, a in history[-4:]:
             messages += [
                 {"role": "user",      "content": u},
@@ -488,9 +497,10 @@ class LLMFallback:
     # ── Together.xyz ─────────────────────────────────────────────────────
 
     def _call_together(
-        self, query: str, history: List[Tuple[str, str]]
+        self, query: str, history: List[Tuple[str, str]],
+        system_prompt: str = _SYSTEM_PROMPT,
     ) -> FallbackResult:
-        messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+        messages = [{"role": "system", "content": system_prompt}]
         for u, a in history[-4:]:
             messages += [
                 {"role": "user",      "content": u},
@@ -521,7 +531,8 @@ class LLMFallback:
     # ── Google Gemini ─────────────────────────────────────────────────────
 
     def _call_gemini(
-        self, query: str, history: List[Tuple[str, str]]
+        self, query: str, history: List[Tuple[str, str]],
+        system_prompt: str = _SYSTEM_PROMPT,
     ) -> FallbackResult:
         # بناء تاريخ المحادثة بصيغة Gemini
         contents = []
@@ -537,7 +548,7 @@ class LLMFallback:
             f"{self._model}:generateContent?key={self._api_key}"
         )
         body = {
-            "system_instruction": {"parts": [{"text": _SYSTEM_PROMPT}]},
+            "system_instruction": {"parts": [{"text": system_prompt}]},
             "contents": contents,
             "generationConfig": {
                 "maxOutputTokens": self.max_tokens,
@@ -553,9 +564,10 @@ class LLMFallback:
     # ── Groq ────────────────────────────────────────────────────────────
 
     def _call_groq(
-        self, query: str, history: List[Tuple[str, str]]
+        self, query: str, history: List[Tuple[str, str]],
+        system_prompt: str = _SYSTEM_PROMPT,
     ) -> FallbackResult:
-        messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+        messages = [{"role": "system", "content": system_prompt}]
         for u, a in history[-4:]:
             messages += [
                 {"role": "user",      "content": u},
