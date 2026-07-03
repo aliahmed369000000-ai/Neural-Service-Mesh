@@ -17,6 +17,16 @@ from typing import Dict, List, Tuple
 
 from ai.llm_fallback import LLMFallback, LIVE_LLM_PROVIDERS
 
+# محاولة استيراد أوامر Code Agent الحقيقية (افحص/قائمة/اقترح/ملخص/صحح/عدل/أنشئ/ارفع)
+# نفس الدوال المُستخدَمة أصلاً في تبويب "المحادثة" — بدون أي تغيير عليها.
+# تُستخدَم حصراً في وكيل "الصيانة الذاتية" أدناه.
+try:
+    from nsm_chat import _handle_code_command as _maintenance_command
+    _HAS_MAINTENANCE_COMMANDS = True
+except Exception:
+    _maintenance_command = None
+    _HAS_MAINTENANCE_COMMANDS = False
+
 
 # ══════════════════════════════════════════════════════════════════
 # تعريف الفئات
@@ -166,11 +176,38 @@ AGENT_CATEGORIES: Dict[str, AgentCategory] = {
             "ما الأسئلة المهمة التي يجب أن أبحث عنها هنا؟",
         ],
     ),
+
+    "maintenance": AgentCategory(
+        key="maintenance",
+        emoji="🛡️",
+        title="الصيانة الذاتية",
+        subtitle="يفحص ملفات المشروع، يكتشف الأخطاء المحتملة، ويقترح تصحيحات حقيقية",
+        system_prompt=(
+            "أنت وكيل \"الصيانة الذاتية\" داخل نظام NSM (Neural Service Mesh).\n"
+            "تخصصك: مراقبة صحة مشروع NSM نفسه — اكتشاف الملفات الكبيرة، الدوال "
+            "بدون معالجة أخطاء (try/except)، الملفات غير المستخدَمة، والوحدات "
+            "المكررة، ثم اقتراح خطوات تصحيح واضحة وآمنة (لا تُطبَّق تلقائياً).\n"
+            "قواعد الإجابة:\n"
+            "1. أجب بالعربية الفصحى، ورتّب النتائج كنقاط أو جدول عند الحاجة.\n"
+            "2. إذا سُئلت عن أمر تشخيص حقيقي (افحص/قائمة/اقترح/ملخص/صحح)، "
+            "فهذه الأوامر تُنفَّذ فعلياً على ملفات المشروع — لا تخترع نتائج.\n"
+            "3. لا تقترح حذف أو تعديل أي ملف مباشرة دون أن يطلب المستخدم ذلك صراحة "
+            "عبر أمر 'عدل' بالصيغة الدقيقة.\n"
+            "4. لا تُشر إلى نفسك كنموذج آخر — أنت وكيل NSM."
+        ),
+        quick_prompts=[
+            "اقترح أخطاء",
+            "اقترح كبير",
+            "اقترح مكررة",
+            "قائمة",
+        ],
+    ),
 }
 
 
 CATEGORY_ORDER: List[str] = [
     "assistant", "automation", "analytics", "reasoning", "coding", "research",
+    "maintenance",
 ]
 
 
@@ -196,6 +233,19 @@ class CategoryAgentChat:
     def chat(self, user_input: str) -> str:
         if not user_input.strip():
             return "الرجاء كتابة سؤالك."
+
+        # ── وكيل الصيانة الذاتية فقط: أوامر تشخيص حقيقية على ملفات المشروع ──
+        if (
+            self.category.key == "maintenance"
+            and _HAS_MAINTENANCE_COMMANDS
+            and _maintenance_command is not None
+        ):
+            cmd_response = _maintenance_command(user_input.strip())
+            if cmd_response is not None:
+                self._last_provider = "🛠️ Code Agent"
+                self.history.append((user_input, cmd_response))
+                return cmd_response
+
         result = self.fallback.generate(
             query=user_input,
             history=self.history[-4:],
@@ -208,7 +258,11 @@ class CategoryAgentChat:
         return result.text
 
     def last_provider_badge(self) -> str:
-        return f"🤖 {self._last_provider}" if self._last_provider else ""
+        if not self._last_provider:
+            return ""
+        if self._last_provider.startswith("🛠️"):
+            return self._last_provider
+        return f"🤖 {self._last_provider}"
 
     def clear_history(self):
         self.history.clear()
