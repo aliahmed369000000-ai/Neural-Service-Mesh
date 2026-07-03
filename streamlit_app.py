@@ -59,6 +59,15 @@ except ImportError:
         _NSM_CHAT_OK   = False
         _NSM_CHAT_PLUS = False
 
+# ── وكلاء AI المتخصصون (تبويب جديد — إضافي بالكامل) ───────────────────────
+try:
+    from ai.agent_categories import (
+        AGENT_CATEGORIES, CATEGORY_ORDER, CategoryAgentChat,
+    )
+    _AGENTS_HUB_OK = True
+except Exception:
+    _AGENTS_HUB_OK = False
+
 # ── إعداد الصفحة ──────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="النظام المعرفي العربي | Neural Service Mesh",
@@ -1304,16 +1313,18 @@ def main():
 
     # ── التبويبات ─────────────────────────────────────────────────────────
     tabs = st.tabs(["🏠 الرئيسية", "🔍 البحث المعرفي", "📖 القرآن الكريم",
-                    "❓ الأسئلة والأجوبة", "💬 المحادثة", "🎓 التدريب", "🧠 الذاكرة", "🏥 صحة النظام"])
+                    "❓ الأسئلة والأجوبة", "💬 المحادثة", "🤖 وكلاء AI",
+                    "🎓 التدريب", "🧠 الذاكرة", "🏥 صحة النظام"])
 
     with tabs[0]: render_home()
     with tabs[1]: render_search()
     with tabs[2]: render_quran()
     with tabs[3]: render_qa()
     with tabs[4]: render_chat()
-    with tabs[5]: render_training()
-    with tabs[6]: render_memory()
-    with tabs[7]: render_health()
+    with tabs[5]: render_agents_hub()
+    with tabs[6]: render_training()
+    with tabs[7]: render_memory()
+    with tabs[8]: render_health()
 
     # ── تذييل الصفحة ─────────────────────────────────────────────────────
     st.markdown("---")
@@ -1623,6 +1634,156 @@ def render_chat():
     if hasattr(st.session_state, "_chat_pending"):
         q = st.session_state._chat_pending
         del st.session_state._chat_pending
+        _process(q)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# تبويب وكلاء AI — صفحة مستقلة لكل فئة/تخصص
+# ══════════════════════════════════════════════════════════════════════════
+def render_agents_hub():
+    """يعرض تبويباً فرعياً مستقلاً لكل فئة من وكلاء الذكاء الاصطناعي المتخصصين."""
+
+    if not _AGENTS_HUB_OK:
+        st.error("⚠️ تعذّر تحميل وكلاء AI. تأكد من وجود ai/agent_categories.py.")
+        return
+
+    st.markdown("### 🤖 وكلاء AI المتخصصون")
+    st.caption("كل فئة لها وكيلها الخاص، بذاكرة محادثة مستقلة، ومزوّد LLM نفسه المُستخدَم في المشروع.")
+
+    # CSS مشترك لكل فقاعات المحادثة داخل هذا التبويب (نفس أسلوب تبويب المحادثة)
+    st.markdown("""
+    <style>
+    @keyframes agentBubbleIn {
+        from {opacity:0;transform:translateY(6px);}
+        to   {opacity:1;transform:translateY(0);}
+    }
+    .agent-user {display:flex;justify-content:flex-end;margin:0.5rem 0;animation:agentBubbleIn .25s ease-out;}
+    .agent-user .bbl {
+        background:linear-gradient(135deg,#1a73e8,#0d47a1);
+        color:#fff;padding:0.7rem 1.05rem;border-radius:18px 18px 4px 18px;
+        max-width:85%;font-size:0.96rem;line-height:1.7;text-align:right;direction:rtl;
+        box-shadow:0 3px 12px rgba(26,115,232,.3);white-space:pre-wrap;word-break:break-word;
+    }
+    .agent-bot {display:flex;justify-content:flex-start;margin:0.5rem 0;gap:0.5rem;align-items:flex-start;animation:agentBubbleIn .25s ease-out;}
+    .agent-bot .bbl {
+        background:linear-gradient(135deg,#1e2a3a,#162032);
+        color:#e2e8f0;padding:0.7rem 1.05rem;border-radius:18px 18px 18px 4px;
+        max-width:85%;font-size:0.96rem;line-height:1.8;text-align:right;direction:rtl;
+        border:1px solid #2d4a6e;box-shadow:0 2px 8px rgba(0,0,0,.25);
+        white-space:pre-wrap;word-break:break-word;
+    }
+    .agent-box {
+        height:48vh;min-height:320px;max-height:520px;overflow-y:auto;padding:1rem;
+        background:#0a0f1a;border-radius:16px;border:1px solid #1e2a3a;margin-bottom:0.8rem;
+        scroll-behavior:smooth;box-shadow:inset 0 0 20px rgba(0,0,0,.25);
+    }
+    .agent-badge {
+        display:inline-block;background:#0f1923;border:1px solid #2d4a6e;border-radius:20px;
+        padding:0.15rem 0.65rem;font-size:0.72rem;color:#90cdf4;direction:rtl;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    labels = [
+        f"{AGENT_CATEGORIES[k].emoji} {AGENT_CATEGORIES[k].title}" for k in CATEGORY_ORDER
+    ]
+    sub_tabs = st.tabs(labels)
+
+    for i, key in enumerate(CATEGORY_ORDER):
+        with sub_tabs[i]:
+            _render_agent_page(AGENT_CATEGORIES[key])
+
+
+def _render_agent_page(category):
+    """يعرض صفحة وكيل واحد: محادثة معزولة + أسئلة سريعة خاصة بفئته."""
+    import html as _html
+
+    bot_key  = f"agent_bot_{category.key}"
+    msg_key  = f"agent_msgs_{category.key}"
+    cnt_key  = f"agent_count_{category.key}"
+
+    if bot_key not in st.session_state:
+        st.session_state[bot_key] = CategoryAgentChat(category.key)
+        st.session_state[msg_key] = []
+        st.session_state[cnt_key] = 0
+
+    bot = st.session_state[bot_key]
+
+    col_t, col_s = st.columns([3, 1])
+    with col_t:
+        st.markdown(f"#### {category.emoji} {category.title}")
+        st.caption(category.subtitle)
+    with col_s:
+        st.metric("رسائل الجلسة", st.session_state[cnt_key])
+
+    box_id = f"agent-chat-box-{category.key}"
+    html_out = f'<div class="agent-box" id="{box_id}">'
+    if not st.session_state[msg_key]:
+        html_out += (
+            f'<div style="text-align:center;color:#2d4a6e;padding:2rem 1rem">'
+            f'{category.emoji}<br><br>ابدأ محادثتك مع وكيل {category.title}</div>'
+        )
+    else:
+        for role, text, badge in st.session_state[msg_key]:
+            safe = _html.escape(text).replace("\n", "<br>")
+            if role == "user":
+                html_out += f'<div class="agent-user"><div class="bbl">{safe}</div></div>'
+            else:
+                badge_html = f'<div class="agent-badge">{badge}</div>' if badge else ""
+                html_out += (
+                    f'<div class="agent-bot"><span style="font-size:1.3rem;margin-top:3px">'
+                    f'{category.emoji}</span><div class="bbl">{badge_html}{safe}</div></div>'
+                )
+    html_out += "</div>"
+    st.markdown(html_out, unsafe_allow_html=True)
+    st.markdown(f"""
+    <script>
+    (function() {{
+        const box = window.parent.document.getElementById('{box_id}');
+        if (box) {{ box.scrollTop = box.scrollHeight; }}
+    }})();
+    </script>
+    """, unsafe_allow_html=True)
+
+    c1, c2 = st.columns([5, 1.2], gap="small")
+    with c1:
+        user_input = st.text_area(
+            label="سؤالك", placeholder=f"اسأل وكيل {category.title}…",
+            key=f"agent_input_{category.key}", label_visibility="collapsed", height=88,
+        )
+    with c2:
+        send = st.button("➤ إرسال", key=f"agent_send_{category.key}", use_container_width=True)
+
+    if category.quick_prompts:
+        st.markdown("**⚡ أسئلة سريعة:**")
+        qcols = st.columns(len(category.quick_prompts))
+        for i, q in enumerate(category.quick_prompts):
+            with qcols[i]:
+                if st.button(q, key=f"agent_q_{category.key}_{i}", use_container_width=True):
+                    st.session_state[f"_agent_pending_{category.key}"] = q
+
+    if st.button("🗑 مسح المحادثة", key=f"agent_clear_{category.key}"):
+        st.session_state[msg_key] = []
+        st.session_state[cnt_key] = 0
+        bot.clear_history()
+        st.rerun()
+
+    def _process(text: str):
+        if not text.strip():
+            return
+        st.session_state[msg_key].append(("user", text.strip(), ""))
+        response = bot.chat(text.strip())
+        st.session_state[msg_key].append(("bot", response, bot.last_provider_badge()))
+        st.session_state[cnt_key] += 1
+        st.rerun()
+
+    if send and user_input:
+        _process(user_input)
+
+    pending_key = f"_agent_pending_{category.key}"
+    if pending_key in st.session_state:
+        q = st.session_state[pending_key]
+        del st.session_state[pending_key]
         _process(q)
 
 
