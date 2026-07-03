@@ -422,15 +422,20 @@ class _LongTermStore:
                 ).fetchall()
                 n_facts  = c.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
             vector_active = False
+            vector_usage: dict = {}
             if _HAS_VECTOR_BACKEND:
                 try:
-                    vector_active = get_vector_backend().available()
+                    vb = get_vector_backend()
+                    vector_active = vb.available()
+                    if vector_active:
+                        vector_usage = vb.get_usage_stats()
                 except Exception:
                     vector_active = False
             return {"total_turns": total, "sessions": sessions,
                     "top_topics": [{"topic": t, "count": n} for t, n in topics],
                     "total_facts": n_facts, "semantic_search": _HAS_SKLEARN,
-                    "vector_backend_active": vector_active}
+                    "vector_backend_active": vector_active,
+                    "vector_usage": vector_usage}
         except Exception:
             return {}
 
@@ -576,6 +581,23 @@ class ConversationMemory:
 
     def get_ltm_stats(self) -> dict:
         return self._ltm.stats()
+
+    def vector_capacity_warning(self) -> Optional[str]:
+        """
+        يعيد رسالة تحذير بسيطة لو اقترب Qdrant من حد الباقة المجانية
+        (80%+)، أو None لو كل شي طبيعي / Qdrant غير مفعَّل. مصمَّمة
+        للعرض المباشر بواجهة Streamlit بدون أي منطق إضافي مطلوب هناك.
+        """
+        usage = self._ltm.stats().get("vector_usage") or {}
+        if usage.get("warning"):
+            pct = usage.get("usage_pct", "?")
+            return (
+                f"⚠️ الذاكرة المتجهية (Qdrant) وصلت تقريباً {pct}% من سعة "
+                f"الباقة المجانية المقدَّرة. النظام ما زال يعمل بأمان تام "
+                f"(سيتراجع تلقائياً لـ TF-IDF عند الامتلاء الفعلي)، لكن هذا "
+                f"وقت مناسب للتفكير بترقية الباقة أو حساب إضافي إن أردت."
+            )
+        return None
 
     # ── مسح ─────────────────────────────────────────────────────
     def clear(self):
