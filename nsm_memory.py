@@ -42,6 +42,12 @@ try:
 except Exception:  # sklearn غير متاح — نتراجع تلقائياً لبحث LIKE النصي
     _HAS_SKLEARN = False
 
+try:
+    from ai.vector_backend import get_vector_backend
+    _HAS_VECTOR_BACKEND = True
+except Exception:  # الوحدة غير متاحة (مكتبة ناقصة/مسار مختلف) — لا مشكلة
+    _HAS_VECTOR_BACKEND = False
+
 logger = logging.getLogger("NSMMemory")
 
 # ══════════════════════════════════════════════════════════════════
@@ -149,14 +155,32 @@ class _LongTermStore:
     def save(self, session_id: str, turn: _Turn):
         try:
             with sqlite3.connect(self._path) as c:
-                c.execute(
+                cur = c.execute(
                     "INSERT INTO turns(session_id,user_msg,bot_reply,topic,entities,ts) "
                     "VALUES(?,?,?,?,?,?)",
                     (session_id, turn.user[:400], turn.bot[:800],
                      turn.topic, json.dumps(turn.entities, ensure_ascii=False), turn.ts)
                 )
+                row_id = cur.lastrowid
         except Exception as e:
             logger.debug(f"LTM save: {e}")
+            return
+
+        # مرآة اختيارية إلى Qdrant (الطبقة الأولى في سلسلة الذاكرة الدلالية)
+        # — best-effort تماماً، لا تؤثر أبداً على نجاح الحفظ الأساسي أعلاه.
+        if _HAS_VECTOR_BACKEND:
+            try:
+                vb = get_vector_backend()
+                if vb.available():
+                    vb.upsert(
+                        key=f"turn:{session_id}:{row_id}",
+                        text=f"{turn.user} {turn.bot}",
+                        payload={"kind": "turn", "session_id": session_id,
+                                 "user": turn.user[:400], "bot": turn.bot[:800],
+                                 "topic": turn.topic, "ts": turn.ts},
+                    )
+            except Exception as e:
+                logger.debug(f"LTM Qdrant mirror skipped: {e}")
 
     # ── بحث نصي بسيط (الطريقة القديمة — تبقى كـ fallback) ──────────
     def search(self, keywords: List[str], limit: int = 3) -> List[dict]:
@@ -181,15 +205,38 @@ class _LongTermStore:
                 seen.add(k); unique.append(r)
         return unique[:limit]
 
-    # ── بحث دلالي (TF-IDF + cosine) — الذاكرة القوية الجديدة ───────
+    # ── بحث دلالي — سلسلة تراجع كاملة: Qdrant → TF-IDF → (search اللي فوق) ──
     def semantic_search(self, query: str, session_id: Optional[str] = None,
                          limit: int = 5, recent_cap: int = 500) -> List[dict]:
         """
-        يبحث بالتشابه الدلالي (وليس فقط تطابق نصي حرفي) بين query وكل
-        المحادثات السابقة. يرجّح النتائج بمزيج من: التشابه + الحداثة.
-        يتراجع تلقائياً لـ search() النصية إذا sklearn غير متاح أو البيانات قليلة.
+        الذاكرة الدلالية القوية — بنفس فلسفة LLMFallback بالضبط:
+          1) Qdrant Cloud (embeddings حقيقية عبر bge-m3) إن كان مُعدَّاً ومتاحاً
+          2) TF-IDF محلي (يعمل دائماً بدون أي اعتمادية خارجية)
+        أي طبقة تفشل → تتراجع فوراً وبصمت للطبقة التالية. recall_past() في
+        ConversationMemory يستدعي هذه الدالة ثم search() النصية كطبقة أخيرة.
         """
-        if not _HAS_SKLEARN or not query.strip():
+        if not query.strip():
+            return []
+
+        # الطبقة 1: Qdrant (إن كان مُعدَّاً ومتصلاً فعلياً)
+        if _HAS_VECTOR_BACKEND:
+            try:
+                vb = get_vector_backend()
+                if vb.available():
+                    flt = {"session_id": session_id, "kind": "turn"} if session_id else {"kind": "turn"}
+                    hits = vb.search(query, k=limit, filter_payload=flt)
+                    if hits:
+                        return [
+                            {"user": p.get("user", ""), "bot": p.get("bot", "")[:300],
+                             "topic": p.get("topic", ""), "ts": p.get("ts", 0),
+                             "score": round(score, 4), "source": "qdrant"}
+                            for score, p in hits
+                        ]
+            except Exception as e:
+                logger.debug(f"Qdrant semantic_search skipped, falling back: {e}")
+
+        # الطبقة 2: TF-IDF محلي (الافتراضي الآمن دائماً)
+        if not _HAS_SKLEARN:
             return []
         try:
             with sqlite3.connect(self._path) as c:
@@ -224,7 +271,8 @@ class _LongTermStore:
 
             scored.sort(key=lambda x: x[0], reverse=True)
             return [
-                {"user": r[0], "bot": r[1][:300], "topic": r[2], "ts": r[3], "score": round(s, 4)}
+                {"user": r[0], "bot": r[1][:300], "topic": r[2], "ts": r[3],
+                 "score": round(s, 4), "source": "tfidf"}
                 for s, r in scored[:limit]
             ]
         except Exception as e:
@@ -250,6 +298,23 @@ class _LongTermStore:
                       importance, now, now))
         except Exception as e:
             logger.debug(f"LTM upsert_fact error: {e}")
+            return
+
+        # مرآة اختيارية إلى Qdrant — SQLite يبقى دائماً مصدر الحقيقة الأساسي
+        # (all_facts تقرأ منه دوماً)، Qdrant يُستخدم فقط لتحسين الترتيب/البحث.
+        if _HAS_VECTOR_BACKEND:
+            try:
+                vb = get_vector_backend()
+                if vb.available():
+                    vb.upsert(
+                        key=f"fact:{session_id}:{fact_key}",
+                        text=fact_text,
+                        payload={"kind": "fact", "session_id": session_id,
+                                 "fact_key": fact_key, "category": category,
+                                 "importance": importance},
+                    )
+            except Exception as e:
+                logger.debug(f"LTM fact Qdrant mirror skipped: {e}")
 
     def find_similar_fact_key(self, session_id: str, fact_text: str,
                                threshold: float = 0.72) -> Optional[str]:
@@ -295,6 +360,28 @@ class _LongTermStore:
         facts = self.all_facts(session_id)
         if not facts:
             return []
+        by_key = {f["fact_key"]: f for f in facts}
+
+        # الطبقة 1: Qdrant — ترتيب دلالي حقيقي (SQLite يبقى مصدر البيانات)
+        if _HAS_VECTOR_BACKEND and query.strip():
+            try:
+                vb = get_vector_backend()
+                if vb.available():
+                    hits = vb.search(
+                        query, k=limit,
+                        filter_payload={"session_id": session_id, "kind": "fact"},
+                    )
+                    ordered = [
+                        by_key[p["fact_key"]] for _, p in hits
+                        if p.get("fact_key") in by_key
+                    ]
+                    if ordered:
+                        self._bump_access([f["fact_key"] for f in ordered], session_id)
+                        return ordered[:limit]
+            except Exception as e:
+                logger.debug(f"Qdrant search_facts skipped, falling back: {e}")
+
+        # الطبقة 2: TF-IDF محلي
         if _HAS_SKLEARN and query.strip() and len(facts) >= 1:
             try:
                 texts = [f["fact_text"] for f in facts] + [query]
@@ -334,9 +421,16 @@ class _LongTermStore:
                     "SELECT topic,COUNT(*) FROM turns GROUP BY topic ORDER BY COUNT(*) DESC LIMIT 5"
                 ).fetchall()
                 n_facts  = c.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+            vector_active = False
+            if _HAS_VECTOR_BACKEND:
+                try:
+                    vector_active = get_vector_backend().available()
+                except Exception:
+                    vector_active = False
             return {"total_turns": total, "sessions": sessions,
                     "top_topics": [{"topic": t, "count": n} for t, n in topics],
-                    "total_facts": n_facts, "semantic_search": _HAS_SKLEARN}
+                    "total_facts": n_facts, "semantic_search": _HAS_SKLEARN,
+                    "vector_backend_active": vector_active}
         except Exception:
             return {}
 
