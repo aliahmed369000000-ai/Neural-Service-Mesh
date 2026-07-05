@@ -143,6 +143,16 @@ def _build_system_prompt() -> str:
     مهرّبة (مثل استخدام " بداخل نص محاط أصلاً بـ "). استخدم علامات اقتباس
     مفردة ' بالداخل، أو أنشئ ملف Python كامل عبر create_file وشغّله بـ
     run_file بدل كتابة أكواد معقدة داخل سطر cmd واحد.
+13. 🆕🚫 ممنوع منعاً باتاً استخدام خطوة واحدة فقط من نوع "answer" (بدون أي
+    "create_file"/"edit_file"/"git_push" قبلها) إذا كان طلب المستخدم يحتوي
+    كلمة فعل تنفيذية مثل: أنشئ/انشئ/أضف/عدّل/اكتب ملف/ارفع/ادمج/طبّق.
+    في هذه الحالة، اكتابة الكود داخل "reply" فقط دون تنفيذه عبر "create_file"
+    هو خطأ فادح — المستخدم يريد الملف مكتوباً على القرص فعلياً وليس شرحاً
+    نظرياً للكود. "steps" يجب أن تبدأ بخطوة create_file/edit_file حقيقية
+    تحتوي الكود الكامل في حقل "content"، ثم git_push إذا طُلب الرفع، ثم
+    answer تلخيصية أخيرة فقط.
+14. 🆕 لا تشرح كيف "يمكن" فعل الشي — نفّذه مباشرة عبر steps. الشرح النظري
+    بدون تنفيذ فعلي غير مقبول أبداً عندما يطلب المستخدم إنشاء/تعديل/رفع.
 
 ## مثال حقيقي لرد صحيح (وليس نصاً تنسخه — فقط توضيح للصيغة):
 {{
@@ -427,7 +437,6 @@ def _git_push(message: str) -> str:
         for cmd in [
             ["git", "-C", str(ROOT), "add", "-A"],
             ["git", "-C", str(ROOT), "commit", "-m", message],
-            ["git", "-C", str(ROOT), "push"],
         ]:
             r = subprocess.run(cmd, capture_output=True, text=True)
             if r.returncode != 0:
@@ -435,6 +444,27 @@ def _git_push(message: str) -> str:
                 if "nothing to commit" in out:
                     return "ℹ️ لا توجد تغييرات للرفع"
                 return f"❌ git: {out}"
+
+        # 🆕 استخدام remote موثّق بتوكن (GITHUB_TOKEN/GITHUB_USER/GITHUB_REMOTE)
+        # بدلاً من "git push" العادي، لأن بيئة Streamlit Cloud لا تملك
+        # credential helper مُعد مسبقاً — بدون هذا سيفشل الرفع بخطأ صلاحيات.
+        try:
+            from ai.github_sync import get_authenticated_remote
+            auth_remote = get_authenticated_remote()
+        except Exception:
+            auth_remote = None
+
+        push_cmd = ["git", "-C", str(ROOT), "push"]
+        if auth_remote:
+            push_cmd = ["git", "-C", str(ROOT), "push", auth_remote, "HEAD:main"]
+
+        r = subprocess.run(push_cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            out = (r.stdout + r.stderr).strip()
+            if not auth_remote:
+                return (f"❌ git: {out}\n"
+                        f"💡 أضف GITHUB_TOKEN و GITHUB_USER و GITHUB_REMOTE في Secrets ليعمل الرفع.")
+            return f"❌ git: {out}"
         return "📤 رُفع لـ GitHub ✅"
     except Exception as e:
         return f"❌ خطأ git: {e}"
