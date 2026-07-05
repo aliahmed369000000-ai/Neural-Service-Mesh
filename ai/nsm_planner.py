@@ -119,7 +119,7 @@ _AGENT_ONLY_TRIGGERS = (
 
 # ── أسماء الملفات أو المسارات تعني تعديل وليس إنشاء ──
 import re as _re
-_PATH_PATTERN = _re.compile(r"[\w/]+\.(py|json|toml|md|txt|yaml|yml|csv)")
+_PATH_PATTERN = _re.compile(r"[\w/]+\.(py|json|toml|md|txt|yaml|yml|csv)\b")
 
 
 def is_planning_request(text: str) -> bool:
