@@ -87,6 +87,7 @@ ANTHROPIC_MODELS = {
     "opus":    "claude-opus-4-8",             # للمهام المعقدة التي تتطلب أعلى دقة
     "haiku":   "claude-haiku-4-5-20251001",   # للردود السريعة والمهام الخفيفة
     "stable":  "claude-sonnet-4-20250514",    # إصدار مستقر للإنتاج
+    "fable":   "claude-fable-5",              # متخصص في السرد الإبداعي (ai/fable_engine.py)
 }
 
 _ANTHROPIC_MODEL  = ANTHROPIC_MODELS["sonnet"]    # الأولوية الأولى ✅
@@ -219,13 +220,21 @@ class LLMFallback:
         max_tokens:  int   = 350,
         temperature: float = 0.4,
         timeout:     int   = 14,
+        model_key:   Optional[str] = None,
     ):
         self.ckg         = ckg
         self.max_tokens  = max_tokens
         self.temperature = temperature
         self.timeout     = timeout
+        # model_key اختياري: يسمح باختيار نموذج Anthropic محدد من
+        # ANTHROPIC_MODELS (مثال: model_key="fable" لاستخدام claude-fable-5
+        # في محرك السرد الإبداعي ai/fable_engine.py). إن لم يُمرَّر، يُستخدم
+        # الافتراضي "sonnet" كما كان سابقاً — لا تغيير في السلوك القديم.
+        self._model_key  = model_key if model_key in ANTHROPIC_MODELS else None
 
         self._provider, self._api_key, self._model = self._detect_provider()
+        if self._model_key and self._provider == Provider.ANTHROPIC:
+            self._model = ANTHROPIC_MODELS[self._model_key]
         logger.info(
             f"[LLMFallback] مزوّد: {self._provider.value} | نموذج: {self._model}"
         )
@@ -295,6 +304,8 @@ class LLMFallback:
         # إعادة فحص المفتاح (يدعم الحقن المتأخر من Streamlit Secrets)
         if not self._api_key or self._provider.value == "ckg_synthesis":
             self._provider, self._api_key, self._model = self._detect_provider()
+            if self._model_key and self._provider == Provider.ANTHROPIC:
+                self._model = ANTHROPIC_MODELS[self._model_key]
 
         t0      = time.time()
         history = history or []
