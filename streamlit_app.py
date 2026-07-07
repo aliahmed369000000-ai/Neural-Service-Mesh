@@ -68,6 +68,18 @@ try:
 except Exception:
     _AGENTS_HUB_OK = False
 
+# ── محرك السرد الإبداعي 🎭 إبداع (تبويب جديد — إضافي بالكامل) ─────────────
+try:
+    from ai.llm_fallback import LLMFallback as _FableLLMFallback
+    from ai.fable_engine import (
+        FableEngine, STORY_MODES, CHARACTERS, ARABIC_METERS,
+        DEFAULT_MODE as FABLE_DEFAULT_MODE,
+        DEFAULT_CHARACTER as FABLE_DEFAULT_CHARACTER,
+    )
+    _FABLE_OK = True
+except Exception:
+    _FABLE_OK = False
+
 # ── إعداد الصفحة ──────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="النظام المعرفي العربي | Neural Service Mesh",
@@ -1669,7 +1681,8 @@ def main():
     # ── التبويبات ─────────────────────────────────────────────────────────
     tabs = st.tabs(["🏠 الرئيسية", "🔍 البحث المعرفي", "📖 القرآن الكريم",
                     "❓ الأسئلة والأجوبة", "💬 المحادثة", "🤖 وكلاء AI",
-                    "🎓 التدريب", "🧠 الذاكرة", "🏥 صحة النظام", "🔬 API متقدمة"])
+                    "🎭 إبداع", "🎓 التدريب", "🧠 الذاكرة", "🏥 صحة النظام",
+                    "🔬 API متقدمة"])
 
     with tabs[0]: render_home()
     with tabs[1]: render_search()
@@ -1677,10 +1690,11 @@ def main():
     with tabs[3]: render_qa()
     with tabs[4]: render_chat()
     with tabs[5]: render_agents_hub()
-    with tabs[6]: render_training()
-    with tabs[7]: render_memory()
-    with tabs[8]: render_health()
-    with tabs[9]: render_advanced_api()
+    with tabs[6]: render_fable()
+    with tabs[7]: render_training()
+    with tabs[8]: render_memory()
+    with tabs[9]: render_health()
+    with tabs[10]: render_advanced_api()
 
     # ── تذييل الصفحة ─────────────────────────────────────────────────────
     st.markdown("---")
@@ -1689,6 +1703,234 @@ def main():
         Neural Service Mesh · نظام معرفي عربي ذاتي التعلم · مبني بـ Python & Streamlit
     </div>
     """, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# تبويب 🎭 إبداع — السرد الإبداعي التفاعلي وتوليد الشعر
+# ══════════════════════════════════════════════════════════════════════════
+def render_fable():
+    """تبويب القصص التفاعلية والشعر — مبني فوق نفس LLMFallback المستخدم
+    في المحادثة (Anthropic أولاً ثم بقية المزوّدين المجانية)."""
+
+    st.markdown('<div class="section-header">🎭 إبداع — السرد الإبداعي العربي</div>',
+                unsafe_allow_html=True)
+
+    if not _FABLE_OK:
+        st.error("⚠️ تعذّر تحميل محرك السرد الإبداعي (ai/fable_engine.py). "
+                  "تأكد من رفع الملف إلى مجلد ai/.")
+        return
+
+    st.markdown(
+        '<p style="color:#999">اختر وضع القصة والراوي، وابدأ حكاية تفاعلية '
+        'تتطور حسب اختياراتك، أو اطلب قصيدة على أحد بحور الشعر العربي.</p>',
+        unsafe_allow_html=True,
+    )
+
+    # ── تهيئة محرك السرد مرة واحدة لكل جلسة Streamlit ──
+    if "fable_engine" not in st.session_state:
+        fb = _FableLLMFallback(model_key="fable")
+        st.session_state.fable_engine = FableEngine(
+            llm_fallback=fb, db_path=str(MEMORY_DIR / "fable.db")
+        )
+        st.session_state.fable_chapter = None   # آخر فصل مُولَّد
+
+    engine = st.session_state.fable_engine
+
+    story_tab, poem_tab, explainer_tab, shorts_tab = st.tabs(
+        ["📖 قصة تفاعلية", "🪶 توليد شعر", "🎬 وثائقي (سيناريو)", "⚡ Shorts (سيناريو)"]
+    )
+
+    # ══════════════════ قصة تفاعلية ══════════════════
+    with story_tab:
+        cur = st.session_state.fable_chapter
+
+        if cur is None:
+            c1, c2 = st.columns(2)
+            with c1:
+                mode = st.selectbox(
+                    "وضع القصة",
+                    list(STORY_MODES.keys()),
+                    index=list(STORY_MODES.keys()).index(FABLE_DEFAULT_MODE),
+                    format_func=lambda m: f"{STORY_MODES[m]['emoji']} {m} — {STORY_MODES[m]['desc']}",
+                )
+            with c2:
+                character = st.selectbox(
+                    "الراوي / الأسلوب",
+                    list(CHARACTERS.keys()),
+                    index=list(CHARACTERS.keys()).index(FABLE_DEFAULT_CHARACTER),
+                    format_func=lambda c: f"{CHARACTERS[c]['emoji']} {c} — {CHARACTERS[c]['style']}",
+                )
+            seed = st.text_input(
+                "فكرة مبدئية (اختياري):",
+                placeholder="مثال: قصة عن تاجر يبحث عن كنز مفقود في الصحراء",
+            )
+            if st.button("✨ ابدأ القصة", type="primary"):
+                with st.spinner("يُنسج الفصل الأول..."):
+                    chapter = engine.start_story(mode=mode, character=character, seed_idea=seed)
+                st.session_state.fable_chapter = chapter
+                st.rerun()
+            return
+
+        # ── عرض الفصل الحالي ──
+        mode_info = STORY_MODES.get(cur.mode, {})
+        char_info = CHARACTERS.get(cur.character, {})
+        st.markdown(
+            f'<span class="badge badge-purple">{mode_info.get("emoji","")} {cur.mode}</span> '
+            f'<span class="badge badge-blue">{char_info.get("emoji","")} {cur.character}</span> '
+            f'<span class="badge badge-amber">المزوّد: {cur.provider}</span>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(f"""
+        <div class="root-item" style="font-size:1.05rem; line-height:2; text-align:right; direction:rtl">
+            {cur.text}
+        </div>
+        """, unsafe_allow_html=True)
+
+        if cur.error:
+            st.caption(f"⚠️ ملاحظة تقنية: {cur.error}")
+
+        st.markdown("**ماذا يحدث بعد ذلك؟**")
+        cols = st.columns(len(cur.choices) or 1)
+        chosen = None
+        for i, choice in enumerate(cur.choices):
+            with cols[i]:
+                if st.button(choice, key=f"fable_choice_{i}", use_container_width=True):
+                    chosen = choice
+
+        custom_choice = st.text_input("أو اكتب مسارك الخاص:", key="fable_custom_choice")
+        if st.button("➡️ تابع") and custom_choice.strip():
+            chosen = custom_choice.strip()
+
+        if chosen:
+            with st.spinner("يُتابع نسج الأحداث..."):
+                st.session_state.fable_chapter = engine.continue_story(cur.session_id, chosen)
+            st.rerun()
+
+        st.markdown("---")
+        st.markdown("**أوامر سريعة:**")
+        qc_cols = st.columns(4)
+        quick_labels = ["أنشد بيتاً", "صف المكان", "أضف حواراً", "لخّص"]
+        for i, label in enumerate(quick_labels):
+            with qc_cols[i]:
+                if st.button(f"⚡ {label}", key=f"fable_qc_{i}", use_container_width=True):
+                    with st.spinner("..."):
+                        result = engine.quick_command(cur.session_id, label)
+                    st.markdown(f"""
+                    <div class="root-item" style="text-align:right; direction:rtl">
+                        {result.text}
+                    </div>
+                    """, unsafe_allow_html=True)
+
+        if st.button("🔄 قصة جديدة"):
+            st.session_state.fable_chapter = None
+            st.rerun()
+
+    # ══════════════════ توليد شعر ══════════════════
+    with poem_tab:
+        st.markdown("**اطلب قصيدة قصيرة على أحد بحور الشعر العربي:**")
+        topic = st.text_input("موضوع القصيدة:", placeholder="مثال: الوفاء، الوطن، الصحراء ليلاً")
+        meter = st.selectbox(
+            "البحر الشعري",
+            list(ARABIC_METERS.keys()),
+            format_func=lambda m: f"{m} — {ARABIC_METERS[m]['وصف']}",
+        )
+        if st.button("🪶 أنشئ القصيدة", type="primary") and topic.strip():
+            with st.spinner("تُنظَم الأبيات..."):
+                poem = engine.generate_poem(topic.strip(), meter=meter)
+            st.markdown(f"""
+            <div class="root-item" style="font-size:1.1rem; line-height:2.1; text-align:center; direction:rtl">
+                {poem.text}
+            </div>
+            """, unsafe_allow_html=True)
+            st.caption(f"المزوّد: {poem.provider}")
+
+    # ══════════════════ وثائقي (سيناريو Explainer) ══════════════════
+    with explainer_tab:
+        st.markdown(
+            '<p style="color:#999">يولّد سيناريو وثائقياً مُقسّماً إلى مشاهد '
+            '(نص السرد + توجيه مرئي مقترح لكل مشهد) — فكرة مستوحاة من أدوات '
+            'مثل Higgsfield Explainer. <strong>ملاحظة:</strong> NSM لا يملك '
+            'نموذج توليد فيديو فعلي، لذا الناتج هنا نص سيناريو فقط جاهز '
+            'لتُغذّى به يدوياً أي أداة توليد فيديو خارجية.</p>',
+            unsafe_allow_html=True,
+        )
+        topic = st.text_input(
+            "موضوع الوثائقي:",
+            placeholder="مثال: تاريخ طريق الحرير، كيف تعمل الأقمار الصناعية",
+            key="explainer_topic",
+        )
+        minutes = st.slider("المدة المستهدفة (دقائق)", min_value=1, max_value=10, value=5)
+
+        if st.button("🎬 أنشئ السيناريو", type="primary") and topic.strip():
+            with st.spinner("يُجري بحثاً ويكتب السيناريو..."):
+                script = engine.generate_explainer(topic.strip(), target_minutes=minutes)
+
+            st.markdown(f"### {script.title}")
+            st.caption(
+                f"عدد المشاهد: {len(script.segments)} · "
+                f"إجمالي المدة التقديرية: ~{script.total_seconds // 60} دقيقة "
+                f"({script.total_seconds} ثانية) · المزوّد: {script.provider}"
+            )
+            if script.error:
+                st.caption(f"⚠️ ملاحظة تقنية: {script.error}")
+
+            for seg in script.segments:
+                st.markdown(f"""
+                <div class="root-item" style="text-align:right; direction:rtl">
+                    <span class="badge badge-purple">المشهد {seg.index}</span>
+                    <span class="badge badge-amber">~{seg.est_seconds} ثانية</span>
+                    <p style="margin-top:0.5rem"><strong>السرد:</strong> {seg.narration}</p>
+                    <p style="color:#999"><strong>🎥 اللقطة المقترحة:</strong> {seg.visual_notes}</p>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with st.expander("📋 النص الكامل للسرد (لنسخه إلى أداة التعليق الصوتي)"):
+                st.text_area("النص الكامل:", value=script.full_narration, height=200)
+
+    # ══════════════════ ⚡ Shorts (فيديو قصير عمودي) ══════════════════
+    with shorts_tab:
+        st.markdown(
+            '<p style="color:#999">يحوّل نصاً أو موضوعاً إلى سيناريو فيديو '
+            'قصير عمودي (~دقيقة واحدة) بسرد صوتي مكثّف ووصف رسوم متحركة '
+            'توضيحية لكل لقطة — فكرة مستوحاة من ميزة NotebookLM: Shorts. '
+            '<strong>ملاحظة:</strong> هذا سيناريو نصي فقط؛ إنتاج الفيديو '
+            'الفعلي (الصوت المُصوَّت والرسوم المتحركة) يحتاج أداة خارجية '
+            'تتغذّى على هذا النص.</p>',
+            unsafe_allow_html=True,
+        )
+        source_text = st.text_area(
+            "الصق مصدرك أو اكتب الموضوع:",
+            placeholder="مثال: فقرة من مقال، ملخص بحث، أو مجرد فكرة موضوع قصير",
+            key="shorts_source",
+            height=120,
+        )
+        target_sec = st.slider("المدة المستهدفة (ثانية)", min_value=20, max_value=90, value=60, step=5)
+
+        if st.button("⚡ أنشئ سيناريو Shorts", type="primary") and source_text.strip():
+            with st.spinner("يُلخّص ويكتب لقطات سريعة..."):
+                short = engine.generate_short(source_text.strip(), target_seconds=target_sec)
+
+            st.markdown(f"### {short.title}")
+            st.caption(
+                f"عدد اللقطات: {len(short.segments)} · "
+                f"إجمالي المدة التقديرية: ~{short.total_seconds} ثانية · "
+                f"المزوّد: {short.provider}"
+            )
+            if short.error:
+                st.caption(f"⚠️ ملاحظة تقنية: {short.error}")
+
+            for seg in short.segments:
+                st.markdown(f"""
+                <div class="root-item" style="text-align:right; direction:rtl">
+                    <span class="badge badge-purple">لقطة {seg.index}</span>
+                    <span class="badge badge-amber">~{seg.est_seconds} ثانية</span>
+                    <p style="margin-top:0.5rem"><strong>السرد:</strong> {seg.narration}</p>
+                    <p style="color:#999"><strong>🎞️ رسم متحرك مقترح:</strong> {seg.visual_notes}</p>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with st.expander("📋 النص الكامل للسرد"):
+                st.text_area("النص الكامل:", value=short.full_narration, height=150, key="shorts_full_text")
 
 
 # ══════════════════════════════════════════════════════════════════════════
