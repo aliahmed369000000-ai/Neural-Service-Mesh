@@ -1323,6 +1323,93 @@ def render_health():
     except Exception as _me:
         st.info(f"تعذّر تحميل قائمة النماذج: {_me}")
 
+    # ── GitHub Push ───────────────────────────────────────────────────────
+    st.markdown("")
+    st.markdown('<div class="section-header">🚀 رفع إلى GitHub</div>', unsafe_allow_html=True)
+
+    _gh_token = os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN", "").strip()
+    if not _gh_token:
+        st.warning("🔑 أضف **GITHUB_PERSONAL_ACCESS_TOKEN** في Secrets لتفعيل هذه الميزة.")
+    else:
+        col_gh1, col_gh2 = st.columns([3, 1])
+        with col_gh1:
+            commit_msg = st.text_input(
+                "رسالة الـ Commit",
+                value="NSM update — رفع من الواجهة",
+                key="gh_commit_msg",
+                label_visibility="visible",
+            )
+        with col_gh2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            push_btn = st.button("⬆️ Push", key="gh_push_btn", use_container_width=True, type="primary")
+
+        if push_btn:
+            if not commit_msg.strip():
+                st.warning("أدخل رسالة commit أولاً.")
+            else:
+                import subprocess as _sp
+                with st.spinner("⟳ جارٍ الرفع إلى GitHub..."):
+                    try:
+                        # git add
+                        r_add = _sp.run(
+                            ["git", "add", "-A"],
+                            cwd=str(BASE), capture_output=True, text=True, timeout=15
+                        )
+                        # git commit
+                        r_commit = _sp.run(
+                            ["git", "-c", "user.email=nsm@replit.com",
+                             "-c", "user.name=NSM Agent",
+                             "commit", "-m", commit_msg.strip()],
+                            cwd=str(BASE), capture_output=True, text=True, timeout=15,
+                            env={**os.environ,
+                                 "GIT_AUTHOR_NAME": "NSM Agent",
+                                 "GIT_AUTHOR_EMAIL": "nsm@replit.com",
+                                 "GIT_COMMITTER_NAME": "NSM Agent",
+                                 "GIT_COMMITTER_EMAIL": "nsm@replit.com"},
+                        )
+                        # إذا لا يوجد تغيير جديد، نكمل الـ push للـ commit الحالي
+                        nothing_to_commit = (
+                            r_commit.returncode != 0 and
+                            "nothing to commit" in (r_commit.stdout + r_commit.stderr)
+                        )
+                        if r_commit.returncode != 0 and not nothing_to_commit:
+                            st.error(f"❌ فشل Commit:\n{r_commit.stderr[:400] or r_commit.stdout[:400]}")
+                        else:
+                            # git push
+                            _remote = (
+                                f"https://aliahmed369000000-ai:{_gh_token}"
+                                "@github.com/aliahmed369000000-ai/Neural-Service-Mesh.git"
+                            )
+                            r_push = _sp.run(
+                                ["git", "push", _remote, "main"],
+                                cwd=str(BASE), capture_output=True, text=True, timeout=30
+                            )
+                            if r_push.returncode == 0:
+                                st.success("✅ تم الرفع إلى GitHub بنجاح!")
+                                # عرض معلومات الـ commit الأخير
+                                r_log = _sp.run(
+                                    ["git", "log", "--oneline", "-1"],
+                                    cwd=str(BASE), capture_output=True, text=True
+                                )
+                                st.code(r_log.stdout.strip(), language="text")
+                            else:
+                                st.error(f"❌ فشل Push:\n{r_push.stderr[:400] or r_push.stdout[:400]}")
+                    except Exception as _gh_err:
+                        st.error(f"❌ خطأ غير متوقع: {_gh_err}")
+
+        # عرض آخر commit
+        try:
+            import subprocess as _sp2
+            _log = _sp2.run(
+                ["git", "log", "--oneline", "-3"],
+                cwd=str(BASE), capture_output=True, text=True, timeout=5
+            )
+            if _log.stdout.strip():
+                with st.expander("📋 آخر 3 commits"):
+                    st.code(_log.stdout.strip(), language="text")
+        except Exception:
+            pass
+
     # أزرار الإجراءات
     st.markdown("")
     st.markdown('<div class="section-header">⚙️ إجراءات</div>', unsafe_allow_html=True)
