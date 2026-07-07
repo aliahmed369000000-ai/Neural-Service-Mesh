@@ -1261,6 +1261,18 @@ def render_health():
     else:
         checks.append(("⚠️", "حالة التدريب", "لم يكتمل تدريب بعد", False))
 
+    # ── 8. مزوّد LLM الحالي ─────────────────────────────────────────────
+    try:
+        from ai.llm_fallback import LLMFallback, ANTHROPIC_MODELS
+        _fb = LLMFallback()
+        fb_info = _fb.info()
+        _prov   = fb_info.get("provider", "غير محدد")
+        _model  = fb_info.get("model", "غير محدد")
+        _live   = fb_info.get("live_llm", "❌")
+        checks.append(("✅" if "✅" in _live else "⚠️", f"مزوّد LLM — {_prov}", _model, "✅" in _live))
+    except Exception as _e:
+        checks.append(("⚠️", "مزوّد LLM", str(_e)[:60], False))
+
     # عرض النتائج
     all_ok = sum(1 for c in checks if c[3])
     total  = len(checks)
@@ -1274,7 +1286,6 @@ def render_health():
 
     st.markdown("")
     for icon, name, detail, ok in checks:
-        css_class = "health-ok" if ok else ("health-err" if icon == "❌" else "")
         st.markdown(f"""
         <div style="padding: 0.6rem 1rem; margin: 0.3rem 0; background: {'#f0fdf4' if ok else '#fef2f2'};
                     border-radius: 8px; border: 1px solid {'#bbf7d0' if ok else '#fecaca'};">
@@ -1283,6 +1294,34 @@ def render_health():
             &nbsp;&nbsp;<small style="color:#666">{detail}</small>
         </div>
         """, unsafe_allow_html=True)
+
+    # ── نماذج Anthropic المتاحة (من That.md) ────────────────────────────
+    st.markdown("")
+    st.markdown('<div class="section-header">🤖 نماذج Anthropic المتاحة</div>', unsafe_allow_html=True)
+    try:
+        from ai.llm_fallback import ANTHROPIC_MODELS
+        model_rows = {
+            "sonnet":  ("claude-sonnet-4-6",          "⚡ Sonnet 4",  "الافتراضي — توازن مثالي بين الجودة والسرعة"),
+            "opus":    ("claude-opus-4-8",             "💎 Opus 4",    "المهام المعقدة — الأعلى جودةً"),
+            "haiku":   ("claude-haiku-4-5-20251001",   "🚀 Haiku 4",   "الردود الفورية — الأخف والأسرع"),
+            "stable":  ("claude-sonnet-4-20250514",    "🔒 Sonnet Stable", "الإصدار المستقر للإنتاج"),
+        }
+        cols = st.columns(len(model_rows))
+        for col, (key, (model_id, label, desc)) in zip(cols, model_rows.items()):
+            with col:
+                is_active = ANTHROPIC_MODELS.get(key) == model_id
+                border_color = "#1a73e8" if key == "sonnet" else "#e2e8f0"
+                st.markdown(f"""
+                <div style="background:#f8faff;border:2px solid {border_color};border-radius:10px;
+                            padding:0.8rem;text-align:center;direction:ltr">
+                    <div style="font-size:1.3rem">{label}</div>
+                    <code style="font-size:0.72rem;color:#1a73e8">{model_id}</code>
+                    <div style="font-size:0.78rem;color:#555;margin-top:0.4rem;direction:rtl">{desc}</div>
+                </div>
+                """, unsafe_allow_html=True)
+        st.caption("المصدر: Claude.ai System Prompt (That.md) — محدَّث 2026")
+    except Exception as _me:
+        st.info(f"تعذّر تحميل قائمة النماذج: {_me}")
 
     # أزرار الإجراءات
     st.markdown("")
