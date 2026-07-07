@@ -76,14 +76,27 @@ _SYSTEM_PROMPT = (
     "4. لا تُشر إلى نفسك كـ GPT أو Claude أو أي نموذج آخر — أنت NSM"
 )
 
-_ANTHROPIC_MODEL = "claude-sonnet-5"  # الأولوية الأولى ✅
-_CF_MODEL        = "@cf/meta/llama-3.1-8b-instruct"  # مجاني 10k/يوم ✅
+# ── أسماء النماذج المحدّثة ────────────────────────────────────────────────
+# مصدر: Claude.ai system prompt (2026) — النماذج الرسمية المتاحة:
+#   claude-sonnet-4-6          ← Sonnet 4 (الأسرع/الأوفر تكلفةً)
+#   claude-opus-4-8            ← Opus 4 (الأقوى)
+#   claude-haiku-4-5-20251001  ← Haiku 4 (الأخف والأسرع)
+#   claude-sonnet-4-20250514   ← Sonnet 4 للـ Artifacts (مستقر)
+ANTHROPIC_MODELS = {
+    "sonnet":  "claude-sonnet-4-6",           # الافتراضي — توازن مثالي بين الجودة والسرعة
+    "opus":    "claude-opus-4-8",             # للمهام المعقدة التي تتطلب أعلى دقة
+    "haiku":   "claude-haiku-4-5-20251001",   # للردود السريعة والمهام الخفيفة
+    "stable":  "claude-sonnet-4-20250514",    # إصدار مستقر للإنتاج
+}
+
+_ANTHROPIC_MODEL  = ANTHROPIC_MODELS["sonnet"]    # الأولوية الأولى ✅
+_CF_MODEL         = "@cf/meta/llama-3.1-8b-instruct"  # مجاني 10k/يوم ✅
 _OPENROUTER_MODEL = "meta-llama/llama-3.1-8b-instruct:free"  # مجاني
 _OPENROUTER_URL   = "https://openrouter.ai/api/v1/chat/completions"
-_OPENAI_MODEL   = "gpt-4o-mini"
-_TOGETHER_MODEL = "meta-llama/Llama-3-8b-chat-hf"
-_GEMINI_MODEL   = "gemini-1.5-flash"
-_GROQ_MODELS    = ["llama-3.1-8b-instant", "llama3-8b-8192", "gemma2-9b-it"]
+_OPENAI_MODEL     = "gpt-4o-mini"
+_TOGETHER_MODEL   = "meta-llama/Llama-3-8b-chat-hf"
+_GEMINI_MODEL     = "gemini-1.5-flash"
+_GROQ_MODELS      = ["llama-3.1-8b-instant", "llama3-8b-8192", "gemma2-9b-it"]
 
 
 # ════════════════════════════════════════════════════════════════════════════
