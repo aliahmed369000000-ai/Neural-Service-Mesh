@@ -41,6 +41,10 @@ testem.log
 .DS_Store
 Thumbs.db
 
+# قاعدة بيانات المحادثات المحلية — بيانات المستخدم، لا تُرفع لـ GitHub
+memory/*.db
+memory/*.db-journal
+
 .cursor/rules/nx-rules.mdc
 .github/instructions/nx.instructions.md
 
