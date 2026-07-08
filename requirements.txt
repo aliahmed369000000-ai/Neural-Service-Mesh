@@ -4,3 +4,7 @@ requests
 streamlit
 numpy
 pypdf
+numpy
+pypdf
+requests
+streamlit
