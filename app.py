@@ -307,12 +307,15 @@ def _extract_file(uploaded) -> dict | None:
     result = {"name": name, "mime": mime, "size_kb": round(size_kb, 1),
               "is_image": False, "data_url": None, "text_content": None}
 
-    if mime in IMAGE_MIMES or ext in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+    # استنتاج MIME صحيح من الامتداد عند غيابه أو خطئه
+    EXT_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".webp": "image/webp", ".gif": "image/gif"}
+    if mime in IMAGE_MIMES or ext in EXT_MIME:
         b64 = base64.b64encode(raw).decode()
-        used_mime = mime if mime in IMAGE_MIMES else "image/png"
+        used_mime = mime if mime in IMAGE_MIMES else EXT_MIME.get(ext, "image/png")
         result["is_image"] = True
         result["data_url"] = f"data:{used_mime};base64,{b64}"
-        result["raw_bytes"] = raw  # للعرض في st.image
+        result["raw_bytes"] = raw  # للعرض فقط — يُحذف من رسائل التاريخ بعد الإرسال
 
     elif mime == "application/pdf" or ext == ".pdf":
         try:
@@ -335,34 +338,34 @@ def _extract_file(uploaded) -> dict | None:
     return result
 
 
-def _build_user_content(text: str, files: list) -> str | list:
+def _build_user_content(text: str, doc_files: list, image_files: list) -> str | list:
     """
     يبني محتوى رسالة المستخدم بتنسيق OpenRouter:
-    - بدون ملفات → نص عادي
-    - مع صور     → قائمة content parts (multimodal)
-    - مع نصوص/PDF→ يُضيف محتوى الملف كـ text part
+    - doc_files   → دائماً مُضمَّنة كـ text parts (PDF + نصوص)
+    - image_files → فقط للنماذج التي تدعم الرؤية
+    - بدون ملفات  → نص عادي
     """
-    if not files:
+    if not doc_files and not image_files:
         return text
 
     parts: list = []
 
-    # الملفات النصية والـ PDF أولاً (context)
-    for f in files:
-        if not f["is_image"] and f["text_content"]:
+    # الملفات النصية والـ PDF أولاً كسياق
+    for f in doc_files:
+        if f.get("text_content"):
             parts.append({"type": "text",
                           "text": f"📄 **{f['name']}**:\n```\n{f['text_content']}\n```\n"})
 
     # نص المستخدم
     parts.append({"type": "text", "text": text or "ما في هذا الملف / الصورة؟"})
 
-    # الصور
-    for f in files:
-        if f["is_image"] and f["data_url"]:
+    # الصور (vision-only)
+    for f in image_files:
+        if f.get("data_url"):
             parts.append({"type": "image_url",
                           "image_url": {"url": f["data_url"]}})
 
-    return parts if len(parts) > 1 else (parts[0]["text"] if parts else text)
+    return parts if len(parts) > 1 else (parts[0].get("text", text) if parts else text)
 
 
 def _display_text(content: str | list) -> str:
@@ -672,9 +675,11 @@ with tab1:
                 top_p = at.params.top_p
 
             # ── بناء محتوى رسالة المستخدم (multimodal إذا لزم) ───────────
-            # الصور فقط تُرسل للنماذج التي تدعم الرؤية
-            vision_files = files if (is_vision or model_to_use in VISION_MODELS) else []
-            user_api_content = _build_user_content(user_prompt_text, vision_files)
+            # النصوص/PDF دائماً مُضمَّنة — الصور فقط لنماذج الرؤية
+            can_vision = is_vision or model_to_use in VISION_MODELS
+            doc_files   = [f for f in files if not f["is_image"]]
+            image_files = [f for f in files if f["is_image"]] if can_vision else []
+            user_api_content = _build_user_content(user_prompt_text, doc_files, image_files)
 
             # ── بناء قائمة رسائل API ──────────────────────────────────────
             api_msgs = [{"role": "system", "content": sys_prompt}]
@@ -693,11 +698,16 @@ with tab1:
                 names = ", ".join(f["name"] for f in files)
                 display_text = raw + f"\n\n📎 *{names}*"
 
+            # raw_bytes يُحفظ فقط للعرض الفوري، ويُحذف من التاريخ الدائم توفيراً للذاكرة
+            history_images = [
+                {k: v for k, v in img.items() if k != "raw_bytes"}
+                for img in msg_images
+            ]
             st.session_state.messages.append({
                 "role": "user",
                 "content": display_text,
                 "api_content": user_api_content,
-                "images": msg_images,
+                "images": history_images,   # بدون raw_bytes
                 "docs": msg_docs,
             })
             db_save_msg(cid, "user", display_text)
