@@ -694,8 +694,11 @@ with tab1:
             with st.chat_message(msg["role"], avatar=av):
                 # عرض الصور المرفقة بالرسالة
                 for img in msg.get("images", []):
-                    st.image(img["raw_bytes"], caption=img["name"], use_container_width=False,
-                             width=320)
+                    if img.get("raw_bytes"):
+                        st.image(img["raw_bytes"], caption=img["name"], use_container_width=False,
+                                 width=320)
+                    else:
+                        st.caption(f"🖼 {img.get('name', 'صورة')} (لم تُحفظ في السجل الدائم)")
                 # عرض مرفقات نصية
                 for doc in msg.get("docs", []):
                     with st.expander(f"📄 {doc['name']} ({doc['size_kb']} KB)"):
