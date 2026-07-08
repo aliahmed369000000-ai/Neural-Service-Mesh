@@ -295,7 +295,7 @@ def _call_model(
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
         "HTTP-Referer": "https://g0dm0d3.replit.app",
-        "X-Title": "G0DM0DƎ ULTRAPLINIAN",
+        "X-Title": "G0DM0DE ULTRAPLINIAN",
     }
     payload = {
         "model": model,
