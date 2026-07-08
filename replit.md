@@ -1,51 +1,46 @@
-# Neural Service Mesh (NSM) — نظام معرفي عربي
+# Neural Service Mesh (NSM)
 
-## نظرة عامة
-NSM هو نظام ذكاء اصطناعي عربي متكامل مبني على Streamlit، يجمع بين:
-- **NSM Agent** (وكيل ذكي للمهام البرمجية)
-- **LLM Fallback** (دعم متعدد المزوّدين: Anthropic, Cloudflare, Gemini, Groq, OpenAI, ...)
-- **Cognitive Knowledge Graph** (رسم معرفي مدرَّب)
-- **ConversationMemory** (ذاكرة محادثة متعددة الأدوار)
+نظام ذكاء اصطناعي عربي متكامل مبني على Streamlit، يجمع بين وكيل ذكي وشبكة نماذج لغوية ورسم معرفي وذاكرة محادثة.
 
-## تشغيل المشروع
-```bash
-streamlit run streamlit_app.py
-```
-المنفذ: 5000
+## Run & Operate
 
-## الملفات الرئيسية
-| الملف | الوظيفة |
-|-------|---------|
-| `streamlit_app.py` | واجهة Streamlit الرئيسية |
-| `ai/llm_fallback.py` | محرك LLM متعدد المزوّدين |
-| `ai/anthropic_advanced.py` | واجهة Anthropic API المتقدمة |
-| `nsm_chat_plus.py` | طبقة المحادثة الذكية |
-| `nsm_chat.py` | NSMChat الأصلي |
-| `nsm_memory.py` | ذاكرة المحادثة |
-| `That.md` | Claude.ai System Prompt (مرجع API) |
+- `streamlit run streamlit_app.py --server.port 5000` — run the Streamlit app
 
-## متغيرات البيئة (Secrets)
-| المتغير | الوظيفة |
-|---------|---------|
-| `ANTHROPIC_API_KEY` | Anthropic Claude — الأولوية الأولى |
-| `CF_API_TOKEN` | Cloudflare Workers AI (مجاني 10k/يوم) |
-| `CF_ACCOUNT_ID` | معرّف حساب Cloudflare |
-| `GOOGLE_API_KEY` | Google Gemini |
+## Stack
+
+- Python 3.11 + Streamlit
+- Multi-provider LLM fallback (Anthropic, Cloudflare, Gemini, Groq, OpenAI, OpenRouter, Together)
+- Cognitive Knowledge Graph (CKG) with Arabic NLP
+- NSM Chat with conversation memory
+
+## Where things live
+
+- `streamlit_app.py` — main Streamlit UI
+- `ai/` — AI modules (LLM fallback, agents, knowledge graph, etc.)
+- `knowledge/` — knowledge store, Quran QA engine, episodic memory
+- `nsm_chat_plus.py` — generative chat layer
+- `nsm_memory.py` — conversation memory
+- `.streamlit/config.toml` — server config (port 5000, headless)
+
+## User preferences
+
+- Arabic responses preferred (اللغة العربية الفصحى)
+- Maintain existing file structure
+
+## Gotchas
+
+- Must inject Streamlit secrets → os.environ before any module imports (done in streamlit_app.py)
+- `st.rerun()` must be used instead of `experimental_rerun`
+
+## Required Secrets
+
+| Variable | Purpose |
+|----------|---------|
+| `ANTHROPIC_API_KEY` | Claude (primary) |
+| `CF_API_TOKEN` | Cloudflare Workers AI |
+| `CF_ACCOUNT_ID` | Cloudflare account |
+| `GOOGLE_API_KEY` | Gemini |
 | `OPENROUTER_API_KEY` | OpenRouter |
 | `GROQ_API_KEY` | Groq |
 | `OPENAI_API_KEY` | OpenAI |
 | `TOGETHER_API_KEY` | Together.xyz |
-
-## نماذج Anthropic المتاحة (2026)
-| الاسم | الكود | الاستخدام |
-|-------|-------|-----------|
-| Sonnet 4 | `claude-sonnet-4-6` | الافتراضي — توازن مثالي |
-| Opus 4 | `claude-opus-4-8` | المهام المعقدة |
-| Haiku 4 | `claude-haiku-4-5-20251001` | الردود السريعة |
-| Sonnet 4 Stable | `claude-sonnet-4-20250514` | الإنتاج المستقر |
-
-المصدر: Claude.ai System Prompt export (That.md)
-
-## تفضيلات المستخدم
-- اللغة العربية الفصحى في كل الردود
-- الحفاظ على بنية الملفات الموجودة
