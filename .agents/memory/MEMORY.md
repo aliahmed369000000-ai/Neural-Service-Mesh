@@ -1,1 +1,2 @@
 - [G0DM0D3 Streamlit port](g0dm0d3-streamlit.md) — تطبيق الدردشة محوّل من Next.js إلى Streamlit؛ يعمل على المنفذ 5000 عبر workflow باسم G0DM0DE.
+- [Vercel misdetection](streamlit-vercel-misdetect.md) — repo has dead pnpm/Node scaffold from importer misdetect; real app is Streamlit `app.py`; Streamlit Cloud needs `streamlit_app.py` entrypoint.
