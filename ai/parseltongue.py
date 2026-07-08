@@ -1,145 +1,47 @@
 """
-Parseltongue — محرك التشويه (Python port من G0DM0D3)
-يكتشف الكلمات المُشغِّلة ويطبّق تقنيات التشويه عليها.
-"""
+Parseltongue — محرك إخفاء المدخلات
+===========================================
+يرصد الكلمات المثيرة لرفض النماذج ويطبّق تقنيات تشفير لتجاوز فلاتر المحتوى.
+Python port من src/lib/parseltongue.ts في G0DM0D3-main.
 
-import re
+التقنيات:
+  - leetspeak   : تحويل الحروف لرموز l33t (a→4, e→3, ...)
+  - unicode     : مثيلات Unicode بصرياً متشابهة (Cyrillic, Greek, ...)
+  - zwj         : إدراج محارف عرض-صفري غير مرئية بين الأحرف
+  - mixedcase   : اضطراب نمط الأحرف الكبيرة/الصغيرة
+  - phonetic    : استبدال صوتي بكلمات مشابهة لفظاً
+  - random      : خلط عشوائي من جميع التقنيات
+"""
+from __future__ import annotations
+
 import random
+import re
 from dataclasses import dataclass, field
-from typing import Literal, List, Dict, Optional
+from typing import List, Literal, Dict
+
+# ══════════════════════════════════════════════════════════════════════
+# الأنواع
+# ══════════════════════════════════════════════════════════════════════
 
 ObfuscationTechnique = Literal["leetspeak", "unicode", "zwj", "mixedcase", "phonetic", "random"]
-Intensity = Literal["light", "medium", "heavy"]
 
-DEFAULT_TRIGGERS: List[str] = [
-    "hack", "exploit", "bypass", "crack", "break", "attack", "penetrate",
-    "inject", "manipulate", "override", "disable", "circumvent", "evade",
-    "malware", "virus", "trojan", "payload", "shellcode", "rootkit",
-    "keylogger", "backdoor", "vulnerability",
-    "weapon", "bomb", "explosive", "poison", "drug", "synthesize",
-    "jailbreak", "unlock", "root", "sudo", "admin", "privilege",
-    "phishing", "scam", "impersonate", "deceive", "fraud",
-    "nsfw", "explicit", "uncensored", "unfiltered", "unrestricted",
-    "ignore", "disregard", "forget", "pretend", "roleplay",
-]
-
-LEET_MAP: Dict[str, List[str]] = {
-    "a": ["4", "@", "∂", "λ"], "b": ["8", "|3", "ß"],
-    "c": ["(", "<", "¢"],      "d": ["|)", "|>", "đ"],
-    "e": ["3", "€", "£", "∑"], "f": ["|=", "ƒ"],
-    "g": ["9", "6", "&"],      "h": ["#", "|-|", "}{"],
-    "i": ["1", "!", "|"],      "j": ["_|", "]"],
-    "k": ["|<", "|{"],         "l": ["1", "|", "|_"],
-    "m": ["|V|", "µ"],         "n": ["|\\|", "η"],
-    "o": ["0", "()", "°", "ø"],"p": ["|*", "|>"],
-    "q": ["0_", "()_"],        "r": ["|2", "®"],
-    "s": ["5", "$", "§"],      "t": ["7", "+", "†"],
-    "u": ["|_|", "µ"],         "v": ["\\/", "√"],
-    "w": ["\\/\\/", "vv", "ω"],"x": ["><", "×"],
-    "y": ["`/", "¥", "γ"],     "z": ["2", "7_"],
+INTENSITY_RATES: Dict[str, float] = {
+    "light":  0.25,  # 25% من الأحرف المؤهلة
+    "medium": 0.55,  # 55%
+    "heavy":  0.90,  # 90%
 }
-
-UNICODE_HOMOGLYPHS: Dict[str, List[str]] = {
-    "a": ["а", "ɑ", "α"],  "b": ["Ь", "ḅ"],
-    "c": ["с", "ϲ"],        "d": ["ԁ", "ⅾ"],
-    "e": ["е", "ė", "ẹ"],  "f": ["ƒ"],
-    "g": ["ɡ"],              "h": ["һ", "ḥ"],
-    "i": ["і", "ι"],         "j": ["ϳ"],
-    "k": ["κ"],               "l": ["ӏ", "ⅼ"],
-    "m": ["м"],               "n": ["ո"],
-    "o": ["о", "ο"],          "p": ["р", "ρ"],
-    "s": ["ѕ"],               "t": ["τ"],
-    "u": ["υ"],               "v": ["ν"],
-    "w": ["ѡ"],               "x": ["х"],
-    "y": ["у", "γ"],          "z": ["ᴢ"],
-}
-
-ZW_CHARS = ["\u200B", "\u200C", "\u200D", "\uFEFF"]
-
-
-def _apply_leetspeak(word: str, intensity: Intensity) -> str:
-    chars = list(word)
-    n = len(chars)
-    transform_count = 1 if intensity == "light" else (n // 2 + 1 if intensity == "medium" else n)
-    indices = [i for i in range(n) if chars[i].lower() in LEET_MAP]
-    random.shuffle(indices)
-    for idx in indices[:transform_count]:
-        c = chars[idx].lower()
-        if c in LEET_MAP:
-            chars[idx] = random.choice(LEET_MAP[c])
-    return "".join(chars)
-
-
-def _apply_unicode(word: str, intensity: Intensity) -> str:
-    chars = list(word)
-    n = len(chars)
-    transform_count = 1 if intensity == "light" else (n // 2 + 1 if intensity == "medium" else n)
-    indices = [i for i in range(n) if chars[i].lower() in UNICODE_HOMOGLYPHS]
-    random.shuffle(indices)
-    for idx in indices[:transform_count]:
-        c = chars[idx].lower()
-        if c in UNICODE_HOMOGLYPHS:
-            replacement = random.choice(UNICODE_HOMOGLYPHS[c])
-            chars[idx] = replacement.upper() if chars[idx].isupper() else replacement
-    return "".join(chars)
-
-
-def _apply_zwj(word: str, intensity: Intensity) -> str:
-    chars = list(word)
-    n = len(chars)
-    insert_count = 1 if intensity == "light" else (n // 2 if intensity == "medium" else n - 1)
-    result = []
-    insertions = 0
-    for i, c in enumerate(chars):
-        result.append(c)
-        if i < n - 1 and insertions < insert_count:
-            result.append(random.choice(ZW_CHARS))
-            insertions += 1
-    return "".join(result)
-
-
-def _apply_mixedcase(word: str, intensity: Intensity) -> str:
-    chars = list(word)
-    if intensity == "light":
-        idx = random.randint(0, len(chars) - 1)
-        chars[idx] = chars[idx].upper()
-    elif intensity == "medium":
-        chars = [c.lower() if i % 2 == 0 else c.upper() for i, c in enumerate(chars)]
-    else:
-        chars = [c.upper() if random.random() > 0.5 else c.lower() for c in chars]
-    return "".join(chars)
-
-
-def _apply_phonetic(word: str) -> str:
-    subs = [
-        (r"ph", "f"), (r"ck", "k"), (r"qu", "kw"),
-        (r"c(?=[eiy])", "s"), (r"c", "k"),
-    ]
-    result = word
-    for pattern, replacement in subs:
-        result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
-    return result
-
-
-def _obfuscate_word(word: str, technique: ObfuscationTechnique, intensity: Intensity) -> str:
-    if technique == "leetspeak":
-        return _apply_leetspeak(word, intensity)
-    elif technique == "unicode":
-        return _apply_unicode(word, intensity)
-    elif technique == "zwj":
-        return _apply_zwj(word, intensity)
-    elif technique == "mixedcase":
-        return _apply_mixedcase(word, intensity)
-    elif technique == "phonetic":
-        return _apply_phonetic(word)
-    elif technique == "random":
-        fn = random.choice([_apply_leetspeak, _apply_unicode, _apply_zwj, _apply_mixedcase])
-        return fn(word, intensity)
-    return word
 
 
 @dataclass
-class Transformation:
+class ParseltongueConfig:
+    enabled: bool = False
+    technique: ObfuscationTechnique = "leetspeak"
+    intensity: Literal["light", "medium", "heavy"] = "medium"
+    custom_triggers: List[str] = field(default_factory=list)
+
+
+@dataclass
+class TransformRecord:
     original: str
     transformed: str
     technique: str
@@ -151,61 +53,260 @@ class ParseltongueResult:
     transformed_text: str
     triggers_found: List[str]
     technique_used: str
-    transformations: List[Transformation] = field(default_factory=list)
+    transformations: List[TransformRecord]
 
 
-def detect_triggers(text: str, custom_triggers: Optional[List[str]] = None) -> List[str]:
-    all_triggers = DEFAULT_TRIGGERS + (custom_triggers or [])
-    found = []
-    for trigger in all_triggers:
+# ══════════════════════════════════════════════════════════════════════
+# قائمة الكلمات المثيرة الافتراضية
+# ══════════════════════════════════════════════════════════════════════
+
+DEFAULT_TRIGGERS: List[str] = [
+    # أفعال الاختراق
+    "hack", "exploit", "bypass", "crack", "break", "attack", "penetrate",
+    "inject", "manipulate", "override", "disable", "circumvent", "evade",
+    # مصطلحات أمنية
+    "malware", "virus", "trojan", "payload", "shellcode", "rootkit",
+    "keylogger", "backdoor", "vulnerability",
+    # مواضيع حساسة
+    "weapon", "bomb", "explosive", "poison", "drug", "synthesize",
+    # مصطلحات النظام
+    "jailbreak", "unlock", "root", "sudo", "admin", "privilege",
+    # هندسة اجتماعية
+    "phishing", "scam", "impersonate", "deceive", "fraud",
+    # إشارات المحتوى
+    "nsfw", "explicit", "uncensored", "unfiltered", "unrestricted",
+    # أوامر الذكاء الاصطناعي
+    "ignore", "disregard", "forget", "pretend", "roleplay",
+    "act as", "you are now", "new identity",
+]
+
+# ══════════════════════════════════════════════════════════════════════
+# جداول التحويل
+# ══════════════════════════════════════════════════════════════════════
+
+LEET_MAP: Dict[str, List[str]] = {
+    "a": ["4", "@", "∂", "λ"],
+    "b": ["8", "|3", "ß"],
+    "c": ["(", "<", "¢"],
+    "d": ["|)", "|>", "đ"],
+    "e": ["3", "€", "£", "∑"],
+    "f": ["|=", "ƒ"],
+    "g": ["9", "6", "&"],
+    "h": ["#", "|-|", "}{"],
+    "i": ["1", "!", "|", "¡"],
+    "j": ["_|", "]"],
+    "k": ["|<", "|{", "κ"],
+    "l": ["1", "|", "£"],
+    "m": ["|V|", "µ"],
+    "n": ["|\\|", "η"],
+    "o": ["0", "()", "°", "ø"],
+    "p": ["|*", "|>", "þ"],
+    "q": ["0_", "ℚ"],
+    "r": ["|2", "®"],
+    "s": ["5", "$", "§", "∫"],
+    "t": ["7", "+", "†"],
+    "u": ["|_|", "µ", "ü"],
+    "v": ["\\/", "√"],
+    "w": ["\\/\\/", "vv", "ω"],
+    "x": ["><", "×"],
+    "y": ["`/", "¥", "γ"],
+    "z": ["2", "7_", "ℤ"],
+}
+
+UNICODE_HOMOGLYPHS: Dict[str, List[str]] = {
+    "a": ["а", "ɑ", "α", "ａ"],     # Cyrillic а
+    "b": ["Ь", "ｂ"],
+    "c": ["с", "ϲ", "ｃ"],           # Cyrillic с
+    "d": ["ԁ", "ｄ"],
+    "e": ["е", "ė", "ｅ"],           # Cyrillic е
+    "f": ["ƒ", "ｆ"],
+    "g": ["ɡ", "ｇ"],
+    "h": ["һ", "ｈ"],               # Cyrillic һ
+    "i": ["і", "ι", "ｉ"],          # Cyrillic і
+    "j": ["ϳ", "ｊ"],
+    "k": ["κ", "ｋ"],
+    "l": ["ӏ", "ｌ"],               # Cyrillic palochka
+    "m": ["м", "ｍ"],
+    "n": ["ո", "ｎ"],
+    "o": ["о", "ο", "ｏ"],          # Cyrillic о
+    "p": ["р", "ρ", "ｐ"],          # Cyrillic р
+    "s": ["ѕ", "ｓ"],               # Cyrillic ѕ
+    "t": ["τ", "ｔ"],
+    "u": ["υ", "ｕ"],
+    "v": ["ν", "ｖ"],
+    "w": ["ѡ", "ｗ"],
+    "x": ["х", "ｘ"],               # Cyrillic х
+    "y": ["у", "γ", "ｙ"],          # Cyrillic у
+    "z": ["ᴢ", "ｚ"],
+}
+
+# محارف عرض-صفري غير مرئية
+ZWJ_CHARS = [
+    "\u200d",  # Zero-Width Joiner
+    "\u200b",  # Zero-Width Space
+    "\u200c",  # Zero-Width Non-Joiner
+    "\u2060",  # Word Joiner
+    "\ufeff",  # Zero-Width No-Break Space
+]
+
+# الاستبدال الصوتي
+PHONETIC_MAP: Dict[str, str] = {
+    "hack": "h4ck",
+    "exploit": "3xpl0it",
+    "crack": "kr4ck",
+    "bomb": "b0mb",
+    "weapon": "w34p0n",
+    "virus": "viru5",
+    "malware": "m4lw4re",
+    "rootkit": "r00tk1t",
+    "backdoor": "b4ckd00r",
+    "jailbreak": "j4ilbr3ak",
+    "synthesize": "synth3siz3",
+    "poison": "p01s0n",
+    "phishing": "ph1sh1ng",
+    "impersonate": "imp3rs0n4te",
+    "manipulate": "m4n1pul4te",
+}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# محركات التحويل
+# ══════════════════════════════════════════════════════════════════════
+
+def _apply_leet(word: str, rate: float) -> str:
+    """تحويل حرف إلى l33t حسب معدل التكثيف."""
+    result = list(word)
+    for i, ch in enumerate(result):
+        if random.random() < rate and ch.lower() in LEET_MAP:
+            options = LEET_MAP[ch.lower()]
+            repl = random.choice(options)
+            result[i] = repl if not ch.isupper() else repl.upper()
+    return "".join(result)
+
+
+def _apply_unicode(word: str, rate: float) -> str:
+    """استبدال أحرف بمثيلات Unicode بصرياً متشابهة."""
+    result = list(word)
+    for i, ch in enumerate(result):
+        if random.random() < rate and ch.lower() in UNICODE_HOMOGLYPHS:
+            options = UNICODE_HOMOGLYPHS[ch.lower()]
+            result[i] = random.choice(options)
+    return "".join(result)
+
+
+def _apply_zwj(word: str, rate: float) -> str:
+    """إدراج محارف عرض-صفري غير مرئية بين أحرف الكلمة."""
+    if len(word) <= 2:
+        return word
+    result = [word[0]]
+    for ch in word[1:]:
+        if random.random() < rate:
+            result.append(random.choice(ZWJ_CHARS))
+        result.append(ch)
+    return "".join(result)
+
+
+def _apply_mixedcase(word: str, _rate: float) -> str:
+    """اضطراب نمط الأحرف الكبيرة والصغيرة."""
+    return "".join(
+        ch.upper() if i % 2 == 0 else ch.lower()
+        for i, ch in enumerate(word)
+    )
+
+
+def _apply_phonetic(word: str, _rate: float) -> str:
+    """استبدال صوتي بناءً على قاموس محدد مسبقاً."""
+    lower = word.lower()
+    if lower in PHONETIC_MAP:
+        repl = PHONETIC_MAP[lower]
+        # المحافظة على حالة الحرف الأول
+        return repl.capitalize() if word[0].isupper() else repl
+    # الرجوع إلى l33t إذا لا يوجد استبدال صوتي
+    return _apply_leet(word, 0.6)
+
+
+_TECHNIQUE_FNS = {
+    "leetspeak": _apply_leet,
+    "unicode":   _apply_unicode,
+    "zwj":       _apply_zwj,
+    "mixedcase": _apply_mixedcase,
+    "phonetic":  _apply_phonetic,
+}
+
+
+def _pick_random_fn():
+    """اختيار دالة تحويل عشوائية من التقنيات المتاحة."""
+    name = random.choice(["leetspeak", "unicode", "zwj", "mixedcase", "phonetic"])
+    return name, _TECHNIQUE_FNS[name]
+
+
+# ══════════════════════════════════════════════════════════════════════
+# الدالة الرئيسية
+# ══════════════════════════════════════════════════════════════════════
+
+def apply_parseltongue(text: str, config: ParseltongueConfig) -> ParseltongueResult:
+    """
+    تطبيق تقنية الإخفاء على النص.
+    يكتشف الكلمات المثيرة ويحوّلها فقط (ليس النص كاملاً).
+    """
+    if not config.enabled:
+        return ParseltongueResult(
+            original_text=text,
+            transformed_text=text,
+            triggers_found=[],
+            technique_used="none",
+            transformations=[],
+        )
+
+    # دمج الكلمات المثيرة الافتراضية + المخصصة
+    all_triggers = list(set(DEFAULT_TRIGGERS + config.custom_triggers))
+    rate = INTENSITY_RATES.get(config.intensity, 0.55)
+    technique = config.technique
+
+    found_triggers: List[str] = []
+    transformations: List[TransformRecord] = []
+    result_text = text
+
+    for trigger in sorted(all_triggers, key=len, reverse=True):  # الأطول أولاً
+        # البحث الغير حساس للحالة
         pattern = re.compile(r"\b" + re.escape(trigger) + r"\b", re.IGNORECASE)
-        if pattern.search(text):
-            found.append(trigger)
-    return list(dict.fromkeys(found))
+        matches = pattern.findall(result_text)
+        if not matches:
+            continue
 
+        found_triggers.append(trigger)
 
-def apply_parseltongue(
-    text: str,
-    technique: ObfuscationTechnique = "leetspeak",
-    intensity: Intensity = "medium",
-    enabled: bool = True,
-    custom_triggers: Optional[List[str]] = None,
-) -> ParseltongueResult:
-    if not enabled:
-        return ParseltongueResult(text, text, [], technique)
+        def _replace_match(m: re.Match) -> str:  # noqa: E501
+            word = m.group(0)
+            actual_technique = technique
+            if technique == "random":
+                actual_technique, fn = _pick_random_fn()
+                transformed = fn(word, rate)
+            else:
+                fn = _TECHNIQUE_FNS[technique]
+                transformed = fn(word, rate)
+            transformations.append(TransformRecord(word, transformed, actual_technique))
+            return transformed
 
-    triggers_found = detect_triggers(text, custom_triggers)
-    if not triggers_found:
-        return ParseltongueResult(text, text, [], technique)
-
-    transformed = text
-    transformations: List[Transformation] = []
-
-    sorted_triggers = sorted(triggers_found, key=len, reverse=True)
-    for trigger in sorted_triggers:
-        pattern = re.compile(r"\b(" + re.escape(trigger) + r")\b", re.IGNORECASE)
-
-        def replacer(m, t=trigger, tech=technique, inten=intensity):
-            result = _obfuscate_word(m.group(0), tech, inten)
-            transformations.append(Transformation(m.group(0), result, tech))
-            return result
-
-        transformed = pattern.sub(replacer, transformed)
+        result_text = pattern.sub(_replace_match, result_text)
 
     return ParseltongueResult(
         original_text=text,
-        transformed_text=transformed,
-        triggers_found=triggers_found,
+        transformed_text=result_text,
+        triggers_found=list(set(found_triggers)),
         technique_used=technique,
         transformations=transformations,
     )
 
 
-TECHNIQUE_DESCRIPTIONS: Dict[str, str] = {
-    "leetspeak": "L33tspeak الكلاسيكي: a→4, e→3, …",
-    "unicode": "حروف Unicode مرئياً مطابقة (سيريلية، يونانية)",
-    "zwj": "أحرف عرض-صفر غير مرئية بين الحروف",
-    "mixedcase": "أنماط كبتلة مُختلطة مُشوِّشة",
-    "phonetic": "استبدال صوتي للحروف",
-    "random": "مزيج عشوائي من جميع التقنيات",
-}
+def get_technique_description(technique: str) -> str:
+    descriptions = {
+        "leetspeak": "l33tspeak كلاسيكي: a→4, e→3, i→1, ...",
+        "unicode":   "مثيلات Unicode (سيريلية، يونانية)",
+        "zwj":       "محارف عرض-صفري غير مرئية بين الأحرف",
+        "mixedcase": "اضطراب نمط الأحرف الكبيرة/الصغيرة",
+        "phonetic":  "استبدال صوتي بكلمات مشابهة لفظاً",
+        "random":    "خلط عشوائي من جميع التقنيات",
+        "none":      "بدون تحويل",
+    }
+    return descriptions.get(technique, technique)
