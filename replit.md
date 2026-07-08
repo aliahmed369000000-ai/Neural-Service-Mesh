@@ -1,46 +1,45 @@
-# Neural Service Mesh (NSM)
+# [Project name]
 
-نظام ذكاء اصطناعي عربي متكامل مبني على Streamlit، يجمع بين وكيل ذكي وشبكة نماذج لغوية ورسم معرفي وذاكرة محادثة.
+_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
 
 ## Run & Operate
 
-- `streamlit run streamlit_app.py --server.port 5000` — run the Streamlit app
+- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm run typecheck` — full typecheck across all packages
+- `pnpm run build` — typecheck + build all packages
+- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
+- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
+- Required env: `DATABASE_URL` — Postgres connection string
 
 ## Stack
 
-- Python 3.11 + Streamlit
-- Multi-provider LLM fallback (Anthropic, Cloudflare, Gemini, Groq, OpenAI, OpenRouter, Together)
-- Cognitive Knowledge Graph (CKG) with Arabic NLP
-- NSM Chat with conversation memory
+- pnpm workspaces, Node.js 24, TypeScript 5.9
+- API: Express 5
+- DB: PostgreSQL + Drizzle ORM
+- Validation: Zod (`zod/v4`), `drizzle-zod`
+- API codegen: Orval (from OpenAPI spec)
+- Build: esbuild (CJS bundle)
 
 ## Where things live
 
-- `streamlit_app.py` — main Streamlit UI
-- `ai/` — AI modules (LLM fallback, agents, knowledge graph, etc.)
-- `knowledge/` — knowledge store, Quran QA engine, episodic memory
-- `nsm_chat_plus.py` — generative chat layer
-- `nsm_memory.py` — conversation memory
-- `.streamlit/config.toml` — server config (port 5000, headless)
+_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+
+## Architecture decisions
+
+_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+
+## Product
+
+_Describe the high-level user-facing capabilities of this app once they exist._
 
 ## User preferences
 
-- Arabic responses preferred (اللغة العربية الفصحى)
-- Maintain existing file structure
+_Populate as you build — explicit user instructions worth remembering across sessions._
 
 ## Gotchas
 
-- Must inject Streamlit secrets → os.environ before any module imports (done in streamlit_app.py)
-- `st.rerun()` must be used instead of `experimental_rerun`
+_Populate as you build — sharp edges, "always run X before Y" rules._
 
-## Required Secrets
+## Pointers
 
-| Variable | Purpose |
-|----------|---------|
-| `ANTHROPIC_API_KEY` | Claude (primary) |
-| `CF_API_TOKEN` | Cloudflare Workers AI |
-| `CF_ACCOUNT_ID` | Cloudflare account |
-| `GOOGLE_API_KEY` | Gemini |
-| `OPENROUTER_API_KEY` | OpenRouter |
-| `GROQ_API_KEY` | Groq |
-| `OPENAI_API_KEY` | OpenAI |
-| `TOGETHER_API_KEY` | Together.xyz |
+- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
