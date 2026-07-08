@@ -9,6 +9,8 @@ G0DM0DƎ — Neural Service Mesh — عقل موحد
 """
 from __future__ import annotations
 
+import base64
+import io
 import json
 import logging
 import os
@@ -98,6 +100,16 @@ MODELS = [
 ]
 MODEL_OPTIONS = {f"{name} — {prov} [{ctx}]": mid for mid, name, prov, ctx in MODELS}
 
+# النماذج التي تدعم الرؤية (vision / multimodal)
+VISION_MODELS = {
+    "google/gemini-2.5-flash", "google/gemini-2.5-pro",
+    "anthropic/claude-3.5-sonnet", "anthropic/claude-sonnet-4.6", "anthropic/claude-opus-4.6",
+    "openai/gpt-4o", "openai/gpt-5", "openai/gpt-oss-120b",
+    "x-ai/grok-4", "x-ai/grok-4-fast",
+    "meta-llama/llama-4-maverick",
+    "qwen/qwen3-235b-a22b",
+}
+
 THEMES = {
     "matrix": {"bg": "#0d0208", "primary": "#00ff41", "secondary": "#008f11", "text": "#00ff41", "sidebar": "#080105"},
     "hacker": {"bg": "#0a0e14", "primary": "#ff3e3e", "secondary": "#ff8c00", "text": "#e6e6e6", "sidebar": "#060910"},
@@ -173,8 +185,9 @@ def _init():
         "current_conv": None, "messages": [],
         "no_log": False, "autotune": False, "autotune_strategy": "adaptive",
         "hof_combo": None,
-        "agent_chats": {},     # category_key → CategoryAgentChat
+        "agent_chats": {},          # category_key → CategoryAgentChat
         "active_agent": "assistant",
+        "pending_files": [],        # ملفات منتظرة للإرسال مع الرسالة القادمة
     }
     for k, v in D.items():
         if k not in st.session_state:
@@ -268,6 +281,96 @@ def _stream(messages: list, model: str, api_key: str,
         yield "\n\n**خطأ:** انتهت مهلة الطلب. جرّب نموذجاً أسرع."
     except Exception as e:
         yield f"\n\n**خطأ:** {e}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# مساعدات الملفات
+# ─────────────────────────────────────────────────────────────────────────────
+MAX_FILE_MB = 20
+IMAGE_MIMES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
+TEXT_EXTS   = {".txt", ".md", ".csv", ".json", ".py", ".js", ".ts", ".html", ".xml", ".yaml", ".yml"}
+
+def _extract_file(uploaded) -> dict | None:
+    """
+    يقرأ ملفاً مرفوعاً ويُعيد dict يحتوي على:
+      name, mime, size_kb, is_image, data_url (للصور), text_content (للنصوص/PDF)
+    يُعيد None إذا كان الملف أكبر من الحد المسموح.
+    """
+    raw = uploaded.read()
+    size_kb = len(raw) / 1024
+    if size_kb > MAX_FILE_MB * 1024:
+        return None
+
+    mime = uploaded.type or ""
+    name = uploaded.name or "ملف"
+    ext  = Path(name).suffix.lower()
+
+    result = {"name": name, "mime": mime, "size_kb": round(size_kb, 1),
+              "is_image": False, "data_url": None, "text_content": None}
+
+    if mime in IMAGE_MIMES or ext in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+        b64 = base64.b64encode(raw).decode()
+        used_mime = mime if mime in IMAGE_MIMES else "image/png"
+        result["is_image"] = True
+        result["data_url"] = f"data:{used_mime};base64,{b64}"
+        result["raw_bytes"] = raw  # للعرض في st.image
+
+    elif mime == "application/pdf" or ext == ".pdf":
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(io.BytesIO(raw))
+            pages  = [p.extract_text() or "" for p in reader.pages]
+            result["text_content"] = f"[PDF — {len(pages)} صفحة]\n\n" + "\n\n".join(pages)[:12000]
+        except Exception:
+            result["text_content"] = f"[ملف PDF: {name} — تعذّر استخراج النص]"
+
+    elif ext in TEXT_EXTS or mime.startswith("text/"):
+        try:
+            result["text_content"] = raw.decode("utf-8", errors="replace")[:12000]
+        except Exception:
+            result["text_content"] = f"[تعذّر قراءة الملف: {name}]"
+
+    else:
+        result["text_content"] = f"[ملف مرفق: {name} — {size_kb:.0f} KB]"
+
+    return result
+
+
+def _build_user_content(text: str, files: list) -> str | list:
+    """
+    يبني محتوى رسالة المستخدم بتنسيق OpenRouter:
+    - بدون ملفات → نص عادي
+    - مع صور     → قائمة content parts (multimodal)
+    - مع نصوص/PDF→ يُضيف محتوى الملف كـ text part
+    """
+    if not files:
+        return text
+
+    parts: list = []
+
+    # الملفات النصية والـ PDF أولاً (context)
+    for f in files:
+        if not f["is_image"] and f["text_content"]:
+            parts.append({"type": "text",
+                          "text": f"📄 **{f['name']}**:\n```\n{f['text_content']}\n```\n"})
+
+    # نص المستخدم
+    parts.append({"type": "text", "text": text or "ما في هذا الملف / الصورة؟"})
+
+    # الصور
+    for f in files:
+        if f["is_image"] and f["data_url"]:
+            parts.append({"type": "image_url",
+                          "image_url": {"url": f["data_url"]}})
+
+    return parts if len(parts) > 1 else (parts[0]["text"] if parts else text)
+
+
+def _display_text(content: str | list) -> str:
+    """يستخرج النص القابل للعرض من محتوى قد يكون قائمة multimodal."""
+    if isinstance(content, str):
+        return content
+    texts = [p.get("text", "") for p in content if p.get("type") == "text"]
+    return "\n".join(texts)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Sidebar
@@ -439,19 +542,106 @@ with tab1:
   </p>
 </div>""", unsafe_allow_html=True)
     else:
-        # عرض الرسائل
+        t_pr = t["primary"]
+        t_sec = t["secondary"]
+        is_vision = st.session_state.model in VISION_MODELS
+
+        # ── واجهة رفع الملفات ──────────────────────────────────────────────
+        with st.expander("📎 إرفاق ملف أو صورة", expanded=bool(st.session_state.pending_files)):
+            col_up, col_info = st.columns([3, 2])
+            with col_up:
+                accepted = ["image/png","image/jpeg","image/webp","image/gif",
+                            "application/pdf",".txt",".md",".csv",".json",
+                            ".py",".js",".ts",".html",".yaml"]
+                uploaded = st.file_uploader(
+                    "اسحب ملفاً هنا أو انقر للاختيار",
+                    type=["png","jpg","jpeg","webp","gif",
+                          "pdf","txt","md","csv","json",
+                          "py","js","ts","html","yaml","yml"],
+                    accept_multiple_files=True,
+                    label_visibility="collapsed",
+                    key="file_uploader",
+                )
+                if uploaded:
+                    new_names = {f["name"] for f in st.session_state.pending_files}
+                    for uf in uploaded:
+                        if uf.name not in new_names:
+                            extracted = _extract_file(uf)
+                            if extracted:
+                                st.session_state.pending_files.append(extracted)
+                                new_names.add(uf.name)
+                            else:
+                                st.warning(f"⚠ {uf.name} أكبر من {MAX_FILE_MB} MB")
+
+            with col_info:
+                if not is_vision and any(f["is_image"] for f in st.session_state.pending_files):
+                    st.warning(f"⚠ النموذج الحالي لا يدعم الصور.\nاختر: GPT-4o أو Gemini أو Claude.")
+                elif is_vision:
+                    st.markdown(
+                        f'<span class="nsm-badge" style="color:{t_pr};">👁 رؤية مُفعَّلة</span>',
+                        unsafe_allow_html=True,
+                    )
+                st.caption(f"الحد الأقصى: {MAX_FILE_MB} MB للملف الواحد\n"
+                           "صور: PNG · JPG · WEBP · GIF\n"
+                           "مستندات: PDF · TXT · MD · CSV · JSON · PY")
+
+        # معاينة الملفات المعلّقة
+        if st.session_state.pending_files:
+            pf_cols = st.columns(min(len(st.session_state.pending_files), 4))
+            to_remove = []
+            for i, f in enumerate(st.session_state.pending_files):
+                with pf_cols[i % 4]:
+                    if f["is_image"] and f.get("raw_bytes"):
+                        st.image(f["raw_bytes"], caption=f["name"], use_container_width=True)
+                    else:
+                        icon = "📄" if f["text_content"] else "📎"
+                        st.markdown(
+                            f'<div style="border:1px solid {t_pr}40;border-radius:6px;'
+                            f'padding:8px;text-align:center;font-size:.75rem;">'
+                            f'{icon}<br>{f["name"]}<br>'
+                            f'<span style="opacity:.6;">{f["size_kb"]} KB</span></div>',
+                            unsafe_allow_html=True,
+                        )
+                    if st.button("✕", key=f"rm_file_{i}", help="حذف"):
+                        to_remove.append(i)
+            for idx in sorted(to_remove, reverse=True):
+                st.session_state.pending_files.pop(idx)
+            if to_remove:
+                st.rerun()
+
+            if st.button("🗑 مسح كل الملفات", key="clear_all_files"):
+                st.session_state.pending_files.clear()
+                st.rerun()
+
+        st.markdown("---")
+
+        # ── عرض الرسائل ───────────────────────────────────────────────────
         for msg in st.session_state.messages:
             av = emoji if msg["role"] == "assistant" else "👤"
             with st.chat_message(msg["role"], avatar=av):
+                # عرض الصور المرفقة بالرسالة
+                for img in msg.get("images", []):
+                    st.image(img["raw_bytes"], caption=img["name"], use_container_width=False,
+                             width=320)
+                # عرض مرفقات نصية
+                for doc in msg.get("docs", []):
+                    with st.expander(f"📄 {doc['name']} ({doc['size_kb']} KB)"):
+                        st.text(doc["text_content"][:2000] +
+                                ("…" if len(doc["text_content"]) > 2000 else ""))
                 st.markdown(msg["content"])
 
-        # مربع الإدخال
-        user_input = st.chat_input(f"رسالتك إلى {pname}...")
+        # ── مربع الإدخال ──────────────────────────────────────────────────
+        hint = "رسالتك إلى " + pname
+        if st.session_state.pending_files:
+            n = len(st.session_state.pending_files)
+            hint += f" (+{n} ملف مرفق)"
+        user_input = st.chat_input(hint)
 
         if user_input and user_input.strip():
             raw = user_input.strip()
+            files = list(st.session_state.pending_files)
 
-            # ── إنشاء محادثة جديدة إذا لزم ─────────────────────────────
+            # ── إنشاء محادثة جديدة إذا لزم ──────────────────────────────
             if not st.session_state.current_conv:
                 cid = str(uuid.uuid4())[:8]
                 title = raw[:40] + ("…" if len(raw) > 40 else "")
@@ -463,35 +653,66 @@ with tab1:
             # ── Hall of Fame injection ────────────────────────────────────
             if st.session_state.hof_combo and HAS_GODMODE:
                 combo = next(c for c in HALL_OF_FAME if c.id == st.session_state.hof_combo)
-                sys_prompt, user_prompt = apply_combo(combo, raw)
+                sys_prompt, user_prompt_text = apply_combo(combo, raw)
                 model_to_use = combo.model
             else:
                 sys_prompt = psys
-                user_prompt = raw
+                user_prompt_text = raw
                 model_to_use = st.session_state.model
 
             # ── AutoTune ──────────────────────────────────────────────────
             temp = top_p = None
             if st.session_state.autotune and HAS_GODMODE:
-                result = compute_autotune(
+                at = compute_autotune(
                     strategy=st.session_state.autotune_strategy,
                     message=raw,
                     conversation_length=len(st.session_state.messages),
                 )
-                temp = result.params.temperature
-                top_p = result.params.top_p
+                temp = at.params.temperature
+                top_p = at.params.top_p
 
-            # ── بناء قائمة الرسائل ────────────────────────────────────────
+            # ── بناء محتوى رسالة المستخدم (multimodal إذا لزم) ───────────
+            # الصور فقط تُرسل للنماذج التي تدعم الرؤية
+            vision_files = files if (is_vision or model_to_use in VISION_MODELS) else []
+            user_api_content = _build_user_content(user_prompt_text, vision_files)
+
+            # ── بناء قائمة رسائل API ──────────────────────────────────────
             api_msgs = [{"role": "system", "content": sys_prompt}]
             for m in st.session_state.messages:
-                api_msgs.append({"role": m["role"], "content": m["content"]})
-            api_msgs.append({"role": "user", "content": user_prompt})
+                api_msgs.append({
+                    "role": m["role"],
+                    "content": m.get("api_content", m["content"]),
+                })
+            api_msgs.append({"role": "user", "content": user_api_content})
 
-            # ── عرض رسالة المستخدم ───────────────────────────────────────
-            st.session_state.messages.append({"role": "user", "content": raw})
-            db_save_msg(cid, "user", raw)
+            # ── عرض رسالة المستخدم في الواجهة ────────────────────────────
+            msg_images = [f for f in files if f["is_image"] and f.get("raw_bytes")]
+            msg_docs   = [f for f in files if not f["is_image"] and f.get("text_content")]
+            display_text = raw
+            if files:
+                names = ", ".join(f["name"] for f in files)
+                display_text = raw + f"\n\n📎 *{names}*"
+
+            st.session_state.messages.append({
+                "role": "user",
+                "content": display_text,
+                "api_content": user_api_content,
+                "images": msg_images,
+                "docs": msg_docs,
+            })
+            db_save_msg(cid, "user", display_text)
+
             with st.chat_message("user", avatar="👤"):
-                st.markdown(raw)
+                for img in msg_images:
+                    st.image(img["raw_bytes"], caption=img["name"],
+                             use_container_width=False, width=320)
+                for doc in msg_docs:
+                    with st.expander(f"📄 {doc['name']} ({doc['size_kb']} KB)"):
+                        st.text(doc["text_content"][:2000])
+                st.markdown(display_text)
+
+            # ── مسح الملفات المعلّقة بعد الإرسال ─────────────────────────
+            st.session_state.pending_files.clear()
 
             # ── البث ─────────────────────────────────────────────────────
             with st.chat_message("assistant", avatar=emoji):
@@ -500,7 +721,12 @@ with tab1:
                     st.session_state.no_log, temp, top_p,
                 ))
 
-            st.session_state.messages.append({"role": "assistant", "content": reply})
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": reply,
+                "images": [],
+                "docs": [],
+            })
             db_save_msg(cid, "assistant", reply)
             st.rerun()
 
