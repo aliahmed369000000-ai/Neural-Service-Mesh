@@ -4,3 +4,10 @@ scikit-learn>=1.3.0
 plotly>=5.0.0
 requests>=2.31.0
 qdrant-client>=1.9.0
+episodic-memory
+numpy
+plotly
+qdrant-client
+requests
+scikit-learn
+streamlit
