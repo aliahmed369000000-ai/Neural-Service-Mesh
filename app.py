@@ -85,6 +85,17 @@ except Exception as _e:
     HAS_ARABIC = False
     _arabic_engine = None
 
+try:
+    from ai.social_agent import (
+        SocialAgentManager, get_manager, get_recent_events, get_event_counts,
+        get_config as sa_get_config, set_config as sa_set_config,
+    )
+    from ai.social_platforms import ALL_ADAPTERS, PLATFORM_LABELS_AR
+    HAS_SOCIAL_AGENT = True
+except Exception as _e:
+    HAS_SOCIAL_AGENT = False
+    PLATFORM_LABELS_AR = {}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # إعداد الصفحة
 # ─────────────────────────────────────────────────────────────────────────────
@@ -541,10 +552,120 @@ def _sidebar():
                             st.session_state.messages = []
                         st.rerun()
 
+        # ── SOCIAL AGENT ─────────────────────────────────────────────────────
+        if HAS_SOCIAL_AGENT:
+            st.markdown("---")
+            st.markdown('<span class="nsm-badge">🌐 SOCIAL AGENT</span>', unsafe_allow_html=True)
+            mgr = get_manager()
+
+            # تحديث حالة كل منصة
+            status = mgr.status()
+            platform_running = mgr.is_running()
+
+            # زر تشغيل / إيقاف الخدمة الخلفية
+            if platform_running:
+                if st.button("⏹ إيقاف الوكيل الاجتماعي", use_container_width=True):
+                    mgr.stop()
+                    st.rerun()
+            else:
+                if st.button("▶ تشغيل الوكيل الاجتماعي", use_container_width=True):
+                    mgr.start()
+                    st.rerun()
+
+            st.caption("🟢 يعمل" if platform_running else "🔴 متوقف")
+
+            # إعدادات المنصات (مُفعَّلة / الكلمات المفتاحية / الرد التلقائي)
+            with st.expander("⚙️ إعدادات المنصات", expanded=False):
+                enabled_saved = set(sa_get_config("enabled_platforms", []))
+                new_enabled = set()
+                for pid, label in PLATFORM_LABELS_AR.items():
+                    st_obj = status.get(pid)
+                    configured = st_obj.configured if st_obj else False
+                    suffix = "" if configured else " ⚠️"
+                    checked = st.checkbox(
+                        f"{label}{suffix}", value=(pid in enabled_saved),
+                        key=f"sa_en_{pid}",
+                        help=None if configured else f"يلزم: {', '.join((st_obj.missing_env if st_obj else []))}"
+                    )
+                    if checked:
+                        new_enabled.add(pid)
+                if new_enabled != enabled_saved:
+                    sa_set_config("enabled_platforms", list(new_enabled))
+
+                kw_raw = st.text_input(
+                    "🔍 كلمات المراقبة (مفصولة بفاصلة)",
+                    value=", ".join(sa_get_config("keywords", [])),
+                    placeholder="مثال: GODMODE, AI, عرض, منتج",
+                )
+                kw_list = [k.strip() for k in kw_raw.split(",") if k.strip()]
+                sa_set_config("keywords", kw_list)
+
+                auto_r = st.toggle(
+                    "🤖 رد تلقائي على المنشات/التعليقات",
+                    value=bool(sa_get_config("auto_reply", False)),
+                    key="sa_auto_reply",
+                    help="يستخدم نفس محرك GODMODE للرد"
+                )
+                sa_set_config("auto_reply", auto_r)
+
+                poll_s = st.number_input(
+                    "⏱ فترة الاستطلاع (ثانية)", min_value=30, max_value=600,
+                    value=int(sa_get_config("poll_interval", 90)), step=15,
+                    key="sa_poll",
+                )
+                sa_set_config("poll_interval", int(poll_s))
+
+            # نشر يدوي فوري
+            with st.expander("📢 نشر فوري", expanded=False):
+                pub_text = st.text_area("النص", height=80, key="sa_pub_text",
+                                        placeholder="اكتب المنشور هنا...")
+                enabled_platforms = list(sa_get_config("enabled_platforms", []))
+                target = st.multiselect(
+                    "المنصات", [PLATFORM_LABELS_AR.get(p, p) for p in enabled_platforms],
+                    default=[PLATFORM_LABELS_AR.get(p, p) for p in enabled_platforms],
+                    key="sa_pub_target",
+                )
+                target_ids = [p for p in enabled_platforms
+                              if PLATFORM_LABELS_AR.get(p, p) in target]
+                if st.button("📤 نشر الآن", use_container_width=True, key="sa_pub_btn"):
+                    if pub_text.strip() and target_ids:
+                        with st.spinner("جارٍ النشر..."):
+                            results = mgr.publish_to(target_ids, pub_text.strip())
+                        for pid, res in results.items():
+                            icon = "✅" if not res.startswith("ERROR") else "❌"
+                            st.caption(f"{icon} {PLATFORM_LABELS_AR.get(pid, pid)}: {res}")
+                    else:
+                        st.warning("اكتب نصاً واختر منصة على الأقل.")
+
+            # سجل الأحداث الأخيرة
+            with st.expander("📋 سجل الأحداث", expanded=False):
+                events = get_recent_events(15)
+                if not events:
+                    st.caption("لا توجد أحداث بعد.")
+                else:
+                    counts = get_event_counts()
+                    st.caption(
+                        " | ".join(f"{k}: {v}" for k, v in counts.items())
+                    )
+                    for plat, etype, author, content, reply_c, ts, ok in events:
+                        icon = "✅" if ok else "❌"
+                        label = PLATFORM_LABELS_AR.get(plat, plat)
+                        st.markdown(
+                            f"`{ts[:16]}` {icon} **{label}** [{etype}] "
+                            f"@{author}: {content[:60]}{'…' if len(content) > 60 else ''}",
+                            unsafe_allow_html=False,
+                        )
+
         st.markdown("---")
         st.markdown('<div class="nsm-sub">AGPL-3.0 | FOREVER FREE</div>', unsafe_allow_html=True)
 
 _sidebar()
+
+# ── تشغيل تلقائي للوكيل الاجتماعي عند بدء التطبيق إن كان مُفعَّلاً مسبقاً ──
+if HAS_SOCIAL_AGENT:
+    _mgr = get_manager()
+    if sa_get_config("agent_running", False) and not _mgr.is_running():
+        _mgr.start()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # التبويبات الرئيسية

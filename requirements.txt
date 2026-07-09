@@ -1,10 +1,5 @@
 streamlit>=1.35.0
 requests>=2.31.0
-requests
-streamlit
 numpy
 pypdf
-numpy
-pypdf
-requests
-streamlit
+requests_oauthlib
