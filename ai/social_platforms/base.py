@@ -1,0 +1,63 @@
+"""
+الواجهة الأساسية لكل محولات المنصات — عقد ثابت يضمن أن الوكيل الموحد
+يتعامل مع كل منصة بنفس الطريقة (نشر / جلب جديد / رد).
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from typing import List, Optional
+
+
+class NotConfiguredError(RuntimeError):
+    """تُرفع عندما تكون بيانات اعتماد المنصة غير متوفرة — لا نلفّق نتائج بديلة أبداً."""
+
+
+@dataclass
+class SocialItem:
+    """عنصر وارد من منصة (منشن، تعليق، رسالة خاصة) بصيغة موحّدة."""
+    platform: str
+    external_id: str          # معرف فريد على المنصة نفسها (لتفادي التكرار)
+    kind: str                 # "mention" | "comment" | "dm" | "reply_target"
+    author: str
+    text: str
+    thread_id: Optional[str] = None   # للرد ضمن نفس الخيط/المحادثة إن وُجد
+    url: Optional[str] = None
+    raw: dict = field(default_factory=dict)
+
+
+class PlatformAdapter:
+    """
+    عقد أساسي لكل محول منصة. المحولات الفعلية (Discord/Telegram/...)
+    تُطبّق هذه الدوال. أي دالة غير مطبَّقة أو بدون بيانات اعتماد ترفع
+    NotConfiguredError — لا نتائج مزيّفة، لا صمت عن الفشل.
+    """
+    platform_id: str = "base"
+    #: أسماء متغيرات البيئة/الأسرار المطلوبة لتفعيل هذا المحول
+    required_env: List[str] = []
+
+    def is_configured(self) -> bool:
+        return all(os.environ.get(k) for k in self.required_env)
+
+    def missing_env(self) -> List[str]:
+        return [k for k in self.required_env if not os.environ.get(k)]
+
+    def _require_configured(self):
+        if not self.is_configured():
+            raise NotConfiguredError(
+                f"{self.platform_id}: بيانات الاعتماد المفقودة — {', '.join(self.missing_env())}"
+            )
+
+    # ── الواجهة التي يجب على كل محول تطبيقها ────────────────────────────
+    def publish(self, text: str) -> str:
+        """ينشر منشوراً/رسالة جديدة. يعيد المعرف الخارجي للمنشور."""
+        raise NotImplementedError
+
+    def fetch_new_items(self, since_ids: set) -> List[SocialItem]:
+        """يجلب العناصر الجديدة (منشن/تعليقات/رسائل) غير الموجودة في since_ids."""
+        raise NotImplementedError
+
+    def reply(self, item: SocialItem, text: str) -> str:
+        """يرد على عنصر محدد. يعيد المعرف الخارجي للرد."""
+        raise NotImplementedError
