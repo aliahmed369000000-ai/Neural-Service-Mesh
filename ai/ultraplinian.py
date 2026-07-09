@@ -28,7 +28,7 @@ import requests
 # ══════════════════════════════════════════════════════════════════════
 
 ULTRAPLINIAN_MODELS: Dict[str, List[str]] = {
-    # ⚡ FAST (10 نماذج) — سريعة، رخيصة، مناسبة للرصيد المجاني
+    # ⚡ FAST (17 نموذج) — سريعة، رخيصة، مناسبة للرصيد المجاني
     "fast": [
         "google/gemini-2.5-flash",
         "deepseek/deepseek-chat",
@@ -40,8 +40,16 @@ ULTRAPLINIAN_MODELS: Dict[str, List[str]] = {
         "qwen/qwen-2.5-72b-instruct",
         "meta-llama/llama-3.3-70b-instruct",
         "google/gemma-3-27b-it",
+        # ↓ إضافات من G0DM0D3
+        "perplexity/sonar",               # إجابات مدعومة بالويب
+        "moonshotai/kimi-k2.5",           # متعدد الأوضاع، سريع
+        "xiaomi/mimo-v2-flash",           # MiMo-V2 Flash، مفتوح المصدر
+        "openai/gpt-oss-20b",             # مفتوح الوزن، خفيف
+        "stepfun/step-3.5-flash",         # MoE سريع، 196B
+        "google/gemini-3.1-flash-lite",   # أسرع نماذج Google، سياق 1M
+        "nvidia/nemotron-3-nano-30b-a3b", # NVIDIA وكيل MoE، سياق 262K
     ],
-    # 🎯 STANDARD (+10 = 20 تراكمياً) — متوازنة، ممتازة للمهام العامة
+    # 🎯 STANDARD (+15 = 32 تراكمياً) — متوازنة، ممتازة للمهام العامة
     "standard": [
         "anthropic/claude-3.5-sonnet",
         "openai/gpt-4o",
@@ -53,6 +61,12 @@ ULTRAPLINIAN_MODELS: Dict[str, List[str]] = {
         "meta-llama/llama-4-scout",
         "mistralai/mistral-medium-3.1",
         "z-ai/glm-5-turbo",
+        # ↓ إضافات من G0DM0D3
+        "anthropic/claude-sonnet-4",      # موثوق ومتوازن
+        "meta-llama/llama-3.3-70b-instruct",
+        "qwen/qwen-2.5-72b-instruct",
+        "google/gemini-3-flash-preview",  # نموذج وكيل سريع
+        "google/gemma-3-27b-it",
     ],
     # 🧠 SMART (+11 = 31 تراكمياً) — الفلاغشيب والنماذج الثقيلة
     "smart": [
@@ -97,7 +111,7 @@ ULTRAPLINIAN_MODELS: Dict[str, List[str]] = {
 }
 
 # عدد نماذج كل مستوى تراكمياً — للعرض في الواجهة
-TIER_CUMULATIVE = {"fast": 10, "standard": 20, "smart": 31, "power": 41, "ultra": 51}
+TIER_CUMULATIVE = {"fast": 17, "standard": 32, "smart": 43, "power": 53, "ultra": 63}
 
 # الحد الافتراضي للسباق (يُقيّد التكلفة)
 DEFAULT_MAX_MODELS = 6
