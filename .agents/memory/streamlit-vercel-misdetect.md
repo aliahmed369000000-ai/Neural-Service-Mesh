@@ -25,3 +25,10 @@ for "main module file does not exist" errors: add a thin `streamlit_app.py`
 that `compile()`/`exec()`s the real entry file's source with correct
 `__file__`/`__name__`, rather than duplicating app logic — keeps one source of
 truth while satisfying the platform's naming convention.
+
+**Resolution (2026-07-09):** The repeated "Port imported Vercel app to Replit"
+task was caused by three importer scaffold files left at repo root:
+`tsconfig.json`, `tsconfig.base.json`, `.npmrc`. These were deleted and
+committed. No functional code was affected. The `.migration-backup/` folder
+(which contains the legacy Next.js app) is intentionally kept and is NOT the
+trigger — the root-level Node scaffold was.
