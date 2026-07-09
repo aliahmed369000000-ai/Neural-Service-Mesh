@@ -96,6 +96,23 @@ except Exception as _e:
     HAS_SOCIAL_AGENT = False
     PLATFORM_LABELS_AR = {}
 
+# ── AutoTune Feedback Loop (G0DM0D3) ─────────────────────────────────────────
+try:
+    from ai.autotune_feedback import (
+        FeedbackRecord, compute_heuristics, process_feedback,
+        apply_learned_adjustments, load_profiles, get_feedback_stats,
+    )
+    HAS_FEEDBACK = True
+except Exception as _e:
+    HAS_FEEDBACK = False
+
+# ── Harm Classifier (G0DM0D3) ────────────────────────────────────────────────
+try:
+    from ai.harm_classifier import classify_prompt, get_domain_label, is_sensitive
+    HAS_HARM_CLASSIFIER = True
+except Exception as _e:
+    HAS_HARM_CLASSIFIER = False
+
 # ─────────────────────────────────────────────────────────────────────────────
 # إعداد الصفحة
 # ─────────────────────────────────────────────────────────────────────────────
@@ -236,6 +253,14 @@ def _init():
         "ultraplinian_max_models": DEFAULT_MAX_MODELS if HAS_ULTRAPLINIAN else 6,
         "ultraplinian_results": None,
         "ultraplinian_query": "",
+        # AutoTune Feedback Loop (G0DM0D3)
+        "feedback_profiles": None,   # محمَّل كسول من DB عند أول تقييم
+        "last_autotune_ctx": None,   # سياق AutoTune لآخر رد (للتغذية الراجعة)
+        "last_autotune_params": None,
+        "last_msg_id": None,
+        # Harm Classifier
+        "show_harm_badge": False,
+        "last_harm_result": None,
     }
     for k, v in D.items():
         if k not in st.session_state:
@@ -423,6 +448,38 @@ def _display_text(content: str | list) -> str:
     texts = [p.get("text", "") for p in content if p.get("type") == "text"]
     return "\n".join(texts)
 
+
+def _record_feedback(msg: dict, m_idx: int, rating: int) -> None:
+    """تسجيل تقييم المستخدم (👍/👎) وتحديث ملف AutoTune المتعلَّم."""
+    if not HAS_FEEDBACK:
+        return
+    import time as _time
+    try:
+        h = compute_heuristics(msg.get("content", ""))
+        record = FeedbackRecord(
+            message_id=msg.get("msg_id", f"m_{m_idx}"),
+            timestamp=_time.time(),
+            context_type=msg.get("at_context", "conversational"),
+            model=msg.get("model", st.session_state.model),
+            persona=st.session_state.persona,
+            params=msg.get("at_params", {}),
+            rating=rating,
+            heuristics={
+                "response_length":      h.response_length,
+                "repetition_score":     h.repetition_score,
+                "avg_sentence_length":  h.avg_sentence_length,
+                "vocabulary_diversity": h.vocabulary_diversity,
+            },
+        )
+        updated = process_feedback(record, st.session_state.feedback_profiles)
+        st.session_state.feedback_profiles = updated
+        # تخزين التقييم في الرسالة لعدم إعادة العرض
+        st.session_state.messages[m_idx]["feedback_rating"] = rating
+        st.rerun()
+    except Exception:
+        pass
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Sidebar
 # ─────────────────────────────────────────────────────────────────────────────
@@ -519,6 +576,29 @@ def _sidebar():
                 else:
                     enabled.discard(mod.id)
             st.session_state.stm_enabled_ids = list(enabled)
+
+        # AutoTune Feedback Loop Stats
+        if HAS_FEEDBACK:
+            st.markdown("---")
+            st.markdown('<span class="nsm-badge">🧠 FEEDBACK LOOP</span>', unsafe_allow_html=True)
+            if st.session_state.feedback_profiles is None:
+                st.session_state.feedback_profiles = load_profiles()
+            try:
+                stats = get_feedback_stats(st.session_state.feedback_profiles)
+                total = stats["total_feedback"]
+                if total > 0:
+                    rate = stats["positive_rate"]
+                    st.caption(f"إجمالي التقييمات: {total} | إيجابية: {rate:.0%}")
+                    learned_ctxs = [
+                        ctx for ctx, d in stats["context_breakdown"].items()
+                        if d["has_learned"]
+                    ]
+                    if learned_ctxs:
+                        st.caption(f"✨ تعلّم من: {', '.join(learned_ctxs)}")
+                else:
+                    st.caption("قيّم الردود بـ 👍/👎 لتحسين AutoTune")
+            except Exception:
+                pass
 
         st.markdown("---")
         st.session_state.no_log = st.toggle("🔇 وضع No-Log", value=st.session_state.no_log)
@@ -810,7 +890,7 @@ with tab1:
         st.markdown("---")
 
         # ── عرض الرسائل ───────────────────────────────────────────────────
-        for msg in st.session_state.messages:
+        for m_idx, msg in enumerate(st.session_state.messages):
             av = emoji if msg["role"] == "assistant" else "👤"
             with st.chat_message(msg["role"], avatar=av):
                 # عرض الصور المرفقة بالرسالة
@@ -826,6 +906,24 @@ with tab1:
                         st.text(doc["text_content"][:2000] +
                                 ("…" if len(doc["text_content"]) > 2000 else ""))
                 st.markdown(msg["content"])
+
+                # ── 👍/👎 تغذية راجعة (فقط عند وجود AutoTune params) ──────
+                _has_at = bool(msg.get("at_params"))  # لا نسجّل بدون بيانات AutoTune
+                if msg["role"] == "assistant" and HAS_FEEDBACK and _has_at:
+                    msg_id = msg.get("msg_id", f"m_{m_idx}")
+                    fb_key = f"fb_{msg_id}"
+                    existing_rating = msg.get("feedback_rating")
+                    if existing_rating:
+                        label = "👍 ممتاز" if existing_rating == 1 else "👎 ضعيف"
+                        st.caption(label)
+                    else:
+                        fc1, fc2, _ = st.columns([1, 1, 10])
+                        with fc1:
+                            if st.button("👍", key=f"up_{fb_key}", help="رد جيد"):
+                                _record_feedback(msg, m_idx, 1)
+                        with fc2:
+                            if st.button("👎", key=f"dn_{fb_key}", help="رد ضعيف"):
+                                _record_feedback(msg, m_idx, -1)
 
         # ── مربع الإدخال ──────────────────────────────────────────────────
         hint = "رسالتك إلى " + pname
@@ -867,16 +965,44 @@ with tab1:
                 pt_result = apply_parseltongue(user_prompt_text, pt_cfg)
                 user_prompt_text = pt_result.transformed_text
 
+            # ── Harm Classifier (G0DM0D3) ────────────────────────────────
+            if HAS_HARM_CLASSIFIER:
+                harm_result = classify_prompt(raw)
+                st.session_state.last_harm_result = harm_result
+                if is_sensitive(harm_result):
+                    hemoji, hlabel = get_domain_label(harm_result.domain)
+                    st.caption(f"{hemoji} تصنيف الطلب: **{hlabel}** ({harm_result.subcategory}) — {harm_result.confidence:.0%}")
+
             # ── AutoTune ──────────────────────────────────────────────────
             temp = top_p = None
+            _at_ctx = "conversational"
+            _at_params: dict = {}
             if st.session_state.autotune and HAS_GODMODE:
                 at = compute_autotune(
                     strategy=st.session_state.autotune_strategy,
                     message=raw,
                     conversation_length=len(st.session_state.messages),
                 )
-                temp = at.params.temperature
-                top_p = at.params.top_p
+                _at_ctx = at.detected_context
+                _at_params = {
+                    "temperature":        at.params.temperature,
+                    "top_p":              at.params.top_p,
+                    "top_k":              float(at.params.top_k),
+                    "frequency_penalty":  at.params.frequency_penalty,
+                    "presence_penalty":   at.params.presence_penalty,
+                    "repetition_penalty": at.params.repetition_penalty,
+                }
+                # ── تطبيق التعديلات المتعلَّمة من التغذية الراجعة ─────────
+                if HAS_FEEDBACK:
+                    if st.session_state.feedback_profiles is None:
+                        st.session_state.feedback_profiles = load_profiles()
+                    _at_params, learned, note = apply_learned_adjustments(
+                        _at_params, _at_ctx, st.session_state.feedback_profiles
+                    )
+                    if learned:
+                        st.caption(note)
+                temp = _at_params["temperature"]
+                top_p = _at_params["top_p"]
 
             # ── بناء محتوى رسالة المستخدم (multimodal إذا لزم) ───────────
             # النصوص/PDF دائماً مُضمَّنة — الصور فقط لنماذج الرؤية
@@ -943,11 +1069,16 @@ with tab1:
                         st.caption("🧬 بعد تطبيق STM:")
                         st.markdown(reply)
 
+            _new_msg_id = str(uuid.uuid4())[:12]
             st.session_state.messages.append({
                 "role": "assistant",
                 "content": reply,
                 "images": [],
                 "docs": [],
+                "msg_id":   _new_msg_id,
+                "model":    model_to_use,
+                "at_context": _at_ctx,
+                "at_params":  _at_params,
             })
             db_save_msg(cid, "assistant", reply)
             st.rerun()
