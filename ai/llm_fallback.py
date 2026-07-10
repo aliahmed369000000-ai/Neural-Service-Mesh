@@ -97,7 +97,8 @@ _OPENROUTER_URL   = "https://openrouter.ai/api/v1/chat/completions"
 _OPENAI_MODEL     = "gpt-4o-mini"
 _TOGETHER_MODEL   = "meta-llama/Llama-3-8b-chat-hf"
 _GEMINI_MODEL     = "gemini-1.5-flash"
-_GROQ_MODELS      = ["llama-3.1-8b-instant", "llama3-8b-8192", "gemma2-9b-it"]
+_GROQ_MODELS          = ["llama-3.1-8b-instant", "llama3-8b-8192", "gemma2-9b-it"]
+_FAILURE_COOLDOWN_SEC = 300   # 5 دقائق قبل إعادة تجربة مزوّد فاشل
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -111,6 +112,11 @@ class FallbackResult:
     model:      str   = ""
     latency_ms: float = 0.0
     error:      Optional[str] = None
+    tried:      List[str] = None   # سجل المزوّدين الذين جرى تجريبهم بالترتيب
+
+    def __post_init__(self):
+        if self.tried is None:
+            self.tried = []
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -235,53 +241,107 @@ class LLMFallback:
         self._provider, self._api_key, self._model = self._detect_provider()
         if self._model_key and self._provider == Provider.ANTHROPIC:
             self._model = ANTHROPIC_MODELS[self._model_key]
+        # سجل المزوّدين الفاشلين: provider → timestamp انتهاء الـ cooldown
+        self._failed_until: Dict[Provider, float] = {}
         logger.info(
             f"[LLMFallback] مزوّد: {self._provider.value} | نموذج: {self._model}"
         )
 
-    # ── اكتشاف المزوّد تلقائياً ─────────────────────────────────────────
+    # ── اكتشاف المزوّد تلقائياً (أول مزوّد متاح فقط — للتهيئة الأولى) ─────
 
     def _detect_provider(self) -> Tuple[Provider, str, str]:
-        # 1) Anthropic Claude — الأولوية الأولى دائماً ✅
+        chain = self._build_provider_chain()
+        if chain:
+            return chain[0]
+        return Provider.CKG_SYNTH, "", "ckg-synthesis-v1"
+
+    # ── بناء سلسلة كل المزوّدين المتاحين ────────────────────────────────
+
+    def _build_provider_chain(self) -> List[Tuple[Provider, str, str]]:
+        """
+        يُعيد قائمة مرتّبة بكل المزوّدين الذين لديهم مفاتيح صالحة.
+        هذه القائمة هي مصدر الحقيقة لنظام التبديل التلقائي.
+        """
+        chain: List[Tuple[Provider, str, str]] = []
+
+        # 1) Anthropic Claude
         k = os.getenv("ANTHROPIC_API_KEY", "").strip()
         if k:
-            return Provider.ANTHROPIC, k, _ANTHROPIC_MODEL
+            model = (
+                ANTHROPIC_MODELS[self._model_key]
+                if self._model_key else _ANTHROPIC_MODEL
+            )
+            chain.append((Provider.ANTHROPIC, k, model))
 
-        # 2) Cloudflare Workers AI — مجاني 10k/يوم ويعمل من اليمن ✅
-        cf_token = os.getenv("CF_API_TOKEN", "").strip()
-        cf_account = os.getenv("CF_ACCOUNT_ID", "").strip()
+        # 2) Cloudflare Workers AI
+        cf_token   = os.getenv("CF_API_TOKEN",   "").strip()
+        cf_account = os.getenv("CF_ACCOUNT_ID",  "").strip()
         if cf_token and cf_account:
-            return Provider.CLOUDFLARE, cf_token, _CF_MODEL
+            chain.append((Provider.CLOUDFLARE, cf_token, _CF_MODEL))
 
-        # 3) Google Gemini — مجاني (قد لا يعمل من اليمن)
+        # 3) Google Gemini
         k = os.getenv("GOOGLE_API_KEY", "").strip()
         if k and k.startswith("AIzaSy"):
-            return Provider.GEMINI, k, _GEMINI_MODEL
+            chain.append((Provider.GEMINI, k, _GEMINI_MODEL))
 
         # 4) OpenRouter
         k = os.getenv("OPENROUTER_API_KEY", "").strip()
         if k:
-            return Provider.OPENROUTER, k, _OPENROUTER_MODEL
+            chain.append((Provider.OPENROUTER, k, _OPENROUTER_MODEL))
 
-        # 5) Groq (قد يُحجب من بعض الشبكات)
+        # 5) Groq
         k = os.getenv("GROQ_API_KEY", "").strip()
         if k:
-            return Provider.GROQ, k, _GROQ_MODELS[0]
+            chain.append((Provider.GROQ, k, _GROQ_MODELS[0]))
 
         # 6) OpenAI
         k = os.getenv("OPENAI_API_KEY", "").strip()
         if k:
-            return Provider.OPENAI, k, _OPENAI_MODEL
+            chain.append((Provider.OPENAI, k, _OPENAI_MODEL))
 
         # 7) Together
         k = os.getenv("TOGETHER_API_KEY", "").strip()
         if k:
-            return Provider.TOGETHER, k, _TOGETHER_MODEL
+            chain.append((Provider.TOGETHER, k, _TOGETHER_MODEL))
 
-        # 8) CKG فقط
-        return Provider.CKG_SYNTH, "", "ckg-synthesis-v1"
+        return chain
 
-    # ── الواجهة العامة ───────────────────────────────────────────────────
+    # ── التبديل بين المزوّدين حسب النوع ─────────────────────────────────
+
+    def _call_provider(
+        self,
+        provider: Provider,
+        api_key:  str,
+        model:    str,
+        query:    str,
+        history:  List[Tuple[str, str]],
+        sp:       str,
+    ) -> FallbackResult:
+        """يستدعي المزوّد المحدّد ويُعيد النتيجة — أو يرفع استثناءً عند الفشل."""
+        # تحديث مؤقت حتى تعمل دوال _call_* (تقرأ self._api_key و self._model)
+        old_key, old_model = self._api_key, self._model
+        self._api_key, self._model = api_key, model
+        try:
+            if provider == Provider.ANTHROPIC:
+                return self._call_anthropic(query, history, sp)
+            elif provider == Provider.CLOUDFLARE:
+                return self._call_cloudflare(query, history, sp)
+            elif provider == Provider.OPENROUTER:
+                return self._call_openrouter(query, history, sp)
+            elif provider == Provider.OPENAI:
+                return self._call_openai(query, history, sp)
+            elif provider == Provider.TOGETHER:
+                return self._call_together(query, history, sp)
+            elif provider == Provider.GEMINI:
+                return self._call_gemini(query, history, sp)
+            elif provider == Provider.GROQ:
+                return self._call_groq(query, history, sp)
+            else:
+                raise ValueError(f"مزوّد غير معروف: {provider}")
+        finally:
+            self._api_key, self._model = old_key, old_model
+
+    # ── الواجهة العامة مع التبديل التلقائي ──────────────────────────────
 
     def generate(
         self,
@@ -290,56 +350,66 @@ class LLMFallback:
         system_prompt: Optional[str] = None,
     ) -> FallbackResult:
         """
-        يولّد إجابة للاستعلام مع السياق متعدد الأدوار.
+        يولّد إجابة مع التبديل التلقائي بين المزوّدين عند الفشل.
 
-        Args:
-            query:   نص سؤال المستخدم
-            history: [(user_msg, bot_msg), ...] آخر N رسائل
-            system_prompt: تعليمات نظام مخصّصة (اختياري). إذا لم تُمرَّر،
-                يُستخدم _SYSTEM_PROMPT الافتراضي (عربي/إسلامي عام) — بدون
-                أي تغيير في السلوك الحالي.
-        Returns:
-            FallbackResult
+        السلوك:
+          1. يبني سلسلة كل المزوّدين المتاحين (لديهم مفاتيح API).
+          2. يتخطّى المزوّدين الذين فشلوا مؤخراً (cooldown = 5 دقائق).
+          3. عند فشل مزوّد → يُسجَّل في _failed_until → ينتقل للتالي.
+          4. إذا فشلت الجميع → يسقط إلى CKG Synthesis.
+          5. عند نجاح مزوّد → يصبح self._provider الجديد.
         """
-        # إعادة فحص المفتاح (يدعم الحقن المتأخر من Streamlit Secrets)
-        if not self._api_key or self._provider.value == "ckg_synthesis":
-            self._provider, self._api_key, self._model = self._detect_provider()
-            if self._model_key and self._provider == Provider.ANTHROPIC:
-                self._model = ANTHROPIC_MODELS[self._model_key]
-
         t0      = time.time()
         history = history or []
         sp      = system_prompt or _SYSTEM_PROMPT
+        now     = time.time()
+        tried:  List[str] = []
 
-        try:
-            if self._provider == Provider.ANTHROPIC:
-                result = self._call_anthropic(query, history, sp)
-            elif self._provider == Provider.CLOUDFLARE:
-                result = self._call_cloudflare(query, history, sp)
-            elif self._provider == Provider.OPENROUTER:
-                result = self._call_openrouter(query, history, sp)
-            elif self._provider == Provider.OPENAI:
-                result = self._call_openai(query, history, sp)
-            elif self._provider == Provider.TOGETHER:
-                result = self._call_together(query, history, sp)
-            elif self._provider == Provider.GEMINI:
-                result = self._call_gemini(query, history, sp)
-            elif self._provider == Provider.GROQ:
-                result = self._call_groq(query, history, sp)
-            else:
-                text   = _ckg_synthesize(query, self.ckg)
-                result = FallbackResult(
-                    text=text, provider=Provider.CKG_SYNTH, model=self._model
+        chain = self._build_provider_chain()
+
+        for (prov, key, mdl) in chain:
+            # تخطّ المزوّدين في فترة الـ cooldown
+            if self._failed_until.get(prov, 0) > now:
+                remaining = int(self._failed_until[prov] - now)
+                logger.debug(
+                    f"[Rotation] تخطّي {prov.value} (cooldown {remaining}ث متبقية)"
                 )
-        except Exception as exc:
-            logger.error(f"[LLMFallback] {self._provider.value} فشل: {exc}")
-            result = FallbackResult(
-                text=_ckg_synthesize(query, self.ckg),
-                provider=Provider.CKG_SYNTH,
-                model="ckg-synthesis-v1",
-                error=str(exc),
-            )
+                tried.append(f"{prov.value}:cooldown")
+                continue
 
+            try:
+                logger.info(f"[Rotation] محاولة → {prov.value} / {mdl}")
+                result = self._call_provider(prov, key, mdl, query, history, sp)
+
+                # نجاح: تحديث المزوّد الحالي وإزالته من قائمة الفاشلين
+                self._provider, self._api_key, self._model = prov, key, mdl
+                self._failed_until.pop(prov, None)
+                tried.append(f"{prov.value}:ok")
+                result.tried = tried
+                result.latency_ms = round((time.time() - t0) * 1000, 1)
+                if len(tried) > 1:
+                    logger.info(
+                        f"[Rotation] نجح {prov.value} بعد {len(tried)-1} محاولة فاشلة"
+                    )
+                return result
+
+            except Exception as exc:
+                err_msg = str(exc)[:120]
+                logger.warning(
+                    f"[Rotation] فشل {prov.value}: {err_msg} — جرّب التالي..."
+                )
+                self._failed_until[prov] = now + _FAILURE_COOLDOWN_SEC
+                tried.append(f"{prov.value}:err({err_msg})")
+
+        # كل المزوّدين فشلوا → CKG Synthesis
+        logger.error(f"[Rotation] فشلت جميع المزوّدين {[t for t in tried]} → CKG")
+        result = FallbackResult(
+            text=_ckg_synthesize(query, self.ckg),
+            provider=Provider.CKG_SYNTH,
+            model="ckg-synthesis-v1",
+            error=f"فشلت كل المزوّدين: {tried}",
+            tried=tried,
+        )
         result.latency_ms = round((time.time() - t0) * 1000, 1)
         return result
 
