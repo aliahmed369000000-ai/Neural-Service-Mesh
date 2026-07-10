@@ -1,0 +1,192 @@
+{
+  "input": [
+    {
+      "node_id": "bdc6f00c-356a-41d4-8268-b5c04bce4a27",
+      "node_name": "SimInput",
+      "capability": "input",
+      "quality_score": 0.8,
+      "avg_latency_ms": 100.0,
+      "composite_score": 0.854,
+      "tags": [
+        "input",
+        "entry"
+      ],
+      "metadata": {},
+      "advertised_at": "2026-06-11T04:49:39.143134+00:00",
+      "last_updated": "2026-06-11T04:49:39.143134+00:00",
+      "execution_count": 0,
+      "is_active": true
+    }
+  ],
+  "entry": [
+    {
+      "node_id": "bdc6f00c-356a-41d4-8268-b5c04bce4a27",
+      "node_name": "SimInput",
+      "capability": "entry",
+      "quality_score": 0.8,
+      "avg_latency_ms": 100.0,
+      "composite_score": 0.854,
+      "tags": [
+        "input",
+        "entry"
+      ],
+      "metadata": {},
+      "advertised_at": "2026-06-11T04:49:39.145140+00:00",
+      "last_updated": "2026-06-11T04:49:39.145140+00:00",
+      "execution_count": 0,
+      "is_active": true
+    }
+  ],
+  "enrich": [
+    {
+      "node_id": "b42b2b02-4b85-4e0d-8d3c-c8b12139b7ba",
+      "node_name": "SimProcessor",
+      "capability": "enrich",
+      "quality_score": 0.8,
+      "avg_latency_ms": 100.0,
+      "composite_score": 0.854,
+      "tags": [
+        "processor",
+        "analysis"
+      ],
+      "metadata": {},
+      "advertised_at": "2026-06-11T04:49:39.750059+00:00",
+      "last_updated": "2026-06-11T04:49:39.750059+00:00",
+      "execution_count": 0,
+      "is_active": true
+    }
+  ],
+  "analyze": [
+    {
+      "node_id": "b42b2b02-4b85-4e0d-8d3c-c8b12139b7ba",
+      "node_name": "SimProcessor",
+      "capability": "analyze",
+      "quality_score": 0.8,
+      "avg_latency_ms": 100.0,
+      "composite_score": 0.854,
+      "tags": [
+        "processor",
+        "analysis"
+      ],
+      "metadata": {},
+      "advertised_at": "2026-06-11T04:49:39.752230+00:00",
+      "last_updated": "2026-06-11T04:49:39.752230+00:00",
+      "execution_count": 0,
+      "is_active": true
+    }
+  ],
+  "process": [
+    {
+      "node_id": "b42b2b02-4b85-4e0d-8d3c-c8b12139b7ba",
+      "node_name": "SimProcessor",
+      "capability": "process",
+      "quality_score": 0.8,
+      "avg_latency_ms": 100.0,
+      "composite_score": 0.854,
+      "tags": [
+        "processor",
+        "analysis"
+      ],
+      "metadata": {},
+      "advertised_at": "2026-06-11T04:49:39.753995+00:00",
+      "last_updated": "2026-06-11T04:49:39.753995+00:00",
+      "execution_count": 0,
+      "is_active": true
+    }
+  ],
+  "processor": [
+    {
+      "node_id": "b42b2b02-4b85-4e0d-8d3c-c8b12139b7ba",
+      "node_name": "SimProcessor",
+      "capability": "processor",
+      "quality_score": 0.8,
+      "avg_latency_ms": 100.0,
+      "composite_score": 0.854,
+      "tags": [
+        "processor",
+        "analysis"
+      ],
+      "metadata": {},
+      "advertised_at": "2026-06-11T04:49:39.755531+00:00",
+      "last_updated": "2026-06-11T04:49:39.755531+00:00",
+      "execution_count": 0,
+      "is_active": true
+    }
+  ],
+  "analysis": [
+    {
+      "node_id": "b42b2b02-4b85-4e0d-8d3c-c8b12139b7ba",
+      "node_name": "SimProcessor",
+      "capability": "analysis",
+      "quality_score": 0.8,
+      "avg_latency_ms": 100.0,
+      "composite_score": 0.854,
+      "tags": [
+        "processor",
+        "analysis"
+      ],
+      "metadata": {},
+      "advertised_at": "2026-06-11T04:49:39.757130+00:00",
+      "last_updated": "2026-06-11T04:49:39.757130+00:00",
+      "execution_count": 0,
+      "is_active": true
+    }
+  ],
+  "format": [
+    {
+      "node_id": "f5372809-9eb6-400f-ba33-f319aacbd35a",
+      "node_name": "SimOutput",
+      "capability": "format",
+      "quality_score": 0.8,
+      "avg_latency_ms": 100.0,
+      "composite_score": 0.854,
+      "tags": [
+        "output",
+        "terminal"
+      ],
+      "metadata": {},
+      "advertised_at": "2026-06-11T04:49:40.388892+00:00",
+      "last_updated": "2026-06-11T04:49:40.388892+00:00",
+      "execution_count": 0,
+      "is_active": true
+    }
+  ],
+  "output": [
+    {
+      "node_id": "f5372809-9eb6-400f-ba33-f319aacbd35a",
+      "node_name": "SimOutput",
+      "capability": "output",
+      "quality_score": 0.8,
+      "avg_latency_ms": 100.0,
+      "composite_score": 0.854,
+      "tags": [
+        "output",
+        "terminal"
+      ],
+      "metadata": {},
+      "advertised_at": "2026-06-11T04:49:40.390840+00:00",
+      "last_updated": "2026-06-11T04:49:40.390840+00:00",
+      "execution_count": 0,
+      "is_active": true
+    }
+  ],
+  "terminal": [
+    {
+      "node_id": "f5372809-9eb6-400f-ba33-f319aacbd35a",
+      "node_name": "SimOutput",
+      "capability": "terminal",
+      "quality_score": 0.8,
+      "avg_latency_ms": 100.0,
+      "composite_score": 0.854,
+      "tags": [
+        "output",
+        "terminal"
+      ],
+      "metadata": {},
+      "advertised_at": "2026-06-11T04:49:40.392204+00:00",
+      "last_updated": "2026-06-11T04:49:40.392204+00:00",
+      "execution_count": 0,
+      "is_active": true
+    }
+  ]
+}
