@@ -2492,6 +2492,67 @@ def render_chat():
             st.markdown(f'<div class="ctx-tag">📎 {ctx}</div>', unsafe_allow_html=True)
         st.metric("رسائل الجلسة", st.session_state.nsm_count)
 
+    # ── إرفاق ملف أو صورة (multimodal عبر OpenRouter) ─────────────────────
+    if "chat_pending_files" not in st.session_state:
+        st.session_state["chat_pending_files"] = []
+
+    _or_key_chat = st.session_state.get("_or_api_key", "").strip()
+    _or_model_chat = st.session_state.get("_or_model", "google/gemini-2.5-flash")
+    _is_vision_chat = _or_model_chat in VISION_MODELS
+
+    with st.expander("📎 إرفاق ملف أو صورة (يتطلب OpenRouter API Key)",
+                      expanded=bool(st.session_state["chat_pending_files"])):
+        if not _or_key_chat:
+            st.info("🔑 أدخل OpenRouter API Key في الشريط الجانبي لتفعيل رفع الملفات والصور.")
+        else:
+            col_up, col_info = st.columns([3, 2])
+            with col_up:
+                uploaded = st.file_uploader(
+                    "اسحب ملفاً هنا أو انقر للاختيار",
+                    type=["png", "jpg", "jpeg", "webp", "gif",
+                          "pdf", "txt", "md", "csv", "json",
+                          "py", "js", "ts", "html", "yaml", "yml"],
+                    accept_multiple_files=True,
+                    label_visibility="collapsed",
+                    key="chat_file_uploader",
+                )
+                if uploaded:
+                    existing_names = {f["name"] for f in st.session_state["chat_pending_files"]}
+                    for uf in uploaded:
+                        if uf.name not in existing_names:
+                            extracted = _extract_file(uf)
+                            if extracted:
+                                st.session_state["chat_pending_files"].append(extracted)
+                                existing_names.add(uf.name)
+                            else:
+                                st.warning(f"⚠ {uf.name} أكبر من {MAX_FILE_MB} MB")
+            with col_info:
+                if not _is_vision_chat and any(f["is_image"] for f in st.session_state["chat_pending_files"]):
+                    st.warning("⚠ النموذج الحالي لا يدعم الصور. اختر نموذج رؤية في الشريط الجانبي.")
+                elif _is_vision_chat:
+                    st.markdown('<span class="ctx-tag">👁 رؤية مُفعَّلة</span>', unsafe_allow_html=True)
+                st.caption(f"الحد الأقصى: {MAX_FILE_MB} MB للملف الواحد")
+
+        if st.session_state["chat_pending_files"]:
+            pf_cols = st.columns(min(len(st.session_state["chat_pending_files"]), 4))
+            to_remove = []
+            for i, f in enumerate(st.session_state["chat_pending_files"]):
+                with pf_cols[i % 4]:
+                    if f["is_image"] and f.get("raw_bytes"):
+                        st.image(f["raw_bytes"], caption=f["name"], use_container_width=True)
+                    else:
+                        icon = "📄" if f["text_content"] else "📎"
+                        st.caption(f"{icon} {f['name']} ({f['size_kb']} KB)")
+                    if st.button("✕", key=f"chat_rm_file_{i}", help="حذف"):
+                        to_remove.append(i)
+            for idx in sorted(to_remove, reverse=True):
+                st.session_state["chat_pending_files"].pop(idx)
+            if to_remove:
+                st.rerun()
+            if st.button("🗑 مسح كل الملفات", key="chat_clear_all_files"):
+                st.session_state["chat_pending_files"].clear()
+                st.rerun()
+
     # عرض المحادثة
     html = '<div class="chat-box" id="nsm-chat-box">'
     if not st.session_state.nsm_messages:
@@ -2652,8 +2713,47 @@ def render_chat():
     def _process(text: str):
         if not text.strip(): return
 
+        files = list(st.session_state["chat_pending_files"])
+        st.session_state["chat_pending_files"] = []
+
+        display_text = text.strip()
+        if files:
+            names = ", ".join(f["name"] for f in files)
+            display_text += f"\n\n📎 {names}"
+
         # ── أضف رسالة المستخدم فوراً ──
-        st.session_state.nsm_messages.append(("user", text.strip(), "", ""))
+        st.session_state.nsm_messages.append(("user", display_text, "", ""))
+
+        # ── مسار OpenRouter مباشرة إذا تم إدخال مفتاح (يدعم الملفات/الصور) ──
+        _or_key_p = st.session_state.get("_or_api_key", "").strip()
+        if _or_key_p:
+            _or_model_p = st.session_state.get("_or_model", "google/gemini-2.5-flash")
+            can_vision = _or_model_p in VISION_MODELS
+            doc_files   = [f for f in files if not f["is_image"]]
+            image_files = [f for f in files if f["is_image"]] if can_vision else []
+            user_content = _build_user_content(text.strip(), doc_files, image_files)
+
+            history_msgs = []
+            for m in st.session_state.nsm_messages[:-1]:
+                role = "user" if m[0] == "user" else "assistant"
+                history_msgs.append({"role": role, "content": m[1]})
+
+            api_messages = history_msgs + [{"role": "user", "content": user_content}]
+
+            with st.chat_message("assistant", avatar="🌐"):
+                placeholder = st.empty()
+                full_response = ""
+                for chunk in _or_stream(api_messages, model=_or_model_p, api_key=_or_key_p):
+                    full_response += chunk
+                    placeholder.markdown(full_response + "▌")
+                placeholder.markdown(full_response)
+            response = full_response
+            ctx_tag = ""
+            src_badge = f"🌐 OpenRouter · {_or_model_p.split('/')[-1]}"
+            st.session_state.nsm_messages.append(("nsm", response, ctx_tag, src_badge))
+            st.session_state.nsm_count += 1
+            st.rerun()
+            return
 
         # ── Streaming عبر NSM Agent مباشرة إذا كان متاحاً ──
         try:
