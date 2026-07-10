@@ -1,1 +1,0 @@
-- [Anthropic model names 2026](anthropic-models-2026.md) — That.md showed correct model IDs; old code used fake "claude-sonnet-5".
