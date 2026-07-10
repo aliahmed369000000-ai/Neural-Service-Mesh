@@ -1,0 +1,3 @@
+- [Nova System Architecture](nova-system-arch.md) — بنية نظام Nova المُجزَّأة على 3 وحدات (part1-6) مع build_full_nova_prompt()
+- [GitHub Push Blocked](github-push.md) — git add/commit محظوران في المُوكِّل الرئيسي؛ الحل: push_to_github.sh أو project_tasks
+- [Python Streamlit Project](streamlit-project.md) — المشروع Python/Streamlit (وليس pnpm)؛ الكود في الجذر مُهاجَر من .migration-backup/
