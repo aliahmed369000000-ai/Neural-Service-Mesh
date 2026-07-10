@@ -4002,7 +4002,7 @@ except Exception:
 try:
     from ai.llm_fallback import LLMFallback as _FableLLMFallback
     from ai.fable_engine import (
-        FableEngine, STORY_MODES, CHARACTERS, ARABIC_METERS,
+        FableEngine, FableChapter, STORY_MODES, CHARACTERS, ARABIC_METERS,
         DEFAULT_MODE as FABLE_DEFAULT_MODE,
         DEFAULT_CHARACTER as FABLE_DEFAULT_CHARACTER,
     )
@@ -6287,8 +6287,8 @@ def render_fable():
 
     engine = st.session_state.fable_engine
 
-    story_tab, poem_tab, explainer_tab, shorts_tab = st.tabs(
-        ["📖 قصة تفاعلية", "🪶 توليد شعر", "🎬 وثائقي (سيناريو)", "⚡ Shorts (سيناريو)"]
+    story_tab, poem_tab, explainer_tab, shorts_tab, library_tab = st.tabs(
+        ["📖 قصة تفاعلية", "🪶 توليد شعر", "🎬 وثائقي (سيناريو)", "⚡ Shorts (سيناريو)", "📚 مكتبة القصص"]
     )
 
     # ══════════════════ قصة تفاعلية ══════════════════
@@ -6523,6 +6523,80 @@ def render_fable():
                     file_name=f"{short.title[:40] or 'short'}.mp4",
                     mime="video/mp4",
                 )
+
+    # ══════════════════ مكتبة القصص المحفوظة ══════════════════
+    with library_tab:
+        st.markdown(
+            '<p style="color:#999">كل قصة تفاعلية تُحفظ تلقائياً في قاعدة بيانات SQLite محلية '
+            '(<code>memory/fable.db</code>) — هذه الواجهة تستعرضها.</p>',
+            unsafe_allow_html=True,
+        )
+
+        try:
+            sessions = engine.memory.list_recent_sessions(limit=30)
+        except Exception as e:  # noqa: BLE001
+            sessions = []
+            st.error(f"⚠️ تعذّر قراءة مكتبة القصص: {e}")
+
+        if not sessions:
+            st.info(
+                "📭 لا توجد قصص محفوظة بعد. ابدأ قصة من تبويب «📖 قصة تفاعلية» "
+                "وستظهر هنا تلقائياً بمجرد إنشاء الفصل الأول."
+            )
+        else:
+            st.caption(f"📚 عدد القصص المحفوظة: {len(sessions)}")
+            for sess in sessions:
+                session_id = sess["session_id"]
+                mode = sess["mode"]
+                character = sess["character"]
+                mode_info = STORY_MODES.get(mode, {})
+                char_info = CHARACTERS.get(character, {})
+                try:
+                    created_label = datetime.fromtimestamp(sess["created_at"]).strftime("%Y-%m-%d %H:%M")
+                except Exception:  # noqa: BLE001
+                    created_label = ""
+
+                history_rows = engine.memory.get_history(session_id, limit=200)
+                narrations = [r["content"] for r in history_rows if r["role"] == "narration"]
+                preview = (narrations[0][:90] + "…") if narrations and len(narrations[0]) > 90 else (narrations[0] if narrations else "(لا يوجد نص بعد)")
+
+                header = (
+                    f"{mode_info.get('emoji', '📖')} {mode} · "
+                    f"{char_info.get('emoji', '')} {character} — {created_label}"
+                )
+                with st.expander(header):
+                    st.caption(f"🆔 {session_id} · عدد الفصول: {len(narrations)}")
+                    st.markdown(
+                        f"<p style='direction:rtl; text-align:right; color:#bbb'>{preview}</p>",
+                        unsafe_allow_html=True,
+                    )
+
+                    view_key = f"lib_expand_{session_id}"
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        if st.button("📖 عرض القصة كاملة", key=f"lib_view_btn_{session_id}", use_container_width=True):
+                            st.session_state[view_key] = not st.session_state.get(view_key, False)
+                    with col_b:
+                        if st.button("▶️ استأنف هذه القصة", key=f"lib_resume_btn_{session_id}", use_container_width=True):
+                            last_narration = narrations[-1] if narrations else ""
+                            st.session_state.fable_chapter = FableChapter(
+                                session_id=session_id,
+                                text=last_narration,
+                                choices=[],
+                                mode=mode,
+                                character=character,
+                                provider="محفوظ من المكتبة",
+                            )
+                            st.success("✅ تم تحميل القصة — افتح تبويب «📖 قصة تفاعلية» للمتابعة منها.")
+                            st.rerun()
+
+                    if st.session_state.get(view_key):
+                        full_text = "\n\n".join(narrations) if narrations else "(لا يوجد نص محفوظ)"
+                        st.markdown(f"""
+                        <div class="root-item" style="text-align:right; direction:rtl; line-height:2">
+                            {full_text}
+                        </div>
+                        """, unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════
