@@ -51,3 +51,4 @@ memory/*.db-journal
 # Replit
 .cache/
 .local/
+__pycache__/

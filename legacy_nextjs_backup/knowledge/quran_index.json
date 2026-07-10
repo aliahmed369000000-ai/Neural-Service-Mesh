@@ -1,0 +1,466 @@
+{
+  "total_ayat": 6236,
+  "total_chunks": 63,
+  "chunk_size": 100,
+  "total_surahs": 114,
+  "surah_index": {
+    "1": {
+      "first_chunk": 0,
+      "ayah_count": 7
+    },
+    "2": {
+      "first_chunk": 0,
+      "ayah_count": 286
+    },
+    "3": {
+      "first_chunk": 2,
+      "ayah_count": 200
+    },
+    "4": {
+      "first_chunk": 4,
+      "ayah_count": 176
+    },
+    "5": {
+      "first_chunk": 6,
+      "ayah_count": 120
+    },
+    "6": {
+      "first_chunk": 7,
+      "ayah_count": 165
+    },
+    "7": {
+      "first_chunk": 9,
+      "ayah_count": 206
+    },
+    "8": {
+      "first_chunk": 11,
+      "ayah_count": 75
+    },
+    "9": {
+      "first_chunk": 12,
+      "ayah_count": 129
+    },
+    "10": {
+      "first_chunk": 13,
+      "ayah_count": 109
+    },
+    "11": {
+      "first_chunk": 14,
+      "ayah_count": 123
+    },
+    "12": {
+      "first_chunk": 15,
+      "ayah_count": 111
+    },
+    "13": {
+      "first_chunk": 17,
+      "ayah_count": 43
+    },
+    "14": {
+      "first_chunk": 17,
+      "ayah_count": 52
+    },
+    "15": {
+      "first_chunk": 18,
+      "ayah_count": 99
+    },
+    "16": {
+      "first_chunk": 19,
+      "ayah_count": 128
+    },
+    "17": {
+      "first_chunk": 20,
+      "ayah_count": 111
+    },
+    "18": {
+      "first_chunk": 21,
+      "ayah_count": 110
+    },
+    "19": {
+      "first_chunk": 22,
+      "ayah_count": 98
+    },
+    "20": {
+      "first_chunk": 23,
+      "ayah_count": 135
+    },
+    "21": {
+      "first_chunk": 24,
+      "ayah_count": 112
+    },
+    "22": {
+      "first_chunk": 25,
+      "ayah_count": 78
+    },
+    "23": {
+      "first_chunk": 26,
+      "ayah_count": 118
+    },
+    "24": {
+      "first_chunk": 27,
+      "ayah_count": 64
+    },
+    "25": {
+      "first_chunk": 28,
+      "ayah_count": 77
+    },
+    "26": {
+      "first_chunk": 29,
+      "ayah_count": 227
+    },
+    "27": {
+      "first_chunk": 31,
+      "ayah_count": 93
+    },
+    "28": {
+      "first_chunk": 32,
+      "ayah_count": 88
+    },
+    "29": {
+      "first_chunk": 33,
+      "ayah_count": 69
+    },
+    "30": {
+      "first_chunk": 34,
+      "ayah_count": 60
+    },
+    "31": {
+      "first_chunk": 34,
+      "ayah_count": 34
+    },
+    "32": {
+      "first_chunk": 35,
+      "ayah_count": 30
+    },
+    "33": {
+      "first_chunk": 35,
+      "ayah_count": 73
+    },
+    "34": {
+      "first_chunk": 36,
+      "ayah_count": 54
+    },
+    "35": {
+      "first_chunk": 36,
+      "ayah_count": 45
+    },
+    "36": {
+      "first_chunk": 37,
+      "ayah_count": 83
+    },
+    "37": {
+      "first_chunk": 37,
+      "ayah_count": 182
+    },
+    "38": {
+      "first_chunk": 39,
+      "ayah_count": 88
+    },
+    "39": {
+      "first_chunk": 40,
+      "ayah_count": 75
+    },
+    "40": {
+      "first_chunk": 41,
+      "ayah_count": 85
+    },
+    "41": {
+      "first_chunk": 42,
+      "ayah_count": 54
+    },
+    "42": {
+      "first_chunk": 42,
+      "ayah_count": 53
+    },
+    "43": {
+      "first_chunk": 43,
+      "ayah_count": 89
+    },
+    "44": {
+      "first_chunk": 44,
+      "ayah_count": 59
+    },
+    "45": {
+      "first_chunk": 44,
+      "ayah_count": 37
+    },
+    "46": {
+      "first_chunk": 45,
+      "ayah_count": 35
+    },
+    "47": {
+      "first_chunk": 45,
+      "ayah_count": 38
+    },
+    "48": {
+      "first_chunk": 45,
+      "ayah_count": 29
+    },
+    "49": {
+      "first_chunk": 46,
+      "ayah_count": 18
+    },
+    "50": {
+      "first_chunk": 46,
+      "ayah_count": 45
+    },
+    "51": {
+      "first_chunk": 46,
+      "ayah_count": 60
+    },
+    "52": {
+      "first_chunk": 47,
+      "ayah_count": 49
+    },
+    "53": {
+      "first_chunk": 47,
+      "ayah_count": 62
+    },
+    "54": {
+      "first_chunk": 48,
+      "ayah_count": 55
+    },
+    "55": {
+      "first_chunk": 49,
+      "ayah_count": 78
+    },
+    "56": {
+      "first_chunk": 49,
+      "ayah_count": 96
+    },
+    "57": {
+      "first_chunk": 50,
+      "ayah_count": 29
+    },
+    "58": {
+      "first_chunk": 51,
+      "ayah_count": 22
+    },
+    "59": {
+      "first_chunk": 51,
+      "ayah_count": 24
+    },
+    "60": {
+      "first_chunk": 51,
+      "ayah_count": 13
+    },
+    "61": {
+      "first_chunk": 51,
+      "ayah_count": 14
+    },
+    "62": {
+      "first_chunk": 51,
+      "ayah_count": 11
+    },
+    "63": {
+      "first_chunk": 51,
+      "ayah_count": 11
+    },
+    "64": {
+      "first_chunk": 51,
+      "ayah_count": 18
+    },
+    "65": {
+      "first_chunk": 52,
+      "ayah_count": 12
+    },
+    "66": {
+      "first_chunk": 52,
+      "ayah_count": 12
+    },
+    "67": {
+      "first_chunk": 52,
+      "ayah_count": 30
+    },
+    "68": {
+      "first_chunk": 52,
+      "ayah_count": 52
+    },
+    "69": {
+      "first_chunk": 53,
+      "ayah_count": 52
+    },
+    "70": {
+      "first_chunk": 53,
+      "ayah_count": 44
+    },
+    "71": {
+      "first_chunk": 54,
+      "ayah_count": 28
+    },
+    "72": {
+      "first_chunk": 54,
+      "ayah_count": 28
+    },
+    "73": {
+      "first_chunk": 54,
+      "ayah_count": 20
+    },
+    "74": {
+      "first_chunk": 54,
+      "ayah_count": 56
+    },
+    "75": {
+      "first_chunk": 55,
+      "ayah_count": 40
+    },
+    "76": {
+      "first_chunk": 55,
+      "ayah_count": 31
+    },
+    "77": {
+      "first_chunk": 56,
+      "ayah_count": 50
+    },
+    "78": {
+      "first_chunk": 56,
+      "ayah_count": 40
+    },
+    "79": {
+      "first_chunk": 57,
+      "ayah_count": 46
+    },
+    "80": {
+      "first_chunk": 57,
+      "ayah_count": 42
+    },
+    "81": {
+      "first_chunk": 58,
+      "ayah_count": 29
+    },
+    "82": {
+      "first_chunk": 58,
+      "ayah_count": 19
+    },
+    "83": {
+      "first_chunk": 58,
+      "ayah_count": 36
+    },
+    "84": {
+      "first_chunk": 58,
+      "ayah_count": 25
+    },
+    "85": {
+      "first_chunk": 59,
+      "ayah_count": 22
+    },
+    "86": {
+      "first_chunk": 59,
+      "ayah_count": 17
+    },
+    "87": {
+      "first_chunk": 59,
+      "ayah_count": 19
+    },
+    "88": {
+      "first_chunk": 59,
+      "ayah_count": 26
+    },
+    "89": {
+      "first_chunk": 59,
+      "ayah_count": 30
+    },
+    "90": {
+      "first_chunk": 60,
+      "ayah_count": 20
+    },
+    "91": {
+      "first_chunk": 60,
+      "ayah_count": 15
+    },
+    "92": {
+      "first_chunk": 60,
+      "ayah_count": 21
+    },
+    "93": {
+      "first_chunk": 60,
+      "ayah_count": 11
+    },
+    "94": {
+      "first_chunk": 60,
+      "ayah_count": 8
+    },
+    "95": {
+      "first_chunk": 60,
+      "ayah_count": 8
+    },
+    "96": {
+      "first_chunk": 61,
+      "ayah_count": 19
+    },
+    "97": {
+      "first_chunk": 61,
+      "ayah_count": 5
+    },
+    "98": {
+      "first_chunk": 61,
+      "ayah_count": 8
+    },
+    "99": {
+      "first_chunk": 61,
+      "ayah_count": 8
+    },
+    "100": {
+      "first_chunk": 61,
+      "ayah_count": 11
+    },
+    "101": {
+      "first_chunk": 61,
+      "ayah_count": 11
+    },
+    "102": {
+      "first_chunk": 61,
+      "ayah_count": 8
+    },
+    "103": {
+      "first_chunk": 61,
+      "ayah_count": 3
+    },
+    "104": {
+      "first_chunk": 61,
+      "ayah_count": 9
+    },
+    "105": {
+      "first_chunk": 61,
+      "ayah_count": 5
+    },
+    "106": {
+      "first_chunk": 61,
+      "ayah_count": 4
+    },
+    "107": {
+      "first_chunk": 61,
+      "ayah_count": 7
+    },
+    "108": {
+      "first_chunk": 62,
+      "ayah_count": 3
+    },
+    "109": {
+      "first_chunk": 62,
+      "ayah_count": 6
+    },
+    "110": {
+      "first_chunk": 62,
+      "ayah_count": 3
+    },
+    "111": {
+      "first_chunk": 62,
+      "ayah_count": 5
+    },
+    "112": {
+      "first_chunk": 62,
+      "ayah_count": 4
+    },
+    "113": {
+      "first_chunk": 62,
+      "ayah_count": 5
+    },
+    "114": {
+      "first_chunk": 62,
+      "ayah_count": 6
+    }
+  },
+  "source": "alquran.cloud \u2014 \u0627\u0644\u0631\u0633\u0645 \u0627\u0644\u0639\u062b\u0645\u0627\u0646\u064a",
+  "stored_at": "2026-06-09T00:01:58.979620+00:00"
+}

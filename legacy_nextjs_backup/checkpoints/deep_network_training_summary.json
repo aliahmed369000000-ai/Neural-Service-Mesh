@@ -1,0 +1,58 @@
+{
+  "name": "training_network",
+  "architecture": "Input (7) → L1_108x7_relu (7→108) → L2_9x108_relu (108→9) → L3_4x9_softmax (9→4) → Output (4 routing weights)",
+  "layer_count": 3,
+  "layers": [
+    {
+      "name": "L1_108x7_relu",
+      "shape": [
+        108,
+        7
+      ],
+      "activation": "relu",
+      "weight_stats": {
+        "min": -0.000905,
+        "max": 0.903635,
+        "mean": 0.31315,
+        "std": 0.231039
+      }
+    },
+    {
+      "name": "L2_9x108_relu",
+      "shape": [
+        9,
+        108
+      ],
+      "activation": "relu",
+      "weight_stats": {
+        "min": -0.243566,
+        "max": 0.225727,
+        "mean": -0.001771,
+        "std": 0.130276
+      }
+    },
+    {
+      "name": "L3_4x9_softmax",
+      "shape": [
+        4,
+        9
+      ],
+      "activation": "softmax",
+      "weight_stats": {
+        "min": -0.581259,
+        "max": 0.662955,
+        "mean": 0.1047,
+        "std": 0.363314
+      }
+    }
+  ],
+  "total_parameters": 1885,
+  "layer1_rows": 108,
+  "layer1_cols_fixed": 7,
+  "layer1_max_rows": 200,
+  "layer1_grow_by": 6,
+  "train_steps": 500,
+  "last_loss": 4.83e-06,
+  "avg_recent_loss": 1.44e-06,
+  "learning_rate": 0.005
+}
