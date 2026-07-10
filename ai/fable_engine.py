@@ -337,7 +337,7 @@ class FableEngine:
         except ImportError as exc:
             raise RuntimeError(
                 "توليد الفيديو يحتاج حزمتي moviepy و imageio-ffmpeg. "
-                "أضِفهما لـ requirements.txt: moviepy==1.0.3, imageio-ffmpeg>=0.4.9"
+                "أضِفهما لـ requirements.txt: moviepy>=2.0, imageio-ffmpeg>=0.4.9"
             ) from exc
 
         if not script.has_audio:
@@ -350,7 +350,7 @@ class FableEngine:
         except ImportError as exc:
             raise RuntimeError(
                 "توليد الفيديو يحتاج حزمتي moviepy و imageio-ffmpeg. "
-                "أضِفهما لـ requirements.txt: moviepy==1.0.3, imageio-ffmpeg>=0.4.9"
+                "أضِفهما لـ requirements.txt: moviepy>=2.0, imageio-ffmpeg>=0.4.9"
             ) from exc
 
     # ── بناء تعليمات النظام لكل جلسة ────────────────────────────────────

@@ -179,7 +179,7 @@ class VideoEngine:
 
     # ── بناء مقطع فيديو واحد (مشهد) بالصوت المرافق ──────────────────
     def _build_segment_clip(self, segment, index: int, tmp_dir: str):
-        from moviepy.editor import AudioFileClip, ImageClip
+        from moviepy import AudioFileClip, ImageClip, vfx
         import numpy as np
 
         if not segment.audio_bytes:
@@ -201,12 +201,12 @@ class VideoEngine:
         # تأثير Ken Burns بسيط (زووم تدريجي خفيف) لإحساس حركي بدون رسوم AI
         clip = (
             ImageClip(frame_array)
-            .set_duration(duration)
-            .resize(lambda t: 1.0 + 0.045 * (t / duration))
-            .set_position("center")
+            .with_duration(duration)
+            .resized(lambda t: 1.0 + 0.045 * (t / duration))
+            .with_position("center")
         )
-        clip = clip.set_audio(audio_clip.set_duration(duration))
-        return clip.crossfadein(0.25)
+        clip = clip.with_audio(audio_clip.with_duration(duration))
+        return clip.with_effects([vfx.CrossFadeIn(0.25)])
 
     # ── الواجهة العامة: رندر الفيديو الكامل ──────────────────────────
     def render(self, script) -> bytes:
@@ -219,7 +219,7 @@ class VideoEngine:
                 "السيناريو بدون صوت مُولَّد — نفّذ render_audio(script) قبل render_video()."
             )
 
-        from moviepy.editor import CompositeVideoClip, concatenate_videoclips
+        from moviepy import CompositeVideoClip, concatenate_videoclips
 
         with tempfile.TemporaryDirectory(prefix="nsm_video_") as tmp_dir:
             clips = [
@@ -227,7 +227,7 @@ class VideoEngine:
                 for i, seg in enumerate(script.segments)
             ]
             final = concatenate_videoclips(clips, method="compose", padding=-0.15)
-            final = final.set_fps(FPS)
+            final = final.with_fps(FPS)
 
             out_path = os.path.join(tmp_dir, "output.mp4")
             final.write_videofile(
@@ -237,7 +237,6 @@ class VideoEngine:
                 audio_codec="aac",
                 preset="veryfast",
                 threads=2,
-                verbose=False,
                 logger=None,
             )
 
