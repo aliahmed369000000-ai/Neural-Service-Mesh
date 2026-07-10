@@ -115,3 +115,73 @@ class YouTubeAdapter(PlatformAdapter):
         )
         r.raise_for_status()
         return r.json()["id"]
+
+    # ── رفع فيديو فعلي (videos.insert عبر Resumable Upload) ──────────────
+    #
+    # يتطلب رمز OAuth مُنشأ بنطاق (scope) يتضمن:
+    #   https://www.googleapis.com/auth/youtube.upload
+    # (نفس متغيرات الكتابة أعلاه — write_env — لكن يجب توليد
+    # YOUTUBE_OAUTH_REFRESH_TOKEN من موافقة تتضمّن هذا النطاق تحديداً،
+    # وإلا سترجع Google خطأ 403 insufficientPermissions).
+    UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
+
+    def upload_video(
+        self,
+        video_bytes: bytes,
+        title: str,
+        description: str = "",
+        tags: Optional[List[str]] = None,
+        privacy_status: str = "private",   # private | unlisted | public
+        category_id: str = "22",           # 22 = People & Blogs
+        made_for_kids: bool = False,
+    ) -> str:
+        """يرفع فيديو حقيقي إلى القناة عبر YouTube Data API v3 (Resumable
+        Upload بخطوتين: تهيئة الجلسة ثم رفع البايتات). يعيد videoId الفعلي.
+        لا يُنشئ أي نتيجة وهمية — أي فشل HTTP يرفع استثناءً واضحاً."""
+        if not video_bytes:
+            raise ValueError("youtube.upload_video: video_bytes فارغة.")
+
+        token = self._access_token()
+        metadata = {
+            "snippet": {
+                "title": (title or "بدون عنوان")[:100],
+                "description": (description or "")[:5000],
+                "tags": tags or [],
+                "categoryId": category_id,
+            },
+            "status": {
+                "privacyStatus": privacy_status,
+                "selfDeclaredMadeForKids": made_for_kids,
+            },
+        }
+
+        # 1) تهيئة جلسة الرفع القابلة للاستئناف
+        init = requests.post(
+            self.UPLOAD_URL,
+            params={"uploadType": "resumable", "part": "snippet,status"},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=UTF-8",
+                "X-Upload-Content-Type": "video/mp4",
+                "X-Upload-Content-Length": str(len(video_bytes)),
+            },
+            json=metadata,
+            timeout=30,
+        )
+        init.raise_for_status()
+        upload_session_url = init.headers.get("Location")
+        if not upload_session_url:
+            raise RuntimeError("youtube.upload_video: تعذّر الحصول على رابط جلسة الرفع.")
+
+        # 2) رفع البيانات الفعلية (PUT مباشر — يوتيوب يدعم ملفات حتى عدة GB)
+        put = requests.put(
+            upload_session_url,
+            headers={
+                "Content-Type": "video/mp4",
+                "Content-Length": str(len(video_bytes)),
+            },
+            data=video_bytes,
+            timeout=900,
+        )
+        put.raise_for_status()
+        return put.json()["id"]
