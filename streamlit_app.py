@@ -6525,6 +6525,70 @@ def render_fable():
                     mime="video/mp4",
                 )
 
+                st.markdown("---")
+                st.markdown("#### 📤 مشاركة اجتماعية فعلية (رفع الفيديو)")
+                try:
+                    from ai.social_platforms import YouTubeAdapter, TikTokAdapter
+                except ImportError as e:  # noqa: BLE001
+                    st.caption(f"⚠️ تعذّر تحميل محولات المشاركة: {e}")
+                else:
+                    yt = YouTubeAdapter()
+                    tk = TikTokAdapter()
+                    share_cols = st.columns(2)
+
+                    # ── يوتيوب ──
+                    with share_cols[0]:
+                        st.markdown("**▶️ YouTube**")
+                        yt_ready = yt.is_configured() and yt._can_write()
+                        if not yt_ready:
+                            missing = yt.missing_env() or yt.write_env
+                            st.caption("⚙️ غير مُهيّأ — أضِف بالبيئة (Secrets): " + "، ".join(missing))
+                        else:
+                            yt_title = st.text_input(
+                                "العنوان:", value=short.title[:100], key="yt_upload_title"
+                            )
+                            yt_privacy = st.selectbox(
+                                "الخصوصية:", ["private", "unlisted", "public"],
+                                key="yt_upload_privacy",
+                            )
+                            if st.button("▶️ ارفع على يوتيوب", key="yt_upload_btn", use_container_width=True):
+                                try:
+                                    with st.spinner("⏳ يرفع الفيديو على يوتيوب (Resumable Upload)..."):
+                                        video_id = yt.upload_video(
+                                            mp4_bytes,
+                                            title=yt_title,
+                                            description=short.full_narration[:4500],
+                                            privacy_status=yt_privacy,
+                                        )
+                                    st.success(f"✅ تم الرفع! الرابط: https://youtu.be/{video_id}")
+                                except Exception as e:  # noqa: BLE001
+                                    st.error(f"⚠️ فشل الرفع على يوتيوب: {e}")
+
+                    # ── تيك توك ──
+                    with share_cols[1]:
+                        st.markdown("**🎵 TikTok**")
+                        tk_ready = tk.is_configured()
+                        if not tk_ready:
+                            st.caption("⚙️ غير مُهيّأ — أضِف بالبيئة (Secrets): " + "، ".join(tk.missing_env()))
+                        else:
+                            st.caption(
+                                "ℹ️ التطبيقات غير المدقَّقة من TikTok تنشر كـ«خاص بحسابك فقط» "
+                                "(مسودة للمراجعة) حتى يجتاز التطبيق مراجعة TikTok الرسمية للنشر العام."
+                            )
+                            tk_title = st.text_input(
+                                "العنوان:", value=short.title[:150], key="tk_upload_title"
+                            )
+                            if st.button("🎵 ارفع على تيك توك", key="tk_upload_btn", use_container_width=True):
+                                try:
+                                    with st.spinner("⏳ يرفع الفيديو على تيك توك..."):
+                                        publish_id = tk.upload_video(mp4_bytes, title=tk_title)
+                                    st.success(
+                                        f"✅ تم إرسال الفيديو (publish_id: {publish_id}) — "
+                                        "افتح تطبيق TikTok للتأكد من ظهوره ضمن المسودات/المنشورات."
+                                    )
+                                except Exception as e:  # noqa: BLE001
+                                    st.error(f"⚠️ فشل الرفع على تيك توك: {e}")
+
     # ══════════════════ مكتبة القصص المحفوظة ══════════════════
     with library_tab:
         st.markdown(
