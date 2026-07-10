@@ -6,16 +6,115 @@ Streamlit front-end لمشروع النظام المعرفي العربي.
 
 from __future__ import annotations
 
+import base64
+import io
 import json
 import os
 import re
 import sqlite3
+import uuid
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Generator, List, Optional, Tuple
 
 import streamlit as st
+
+# ── OpenRouter — مزوّد موازٍ اختياري ─────────────────────────────────────
+try:
+    import requests as _requests
+    _REQUESTS_OK = True
+except ImportError:
+    _REQUESTS_OK = False
+
+_OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+# نماذج OpenRouter المتاحة (20+ نموذج)
+OPENROUTER_MODELS: List[Tuple[str, str, str, str]] = [
+    ("google/gemini-2.5-flash",           "Gemini 2.5 Flash",    "Google",       "1M"),
+    ("google/gemini-2.5-pro",             "Gemini 2.5 Pro",      "Google",       "1M"),
+    ("anthropic/claude-3.5-sonnet",       "Claude 3.5 Sonnet",   "Anthropic",    "200K"),
+    ("anthropic/claude-sonnet-4-5",       "Claude Sonnet 4.5",   "Anthropic",    "200K"),
+    ("openai/gpt-4o",                     "GPT-4o",              "OpenAI",       "128K"),
+    ("openai/gpt-4o-mini",                "GPT-4o Mini",         "OpenAI",       "128K"),
+    ("deepseek/deepseek-chat",            "DeepSeek V3",         "DeepSeek",     "128K"),
+    ("deepseek/deepseek-r1",              "DeepSeek R1",         "DeepSeek",     "128K"),
+    ("x-ai/grok-3-mini",                  "Grok 3 Mini",         "xAI",          "128K"),
+    ("meta-llama/llama-4-maverick",       "Llama 4 Maverick",    "Meta",         "128K"),
+    ("meta-llama/llama-3.3-70b-instruct", "Llama 3.3 70B",       "Meta",         "128K"),
+    ("qwen/qwen3-235b-a22b",              "Qwen3 235B",          "Qwen",         "131K"),
+    ("mistralai/mistral-large-2411",      "Mistral Large",       "Mistral",      "128K"),
+    ("nousresearch/hermes-3-llama-3.1-70b","Hermes 3 70B",       "Nous",         "128K"),
+    ("perplexity/sonar",                  "Perplexity Sonar",    "Perplexity",   "128K"),
+    ("moonshotai/moonlight-16a-preview",  "Moonlight 16A",       "Moonshot AI",  "128K"),
+    ("google/gemma-3-27b-it",             "Gemma 3 27B",         "Google",       "128K"),
+    ("microsoft/phi-4",                   "Phi-4",               "Microsoft",    "16K"),
+]
+OPENROUTER_MODEL_OPTIONS = {
+    f"{name} — {prov} [{ctx}]": mid
+    for mid, name, prov, ctx in OPENROUTER_MODELS
+}
+
+def _or_stream(
+    messages: List[Dict],
+    model: str,
+    api_key: str,
+    temperature: float = 0.7,
+    top_p: float = 0.9,
+) -> Generator[str, None, None]:
+    """بثّ streaming من OpenRouter — يُعيد قطعاً نصية تدريجياً."""
+    if not _REQUESTS_OK or not api_key:
+        yield "⚠️ مفتاح OpenRouter غير موجود."
+        return
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://nsm.replit.app",
+        "X-Title": "Neural Service Mesh",
+    }
+    payload = {
+        "model": model,
+        "messages": messages,
+        "stream": True,
+        "temperature": temperature,
+        "top_p": top_p,
+        "max_tokens": 4096,
+    }
+    try:
+        with _requests.post(
+            _OPENROUTER_URL, headers=headers, json=payload, stream=True, timeout=60
+        ) as r:
+            if not r.ok:
+                yield f"**خطأ {r.status_code}:** {r.text[:200]}"
+                return
+            for line in r.iter_lines():
+                if not line:
+                    continue
+                decoded = line.decode("utf-8") if isinstance(line, bytes) else line
+                if not decoded.startswith("data: "):
+                    continue
+                data = decoded[6:]
+                if data == "[DONE]":
+                    break
+                try:
+                    delta = json.loads(data)["choices"][0]["delta"].get("content", "")
+                    if delta:
+                        yield delta
+                except Exception:
+                    continue
+    except Exception as exc:
+        yield f"\n\n**خطأ:** {exc}"
+
+
+def _or_chat(
+    messages: List[Dict],
+    model: str,
+    api_key: str,
+    temperature: float = 0.7,
+) -> str:
+    """استدعاء غير-streaming من OpenRouter — يُعيد النص كاملاً."""
+    chunks = list(_or_stream(messages, model, api_key, temperature))
+    return "".join(chunks)
 
 # ══════════════════════════════════════════════════════════════════
 # حقن Streamlit Secrets → os.environ (يجب أن يكون هنا قبل أي import آخر)
@@ -1783,6 +1882,46 @@ def render_advanced_api():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def main():
+    # ── الشريط الجانبي — OpenRouter ───────────────────────────────────────
+    with st.sidebar:
+        st.markdown("## 🌐 Neural Service Mesh")
+        st.markdown("---")
+
+        st.markdown("### 🔑 OpenRouter API")
+        st.caption("مفتاح اختياري — يُفعّل النماذج التجارية في تبويبَي المحادثة و G0DM0D3")
+
+        _or_key_stored = st.session_state.get("_or_api_key", "")
+        _or_key_input = st.text_input(
+            "OpenRouter API Key",
+            value=_or_key_stored,
+            type="password",
+            placeholder="sk-or-v1-...",
+            label_visibility="collapsed",
+            key="or_key_input_widget",
+        )
+        if _or_key_input != _or_key_stored:
+            st.session_state["_or_api_key"] = _or_key_input
+
+        _or_key = st.session_state.get("_or_api_key", "").strip()
+
+        if _or_key:
+            st.success("✅ OpenRouter مُفعَّل")
+            _or_model_label = st.selectbox(
+                "النموذج",
+                list(OPENROUTER_MODEL_OPTIONS.keys()),
+                index=0,
+                key="or_model_select",
+                label_visibility="collapsed",
+            )
+            st.session_state["_or_model"] = OPENROUTER_MODEL_OPTIONS[_or_model_label]
+        else:
+            st.info("بدون مفتاح → يُستخدم NSM/LLMFallback")
+            st.session_state["_or_model"] = "google/gemini-2.5-flash"
+
+        st.markdown("---")
+        st.caption("🧠 النظام المعرفي العربي")
+        st.caption("CKG · قرآن · AutoTune · Parseltongue")
+
     # ── العنوان ──────────────────────────────────────────────────────────
     st.markdown("""
     <div class="main-title">🧠 النظام المعرفي العربي</div>
@@ -2958,18 +3097,35 @@ def render_godmode():
 
         if _gm_send and _gm_q.strip():
             _gm_hist.append(("user", _gm_q.strip()))
-            with st.spinner("⟳ G0DM0D3 يُفكّر..."):
-                try:
-                    _llm = LLMFallback()
-                    _gm_resp = _llm.chat(
-                        messages=[
-                            {"role": "system", "content": GODMODE_SYSTEM_PROMPT},
-                            {"role": "user",   "content": _gm_q.strip()},
-                        ]
-                    )
-                    _gm_hist.append(("assistant", _gm_resp))
-                except Exception as _gm_err:
-                    _gm_hist.append(("assistant", f"⚠️ خطأ: {_gm_err}"))
+            _or_key_gm = st.session_state.get("_or_api_key", "").strip()
+            _or_mdl_gm = st.session_state.get("_or_model", "google/gemini-2.5-flash")
+            if _or_key_gm:
+                # ── OpenRouter streaming ──
+                with st.chat_message("assistant", avatar="🔓"):
+                    _placeholder = st.empty()
+                    _full = ""
+                    for _chunk in _or_stream(
+                        [{"role": "system", "content": GODMODE_SYSTEM_PROMPT},
+                         {"role": "user",   "content": _gm_q.strip()}],
+                        model=_or_mdl_gm, api_key=_or_key_gm,
+                    ):
+                        _full += _chunk
+                        _placeholder.markdown(_full + "▌")
+                    _placeholder.markdown(_full)
+                _gm_hist.append(("assistant", _full))
+            else:
+                with st.spinner("⟳ G0DM0D3 يُفكّر..."):
+                    try:
+                        _llm = LLMFallback()
+                        _gm_resp = _llm.chat(
+                            messages=[
+                                {"role": "system", "content": GODMODE_SYSTEM_PROMPT},
+                                {"role": "user",   "content": _gm_q.strip()},
+                            ]
+                        )
+                        _gm_hist.append(("assistant", _gm_resp))
+                    except Exception as _gm_err:
+                        _gm_hist.append(("assistant", f"⚠️ خطأ: {_gm_err}"))
             st.session_state["godmode_chat"] = _gm_hist
             st.rerun()
 
@@ -3013,21 +3169,36 @@ def render_godmode():
 
                 if _hof_run and _hof_query.strip():
                     _sys_p, _usr_p = apply_combo(combo, _hof_query.strip())
-                    with st.spinner(f"⟳ {combo.codename} يعالج..."):
-                        try:
-                            _llm2 = LLMFallback()
-                            _hof_resp = _llm2.chat(messages=[
-                                {"role": "system", "content": _sys_p},
-                                {"role": "user",   "content": _usr_p},
-                            ])
-                            st.markdown(f"""
-                            <div style="background:#0d1f0d;border:1px solid {combo.color};border-radius:10px;
-                                        padding:1rem 1.2rem;direction:rtl;line-height:1.8;white-space:pre-wrap">
-                            {_hof_resp}
-                            </div>
-                            """, unsafe_allow_html=True)
-                        except Exception as _hof_err:
-                            st.error(f"خطأ: {_hof_err}")
+                    _or_key_hof = st.session_state.get("_or_api_key", "").strip()
+                    _or_mdl_hof = st.session_state.get("_or_model", combo.model)
+                    if _or_key_hof:
+                        with st.chat_message("assistant", avatar=combo.emoji):
+                            _hof_ph = st.empty()
+                            _hof_full = ""
+                            for _hc in _or_stream(
+                                [{"role": "system", "content": _sys_p},
+                                 {"role": "user",   "content": _usr_p}],
+                                model=_or_mdl_hof, api_key=_or_key_hof,
+                            ):
+                                _hof_full += _hc
+                                _hof_ph.markdown(_hof_full + "▌")
+                            _hof_ph.markdown(_hof_full)
+                    else:
+                        with st.spinner(f"⟳ {combo.codename} يعالج..."):
+                            try:
+                                _llm2 = LLMFallback()
+                                _hof_resp = _llm2.chat(messages=[
+                                    {"role": "system", "content": _sys_p},
+                                    {"role": "user",   "content": _usr_p},
+                                ])
+                                st.markdown(f"""
+                                <div style="background:#0d1f0d;border:1px solid {combo.color};border-radius:10px;
+                                            padding:1rem 1.2rem;direction:rtl;line-height:1.8;white-space:pre-wrap">
+                                {_hof_resp}
+                                </div>
+                                """, unsafe_allow_html=True)
+                            except Exception as _hof_err:
+                                st.error(f"خطأ: {_hof_err}")
                 elif _hof_run:
                     st.warning("أدخل استعلاماً أولاً في حقل 'الاستعلام' أعلاه.")
 
