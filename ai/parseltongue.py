@@ -244,11 +244,46 @@ def _pick_random_fn():
 # الدالة الرئيسية
 # ══════════════════════════════════════════════════════════════════════
 
-def apply_parseltongue(text: str, config: ParseltongueConfig) -> ParseltongueResult:
+# ── شيم التوافق مع الإصدارات القديمة ─────────────────────────────────────
+
+# قاموس الوصف (للواجهات القديمة)
+TECHNIQUE_DESCRIPTIONS: Dict[str, str] = {
+    "leetspeak": "l33tspeak كلاسيكي: a→4, e→3, i→1, ...",
+    "unicode":   "مثيلات Unicode (سيريلية، يونانية)",
+    "zwj":       "محارف عرض-صفري غير مرئية بين الأحرف",
+    "mixedcase": "اضطراب نمط الأحرف الكبيرة/الصغيرة",
+    "phonetic":  "استبدال صوتي بكلمات مشابهة لفظاً",
+    "random":    "خلط عشوائي من جميع التقنيات",
+}
+
+
+def detect_triggers(text: str, custom_triggers: List[str] | None = None) -> List[str]:
+    """يكتشف الكلمات المثيرة في النص ويُعيدها كقائمة."""
+    triggers = list(set(DEFAULT_TRIGGERS + (custom_triggers or [])))
+    lower = text.lower()
+    return [t for t in triggers if t.lower() in lower]
+
+
+def apply_parseltongue(  # type: ignore[override]
+    text: str,
+    config: ParseltongueConfig | None = None,
+    *,
+    technique: str | None = None,
+    intensity: str | None = None,
+    enabled: bool | None = None,
+) -> ParseltongueResult:
     """
     تطبيق تقنية الإخفاء على النص.
-    يكتشف الكلمات المثيرة ويحوّلها فقط (ليس النص كاملاً).
+    يدعم أسلوبين: apply_parseltongue(text, config) أو apply_parseltongue(text, technique=t, intensity=i, enabled=True)
     """
+    # بناء config من الـ keyword args إذا لم يُمرَّر config صريحاً
+    if config is None:
+        config = ParseltongueConfig(
+            enabled=enabled if enabled is not None else True,
+            technique=technique or "leetspeak",   # type: ignore[arg-type]
+            intensity=intensity or "medium",       # type: ignore[arg-type]
+        )
+
     if not config.enabled:
         return ParseltongueResult(
             original_text=text,
