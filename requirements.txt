@@ -1,5 +1,12 @@
 streamlit>=1.35.0
 requests>=2.31.0
+requests_oauthlib
 numpy
 pypdf
-requests_oauthlib
+pillow
+arabic-reshaper
+python-bidi
+plotly
+scikit-learn
+librosa
+qdrant-client
