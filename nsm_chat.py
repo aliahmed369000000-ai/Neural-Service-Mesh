@@ -256,7 +256,7 @@ class NSMChat:
         return l2(z)
 
     # ── المحادثة ──────────────────────────────────────────────────
-    def chat(self, user_input: str) -> str:
+    def chat(self, user_input: str, system_prompt: str = None) -> str:
         if not user_input.strip():
             return "الرجاء كتابة سؤالك."
 
@@ -287,7 +287,9 @@ class NSMChat:
                     else {"role": "assistant", "content": a}
                     for i, (u, a) in enumerate(self.history[-4:])
                 ]
-                llm_result = _llm_instance.generate(t, history=history_for_llm)
+                llm_result = _llm_instance.generate(
+                    t, history=history_for_llm, system_prompt=system_prompt
+                )
                 answer = llm_result.text
                 self._last_source = f"llm:{llm_result.provider.value}"
                 self.history.append((t, answer))

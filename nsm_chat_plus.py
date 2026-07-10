@@ -53,20 +53,22 @@ class NSMChatPlus(NSMChat):
         print(bot.source_badge())   # "🧠 NSM Agent" أو "🤖 llama-3.1-8b-instant" ...
     """
 
-    def __init__(self, ckg=None):
+    def __init__(self, ckg=None, system_prompt: str = None):
         super().__init__()
-        self._ckg         = ckg
-        self.fallback     = LLMFallback(ckg=ckg)
-        self._last_source = "nsm_agent"   # قيمة افتراضية محايدة — لا يوجد قاموس بعد الآن
-        self._last_score  = 0.0
+        self._ckg           = ckg
+        self.fallback       = LLMFallback(ckg=ckg)
+        self._last_source   = "nsm_agent"
+        self._last_score    = 0.0
+        self._system_prompt = system_prompt  # NSM_SYSTEM_PROMPT يُمرَّر من streamlit_app.py
         logger.info(
             f"[NSMChatPlus] جاهز | fallback: {self.fallback.provider.value}"
             f" | نموذج: {self.fallback.model}"
+            f" | system_prompt: {'مخصص' if system_prompt else 'افتراضي'}"
         )
 
     # ── override chat ────────────────────────────────────────────────────
 
-    def chat(self, user_input: str) -> str:
+    def chat(self, user_input: str, system_prompt: str = None) -> str:
         if not user_input.strip():
             return "الرجاء كتابة سؤالك."
 
@@ -102,9 +104,12 @@ class NSMChatPlus(NSMChat):
                 logger.debug(f"memory context injection skipped: {_mem_err}")
 
         # ❹ LLM مباشرة — القاموس محذوف من مسار الردود
+        # الأولوية: system_prompt الممرَّر في الاستدعاء → self._system_prompt → الافتراضي
+        _sp = system_prompt or self._system_prompt
         result = self.fallback.generate(
             query=query,
             history=self.history[-4:],
+            system_prompt=_sp,
         )
         answer = result.text
         self._last_source = (
