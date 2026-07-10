@@ -2495,6 +2495,8 @@ def render_chat():
     # ── إرفاق ملف أو صورة (multimodal عبر OpenRouter) ─────────────────────
     if "chat_pending_files" not in st.session_state:
         st.session_state["chat_pending_files"] = []
+    if "chat_uploader_version" not in st.session_state:
+        st.session_state["chat_uploader_version"] = 0
 
     _or_key_chat = st.session_state.get("_or_api_key", "").strip()
     _or_model_chat = st.session_state.get("_or_model", "google/gemini-2.5-flash")
@@ -2507,6 +2509,8 @@ def render_chat():
         else:
             col_up, col_info = st.columns([3, 2])
             with col_up:
+                # مفتاح ديناميكي — يُعاد ضبط عنصر الرفع بعد كل إرسال/مسح
+                # حتى لا تُعاد إضافة نفس الملفات القديمة من الـ widget state
                 uploaded = st.file_uploader(
                     "اسحب ملفاً هنا أو انقر للاختيار",
                     type=["png", "jpg", "jpeg", "webp", "gif",
@@ -2514,7 +2518,7 @@ def render_chat():
                           "py", "js", "ts", "html", "yaml", "yml"],
                     accept_multiple_files=True,
                     label_visibility="collapsed",
-                    key="chat_file_uploader",
+                    key=f"chat_file_uploader_{st.session_state['chat_uploader_version']}",
                 )
                 if uploaded:
                     existing_names = {f["name"] for f in st.session_state["chat_pending_files"]}
@@ -2551,6 +2555,7 @@ def render_chat():
                 st.rerun()
             if st.button("🗑 مسح كل الملفات", key="chat_clear_all_files"):
                 st.session_state["chat_pending_files"].clear()
+                st.session_state["chat_uploader_version"] += 1
                 st.rerun()
 
     # عرض المحادثة
@@ -2711,10 +2716,12 @@ def render_chat():
 
     # معالجة الإدخال
     def _process(text: str):
-        if not text.strip(): return
-
         files = list(st.session_state["chat_pending_files"])
+        if not text.strip() and not files:
+            return
+
         st.session_state["chat_pending_files"] = []
+        st.session_state["chat_uploader_version"] += 1
 
         display_text = text.strip()
         if files:
@@ -2792,7 +2799,7 @@ def render_chat():
         st.session_state.nsm_count += 1
         st.rerun()
 
-    if send and user_input:
+    if send and (user_input or st.session_state["chat_pending_files"]):
         _process(user_input)
 
     if hasattr(st.session_state, "_chat_pending"):
