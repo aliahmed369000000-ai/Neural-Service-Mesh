@@ -12,5 +12,5 @@ librosa
 qdrant-client
 edge-tts>=6.1.0
 gTTS>=2.5.0
-moviepy==1.0.3
+moviepy>=2.0
 imageio-ffmpeg>=0.4.9
