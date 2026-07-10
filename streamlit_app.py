@@ -3968,7 +3968,7 @@ _KNOWLEDGE_MODULE_DIR = str(Path(__file__).parent / "knowledge")
 if _KNOWLEDGE_MODULE_DIR not in _sys.path:
     _sys.path.insert(0, _KNOWLEDGE_MODULE_DIR)
 from qa_engine import answer_question  # noqa: E402
-from episodic_memory import (  # noqa: E402
+from qa_episodic_memory import (  # noqa: E402
     store_episode, find_similar_episodes, get_memory_stats,
     consolidate_memory, get_semantic_rules,
 )
