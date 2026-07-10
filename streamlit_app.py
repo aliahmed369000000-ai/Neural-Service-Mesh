@@ -6098,7 +6098,7 @@ def main():
     # ── التبويبات ─────────────────────────────────────────────────────────
     tabs = st.tabs(["🏠 الرئيسية", "🔍 البحث المعرفي", "📖 القرآن الكريم",
                     "❓ الأسئلة والأجوبة", "💬 المحادثة", "🤖 وكلاء AI",
-                    "🎭 إبداع", "🎬 Higgsfield", "🎓 التدريب", "🧠 الذاكرة",
+                    "🎭 إبداع", "🌐 ترجمة", "🎬 Higgsfield", "🎓 التدريب", "🧠 الذاكرة",
                     "🏥 صحة النظام", "🔬 API متقدمة", "⚙️ النظام الداخلي",
                     "🔓 G0DM0D3", "⚡ ULTRAPLINIAN"])
 
@@ -6109,14 +6109,15 @@ def main():
     with tabs[4]: render_chat()
     with tabs[5]: render_agents_hub()
     with tabs[6]: render_fable()
-    with tabs[7]: render_higgsfield()
-    with tabs[8]: render_training()
-    with tabs[9]: render_memory()
-    with tabs[10]: render_health()
-    with tabs[11]: render_advanced_api()
-    with tabs[12]: render_system_core()
-    with tabs[13]: render_godmode()
-    with tabs[14]: render_ultraplinian()
+    with tabs[7]: render_translate()
+    with tabs[8]: render_higgsfield()
+    with tabs[9]: render_training()
+    with tabs[10]: render_memory()
+    with tabs[11]: render_health()
+    with tabs[12]: render_advanced_api()
+    with tabs[13]: render_system_core()
+    with tabs[14]: render_godmode()
+    with tabs[15]: render_ultraplinian()
 
     # ── تذييل الصفحة ─────────────────────────────────────────────────────
     st.markdown("---")
@@ -6597,6 +6598,98 @@ def render_fable():
                             {full_text}
                         </div>
                         """, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# تبويب 🌐 ترجمة فورية — يستخدم نفس سلسلة LLMFallback الموجودة (Anthropic →
+# Cloudflare → Gemini → OpenRouter → Groq...) فلا حاجة لمفتاح Google
+# Translate/DeepL منفصل — النماذج اللغوية نفسها مترجم دقيق بما يكفي.
+# ══════════════════════════════════════════════════════════════════════════
+
+_TRANSLATE_LANGS = {
+    "🌐 اكتشاف تلقائي": "auto",
+    "🇸🇦 العربية": "العربية",
+    "🇬🇧 الإنجليزية": "الإنجليزية",
+    "🇫🇷 الفرنسية": "الفرنسية",
+    "🇪🇸 الإسبانية": "الإسبانية",
+    "🇩🇪 الألمانية": "الألمانية",
+    "🇹🇷 التركية": "التركية",
+    "🇮🇷 الفارسية": "الفارسية",
+    "🇵🇰 الأردية": "الأردية",
+    "🇮🇩 الإندونيسية": "الإندونيسية",
+    "🇲🇾 الملايوية": "الملايوية",
+    "🇮🇳 الهندية": "الهندية",
+    "🇷🇺 الروسية": "الروسية",
+    "🇨🇳 الصينية": "الصينية",
+    "🇧🇩 البنغالية": "البنغالية",
+}
+
+
+def render_translate():
+    """تبويب الترجمة الفورية بين العربية ولغات أخرى شائعة لدى مستخدمي NSM،
+    عبر نفس سلسلة LLMFallback المستخدمة بباقي النظام (بدون مفتاح API إضافي)."""
+
+    st.markdown('<div class="section-header">🌐 ترجمة فورية</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<p style="color:#999">ترجمة نص باستخدام نفس نماذج NSM اللغوية '
+        '(Anthropic ← Cloudflare ← Gemini ← OpenRouter ← Groq) — بدون حاجة '
+        'لأي مفتاح Google Translate أو DeepL.</p>',
+        unsafe_allow_html=True,
+    )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        src_label = st.selectbox("من لغة:", list(_TRANSLATE_LANGS.keys()), index=0, key="tr_src_lang")
+    with c2:
+        tgt_label = st.selectbox("إلى لغة:", list(_TRANSLATE_LANGS.keys()), index=2, key="tr_tgt_lang")
+
+    source_text = st.text_area(
+        "النص المراد ترجمته:",
+        height=150,
+        placeholder="اكتب أو الصق النص هنا...",
+        key="tr_source_text",
+    )
+
+    if st.button("🌐 ترجم الآن", type="primary", key="tr_translate_btn") and source_text.strip():
+        src = _TRANSLATE_LANGS[src_label]
+        tgt = _TRANSLATE_LANGS[tgt_label]
+
+        if src == tgt and src != "auto":
+            st.warning("⚠️ لغة المصدر ولغة الهدف متطابقتان.")
+        else:
+            src_instruction = "اكتشف لغة النص تلقائياً ثم" if src == "auto" else f"ترجم من {src} إلى"
+            system_prompt = (
+                f"أنت مترجم محترف. {src_instruction} {tgt}. "
+                "أعد فقط النص المترجم دون أي شرح أو مقدمات أو علامات اقتباس إضافية، "
+                "مع الحفاظ على المعنى والأسلوب الأصلي بدقة."
+            )
+            with st.spinner("⏳ يترجم..."):
+                try:
+                    from ai.llm_fallback import LLMFallback
+                    _tr_llm = LLMFallback(max_tokens=1200, temperature=0.2)
+                    result = _tr_llm.generate(source_text.strip(), history=[], system_prompt=system_prompt)
+                    st.session_state.tr_result = result
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"⚠️ فشلت الترجمة: {e}")
+                    st.session_state.tr_result = None
+
+    result = st.session_state.get("tr_result")
+    if result is not None:
+        st.markdown("#### 📄 الترجمة")
+        st.markdown(f"""
+        <div class="root-item" style="text-align:right; direction:rtl; line-height:1.9">
+            {result.text}
+        </div>
+        """, unsafe_allow_html=True)
+        provider_label = getattr(result.provider, "value", str(result.provider))
+        st.caption(f"المزوّد: {provider_label}" + (f" · ⚠️ {result.error}" if getattr(result, "error", None) else ""))
+        st.download_button(
+            "⬇️ تحميل الترجمة (txt)",
+            data=result.text,
+            file_name="translation.txt",
+            mime="text/plain",
+            key="tr_download_btn",
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════
