@@ -6441,12 +6441,10 @@ def render_fable():
     # ══════════════════ ⚡ Shorts (فيديو قصير عمودي) ══════════════════
     with shorts_tab:
         st.markdown(
-            '<p style="color:#999">يحوّل نصاً أو موضوعاً إلى سيناريو فيديو '
-            'قصير عمودي (~دقيقة واحدة) بسرد صوتي مكثّف ووصف رسوم متحركة '
-            'توضيحية لكل لقطة — فكرة مستوحاة من ميزة NotebookLM: Shorts. '
-            '<strong>ملاحظة:</strong> هذا سيناريو نصي فقط؛ إنتاج الفيديو '
-            'الفعلي (الصوت المُصوَّت والرسوم المتحركة) يحتاج أداة خارجية '
-            'تتغذّى على هذا النص.</p>',
+            '<p style="color:#999">يحوّل نصاً أو موضوعاً إلى فيديو '
+            'قصير عمودي فعلي (~دقيقة واحدة) بسرد صوتي ورسوم متحركة نصية '
+            '(Kinetic Typography) — فكرة مستوحاة من ميزة NotebookLM: Shorts، '
+            'مع رندر mp4 حقيقي داخل المشروع (بدون أدوات خارجية).</p>',
             unsafe_allow_html=True,
         )
         source_text = st.text_area(
@@ -6460,7 +6458,10 @@ def render_fable():
         if st.button("⚡ أنشئ سيناريو Shorts", type="primary") and source_text.strip():
             with st.spinner("يُلخّص ويكتب لقطات سريعة..."):
                 short = engine.generate_short(source_text.strip(), target_seconds=target_sec)
+            st.session_state.shorts_script = short  # نحفظه بالجلسة لاستخدامه بزر الفيديو تحت
 
+        short = st.session_state.get("shorts_script")
+        if short is not None:
             st.markdown(f"### {short.title}")
             st.caption(
                 f"عدد اللقطات: {len(short.segments)} · "
@@ -6482,6 +6483,27 @@ def render_fable():
 
             with st.expander("📋 النص الكامل للسرد"):
                 st.text_area("النص الكامل:", value=short.full_narration, height=150, key="shorts_full_text")
+
+            st.divider()
+            st.markdown("#### 🎬 رندر الفيديو الفعلي (mp4)")
+            if st.button("🎬 أنشئ الفيديو الآن", type="primary", key="shorts_render_video_btn"):
+                try:
+                    with st.spinner("⏳ يولّد السرد الصوتي ثم يركّب الفيديو... قد يستغرق دقيقة"):
+                        mp4_bytes = engine.render_video(short)
+                    st.session_state.shorts_mp4 = mp4_bytes
+                    st.success("✅ تم إنتاج الفيديو")
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"⚠️ فشل رندر الفيديو: {e}")
+
+            mp4_bytes = st.session_state.get("shorts_mp4")
+            if mp4_bytes:
+                st.video(mp4_bytes)
+                st.download_button(
+                    "⬇️ تحميل الفيديو (mp4)",
+                    data=mp4_bytes,
+                    file_name=f"{short.title[:40] or 'short'}.mp4",
+                    mime="video/mp4",
+                )
 
 
 # ══════════════════════════════════════════════════════════════════════════
