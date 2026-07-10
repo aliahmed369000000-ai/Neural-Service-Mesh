@@ -35,6 +35,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from ai.tts_engine import TTSEngine
+
 logger = logging.getLogger("FableEngine")
 
 
@@ -258,6 +260,9 @@ class ExplainerSegment:
     narration:    str   # النص المسرود (لصوت الراوي)
     visual_notes: str    # وصف اللقطة/الصورة المقترحة لهذا المقطع
     est_seconds:  int = 30
+    audio_bytes:  Optional[bytes] = None   # يُملأ بعد render_audio()
+    audio_format: str = "mp3"
+    audio_provider: str = ""
 
 
 @dataclass
@@ -272,6 +277,10 @@ class ExplainerScript:
     @property
     def total_seconds(self) -> int:
         return sum(s.est_seconds for s in self.segments)
+
+    @property
+    def has_audio(self) -> bool:
+        return bool(self.segments) and all(s.audio_bytes for s in self.segments)
 
     @property
     def full_narration(self) -> str:
@@ -290,6 +299,59 @@ class FableEngine:
     def __init__(self, llm_fallback, db_path: str | Path = "memory/fable.db"):
         self.llm = llm_fallback
         self.memory = NarrativeMemory(db_path)
+        self.tts = TTSEngine()
+
+    # ── تحويل سيناريو الفيديو (Shorts/Explainer) لصوت سرد فعلي ──────────
+
+    def render_audio(self, script: "ExplainerScript", voice: str = "") -> "ExplainerScript":
+        """يملأ audio_bytes لكل مقطع بالسيناريو عبر TTSEngine (Gemini →
+        ElevenLabs → Edge TTS → gTTS، أول مزوّد ناجح). يُعدَّل الكائن
+        في مكانه ويُعاد أيضاً للراحة في الاستخدام المتسلسل."""
+        if not script.segments:
+            return script
+        for seg in script.segments:
+            result = self.tts.synthesize(seg.narration, voice=voice)
+            if result.ok:
+                seg.audio_bytes = result.audio_bytes
+                seg.audio_format = result.format
+                seg.audio_provider = result.provider.value
+            else:
+                logger.warning(
+                    "فشل توليد الصوت للمقطع %s: %s (تُجرِّب: %s)",
+                    seg.index, result.error, ", ".join(result.tried),
+                )
+        return script
+
+    # ── رندر الفيديو الفعلي (mp4) — يستدعي render_audio تلقائياً لو لزم ──
+
+    def render_video(self, script: "ExplainerScript", voice: str = "") -> bytes:
+        """يبني mp4 فعلي (نص متحرك + صوت سرد) من ExplainerScript. يستدعي
+        render_audio() تلقائياً إن لم يكن الصوت مولَّداً بعد. يرجع bytes
+        الفيديو النهائي (اكتبها لملف .mp4 مباشرة).
+
+        الاستيراد هنا داخلي (lazy) عمداً: لو moviepy/imageio-ffmpeg غير
+        مثبَّتة بعد، باقي NSM (الشات، الوكلاء، إلخ) يستمر يشتغل طبيعياً
+        بدون أي كسر — فقط توليد الفيديو نفسه يفشل برسالة واضحة."""
+        try:
+            from ai.video_engine import VideoEngine, VideoEngineError
+        except ImportError as exc:
+            raise RuntimeError(
+                "توليد الفيديو يحتاج حزمتي moviepy و imageio-ffmpeg. "
+                "أضِفهما لـ requirements.txt: moviepy==1.0.3, imageio-ffmpeg>=0.4.9"
+            ) from exc
+
+        if not script.has_audio:
+            self.render_audio(script, voice=voice)
+        if not script.has_audio:
+            raise VideoEngineError("تعذّر توليد الصوت لكل المقاطع — لا يمكن رندر الفيديو.")
+
+        try:
+            return VideoEngine().render(script)
+        except ImportError as exc:
+            raise RuntimeError(
+                "توليد الفيديو يحتاج حزمتي moviepy و imageio-ffmpeg. "
+                "أضِفهما لـ requirements.txt: moviepy==1.0.3, imageio-ffmpeg>=0.4.9"
+            ) from exc
 
     # ── بناء تعليمات النظام لكل جلسة ────────────────────────────────────
 
