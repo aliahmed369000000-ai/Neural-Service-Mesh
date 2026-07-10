@@ -1972,6 +1972,9 @@ def main():
         st.markdown("### 🔑 OpenRouter API")
         st.caption("مفتاح اختياري — يُفعّل النماذج التجارية في تبويبَي المحادثة و G0DM0D3")
 
+        if "_or_api_key" not in st.session_state:
+            st.session_state["_or_api_key"] = os.getenv("OPENROUTER_API_KEY", "")
+
         _or_key_stored = st.session_state.get("_or_api_key", "")
         _or_key_input = st.text_input(
             "OpenRouter API Key",
