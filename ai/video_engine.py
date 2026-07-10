@@ -2,13 +2,16 @@
 Video Engine — محرك رندر الفيديو الفعلي — NSM
 =================================================
 يركّب سيناريو ExplainerScript (من FableEngine.generate_short/generate_explainer)
-+ الصوت المولَّد عبر TTSEngine → فيديو mp4 عمودي فعلي (Kinetic Typography)،
-بدون أي اعتماد على ImageMagick (كل النص يُرسم عبر Pillow مباشرة).
++ الصوت المولَّد عبر TTSEngine → فيديو mp4 عمودي فعلي بأسلوب الترجمات
+المتحركة كلمة-بكلمة (Kinetic Captions بنمط CapCut/Submagic/Opus Clip) —
+كل عبارة قصيرة تظهر بحاجز (pill) ملوّن ونص عريض بحدّ أبيض وتأثير "نبضة"
+عند الظهور + زووم Ken-Burns مستمر عبر المشهد بالكامل، بدون أي اعتماد على
+ImageMagick (كل النص يُرسم عبر Pillow مباشرة).
 
 المتطلبات (requirements.txt):
-    moviepy==1.0.3
+    moviepy>=2.0
     imageio-ffmpeg>=0.4.9   # يحمل ثنائي ffmpeg تلقائياً، بدون حاجة لـ apt
-    pillow                  # موجود أصلاً بالمشروع
+    pillow                  # موجود أصلاً بالمشروع (يلزم Pillow>=8.0 لدعم stroke_width في draw.text)
     arabic-reshaper         # موجود أصلاً بالمشروع
     python-bidi             # موجود أصلاً بالمشروع
 
@@ -51,24 +54,31 @@ _GRADIENT_PAIRS = [
 ]
 
 # مسارات خطوط عربية شائعة في بيئات Linux (Replit / Streamlit Cloud / Debian)
-# ترتيب الأولوية مهم: خطوط تدعم العربية أولاً، وDejaVuSans (لا يدعم العربي)
-# آخر خيار مطلق فقط عشان لا يفشل الرسم بالكامل.
+# ترتيب الأولوية: خطوط عريضة (Bold) أولاً — أوضح وأقوى بصرياً لأسلوب
+# الترجمات المتحركة (Kinetic Captions) المستخدم بمنصات مثل CapCut/Submagic —
+# ثم الأوزان العادية، وDejaVuSans (لا يدعم العربي) آخر خيار مطلق فقط عشان
+# لا يفشل الرسم بالكامل.
 _SYSTEM_FONT_CANDIDATES = [
+    "/usr/share/fonts/truetype/noto/NotoKufiArabic-Bold.ttf",
+    "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Bold.ttf",
+    "/usr/share/fonts/opentype/noto/NotoKufiArabic-Bold.ttf",
+    "/usr/share/fonts/opentype/noto/NotoNaskhArabic-Bold.ttf",
     "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
     "/usr/share/fonts/truetype/noto/NotoNaskhArabicUI-Regular.ttf",
     "/usr/share/fonts/opentype/noto/NotoNaskhArabic-Regular.ttf",
     "/usr/share/fonts/truetype/kacst/KacstOne.ttf",
 ]
-_LAST_RESORT_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"  # لا يدعم العربي
+_LAST_RESORT_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"  # لا يدعم العربي
 
 # مصدر تنزيل احتياطي (GitHub raw، مُتحقَّق منه) إن لم يوجد الخط بالنظام —
-# يُخزَّن محلياً بعد أول تنزيل فلا يُعاد الطلب كل مرة
+# نفضّل Noto Kufi Arabic Bold (خط عرض هندسي عريض، مثالي للعناوين/الترجمات
+# المتحركة)، ويُخزَّن محلياً بعد أول تنزيل فلا يُعاد الطلب كل مرة.
 _FONT_FALLBACK_URL = (
     "https://raw.githubusercontent.com/notofonts/notofonts.github.io/main/"
-    "fonts/NotoNaskhArabic/hinted/ttf/NotoNaskhArabic-Regular.ttf"
+    "fonts/NotoKufiArabic/hinted/ttf/NotoKufiArabic-Bold.ttf"
 )
 _FONT_CACHE_DIR = Path(__file__).resolve().parent.parent / "assets" / "fonts"
-_FONT_CACHE_PATH = _FONT_CACHE_DIR / "NotoNaskhArabic-Regular.ttf"
+_FONT_CACHE_PATH = _FONT_CACHE_DIR / "NotoKufiArabic-Bold.ttf"
 
 
 class VideoEngineError(RuntimeError):
@@ -143,43 +153,92 @@ class VideoEngine:
                     pixels[x + 3, y] = (r, g, b)
         return img
 
-    # ── رسم نص عربي متوسّط الشاشة مع التفاف تلقائي ──────────────────
-    def _draw_caption(self, img: "Image.Image", text: str, font_size: int = 68) -> "Image.Image":
+    # ── تقسيم النص لعبارات قصيرة (كلمة-بكلمة/عبارة-بعبارة) ──────────
+    @staticmethod
+    def _split_into_chunks(text: str, max_words: int = 3) -> List[str]:
+        words = text.split()
+        if not words:
+            return [text] if text else [""]
+        return [
+            " ".join(words[i:i + max_words])
+            for i in range(0, len(words), max_words)
+        ]
+
+    # ── رسم عبارة نصية واحدة بأسلوب الترجمات المتحركة (Kinetic Caption):
+    #    حاجز (pill) ملوّن خلف نص عريض بحدّ أبيض، أعلى قابلية للقراءة
+    #    وأقرب لأسلوب CapCut/Submagic الاحترافي ──────────────────────
+    def _draw_caption(
+        self,
+        img: "Image.Image",
+        text: str,
+        font_size: int = 84,
+        accent_color: Optional[Tuple[int, int, int]] = None,
+    ) -> "Image.Image":
         from PIL import ImageDraw, ImageFont
 
-        draw = ImageDraw.Draw(img)
+        draw = ImageDraw.Draw(img, "RGBA")
         try:
             font = ImageFont.truetype(self._font_path, font_size) if self._font_path else ImageFont.load_default()
         except Exception:  # noqa: BLE001
             font = ImageFont.load_default()
 
-        shaped = _shape_arabic(text)
-        # التفاف تقريبي بعدد الأحرف؛ نضبط العرض الفعلي عبر textbbox
-        max_width_px = int(FRAME_W * 0.82)
-        wrapped_lines: List[str] = []
-        for raw_line in textwrap.wrap(shaped, width=26):
-            wrapped_lines.append(raw_line)
+        # ⚠️ مهم جداً — ترتيب العمليات هنا يمنع مشكلة النص المشوّه/المبعثر:
+        # يجب لفّ السطور بالترتيب المنطقي الأصلي (حسب الكلمات) *قبل* تطبيق
+        # التشكيل (reshape) وBiDi. تطبيق get_display (الذي يعكس النص لترتيب
+        # العرض البصري) ثم تمرير الناتج إلى textwrap.wrap لاحقاً يقسّم سطراً
+        # مُعاد ترتيبه بصرياً بالفعل حسب عدّ الأحرف، فتُقطَّع الكلمات في
+        # منتصف تسلسلها البصري وتظهر متكسّرة/معكوسة — بالضبط الخلل السابق.
+        stroke_w = max(4, font_size // 14)
+        logical_lines = textwrap.wrap(text, width=16) or [text]
+        wrapped_lines = [_shape_arabic(line) for line in logical_lines]
 
-        line_heights = []
+        line_heights: List[int] = []
+        line_widths: List[int] = []
         for line in wrapped_lines:
-            bbox = draw.textbbox((0, 0), line, font=font)
+            bbox = draw.textbbox((0, 0), line, font=font, stroke_width=stroke_w)
             line_heights.append(bbox[3] - bbox[1])
-        total_h = sum(line_heights) + (len(wrapped_lines) - 1) * 18
+            line_widths.append(bbox[2] - bbox[0])
+        total_h = sum(line_heights) + max(0, len(wrapped_lines) - 1) * 22
 
         y = (FRAME_H - total_h) // 2
-        for line, lh in zip(wrapped_lines, line_heights):
-            bbox = draw.textbbox((0, 0), line, font=font)
-            line_w = bbox[2] - bbox[0]
-            x = (FRAME_W - line_w) // 2
-            # ظل خفيف لتحسين القراءة فوق أي خلفية
-            draw.text((x + 3, y + 3), line, font=font, fill=(0, 0, 0, 140))
-            draw.text((x, y), line, font=font, fill=(255, 255, 255))
-            y += lh + 18
+
+        if accent_color is not None:
+            pad_x, pad_y = 44, 26
+            block_w = max(line_widths) + pad_x * 2
+            block_h = total_h + pad_y * 2
+            bx = (FRAME_W - block_w) // 2
+            by = y - pad_y
+            draw.rounded_rectangle(
+                [bx, by, bx + block_w, by + block_h],
+                radius=32, fill=(*accent_color, 235),
+            )
+            text_fill = (18, 14, 10)
+            stroke_fill = (255, 255, 255)
+        else:
+            text_fill = (255, 255, 255)
+            stroke_fill = (0, 0, 0)
+
+        for line, lh, lw in zip(wrapped_lines, line_heights, line_widths):
+            x = (FRAME_W - lw) // 2
+            draw.text(
+                (x, y), line, font=font,
+                fill=text_fill, stroke_width=stroke_w, stroke_fill=stroke_fill,
+            )
+            y += lh + 22
         return img
 
-    # ── بناء مقطع فيديو واحد (مشهد) بالصوت المرافق ──────────────────
+    # ── بناء مقطع فيديو واحد (مشهد) بالصوت المرافق — بأسلوب الترجمات
+    #    المتحركة كلمة/عبارة-بعبارة (Kinetic Captions) ─────────────────
+    _ACCENT_COLORS = [
+        (255, 199, 0),    # أصفر ذهبي
+        (255, 92, 92),    # أحمر مرجاني
+        (94, 211, 255),   # سماوي
+        (178, 130, 255),  # بنفسجي
+        (110, 231, 172),  # أخضر نعناعي
+    ]
+
     def _build_segment_clip(self, segment, index: int, tmp_dir: str):
-        from moviepy import AudioFileClip, ImageClip, vfx
+        from moviepy import AudioFileClip, ImageClip, concatenate_videoclips
         import numpy as np
 
         if not segment.audio_bytes:
@@ -194,19 +253,54 @@ class VideoEngine:
         audio_clip = AudioFileClip(audio_path)
         duration = max(1.2, audio_clip.duration)
 
-        bg = self._build_background(index)
-        bg = self._draw_caption(bg, segment.narration)
-        frame_array = np.array(bg)
+        bg_base = self._build_background(index)
 
-        # تأثير Ken Burns بسيط (زووم تدريجي خفيف) لإحساس حركي بدون رسوم AI
-        clip = (
-            ImageClip(frame_array)
-            .with_duration(duration)
-            .resized(lambda t: 1.0 + 0.045 * (t / duration))
-            .with_position("center")
-        )
-        clip = clip.with_audio(audio_clip.with_duration(duration))
-        return clip.with_effects([vfx.CrossFadeIn(0.25)])
+        # نقسّم سرد المشهد إلى عبارات قصيرة (2-3 كلمات) تظهر تباعاً —
+        # نفس منطق CapCut/Submagic لترجمات كلمة-بكلمة أكثر جاذبية من فقرة
+        # ثابتة كاملة طوال المشهد.
+        chunks = self._split_into_chunks(segment.narration, max_words=3)
+        total_chars = sum(len(c) for c in chunks) or 1
+        min_chunk_dur = 0.42
+        raw_durations = [max(min_chunk_dur, duration * (len(c) / total_chars)) for c in chunks]
+        scale = duration / sum(raw_durations)
+        chunk_durations = [d * scale for d in raw_durations]
+
+        sub_clips = []
+        elapsed = 0.0
+        for i, (chunk_text, chunk_dur) in enumerate(zip(chunks, chunk_durations)):
+            accent = self._ACCENT_COLORS[i % len(self._ACCENT_COLORS)]
+            frame_img = bg_base.copy()
+            frame_img = self._draw_caption(frame_img, chunk_text, accent_color=accent)
+            frame_array = np.array(frame_img)
+
+            seg_progress_start = elapsed / duration
+            seg_progress_end = min(1.0, (elapsed + chunk_dur) / duration)
+            pop_dur = min(0.14, chunk_dur * 0.4)
+
+            def _combined_scale(t, s=seg_progress_start, e=seg_progress_end, cd=chunk_dur, pd=pop_dur):
+                # زووم Ken-Burns مستمر ومتصاعد عبر كامل المشهد (وليس مُعاد
+                # الانطلاق مع كل عبارة) — إحساس حركي سينمائي متسق.
+                local = s + (t / cd) * (e - s) if cd > 0 else s
+                base_zoom = 1.0 + 0.14 * local
+                # "نبضة" ظهور خفيفة (scale-in) في أول لحظات كل عبارة، بنفس
+                # روح أنيميشن "Pop Up" بمنصات الترجمات الاحترافية.
+                pop = 0.88 + 0.12 * min(1.0, t / pd) if pd > 0 else 1.0
+                return base_zoom * pop
+
+            chunk_clip = (
+                ImageClip(frame_array)
+                .with_duration(chunk_dur)
+                .resized(_combined_scale)
+                .with_position("center")
+            )
+            sub_clips.append(chunk_clip)
+            elapsed += chunk_dur
+
+        captioned = concatenate_videoclips(sub_clips, method="compose")
+        captioned = captioned.with_audio(audio_clip.with_duration(duration))
+
+        from moviepy import vfx
+        return captioned.with_effects([vfx.CrossFadeIn(0.2)])
 
     # ── الواجهة العامة: رندر الفيديو الكامل ──────────────────────────
     def render(self, script) -> bytes:
