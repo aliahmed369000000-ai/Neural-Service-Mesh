@@ -5089,6 +5089,257 @@ def render_qa():
         st.warning("لم يتم العثور على آيات داعمة مباشرة لهذا السؤال.")
 
 
+def render_higgsfield():
+    """
+    تبويب 🎬 Higgsfield Explainer — وثائقي AI حتى 10 دقائق.
+    Pipeline: Gemini Omni Flash (بحث) → Nova Fable 5 (سرد) → Higgsfield API (فيديو).
+    """
+    # ── استيراد المحرك ────────────────────────────────────────────────
+    _hf_ok = False
+    try:
+        from ai.higgsfield_engine import (
+            HiggsfieldEngine, build_gemini_llm, build_fable_llm
+        )
+        _hf_ok = True
+    except Exception as _hf_err:
+        st.error(f"⚠️ تعذّر تحميل محرك Higgsfield: {_hf_err}")
+        return
+
+    # ── رأس الصفحة ────────────────────────────────────────────────────
+    st.markdown("""
+    <div style="direction:rtl; text-align:right">
+        <h2 style="margin-bottom:0.25rem">🎬 Higgsfield Explainer</h2>
+        <p style="color:#aaa; font-size:0.95rem; margin-top:0">
+            أنشئ فيديو وثائقياً من أي موضوع — حتى 10 دقائق —
+            بالاستعانة بـ <strong>Gemini Omni Flash</strong> للبحث
+            و<strong>Nova Fable 5</strong> للسرد
+            و<strong>Higgsfield API</strong> لتوليد الفيديو.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("---")
+
+    # ── لوحة الإعداد ──────────────────────────────────────────────────
+    col_l, col_r = st.columns([2, 1])
+    with col_l:
+        topic = st.text_input(
+            "🎯 موضوع الوثائقي:",
+            placeholder="مثال: نشوء الحضارة الإسلامية في الأندلس، كيف تعمل الثقوب السوداء...",
+            key="hf_topic",
+        )
+    with col_r:
+        style = st.selectbox(
+            "🎨 نوع الوثائقي:",
+            ["وثائقي عام", "تاريخي", "علمي", "ثقافي", "طبيعي", "تقني"],
+            key="hf_style",
+        )
+
+    col_dur, col_vid = st.columns(2)
+    with col_dur:
+        minutes = st.slider(
+            "⏱️ المدة المستهدفة (دقائق):",
+            min_value=1, max_value=10, value=5,
+            key="hf_minutes",
+        )
+    with col_vid:
+        hf_key_input = st.text_input(
+            "🔑 Higgsfield API Key (اختياري):",
+            type="password",
+            placeholder="اتركه فارغاً لتوليد السيناريو فقط",
+            key="hf_api_key_input",
+        )
+        hf_key = hf_key_input.strip() or os.getenv("HIGGSFIELD_API_KEY", "").strip()
+
+    # ── معلومات Pipeline ───────────────────────────────────────────────
+    with st.expander("ℹ️ كيف يعمل الـ Pipeline؟", expanded=False):
+        st.markdown("""
+        <div style="direction:rtl; text-align:right; font-size:0.9rem">
+        <ol>
+            <li><strong>🔍 Gemini Omni Flash</strong> — يبحث في المعلومات
+                ويبني هيكل مشاهد الوثائقي (outline + حقائق موثّقة)</li>
+            <li><strong>✍️ Nova Fable 5</strong> — يصيغ نص السرد الصوتي
+                بالعربية الفصحى + video prompt سينمائي بالإنجليزية لكل مشهد</li>
+            <li><strong>🎬 Higgsfield API</strong> — يُولّد مقطع فيديو قصير
+                (3-8 ثوانٍ) لكل مشهد. <em>يتطلب HIGGSFIELD_API_KEY</em></li>
+        </ol>
+        <p style="color:#888">بدون مفتاح Higgsfield تحصل على السيناريو الكامل
+        جاهزاً للنسخ إلى أي أداة توليد فيديو خارجية.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── زر الإنشاء ────────────────────────────────────────────────────
+    generate_btn = st.button(
+        "🎬 أنشئ الوثائقي",
+        type="primary",
+        use_container_width=True,
+        disabled=not bool(topic and topic.strip()),
+        key="hf_generate_btn",
+    )
+
+    if not generate_btn:
+        # عرض نتيجة سابقة إن وُجدت
+        if "hf_result" in st.session_state:
+            _render_hf_result(st.session_state["hf_result"])
+        return
+
+    if not topic.strip():
+        st.warning("أدخل موضوع الوثائقي أولاً.")
+        return
+
+    # ── تنفيذ Pipeline ────────────────────────────────────────────────
+    progress_bar  = st.progress(0, text="⟳ يبدأ الـ Pipeline...")
+    status_text   = st.empty()
+
+    def _prog(msg: str, pct: float):
+        progress_bar.progress(int(min(pct, 100)), text=msg)
+        status_text.markdown(
+            f'<p style="color:#aaa; direction:rtl">{msg}</p>',
+            unsafe_allow_html=True,
+        )
+
+    try:
+        engine = HiggsfieldEngine(
+            gemini_llm      = build_gemini_llm(),
+            fable_llm       = build_fable_llm(),
+            higgsfield_key  = hf_key,
+        )
+        result = engine.create_documentary(
+            topic           = topic.strip(),
+            target_minutes  = minutes,
+            style           = style,
+            generate_video  = bool(hf_key),
+            progress_cb     = _prog,
+        )
+        st.session_state["hf_result"] = result
+        progress_bar.progress(100, text="✅ اكتمل الوثائقي!")
+        status_text.empty()
+
+    except Exception as exc:
+        progress_bar.empty()
+        status_text.empty()
+        st.error(f"❌ فشل إنشاء الوثائقي: {exc}")
+        return
+
+    _render_hf_result(result)
+
+
+def _render_hf_result(result):
+    """يعرض نتائج Higgsfield Explainer."""
+    import os  # مضمون لكن نُعيد الاستيراد احترازياً
+
+    script  = result.script
+    scenes  = script.scenes
+    has_vid = result.api_used
+
+    # ── ملخص ──────────────────────────────────────────────────────────
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("📽️ عدد المشاهد", len(scenes))
+    total_min = script.total_seconds // 60
+    total_sec = script.total_seconds % 60
+    c2.metric("⏱️ المدة الإجمالية", f"~{total_min}د {total_sec}ث")
+    c3.metric("🔍 مزوّد البحث",
+              script.research_provider or "—",
+              delta=None)
+    c4.metric("✍️ مزوّد السرد",
+              script.narrative_provider or "—",
+              delta=None)
+
+    if has_vid:
+        done  = sum(1 for s in scenes if s.video_status == "completed")
+        fails = sum(1 for s in scenes if s.video_status in ("failed", "timeout"))
+        st.caption(
+            f"🎬 مقاطع الفيديو: {done} مكتملة · {fails} فاشلة "
+            f"· {len(scenes)-done-fails} معلّقة"
+        )
+    else:
+        st.info(
+            "💡 لتوليد الفيديو الفعلي أضف **HIGGSFIELD_API_KEY** "
+            "في الأسرار أو أدخله في الحقل أعلاه. "
+            "السيناريو أدناه جاهز للنسخ إلى Higgsfield.ai يدوياً.",
+            icon="ℹ️",
+        )
+
+    st.markdown("---")
+
+    # ── بطاقات المشاهد ────────────────────────────────────────────────
+    st.markdown(
+        f'<h3 style="direction:rtl; text-align:right">📜 مشاهد الوثائقي — {script.title}</h3>',
+        unsafe_allow_html=True,
+    )
+
+    for scene in scenes:
+        # لون البادج بحسب حالة الفيديو
+        vid_badge = {
+            "completed":  '<span style="background:#22c55e;color:#fff;border-radius:4px;padding:2px 8px;font-size:0.75rem">✅ فيديو جاهز</span>',
+            "processing": '<span style="background:#f59e0b;color:#fff;border-radius:4px;padding:2px 8px;font-size:0.75rem">⏳ يُعالَج</span>',
+            "failed":     '<span style="background:#ef4444;color:#fff;border-radius:4px;padding:2px 8px;font-size:0.75rem">❌ فشل</span>',
+            "timeout":    '<span style="background:#ef4444;color:#fff;border-radius:4px;padding:2px 8px;font-size:0.75rem">⏰ انتهت المهلة</span>',
+            "no_api":     '<span style="background:#6b7280;color:#fff;border-radius:4px;padding:2px 8px;font-size:0.75rem">🔑 بدون API</span>',
+            "skipped":    '<span style="background:#6b7280;color:#fff;border-radius:4px;padding:2px 8px;font-size:0.75rem">⏭️ متخطّى</span>',
+            "pending":    '<span style="background:#6b7280;color:#fff;border-radius:4px;padding:2px 8px;font-size:0.75rem">⏳ معلّق</span>',
+        }.get(scene.video_status, "")
+
+        with st.expander(
+            f"🎬 المشهد {scene.index} — {scene.title}  (~{scene.est_seconds}ث)",
+            expanded=(scene.index == 1),
+        ):
+            # عرض الفيديو إن كان متاحاً
+            if scene.video_url:
+                st.video(scene.video_url)
+            elif scene.video_error:
+                st.caption(f"⚠️ {scene.video_error}")
+
+            st.markdown(
+                f"""
+                <div style="direction:rtl; text-align:right; line-height:1.8">
+                {vid_badge}
+                <p style="margin-top:0.75rem">
+                    <strong>🔊 السرد الصوتي:</strong><br>{scene.narration}
+                </p>
+                <p style="color:#aaa; font-size:0.9rem">
+                    <strong>🎥 التوجيه المرئي:</strong> {scene.visual_notes or "—"}
+                </p>
+                <details>
+                    <summary style="color:#888; cursor:pointer; font-size:0.85rem">
+                        🎬 Higgsfield Video Prompt (إنجليزي)
+                    </summary>
+                    <pre style="background:#1e1e1e; padding:0.5rem; border-radius:6px;
+                                font-size:0.8rem; color:#d4d4d4; white-space:pre-wrap">{scene.video_prompt}</pre>
+                </details>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    # ── تصدير السيناريو الكامل ────────────────────────────────────────
+    st.markdown("---")
+    col_exp, col_dl = st.columns(2)
+
+    with col_exp:
+        with st.expander("📋 النص الكامل للسرد (للتعليق الصوتي)"):
+            st.text_area(
+                "نص السرد:",
+                value=script.full_narration,
+                height=300,
+                key="hf_full_narration",
+            )
+
+    with col_dl:
+        with st.expander("🎬 Prompts لـ Higgsfield (للنسخ اليدوي)"):
+            prompts_text = "\n\n".join(
+                f"=== المشهد {s.index}: {s.title} ===\n{s.video_prompt}"
+                for s in scenes
+            )
+            st.text_area(
+                "Video Prompts:",
+                value=prompts_text,
+                height=300,
+                key="hf_video_prompts",
+            )
+
+
 def render_training():
     """تبويب التدريب."""
     st.markdown('<div class="section-header">🎓 حالة التدريب</div>', unsafe_allow_html=True)
@@ -5847,9 +6098,9 @@ def main():
     # ── التبويبات ─────────────────────────────────────────────────────────
     tabs = st.tabs(["🏠 الرئيسية", "🔍 البحث المعرفي", "📖 القرآن الكريم",
                     "❓ الأسئلة والأجوبة", "💬 المحادثة", "🤖 وكلاء AI",
-                    "🎭 إبداع", "🎓 التدريب", "🧠 الذاكرة", "🏥 صحة النظام",
-                    "🔬 API متقدمة", "⚙️ النظام الداخلي", "🔓 G0DM0D3",
-                    "⚡ ULTRAPLINIAN"])
+                    "🎭 إبداع", "🎬 Higgsfield", "🎓 التدريب", "🧠 الذاكرة",
+                    "🏥 صحة النظام", "🔬 API متقدمة", "⚙️ النظام الداخلي",
+                    "🔓 G0DM0D3", "⚡ ULTRAPLINIAN"])
 
     with tabs[0]: render_home()
     with tabs[1]: render_search()
@@ -5858,13 +6109,14 @@ def main():
     with tabs[4]: render_chat()
     with tabs[5]: render_agents_hub()
     with tabs[6]: render_fable()
-    with tabs[7]: render_training()
-    with tabs[8]: render_memory()
-    with tabs[9]: render_health()
-    with tabs[10]: render_advanced_api()
-    with tabs[11]: render_system_core()
-    with tabs[12]: render_godmode()
-    with tabs[13]: render_ultraplinian()
+    with tabs[7]: render_higgsfield()
+    with tabs[8]: render_training()
+    with tabs[9]: render_memory()
+    with tabs[10]: render_health()
+    with tabs[11]: render_advanced_api()
+    with tabs[12]: render_system_core()
+    with tabs[13]: render_godmode()
+    with tabs[14]: render_ultraplinian()
 
     # ── تذييل الصفحة ─────────────────────────────────────────────────────
     st.markdown("---")
