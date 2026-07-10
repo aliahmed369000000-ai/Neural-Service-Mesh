@@ -208,7 +208,7 @@ class NSMChat:
     - ذاكرة الجلسة
     """
 
-    def __init__(self):
+    def __init__(self, system_prompt: str = None):
         # تحميل Embedding المُدرَّبة
         if _EMBED_PATH.exists():
             data = np.load(_EMBED_PATH)
