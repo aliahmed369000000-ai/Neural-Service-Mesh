@@ -6486,10 +6486,29 @@ def render_fable():
 
             st.divider()
             st.markdown("#### 🎬 رندر الفيديو الفعلي (mp4)")
+
+            _VOICE_OPTIONS = {
+                "🎙️ افتراضي (تلقائي حسب المزوّد المتاح)": "",
+                "👨 حامد — سعودي (Edge, مجاني)": "ar-SA-HamedNeural",
+                "👩 زارية — سعودية (Edge, مجاني)": "ar-SA-ZariyahNeural",
+                "👨 شاكر — مصري (Edge, مجاني)": "ar-EG-ShakirNeural",
+                "👩 سلمى — مصرية (Edge, مجاني)": "ar-EG-SalmaNeural",
+                "👨 حمدان — إماراتي (Edge, مجاني)": "ar-AE-HamdanNeural",
+                "👩 فاطمة — إماراتية (Edge, مجاني)": "ar-AE-FatimaNeural",
+                "✨ Kore — Gemini TTS (يتطلب GOOGLE_API_KEY)": "Kore",
+            }
+            selected_voice_label = st.selectbox(
+                "🗣️ اختر الصوت",
+                options=list(_VOICE_OPTIONS.keys()),
+                key="shorts_voice_select",
+                help="الأصوات المجانية (Edge) لا تحتاج أي مفتاح API. صوت Gemini يحتاج GOOGLE_API_KEY في البيئة.",
+            )
+            selected_voice = _VOICE_OPTIONS[selected_voice_label]
+
             if st.button("🎬 أنشئ الفيديو الآن", type="primary", key="shorts_render_video_btn"):
                 try:
                     with st.spinner("⏳ يولّد السرد الصوتي ثم يركّب الفيديو... قد يستغرق دقيقة"):
-                        mp4_bytes = engine.render_video(short)
+                        mp4_bytes = engine.render_video(short, voice=selected_voice)
                     st.session_state.shorts_mp4 = mp4_bytes
                     st.success("✅ تم إنتاج الفيديو")
                 except Exception as e:  # noqa: BLE001
