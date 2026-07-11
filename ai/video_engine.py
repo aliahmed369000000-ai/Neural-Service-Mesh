@@ -97,6 +97,16 @@ def _resolve_arabic_font() -> Optional[str]:
     if _FONT_CACHE_PATH.is_file():
         return str(_FONT_CACHE_PATH)
 
+    # أي خط عربي مُضمَّن فعلياً داخل المشروع (assets/fonts) — يغطي حالة
+    # وجود خط مرفق باسم مختلف عن _FONT_CACHE_PATH (مثلاً تم رفع
+    # NotoNaskhArabic-Regular.ttf يدوياً بدل NotoKufiArabic-Bold.ttf).
+    # هذا هو السبب الفعلي لظهور مربعات (☐☐☐) بدل الحروف العربية بالفيديو:
+    # كان الكود لا يتحقق إلا من اسم ملف واحد محدد فيفشل الإيجاد رغم وجود
+    # خط عربي صالح بالمجلد فعلاً، فينتهي بخط DejaVuSans غير الداعم للعربية.
+    if _FONT_CACHE_DIR.is_dir():
+        for candidate in sorted(_FONT_CACHE_DIR.glob("*.ttf")):
+            return str(candidate)
+
     try:
         import urllib.request
 
