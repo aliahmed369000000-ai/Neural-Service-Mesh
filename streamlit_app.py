@@ -3041,7 +3041,7 @@ Supports viewing text, images, and directory listings.
 Supported path types:
 - Directories: Lists files and directories up to 2 levels deep, ignoring hidden items and node_modules
 - Image files (.jpg, .jpeg, .png, .gif, .webp): Displays the image visually
-- Text files: Displays numbered lines (prefix `    N	` is display-only — do not include it in str_replace's `old_str`). You can optionally specify a view_range to see specific lines.
+- Text files: Displays numbered lines (prefix `    N    ` is display-only — do not include it in str_replace's `old_str`). You can optionally specify a view_range to see specific lines.
 
 Note: Files with non-UTF-8 encoding will display hex escapes (e.g. \\x84) for invalid bytes
 
@@ -5338,6 +5338,113 @@ def _render_hf_result(result):
                 height=300,
                 key="hf_video_prompts",
             )
+
+    # ── حفظ السيناريو على GitHub ──────────────────────────────────────
+    st.markdown("---")
+    st.markdown(
+        '<div style="direction:rtl; text-align:right">'
+        '<h4 style="margin-bottom:0.3rem">🚀 حفظ الوثائقي على GitHub</h4>'
+        '<p style="color:#aaa; font-size:0.85rem; margin-top:0">'
+        'يحفظ السيناريو الكامل (السرد + Prompts الفيديو) كملف Markdown في مستودعك.'
+        '</p></div>',
+        unsafe_allow_html=True,
+    )
+
+    _gh_token = os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN", "").strip()
+    if not _gh_token:
+        st.warning("🔑 أضف **GITHUB_PERSONAL_ACCESS_TOKEN** في Secrets لتفعيل هذه الميزة.")
+    else:
+        col_save1, col_save2 = st.columns([3, 1])
+        with col_save1:
+            save_commit_msg = st.text_input(
+                "رسالة الحفظ (Commit message):",
+                value=f"🎬 وثائقي: {script.title[:60]}",
+                key="hf_gh_commit_msg",
+            )
+        with col_save2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            save_btn = st.button(
+                "💾 حفظ على GitHub",
+                key="hf_gh_save_btn",
+                use_container_width=True,
+                type="primary",
+            )
+
+        if save_btn:
+            import subprocess as _sp
+            import re as _re
+
+            # بناء محتوى ملف Markdown للسيناريو
+            safe_title = _re.sub(r"[^\w\u0600-\u06FF\s-]", "", script.title)[:60].strip().replace(" ", "_")
+            from datetime import datetime as _dt
+            timestamp   = _dt.now().strftime("%Y%m%d_%H%M")
+            file_name   = f"documentaries/{safe_title or 'documentary'}_{timestamp}.md"
+            file_path   = BASE / file_name
+
+            md_lines = [
+                f"# 🎬 {script.title}",
+                f"\n> تاريخ الإنشاء: {_dt.now().strftime('%Y-%m-%d %H:%M')} | "
+                f"مزوّد البحث: {script.research_provider or '—'} | "
+                f"مزوّد السرد: {script.narrative_provider or '—'}",
+                f"\n---\n",
+            ]
+            for scene in scenes:
+                md_lines += [
+                    f"## المشهد {scene.index}: {scene.title}",
+                    f"**المدة التقديرية:** {scene.est_seconds} ثانية",
+                    f"\n### 🔊 السرد الصوتي\n{scene.narration}",
+                ]
+                if scene.visual_notes:
+                    md_lines.append(f"\n**🎥 التوجيه المرئي:** {scene.visual_notes}")
+                md_lines.append(f"\n### 🎬 Video Prompt\n```\n{scene.video_prompt}\n```")
+                if scene.video_url:
+                    md_lines.append(f"\n**🎥 رابط الفيديو:** {scene.video_url}")
+                md_lines.append("\n---\n")
+
+            md_content = "\n".join(md_lines)
+
+            with st.spinner("⟳ جارٍ الحفظ والرفع إلى GitHub..."):
+                try:
+                    # إنشاء المجلد وكتابة الملف
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    file_path.write_text(md_content, encoding="utf-8")
+
+                    # git add + commit + push
+                    _sp.run(["git", "add", str(file_path)], cwd=str(BASE), timeout=10)
+                    r_commit = _sp.run(
+                        ["git", "-c", "user.email=nsm@replit.com",
+                         "-c", "user.name=NSM Agent",
+                         "commit", "-m", save_commit_msg.strip() or f"🎬 {script.title}"],
+                        cwd=str(BASE), capture_output=True, text=True, timeout=15,
+                        env={**os.environ,
+                             "GIT_AUTHOR_NAME":      "NSM Agent",
+                             "GIT_AUTHOR_EMAIL":     "nsm@replit.com",
+                             "GIT_COMMITTER_NAME":   "NSM Agent",
+                             "GIT_COMMITTER_EMAIL":  "nsm@replit.com"},
+                    )
+                    nothing = ("nothing to commit" in (r_commit.stdout + r_commit.stderr))
+                    if r_commit.returncode != 0 and not nothing:
+                        st.error(f"❌ فشل الـ Commit:\n{r_commit.stderr[:300] or r_commit.stdout[:300]}")
+                    else:
+                        _remote = (
+                            f"https://aliahmed369000000-ai:{_gh_token}"
+                            "@github.com/aliahmed369000000-ai/Neural-Service-Mesh.git"
+                        )
+                        r_push = _sp.run(
+                            ["git", "push", _remote, "main"],
+                            cwd=str(BASE), capture_output=True, text=True, timeout=30
+                        )
+                        if r_push.returncode == 0 or nothing:
+                            st.success(
+                                f"✅ تم الحفظ والرفع إلى GitHub بنجاح!\n\n"
+                                f"📁 الملف: `{file_name}`"
+                            )
+                        else:
+                            st.error(
+                                f"❌ فشل الـ Push:\n{r_push.stderr[:300] or r_push.stdout[:300]}"
+                            )
+                except Exception as _e:
+                    st.error(f"❌ خطأ غير متوقع: {_e}")
 
 
 def render_training():
