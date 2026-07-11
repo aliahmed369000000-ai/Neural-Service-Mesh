@@ -8,6 +8,16 @@ Video Engine — محرك رندر الفيديو الفعلي — NSM
 عند الظهور + زووم Ken-Burns مستمر عبر المشهد بالكامل، بدون أي اعتماد على
 ImageMagick (كل النص يُرسم عبر Pillow مباشرة).
 
+🎬 خلفيات سينمائية احترافية (اختياري — VideoEngine(use_cinematic_backgrounds=True)):
+    بدل الخلفية المتدرّجة الافتراضية، يمكن توليد خلفية فيديو حقيقية لكل
+    مشهد عبر Higgsfield API (نفس مزوّد ai/higgsfield_engine.py، بجودة
+    "National Geographic/BBC Earth") ثم قصّها من 16:9 لتغطية الإطار
+    العمودي 9:16، مع تركيب الترجمات المتحركة فوقها كطبقة شفافة منفصلة.
+    مُعطَّلة افتراضياً (opt-in) لأن Higgsfield مزوّد مدفوع بعكس بقية
+    مسار NSM المجاني — تُفعَّل فقط بطلب صريح من المستخدم بالواجهة، وتتراجع
+    تلقائياً وبصمت للخلفية المتدرّجة المجانية عند غياب HIGGSFIELD_API_KEY
+    أو فشل التوليد لأي مشهد (لا يوقف الفيديو بالكامل أبداً).
+
 المتطلبات (requirements.txt):
     moviepy>=2.0
     imageio-ffmpeg>=0.4.9   # يحمل ثنائي ffmpeg تلقائياً، بدون حاجة لـ apt
@@ -24,7 +34,8 @@ ImageMagick (كل النص يُرسم عبر Pillow مباشرة).
     engine = FableEngine(llm_fallback=my_llm_fallback)
     script = engine.generate_short(source_text, target_seconds=60)
     engine.render_audio(script)          # يملأ الصوت الفعلي لكل مشهد
-    mp4_bytes = engine.render_video(script)   # فيديو mp4 فعلي جاهز
+    mp4_bytes = engine.render_video(script)   # فيديو mp4 فعلي جاهز (خلفية متدرّجة)
+    mp4_bytes = engine.render_video(script, use_cinematic_backgrounds=True)  # خلفيات Higgsfield
     with open("short.mp4", "wb") as f:
         f.write(mp4_bytes)
 """
@@ -35,10 +46,19 @@ import logging
 import os
 import tempfile
 import textwrap
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 logger = logging.getLogger("VideoEngine")
+
+# مهلة زمنية قصوى (ثوانٍ) لكل مشهد عند توليد خلفية سينمائية — أقصر من
+# مهلة الوثائقي الطويل (_HF_MAX_WAIT=300 في higgsfield_engine) عمداً،
+# لأن Shorts فيديو قصير ولا يجب أن يُعلَّق المستخدم دقائق طويلة انتظاراً
+# لكل مشهد؛ عند تجاوز المهلة نتراجع فوراً للخلفية المتدرّجة لهذا المشهد
+# فقط دون فشل الفيديو بالكامل.
+_HF_SHORT_MAX_WAIT = 90
 
 # أبعاد فيديو رأسي قياسي (9:16) — نفس نسبة NotebookLM Shorts
 FRAME_W, FRAME_H = 1080, 1920
@@ -83,6 +103,54 @@ _FONT_CACHE_PATH = _FONT_CACHE_DIR / "NotoKufiArabic-Bold.ttf"
 
 class VideoEngineError(RuntimeError):
     pass
+
+
+# ── تكامل اختياري مع Higgsfield لخلفيات سينمائية حقيقية ──────────────────
+
+def _build_cinematic_prompt(narration: str, visual_notes: str) -> str:
+    """يبني video prompt سينمائياً احترافياً (بالإنجليزية) من سرد/وصف
+    المشهد العربي، بإعادة استخدام نفس منطق higgsfield_engine (بدل تكرار
+    الأسلوب) حتى تتوافق جودة الخلفية مع بقية NSM."""
+    from ai.higgsfield_engine import _build_fallback_prompt
+
+    return _build_fallback_prompt(narration, visual_notes)
+
+
+def _fetch_cinematic_clip(narration: str, visual_notes: str, tmp_dir: str, seg_index: int) -> Optional[str]:
+    """يطلب مقطع فيديو سينمائي حقيقي من Higgsfield لمشهد واحد، وينزّله
+    محلياً. يُرجِع مسار الملف عند النجاح، أو None عند أي فشل/غياب مفتاح
+    (تراجع صامت — لا يرفع استثناء أبداً حتى لا يُسقط الفيديو بالكامل)."""
+    api_key = os.getenv("HIGGSFIELD_API_KEY", "").strip()
+    if not api_key:
+        return None
+
+    try:
+        from ai.higgsfield_engine import HiggsfieldClient
+
+        client = HiggsfieldClient(api_key)
+        prompt = _build_cinematic_prompt(narration, visual_notes)
+        job_id = client.submit_job(prompt)
+        result = client.poll_job(job_id, max_wait=_HF_SHORT_MAX_WAIT)
+
+        if result.video_status != "completed" or not result.video_url:
+            logger.info(
+                "خلفية Higgsfield للمشهد %d غير جاهزة (%s) — استخدام الخلفية "
+                "المتدرّجة كبديل لهذا المشهد فقط.", seg_index, result.video_status,
+            )
+            return None
+
+        clip_path = os.path.join(tmp_dir, f"hf_bg_{seg_index}.mp4")
+        req = urllib.request.Request(result.video_url, headers={"User-Agent": "NSM-VideoEngine/1.0"})
+        with urllib.request.urlopen(req, timeout=60) as resp, open(clip_path, "wb") as f:
+            f.write(resp.read())
+        return clip_path
+
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "تعذّر جلب خلفية Higgsfield للمشهد %d (%s) — استخدام الخلفية "
+            "المتدرّجة كبديل لهذا المشهد فقط.", seg_index, exc,
+        )
+        return None
 
 
 def _resolve_arabic_font() -> Optional[str]:
@@ -138,8 +206,11 @@ def _shape_arabic(text: str) -> str:
 class VideoEngine:
     """يحوّل ExplainerScript (مع صوت مُولَّد مسبقاً) إلى فيديو mp4 فعلي."""
 
-    def __init__(self) -> None:
+    def __init__(self, use_cinematic_backgrounds: bool = False) -> None:
         self._font_path = _resolve_arabic_font()
+        # اختياري (opt-in) — راجع شرح الميزة في رأس الملف. لا يُفعَّل أبداً
+        # ضمنياً حتى لا يستهلك رصيد Higgsfield المدفوع دون طلب صريح.
+        self._use_cinematic_backgrounds = use_cinematic_backgrounds
 
     # ── بناء صورة خلفية متدرّجة للمشهد رقم N ─────────────────────────
     def _build_background(self, seg_index: int) -> "Image.Image":
@@ -247,6 +318,32 @@ class VideoEngine:
         (110, 231, 172),  # أخضر نعناعي
     ]
 
+    # ── تحضير مقطع خلفية سينمائي (Higgsfield، 16:9) ليغطي الإطار العمودي
+    #    9:16 بالكامل (تكبير حسب الارتفاع ثم قصّ العرض الزائد من المنتصف
+    #    — أسلوب "cover" المعتاد بالتصميم الاحترافي)، ويطابق مدة المشهد
+    #    (تكرار إن كان أقصر، أو قصّ إن كان أطول) ──────────────────────
+    @staticmethod
+    def _prepare_cinematic_bg_clip(clip_path: str, duration: float):
+        from moviepy import VideoFileClip, vfx
+
+        src = VideoFileClip(clip_path).without_audio()
+
+        scale = FRAME_H / src.h
+        resized = src.resized(scale)
+        if resized.w >= FRAME_W:
+            resized = resized.cropped(x_center=resized.w / 2, width=FRAME_W, height=FRAME_H)
+        else:
+            # نادر (فيديو أعرض بمناسبة غير 16:9) — نكبّر حسب العرض بدلاً
+            # من الارتفاع لضمان تغطية الإطار كاملاً دون أشرطة سوداء.
+            resized = src.resized(FRAME_W / src.w)
+            resized = resized.cropped(y_center=resized.h / 2, width=FRAME_W, height=FRAME_H)
+
+        if resized.duration < duration:
+            resized = resized.with_effects([vfx.Loop(duration=duration)])
+        else:
+            resized = resized.subclipped(0, duration)
+        return resized
+
     def _build_segment_clip(self, segment, index: int, tmp_dir: str):
         from moviepy import AudioFileClip, ImageClip, concatenate_videoclips
         import numpy as np
@@ -263,7 +360,27 @@ class VideoEngine:
         audio_clip = AudioFileClip(audio_path)
         duration = max(1.2, audio_clip.duration)
 
-        bg_base = self._build_background(index)
+        # خلفية سينمائية حقيقية (Higgsfield، اختياري) إن كانت مفعّلة ومتاحة
+        # لهذا المشهد تحديداً — وإلا نتراجع فوراً للخلفية المتدرّجة المجانية
+        # دون أي تأثير على بقية الفيديو.
+        cinematic_bg = None
+        if self._use_cinematic_backgrounds:
+            clip_path = _fetch_cinematic_clip(
+                segment.narration, segment.visual_notes, tmp_dir, index,
+            )
+            if clip_path:
+                try:
+                    cinematic_bg = self._prepare_cinematic_bg_clip(clip_path, duration)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "تعذّر تجهيز خلفية Higgsfield للمشهد %d (%s) — "
+                        "استخدام الخلفية المتدرّجة كبديل.", index, exc,
+                    )
+                    cinematic_bg = None
+
+        # عند وجود خلفية سينمائية: الترجمات تُرسم على طبقة شفافة منفصلة
+        # (بدل الدمج بالخلفية مباشرة) ثم تُركَّب فوق الفيديو الحقيقي.
+        bg_base = None if cinematic_bg is not None else self._build_background(index)
 
         # نقسّم سرد المشهد إلى عبارات قصيرة (2-3 كلمات) تظهر تباعاً —
         # نفس منطق CapCut/Submagic لترجمات كلمة-بكلمة أكثر جاذبية من فقرة
@@ -279,7 +396,11 @@ class VideoEngine:
         elapsed = 0.0
         for i, (chunk_text, chunk_dur) in enumerate(zip(chunks, chunk_durations)):
             accent = self._ACCENT_COLORS[i % len(self._ACCENT_COLORS)]
-            frame_img = bg_base.copy()
+            if bg_base is not None:
+                frame_img = bg_base.copy()
+            else:
+                from PIL import Image
+                frame_img = Image.new("RGBA", (FRAME_W, FRAME_H), (0, 0, 0, 0))
             frame_img = self._draw_caption(frame_img, chunk_text, accent_color=accent)
             frame_array = np.array(frame_img)
 
@@ -291,7 +412,11 @@ class VideoEngine:
                 # زووم Ken-Burns مستمر ومتصاعد عبر كامل المشهد (وليس مُعاد
                 # الانطلاق مع كل عبارة) — إحساس حركي سينمائي متسق.
                 local = s + (t / cd) * (e - s) if cd > 0 else s
-                base_zoom = 1.0 + 0.14 * local
+                # عند وجود خلفية فيديو حقيقية متحركة أصلاً، نُخفّف زووم
+                # النص لتفادي إحساس حركة "مزدوجة" غير منسجمة مع حركة الكاميرا
+                # الفعلية بالخلفية.
+                zoom_amount = 0.05 if cinematic_bg is not None else 0.14
+                base_zoom = 1.0 + zoom_amount * local
                 # "نبضة" ظهور خفيفة (scale-in) في أول لحظات كل عبارة، بنفس
                 # روح أنيميشن "Pop Up" بمنصات الترجمات الاحترافية.
                 pop = 0.88 + 0.12 * min(1.0, t / pd) if pd > 0 else 1.0
@@ -306,10 +431,18 @@ class VideoEngine:
             sub_clips.append(chunk_clip)
             elapsed += chunk_dur
 
-        captioned = concatenate_videoclips(sub_clips, method="compose")
-        captioned = captioned.with_audio(audio_clip.with_duration(duration))
+        captions_track = concatenate_videoclips(sub_clips, method="compose")
 
         from moviepy import vfx
+        if cinematic_bg is not None:
+            from moviepy import CompositeVideoClip
+            captioned = CompositeVideoClip(
+                [cinematic_bg, captions_track], size=(FRAME_W, FRAME_H),
+            ).with_duration(duration)
+        else:
+            captioned = captions_track
+
+        captioned = captioned.with_audio(audio_clip.with_duration(duration))
         return captioned.with_effects([vfx.CrossFadeIn(0.2)])
 
     # ── الواجهة العامة: رندر الفيديو الكامل ──────────────────────────

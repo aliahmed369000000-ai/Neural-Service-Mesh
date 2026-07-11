@@ -6821,10 +6821,34 @@ def render_fable():
             )
             selected_voice = _VOICE_OPTIONS[selected_voice_label]
 
+            _hf_key_present = bool(os.getenv("HIGGSFIELD_API_KEY", "").strip())
+            use_cinematic_bg = st.checkbox(
+                "🎥 خلفيات سينمائية حقيقية (Higgsfield — بجودة National Geographic)",
+                value=False,
+                key="shorts_cinematic_bg_toggle",
+                help=(
+                    "بدل الخلفية المتدرّجة الافتراضية، يولّد خلفية فيديو حقيقية "
+                    "لكل مشهد عبر Higgsfield. ⚠️ مزوّد مدفوع (بعكس بقية NSM "
+                    "المجاني) — يستهلك رصيدك في Higgsfield لكل مشهد. "
+                    "يتطلب HIGGSFIELD_API_KEY."
+                    + ("" if _hf_key_present else " — غير مُفعَّل حالياً: المفتاح غير موجود بالبيئة."),
+                ),
+                disabled=not _hf_key_present,
+            )
+
             if st.button("🎬 أنشئ الفيديو الآن", type="primary", key="shorts_render_video_btn"):
                 try:
-                    with st.spinner("⏳ يولّد السرد الصوتي ثم يركّب الفيديو... قد يستغرق دقيقة"):
-                        mp4_bytes = engine.render_video(short, voice=selected_voice)
+                    _spinner_msg = (
+                        "⏳ يولّد السرد الصوتي والخلفيات السينمائية ثم يركّب الفيديو... "
+                        "قد يستغرق عدة دقائق"
+                        if use_cinematic_bg else
+                        "⏳ يولّد السرد الصوتي ثم يركّب الفيديو... قد يستغرق دقيقة"
+                    )
+                    with st.spinner(_spinner_msg):
+                        mp4_bytes = engine.render_video(
+                            short, voice=selected_voice,
+                            use_cinematic_backgrounds=use_cinematic_bg,
+                        )
                     st.session_state.shorts_mp4 = mp4_bytes
                     st.success("✅ تم إنتاج الفيديو")
                 except Exception as e:  # noqa: BLE001
