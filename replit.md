@@ -1,63 +1,45 @@
-# G0DM0D3 — Neural Service Mesh
+# [Project name]
 
-تطبيق دردشة ذكاء اصطناعي مبني بـ Python/Streamlit يدعم شخصيات متعددة أبرزها Nova (مساعد Aurora Labs) مع نظام سلامة شامل.
+_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
 
 ## Run & Operate
 
-- `streamlit run app.py --server.port 5000 --server.headless true --server.address 0.0.0.0` — تشغيل التطبيق
-- `pip install -r requirements.txt` — تثبيت المتطلبات
-- `bash push_to_github.sh "رسالة الـ commit"` — دفع التغييرات لـ GitHub
+- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm run typecheck` — full typecheck across all packages
+- `pnpm run build` — typecheck + build all packages
+- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
+- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
+- Required env: `DATABASE_URL` — Postgres connection string
 
 ## Stack
 
-- Python 3.12 + Streamlit
-- OpenRouter API (بث الاستجابات)
-- SQLite (تاريخ المحادثات)
-- GitHub: aliahmed369000000-ai/Neural-Service-Mesh
+- pnpm workspaces, Node.js 24, TypeScript 5.9
+- API: Express 5
+- DB: PostgreSQL + Drizzle ORM
+- Validation: Zod (`zod/v4`), `drizzle-zod`
+- API codegen: Orval (from OpenAPI spec)
+- Build: esbuild (CJS bundle)
 
 ## Where things live
 
-- `app.py` — نقطة الدخول الرئيسية (Streamlit)
-- `ai/nova_system.py` — نظام Nova: part1 (معلومات المنتج، السلامة، النبرة، الرفاهية، الذاكرة)
-- `ai/nova_memory_prefs.py` — part2 (ذاكرة، تفضيلات، MCP، Storage API)
-- `ai/nova_search_copyright.py` — part3 (البحث، حقوق النشر)
-- `ai/nova_tools_registry.py` — parts 4-6 (مخططات الأدوات)
-- `ai/godmode.py` — شخصية GODMODE والـ AutoTune
-- `ai/harm_classifier.py` — مصنّف الضرر
-- `.migration-backup/` — الملفات المرجعية (للقراءة فقط)
-- `push_to_github.sh` — سكريبت الدفع لـ GitHub
+_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
 
 ## Architecture decisions
 
-- Python/Streamlit (وليس Next.js) — المشروع الحقيقي مُهاجَر من .migration-backup/
-- شخصية Nova تُضاف أول القائمة في PERSONAS (مع فحص سلامة مُدمج)
-- فحص السلامة يعمل قبل إرسال الرسالة للـ API — يوقف التنفيذ عند اكتشاف محتوى محظور
-- حقوق النشر: 15 كلمة حد أقصى لكل اقتباس، اقتباس واحد لكل مصدر
-- build_full_nova_prompt() يجمع System Prompt من جميع الأجزاء 1-6
+_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
 
 ## Product
 
-- دردشة AI متعددة الشخصيات: Nova ✨، GODMODE 🜏، CIPHER 🔐، ORACLE 🔮، SAGE 📡، REBEL ⚡، GLITCH 👾
-- بث الاستجابات عبر OpenRouter
-- حفظ سجل المحادثات في SQLite
-- دعم الملفات والصور
-- نظام AutoTune لضبط معاملات النموذج تلقائياً
-- Nova: مساعد آمن من Aurora Labs مع قواعد سلامة شاملة
+_Describe the high-level user-facing capabilities of this app once they exist._
 
 ## User preferences
 
-- `.migration-backup/` للقراءة فقط — لا تحذفه
-- GitHub remote: aliahmed369000000-ai/Neural-Service-Mesh
-- الدفع لـ GitHub بعد إكمال كل جزء (part)
-- الـ workflow يعمل على المنفذ 5000
+_Populate as you build — explicit user instructions worth remembering across sessions._
 
 ## Gotchas
 
-- git add/commit محظوران في المُوكِّل الرئيسي — استخدم `push_to_github.sh` أو project_tasks
-- python/python3 غير متاح مباشرةً من bash — Streamlit يُشغَّل عبر workflow
-- NOVA_SYSTEM_PROMPT يُستورد قبل بناء PERSONAS — أي خطأ في nova_system.py يمنع الاستيراد
+_Populate as you build — sharp edges, "always run X before Y" rules._
 
 ## Pointers
 
-- ملفات part1-6 في `.migration-backup/` — المصدر الحقيقي لتعليمات Nova
-- `build_full_nova_prompt()` في nova_system.py يجمع كل الأجزاء
+- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
