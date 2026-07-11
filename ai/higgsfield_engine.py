@@ -6,7 +6,7 @@ Higgsfield Explainer Engine — NSM v2.0 (Professional Edition)
   المرحلة 1 — Gemini Omni Flash:
       يبحث في المعلومات ويبني هيكل مشاهد وثائقية بمستوى National Geographic.
 
-  المرحلة 2 — Nova Fable 5 (Aurora Labs):
+  المرحلة 2 — NSM Agent Fable 5 (NSM):
       يصيغ نص سرد شاعري-وثائقي فصيح + video prompt سينمائي احترافي لكل مشهد.
 
   المرحلة 3 — Higgsfield API:
@@ -81,7 +81,7 @@ def build_fable_llm() -> _PinnedLLM:
         _fable_instance._api_key = key
         _fable_instance._model   = ANTHROPIC_MODELS[_FABLE_MODEL_KEY]
         primary_fn = _fable_instance._call_anthropic
-    return _PinnedLLM(primary_fn, fallback, "nova-fable-5")
+    return _PinnedLLM(primary_fn, fallback, "nsm-agent")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -437,7 +437,7 @@ class HiggsfieldEngine:
     """
     محرك Higgsfield Explainer المحسّن — جودة National Geographic:
       1. Gemini Flash   → بحث وتصميم مشاهد وثائقية استثنائية
-      2. Nova Fable 5   → سرد شاعري + video prompts سينمائية احترافية
+      2. NSM Agent Fable 5   → سرد شاعري + video prompts سينمائية احترافية
       3. Higgsfield API → توليد فيديو عالي الجودة لكل مشهد
     """
 
