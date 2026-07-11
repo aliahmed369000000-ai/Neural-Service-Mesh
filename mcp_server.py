@@ -30,6 +30,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+
+from mcp_auth import check_api_key
 
 # ── إعداد مسارات الاستيراد (نفس منهجية streamlit_app.py) ───────────────────
 BASE = Path(__file__).parent
@@ -168,5 +173,35 @@ def nsm_knowledge_stats() -> dict:
     }
 
 
+class ApiKeyMiddleware(BaseHTTPMiddleware):
+    """
+    يتحقق من ترويسة X-API-Key قبل السماح بالوصول لأي مسار من مسارات MCP
+    (/sse، /messages). يعيد 401 لمفتاح مفقود/غير صالح، و429 عند تجاوز
+    الحد اليومي للخطة.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        api_key = request.headers.get("x-api-key") or request.query_params.get("api_key")
+        result = check_api_key(api_key)
+        if not result.ok:
+            return JSONResponse(
+                {"error": result.reason}, status_code=result.status_code
+            )
+        return await call_next(request)
+
+
+def build_app():
+    """يبني تطبيق SSE مع طبقة المصادقة مثبّتة فوقه."""
+    app = mcp.sse_app()
+    app.add_middleware(ApiKeyMiddleware)
+    return app
+
+
 if __name__ == "__main__":
-    mcp.run(transport="sse")
+    import uvicorn
+
+    uvicorn.run(
+        build_app(),
+        host=os.environ.get("MCP_HOST", "0.0.0.0"),
+        port=int(os.environ.get("MCP_PORT", "8800")),
+    )
