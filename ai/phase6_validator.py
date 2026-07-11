@@ -1,4 +1,9 @@
-"""Phase 6 Validator stub — auto-generated for Phase 7 compatibility."""
+"""Phase 6 Validator stub — auto-generated for Phase 7 compatibility.
+
+⚠️ STUB — نتائج ثابتة وهمية، ليست فحصًا حقيقيًا.
+   score=85.0 و verdict="Phase 7 ready" مُبرمَجتان مسبقًا بشكل ثابت
+   ولا تعكسان أي فحص فعلي لمكونات النظام.
+"""
 from __future__ import annotations
 from datetime import datetime, timezone
 
@@ -13,12 +18,14 @@ class Phase6Validator:
             len(files) for _, _, files in os.walk(self._root)
             if not any(x in _ for x in ["__pycache__", ".git"])
         )
-        score = 85.0
+        score = 85.0  # ⚠️ STUB: قيمة ثابتة وهمية — ليست نتيجة فحص حقيقي
         return {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "file_count": total_files,
+            "_stub_warning": "⚠️ نتائج تجريبية وهمية — ليست فحصًا حقيقيًا",
             "phase7_readiness": {
                 "score": score,
                 "verdict": "Phase 7 ready — all Phase 1-6 components operational.",
+                "_note": "⚠️ STUB: هذه النتيجة ثابتة وغير محسوبة فعلياً",
             },
         }
