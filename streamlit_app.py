@@ -4471,6 +4471,20 @@ hr { border-color: var(--border) !important; }
     color: var(--text-muted);
     margin-bottom: 0.2rem;
 }
+
+/* ── إصلاح تراكب تلميح "Press Enter to apply" فوق النص العربي ──────────
+   التلميح الداخلي لِـ Streamlit إنجليزي LTR دائماً؛ قاعدة RTL العامة
+   أعلاه (على أي عنصر class يحوي "css") كانت تُطبَّق عليه أيضاً فتُغيّر
+   موضعه المُطلق (position/inset) المبني أصلاً على افتراض LTR، فيرتطم
+   بصرياً بالنص العربي المكتوب داخل الحقل. نُثبّت اتجاهه ونمنع تراكبه. */
+div[data-testid="InputInstructions"] {
+    direction: ltr !important;
+    pointer-events: none;
+}
+div[data-testid="InputInstructions"] > span {
+    direction: ltr !important;
+    unicode-bidi: isolate;
+}
 </style>
 """
 
@@ -5527,112 +5541,108 @@ def _render_hf_result(result):
                 key="hf_video_prompts",
             )
 
-    # ── حفظ السيناريو على GitHub ──────────────────────────────────────
+    # ── تجميع ومشاركة الوثائقي على مواقع التواصل ────────────────────────
     st.markdown("---")
     st.markdown(
         '<div style="direction:rtl; text-align:right">'
-        '<h4 style="margin-bottom:0.3rem">🚀 حفظ الوثائقي على GitHub</h4>'
+        '<h4 style="margin-bottom:0.3rem">📤 تصدير ومشاركة الوثائقي</h4>'
         '<p style="color:#aaa; font-size:0.85rem; margin-top:0">'
-        'يحفظ السيناريو الكامل (السرد + Prompts الفيديو) كملف Markdown في مستودعك.'
+        'يجمّع مقاطع كل المشاهد المكتملة (من Higgsfield API) في فيديو واحد متسلسل، '
+        'ثم يتيح رفعه مباشرة على يوتيوب أو تيك توك.'
         '</p></div>',
         unsafe_allow_html=True,
     )
 
-    _gh_token = os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN", "").strip()
-    if not _gh_token:
-        st.warning("🔑 أضف **GITHUB_PERSONAL_ACCESS_TOKEN** في Secrets لتفعيل هذه الميزة.")
+    _completed_scenes = [s for s in scenes if s.video_status == "completed" and s.video_url]
+    if not _completed_scenes:
+        st.info(
+            "ℹ️ لا توجد مشاهد مكتملة التوليد بعد. فعّل **Higgsfield API Key** أعلاه "
+            "وانتظر اكتمال توليد المشاهد (🎬) حتى يظهر خيار التجميع والمشاركة هنا."
+        )
     else:
-        col_save1, col_save2 = st.columns([3, 1])
-        with col_save1:
-            save_commit_msg = st.text_input(
-                "رسالة الحفظ (Commit message):",
-                value=f"🎬 وثائقي: {script.title[:60]}",
-                key="hf_gh_commit_msg",
+        st.caption(f"🎬 عدد المشاهد الجاهزة للتجميع: {len(_completed_scenes)} / {len(scenes)}")
+
+        if st.button("🎬 جمّع الفيديو الوثائقي الكامل", key="hf_assemble_btn", type="primary"):
+            try:
+                from ai.higgsfield_engine import assemble_documentary, DocumentaryAssemblyError
+                with st.spinner("⏳ يُنزّل مقاطع المشاهد ويجمّعها بفيديو واحد... قد يستغرق دقائق"):
+                    st.session_state.hf_assembled_mp4 = assemble_documentary(scenes)
+                st.success("✅ تم تجميع الفيديو الوثائقي الكامل")
+            except DocumentaryAssemblyError as e:
+                st.error(f"⚠️ {e}")
+            except Exception as e:  # noqa: BLE001
+                st.error(f"⚠️ فشل التجميع: {e}")
+
+        _assembled = st.session_state.get("hf_assembled_mp4")
+        if _assembled:
+            st.video(_assembled)
+            st.download_button(
+                "⬇️ تحميل الوثائقي الكامل (mp4)",
+                data=_assembled,
+                file_name=f"{script.title[:40] or 'documentary'}.mp4",
+                mime="video/mp4",
+                key="hf_download_assembled",
             )
-        with col_save2:
-            st.markdown("<br>", unsafe_allow_html=True)
-            save_btn = st.button(
-                "💾 حفظ على GitHub",
-                key="hf_gh_save_btn",
-                use_container_width=True,
-                type="primary",
-            )
 
-        if save_btn:
-            import subprocess as _sp
-            import re as _re
+            try:
+                from ai.social_platforms import YouTubeAdapter, TikTokAdapter
+            except ImportError as e:  # noqa: BLE001
+                st.caption(f"⚠️ تعذّر تحميل محولات المشاركة: {e}")
+            else:
+                yt = YouTubeAdapter()
+                tk = TikTokAdapter()
+                share_cols = st.columns(2)
 
-            # بناء محتوى ملف Markdown للسيناريو
-            safe_title = _re.sub(r"[^\w\u0600-\u06FF\s-]", "", script.title)[:60].strip().replace(" ", "_")
-            from datetime import datetime as _dt
-            timestamp   = _dt.now().strftime("%Y%m%d_%H%M")
-            file_name   = f"documentaries/{safe_title or 'documentary'}_{timestamp}.md"
-            file_path   = BASE / file_name
-
-            md_lines = [
-                f"# 🎬 {script.title}",
-                f"\n> تاريخ الإنشاء: {_dt.now().strftime('%Y-%m-%d %H:%M')} | "
-                f"مزوّد البحث: {script.research_provider or '—'} | "
-                f"مزوّد السرد: {script.narrative_provider or '—'}",
-                f"\n---\n",
-            ]
-            for scene in scenes:
-                md_lines += [
-                    f"## المشهد {scene.index}: {scene.title}",
-                    f"**المدة التقديرية:** {scene.est_seconds} ثانية",
-                    f"\n### 🔊 السرد الصوتي\n{scene.narration}",
-                ]
-                if scene.visual_notes:
-                    md_lines.append(f"\n**🎥 التوجيه المرئي:** {scene.visual_notes}")
-                md_lines.append(f"\n### 🎬 Video Prompt\n```\n{scene.video_prompt}\n```")
-                if scene.video_url:
-                    md_lines.append(f"\n**🎥 رابط الفيديو:** {scene.video_url}")
-                md_lines.append("\n---\n")
-
-            md_content = "\n".join(md_lines)
-
-            with st.spinner("⟳ جارٍ الحفظ والرفع إلى GitHub..."):
-                try:
-                    # إنشاء المجلد وكتابة الملف
-                    file_path.parent.mkdir(parents=True, exist_ok=True)
-                    file_path.write_text(md_content, encoding="utf-8")
-
-                    # git add + commit + push
-                    _sp.run(["git", "add", str(file_path)], cwd=str(BASE), timeout=10)
-                    r_commit = _sp.run(
-                        ["git", "-c", "user.email=nsm@replit.com",
-                         "-c", "user.name=NSM Agent",
-                         "commit", "-m", save_commit_msg.strip() or f"🎬 {script.title}"],
-                        cwd=str(BASE), capture_output=True, text=True, timeout=15,
-                        env={**os.environ,
-                             "GIT_AUTHOR_NAME":      "NSM Agent",
-                             "GIT_AUTHOR_EMAIL":     "nsm@replit.com",
-                             "GIT_COMMITTER_NAME":   "NSM Agent",
-                             "GIT_COMMITTER_EMAIL":  "nsm@replit.com"},
-                    )
-                    nothing = ("nothing to commit" in (r_commit.stdout + r_commit.stderr))
-                    if r_commit.returncode != 0 and not nothing:
-                        st.error(f"❌ فشل الـ Commit:\n{r_commit.stderr[:300] or r_commit.stdout[:300]}")
+                with share_cols[0]:
+                    st.markdown("**▶️ YouTube**")
+                    yt_ready = yt.is_configured() and yt._can_write()
+                    if not yt_ready:
+                        missing = yt.missing_env() or yt.write_env
+                        st.caption("⚙️ غير مُهيّأ — أضِف بالبيئة (Secrets): " + "، ".join(missing))
                     else:
-                        _remote = (
-                            f"https://aliahmed369000000-ai:{_gh_token}"
-                            "@github.com/aliahmed369000000-ai/Neural-Service-Mesh.git"
+                        yt_title = st.text_input(
+                            "العنوان:", value=script.title[:100], key="hf_yt_upload_title"
                         )
-                        r_push = _sp.run(
-                            ["git", "push", _remote, "main"],
-                            cwd=str(BASE), capture_output=True, text=True, timeout=30
+                        yt_privacy = st.selectbox(
+                            "الخصوصية:", ["private", "unlisted", "public"],
+                            key="hf_yt_upload_privacy",
                         )
-                        if r_push.returncode == 0 or nothing:
-                            st.success(
-                                f"✅ تم الحفظ والرفع إلى GitHub بنجاح!\n\n"
-                                f"📁 الملف: `{file_name}`"
-                            )
-                        else:
-                            st.error(
-                                f"❌ فشل الـ Push:\n{r_push.stderr[:300] or r_push.stdout[:300]}"
-                            )
-                except Exception as _e:
-                    st.error(f"❌ خطأ غير متوقع: {_e}")
+                        if st.button("▶️ ارفع على يوتيوب", key="hf_yt_upload_btn", use_container_width=True):
+                            try:
+                                with st.spinner("⏳ يرفع الفيديو على يوتيوب (Resumable Upload)..."):
+                                    video_id = yt.upload_video(
+                                        _assembled,
+                                        title=yt_title,
+                                        description=script.synopsis or script.full_narration[:4500],
+                                        privacy_status=yt_privacy,
+                                    )
+                                st.success(f"✅ تم الرفع! الرابط: https://youtu.be/{video_id}")
+                            except Exception as e:  # noqa: BLE001
+                                st.error(f"⚠️ فشل الرفع على يوتيوب: {e}")
+
+                with share_cols[1]:
+                    st.markdown("**🎵 TikTok**")
+                    tk_ready = tk.is_configured()
+                    if not tk_ready:
+                        st.caption("⚙️ غير مُهيّأ — أضِف بالبيئة (Secrets): " + "، ".join(tk.missing_env()))
+                    else:
+                        st.caption(
+                            "ℹ️ التطبيقات غير المدقَّقة من TikTok تنشر كـ«خاص بحسابك فقط» "
+                            "(مسودة للمراجعة) حتى يجتاز التطبيق مراجعة TikTok الرسمية."
+                        )
+                        tk_title = st.text_input(
+                            "العنوان:", value=script.title[:150], key="hf_tk_upload_title"
+                        )
+                        if st.button("🎵 ارفع على تيك توك", key="hf_tk_upload_btn", use_container_width=True):
+                            try:
+                                with st.spinner("⏳ يرفع الفيديو على تيك توك..."):
+                                    publish_id = tk.upload_video(_assembled, title=tk_title)
+                                st.success(
+                                    f"✅ تم إرسال الفيديو (publish_id: {publish_id}) — "
+                                    "افتح تطبيق TikTok للتأكد من ظهوره ضمن المسودات/المنشورات."
+                                )
+                            except Exception as e:  # noqa: BLE001
+                                st.error(f"⚠️ فشل الرفع على تيك توك: {e}")
 
 
 def render_training():
@@ -7102,7 +7112,10 @@ def render_chat():
     """تبويب المحادثة الذكية مع ذاكرة السياق"""
 
     if not _NSM_CHAT_OK:
-        st.error("⚠️ تعذّر تحميل NSM Chat. تأكد من وجود nsm_chat.py و nsm_embedding.npz في نفس المجلد.")
+        st.error(
+            "⚠️ تعذّر تحميل NSM Chat. تأكد من وجود nsm_chat.py أو nsm_chat_plus.py "
+            "و nsm_memory.py في جذر المشروع (nsm_embedding.npz اختياري — يعمل النظام بدونه)."
+        )
         return
 
     # تهيئة النموذج مرة واحدة
