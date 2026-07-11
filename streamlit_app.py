@@ -17,6 +17,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Tuple
+from urllib.parse import quote
 
 import streamlit as st
 
@@ -4156,20 +4157,173 @@ KNOWLEDGE_DIR  = BASE / "knowledge"
 CHECKPOINTS_DIR = BASE / "checkpoints"
 MEMORY_DIR     = BASE / "memory"
 
-# ── CSS مخصص ──────────────────────────────────────────────────────────────
-st.markdown("""
+# ── نظام السمتين (الليل / المخطوطة) ─────────────────────────────────────
+# ── لوحتا الألوان ────────────────────────────────────────────────────────
+# مستوحاتان من عالم المخطوطات القرآنية: "الليل" (مخطوطة تحت ضوء قنديل مسجد
+# ليلاً — نيلي عميق وذهب التذهيب)، و"المخطوطة" (ورق رَق/parchment نهاري
+# بحبر سيبيا وتذهيب أفتح). كلا اللونين الذهبيين مختلفان فعلياً عن بعضهما
+# (وليس نفس hex مع تغيير الخلفية فقط) لضمان تباين كافٍ بكل سمة.
+THEMES = {
+    "dark": {
+        "label": "🌙 الليل",
+        "bg_grad": "linear-gradient(180deg, #0B1220 0%, #121A2E 100%)",
+        "bg": "#0B1220",
+        "surface": "#141B2E",
+        "surface2": "#1B2438",
+        "border": "#2A3654",
+        "text": "#EDE6D6",
+        "text_muted": "#9AA5C0",
+        "gold": "#C9A24B",
+        "gold_soft": "rgba(201,162,75,0.15)",
+        "emerald": "#2E9C77",
+        "emerald_soft": "rgba(46,156,119,0.16)",
+        "rose": "#C2686B",
+        "rose_soft": "rgba(194,104,107,0.16)",
+        "shadow": "rgba(0,0,0,0.45)",
+        "pattern_stroke": "#C9A24B",
+        "pattern_opacity": "0.05",
+    },
+    "light": {
+        "label": "📜 المخطوطة",
+        "bg_grad": "linear-gradient(180deg, #F6F0E1 0%, #EFE6CE 100%)",
+        "bg": "#F3ECDA",
+        "surface": "#FFFBF2",
+        "surface2": "#F8F1DE",
+        "border": "#D8C9A3",
+        "text": "#241F16",
+        "text_muted": "#6B5F47",
+        "gold": "#9C7A2E",
+        "gold_soft": "rgba(156,122,46,0.12)",
+        "emerald": "#0F6B52",
+        "emerald_soft": "rgba(15,107,82,0.10)",
+        "rose": "#9C4A4D",
+        "rose_soft": "rgba(156,74,77,0.10)",
+        "shadow": "rgba(90,70,30,0.16)",
+        "pattern_stroke": "#9C7A2E",
+        "pattern_opacity": "0.06",
+    },
+}
+
+
+def _pattern_svg(stroke: str, opacity: str) -> str:
+    """نمط هندسي إسلامي بسيط (نجمة ثمانية من تقاطع مربعين) كخلفية مُبلَّطة
+    خفيفة جداً — التوقيع البصري المميّز لهذا التصميم."""
+    svg = (
+        f"<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'>"
+        f"<g fill='none' stroke='{stroke}' stroke-opacity='{opacity}' stroke-width='1'>"
+        f"<rect x='24' y='24' width='72' height='72'/>"
+        f"<rect x='24' y='24' width='72' height='72' transform='rotate(45 60 60)'/>"
+        f"</g></svg>"
+    )
+    return quote(svg)
+
+
+CSS_TEMPLATE = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@400;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@400;600;700&family=Noto+Kufi+Arabic:wght@500;700;800&display=swap');
+
+:root {
+    --bg: __BG__;
+    --surface: __SURFACE__;
+    --surface-2: __SURFACE2__;
+    --border: __BORDER__;
+    --text: __TEXT__;
+    --text-muted: __TEXT_MUTED__;
+    --gold: __GOLD__;
+    --gold-soft: __GOLD_SOFT__;
+    --emerald: __EMERALD__;
+    --emerald-soft: __EMERALD_SOFT__;
+    --rose: __ROSE__;
+    --rose-soft: __ROSE_SOFT__;
+    --shadow: __SHADOW__;
+}
 
 html, body, [class*="css"] {
     direction: rtl;
     font-family: 'Noto Naskh Arabic', 'Segoe UI', sans-serif;
 }
 
+/* ── القماشة العامة للتطبيق (تتجاوز سمة Streamlit المبنية مسبقاً) ── */
+.stApp {
+    background: __BG_GRAD__;
+    background-image: __BG_GRAD__, url("data:image/svg+xml,__PATTERN__");
+    background-repeat: no-repeat, repeat;
+    background-attachment: fixed, fixed;
+    color: var(--text);
+}
+[data-testid="stHeader"] { background: transparent; }
+[data-testid="stSidebar"] {
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+}
+[data-testid="stSidebar"] * { color: var(--text) !important; }
+[data-testid="stAppViewContainer"] { color: var(--text); }
+
+h1, h2, h3, h4, h5, h6, p, span, label, .stMarkdown { color: var(--text); }
+
+/* ── التبويبات بأسلوب "فصول مخطوطة" ── */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 4px;
+    border-bottom: 1px solid var(--border);
+}
+.stTabs [data-baseweb="tab"] {
+    font-family: 'Noto Kufi Arabic', sans-serif;
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text-muted);
+    direction: rtl;
+    padding: 0.5rem 1rem;
+}
+.stTabs [aria-selected="true"] {
+    color: var(--gold) !important;
+    border-bottom: 2px solid var(--gold) !important;
+}
+
+/* ── الأزرار ── */
+.stButton>button, .stDownloadButton>button {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-family: 'Noto Kufi Arabic', sans-serif;
+    font-weight: 600;
+    transition: border-color 0.15s ease, transform 0.1s ease;
+}
+.stButton>button:hover, .stDownloadButton>button:hover {
+    border-color: var(--gold);
+    color: var(--gold);
+}
+.stButton>button[kind="primary"] {
+    background: linear-gradient(135deg, var(--gold) 0%, __GOLD_DARK_OR_LIGHT__ 100%);
+    color: __BG__;
+    border: none;
+}
+
+/* ── الحقول ── */
+.stTextInput input, .stTextArea textarea, .stNumberInput input,
+[data-baseweb="select"] > div {
+    background: var(--surface-2) !important;
+    color: var(--text) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 8px !important;
+    direction: rtl !important;
+}
+
+/* ── الموسّعات (expanders) ── */
+[data-testid="stExpander"] {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+
+hr { border-color: var(--border) !important; }
+
+/* ── عنوان الصفحة ── */
 .main-title {
+    font-family: 'Noto Kufi Arabic', sans-serif;
     font-size: 2.2rem;
-    font-weight: 700;
-    color: #1a73e8;
+    font-weight: 800;
+    color: var(--gold);
     text-align: center;
     padding: 1rem 0 0.3rem 0;
     direction: rtl;
@@ -4177,56 +4331,58 @@ html, body, [class*="css"] {
 
 .subtitle {
     text-align: center;
-    color: #666;
+    color: var(--text-muted);
     font-size: 1rem;
-    margin-bottom: 1.5rem;
+    margin-bottom: 1.2rem;
     direction: rtl;
 }
 
+/* ── بطاقات المقاييس ── */
 .metric-card {
-    background: linear-gradient(135deg, #f8faff 0%, #eef2ff 100%);
-    border: 1px solid #c7d2fe;
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 12px;
     padding: 1rem 1.2rem;
     text-align: center;
     margin-bottom: 0.5rem;
+    box-shadow: 0 2px 10px var(--shadow);
 }
-
 .metric-value {
+    font-family: 'Noto Kufi Arabic', sans-serif;
     font-size: 2rem;
-    font-weight: 700;
-    color: #1a73e8;
+    font-weight: 800;
+    color: var(--gold);
     direction: ltr;
 }
-
 .metric-label {
     font-size: 0.85rem;
-    color: #555;
+    color: var(--text-muted);
     margin-top: 0.2rem;
     direction: rtl;
 }
 
+/* ── بطاقة المفهوم ── */
 .concept-card {
-    background: #fff;
-    border: 1px solid #e2e8f0;
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 12px;
     padding: 1.2rem 1.5rem;
     margin-bottom: 1rem;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    box-shadow: 0 2px 10px var(--shadow);
     direction: rtl;
 }
-
 .concept-name {
+    font-family: 'Noto Kufi Arabic', sans-serif;
     font-size: 1.6rem;
     font-weight: 700;
-    color: #1e3a5f;
+    color: var(--gold);
     margin-bottom: 0.5rem;
 }
-
 .related-tag {
     display: inline-block;
-    background: #dbeafe;
-    color: #1e40af;
+    background: var(--gold-soft);
+    color: var(--gold);
+    border: 1px solid var(--border);
     border-radius: 20px;
     padding: 0.2rem 0.8rem;
     margin: 0.2rem;
@@ -4234,49 +4390,50 @@ html, body, [class*="css"] {
     cursor: pointer;
 }
 
+/* ── آية قرآنية ── */
 .quran-verse {
-    background: linear-gradient(135deg, #fefce8, #fef3c7);
-    border-right: 4px solid #f59e0b;
+    background: var(--surface-2);
+    border-right: 4px solid var(--gold);
     border-radius: 8px;
     padding: 0.9rem 1.2rem;
     margin: 0.5rem 0;
-    font-size: 1.1rem;
-    line-height: 2.2;
+    font-size: 1.15rem;
+    line-height: 2.3;
     direction: rtl;
-    color: #1a1a1a;
+    color: var(--text);
 }
-
 .verse-ref {
     font-size: 0.8rem;
-    color: #92400e;
+    color: var(--gold);
     font-weight: 600;
     margin-top: 0.3rem;
     direction: rtl;
 }
 
-.health-ok {
-    color: #16a34a;
-    font-weight: 600;
-}
+.health-ok  { color: var(--emerald); font-weight: 600; }
+.health-err { color: var(--rose);    font-weight: 600; }
 
-.health-err {
-    color: #dc2626;
-    font-weight: 600;
-}
-
+/* ── عنوان قسم بتوقيع هندسي إسلامي بسيط بدل خط عادي ── */
 .section-header {
+    font-family: 'Noto Kufi Arabic', sans-serif;
     font-size: 1.3rem;
     font-weight: 700;
-    color: #1e3a5f;
-    border-bottom: 2px solid #c7d2fe;
-    padding-bottom: 0.4rem;
+    color: var(--text);
+    padding-bottom: 0.5rem;
     margin: 1rem 0 0.8rem 0;
     direction: rtl;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+}
+.section-header::after {
+    content: "";
+    position: absolute;
+    right: 0; bottom: -1px;
+    width: 64px; height: 2px;
+    background: var(--gold);
 }
 
-.tab-content {
-    padding: 1rem 0;
-}
+.tab-content { padding: 1rem 0; }
 
 .search-box input {
     font-size: 1.2rem !important;
@@ -4285,12 +4442,13 @@ html, body, [class*="css"] {
 }
 
 .root-item {
-    background: #f0fdf4;
-    border: 1px solid #bbf7d0;
+    background: var(--emerald-soft);
+    border: 1px solid var(--border);
     border-radius: 8px;
     padding: 0.6rem 1rem;
     margin: 0.3rem 0;
     direction: rtl;
+    color: var(--text);
 }
 
 .badge {
@@ -4299,19 +4457,55 @@ html, body, [class*="css"] {
     border-radius: 12px;
     font-size: 0.75rem;
     font-weight: 600;
+    border: 1px solid var(--border);
 }
+.badge-blue   { background: var(--gold-soft);    color: var(--gold); }
+.badge-green  { background: var(--emerald-soft); color: var(--emerald); }
+.badge-amber  { background: var(--gold-soft);    color: var(--gold); }
+.badge-purple { background: var(--rose-soft);    color: var(--rose); }
 
-.badge-blue  { background: #dbeafe; color: #1e40af; }
-.badge-green { background: #dcfce7; color: #166534; }
-.badge-amber { background: #fef3c7; color: #92400e; }
-.badge-purple{ background: #f3e8ff; color: #6b21a8; }
-
-stTabs [data-baseweb="tab"] {
-    font-size: 1rem;
-    direction: rtl;
+/* ── مبدّل السمة ── */
+.theme-toggle-caption {
+    font-family: 'Noto Kufi Arabic', sans-serif;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-bottom: 0.2rem;
 }
 </style>
-""", unsafe_allow_html=True)
+"""
+
+
+def render_css(theme_key: str) -> str:
+    t = THEMES.get(theme_key, THEMES["dark"])
+    gold_alt = "#E4C87A" if theme_key == "dark" else "#7A5E20"
+    pattern = _pattern_svg(t["pattern_stroke"], t["pattern_opacity"])
+    css = CSS_TEMPLATE
+    replacements = {
+        "__BG__": t["bg"],
+        "__BG_GRAD__": t["bg_grad"],
+        "__SURFACE__": t["surface"],
+        "__SURFACE2__": t["surface2"],
+        "__BORDER__": t["border"],
+        "__TEXT__": t["text"],
+        "__TEXT_MUTED__": t["text_muted"],
+        "__GOLD__": t["gold"],
+        "__GOLD_SOFT__": t["gold_soft"],
+        "__EMERALD__": t["emerald"],
+        "__EMERALD_SOFT__": t["emerald_soft"],
+        "__ROSE__": t["rose"],
+        "__ROSE_SOFT__": t["rose_soft"],
+        "__SHADOW__": t["shadow"],
+        "__PATTERN__": pattern,
+        "__GOLD_DARK_OR_LIGHT__": gold_alt,
+    }
+    for k, v in replacements.items():
+        css = css.replace(k, v)
+    return css
+
+# ── حقن CSS السمة الحالية ──────────────────────────────────────────────
+if "ui_theme" not in st.session_state:
+    st.session_state.ui_theme = "dark"
+st.markdown(render_css(st.session_state.ui_theme), unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -6150,6 +6344,26 @@ def main():
     # ── الشريط الجانبي — OpenRouter ───────────────────────────────────────
     with st.sidebar:
         st.markdown("## 🌐 Neural Service Mesh")
+
+        # مبدّل السمة: الليل (نيلي + تذهيب) / المخطوطة (ورق رَق + سيبيا)
+        st.markdown('<div class="theme-toggle-caption">🎨 المظهر</div>', unsafe_allow_html=True)
+        _theme_cols = st.columns(2)
+        _current_theme = st.session_state.get("ui_theme", "dark")
+        with _theme_cols[0]:
+            if st.button(
+                ("● " if _current_theme == "dark" else "") + "🌙 الليل",
+                key="theme_btn_dark", use_container_width=True,
+            ):
+                st.session_state.ui_theme = "dark"
+                st.rerun()
+        with _theme_cols[1]:
+            if st.button(
+                ("● " if _current_theme == "light" else "") + "📜 المخطوطة",
+                key="theme_btn_light", use_container_width=True,
+            ):
+                st.session_state.ui_theme = "light"
+                st.rerun()
+
         st.markdown("---")
 
         st.markdown("### 🔑 OpenRouter API")
