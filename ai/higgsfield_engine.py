@@ -58,13 +58,17 @@ class _PinnedLLM:
         return self._provider_label
 
 
+_OUTLINE_MAX_TOKENS   = 4000   # مرحلة 1: Gemini يصمم كل المشاهد دفعة واحدة
+_NARRATION_MAX_TOKENS = 2000   # مرحلة 2: Claude يكتب السرد + الـ prompt لكل مشهد
+
+
 def build_gemini_llm() -> _PinnedLLM:
     from ai.llm_fallback import LLMFallback
-    fallback = LLMFallback()
+    fallback = LLMFallback(max_tokens=_OUTLINE_MAX_TOKENS)
     key = os.getenv("GOOGLE_API_KEY", "").strip()
     primary_fn = None
     if key:
-        _gemini_instance          = LLMFallback()
+        _gemini_instance          = LLMFallback(max_tokens=_OUTLINE_MAX_TOKENS)
         _gemini_instance._api_key = key
         _gemini_instance._model   = _GEMINI_FLASH_MODEL
         primary_fn = _gemini_instance._call_gemini
@@ -73,11 +77,11 @@ def build_gemini_llm() -> _PinnedLLM:
 
 def build_fable_llm() -> _PinnedLLM:
     from ai.llm_fallback import LLMFallback, ANTHROPIC_MODELS
-    fallback = LLMFallback(model_key=_FABLE_MODEL_KEY)
+    fallback = LLMFallback(model_key=_FABLE_MODEL_KEY, max_tokens=_NARRATION_MAX_TOKENS)
     key = os.getenv("ANTHROPIC_API_KEY", "").strip()
     primary_fn = None
     if key:
-        _fable_instance          = LLMFallback(model_key=_FABLE_MODEL_KEY)
+        _fable_instance          = LLMFallback(model_key=_FABLE_MODEL_KEY, max_tokens=_NARRATION_MAX_TOKENS)
         _fable_instance._api_key = key
         _fable_instance._model   = ANTHROPIC_MODELS[_FABLE_MODEL_KEY]
         primary_fn = _fable_instance._call_anthropic
@@ -567,13 +571,13 @@ class HiggsfieldEngine:
             pct = 15 + (i / total) * 45
             _prog(f"✍️ صياغة المشهد {i+1}/{total} بأسلوب سينمائي احترافي...", pct)
 
-            narration, video_prompt, np = self.craft_narration(
+            narration, video_prompt, scene_provider = self.craft_narration(
                 raw["content"], i + 1,
                 visual_notes    = raw.get("visual", ""),
                 emotional_value = raw.get("emotion", ""),
             )
             if not narrative_provider:
-                narrative_provider = np
+                narrative_provider = scene_provider
 
             scene = VideoScene(
                 index        = i + 1,
@@ -631,10 +635,13 @@ class HiggsfieldEngine:
 # ══════════════════════════════════════════════════════════════════════════
 
 def _extract_field(text: str, field_name: str) -> str:
+    escaped = re.escape(field_name)
+    # نتساهل مع '**الحقل:**' (Markdown bold يلف حتى بعد النقطتين أحياناً)
+    # بالإضافة للشكل العادي 'الحقل:'
     pattern = (
-        rf"{re.escape(field_name)}\s*:\s*"
-        rf"(.+?)(?=\n\s*(?:السرد|الـ Prompt|العنوان|المحتوى|المشهد المرئي"
-        rf"|المدة|القيمة العاطفية)\s*:|$)"
+        rf"\*{{0,2}}{escaped}\*{{0,2}}\s*:\s*\*{{0,2}}"
+        rf"(.+?)(?=\n\s*\*{{0,2}}(?:السرد|الـ Prompt|العنوان|المحتوى|المشهد المرئي"
+        rf"|المدة|القيمة العاطفية)\*{{0,2}}\s*:|$)"
     )
     m = re.search(pattern, text, re.S | re.DOTALL)
     return m.group(1).strip() if m else ""
@@ -669,7 +676,9 @@ def _enhance_prompt(prompt: str, visual: str = "") -> str:
 
 def _parse_outline_scenes(text: str) -> List[dict]:
     scenes = []
-    blocks = re.split(r"###\s*المشهد\s*\d+", text)
+    # نتساهل مع الأشكال التي قد يُخرجها النموذج بدل الالتزام الحرفي بـ
+    # "### المشهد N": مع/بدون ###، مع ** (bold)، مع/بدون ':' لاحقة.
+    blocks = re.split(r"(?:#{1,3}\s*|\*{0,2})المشهد\s*\d+\*{0,2}\s*:?", text)
     for block in blocks:
         block = block.strip()
         if not block:
