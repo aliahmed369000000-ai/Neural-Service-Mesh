@@ -58,6 +58,7 @@ class YouTubeAdapter(PlatformAdapter):
         return r.json()["access_token"]
 
     def _latest_video_id(self) -> Optional[str]:
+        self._require_configured()  # يرفع NotConfiguredError إذا YOUTUBE_API_KEY أو YOUTUBE_CHANNEL_ID غير موجودتين
         r = requests.get(f"{API_BASE}/search", params={
             "key": os.environ["YOUTUBE_API_KEY"],
             "channelId": os.environ["YOUTUBE_CHANNEL_ID"],
