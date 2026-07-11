@@ -6,7 +6,7 @@ Higgsfield Explainer Engine — NSM v2.0 (Professional Edition)
   المرحلة 1 — Gemini Omni Flash:
       يبحث في المعلومات ويبني هيكل مشاهد وثائقية بمستوى National Geographic.
 
-  المرحلة 2 — Nova Fable 5 (Claude):
+  المرحلة 2 — Nova Fable 5 (Aurora Labs):
       يصيغ نص سرد شاعري-وثائقي فصيح + video prompt سينمائي احترافي لكل مشهد.
 
   المرحلة 3 — Higgsfield API:
