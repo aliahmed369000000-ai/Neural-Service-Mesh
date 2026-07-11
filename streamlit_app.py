@@ -5349,6 +5349,11 @@ def render_higgsfield():
             type="password",
             placeholder="اتركه فارغاً لتوليد السيناريو فقط",
             key="hf_api_key_input",
+            help=(
+                "⚠️ يجب أن يكون بصيغة KEY_ID:KEY_SECRET (المفتاح والسر معاً "
+                "مفصولين بنقطتين رأسيتين ':') — كما بلوحة تحكم Higgsfield. "
+                "مفتاح واحد بدون السر لن يعمل ويُرجع خطأ مصادقة 403."
+            ),
         )
         hf_key = hf_key_input.strip() or os.getenv("HIGGSFIELD_API_KEY", "").strip()
 

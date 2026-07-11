@@ -147,10 +147,27 @@ class HiggsfieldResult:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Higgsfield API Client — محسّن مع دعم endpoints متعددة
+# Higgsfield API Client — تطبيق مطابق للتوثيق الرسمي (docs.higgsfield.ai)
 # ══════════════════════════════════════════════════════════════════════════
+#
+# ⚠️ ملاحظة تصحيح مهمة (2026-07-11): التطبيق السابق لهذا العميل كان مبنياً
+# على افتراضات خاطئة عن الـAPI (base URL خاطئ https://api.higgsfield.ai،
+# مخطط مصادقة "Bearer <key>" خاطئ، ومسارات /api/v1/videos/generate وهمية
+# غير موجودة فعلياً) — ما كان يعمل بأي مفتاح API صحيح لأن الـendpoints
+# نفسها غير موجودة. تحقّقتُ من التوثيق الرسمي على docs.higgsfield.ai
+# (صفحات "How to use API" و"Generate Images from Text" و"Generate Videos
+# from Images") وأعدت كتابة العميل ليطابقها تماماً:
+#
+#   • Base URL الصحيح: https://platform.higgsfield.ai
+#   • المصادقة: ترويسة واحدة "Authorization: Key {API_KEY}:{API_SECRET}"
+#     — يتطلب مفتاحين (Key + Secret) مفصولين بـ ':', وليس مفتاحاً واحداً.
+#   • Higgsfield لا يوفّر توليد فيديو من نص مباشرة — فقط صورة→فيديو.
+#     المسار الصحيح إذن مرحلتان:
+#       1) POST /higgsfield-ai/soul/standard  (نص → صورة)
+#       2) POST /higgsfield-ai/dop/standard   (صورة + نص حركة → فيديو)
+#     كل طلب يُرجع request_id يُستطلَع عبر GET /requests/{id}/status.
 
-_HF_BASE_URL      = "https://api.higgsfield.ai"
+_HF_BASE_URL      = "https://platform.higgsfield.ai"
 _HF_TIMEOUT       = 45
 _HF_POLL_INTERVAL = 8
 _HF_MAX_WAIT      = 300    # 5 دقائق لكل مشهد
@@ -158,13 +175,14 @@ _HF_CLIP_DURATION = 8      # مدة المقطع بالثواني
 
 
 def _hf_post(endpoint: str, body: dict, api_key: str) -> dict:
+    """POST عام لأي endpoint تحت _HF_BASE_URL (مسار model_id أو /requests/...)."""
     url  = f"{_HF_BASE_URL}{endpoint}"
     data = json.dumps(body).encode("utf-8")
     req  = urllib.request.Request(
         url, data=data,
         headers={
             "Content-Type":  "application/json",
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"Key {api_key}",
             "Accept":        "application/json",
         },
         method="POST",
@@ -178,7 +196,7 @@ def _hf_get(endpoint: str, api_key: str) -> dict:
     req = urllib.request.Request(
         url,
         headers={
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"Key {api_key}",
             "Accept":        "application/json",
         },
     )
@@ -186,66 +204,75 @@ def _hf_get(endpoint: str, api_key: str) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
+# نماذج Higgsfield الرسمية المستخدمة هنا (من docs.higgsfield.ai):
+_HF_TEXT2IMAGE_MODEL = "higgsfield-ai/soul/standard"   # نص → صورة
+_HF_IMAGE2VIDEO_MODEL = "higgsfield-ai/dop/standard"   # صورة (+نص حركة) → فيديو
+
+_HF_TERMINAL_OK     = {"completed"}
+_HF_TERMINAL_FAILED = {"failed", "nsfw", "cancelled", "canceled"}
+
+
 class HiggsfieldClient:
-    """عميل Higgsfield API محسّن — يجرّب endpoints متعددة للتوافق الأقصى."""
+    """عميل Higgsfield API الحقيقي — مطابق لـ docs.higgsfield.ai.
+
+    يتطلب api_key بصيغة "KEY_ID:KEY_SECRET" (المفتاح والسر مفصولان بـ ':'،
+    كما في مثال cURL الرسمي وخيار "single credentials field" بالـSDK
+    الرسمي). مفتاح بدون ':' سيُقبل (قد يعمل مع بعض حسابات API القديمة)
+    لكن سيُسجَّل تحذير لأن الغالبية العظمى من المفاتيح الحديثة بصيغة زوجية.
+    """
 
     def __init__(self, api_key: str):
         if not api_key:
             raise ValueError("HIGGSFIELD_API_KEY غير موجود في البيئة")
+        if ":" not in api_key:
+            logger.warning(
+                "HIGGSFIELD_API_KEY لا يحتوي ':' — التنسيق المتوقّع رسمياً هو "
+                "'KEY_ID:KEY_SECRET' (راجع لوحة تحكم Higgsfield). سيُرسَل كما هو."
+            )
         self._key = api_key
 
-    def submit_job(self, prompt: str, duration: int = _HF_CLIP_DURATION) -> str:
-        """يُرسل طلب توليد فيديو بجودة احترافية عالية."""
-        duration = max(3, min(int(duration), 8))
-
-        # قائمة endpoints مع body مناسب لكل منها
-        attempts = [
-            ("/api/v1/videos/generate", {
-                "prompt":       prompt,
-                "model":        "higgsfield-1",
-                "duration":     duration,
-                "aspect_ratio": "16:9",
-                "quality":      "high",
-            }),
-            ("/api/v1/videos", {
-                "prompt":       prompt,
-                "model":        "higgsfield-video-1",
-                "duration":     duration,
-                "style":        "cinematic",
-                "aspect_ratio": "16:9",
-                "quality":      "high",
-                "fps":          24,
-            }),
-            ("/v1/generations", {
-                "prompt":       prompt,
-                "duration":     duration,
-                "aspect_ratio": "16:9",
-                "model":        "higgsfield-video-1",
-            }),
-        ]
-
-        last_exc = None
-        for endpoint, body in attempts:
+    # ── إرسال طلب عام لأي model_id ──────────────────────────────────────
+    def _submit(self, model_id: str, body: dict) -> str:
+        try:
+            resp = _hf_post(f"/{model_id}", body, self._key)
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                raise RuntimeError(
+                    f"خطأ مصادقة Higgsfield (HTTP {e.code}) — تحقّق من صحة "
+                    "المفتاح وأنه بصيغة KEY_ID:KEY_SECRET"
+                ) from e
+            body_txt = ""
             try:
-                resp   = _hf_post(endpoint, body, self._key)
-                job_id = (
-                    resp.get("id")
-                    or resp.get("job_id")
-                    or resp.get("generation_id")
-                    or resp.get("video_id")
-                    or ""
-                )
-                if job_id:
-                    logger.info("Higgsfield job submitted → endpoint=%s job_id=%s", endpoint, job_id)
-                    return str(job_id)
-                logger.warning("Higgsfield %s لم يُعِد job_id: %s", endpoint, resp)
+                body_txt = e.read().decode("utf-8", errors="replace")
+            except Exception:
+                pass
+            raise RuntimeError(f"Higgsfield رفض الطلب (HTTP {e.code}): {body_txt[:300]}") from e
+        request_id = resp.get("request_id") or ""
+        if not request_id:
+            raise RuntimeError(f"Higgsfield لم يُعِد request_id: {resp}")
+        return request_id
+
+    # ── استطلاع حالة أي طلب حتى الاكتمال أو الفشل أو انتهاء المهلة ──────
+    def _poll(self, request_id: str, max_wait: int = _HF_MAX_WAIT) -> dict:
+        deadline = time.time() + max_wait
+        while time.time() < deadline:
+            try:
+                resp   = _hf_get(f"/requests/{request_id}/status", self._key)
+                status = (resp.get("status") or "").lower()
+
+                if status in _HF_TERMINAL_OK:
+                    return resp
+                if status in _HF_TERMINAL_FAILED:
+                    raise RuntimeError(
+                        f"Higgsfield رفض/أخفق الطلب (status={status}): "
+                        f"{resp.get('error') or resp.get('message') or 'بدون تفاصيل'}"
+                    )
+                # queued / in_progress → استمر بالاستطلاع
             except urllib.error.HTTPError as e:
-                last_exc = e
-                if e.code in (404, 405):
-                    continue
                 if e.code in (401, 403):
                     raise RuntimeError(
-                        f"خطأ مصادقة Higgsfield (HTTP {e.code}) — تحقّق من صحة API Key"
+                        f"خطأ مصادقة Higgsfield (HTTP {e.code}) — تحقّق من صحة "
+                        "المفتاح وأنه بصيغة KEY_ID:KEY_SECRET"
                     )
                 if 400 <= e.code < 500:
                     body_txt = ""
@@ -253,95 +280,53 @@ class HiggsfieldClient:
                         body_txt = e.read().decode("utf-8", errors="replace")
                     except Exception:
                         pass
-                    raise RuntimeError(
-                        f"Higgsfield رفض الطلب (HTTP {e.code}): {body_txt[:300]}"
-                    )
-            except Exception as exc:
-                last_exc = exc
-                logger.warning("Higgsfield endpoint %s فشل: %s", endpoint, exc)
-
-        raise RuntimeError(
-            f"تعذّر إرسال الطلب إلى Higgsfield — آخر خطأ: {last_exc}"
-        )
-
-    def poll_job(self, job_id: str, max_wait: int = _HF_MAX_WAIT) -> VideoScene:
-        """يستطلع حالة المهمة حتى اكتمالها أو انتهاء المهلة."""
-        poll_paths    = [
-            f"/api/v1/videos/{job_id}",
-            f"/api/v1/generations/{job_id}",
-            f"/v1/generations/{job_id}",
-        ]
-        working_path = poll_paths[0]
-        deadline     = time.time() + max_wait
-
-        while time.time() < deadline:
-            try:
-                resp   = _hf_get(working_path, self._key)
-                status = (
-                    resp.get("status")
-                    or resp.get("state")
-                    or "pending"
-                ).lower()
-
-                if status in ("completed", "done", "success", "succeeded", "finished"):
-                    url = (
-                        resp.get("output", {}).get("url")
-                        or resp.get("video_url")
-                        or resp.get("url")
-                        or resp.get("download_url")
-                        or ""
-                    )
-                    return VideoScene(
-                        index=0, video_url=url,
-                        video_status="completed", job_id=job_id,
-                    )
-
-                if status in ("failed", "error", "cancelled"):
-                    err = (
-                        resp.get("error")
-                        or resp.get("message")
-                        or resp.get("reason")
-                        or "خطأ غير محدد"
-                    )
-                    return VideoScene(
-                        index=0, video_status="failed",
-                        video_error=str(err), job_id=job_id,
-                    )
-
-                logger.debug("Higgsfield job %s → %s", job_id, status)
-
-            except urllib.error.HTTPError as e:
-                if 400 <= e.code < 500:
-                    # جرّب path بديل
-                    try:
-                        idx = poll_paths.index(working_path)
-                        if idx + 1 < len(poll_paths):
-                            working_path = poll_paths[idx + 1]
-                            continue
-                    except ValueError:
-                        pass
-                    err_body = ""
-                    try:
-                        err_body = e.read().decode("utf-8", errors="replace")
-                    except Exception:
-                        pass
-                    return VideoScene(
-                        index=0, video_status="failed",
-                        video_error=f"HTTP {e.code}: {err_body[:200]}",
-                        job_id=job_id,
-                    )
-                logger.debug("Higgsfield poll HTTP %d — سنُعيد المحاولة", e.code)
-
-            except Exception as exc:
-                logger.debug("Higgsfield poll خطأ: %s — سنُعيد المحاولة", exc)
-
+                    raise RuntimeError(f"Higgsfield رفض الطلب (HTTP {e.code}): {body_txt[:300]}")
+                logger.debug("Higgsfield poll HTTP %d — إعادة المحاولة", e.code)
             time.sleep(_HF_POLL_INTERVAL)
 
-        return VideoScene(
-            index=0, video_status="timeout",
-            video_error=f"انتهت مهلة الانتظار ({max_wait}s)",
-            job_id=job_id,
-        )
+        raise TimeoutError(f"انتهت مهلة الانتظار ({max_wait}s) لطلب Higgsfield {request_id}")
+
+    # ── المرحلة أ: نص → صورة ─────────────────────────────────────────────
+    def text_to_image(self, prompt: str, aspect_ratio: str = "9:16") -> str:
+        """يُنشئ صورة من نص عبر higgsfield-ai/soul/standard، ويعيد رابط
+        الصورة الناتجة بعد اكتمال المعالجة."""
+        request_id = self._submit(_HF_TEXT2IMAGE_MODEL, {
+            "prompt": prompt,
+            "aspect_ratio": aspect_ratio,
+            "resolution": "720p",
+        })
+        result = self._poll(request_id)
+        images = result.get("images") or []
+        if not images or not images[0].get("url"):
+            raise RuntimeError(f"Higgsfield لم يُعِد صورة صالحة: {result}")
+        return images[0]["url"]
+
+    # ── المرحلة ب: صورة → فيديو ──────────────────────────────────────────
+    def image_to_video(self, image_url: str, motion_prompt: str, duration: int = _HF_CLIP_DURATION) -> str:
+        """يُحرّك صورة إلى فيديو عبر higgsfield-ai/dop/standard، ويعيد رابط
+        الفيديو الناتج بعد اكتمال المعالجة."""
+        duration = max(3, min(int(duration), 10))
+        request_id = self._submit(_HF_IMAGE2VIDEO_MODEL, {
+            "image_url": image_url,
+            "prompt":    motion_prompt,
+            "duration":  duration,
+        })
+        result = self._poll(request_id)
+        video = result.get("video") or {}
+        if not video.get("url"):
+            raise RuntimeError(f"Higgsfield لم يُعِد فيديو صالحاً: {result}")
+        return video["url"]
+
+    # ── الواجهة عالية المستوى: نص → فيديو (مرحلتان مدمجتان) ─────────────
+    def generate_video_from_prompt(
+        self, prompt: str, duration: int = _HF_CLIP_DURATION,
+        aspect_ratio: str = "9:16",
+    ) -> str:
+        """يُنفّذ خط الأنابيب الكامل: نص → صورة (Soul) → فيديو (DoP)،
+        لأن Higgsfield لا يوفّر توليد فيديو من نص مباشرة. يعيد رابط
+        الفيديو النهائي، أو يرفع استثناءً واضحاً عند فشل أي مرحلة."""
+        image_url = self.text_to_image(prompt, aspect_ratio=aspect_ratio)
+        return self.image_to_video(image_url, prompt, duration=duration)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -514,18 +499,21 @@ class HiggsfieldEngine:
             scene.video_error  = "HIGGSFIELD_API_KEY غير موجود — أضِفه في الأسرار أو أدخله أعلاه"
             return scene
 
+        scene.video_status = "processing"
         try:
-            job_id = self._hf_client.submit_job(
+            video_url = self._hf_client.generate_video_from_prompt(
                 scene.video_prompt,
                 duration=_HF_CLIP_DURATION,
+                aspect_ratio="9:16",
             )
-            scene.job_id       = job_id
-            scene.video_status = "processing"
+            scene.video_url    = video_url
+            scene.video_status = "completed"
+            scene.video_error  = ""
 
-            poll_result        = self._hf_client.poll_job(job_id)
-            scene.video_url    = poll_result.video_url
-            scene.video_status = poll_result.video_status
-            scene.video_error  = poll_result.video_error
+        except TimeoutError as exc:
+            scene.video_status = "timeout"
+            scene.video_error  = str(exc)
+            logger.warning("Higgsfield انتهت المهلة للمشهد %d: %s", scene.index, exc)
 
         except Exception as exc:
             scene.video_status = "failed"
