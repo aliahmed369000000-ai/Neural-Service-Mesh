@@ -1,5 +1,5 @@
 """
-Nova Search & Copyright System — part3_tone_format.md
+NSM Agent Search & Copyright System — part3_tone_format.md
 ======================================================
 يُطبّق:
   - قواعد البحث على الويب
@@ -157,5 +157,5 @@ SONG_LYRICS_REFUSAL = (
 
 
 def get_search_copyright_section() -> str:
-    """يُعيد قسم البحث وحقوق النشر لنظام Nova."""
+    """يُعيد قسم البحث وحقوق النشر لنظام NSM Agent."""
     return SEARCH_SYSTEM_PROMPT_SECTION
