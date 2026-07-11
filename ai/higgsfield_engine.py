@@ -723,3 +723,65 @@ def _fallback_split(text: str, target_minutes: int) -> List[dict]:
         if len(scenes) >= n_target:
             break
     return scenes
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# تجميع مقاطع المشاهد (video_url من Higgsfield API) في فيديو وثائقي واحد
+# متسلسل — يُستخدم كإدخال لواجهة المشاركة الاجتماعية (يوتيوب/تيك توك) بدل
+# الحفظ على GitHub.
+# ══════════════════════════════════════════════════════════════════════════
+
+class DocumentaryAssemblyError(Exception):
+    """خطأ أثناء تنزيل/تجميع مقاطع الوثائقي."""
+
+
+def assemble_documentary(scenes: List["VideoScene"]) -> bytes:
+    """يُنزّل مقطع فيديو كل مشهد مكتمل (video_status == 'completed') من
+    رابطه (video_url الذي يُرجعه Higgsfield API)، ثم يُلحقها بالترتيب في
+    ملف mp4 واحد عبر moviepy. لا يُنشئ أي نتيجة وهمية: إن لم تكتمل أي
+    مشاهد يرفع DocumentaryAssemblyError بدل إرجاع فيديو فارغ.
+
+    ملاحظة: مقاطع Higgsfield لا تتضمن بالضرورة السرد الصوتي (narration)
+    كصوت مُدمَج — هذا تجميع بصري متسلسل للمقاطع كما أنتجتها الـAPI.
+    """
+    completed = [s for s in scenes if s.video_status == "completed" and s.video_url]
+    if not completed:
+        raise DocumentaryAssemblyError(
+            "لا توجد مشاهد مكتملة التوليد (video_status == 'completed') لتجميعها. "
+            "تأكد من تفعيل Higgsfield API وانتظار اكتمال كل المشاهد أولاً."
+        )
+
+    import tempfile
+    from moviepy import VideoFileClip, concatenate_videoclips
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        clip_paths = []
+        for scene in sorted(completed, key=lambda s: s.index):
+            dest = os.path.join(tmp_dir, f"scene_{scene.index}.mp4")
+            try:
+                req = urllib.request.Request(scene.video_url, headers={"User-Agent": "NSM/1.0"})
+                with urllib.request.urlopen(req, timeout=60) as resp, open(dest, "wb") as f:
+                    f.write(resp.read())
+                clip_paths.append(dest)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"تعذّر تنزيل مقطع المشهد {scene.index}: {e}")
+
+        if not clip_paths:
+            raise DocumentaryAssemblyError("فشل تنزيل كل مقاطع المشاهد من Higgsfield.")
+
+        clips = [VideoFileClip(p) for p in clip_paths]
+        try:
+            final = concatenate_videoclips(clips, method="compose")
+            out_path = os.path.join(tmp_dir, "documentary_final.mp4")
+            final.write_videofile(
+                out_path, codec="libx264", audio_codec="aac",
+                fps=30, logger=None, threads=2,
+            )
+            with open(out_path, "rb") as f:
+                return f.read()
+        finally:
+            for c in clips:
+                try:
+                    c.close()
+                except Exception:  # noqa: BLE001
+                    pass
