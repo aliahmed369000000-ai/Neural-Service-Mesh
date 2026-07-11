@@ -47,3 +47,9 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# مفاتيح API لخادم MCP — حساسة، لا تُرفع
+data/api_keys.json
+__pycache__/
+knowledge/__pycache__/
+
