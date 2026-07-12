@@ -671,6 +671,8 @@ def _is_failure(result: str) -> bool:
             "غير موجود", "SyntaxError", "ImportError", "ModuleNotFoundError",
             "NameError", "TypeError", "IndentationError",
             "فعل غير صالح", "فشل البحث", "خطأ في أداة البحث", "مطلوب",
+            "خطأ في أداة بحث الصور", "خطأ في إنشاء الواجهة التفاعلية",
+            "خطأ في استدعاء API", "تعذّر البحث عن الصور",
         ]
     )
 
