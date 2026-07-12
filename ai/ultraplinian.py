@@ -31,15 +31,25 @@ import requests
 # البادئة (":") يُعامل كما كان دائماً: نموذج OpenRouter عادي.
 # هذا يضمن عدم كسر أي معرّف موجود مسبقاً في القوائم أدناه.
 #
-# لماذا هذه النماذج تحديداً: نفس المعرّفات المستخدمة والمُختبرة فعلياً في
-# ai/llm_fallback.py (سلسلة fallback الأساسية للمشروع) — احتمال عملها هنا
-# مرتفع لأنها مُثبَتة أصلاً في نفس المستودع.
+# مصدر المعرّفات: وثائق كل مزوّد مباشرةً (تحقّق بتاريخ يوليو 2026) —
+# تجنّباً لمعرّفات مهجورة (مثل gemini-1.5-flash الذي أُطفئ نهائياً
+# وبات يُعيد 404، أو gemma2-9b-it/llama3-8b-8192 اللذين لم يعودا
+# ضمن قائمة Groq الرسمية الحالية).
+#   Groq    → console.groq.com/docs/models (Production + Preview)
+#   Gemini  → ai.google.dev/gemini-api/docs/models (Flash/Flash-Lite مجانية)
+#   Cloudflare → developers.cloudflare.com/workers-ai/models (فئة 7-8B)
 FREE_DIRECT_MODELS: List[str] = [
+    # Groq — نماذج إنتاجية سريعة (مجانية بالكامل، بدون بطاقة)
     "groq:llama-3.1-8b-instant",
-    "groq:llama3-8b-8192",
-    "groq:gemma2-9b-it",
-    "gemini:gemini-1.5-flash",
+    "groq:llama-3.3-70b-versatile",
+    "groq:openai/gpt-oss-20b",
+    "groq:meta-llama/llama-4-scout-17b-16e-instruct",
+    # Gemini — الفئة المجانية الحالية (Flash / Flash-Lite فقط، Pro أصبح مدفوعاً)
+    "gemini:gemini-2.5-flash",
+    "gemini:gemini-2.5-flash-lite",
+    # Cloudflare Workers AI — نماذج الفئة الصغيرة المجانية (10K neuron/يوم)
     "cloudflare:@cf/meta/llama-3.1-8b-instruct",
+    "cloudflare:@cf/mistral/mistral-7b-instruct-v0.1",
 ]
 
 # ══════════════════════════════════════════════════════════════════════
@@ -133,10 +143,10 @@ ULTRAPLINIAN_MODELS: Dict[str, List[str]] = {
 
 # عدد نماذج كل مستوى تراكمياً — للعرض في الواجهة
 # (+5 عبر كل المستويات بسبب FREE_DIRECT_MODELS المضافة في "fast")
-TIER_CUMULATIVE = {"fast": 22, "standard": 37, "smart": 48, "power": 58, "ultra": 68}
+TIER_CUMULATIVE = {"fast": 25, "standard": 37, "smart": 48, "power": 57, "ultra": 59}
 
-# الحد الافتراضي للسباق (يُقيّد التكلفة)
-DEFAULT_MAX_MODELS = 6
+# الحد الافتراضي للسباق (يُقيّد التكلفة) — 8 لتغطية كل FREE_DIRECT_MODELS افتراضياً
+DEFAULT_MAX_MODELS = 8
 
 # موجّه العمق — يُضاف لكل طلب ULTRAPLINIAN
 DEPTH_DIRECTIVE = """
@@ -318,8 +328,9 @@ class RaceResult:
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-# نماذج Groq البديلة عند 403 على النموذج المطلوب (نفس منطق llm_fallback.py)
-_GROQ_FALLBACK_MODELS = ["llama-3.1-8b-instant", "llama3-8b-8192", "gemma2-9b-it"]
+# نماذج Groq البديلة عند 403 على النموذج المطلوب (نفس منطق llm_fallback.py) —
+# مُحدَّثة على معرّفات Groq الرسمية الحالية (console.groq.com/docs/models)
+_GROQ_FALLBACK_MODELS = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "openai/gpt-oss-20b"]
 
 
 def _parse_model_id(model: str) -> tuple[str, str]:
