@@ -1,45 +1,58 @@
-# [Project name]
+# Neural Service Mesh (NSM) — النظام المعرفي العربي
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+منصة ذكاء اصطناعي عربية (Streamlit) تجمع محركاً معرفياً ذاتي التعلّم (CKG)
+مع نماذج لغوية كبيرة، بحث ويب وصور حقيقي، ذاكرة محادثة دائمة، ومحرر واجهات
+تفاعلية (Artifacts)، مع تخصص بالمعرفة الإسلامية والقرآن الكريم.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- التشغيل: workflow `NSM Streamlit App` يشغّل `streamlit run streamlit_app.py --server.port 5000`
+- `api_server.py` (FastAPI) خادم مستقل اختياري لمحرك `core.engine` — غير مربوط بواجهة Streamlit حالياً
+- بيانات دائمة: SQLite في `memory/nsm_context.db` (المحادثات)، `data/artifacts.db` (الواجهات التفاعلية + الإعدادات)، `data/mesh.db` (Node/Engine)
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- Python 3.12، Streamlit، SQLite
+- بحث ويب: DuckDuckGo (بدون مفتاح) عبر `ai/web_search_tool.py`
+- بحث صور: Unsplash API عبر `ai/image_search_tool.py` (يتطلب `UNSPLASH_ACCESS_KEY`)
+- نماذج لغوية: OpenRouter (اختياري)، Anthropic (اختياري)، NSM/LLMFallback (احتياطي محلي)
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `streamlit_app.py` — الواجهة الرئيسية (كل التبويبات: بحث، محادثة، ذاكرة، واجهات تفاعلية، لوحة مطوّر...)
+- `nsm_memory.py` — ذاكرة المحادثة (نافذة قصيرة + SQLite طويلة الأمد + بحث دلالي)
+- `ai/` — أدوات ووكلاء (بحث ويب/صور، وكيل الكود، محرك NSM، إلخ)
+- `core/` — محرك Node/Engine + `artifacts_store.py` (تخزين الواجهات التفاعلية والإعدادات الدائمة)
+- `storage/` — طبقة SQLite أقدم لمحرك Node/Engine (`db.py`)
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- بحث الويب والصور بدون طبقة وسيطة إضافية — يُستدعيان مباشرة من `streamlit_app.py` عبر دوال في `ai/`، ويرفعان استثناءات صريحة بدل نتائج وهمية عند الفشل.
+- لوحة المطوّر (تنفيذ Bash/Python) محمية بمفتاح `NSM_ADMIN_KEY` — مقفلة افتراضياً حتى إدخال المفتاح الصحيح في الجلسة.
+- `ai/github_sync.py` يقبل إما `GITHUB_TOKEN` أو `GITHUB_PERSONAL_ACCESS_TOKEN` كمصدر للتوكن (كلاهما مدعوم).
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- بحث معرفي + بحث ويب حقيقي + بحث صور (Unsplash)
+- محادثة ذكية بذاكرة تُستعرض وتُبحث من تبويب "🧠 الذاكرة"
+- محرر واجهات تفاعلية (HTML/SVG) قابلة للحفظ، مع أداة استدعاء API عام
+- لوحة مطوّر محمية لتنفيذ أوامر Bash/Python
+- تبويب "ℹ️ عن NSM" يشرح المنتج للمستخدم الجديد
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- المستخدم يتواصل بالعربية ويفضّل تنفيذ الميزات بالترتيب المُعطى مع commit + push إلى GitHub بعد كل ميزة.
+- بحث الويب: يُبقى مجانياً عبر DuckDuckGo (لا مزوّد مدفوع حالياً).
+- ميزات MCP (Google Drive / Slack) مؤجلة بطلب المستخدم — لم تُبنَ بعد.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Streamlit يحتاج `enableCORS = false` و`enableXsrfProtection = false` في `.streamlit/config.toml` ليعمل صحيحاً خلف iframe المعاينة في Replit.
+- `NSM_ADMIN_KEY` و`UNSPLASH_ACCESS_KEY` أسرار مطلوبة — بدونها تتعطّل ميزتا لوحة المطوّر وبحث الصور بأمان (رسالة خطأ صريحة، لا فشل صامت).
+- الدفع لـ GitHub يتطلب `GITHUB_PERSONAL_ACCESS_TOKEN` (أو `GITHUB_TOKEN`) + `GITHUB_USER` + `GITHUB_REMOTE` (الأخيران env vars عاديان، مضبوطان مسبقاً).
 
 ## Pointers
 
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- `ai/web_search_tool.py`, `ai/image_search_tool.py` — أدوات البحث
+- `core/artifacts_store.py` — تخزين الواجهات التفاعلية + إعدادات المستخدم الدائمة
+- `nsm_memory.py` — منطق الذاكرة الكامل
