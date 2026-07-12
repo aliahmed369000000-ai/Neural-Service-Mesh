@@ -26,3 +26,17 @@ python-bidi
 requests
 scikit-learn
 streamlit
+arabic-reshaper
+edge-tts
+fastapi
+gTTS
+numpy
+pillow
+plotly
+pypdf
+python-bidi
+requests
+requests_oauthlib
+scikit-learn
+streamlit
+uvicorn

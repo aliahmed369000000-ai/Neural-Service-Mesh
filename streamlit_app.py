@@ -5039,6 +5039,46 @@ def render_search():
             </div>
             """, unsafe_allow_html=True)
 
+    # ── بحث حقيقي عن الصور (Unsplash) ───────────────────────────────────
+    st.markdown("")
+    st.markdown('<div class="section-header">🖼️ بحث عن الصور</div>', unsafe_allow_html=True)
+    try:
+        from ai.image_search_tool import image_search_safe as _img_search
+        _IMG_SEARCH_OK = True
+    except Exception as _img_imp_err:
+        _IMG_SEARCH_OK = False
+        st.caption(f"⚠️ تعذّر تحميل أداة بحث الصور: {_img_imp_err}")
+
+    if _IMG_SEARCH_OK:
+        _is_cols = st.columns([3, 1])
+        with _is_cols[0]:
+            _is_q = st.text_input(
+                "ابحث عن صور",
+                placeholder="مثال: مسجد، طبيعة، خط عربي...",
+                key="image_search_query",
+                label_visibility="collapsed",
+            )
+        with _is_cols[1]:
+            _is_btn = st.button("🖼️ ابحث", key="image_search_btn", use_container_width=True)
+
+        if _is_btn and _is_q.strip():
+            with st.spinner("⟳ جارٍ البحث عن الصور (Unsplash)..."):
+                _is_result = _img_search(_is_q.strip(), max_results=9)
+
+            if not _is_result["ok"]:
+                st.error(f"❌ {_is_result['error']}")
+            else:
+                _is_images = _is_result["results"]
+                _is_grid = st.columns(3)
+                for _i, _img in enumerate(_is_images):
+                    with _is_grid[_i % 3]:
+                        st.image(_img["thumb_url"] or _img["url"], use_container_width=True)
+                        _cap = _img["description"] or "بدون وصف"
+                        st.caption(f"📷 {_cap}")
+                        if _img.get("author"):
+                            _author_line = f"[{_img['author']}]({_img['author_url']})" if _img.get("author_url") else _img["author"]
+                            st.caption(f"بواسطة {_author_line}", unsafe_allow_html=False)
+
 
 def render_quran():
     """تبويب القرآن الكريم."""
