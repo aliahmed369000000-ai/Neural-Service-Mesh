@@ -9,6 +9,8 @@ python-bidi
 plotly
 scikit-learn
 librosa
+numba>=0.60.0
+llvmlite>=0.43.0
 qdrant-client
 edge-tts>=6.1.0
 gTTS>=2.5.0
