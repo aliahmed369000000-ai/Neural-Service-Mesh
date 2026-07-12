@@ -205,6 +205,43 @@ class _LongTermStore:
                 seen.add(k); unique.append(r)
         return unique[:limit]
 
+    # ── تصفّح كل المحادثات المحفوظة (لواجهة "الذاكرة") ──────────────────
+    def list_recent_turns(self, limit: int = 50, session_id: Optional[str] = None) -> List[dict]:
+        """يعيد آخر المحادثات المحفوظة في SQLite لعرضها/استرجاعها من الواجهة."""
+        try:
+            with sqlite3.connect(self._path) as c:
+                if session_id:
+                    rows = c.execute(
+                        "SELECT id, session_id, user_msg, bot_reply, topic, ts FROM turns "
+                        "WHERE session_id=? ORDER BY ts DESC LIMIT ?",
+                        (session_id, limit),
+                    ).fetchall()
+                else:
+                    rows = c.execute(
+                        "SELECT id, session_id, user_msg, bot_reply, topic, ts FROM turns "
+                        "ORDER BY ts DESC LIMIT ?", (limit,)
+                    ).fetchall()
+        except Exception as e:
+            logger.debug(f"LTM list_recent_turns error: {e}")
+            return []
+        return [
+            {"id": r[0], "session_id": r[1], "user": r[2], "bot": r[3], "topic": r[4], "ts": r[5]}
+            for r in rows
+        ]
+
+    def list_sessions(self, limit: int = 50) -> List[dict]:
+        """يعيد قائمة الجلسات المميزة مع عدد الأدوار وآخر نشاط، الأحدث أولاً."""
+        try:
+            with sqlite3.connect(self._path) as c:
+                rows = c.execute(
+                    "SELECT session_id, COUNT(*) AS n, MAX(ts) AS last_ts FROM turns "
+                    "GROUP BY session_id ORDER BY last_ts DESC LIMIT ?", (limit,)
+                ).fetchall()
+        except Exception as e:
+            logger.debug(f"LTM list_sessions error: {e}")
+            return []
+        return [{"session_id": r[0], "turns": r[1], "last_ts": r[2]} for r in rows]
+
     # ── بحث دلالي — سلسلة تراجع كاملة: Qdrant → TF-IDF → (search اللي فوق) ──
     def semantic_search(self, query: str, session_id: Optional[str] = None,
                          limit: int = 5, recent_cap: int = 500) -> List[dict]:
@@ -578,6 +615,14 @@ class ConversationMemory:
             return sem
         kw = self._keywords(query)
         return self._ltm.search(kw)
+
+    def list_recent_turns(self, limit: int = 50, all_sessions: bool = False) -> List[dict]:
+        """يعيد آخر المحادثات المحفوظة (للجلسة الحالية أو لكل الجلسات) لعرضها في الواجهة."""
+        return self._ltm.list_recent_turns(limit=limit, session_id=None if all_sessions else self._session_id)
+
+    def list_sessions(self, limit: int = 50) -> List[dict]:
+        """يعيد قائمة الجلسات المحفوظة مع عدد الأدوار وآخر نشاط."""
+        return self._ltm.list_sessions(limit=limit)
 
     def get_ltm_stats(self) -> dict:
         return self._ltm.stats()
