@@ -3886,50 +3886,62 @@ def _or_stream(
     temperature: float = 0.7,
     top_p: float = 0.9,
 ) -> Generator[str, None, None]:
-    """بثّ streaming من OpenRouter — يُعيد قطعاً نصية تدريجياً."""
-    if not _REQUESTS_OK or not api_key:
-        yield "⚠️ مفتاح OpenRouter غير موجود."
-        return
+    """بثّ streaming من OpenRouter — يُعيد قطعاً نصية تدريجياً.
+    لو غاب مفتاح OpenRouter أو فشل الاتصال به، يتحوّل تلقائياً لنموذج مجاني
+    مباشر (Groq/Gemini/Cloudflare) عبر ai/free_router.py بدل التوقف الكامل."""
     if not messages or messages[0].get("role") != "system":
         messages = [{"role": "system", "content": NSM_SYSTEM_PROMPT}] + list(messages)
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://nsm.replit.app",
-        "X-Title": "Neural Service Mesh",
-    }
-    payload = {
-        "model": model,
-        "messages": messages,
-        "stream": True,
-        "temperature": temperature,
-        "top_p": top_p,
-        "max_tokens": 4096,
-    }
+
+    if _REQUESTS_OK and api_key:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://nsm.replit.app",
+            "X-Title": "Neural Service Mesh",
+        }
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_tokens": 4096,
+        }
+        try:
+            with _requests.post(
+                _OPENROUTER_URL, headers=headers, json=payload, stream=True, timeout=60
+            ) as r:
+                if not r.ok:
+                    raise RuntimeError(f"OpenRouter {r.status_code}: {r.text[:200]}")
+                got_any = False
+                for line in r.iter_lines():
+                    if not line:
+                        continue
+                    decoded = line.decode("utf-8") if isinstance(line, bytes) else line
+                    if not decoded.startswith("data: "):
+                        continue
+                    data = decoded[6:]
+                    if data == "[DONE]":
+                        break
+                    try:
+                        delta = json.loads(data)["choices"][0]["delta"].get("content", "")
+                        if delta:
+                            got_any = True
+                            yield delta
+                    except Exception:
+                        continue
+                if got_any:
+                    return
+        except Exception:
+            pass  # يسقط تلقائياً للنموذج المجاني المباشر أدناه (لا نطبع الخطأ الخام)
+
+    # ── لا يوجد مفتاح OpenRouter صالح، أو فشل الاتصال به: نموذج مجاني مباشر ──
     try:
-        with _requests.post(
-            _OPENROUTER_URL, headers=headers, json=payload, stream=True, timeout=60
-        ) as r:
-            if not r.ok:
-                yield f"**خطأ {r.status_code}:** {r.text[:200]}"
-                return
-            for line in r.iter_lines():
-                if not line:
-                    continue
-                decoded = line.decode("utf-8") if isinstance(line, bytes) else line
-                if not decoded.startswith("data: "):
-                    continue
-                data = decoded[6:]
-                if data == "[DONE]":
-                    break
-                try:
-                    delta = json.loads(data)["choices"][0]["delta"].get("content", "")
-                    if delta:
-                        yield delta
-                except Exception:
-                    continue
+        from ai.free_router import chat_free
+        text, _used_model = chat_free(messages, temperature=temperature, max_tokens=4096)
+        yield text
     except Exception as exc:
-        yield f"\n\n**خطأ:** {exc}"
+        yield f"⚠️ {exc}"
 
 
 def _or_chat(

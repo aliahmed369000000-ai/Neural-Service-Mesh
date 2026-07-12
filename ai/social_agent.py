@@ -142,35 +142,54 @@ def get_event_counts() -> Dict[str, int]:
 # ═════════════════════════════════════════════════════════════════════════════
 
 def generate_reply(item: SocialItem, persona_prompt: Optional[str] = None) -> str:
-    """يولّد رداً حقيقياً عبر OpenRouter بنفس شخصية GODMODE. يرفع استثناء إن تعذّر
-    ذلك بدل إرجاع رد مزيّف."""
-    import requests as _requests
-
-    api_key = os.environ.get("OPENROUTER_API_KEY", "")
-    if not api_key:
-        raise NotConfiguredError("لا يوجد OPENROUTER_API_KEY في البيئة — الرد التلقائي معطّل.")
-
+    """يولّد رداً حقيقياً عبر OpenRouter بنفس شخصية GODMODE. لو غاب مفتاح
+    OpenRouter أو فشل الاتصال به، يتحوّل تلقائياً لنموذج مجاني مباشر
+    (Groq/Gemini/Cloudflare) عبر ai/free_router.py. يرفع استثناء فقط لو
+    فشلت كل المسارات، بدل إرجاع رد مزيّف."""
     sys_prompt = persona_prompt or GODMODE_SYSTEM_PROMPT
     sys_prompt += (
         f"\n\nأنت الآن ترد نيابة عن الحساب على منصة {item.platform}. "
         "اكتب رداً قصيراً مباشراً مناسباً للسياق الاجتماعي (لا مقدمات طويلة)."
     )
-    resp = _requests.post(
-        OPENROUTER_URL,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={
-            "model": os.environ.get("SOCIAL_AGENT_MODEL", DEFAULT_REPLY_MODEL),
-            "messages": [
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": f"[{item.author}]: {item.text}"},
-            ],
-            "max_tokens": 300,
-        },
-        timeout=60,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    return data["choices"][0]["message"]["content"].strip()
+    messages = [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": f"[{item.author}]: {item.text}"},
+    ]
+
+    api_key = os.environ.get("OPENROUTER_API_KEY", "")
+    if api_key:
+        import requests as _requests
+
+        try:
+            resp = _requests.post(
+                OPENROUTER_URL,
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": os.environ.get("SOCIAL_AGENT_MODEL", DEFAULT_REPLY_MODEL),
+                    "messages": messages,
+                    "max_tokens": 300,
+                },
+                timeout=60,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            text = data["choices"][0]["message"]["content"].strip()
+            if text:
+                return text
+        except Exception:
+            pass  # يسقط تلقائياً للنموذج المجاني المباشر أدناه
+
+    # ── لا يوجد مفتاح OpenRouter صالح، أو فشل الاتصال به: نموذج مجاني مباشر ──
+    try:
+        from .free_router import chat_free
+
+        text, _used_model = chat_free(messages, temperature=0.7, max_tokens=300)
+        return text
+    except Exception as exc:
+        raise NotConfiguredError(
+            "تعذّر توليد الرد: لا يوجد OPENROUTER_API_KEY صالح، وفشلت كل "
+            f"النماذج المجانية المباشرة أيضاً. التفاصيل: {exc}"
+        ) from exc
 
 
 # ═════════════════════════════════════════════════════════════════════════════
