@@ -14,6 +14,7 @@ Python port + توسعة من api/lib/ultraplinian.ts في G0DM0D3-main.
 """
 from __future__ import annotations
 
+import os
 import re
 import time
 from collections import defaultdict
@@ -24,12 +25,32 @@ from typing import Callable, Dict, List, Optional
 import requests
 
 # ══════════════════════════════════════════════════════════════════════
+# نماذج مباشرة مجانية 100% (بدون OpenRouter) — Groq + Gemini + Cloudflare
+# ══════════════════════════════════════════════════════════════════════
+# صيغة المعرّف: "<مزوّد>:<اسم النموذج عند المزوّد>" — أي معرّف بدون هذه
+# البادئة (":") يُعامل كما كان دائماً: نموذج OpenRouter عادي.
+# هذا يضمن عدم كسر أي معرّف موجود مسبقاً في القوائم أدناه.
+#
+# لماذا هذه النماذج تحديداً: نفس المعرّفات المستخدمة والمُختبرة فعلياً في
+# ai/llm_fallback.py (سلسلة fallback الأساسية للمشروع) — احتمال عملها هنا
+# مرتفع لأنها مُثبَتة أصلاً في نفس المستودع.
+FREE_DIRECT_MODELS: List[str] = [
+    "groq:llama-3.1-8b-instant",
+    "groq:llama3-8b-8192",
+    "groq:gemma2-9b-it",
+    "gemini:gemini-1.5-flash",
+    "cloudflare:@cf/meta/llama-3.1-8b-instruct",
+]
+
+# ══════════════════════════════════════════════════════════════════════
 # قوائم النماذج (5 مستويات × ~10 نماذج = 51 نموذجاً)
 # ══════════════════════════════════════════════════════════════════════
 
 ULTRAPLINIAN_MODELS: Dict[str, List[str]] = {
     # ⚡ FAST (17 نموذج) — سريعة، رخيصة، مناسبة للرصيد المجاني
     "fast": [
+        # ↓ نماذج مباشرة 100% مجانية — لا تحتاج رصيد OpenRouter إطلاقاً
+        *FREE_DIRECT_MODELS,
         "google/gemini-2.5-flash",
         "deepseek/deepseek-chat",
         "meta-llama/llama-3.1-8b-instruct",
@@ -111,7 +132,8 @@ ULTRAPLINIAN_MODELS: Dict[str, List[str]] = {
 }
 
 # عدد نماذج كل مستوى تراكمياً — للعرض في الواجهة
-TIER_CUMULATIVE = {"fast": 17, "standard": 32, "smart": 43, "power": 53, "ultra": 63}
+# (+5 عبر كل المستويات بسبب FREE_DIRECT_MODELS المضافة في "fast")
+TIER_CUMULATIVE = {"fast": 22, "standard": 37, "smart": 48, "power": 58, "ultra": 68}
 
 # الحد الافتراضي للسباق (يُقيّد التكلفة)
 DEFAULT_MAX_MODELS = 6
@@ -296,6 +318,119 @@ class RaceResult:
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
+# نماذج Groq البديلة عند 403 على النموذج المطلوب (نفس منطق llm_fallback.py)
+_GROQ_FALLBACK_MODELS = ["llama-3.1-8b-instant", "llama3-8b-8192", "gemma2-9b-it"]
+
+
+def _parse_model_id(model: str) -> tuple[str, str]:
+    """
+    يفصل معرّف النموذج إلى (المزوّد, اسم النموذج عند المزوّد).
+    "groq:llama-3.1-8b-instant"                  -> ("groq", "llama-3.1-8b-instant")
+    "gemini:gemini-1.5-flash"                     -> ("gemini", "gemini-1.5-flash")
+    "cloudflare:@cf/meta/llama-3.1-8b-instruct"    -> ("cloudflare", "@cf/meta/llama-3.1-8b-instruct")
+    "google/gemini-2.5-flash" (بدون ":")           -> ("openrouter", "google/gemini-2.5-flash")
+    """
+    if ":" in model:
+        provider, _, real_model = model.partition(":")
+        if provider in ("groq", "gemini", "cloudflare", "openrouter"):
+            return provider, real_model
+    return "openrouter", model
+
+
+def _call_openrouter_model(
+    model: str, messages: list, api_key: str, temperature: float, max_tokens: int,
+) -> str:
+    if not api_key:
+        raise RuntimeError("OPENROUTER_API_KEY غير مضبوط في Secrets")
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://g0dm0d3.replit.app",
+        "X-Title": "G0DM0DE ULTRAPLINIAN",
+    }
+    payload = {
+        "model": model, "messages": messages, "stream": False,
+        "max_tokens": max_tokens, "temperature": temperature,
+    }
+    resp = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=90)
+    resp.raise_for_status()
+    data = resp.json()
+    return (data["choices"][0]["message"].get("content") or "").strip()
+
+
+def _call_groq_model(
+    model: str, messages: list, temperature: float, max_tokens: int,
+) -> str:
+    api_key = os.getenv("GROQ_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("GROQ_API_KEY غير مضبوط في Secrets")
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    candidates = [model] + [m for m in _GROQ_FALLBACK_MODELS if m != model]
+    last_exc: Optional[Exception] = None
+    for candidate in candidates:
+        try:
+            resp = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers=headers,
+                json={
+                    "model": candidate, "messages": messages, "stream": False,
+                    "max_tokens": max_tokens, "temperature": temperature,
+                },
+                timeout=90,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return (data["choices"][0]["message"].get("content") or "").strip()
+        except requests.exceptions.HTTPError as exc:
+            last_exc = exc
+            if exc.response is not None and exc.response.status_code == 403:
+                continue  # جرّب النموذج التالي
+            raise
+    raise last_exc or RuntimeError("فشلت كل نماذج Groq البديلة")
+
+
+def _call_gemini_model(
+    model: str, user_content: str, system_prompt: str, temperature: float, max_tokens: int,
+) -> str:
+    api_key = os.getenv("GOOGLE_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("GOOGLE_API_KEY غير مضبوط في Secrets")
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model}:generateContent?key={api_key}"
+    )
+    body = {
+        "system_instruction": {"parts": [{"text": system_prompt}]},
+        "contents": [{"role": "user", "parts": [{"text": user_content}]}],
+        "generationConfig": {"maxOutputTokens": max_tokens, "temperature": temperature},
+    }
+    resp = requests.post(url, json=body, headers={"Content-Type": "application/json"}, timeout=90)
+    resp.raise_for_status()
+    data = resp.json()
+    return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+
+def _call_cloudflare_model(
+    model: str, messages: list, max_tokens: int,
+) -> str:
+    token = os.getenv("CF_API_TOKEN", "").strip()
+    account = os.getenv("CF_ACCOUNT_ID", "").strip()
+    if not (token and account):
+        raise RuntimeError("CF_API_TOKEN أو CF_ACCOUNT_ID غير مضبوطين في Secrets")
+    url = f"https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/{model}"
+    resp = requests.post(
+        url,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json={"messages": messages, "max_tokens": max_tokens},
+        timeout=90,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return (
+        data.get("result", {}).get("response", "")
+        or data.get("choices", [{}])[0].get("message", {}).get("content", "")
+    ).strip()
+
 
 def _call_model(
     model: str,
@@ -304,26 +439,33 @@ def _call_model(
     temperature: float = 0.7,
     max_tokens: int = 2048,
 ) -> RaceResult:
-    """إرسال طلب واحد لنموذج واحد وإعادة النتيجة."""
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://g0dm0d3.replit.app",
-        "X-Title": "G0DM0DE ULTRAPLINIAN",
-    }
-    payload = {
-        "model": model,
-        "messages": messages,
-        "stream": False,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-    }
+    """
+    إرسال طلب واحد لنموذج واحد وإعادة النتيجة.
+    يُوجّه تلقائياً حسب بادئة المعرّف: groq:/gemini:/cloudflare: للاتصال
+    المباشر بالمزوّد (مجاني، بدون OpenRouter)، وأي معرّف آخر يمر عبر
+    OpenRouter كما كان الحال دائماً (لا تغيير في السلوك القديم).
+    """
+    provider, real_model = _parse_model_id(model)
     t0 = time.time()
     try:
-        resp = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=90)
-        resp.raise_for_status()
-        data = resp.json()
-        content = (data["choices"][0]["message"].get("content") or "").strip()
+        if provider == "groq":
+            content = _call_groq_model(real_model, messages, temperature, max_tokens)
+        elif provider == "gemini":
+            system_prompt = next(
+                (m["content"] for m in messages if m.get("role") == "system"), ""
+            )
+            user_content = next(
+                (m["content"] for m in reversed(messages) if m.get("role") == "user"), ""
+            )
+            content = _call_gemini_model(
+                real_model, user_content, system_prompt, temperature, max_tokens
+            )
+        elif provider == "cloudflare":
+            content = _call_cloudflare_model(real_model, messages, max_tokens)
+        else:
+            content = _call_openrouter_model(
+                real_model, messages, api_key, temperature, max_tokens
+            )
         return RaceResult(model=model, content=content, duration_ms=(time.time() - t0) * 1000)
     except Exception as exc:
         return RaceResult(
@@ -345,6 +487,11 @@ def friendly_error(raw_error: str) -> str:
     if not raw_error:
         return "خطأ غير معروف."
 
+    # رسائل المفاتيح المفقودة (تُرفع مباشرة بنص عربي واضح من _call_*_model) —
+    # تُعرض كما هي لأنها أصلاً مفهومة.
+    if "غير مضبوط" in raw_error or "غير مضبوطين" in raw_error:
+        return f"🔑 {raw_error} — أضِفه في Streamlit Secrets."
+
     if "402" in raw_error:
         return (
             "❌ رصيد OpenRouter غير كافٍ لهذا الحساب — الحل من داخل حساب "
@@ -353,15 +500,9 @@ def friendly_error(raw_error: str) -> str:
             "كإجراء ضد إساءة الاستخدام)."
         )
     if "404" in raw_error:
-        return (
-            "❌ اسم النموذج غير موجود أو غير متاح لحسابك على OpenRouter "
-            "حالياً — تحقّق من اسم الموديل في openrouter.ai/models."
-        )
-    if "401" in raw_error:
-        return (
-            "❌ مفتاح OpenRouter (OPENROUTER_API_KEY) غير صالح أو منتهي — "
-            "تأكد أنه نفس المفتاح الفعّال في حسابك من openrouter.ai/keys."
-        )
+        return "❌ اسم النموذج غير موجود أو غير متاح لحسابك عند هذا المزوّد حالياً."
+    if "401" in raw_error or "403" in raw_error:
+        return "❌ مفتاح API لهذا المزوّد غير صالح أو منتهي — تحقّق منه في Streamlit Secrets."
     if "429" in raw_error:
         return "⏳ تم تجاوز الحد المسموح من الطلبات (Rate Limit) — أعد المحاولة بعد قليل."
     if "timeout" in raw_error.lower() or "timed out" in raw_error.lower():
@@ -492,3 +633,18 @@ def total_model_count() -> int:
     for models in ULTRAPLINIAN_MODELS.values():
         all_models.update(models)
     return len(all_models)
+
+
+def available_providers() -> Dict[str, bool]:
+    """
+    يفحص متغيرات البيئة (المُحقونة من Streamlit Secrets) ويُعيد أي مزوّدين
+    جاهزين فعلياً — يُستخدم في الواجهة لتفعيل السباق حتى بدون مفتاح
+    OpenRouter، طالما يوجد مزوّد مباشر واحد على الأقل (Groq/Gemini/Cloudflare).
+    """
+    return {
+        "groq": bool(os.getenv("GROQ_API_KEY", "").strip()),
+        "gemini": bool(os.getenv("GOOGLE_API_KEY", "").strip()),
+        "cloudflare": bool(
+            os.getenv("CF_API_TOKEN", "").strip() and os.getenv("CF_ACCOUNT_ID", "").strip()
+        ),
+    }

@@ -4065,6 +4065,7 @@ try:
     from ai.ultraplinian import (
         ULTRAPLINIAN_MODELS, TIER_CUMULATIVE, DEFAULT_MAX_MODELS,
         run_race, get_tier_models, total_model_count, friendly_error,
+        available_providers,
     )
     _ULTRAPLINIAN_OK = True
 except Exception:
@@ -4074,6 +4075,8 @@ except Exception:
     DEFAULT_MAX_MODELS = 6
     def friendly_error(e):
         return e
+    def available_providers():
+        return {}
 
 # ── مساعدات رفع الملفات (PDF / صور) لدعم multimodal مع OpenRouter ──────────
 MAX_FILE_MB = 20
@@ -6818,13 +6821,27 @@ def render_ultraplinian():
     st.markdown("### ⚡ ULTRAPLINIAN — سباق النماذج المتوازي")
 
     _or_key = st.session_state.get("_or_api_key", "").strip()
+    _providers = available_providers()
+    _has_direct = any(_providers.values())
 
     if not _ULTRAPLINIAN_OK:
         st.warning("⚠️ تعذّر تحميل وحدة ai/ultraplinian.py.")
         return
-    if not _or_key:
-        st.info("🔑 أدخل OpenRouter API Key في الشريط الجانبي لتفعيل السباق.")
+    if not _or_key and not _has_direct:
+        st.info(
+            "🔑 لا يوجد أي مزوّد جاهز — أضِف OpenRouter API Key في الشريط "
+            "الجانبي، أو GROQ_API_KEY / GOOGLE_API_KEY / (CF_API_TOKEN + "
+            "CF_ACCOUNT_ID) في Streamlit Secrets لتفعيل السباق مجاناً بدون "
+            "OpenRouter."
+        )
         return
+
+    _direct_names = {"groq": "Groq", "gemini": "Gemini", "cloudflare": "Cloudflare"}
+    _active = [v for k, v in _direct_names.items() if _providers.get(k)]
+    if _active:
+        st.caption("✅ مزوّدون مباشرون مفعّلون (مجاناً بدون OpenRouter): " + "، ".join(_active))
+    elif not _or_key:
+        st.caption("ℹ️ لا يوجد مزوّد مباشر مفعّل — سيُستخدم OpenRouter فقط لكل النماذج.")
 
     st.caption(
         f"يرسل نفس السؤال إلى عدة نماذج في آنٍ واحد (حتى {total_model_count()} نموذجاً "
