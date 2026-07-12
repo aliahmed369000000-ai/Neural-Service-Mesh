@@ -12,9 +12,8 @@ import json
 import os
 import re
 import sqlite3
-import uuid
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Tuple
 from urllib.parse import quote
@@ -3983,13 +3982,11 @@ from qa_episodic_memory import (  # noqa: E402
 # ── NSM Chat (+ Generative Fallback) ──────────────────────────────────────
 try:
     from nsm_chat_plus import NSMChatPlus as NSMChat   # generative wrapper
-    from nsm_memory import ConversationMemory
     _NSM_CHAT_OK   = True
     _NSM_CHAT_PLUS = True
 except ImportError:
     try:
         from nsm_chat import NSMChat                   # fallback to original
-        from nsm_memory import ConversationMemory
         _NSM_CHAT_OK   = True
         _NSM_CHAT_PLUS = False
     except ImportError:
@@ -4025,7 +4022,7 @@ except Exception:
     _WEB_SEARCH_OK = False
 
 try:
-    from ai.arabic_nlp import ArabicNLPEngine, get_arabic_engine
+    from ai.arabic_nlp import get_arabic_engine
     _ARABIC_NLP_OK = True
 except Exception:
     _ARABIC_NLP_OK = False
@@ -4989,7 +4986,6 @@ def render_search():
         st.markdown(f"**المصادر:** {' ، '.join(sources)}")
     with col_conf:
         conf = result["confidence"]
-        bar_color = "#16a34a" if conf > 0.6 else "#f59e0b" if conf > 0.3 else "#dc2626"
         st.markdown(f"**درجة الثقة:** {conf:.0%}")
         st.progress(conf)
 
@@ -5358,12 +5354,10 @@ def render_higgsfield():
     Pipeline: Gemini Omni Flash (بحث) → NSM Agent Fable 5 (سرد) → Higgsfield API (فيديو).
     """
     # ── استيراد المحرك ────────────────────────────────────────────────
-    _hf_ok = False
     try:
         from ai.higgsfield_engine import (
             HiggsfieldEngine, build_gemini_llm, build_fable_llm
         )
-        _hf_ok = True
     except Exception as _hf_err:
         st.error(f"⚠️ تعذّر تحميل محرك Higgsfield: {_hf_err}")
         return
@@ -5495,8 +5489,6 @@ def render_higgsfield():
 
 def _render_hf_result(result):
     """يعرض نتائج Higgsfield Explainer."""
-    import os  # مضمون لكن نُعيد الاستيراد احترازياً
-
     script  = result.script
     scenes  = script.scenes
     has_vid = result.api_used
@@ -6070,7 +6062,7 @@ def render_health():
 
     # ── 8. مزوّد LLM الحالي ─────────────────────────────────────────────
     try:
-        from ai.llm_fallback import LLMFallback, ANTHROPIC_MODELS
+        from ai.llm_fallback import LLMFallback
         _fb = LLMFallback()
         fb_info = _fb.info()
         _prov   = fb_info.get("provider", "غير محدد")
@@ -6117,7 +6109,7 @@ def render_health():
         for col, (key, (model_id, label, desc)) in zip(cols, model_rows.items()):
             with col:
                 is_active = ANTHROPIC_MODELS.get(key) == model_id
-                border_color = "#1a73e8" if key == "sonnet" else "#e2e8f0"
+                border_color = "#1a73e8" if is_active else "#e2e8f0"
                 st.markdown(f"""
                 <div style="background:#f8faff;border:2px solid {border_color};border-radius:10px;
                             padding:0.8rem;text-align:center;direction:ltr">
@@ -6162,6 +6154,9 @@ def render_health():
                             ["git", "add", "-A"],
                             cwd=str(BASE), capture_output=True, text=True, timeout=15
                         )
+                        if r_add.returncode != 0:
+                            st.error(f"❌ فشل git add:\n{r_add.stderr[:400] or r_add.stdout[:400]}")
+                            raise RuntimeError("git add failed")
                         # git commit
                         r_commit = _sp.run(
                             ["git", "-c", "user.email=nsm@replit.com",
@@ -6244,7 +6239,7 @@ def render_advanced_api():
 
     # ── فحص توفّر المفتاح ────────────────────────────────────────────────
     try:
-        from ai.anthropic_advanced import AnthropicAdvanced, get_client
+        from ai.anthropic_advanced import AnthropicAdvanced
         from ai.llm_fallback import ANTHROPIC_MODELS
         _test_client = AnthropicAdvanced()
         _has_key = _test_client.available
