@@ -4064,7 +4064,7 @@ except Exception:
 try:
     from ai.ultraplinian import (
         ULTRAPLINIAN_MODELS, TIER_CUMULATIVE, DEFAULT_MAX_MODELS,
-        run_race, get_tier_models, total_model_count,
+        run_race, get_tier_models, total_model_count, friendly_error,
     )
     _ULTRAPLINIAN_OK = True
 except Exception:
@@ -4072,6 +4072,8 @@ except Exception:
     ULTRAPLINIAN_MODELS = {}
     TIER_CUMULATIVE = {}
     DEFAULT_MAX_MODELS = 6
+    def friendly_error(e):
+        return e
 
 # ── مساعدات رفع الملفات (PDF / صور) لدعم multimodal مع OpenRouter ──────────
 MAX_FILE_MB = 20
@@ -6935,7 +6937,8 @@ def render_ultraplinian():
         if failures:
             with st.expander(f"⚠ {len(failures)} نموذج فشل"):
                 for r in failures:
-                    st.caption(f"{r.model}: {r.error}")
+                    st.caption(f"**{r.model}**")
+                    st.caption(friendly_error(r.error))
 
 
 # ══════════════════════════════════════════════════════════════════════════
