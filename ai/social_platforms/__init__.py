@@ -16,6 +16,9 @@ from .instagram_adapter import InstagramAdapter
 from .facebook_adapter import FacebookAdapter
 from .youtube_adapter import YouTubeAdapter
 from .tiktok_adapter import TikTokAdapter
+from .reddit_adapter import RedditAdapter
+from .linkedin_adapter import LinkedInAdapter
+from .threads_adapter import ThreadsAdapter
 
 ALL_ADAPTERS = {
     "discord": DiscordAdapter,
@@ -25,6 +28,9 @@ ALL_ADAPTERS = {
     "facebook": FacebookAdapter,
     "youtube": YouTubeAdapter,
     "tiktok": TikTokAdapter,
+    "reddit": RedditAdapter,
+    "linkedin": LinkedInAdapter,
+    "threads": ThreadsAdapter,
 }
 
 PLATFORM_LABELS_AR = {
@@ -35,11 +41,15 @@ PLATFORM_LABELS_AR = {
     "facebook": "📘 Facebook",
     "youtube": "▶️ YouTube",
     "tiktok": "🎵 TikTok",
+    "reddit": "👽 Reddit",
+    "linkedin": "💼 LinkedIn",
+    "threads": "🧵 Threads",
 }
 
 __all__ = [
     "PlatformAdapter", "SocialItem", "NotConfiguredError",
     "DiscordAdapter", "TelegramAdapter", "TwitterAdapter",
     "InstagramAdapter", "FacebookAdapter", "YouTubeAdapter", "TikTokAdapter",
+    "RedditAdapter", "LinkedInAdapter", "ThreadsAdapter",
     "ALL_ADAPTERS", "PLATFORM_LABELS_AR",
 ]

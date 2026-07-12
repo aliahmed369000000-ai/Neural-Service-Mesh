@@ -8020,11 +8020,15 @@ def render_social_agent():
     st.markdown('<div class="section-header">📡 الوكيل الاجتماعي</div>', unsafe_allow_html=True)
     st.caption(
         "نشر + رد تلقائي + مراقبة عبر Discord وTelegram وTwitter/X وInstagram "
-        "وFacebook وYouTube وTikTok، بنفس شخصية NSM الموحّدة."
+        "وFacebook وYouTube وTikTok وReddit وLinkedIn وThreads، بنفس شخصية NSM "
+        "الموحّدة — مع جدولة منشورات وتحليل مشاعر وردود تتذكّر كل شخص."
     )
 
     try:
-        from ai.social_agent import get_manager, get_config, set_config, get_recent_events
+        from ai.social_agent import (
+            get_manager, get_config, set_config, get_recent_events,
+            schedule_post, get_scheduled, cancel_scheduled, get_analytics_summary,
+        )
         from ai.social_platforms import PLATFORM_LABELS_AR
     except Exception as _sa_err:
         st.error(f"⚠️ تعذّر تحميل وحدة الوكيل الاجتماعي: {_sa_err}")
@@ -8113,13 +8117,71 @@ def render_social_agent():
                     st.success(f"{label}: ✅ {res}")
 
     st.markdown("---")
+    st.markdown("#### 📅 جدولة المنشورات (تقويم المحتوى)")
+    st.caption("⏰ الأوقات بتوقيت UTC — الخادم يعالج المنشور المستحق في أقرب دورة استطلاع.")
+    sch_col1, sch_col2 = st.columns(2)
+    with sch_col1:
+        sch_date = st.date_input("تاريخ النشر", key="social_sched_date")
+    with sch_col2:
+        sch_time = st.time_input("وقت النشر (UTC)", key="social_sched_time")
+    sch_text = st.text_area("نص المنشور المجدول", key="social_sched_text", height=80)
+    sch_platforms = st.multiselect(
+        "المنصات", options=list(PLATFORM_LABELS_AR.keys()),
+        format_func=lambda p: PLATFORM_LABELS_AR.get(p, p), key="social_sched_platforms",
+    )
+    if st.button("📌 جدولة المنشور", key="social_sched_btn"):
+        if not sch_text.strip():
+            st.warning("أدخل نص المنشور أولاً.")
+        elif not sch_platforms:
+            st.warning("اختر منصة واحدة على الأقل.")
+        else:
+            sched_dt = datetime.combine(sch_date, sch_time).isoformat() + "+00:00"
+            schedule_post(sch_platforms, sch_text.strip(), sched_dt)
+            st.success(f"✅ تمت الجدولة على {sched_dt}")
+            st.rerun()
+
+    scheduled = get_scheduled(status="pending")
+    if scheduled:
+        st.caption(f"**{len(scheduled)} منشور مجدول قيد الانتظار:**")
+        for sid, plats, text, sched_at, status, pub_at, result in scheduled:
+            plat_names = "، ".join(PLATFORM_LABELS_AR.get(p, p) for p in plats)
+            c1, c2 = st.columns([5, 1])
+            with c1:
+                st.caption(f"🕐 {sched_at} — {plat_names} — {text[:60]}")
+            with c2:
+                if st.button("❌", key=f"cancel_sched_{sid}"):
+                    cancel_scheduled(sid)
+                    st.rerun()
+    else:
+        st.caption("لا توجد منشورات مجدولة حالياً.")
+
+    st.markdown("---")
+    st.markdown("#### 📈 لوحة التحليلات (آخر 7 أيام)")
+    analytics = get_analytics_summary(days=7)
+    if not analytics:
+        st.caption("لا توجد بيانات كافية بعد.")
+    else:
+        for pid, s in analytics.items():
+            label = PLATFORM_LABELS_AR.get(pid, pid)
+            total_sent = s["positive"] + s["negative"] + s["neutral"]
+            sent_str = (
+                f"😊 {s['positive']} · 😐 {s['neutral']} · 😠 {s['negative']}"
+                if total_sent else "لا بيانات مشاعر"
+            )
+            st.markdown(
+                f"**{label}** — إشارات: {s['monitor_hit']} · ردود: {s['reply']} "
+                f"(فشل: {s['reply_failed']}) · منشورات: {s['publish']} (فشل: {s['publish_failed']})"
+            )
+            st.caption(f"المشاعر: {sent_str}")
+
+    st.markdown("---")
     st.markdown("#### 🧾 آخر الأحداث")
     events = get_recent_events(20)
     if not events:
         st.caption("لا توجد أحداث بعد.")
     else:
         for ev in events:
-            st.caption(" · ".join(str(x) for x in ev))
+            st.caption(" · ".join(str(x) for x in ev if x is not None))
 
 
 # ══════════════════════════════════════════════════════════════════════════
