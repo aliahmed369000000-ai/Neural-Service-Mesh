@@ -4,3 +4,9 @@ expertMode = true
 
 [nix]
 channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+GITHUB_REMOTE = "https://github.com/aliahmed369000000-ai/Neural-Service-Mesh"
+GITHUB_USER = "aliahmed369000000-ai"
