@@ -195,14 +195,18 @@ class AnthropicAdvanced:
 
     # ── الاستدعاء الأساسي ────────────────────────────────────────────────
 
-    def _call(self, payload: Dict) -> APIResult:
-        """يُرسل الطلب ويُعيد APIResult مُعبَّأ."""
+    def _call(self, payload: Dict, extra_headers: Optional[Dict[str, str]] = None) -> APIResult:
+        """يُرسل الطلب ويُعيد APIResult مُعبَّأ.
+        extra_headers: ترويسات إضافية (مثل anthropic-beta لميزات مبكّرة كـ MCP)."""
         t0 = time.time()
+        headers = self._headers()
+        if extra_headers:
+            headers.update(extra_headers)
         try:
             data = _post_json(
                 _ANTHROPIC_API_URL,
                 payload,
-                self._headers(),
+                headers,
                 self.timeout,
             )
             text, tool_calls, tool_results = _parse_content_blocks(
@@ -446,7 +450,9 @@ class AnthropicAdvanced:
         }
         if system:
             payload["system"] = system
-        return self._call(payload)
+        # يتطلب Anthropic API ترويسة beta مخصّصة لتفعيل ميزة MCP Connector،
+        # وإلا يرفض الخادم حقل mcp_servers في الحمولة.
+        return self._call(payload, extra_headers={"anthropic-beta": "mcp-client-2025-04-04"})
 
     # ════════════════════════════════════════════════════════════════════════
     # ❻  استدعاء stateful لتطبيقات/ألعاب

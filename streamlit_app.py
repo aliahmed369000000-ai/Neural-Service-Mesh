@@ -6320,7 +6320,9 @@ def render_advanced_api():
     # ══════════════════════════════════════════════════════════════════════
     # الأقسام الثلاثة
     # ══════════════════════════════════════════════════════════════════════
-    sec1, sec2, sec3 = st.tabs(["🌐 بحث الويب", "🖼️ تحليل الصور", "📐 JSON منظّم"])
+    sec1, sec2, sec3, sec4 = st.tabs(
+        ["🌐 بحث الويب", "🖼️ تحليل الصور", "📐 JSON منظّم", "🔌 MCP Servers"]
+    )
 
     # ────────────────────────────────────────────────────────────────────
     # القسم 1 — Web Search Tool
@@ -6488,6 +6490,75 @@ def render_advanced_api():
                         key="json_download",
                     )
 
+    # ────────────────────────────────────────────────────────────────────
+    # القسم 4 — MCP Servers (Model Context Protocol)
+    # ────────────────────────────────────────────────────────────────────
+    with sec4:
+        st.markdown("""
+        <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;
+                    padding:0.9rem 1.2rem;direction:rtl;margin-bottom:1rem">
+            <strong>🔌 MCP Servers (Model Context Protocol)</strong><br>
+            <small>يتصل النموذج مباشرة بخوادم MCP بعيدة (Google Drive، Gmail، Google
+            Calendar، Canva، Figma، أو أي خادم MCP آخر) وينفّذ أدواتها الفعلية أثناء
+            توليد الرد. يتطلب أن يكون الحساب المرتبط مصرّحاً (OAuth) لكل خادم حسب
+            سياسته الخاصة.</small>
+        </div>
+        """, unsafe_allow_html=True)
+
+        MCP_PRESETS = {
+            "Google Drive":   "https://drivemcp.googleapis.com/mcp/v1",
+            "Gmail":          "https://gmailmcp.googleapis.com/mcp/v1",
+            "Google Calendar": "https://calendarmcp.googleapis.com/mcp/v1",
+            "Canva":          "https://mcp.canva.com/mcp",
+            "Figma":          "https://mcp.figma.com/mcp",
+        }
+        mcp_chosen = st.multiselect(
+            "اختر خوادم MCP جاهزة للتفعيل",
+            options=list(MCP_PRESETS.keys()),
+            key="mcp_servers_choice",
+        )
+        mcp_custom_url = st.text_input(
+            "أو أضف رابط خادم MCP مخصّص (اختياري)",
+            placeholder="https://example.com/mcp",
+            key="mcp_custom_url",
+        )
+        mcp_query = st.text_area(
+            "سؤالك/طلبك",
+            placeholder="مثال: لخّص آخر ملف في Google Drive باسم يحتوي 'تفسير'.",
+            height=110, key="mcp_query",
+        )
+
+        if st.button("🔌 نفّذ عبر MCP", key="mcp_run", use_container_width=True, type="primary"):
+            servers = [
+                {"type": "url", "url": MCP_PRESETS[name], "name": name}
+                for name in mcp_chosen
+            ]
+            if mcp_custom_url.strip():
+                servers.append({"type": "url", "url": mcp_custom_url.strip(), "name": "مخصّص"})
+
+            if not mcp_query.strip():
+                st.warning("أدخل سؤالك أولاً.")
+            elif not servers:
+                st.warning("اختر خادم MCP واحداً على الأقل أو أضف رابطاً مخصصاً.")
+            else:
+                with st.spinner("⟳ يتصل بخوادم MCP..."):
+                    mcp_result = client.ask_with_mcp(mcp_query.strip(), servers)
+
+                if mcp_result.error:
+                    st.error(f"❌ {mcp_result.error}")
+                else:
+                    st.success("✅ تم")
+                    if mcp_result.text:
+                        st.markdown(mcp_result.text)
+                    if mcp_result.tool_calls:
+                        with st.expander(f"🔧 استدعاءات الأدوات ({len(mcp_result.tool_calls)})"):
+                            for tc in mcp_result.tool_calls:
+                                st.json(tc)
+                    if mcp_result.tool_results:
+                        with st.expander(f"📄 نتائج الأدوات ({len(mcp_result.tool_results)})"):
+                            for tr in mcp_result.tool_results:
+                                st.code(tr[:2000])
+
     # ── ملاحظة ختامية ───────────────────────────────────────────────────
     st.markdown("---")
     st.caption(
@@ -6585,7 +6656,7 @@ def main():
                     "❓ الأسئلة والأجوبة", "💬 المحادثة", "🤖 وكلاء AI",
                     "🎭 إبداع", "🌐 ترجمة", "🎬 Higgsfield", "🎓 التدريب", "🧠 الذاكرة",
                     "🏥 صحة النظام", "🔬 API متقدمة", "⚙️ النظام الداخلي",
-                    "🤝 منسّق الوكلاء", "⚡ ULTRAPLINIAN",
+                    "🤝 منسّق الوكلاء", "📡 الوكيل الاجتماعي", "⚡ ULTRAPLINIAN",
                     "🧩 الواجهات التفاعلية", "🖥️ لوحة المطوّر", "ℹ️ عن NSM"])
 
     with tabs[0]: render_home()
@@ -6603,10 +6674,11 @@ def main():
     with tabs[12]: render_advanced_api()
     with tabs[13]: render_system_core()
     with tabs[14]: render_agent_orchestrator()
-    with tabs[15]: render_ultraplinian()
-    with tabs[16]: render_artifacts_studio()
-    with tabs[17]: render_dev_console()
-    with tabs[18]: render_product_info()
+    with tabs[15]: render_social_agent()
+    with tabs[16]: render_ultraplinian()
+    with tabs[17]: render_artifacts_studio()
+    with tabs[18]: render_dev_console()
+    with tabs[19]: render_product_info()
 
     # ── تذييل الصفحة ─────────────────────────────────────────────────────
     st.markdown("---")
@@ -7941,6 +8013,115 @@ def render_chat():
 
 # ══════════════════════════════════════════════════════════════════════════
 # تبويب وكلاء AI — صفحة مستقلة لكل فئة/تخصص
+def render_social_agent():
+    """يدير الوكيل الاجتماعي الموحّد (ai/social_agent.py): تشغيل/إيقاف
+    الاستطلاع التلقائي، اختيار المنصات المفعّلة وكلمات المراقبة، النشر
+    اليدوي الفوري، وعرض آخر الأحداث/الأخطاء لكل منصة."""
+    st.markdown('<div class="section-header">📡 الوكيل الاجتماعي</div>', unsafe_allow_html=True)
+    st.caption(
+        "نشر + رد تلقائي + مراقبة عبر Discord وTelegram وTwitter/X وInstagram "
+        "وFacebook وYouTube وTikTok، بنفس شخصية NSM الموحّدة."
+    )
+
+    try:
+        from ai.social_agent import get_manager, get_config, set_config, get_recent_events
+        from ai.social_platforms import PLATFORM_LABELS_AR
+    except Exception as _sa_err:
+        st.error(f"⚠️ تعذّر تحميل وحدة الوكيل الاجتماعي: {_sa_err}")
+        return
+
+    mgr = get_manager()
+    status = mgr.status()
+
+    col_state, col_action = st.columns([2, 1])
+    running = mgr.is_running()
+    with col_state:
+        st.markdown(f"**حالة الخدمة:** {'🟢 تعمل' if running else '⚪ متوقفة'}")
+    with col_action:
+        if running:
+            if st.button("⏹️ إيقاف", key="social_stop", use_container_width=True):
+                mgr.stop()
+                st.rerun()
+        else:
+            if st.button("▶️ تشغيل", key="social_start", use_container_width=True):
+                mgr.start()
+                st.rerun()
+
+    st.markdown("---")
+    st.markdown("#### ⚙️ إعدادات المراقبة")
+
+    selected = st.multiselect(
+        "المنصات المفعّلة",
+        options=list(PLATFORM_LABELS_AR.keys()),
+        default=list(set(get_config("enabled_platforms", []))),
+        format_func=lambda p: PLATFORM_LABELS_AR.get(p, p),
+        key="social_enabled_platforms",
+    )
+    keywords_str = st.text_input(
+        "كلمات مفتاحية للمراقبة (مفصولة بفاصلة، اتركه فارغاً لمراقبة كل شيء)",
+        value=", ".join(get_config("keywords", [])),
+        key="social_keywords",
+    )
+    auto_reply = st.checkbox(
+        "🤖 رد تلقائي على الإشارات المطابقة",
+        value=get_config("auto_reply", False), key="social_auto_reply",
+    )
+    poll_interval = st.slider(
+        "فترة الاستطلاع (ثانية)", 30, 600,
+        int(get_config("poll_interval", 90)), 10, key="social_poll_interval",
+    )
+    if st.button("💾 حفظ الإعدادات", key="social_save_settings", type="primary"):
+        set_config("enabled_platforms", selected)
+        set_config("keywords", [k.strip() for k in keywords_str.split(",") if k.strip()])
+        set_config("auto_reply", auto_reply)
+        set_config("poll_interval", poll_interval)
+        st.success("✅ تم الحفظ.")
+        st.rerun()
+
+    st.markdown("---")
+    st.markdown("#### 📊 حالة المنصات")
+    for pid, s in status.items():
+        label = PLATFORM_LABELS_AR.get(pid, pid)
+        badge = "🟢 مُهيّأة" if s.configured else f"🔴 غير مُهيّأة (يلزم: {', '.join(s.missing_env) or '—'})"
+        line = f"- **{label}** — {badge}"
+        if s.last_poll:
+            line += f" · آخر استطلاع: {s.last_poll}"
+        st.markdown(line)
+        if s.last_error:
+            st.caption(f"⚠️ آخر خطأ: {s.last_error}")
+
+    st.markdown("---")
+    st.markdown("#### ✍️ نشر يدوي فوري")
+    publish_text = st.text_area("النص", key="social_publish_text", height=100)
+    publish_platforms = st.multiselect(
+        "انشر على:", options=list(PLATFORM_LABELS_AR.keys()),
+        format_func=lambda p: PLATFORM_LABELS_AR.get(p, p), key="social_publish_platforms",
+    )
+    if st.button("🚀 نشر الآن", key="social_publish_btn", type="primary"):
+        if not publish_text.strip():
+            st.warning("أدخل نصاً أولاً.")
+        elif not publish_platforms:
+            st.warning("اختر منصة واحدة على الأقل.")
+        else:
+            with st.spinner("⟳ ينشر..."):
+                results = mgr.publish_to(publish_platforms, publish_text.strip())
+            for pid, res in results.items():
+                label = PLATFORM_LABELS_AR.get(pid, pid)
+                if str(res).startswith("ERROR"):
+                    st.error(f"{label}: {res}")
+                else:
+                    st.success(f"{label}: ✅ {res}")
+
+    st.markdown("---")
+    st.markdown("#### 🧾 آخر الأحداث")
+    events = get_recent_events(20)
+    if not events:
+        st.caption("لا توجد أحداث بعد.")
+    else:
+        for ev in events:
+            st.caption(" · ".join(str(x) for x in ev))
+
+
 # ══════════════════════════════════════════════════════════════════════════
 def render_agents_hub():
     """يعرض تبويباً فرعياً مستقلاً لكل فئة من وكلاء الذكاء الاصطناعي المتخصصين."""
