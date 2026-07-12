@@ -2,8 +2,8 @@
 SOCIAL AGENT — الوكيل الاجتماعي الموحد
 ==========================================
 خدمة خلفية واحدة تشغّل عدة منصات تواصل بالتوازي: تنشر + ترد تلقائياً +
-تراقب كلمات/إشارات مفتاحية — وتستخدم نفس محرك GODMODE/OpenRouter الذي
-يستعمله الوكيل الأساسي في app.py (نفس الشخصية والسياق، ليس نظاماً منفصلاً).
+تراقب كلمات/إشارات مفتاحية — وتستخدم نفس محرك الشخصية الموحّدة (NSM_PERSONA_PROMPT)
+عبر OpenRouter الذي يستعمله الوكيل الأساسي في app.py (نفس الشخصية والسياق، ليس نظاماً منفصلاً).
 
 يعمل كـ singleton على مستوى العملية (process-wide) في خيط (thread) واحد
 يستطلع كل منصة مُفعَّلة كل SocialAgentManager.poll_interval ثانية، بشكل
@@ -29,7 +29,7 @@ from typing import Dict, List, Optional
 from .social_platforms import ALL_ADAPTERS, PLATFORM_LABELS_AR, SocialItem, NotConfiguredError
 
 try:
-    from .godmode import GODMODE_SYSTEM_PROMPT
+    from .godmode import NSM_PERSONA_PROMPT as GODMODE_SYSTEM_PROMPT
 except Exception:  # pragma: no cover
     GODMODE_SYSTEM_PROMPT = "You are a helpful, direct assistant."
 
