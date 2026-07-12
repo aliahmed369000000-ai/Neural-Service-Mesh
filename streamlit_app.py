@@ -5930,6 +5930,56 @@ def render_memory():
     else:
         st.info("لا توجد أسئلة محفوظة بعد. استخدم تبويب «الأسئلة والأجوبة» لبدء بناء الذاكرة التجريبية.")
 
+    # ── سجل المحادثات المحفوظة (nsm_memory.py — SQLite) ──────────────────
+    st.markdown("")
+    st.markdown('<div class="section-header">📜 سجل المحادثات المحفوظة</div>', unsafe_allow_html=True)
+    try:
+        from nsm_memory import _LongTermStore as _NSMLongTermStore
+        _mem_store = _NSMLongTermStore()
+        _all_sessions = _mem_store.list_sessions(limit=100)
+    except Exception as _mem_err:
+        _mem_store = None
+        _all_sessions = []
+        st.caption(f"⚠️ تعذّر تحميل سجل المحادثات: {_mem_err}")
+
+    if _mem_store is not None:
+        if not _all_sessions:
+            st.info("لا توجد محادثات محفوظة بعد. ابدأ محادثة في تبويب «💬 المحادثة».")
+        else:
+            _sess_labels = {
+                s["session_id"]: f"{s['session_id']} · {s['turns']} رسالة · "
+                                 f"{datetime.fromtimestamp(s['last_ts']).strftime('%Y-%m-%d %H:%M') if s.get('last_ts') else ''}"
+                for s in _all_sessions
+            }
+            _mem_col1, _mem_col2 = st.columns([2, 1])
+            with _mem_col1:
+                _chosen_session = st.selectbox(
+                    "اختر جلسة لاستعراض محادثاتها",
+                    options=list(_sess_labels.keys()),
+                    format_func=lambda k: _sess_labels.get(k, k),
+                    key="mem_browse_session",
+                )
+            with _mem_col2:
+                _mem_search = st.text_input(
+                    "🔎 ابحث داخل هذه الجلسة", key="mem_browse_search", placeholder="كلمة مفتاحية..."
+                )
+
+            _turns = _mem_store.list_recent_turns(limit=200, session_id=_chosen_session)
+            if _mem_search.strip():
+                _needle = _mem_search.strip().lower()
+                _turns = [t for t in _turns if _needle in t["user"].lower() or _needle in t["bot"].lower()]
+
+            st.caption(f"عدد الأدوار المعروضة: {len(_turns)}")
+            for _t in _turns[:50]:
+                _ts_str = datetime.fromtimestamp(_t["ts"]).strftime("%Y-%m-%d %H:%M") if _t.get("ts") else ""
+                st.markdown(f"""
+                <div class="root-item">
+                    <span class="badge badge-blue">👤 {_t['user'][:200]}</span><br>
+                    <span class="badge badge-purple" style="margin-top:4px">🧠 {_t['bot'][:300]}</span>
+                    <br><small style="color:#888">{_ts_str} · {_t.get('topic') or 'بدون موضوع'}</small>
+                </div>
+                """, unsafe_allow_html=True)
+
 
 def render_health():
     """تبويب صحة النظام."""
