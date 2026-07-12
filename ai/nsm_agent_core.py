@@ -231,7 +231,7 @@ def _call_api(messages: List[Dict]) -> str:
     gemini_key = os.getenv("GOOGLE_API_KEY", "").strip()
     if gemini_key:
         url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
-               f"gemini-1.5-flash:generateContent?key={gemini_key}")
+               f"gemini-2.5-flash:generateContent?key={gemini_key}")
         parts: List[Dict] = []
         sys_text = ""
         for m in messages:

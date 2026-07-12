@@ -6,7 +6,7 @@ LLM Generative Fallback Engine — NSM v18.3
 الأولوية في اختيار المزوّد (auto-detect من env vars):
   1. Anthropic Claude (ANTHROPIC_API_KEY) — Claude Sonnet 5 ← الأولوية الأولى ✅
   2. Cloudflare Workers AI (CF_API_TOKEN + CF_ACCOUNT_ID) — مجاني 10k/يوم
-  3. Google Gemini   (GOOGLE_API_KEY)   — Gemini 1.5 Flash
+  3. Google Gemini   (GOOGLE_API_KEY)   — Gemini 2.5 Flash
   4. OpenRouter      (OPENROUTER_API_KEY)
   5. Groq            (GROQ_API_KEY)     — قد يُحجب من بعض الشبكات
   6. OpenAI API      (OPENAI_API_KEY)   — GPT-4o-mini
@@ -99,8 +99,8 @@ _OPENROUTER_MODEL = "meta-llama/llama-3.1-8b-instruct:free"  # مجاني
 _OPENROUTER_URL   = "https://openrouter.ai/api/v1/chat/completions"
 _OPENAI_MODEL     = "gpt-4o-mini"
 _TOGETHER_MODEL   = "meta-llama/Llama-3-8b-chat-hf"
-_GEMINI_MODEL     = "gemini-1.5-flash"
-_GROQ_MODELS          = ["llama-3.1-8b-instant", "llama3-8b-8192", "gemma2-9b-it"]
+_GEMINI_MODEL     = "gemini-2.5-flash"  # gemini-1.5-flash أُطفئ نهائياً ويرجع 404
+_GROQ_MODELS          = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "openai/gpt-oss-20b"]
 _FAILURE_COOLDOWN_SEC = 300   # 5 دقائق قبل إعادة تجربة مزوّد فاشل
 
 
