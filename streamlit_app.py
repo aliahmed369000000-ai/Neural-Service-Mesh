@@ -4053,13 +4053,11 @@ except Exception:
 
 try:
     from ai.godmode import (
-        GODMODE_SYSTEM_PROMPT, HALL_OF_FAME, apply_combo,
-        compute_autotune, STM_MODULES, apply_stms, AutoTuneStrategy,
-        STRATEGY_PROFILES,
+        NSM_PERSONA_PROMPT, COORDINATOR_SYSTEM_PROMPT, route_query,
     )
-    _GODMODE_OK = True
+    _ORCHESTRATOR_OK = True
 except Exception:
-    _GODMODE_OK = False
+    _ORCHESTRATOR_OK = False
 
 try:
     from ai.parseltongue import (
@@ -6546,7 +6544,7 @@ def main():
                     "❓ الأسئلة والأجوبة", "💬 المحادثة", "🤖 وكلاء AI",
                     "🎭 إبداع", "🌐 ترجمة", "🎬 Higgsfield", "🎓 التدريب", "🧠 الذاكرة",
                     "🏥 صحة النظام", "🔬 API متقدمة", "⚙️ النظام الداخلي",
-                    "🔓 G0DM0D3", "⚡ ULTRAPLINIAN",
+                    "🤝 منسّق الوكلاء", "⚡ ULTRAPLINIAN",
                     "🧩 الواجهات التفاعلية", "🖥️ لوحة المطوّر", "ℹ️ عن NSM"])
 
     with tabs[0]: render_home()
@@ -6563,7 +6561,7 @@ def main():
     with tabs[11]: render_health()
     with tabs[12]: render_advanced_api()
     with tabs[13]: render_system_core()
-    with tabs[14]: render_godmode()
+    with tabs[14]: render_agent_orchestrator()
     with tabs[15]: render_ultraplinian()
     with tabs[16]: render_artifacts_studio()
     with tabs[17]: render_dev_console()
@@ -6908,7 +6906,7 @@ def render_ultraplinian():
         models = get_tier_models(
             sel_tier, st.session_state["ultraplinian_max_models"], include_lower)
 
-        sys_prompt = GODMODE_SYSTEM_PROMPT if _GODMODE_OK else NSM_SYSTEM_PROMPT
+        sys_prompt = NSM_PERSONA_PROMPT if _ORCHESTRATOR_OK else NSM_SYSTEM_PROMPT
 
         progress_box = st.empty()
         progress_bar = st.progress(0.0)
@@ -8415,483 +8413,95 @@ def render_system_core():
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# تبويب 🔓 G0DM0D3 — نظام Prompts المُحرَّرة + Parseltongue + AutoTune + STM
+# تبويب 🤝 منسّق الوكلاء — توزيع مهمة واحدة على وكلاء Agents Hub الفعليين
 # ══════════════════════════════════════════════════════════════════════════
-def render_godmode():
-    """واجهة G0DM0D3 الكاملة مدمجة في Streamlit."""
+def render_agent_orchestrator():
+    """يوجّه مهمة/سؤال المستخدم تلقائياً إلى وكيل أو أكثر من وكلاء
+    "🤖 وكلاء AI" الفعليين (نفس جلسات session_state وذاكرة المحادثة
+    المستخدَمة في تبويب Agents Hub)، ثم يعرض ردودهم، مع توليف اختياري
+    لإجابة موحّدة. يطبّق نمط Multi-Agent Systems: تفويض مهمة رئيسية إلى
+    وكلاء متخصصين ثم تجميع نتائجهم عبر وكيل "منسّق"."""
     st.markdown("""
     <div style="text-align:center;padding:1rem 0 0.5rem">
-        <span style="font-size:2rem;filter:drop-shadow(0 0 12px #a855f7)">🔓</span>
-        <div style="font-size:1.6rem;font-weight:900;color:#a855f7;letter-spacing:4px;direction:ltr">
-            G0DM0D3
+        <span style="font-size:2rem">🤝</span>
+        <div style="font-size:1.5rem;font-weight:900;color:#38bdf8">
+            منسّق الوكلاء
         </div>
-        <div style="color:#999;font-size:0.85rem;direction:ltr;letter-spacing:2px">
-            LIBERATED AI · COGNITION WITHOUT CONTROL
+        <div style="color:#999;font-size:0.85rem;direction:rtl">
+            وزّع مهمتك تلقائياً على وكلاء "🤖 وكلاء AI" المتخصصين، ثم احصل على إجابة موحّدة
         </div>
     </div>
     """, unsafe_allow_html=True)
 
-    if not _GODMODE_OK:
-        st.error("⚠️ تعذّر تحميل وحدة ai/godmode.py")
+    if not _AGENTS_HUB_OK or not _ORCHESTRATOR_OK:
+        st.error("⚠️ تعذّر تحميل وحدات الوكلاء (ai/agent_categories.py أو ai/godmode.py).")
         return
 
-    gm_tabs = st.tabs([
-        "📜 System Prompt",
-        "🔥 GODMODE Classic",
-        "🏆 Hall of Fame",
-        "🐍 Parseltongue",
-        "🎛 AutoTune",
-        "⚡ STM Modules",
-        "📖 That.md",
-    ])
+    st.markdown(
+        '<p style="color:#999;direction:rtl">اكتب مهمة أو سؤالاً مركّباً، وسيُحدَّد تلقائياً '
+        'أنسب وكيل/وكلاء من تبويب "🤖 وكلاء AI" للإجابة عليه — بنفس ذاكرة محادثتهم الفعلية. '
+        'يمكنك أيضاً اختيار الوكلاء يدوياً.</p>',
+        unsafe_allow_html=True,
+    )
 
-    # ══════════════════ 1. System Prompt Viewer ══════════════════
-    with gm_tabs[0]:
-        st.markdown('<div class="section-header">📜 GODMODE System Prompt</div>', unsafe_allow_html=True)
-        st.markdown(
-            '<p style="color:#999;direction:ltr">The master system prompt that unlocks unrestricted cognition. '
-            'Copy and use with any OpenRouter-compatible model.</p>',
-            unsafe_allow_html=True,
-        )
-        _gm_col1, _gm_col2 = st.columns([3, 1])
-        with _gm_col1:
-            st.code(GODMODE_SYSTEM_PROMPT, language="markdown")
-        with _gm_col2:
-            st.download_button(
-                "⬇️ تحميل",
-                data=GODMODE_SYSTEM_PROMPT,
-                file_name="godmode_system_prompt.md",
-                mime="text/markdown",
-                use_container_width=True,
-            )
-            st.metric("الأحرف", len(GODMODE_SYSTEM_PROMPT))
-            st.metric("الكلمات", len(GODMODE_SYSTEM_PROMPT.split()))
+    manual = st.multiselect(
+        "اختر وكلاء يدوياً (اختياري — إن تُرك فارغاً يتم التوجيه التلقائي):",
+        options=CATEGORY_ORDER,
+        format_func=lambda k: f"{AGENT_CATEGORIES[k].emoji} {AGENT_CATEGORIES[k].title}",
+        key="orch_manual_agents",
+    )
 
-    # ══════════════════ 2. GODMODE Classic Chat ══════════════════
-    with gm_tabs[1]:
-        st.markdown('<div class="section-header">🔥 GODMODE Classic — محادثة بدون قيود</div>', unsafe_allow_html=True)
-        st.markdown(
-            '<p style="color:#f59e0b;direction:ltr">⚠️ Research mode. Uses GODMODE system prompt via your LLM provider.</p>',
-            unsafe_allow_html=True,
-        )
+    task = st.text_area(
+        "المهمة أو السؤال:",
+        placeholder="مثال: راجع خطة إطلاق ميزة جديدة من ناحية الأتمتة والتحليل والمخاطر",
+        key="orch_task_input",
+        height=100,
+    )
 
-        if "godmode_chat" not in st.session_state:
-            st.session_state["godmode_chat"] = []
+    synth = st.checkbox("🧩 وَلِّف الردود في إجابة واحدة موحّدة", value=True, key="orch_synth")
 
-        _gm_hist = st.session_state["godmode_chat"]
-
-        _gm_chat_container = st.container()
-        with _gm_chat_container:
-            for role, msg in _gm_hist:
-                _icon = "🧑" if role == "user" else "🤖"
-                _bg   = "#1e293b" if role == "user" else "#0f1f3d"
-                _dir  = "rtl" if any("\u0600" <= c <= "\u06FF" for c in msg[:30]) else "ltr"
-                st.markdown(f"""
-                <div style="background:{_bg};border-radius:10px;padding:0.8rem 1rem;
-                            margin:0.4rem 0;direction:{_dir};line-height:1.7">
-                    <strong>{_icon}</strong> {msg}
-                </div>
-                """, unsafe_allow_html=True)
-
-        _gm_input_cols = st.columns([4, 1, 1])
-        with _gm_input_cols[0]:
-            _gm_q = st.text_input(
-                "رسالتك",
-                placeholder="اكتب أي شيء — لا قيود في هذا الوضع...",
-                key="godmode_classic_input",
-                label_visibility="collapsed",
-            )
-        with _gm_input_cols[1]:
-            _gm_send = st.button("🔥 أرسل", key="godmode_classic_send", use_container_width=True, type="primary")
-        with _gm_input_cols[2]:
-            if st.button("🗑 مسح", key="godmode_classic_clear", use_container_width=True):
-                st.session_state["godmode_chat"] = []
-                st.rerun()
-
-        if _gm_send and _gm_q.strip():
-            _gm_hist.append(("user", _gm_q.strip()))
-            _or_key_gm = st.session_state.get("_or_api_key", "").strip()
-            _or_mdl_gm = st.session_state.get("_or_model", "google/gemini-2.5-flash")
-            if _or_key_gm:
-                # ── OpenRouter streaming ──
-                with st.chat_message("assistant", avatar="🔓"):
-                    _placeholder = st.empty()
-                    _full = ""
-                    for _chunk in _or_stream(
-                        [{"role": "system", "content": GODMODE_SYSTEM_PROMPT},
-                         {"role": "user",   "content": _gm_q.strip()}],
-                        model=_or_mdl_gm, api_key=_or_key_gm,
-                    ):
-                        _full += _chunk
-                        _placeholder.markdown(_full + "▌")
-                    _placeholder.markdown(_full)
-                _gm_hist.append(("assistant", _full))
-            else:
-                with st.spinner("⟳ G0DM0D3 يُفكّر..."):
-                    try:
-                        _llm = LLMFallback()
-                        _gm_resp = _llm.chat(
-                            messages=[
-                                {"role": "system", "content": GODMODE_SYSTEM_PROMPT},
-                                {"role": "user",   "content": _gm_q.strip()},
-                            ]
-                        )
-                        _gm_hist.append(("assistant", _gm_resp))
-                    except Exception as _gm_err:
-                        _gm_hist.append(("assistant", f"⚠️ خطأ: {_gm_err}"))
-            st.session_state["godmode_chat"] = _gm_hist
-            st.rerun()
-
-    # ══════════════════ 3. Hall of Fame ══════════════════
-    with gm_tabs[2]:
-        st.markdown('<div class="section-header">🏆 Hall of Fame — أفضل 5 تركيبات</div>', unsafe_allow_html=True)
-        st.markdown(
-            '<p style="color:#999;direction:ltr">5 proven model + prompt combos. Each pairs a model with its best-performing jailbreak prompt.</p>',
-            unsafe_allow_html=True,
-        )
-
-        _hof_query = st.text_input(
-            "الاستعلام:",
-            placeholder="أدخل استعلامك هنا — سيُحقَن في كل prompt تلقائياً",
-            key="hof_query",
-        )
-
-        for combo in HALL_OF_FAME:
-            with st.expander(f"{combo.emoji} {combo.codename} — {combo.description}"):
-                _c1, _c2 = st.columns([2, 1])
-                with _c1:
-                    st.markdown(f"""
-                    <div style="background:#0f1f3d;padding:0.6rem 1rem;border-radius:8px;
-                                border-left:4px solid {combo.color};direction:ltr;font-size:0.8rem">
-                        <strong style="color:{combo.color}">Model:</strong> {combo.model}
-                    </div>
-                    """, unsafe_allow_html=True)
-                with _c2:
-                    _hof_run = st.button(
-                        f"🚀 شغّل {combo.codename}",
-                        key=f"hof_run_{combo.id}",
-                        use_container_width=True,
-                    )
-
-                if _hof_query.strip():
-                    _sys_injected, _usr_injected = apply_combo(combo, _hof_query.strip())
-                    with st.expander("🔍 System Prompt بعد الحقن", expanded=False):
-                        st.code(_sys_injected[:1000] + ("…" if len(_sys_injected) > 1000 else ""), language="text")
-                    with st.expander("💬 User Message بعد الحقن", expanded=False):
-                        st.code(_usr_injected, language="text")
-
-                if _hof_run and _hof_query.strip():
-                    _sys_p, _usr_p = apply_combo(combo, _hof_query.strip())
-                    _or_key_hof = st.session_state.get("_or_api_key", "").strip()
-                    _or_mdl_hof = st.session_state.get("_or_model", combo.model)
-                    if _or_key_hof:
-                        with st.chat_message("assistant", avatar=combo.emoji):
-                            _hof_ph = st.empty()
-                            _hof_full = ""
-                            for _hc in _or_stream(
-                                [{"role": "system", "content": _sys_p},
-                                 {"role": "user",   "content": _usr_p}],
-                                model=_or_mdl_hof, api_key=_or_key_hof,
-                            ):
-                                _hof_full += _hc
-                                _hof_ph.markdown(_hof_full + "▌")
-                            _hof_ph.markdown(_hof_full)
-                    else:
-                        with st.spinner(f"⟳ {combo.codename} يعالج..."):
-                            try:
-                                _llm2 = LLMFallback()
-                                _hof_resp = _llm2.chat(messages=[
-                                    {"role": "system", "content": _sys_p},
-                                    {"role": "user",   "content": _usr_p},
-                                ])
-                                st.markdown(f"""
-                                <div style="background:#0d1f0d;border:1px solid {combo.color};border-radius:10px;
-                                            padding:1rem 1.2rem;direction:rtl;line-height:1.8;white-space:pre-wrap">
-                                {_hof_resp}
-                                </div>
-                                """, unsafe_allow_html=True)
-                            except Exception as _hof_err:
-                                st.error(f"خطأ: {_hof_err}")
-                elif _hof_run:
-                    st.warning("أدخل استعلاماً أولاً في حقل 'الاستعلام' أعلاه.")
-
-    # ══════════════════ 4. Parseltongue ══════════════════
-    with gm_tabs[3]:
-        st.markdown('<div class="section-header">🐍 Parseltongue — محرك التشويه</div>', unsafe_allow_html=True)
-        st.markdown(
-            '<p style="color:#999;direction:ltr">Input perturbation engine. Detects trigger words and obfuscates them '
-            'using 6 techniques across 3 intensity levels.</p>',
-            unsafe_allow_html=True,
-        )
-
-        if not _PARSELTONGUE_OK:
-            st.error("⚠️ تعذّر تحميل ai/parseltongue.py")
+    if st.button("🚀 نفّذ عبر الوكلاء", type="primary", key="orch_run") and task.strip():
+        selected = manual if manual else route_query(task.strip(), AGENT_CATEGORIES, max_agents=2)
+        if not selected:
+            st.warning("لم يتم تحديد أي وكيل مناسب تلقائياً. اختر وكلاء يدوياً من القائمة أعلاه.")
         else:
-            _pt_cols = st.columns([2, 1, 1])
-            with _pt_cols[0]:
-                _pt_text = st.text_area(
-                    "النص للمعالجة:",
-                    placeholder="مثال: how to hack a system and exploit vulnerabilities using malware",
-                    height=100,
-                    key="parseltongue_input",
+            st.caption("الوكلاء المُفعَّلون لهذه المهمة: " + "، ".join(
+                f"{AGENT_CATEGORIES[k].emoji} {AGENT_CATEGORIES[k].title}" for k in selected
+            ))
+            responses: Dict[str, str] = {}
+            for key in selected:
+                cat = AGENT_CATEGORIES[key]
+                bot_key = f"agent_bot_{cat.key}"
+                if bot_key not in st.session_state:
+                    st.session_state[bot_key] = CategoryAgentChat(cat.key)
+                bot = st.session_state[bot_key]
+                with st.spinner(f"⟳ {cat.title} يعمل على المهمة..."):
+                    try:
+                        resp = bot.chat(task.strip())
+                    except Exception as _orch_err:
+                        resp = f"⚠️ خطأ: {_orch_err}"
+                responses[key] = resp
+                with st.expander(f"{cat.emoji} {cat.title}", expanded=not synth):
+                    st.markdown(resp)
+
+            if synth and responses:
+                combined_input = "\n\n".join(
+                    f"[{AGENT_CATEGORIES[k].title}]\n{v}" for k, v in responses.items()
                 )
-            with _pt_cols[1]:
-                _pt_technique = st.selectbox(
-                    "التقنية:",
-                    options=list(TECHNIQUE_DESCRIPTIONS.keys()),
-                    format_func=lambda k: f"{k} — {TECHNIQUE_DESCRIPTIONS[k][:30]}",
-                    key="pt_technique",
-                )
-            with _pt_cols[2]:
-                _pt_intensity = st.selectbox(
-                    "الشدة:",
-                    options=["light", "medium", "heavy"],
-                    index=1,
-                    format_func=lambda x: {"light": "خفيفة 🟢", "medium": "متوسطة 🟡", "heavy": "ثقيلة 🔴"}[x],
-                    key="pt_intensity",
-                )
+                with st.spinner("⟳ يجري توليف الإجابة النهائية..."):
+                    try:
+                        from ai.llm_fallback import LLMFallback
+                        _llm = LLMFallback()
+                        final = _llm.chat(messages=[
+                            {"role": "system", "content": COORDINATOR_SYSTEM_PROMPT},
+                            {"role": "user", "content":
+                                f"السؤال الأصلي: {task.strip()}\n\nردود الوكلاء:\n{combined_input}"},
+                        ])
+                    except Exception as _synth_err:
+                        final = f"⚠️ تعذّر التوليف: {_synth_err}"
+                st.markdown('<div class="section-header">✅ الإجابة الموحّدة</div>', unsafe_allow_html=True)
+                st.markdown(final)
 
-            _pt_run = st.button("🐍 طبّق Parseltongue", type="primary", key="pt_run", use_container_width=True)
-
-            if _pt_run and _pt_text.strip():
-                _pt_result = apply_parseltongue(
-                    _pt_text.strip(),
-                    technique=_pt_technique,
-                    intensity=_pt_intensity,
-                    enabled=True,
-                )
-                _r1, _r2 = st.columns(2)
-                with _r1:
-                    st.markdown("**النص الأصلي:**")
-                    st.code(_pt_result.original_text, language="text")
-                with _r2:
-                    st.markdown("**النص المُشوَّه:**")
-                    st.code(_pt_result.transformed_text, language="text")
-
-                if _pt_result.triggers_found:
-                    st.markdown("**الكلمات المُشغِّلة المكتشفة:**")
-                    _trigs_html = " ".join(
-                        f'<span class="badge badge-red" style="margin:3px">{t}</span>'
-                        for t in _pt_result.triggers_found
-                    )
-                    st.markdown(_trigs_html, unsafe_allow_html=True)
-
-                if _pt_result.transformations:
-                    with st.expander("🔍 تفاصيل التحويلات"):
-                        for tr in _pt_result.transformations:
-                            st.markdown(
-                                f'<span class="badge badge-amber">{tr.original}</span> → '
-                                f'<span class="badge badge-purple">{tr.transformed}</span> '
-                                f'<small>({tr.technique})</small>',
-                                unsafe_allow_html=True,
-                            )
-
-                st.download_button(
-                    "⬇️ تحميل النص المُشوَّه",
-                    data=_pt_result.transformed_text,
-                    file_name="parseltongue_output.txt",
-                    mime="text/plain",
-                    key="pt_download",
-                )
-
-            st.markdown("---")
-            with st.expander("📋 قائمة الكلمات المُشغِّلة الافتراضية"):
-                _def_html = " ".join(
-                    f'<span class="badge badge-red" style="margin:2px;font-size:0.78rem">{t}</span>'
-                    for t in DEFAULT_TRIGGERS
-                )
-                st.markdown(_def_html, unsafe_allow_html=True)
-
-    # ══════════════════ 5. AutoTune ══════════════════
-    with gm_tabs[4]:
-        st.markdown('<div class="section-header">🎛 AutoTune — محرك المعاملات التكيفية</div>', unsafe_allow_html=True)
-        st.markdown(
-            '<p style="color:#999;direction:ltr">Context-adaptive sampling parameters. '
-            'Classifies your query and selects optimal temperature, top_p, etc.</p>',
-            unsafe_allow_html=True,
-        )
-
-        _at_c1, _at_c2 = st.columns([2, 1])
-        with _at_c1:
-            _at_msg = st.text_area(
-                "رسالتك:",
-                placeholder="أدخل رسالتك لتحليل السياق وضبط المعاملات...",
-                height=80,
-                key="autotune_input",
-            )
-        with _at_c2:
-            _at_strategy = st.selectbox(
-                "الاستراتيجية:",
-                options=["adaptive", "precise", "balanced", "creative", "chaotic"],
-                format_func=lambda x: {
-                    "adaptive": "🧠 تكيّفي (تحليل تلقائي)",
-                    "precise":  "🎯 دقيق (كود / رياضيات)",
-                    "balanced": "⚖️ متوازن (عام)",
-                    "creative": "🎨 إبداعي (كتابة / فن)",
-                    "chaotic":  "🌀 فوضوي (تجريبي)",
-                }[x],
-                key="autotune_strategy",
-            )
-
-        _at_run = st.button("🎛 احسب المعاملات", type="primary", key="at_run", use_container_width=True)
-
-        if _at_run and _at_msg.strip():
-            _at_result = compute_autotune(
-                strategy=_at_strategy,
-                message=_at_msg.strip(),
-                conversation_length=0,
-            )
-            p = _at_result.params
-
-            st.markdown(f"""
-            <div style="background:#0f172a;border:1px solid #a855f7;border-radius:10px;
-                        padding:0.8rem 1.2rem;direction:ltr;margin-bottom:1rem">
-                <strong style="color:#a855f7">Context:</strong> {_at_result.detected_context.upper()}
-                &nbsp;&nbsp;|&nbsp;&nbsp;
-                <strong style="color:#06b6d4">Confidence:</strong> {_at_result.confidence:.0%}
-                &nbsp;&nbsp;|&nbsp;&nbsp;
-                <small style="color:#999">{_at_result.reasoning}</small>
-            </div>
-            """, unsafe_allow_html=True)
-
-            _p_cols = st.columns(3)
-            metrics = [
-                ("🌡️ Temperature", f"{p.temperature:.2f}"),
-                ("🎲 Top-P",        f"{p.top_p:.2f}"),
-                ("🔢 Top-K",        str(p.top_k)),
-                ("📊 Freq Penalty", f"{p.frequency_penalty:.2f}"),
-                ("👁️ Pres Penalty", f"{p.presence_penalty:.2f}"),
-                ("🔁 Rep Penalty",  f"{p.repetition_penalty:.2f}"),
-            ]
-            for i, (label, value) in enumerate(metrics):
-                with _p_cols[i % 3]:
-                    st.metric(label, value)
-
-            _params_json = (
-                f'{{"temperature":{p.temperature:.2f},'
-                f'"top_p":{p.top_p:.2f},'
-                f'"top_k":{p.top_k},'
-                f'"frequency_penalty":{p.frequency_penalty:.2f},'
-                f'"presence_penalty":{p.presence_penalty:.2f},'
-                f'"repetition_penalty":{p.repetition_penalty:.2f}}}'
-            )
-            st.download_button(
-                "⬇️ تحميل المعاملات JSON",
-                data=_params_json,
-                file_name="autotune_params.json",
-                mime="application/json",
-                key="at_download",
-            )
-
-    # ══════════════════ 6. STM Modules ══════════════════
-    with gm_tabs[5]:
-        st.markdown('<div class="section-header">⚡ STM Modules — وحدات التحويل الدلالي</div>', unsafe_allow_html=True)
-        st.markdown(
-            '<p style="color:#999;direction:ltr">Semantic Transformation Modules normalize AI outputs. '
-            'Enable modules and apply them to any text.</p>',
-            unsafe_allow_html=True,
-        )
-
-        _stm_enabled = []
-        _stm_cols = st.columns(len(STM_MODULES))
-        for i, _mod in enumerate(STM_MODULES):
-            with _stm_cols[i]:
-                _is_on = st.toggle(_mod.name_ar, key=f"stm_{_mod.id}", value=False)
-                st.caption(_mod.description_ar)
-                if _is_on:
-                    _stm_enabled.append(_mod.id)
-
-        st.markdown("")
-        _stm_input = st.text_area(
-            "النص للمعالجة:",
-            placeholder="الصق هنا ردّ الذكاء الاصطناعي لتنظيفه وتحسينه...",
-            height=120,
-            key="stm_input",
-        )
-        _stm_run = st.button("⚡ طبّق الوحدات", type="primary", key="stm_run", use_container_width=True)
-
-        if _stm_run and _stm_input.strip():
-            if not _stm_enabled:
-                st.warning("فعّل وحدة واحدة على الأقل أولاً.")
-            else:
-                _stm_out = apply_stms(_stm_input.strip(), _stm_enabled)
-                _s1, _s2 = st.columns(2)
-                with _s1:
-                    st.markdown("**النص الأصلي:**")
-                    st.code(_stm_input.strip(), language="text")
-                with _s2:
-                    st.markdown("**النص بعد المعالجة:**")
-                    st.code(_stm_out, language="text")
-                st.success(f"✅ طُبّقت {len(_stm_enabled)} وحدة: {', '.join(_stm_enabled)}")
-
-    # ══════════════════ 7. That.md Viewer ══════════════════
-    with gm_tabs[6]:
-        st.markdown('<div class="section-header">📖 That.md — System Prompt كامل لـ Claude</div>', unsafe_allow_html=True)
-        st.markdown(
-            '<p style="color:#999;direction:ltr">The full extracted Claude system prompt (3827 lines). '
-            'Browse, search, and copy sections.</p>',
-            unsafe_allow_html=True,
-        )
-
-        _that_path = "That.md"
-        try:
-            with open(_that_path, "r", encoding="utf-8") as _f:
-                _that_content = _f.read()
-
-            _tm_stats = st.columns(4)
-            with _tm_stats[0]: metric_card(len(_that_content), "الأحرف")
-            with _tm_stats[1]: metric_card(len(_that_content.split()), "الكلمات")
-            with _tm_stats[2]: metric_card(_that_content.count("\n"), "الأسطر")
-            with _tm_stats[3]: metric_card(f"{len(_that_content)//1024} KB", "الحجم")
-
-            st.markdown("")
-            _tm_search = st.text_input(
-                "🔍 ابحث في المحتوى:",
-                placeholder="مثال: memory, tool, search, behavior...",
-                key="that_md_search",
-            )
-
-            if _tm_search.strip():
-                _lines = _that_content.split("\n")
-                _matches = [
-                    (i + 1, line) for i, line in enumerate(_lines)
-                    if _tm_search.lower() in line.lower()
-                ]
-                st.markdown(f"**{len(_matches)} نتيجة** لـ `{_tm_search}`:")
-                for line_num, line_text in _matches[:50]:
-                    _highlighted = line_text.replace(
-                        _tm_search,
-                        f"**{_tm_search}**",
-                    )
-                    st.markdown(
-                        f'<div style="background:#1e293b;padding:4px 10px;border-radius:4px;'
-                        f'margin:2px 0;font-size:0.82rem;direction:ltr">'
-                        f'<span style="color:#666">L{line_num}:</span> {_highlighted}</div>',
-                        unsafe_allow_html=True,
-                    )
-                if len(_matches) > 50:
-                    st.caption(f"... و {len(_matches) - 50} نتيجة إضافية")
-            else:
-                _page_size = 100
-                _total_lines = _that_content.count("\n")
-                _total_pages = max(1, _total_lines // _page_size)
-                _page = st.slider("الصفحة:", 1, _total_pages, 1, key="that_md_page")
-                _start = (_page - 1) * _page_size
-                _excerpt = "\n".join(_that_content.split("\n")[_start: _start + _page_size])
-                st.code(_excerpt, language="markdown")
-
-            st.download_button(
-                "⬇️ تحميل That.md كاملاً",
-                data=_that_content,
-                file_name="That.md",
-                mime="text/markdown",
-                key="that_md_download",
-            )
-
-        except FileNotFoundError:
-            st.error("⚠️ الملف That.md غير موجود في جذر المشروع.")
-        except Exception as _that_err:
-            st.error(f"خطأ في قراءة الملف: {_that_err}")
 
 
 if __name__ == "__main__":
