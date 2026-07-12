@@ -6607,6 +6607,52 @@ def main():
 
         st.markdown("---")
 
+        # ── 👤 الحساب (تسجيل دخول / إنشاء حساب) ─────────────────────────
+        st.markdown("### 👤 الحساب")
+        try:
+            from ai.accounts import create_user as _acc_create, verify_login as _acc_login, AccountError as _AccErr
+            _accounts_module_ok = True
+        except Exception:
+            _accounts_module_ok = False
+
+        if not _accounts_module_ok:
+            st.caption("نظام الحسابات غير متاح حالياً")
+        elif st.session_state.get("_account"):
+            _acc = st.session_state["_account"]
+            st.success(f"مسجّل الدخول: {_acc['username']}")
+            if st.button("🚪 تسجيل خروج", key="account_logout_btn", use_container_width=True):
+                del st.session_state["_account"]
+                st.rerun()
+        else:
+            _acc_tab_login, _acc_tab_register = st.tabs(["دخول", "حساب جديد"])
+            with _acc_tab_login:
+                _li_user = st.text_input("اسم المستخدم", key="account_login_username")
+                _li_pass = st.text_input("كلمة المرور", type="password", key="account_login_password")
+                if st.button("دخول", key="account_login_btn", use_container_width=True):
+                    _user = _acc_login(_li_user, _li_pass) if _li_user and _li_pass else None
+                    if _user:
+                        st.session_state["_account"] = _user
+                        st.rerun()
+                    else:
+                        st.error("اسم المستخدم أو كلمة المرور غير صحيحة")
+            with _acc_tab_register:
+                _reg_user = st.text_input("اسم المستخدم", key="account_reg_username")
+                _reg_pass = st.text_input("كلمة المرور", type="password", key="account_reg_password")
+                _reg_phone = st.text_input(
+                    "رقم الهاتف (اختياري — لربط واتساب لاحقاً)",
+                    key="account_reg_phone", placeholder="+9677xxxxxxxx",
+                )
+                if st.button("إنشاء حساب", key="account_reg_btn", use_container_width=True):
+                    try:
+                        _acc_create(_reg_user, _reg_pass, phone_number=_reg_phone or None)
+                        st.success("تم إنشاء الحساب! سجّل دخولك من تبويب «دخول»")
+                    except _AccErr as _e:
+                        st.error(str(_e))
+                    except Exception:
+                        st.error("تعذّر إنشاء الحساب")
+
+        st.markdown("---")
+
         st.markdown("### 🔑 OpenRouter API")
         st.caption("مفتاح اختياري — يُفعّل النماذج التجارية في تبويبَي المحادثة و G0DM0D3")
 
