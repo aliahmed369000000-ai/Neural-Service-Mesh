@@ -39,7 +39,10 @@ def _run(cmd: list[str], cwd: str | None = None) -> tuple[int, str]:
 
 
 def _token_remote() -> str | None:
-    token  = os.environ.get("GITHUB_TOKEN", "").strip()
+    token  = (
+        os.environ.get("GITHUB_TOKEN", "").strip()
+        or os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN", "").strip()
+    )
     user   = os.environ.get("GITHUB_USER", "").strip()
     remote = os.environ.get("GITHUB_REMOTE", "").strip()
     if not token or not remote:
