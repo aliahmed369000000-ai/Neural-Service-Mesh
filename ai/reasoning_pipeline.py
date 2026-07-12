@@ -13,7 +13,8 @@ Reasoning Pipeline — Question → CKG → Neural Core → Decision → Answer
 2. CKG
      → لكل مفهوم مطابق: vec = VectorEncoder.encode(...، importance=strength)
      → دمج متجهات المفاهيم المطابقة (متوسط مرجّح بـ strength) مع متجه
-       ArabicNLP → متجه سياق نهائي (7,) — "context_vector"
+       ArabicNLP → متجه سياق نهائي (784,) — "context_vector"
+       (7 دلالي أولي + 777 TF-IDF hash، يطابق DEFAULT_INPUT_DIM)
 
 3. Neural Core
      → NeuralCore.forward(context_vector[784]) → L1(784×784,مدروسة بالكامل) → L2(32×784,Xavier) → L3(4×32,Xavier) → 4 أوزان توجيه
