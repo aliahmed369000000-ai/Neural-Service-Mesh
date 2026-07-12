@@ -4060,15 +4060,6 @@ except Exception:
     _ORCHESTRATOR_OK = False
 
 try:
-    from ai.parseltongue import (
-        apply_parseltongue, detect_triggers, TECHNIQUE_DESCRIPTIONS,
-        DEFAULT_TRIGGERS,
-    )
-    _PARSELTONGUE_OK = True
-except Exception:
-    _PARSELTONGUE_OK = False
-
-try:
     from ai.ultraplinian import (
         ULTRAPLINIAN_MODELS, TIER_CUMULATIVE, DEFAULT_MAX_MODELS,
         run_race, get_tier_models, total_model_count, friendly_error,
@@ -6581,7 +6572,7 @@ def main():
 
         st.markdown("---")
         st.caption("🧠 النظام المعرفي العربي")
-        st.caption("CKG · قرآن · AutoTune · Parseltongue")
+        st.caption("CKG · قرآن · AutoTune")
 
     # ── العنوان ──────────────────────────────────────────────────────────
     st.markdown("""
