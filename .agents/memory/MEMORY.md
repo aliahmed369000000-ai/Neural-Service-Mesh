@@ -1,0 +1,2 @@
+- [Streamlit preview on Replit](streamlit-replit-preview.md) — CORS/XSRF + port settings needed for the proxied iframe preview to render.
+- [GitHub push token naming](github-push-token-naming.md) — a repo's git-sync code may expect `GITHUB_TOKEN`; support `GITHUB_PERSONAL_ACCESS_TOKEN` as a fallback instead of duplicating secrets.
