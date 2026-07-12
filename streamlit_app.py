@@ -6225,6 +6225,56 @@ def render_health():
         </div>
         """, unsafe_allow_html=True)
 
+    # ── رقابة/تدقيق تفاعلات الوكلاء (Observability) ──
+    # سجل مستقل تماماً عن CKG (القرآن) — يتتبّع فقط استدعاءات وكلاء AI
+    # (ai/agent_categories.py) من "hub" أو "orchestrator" لأغراض التشخيص.
+    st.markdown("")
+    st.markdown('<div class="section-header">🔎 رقابة وكلاء AI (Observability)</div>', unsafe_allow_html=True)
+    try:
+        from ai.agent_audit import get_default_audit_log
+        _audit = get_default_audit_log()
+        _summary = _audit.summary()
+    except Exception as _audit_err:
+        _audit = None
+        _summary = None
+        st.caption(f"⚠️ تعذّر تحميل سجل تدقيق الوكلاء: {_audit_err}")
+
+    if _summary:
+        if _summary["total_events"] == 0:
+            st.caption("لا توجد تفاعلات مسجَّلة بعد — استخدم تبويب \"🤖 وكلاء AI\" أو \"🤝 منسّق الوكلاء\" أولاً.")
+        else:
+            m1, m2, m3 = st.columns(3)
+            m1.metric("إجمالي التفاعلات", _summary["total_events"])
+            m2.metric("عبر hub", _summary["by_source"].get("hub", 0))
+            m3.metric("عبر orchestrator", _summary["by_source"].get("orchestrator", 0))
+
+            web_pct = (
+                (_summary["web_used_count"] / _summary["total_events"]) * 100
+                if _summary["total_events"] else 0
+            )
+            st.caption(f"🌐 استخدم بحث ويب حقيقي في {_summary['web_used_count']} تفاعل ({web_pct:.0f}%)")
+
+            if _summary["by_category"]:
+                st.markdown(
+                    "**حسب الوكيل:** " + "، ".join(
+                        f"{k}: {v}" for k, v in _summary["by_category"].items()
+                    )
+                )
+
+            with st.expander("📋 آخر التفاعلات المسجَّلة"):
+                recent = _audit.get_recent(15)
+                for entry in recent:
+                    web_tag = "🌐" if entry.get("web_used") else ""
+                    src_tag = "🤝" if entry.get("source") == "orchestrator" else "🤖"
+                    st.markdown(
+                        f"{src_tag} **{entry.get('category_title', '')}** "
+                        f"{web_tag} — {entry.get('provider', '') or '—'} "
+                        f"— {entry.get('timestamp', '')[:19]}"
+                    )
+                    q = entry.get("question_preview", "")
+                    if q:
+                        st.caption(f"س: {q[:120]}{'…' if len(q) > 120 else ''}")
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # تبويب API متقدمة
@@ -8040,7 +8090,7 @@ def _render_agent_page(category):
         if not text.strip():
             return
         st.session_state[msg_key].append(("user", text.strip(), ""))
-        response = bot.chat(text.strip(), force_web=web_toggle)
+        response = bot.chat(text.strip(), force_web=web_toggle, source="hub")
         st.session_state[msg_key].append(("bot", response, bot.last_provider_badge()))
         st.session_state[cnt_key] += 1
         st.rerun()
@@ -8467,14 +8517,34 @@ def render_agent_orchestrator():
 
     synth = st.checkbox("🧩 وَلِّف الردود في إجابة واحدة موحّدة", value=True, key="orch_synth")
 
+    exec_mode = st.radio(
+        "نمط التنفيذ:",
+        options=["parallel", "sequential"],
+        format_func=lambda m: (
+            "⚡ متوازٍ — كل وكيل يجيب على المهمة الأصلية بشكل مستقل"
+            if m == "parallel" else
+            "🔗 متسلسل — كل وكيل يبني على ردود الوكلاء السابقين (سير عمل أعمق)"
+        ),
+        index=0,
+        key="orch_exec_mode",
+        help=(
+            "متوازٍ: أسرع، مناسب لمهام مستقلة (مثال: تحليل من زوايا مختلفة).\n"
+            "متسلسل: كل وكيل يرى ردود من سبقه قبل أن يضيف رأيه — مناسب لسير "
+            "عمل تراكمي (مثال: بحث ← تحليل ← توصية)."
+        ),
+    )
+
     if st.button("🚀 نفّذ عبر الوكلاء", type="primary", key="orch_run") and task.strip():
         selected = manual if manual else route_query(task.strip(), AGENT_CATEGORIES, max_agents=2)
         if not selected:
             st.warning("لم يتم تحديد أي وكيل مناسب تلقائياً. اختر وكلاء يدوياً من القائمة أعلاه.")
         else:
-            st.caption("الوكلاء المُفعَّلون لهذه المهمة: " + "، ".join(
-                f"{AGENT_CATEGORIES[k].emoji} {AGENT_CATEGORIES[k].title}" for k in selected
-            ))
+            mode_label = "🔗 متسلسل" if exec_mode == "sequential" else "⚡ متوازٍ"
+            st.caption(
+                f"نمط التنفيذ: {mode_label} — الوكلاء المُفعَّلون: " + "، ".join(
+                    f"{AGENT_CATEGORIES[k].emoji} {AGENT_CATEGORIES[k].title}" for k in selected
+                )
+            )
             responses: Dict[str, str] = {}
             for key in selected:
                 cat = AGENT_CATEGORIES[key]
@@ -8482,9 +8552,26 @@ def render_agent_orchestrator():
                 if bot_key not in st.session_state:
                     st.session_state[bot_key] = CategoryAgentChat(cat.key)
                 bot = st.session_state[bot_key]
+
+                # ── النمط المتسلسل: يُرفَق ملخّص ردود الوكلاء السابقين
+                # بنص المهمة، بحيث يبني كل وكيل على ما سبقه (سير عمل حقيقي
+                # بدل مجرد ردود متوازية منفصلة). النمط المتوازي يمرّر
+                # المهمة الأصلية فقط لكل وكيل، بدون أي تعديل. ──
+                if exec_mode == "sequential" and responses:
+                    prior = "\n\n".join(
+                        f"[{AGENT_CATEGORIES[k].title}]\n{v}" for k, v in responses.items()
+                    )
+                    agent_input = (
+                        f"{task.strip()}\n\n"
+                        f"── ردود وكلاء سابقين في نفس سير العمل (ابنِ عليها، لا تكررها) ──\n"
+                        f"{prior}"
+                    )
+                else:
+                    agent_input = task.strip()
+
                 with st.spinner(f"⟳ {cat.title} يعمل على المهمة..."):
                     try:
-                        resp = bot.chat(task.strip())
+                        resp = bot.chat(agent_input, source="orchestrator")
                     except Exception as _orch_err:
                         resp = f"⚠️ خطأ: {_orch_err}"
                 responses[key] = resp

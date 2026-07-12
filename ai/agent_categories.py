@@ -13,9 +13,19 @@ Agent Categories — تبويبات وكلاء الذكاء الاصطناعي �
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from ai.llm_fallback import LLMFallback, LIVE_LLM_PROVIDERS
+
+# سجل تدقيق تفاعلات الوكلاء (Observability) — تسجيل صامت، لا يُعطّل
+# المحادثة أبداً عند الفشل.
+try:
+    from ai.agent_audit import get_default_audit_log, SOURCE_HUB
+    _AUDIT_OK = True
+except Exception:
+    get_default_audit_log = None
+    SOURCE_HUB = "hub"
+    _AUDIT_OK = False
 
 # أداة البحث الحقيقية في الويب (DuckDuckGo، بدون مفتاح API) — نفس الأداة
 # المُستخدَمة أصلاً في nsm_agent_core.py وcode_agent.py، بدون أي تكرار.
@@ -248,7 +258,20 @@ class CategoryAgentChat:
         self.history: List[Tuple[str, str]] = []
         self._last_provider = ""
 
-    def chat(self, user_input: str, force_web: "bool | None" = None) -> str:
+    def chat(
+        self,
+        user_input: str,
+        force_web: "bool | None" = None,
+        source: str = SOURCE_HUB,
+    ) -> str:
+        """
+        Parameters
+        ----------
+        source : str
+            من أين استُدعي هذا الوكيل — للتدقيق فقط، لا يؤثر على السلوك.
+            "hub" (افتراضي): من تبويب الوكيل المباشر داخل "🤖 وكلاء AI".
+            "orchestrator": من تبويب "🤝 منسّق الوكلاء".
+        """
         if not user_input.strip():
             return "الرجاء كتابة سؤالك."
 
@@ -262,6 +285,7 @@ class CategoryAgentChat:
             if cmd_response is not None:
                 self._last_provider = "🛠️ Code Agent"
                 self.history.append((user_input, cmd_response))
+                self._log_audit(user_input, cmd_response, source, "🛠️ Code Agent", False)
                 return cmd_response
 
         # ── بحث ويب حقيقي (DuckDuckGo) قبل توليد الرد ──
@@ -289,7 +313,29 @@ class CategoryAgentChat:
         )
         self._last_provider = f"🌐 {provider_label}" if searched else provider_label
         self.history.append((user_input, result.text))
+        self._log_audit(user_input, result.text, source, provider_label, searched)
         return result.text
+
+    def _log_audit(
+        self, question: str, response: str, source: str,
+        provider: str, web_used: bool,
+    ) -> None:
+        """يسجّل التفاعل في سجل التدقيق (Observability) — لا يرفع أي
+        استثناء أبداً؛ فشل التدقيق لا يجب أن يكسر المحادثة."""
+        if not _AUDIT_OK or get_default_audit_log is None:
+            return
+        try:
+            get_default_audit_log().log_event(
+                category_key=self.category.key,
+                category_title=self.category.title,
+                source=source,
+                question=question,
+                response=response,
+                provider=provider,
+                web_used=web_used,
+            )
+        except Exception:
+            pass
 
     def last_provider_badge(self) -> str:
         if not self._last_provider:
