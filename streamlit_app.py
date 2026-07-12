@@ -4516,9 +4516,13 @@ def render_css(theme_key: str) -> str:
         css = css.replace(k, v)
     return css
 
-# ── حقن CSS السمة الحالية ──────────────────────────────────────────────
+# ── حقن CSS السمة الحالية (مع تخزين دائم للتفضيل عبر core.artifacts_store) ──
 if "ui_theme" not in st.session_state:
-    st.session_state.ui_theme = "dark"
+    try:
+        from core.artifacts_store import get_setting as _get_persisted_setting
+        st.session_state.ui_theme = _get_persisted_setting("ui_theme", "dark")
+    except Exception:
+        st.session_state.ui_theme = "dark"
 st.markdown(render_css(st.session_state.ui_theme), unsafe_allow_html=True)
 
 
@@ -6460,6 +6464,11 @@ def main():
                 key="theme_btn_dark", use_container_width=True,
             ):
                 st.session_state.ui_theme = "dark"
+                try:
+                    from core.artifacts_store import set_setting as _persist_setting
+                    _persist_setting("ui_theme", "dark")
+                except Exception:
+                    pass
                 st.rerun()
         with _theme_cols[1]:
             if st.button(
@@ -6467,6 +6476,11 @@ def main():
                 key="theme_btn_light", use_container_width=True,
             ):
                 st.session_state.ui_theme = "light"
+                try:
+                    from core.artifacts_store import set_setting as _persist_setting
+                    _persist_setting("ui_theme", "light")
+                except Exception:
+                    pass
                 st.rerun()
 
         st.markdown("---")
