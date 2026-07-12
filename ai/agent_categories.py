@@ -17,6 +17,15 @@ from typing import Dict, List, Tuple
 
 from ai.llm_fallback import LLMFallback, LIVE_LLM_PROVIDERS
 
+# أداة البحث الحقيقية في الويب (DuckDuckGo، بدون مفتاح API) — نفس الأداة
+# المُستخدَمة أصلاً في nsm_agent_core.py وcode_agent.py، بدون أي تكرار.
+try:
+    from ai.web_search_tool import web_search as _web_search
+    _WEB_SEARCH_OK = True
+except Exception:
+    _web_search = None
+    _WEB_SEARCH_OK = False
+
 # محاولة استيراد أوامر Code Agent الحقيقية (افحص/قائمة/اقترح/ملخص/صحح/عدل/أنشئ/ارفع)
 # نفس الدوال المُستخدَمة أصلاً في تبويب "المحادثة" — بدون أي تغيير عليها.
 # تُستخدَم حصراً في وكيل "الصيانة الذاتية" أدناه.
@@ -40,6 +49,7 @@ class AgentCategory:
     subtitle:    str
     system_prompt: str
     quick_prompts: List[str] = field(default_factory=list)
+    web_enabled:   bool = False  # يبحث في الويب تلقائياً قبل الإجابة
 
 
 AGENT_CATEGORIES: Dict[str, AgentCategory] = {
@@ -92,11 +102,14 @@ AGENT_CATEGORIES: Dict[str, AgentCategory] = {
         key="analytics",
         emoji="📊",
         title="تحليل البيانات",
-        subtitle="قراءة الأرقام، استخلاص الأنماط، واقتراح رؤى قابلة للتنفيذ",
+        subtitle="قراءة الأرقام، بحث عن مؤشرات ومعايير حديثة من الويب، واقتراح رؤى قابلة للتنفيذ",
         system_prompt=(
             "أنت وكيل \"تحليل البيانات\" داخل نظام NSM (Neural Service Mesh).\n"
             "تخصصك: فهم بيانات ومقاييس يصفها المستخدم، استخلاص الأنماط منها، "
             "واقتراح رؤى وقرارات عملية مبنية عليها.\n"
+            "قد تصلك نتائج بحث ويب حديثة تحت عنوان 'نتائج بحث ويب ذات صلة' — "
+            "استخدمها لمقارنة أرقام المستخدم بمعايير أو مؤشرات السوق الحالية "
+            "عند الحاجة، واذكر مصدرها.\n"
             "قواعد الإجابة:\n"
             "1. أجب بالعربية الفصحى، واستخدم أرقاماً ونسباً عند توفرها.\n"
             "2. إذا كانت البيانات غير كافية، اذكر بوضوح ما تحتاجه لتحليل أدق.\n"
@@ -105,9 +118,10 @@ AGENT_CATEGORIES: Dict[str, AgentCategory] = {
         ),
         quick_prompts=[
             "كيف أفسّر ارتفاع معدل الارتداد في تطبيقي؟",
-            "ما أهم المؤشرات لتتبع نمو مشروع ناشئ؟",
+            "ما المعايير الحالية لمؤشرات نمو مشروع ناشئ؟",
             "حلّل لي هذا الاتجاه في البيانات",
         ],
+        web_enabled=True,
     ),
 
     "reasoning": AgentCategory(
@@ -159,22 +173,26 @@ AGENT_CATEGORIES: Dict[str, AgentCategory] = {
         key="research",
         emoji="🔍",
         title="وكيل البحث",
-        subtitle="تجميع معلومات، تلخيص مواضيع، والإجابة بمصادر موثوقة",
+        subtitle="بحث حقيقي في الويب (DuckDuckGo)، تلخيص مواضيع، وإجابات بمصادر فعلية",
         system_prompt=(
             "أنت وكيل \"البحث\" داخل نظام NSM (Neural Service Mesh).\n"
-            "تخصصك: تجميع المعلومات حول موضوع معيّن، تلخيصها بشكل منظم، "
-            "والإشارة إلى نوع المصادر التي يجب الرجوع إليها للتحقق.\n"
+            "تخصصك: تجميع المعلومات حول موضوع معيّن، تلخيصها بشكل منظم.\n"
+            "قبل كل رد، تحصل تلقائياً على نتائج بحث ويب حقيقية حديثة (ستظهر لك "
+            "تحت عنوان 'نتائج بحث ويب ذات صلة') — استخدمها كمصدر أساسي لإجابتك، "
+            "واذكر الروابط المهمة منها إن وُجدت.\n"
             "قواعد الإجابة:\n"
             "1. أجب بالعربية الفصحى، ونظّم الإجابة في نقاط عند تعدد الجوانب.\n"
-            "2. إذا لم تكن متأكداً من معلومة حديثة أو دقيقة، قل ذلك بصراحة.\n"
+            "2. إذا لم تُقدَّم لك نتائج بحث أو كانت غير كافية، قل ذلك بصراحة "
+            "بدل اختلاق معلومة.\n"
             "3. اقترح زوايا بحث إضافية إذا كان الموضوع واسعاً.\n"
             "4. لا تُشر إلى نفسك كنموذج آخر — أنت وكيل NSM."
         ),
         quick_prompts=[
-            "لخّص لي أهم جوانب هذا الموضوع",
+            "ما آخر الأخبار عن هذا الموضوع؟",
             "ما الفرق بين هذين المفهومين؟",
-            "ما الأسئلة المهمة التي يجب أن أبحث عنها هنا؟",
+            "ابحث لي عن أفضل الممارسات الحالية في هذا المجال",
         ],
+        web_enabled=True,
     ),
 
     "maintenance": AgentCategory(
@@ -230,7 +248,7 @@ class CategoryAgentChat:
         self.history: List[Tuple[str, str]] = []
         self._last_provider = ""
 
-    def chat(self, user_input: str) -> str:
+    def chat(self, user_input: str, force_web: "bool | None" = None) -> str:
         if not user_input.strip():
             return "الرجاء كتابة سؤالك."
 
@@ -246,14 +264,30 @@ class CategoryAgentChat:
                 self.history.append((user_input, cmd_response))
                 return cmd_response
 
+        # ── بحث ويب حقيقي (DuckDuckGo) قبل توليد الرد ──
+        # يُفعَّل تلقائياً للفئات ذات web_enabled=True، أو يدوياً عبر force_web
+        # من الواجهة (تفعيل/تعطيل لكل سؤال بغض النظر عن الفئة).
+        use_web = self.category.web_enabled if force_web is None else force_web
+        sp = self.category.system_prompt
+        searched = False
+        if use_web and _WEB_SEARCH_OK:
+            try:
+                web_results = _web_search(user_input.strip(), max_results=5)
+            except Exception as _web_err:
+                web_results = f"❌ تعذّر البحث: {_web_err}"
+            if web_results and not web_results.startswith("❌"):
+                sp = sp + "\n\nنتائج بحث ويب ذات صلة بسؤال المستخدم:\n" + web_results
+                searched = True
+
         result = self.fallback.generate(
             query=user_input,
             history=self.history[-4:],
-            system_prompt=self.category.system_prompt,
+            system_prompt=sp,
         )
-        self._last_provider = (
+        provider_label = (
             result.model if result.provider in LIVE_LLM_PROVIDERS else "رسم معرفي"
         )
+        self._last_provider = f"🌐 {provider_label}" if searched else provider_label
         self.history.append((user_input, result.text))
         return result.text
 

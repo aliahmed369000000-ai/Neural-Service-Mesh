@@ -7977,6 +7977,13 @@ def _render_agent_page(category):
     with col_s:
         st.metric("رسائل الجلسة", st.session_state[cnt_key])
 
+    web_toggle = st.toggle(
+        "🌐 بحث حقيقي في الويب قبل الرد",
+        value=category.web_enabled,
+        key=f"agent_web_{category.key}",
+        help="يفعّل بحثاً فعلياً عبر DuckDuckGo قبل توليد الرد، بغض النظر عن الفئة.",
+    )
+
     box_id = f"agent-chat-box-{category.key}"
     html_out = f'<div class="agent-box" id="{box_id}">'
     if not st.session_state[msg_key]:
@@ -8033,7 +8040,7 @@ def _render_agent_page(category):
         if not text.strip():
             return
         st.session_state[msg_key].append(("user", text.strip(), ""))
-        response = bot.chat(text.strip())
+        response = bot.chat(text.strip(), force_web=web_toggle)
         st.session_state[msg_key].append(("bot", response, bot.last_provider_badge()))
         st.session_state[cnt_key] += 1
         st.rerun()
