@@ -105,6 +105,9 @@ def _build_system_prompt() -> str:
 - تشغيل كود Python وعرض النتيجة
 - رفع التغييرات لـ GitHub تلقائياً
 - 🆕 بحث حقيقي في الإنترنت (بدون مفتاح API) لمعلومات حديثة أو خارجية
+- 🆕 بحث حقيقي عن الصور (عبر Unsplash) لإرفاق صور فعلية في الرد
+- 🆕 إنشاء "واجهات تفاعلية" (HTML/SVG) تُحفظ وتُعرض للمستخدم في تبويب الواجهات التفاعلية
+- 🆕 استدعاء أي API خارجي مباشرة (GET/POST/...) وعرض النتيجة
 - سلسلة أفعال متعددة في رد واحد
 - تصحيح أخطائك تلقائياً إذا فشل التنفيذ
 
@@ -113,14 +116,19 @@ def _build_system_prompt() -> str:
   "thinking": "تحليلك للطلب خطوة بخطوة",
   "steps": [
     {{
-      "action": "read_file | create_file | edit_file | run_file | run_tests | git_push | web_search | answer",
+      "action": "read_file | create_file | edit_file | run_file | run_tests | git_push | web_search | image_search | create_artifact | api_call | answer",
       "path": "المسار النسبي من جذر المشروع",
-      "content": "محتوى الملف الكامل (لـ create_file)",
+      "content": "محتوى الملف الكامل (لـ create_file) أو كود HTML/SVG كامل (لـ create_artifact)",
       "old": "النص القديم المراد استبداله (لـ edit_file) — يجب أن يكون موجوداً حرفياً",
       "new": "النص الجديد البديل (لـ edit_file)",
       "cmd": "أمر bash للتشغيل (لـ run_file)",
       "message": "رسالة commit (لـ git_push)",
-      "query": "نص البحث (لـ web_search فقط)",
+      "query": "نص البحث (لـ web_search أو image_search)",
+      "title": "عنوان الواجهة التفاعلية (لـ create_artifact)",
+      "url": "رابط الـ API (لـ api_call)",
+      "method": "GET|POST|PUT|PATCH|DELETE (لـ api_call، افتراضي GET)",
+      "headers": "كائن JSON بالترويسات (لـ api_call، اختياري)",
+      "body": "كائن JSON لجسم الطلب (لـ api_call، اختياري)",
       "reply": "رد للمستخدم بالعربية (لـ answer)"
     }}
   ]
@@ -159,6 +167,13 @@ def _build_system_prompt() -> str:
     answer تلخيصية أخيرة فقط.
 14. 🆕 لا تشرح كيف "يمكن" فعل الشي — نفّذه مباشرة عبر steps. الشرح النظري
     بدون تنفيذ فعلي غير مقبول أبداً عندما يطلب المستخدم إنشاء/تعديل/رفع.
+15. 🆕 إذا طلب المستخدم صوراً أو "أرني صورة" أو ما شابه: استخدم خطوة
+    "image_search" بحقل "query" بالإنجليزية (نتائج أدق)، ثم answer.
+16. 🆕 إذا طلب المستخدم رسماً بيانياً/بطاقة/نموذجاً/واجهة تفاعلية (HTML/SVG):
+    استخدم خطوة "create_artifact" بحقلي "title" و"content" (كود HTML كامل)،
+    ثم answer تُخبر المستخدم أنها حُفظت وتظهر في تبويب "🧩 الواجهات التفاعلية".
+17. 🆕 إذا طلب المستخدم استدعاء API خارجي أو جلب بيانات من رابط: استخدم
+    خطوة "api_call" بحقول "url" و"method" و"headers"/"body" عند الحاجة.
 
 ## مثال حقيقي لرد صحيح (وليس نصاً تنسخه — فقط توضيح للصيغة):
 {{
@@ -316,6 +331,11 @@ def _run_step(step: Dict[str, Any]) -> str:
     reply   = step.get("reply", "")
     cmd     = step.get("cmd", "")
     query   = step.get("query", "")
+    title   = step.get("title", "")
+    url     = step.get("url", "")
+    method  = (step.get("method") or "GET").upper()
+    headers = step.get("headers") or {}
+    body    = step.get("body")
 
     # ── 🆕 حماية: النموذج أحياناً (خصوصاً النماذج الصغيرة/الاحتياطية)
     # ينسخ قيمة الحقل من الـ schema حرفياً بدل اختيار فعل واحد حقيقي،
@@ -324,12 +344,14 @@ def _run_step(step: Dict[str, Any]) -> str:
     # صراحة كخطأ قابل للاكتشاف عبر _is_failure() ليُعاد المحاولة تلقائياً.
     _VALID_ACTIONS = {
         "read_file", "create_file", "edit_file",
-        "run_file", "run_tests", "git_push", "web_search", "answer",
+        "run_file", "run_tests", "git_push", "web_search",
+        "image_search", "create_artifact", "api_call", "answer",
     }
     if action not in _VALID_ACTIONS:
         return (f"❌ فعل غير صالح من النموذج: '{action}'\n"
                 f"💡 يجب اختيار فعل واحد بالضبط من: "
-                f"read_file, create_file, edit_file, run_file, run_tests, git_push, web_search, answer")
+                f"read_file, create_file, edit_file, run_file, run_tests, git_push, "
+                f"web_search, image_search, create_artifact, api_call, answer")
 
     # ── read_file ──
     if action == "read_file":
@@ -422,6 +444,67 @@ def _run_step(step: Dict[str, Any]) -> str:
             return _web_search(query)
         except Exception as e:
             return f"❌ خطأ في أداة البحث: {e}"
+
+    # ── image_search ── 🆕 يربط أداة بحث الصور (Unsplash) بالوكيل
+    if action == "image_search":
+        if not query:
+            return "❌ image_search: مطلوب query (نص البحث)"
+        try:
+            from ai.image_search_tool import image_search_safe as _image_search
+            outcome = _image_search(query, max_results=4)
+            if not outcome.get("ok"):
+                return f"⚠️ تعذّر البحث عن الصور: {outcome.get('error')}"
+            results = outcome.get("results") or []
+            # ملاحظة: واجهة المحادثة تعرض النص كـ HTML خام إذا احتوى على "<" —
+            # لذا نستخدم <img> مباشرة هنا بدل صيغة Markdown كي تظهر الصور فعلياً.
+            import html as _html_mod
+            parts = [f"🖼️ <strong>نتائج البحث عن الصور — «{_html_mod.escape(query)}»:</strong><br>"]
+            for r in results:
+                desc = _html_mod.escape(r.get("description") or query)
+                author = _html_mod.escape(r.get("author") or "مجهول")
+                img_url = _html_mod.escape(r.get("thumb_url") or r.get("url") or "")
+                parts.append(
+                    f'<div style="margin:0.5rem 0"><img src="{img_url}" alt="{desc}" '
+                    f'style="max-width:100%;border-radius:10px"><br>'
+                    f'<small style="color:#888">{desc} — تصوير: {author}</small></div>'
+                )
+            return "".join(parts)
+        except Exception as e:
+            return f"❌ خطأ في أداة بحث الصور: {e}"
+
+    # ── create_artifact ── 🆕 يربط مخزن الواجهات التفاعلية بالوكيل
+    if action == "create_artifact":
+        if not content:
+            return "❌ create_artifact: مطلوب content (كود HTML/SVG)"
+        try:
+            from core.artifacts_store import save_artifact
+            new_id = save_artifact(title or "واجهة بدون عنوان", content, kind="html")
+            return (f"✅ أُنشئت الواجهة التفاعلية #{new_id} — \"{title or 'بدون عنوان'}\"\n"
+                    f"💡 يمكن معاينتها وتعديلها من تبويب «🧩 الواجهات التفاعلية».")
+        except Exception as e:
+            return f"❌ خطأ في إنشاء الواجهة التفاعلية: {e}"
+
+    # ── api_call ── 🆕 يربط أداة استدعاء API العام بالوكيل
+    if action == "api_call":
+        if not url:
+            return "❌ api_call: مطلوب url"
+        try:
+            import requests as _requests
+            resp = _requests.request(
+                method, url,
+                headers=headers if isinstance(headers, dict) else None,
+                json=body if method in ("POST", "PUT", "PATCH") and body is not None else None,
+                params=body if method in ("GET", "DELETE") and isinstance(body, dict) else None,
+                timeout=15,
+            )
+            try:
+                data = resp.json()
+                data_str = json.dumps(data, ensure_ascii=False, indent=2)[:2000]
+            except Exception:
+                data_str = resp.text[:2000]
+            return f"🔌 {method} {url} → الحالة {resp.status_code}\n```\n{data_str}\n```"
+        except Exception as e:
+            return f"❌ خطأ في استدعاء API: {e}"
 
     # ── answer ──
     if reply:
