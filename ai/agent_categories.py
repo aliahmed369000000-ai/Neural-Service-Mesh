@@ -291,7 +291,7 @@ class CategoryAgentChat:
         # ── بحث ويب حقيقي (DuckDuckGo) قبل توليد الرد ──
         # يُفعَّل تلقائياً للفئات ذات web_enabled=True، أو يدوياً عبر force_web
         # من الواجهة (تفعيل/تعطيل لكل سؤال بغض النظر عن الفئة).
-        use_web = self.category.web_enabled if force_web is None else force_web
+        use_web = getattr(self.category, "web_enabled", False) if force_web is None else force_web
         sp = self.category.system_prompt
         searched = False
         if use_web and _WEB_SEARCH_OK:

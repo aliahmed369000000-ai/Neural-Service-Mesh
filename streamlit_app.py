@@ -8020,7 +8020,7 @@ def _render_agent_page(category):
 
     web_toggle = st.toggle(
         "🌐 بحث حقيقي في الويب قبل الرد",
-        value=category.web_enabled,
+        value=getattr(category, "web_enabled", False),
         key=f"agent_web_{category.key}",
         help="يفعّل بحثاً فعلياً عبر DuckDuckGo قبل توليد الرد، بغض النظر عن الفئة.",
     )
