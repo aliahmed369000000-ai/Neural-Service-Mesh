@@ -6520,7 +6520,8 @@ def main():
                     "❓ الأسئلة والأجوبة", "💬 المحادثة", "🤖 وكلاء AI",
                     "🎭 إبداع", "🌐 ترجمة", "🎬 Higgsfield", "🎓 التدريب", "🧠 الذاكرة",
                     "🏥 صحة النظام", "🔬 API متقدمة", "⚙️ النظام الداخلي",
-                    "🔓 G0DM0D3", "⚡ ULTRAPLINIAN"])
+                    "🔓 G0DM0D3", "⚡ ULTRAPLINIAN",
+                    "🧩 الواجهات التفاعلية", "🖥️ لوحة المطوّر", "ℹ️ عن NSM"])
 
     with tabs[0]: render_home()
     with tabs[1]: render_search()
@@ -6538,6 +6539,9 @@ def main():
     with tabs[13]: render_system_core()
     with tabs[14]: render_godmode()
     with tabs[15]: render_ultraplinian()
+    with tabs[16]: render_artifacts_studio()
+    with tabs[17]: render_dev_console()
+    with tabs[18]: render_product_info()
 
     # ── تذييل الصفحة ─────────────────────────────────────────────────────
     st.markdown("---")
@@ -6546,6 +6550,249 @@ def main():
         Neural Service Mesh · نظام معرفي عربي ذاتي التعلم · مبني بـ Python & Streamlit
     </div>
     """, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# تبويب 🧩 الواجهات التفاعلية — Artifacts (HTML/SVG) + استدعاء API
+# ══════════════════════════════════════════════════════════════════════════
+def render_artifacts_studio():
+    st.markdown('<div class="section-header">🧩 الواجهات التفاعلية (Artifacts)</div>', unsafe_allow_html=True)
+    st.caption("أنشئ واعرض محتوى HTML/SVG تفاعلياً داخل التطبيق — رسوم بيانية، نماذج، بطاقات، إلخ.")
+
+    try:
+        from core.artifacts_store import (
+            save_artifact, list_artifacts, get_artifact, delete_artifact,
+        )
+        _ART_STORE_OK = True
+    except Exception as _art_err:
+        _ART_STORE_OK = False
+        st.error(f"⚠️ تعذّر تحميل مخزن الواجهات التفاعلية: {_art_err}")
+
+    art_tab1, art_tab2 = st.tabs(["🖼️ محرّر HTML/SVG", "🔌 استدعاء API"])
+
+    # ── محرّر ومعرض الواجهات التفاعلية ───────────────────────────────────
+    with art_tab1:
+        _default_html = (
+            "<div style=\"font-family:sans-serif;text-align:center;padding:2rem;"
+            "background:linear-gradient(135deg,#1a73e8,#0d47a1);color:#fff;border-radius:16px\">"
+            "<h2>مرحباً من NSM 🧠</h2><p>هذا مثال بسيط — عدّل الكود وشاهد النتيجة فوراً.</p></div>"
+        )
+        col_edit, col_preview = st.columns([1, 1])
+        with col_edit:
+            art_title = st.text_input("عنوان الواجهة", value="واجهتي الجديدة", key="art_title")
+            art_code = st.text_area(
+                "كود HTML/SVG", value=_default_html, height=320, key="art_code",
+                help="يمكنك كتابة HTML كامل مع <style> و<script> — يُعرض داخل إطار معزول.",
+            )
+            art_height = st.slider("ارتفاع العرض (px)", 200, 900, 420, 20, key="art_height")
+            c1, c2 = st.columns(2)
+            with c1:
+                art_render_btn = st.button("🖥️ عرض", key="art_render_btn", use_container_width=True, type="primary")
+            with c2:
+                art_save_btn = st.button("💾 حفظ", key="art_save_btn", use_container_width=True,
+                                          disabled=not _ART_STORE_OK)
+            if art_save_btn and _ART_STORE_OK:
+                if art_code.strip():
+                    new_id = save_artifact(art_title, art_code, kind="html")
+                    st.success(f"✅ تم الحفظ (رقم #{new_id})")
+                else:
+                    st.warning("أدخل كوداً أولاً.")
+
+        with col_preview:
+            st.markdown("**المعاينة:**")
+            if art_render_btn or art_code.strip():
+                try:
+                    st.components.v1.html(art_code, height=art_height, scrolling=True)
+                except Exception as _render_err:
+                    st.error(f"❌ خطأ أثناء العرض: {_render_err}")
+
+        if _ART_STORE_OK:
+            st.markdown("---")
+            st.markdown("#### 📚 الواجهات المحفوظة")
+            saved = list_artifacts()
+            if not saved:
+                st.info("لا توجد واجهات محفوظة بعد.")
+            else:
+                for item in saved[:20]:
+                    with st.expander(f"#{item['id']} — {item['title']} · {item['created_at'][:19].replace('T',' ')}"):
+                        full = get_artifact(item["id"])
+                        st.components.v1.html(full["content"], height=300, scrolling=True)
+                        dcol1, dcol2 = st.columns(2)
+                        with dcol1:
+                            if st.button("📋 حمّل في المحرّر", key=f"art_load_{item['id']}"):
+                                st.session_state["art_code"] = full["content"]
+                                st.session_state["art_title"] = full["title"]
+                                st.rerun()
+                        with dcol2:
+                            if st.button("🗑️ حذف", key=f"art_del_{item['id']}"):
+                                delete_artifact(item["id"])
+                                st.rerun()
+
+    # ── استدعاء APIs مباشرة من الواجهة ───────────────────────────────────
+    with art_tab2:
+        st.markdown("""
+        <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;
+                    padding:0.9rem 1.2rem;direction:rtl;margin-bottom:1rem">
+            <strong>🔌 جرّب أي API مباشرة</strong><br>
+            <small>أدخل رابط API، الطريقة، والترويسات/الجسم (JSON) — وشاهد الاستجابة فوراً.</small>
+        </div>
+        """, unsafe_allow_html=True)
+
+        api_url = st.text_input("رابط الـ API", placeholder="https://api.example.com/data", key="api_tool_url")
+        colm, colh = st.columns([1, 3])
+        with colm:
+            api_method = st.selectbox("الطريقة", ["GET", "POST", "PUT", "PATCH", "DELETE"], key="api_tool_method")
+        with colh:
+            api_headers_raw = st.text_input(
+                "ترويسات (JSON، اختياري)", placeholder='{"Authorization": "Bearer ..."}', key="api_tool_headers"
+            )
+        api_body_raw = st.text_area(
+            "جسم الطلب (JSON، اختياري — لـ POST/PUT/PATCH)", height=100, key="api_tool_body"
+        )
+
+        if st.button("▶️ استدعِ API", key="api_tool_run", type="primary"):
+            if not api_url.strip():
+                st.warning("أدخل رابط الـ API أولاً.")
+            else:
+                try:
+                    headers = json.loads(api_headers_raw) if api_headers_raw.strip() else {}
+                except Exception:
+                    st.error("❌ الترويسات ليست JSON صالحاً.")
+                    headers = None
+                try:
+                    body = json.loads(api_body_raw) if api_body_raw.strip() else None
+                except Exception:
+                    st.error("❌ جسم الطلب ليس JSON صالحاً.")
+                    body = None
+                    api_body_raw_invalid = True
+                else:
+                    api_body_raw_invalid = False
+
+                if headers is not None and not api_body_raw_invalid:
+                    try:
+                        with st.spinner("⟳ جارٍ الاتصال..."):
+                            resp = _requests.request(
+                                api_method, api_url.strip(), headers=headers or None,
+                                json=body if api_method in ("POST", "PUT", "PATCH") else None,
+                                params=body if api_method in ("GET", "DELETE") and isinstance(body, dict) else None,
+                                timeout=15,
+                            )
+                        st.markdown(f"**الحالة:** `{resp.status_code}`  ·  **الزمن:** `{resp.elapsed.total_seconds()*1000:.0f} ms`")
+                        try:
+                            st.json(resp.json())
+                        except Exception:
+                            st.text(resp.text[:3000])
+                    except Exception as _api_err:
+                        st.error(f"❌ فشل الاتصال: {_api_err}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# تبويب 🖥️ لوحة المطوّر — تنفيذ أوامر Bash/Python (محمي بمفتاح المالك)
+# ══════════════════════════════════════════════════════════════════════════
+def render_dev_console():
+    st.markdown('<div class="section-header">🖥️ لوحة المطوّر</div>', unsafe_allow_html=True)
+    st.warning(
+        "⚠️ هذه الأداة تنفّذ أوامر حقيقية على الخادم. محمية بمفتاح المالك "
+        "(`NSM_ADMIN_KEY`) — لا تشاركها مع أحد."
+    )
+
+    _admin_key_env = os.environ.get("NSM_ADMIN_KEY", "")
+    if not _admin_key_env:
+        st.error("❌ لم يتم ضبط NSM_ADMIN_KEY في Secrets — هذه الميزة معطّلة حتى يُضاف المفتاح.")
+        return
+
+    if not st.session_state.get("_dev_console_unlocked", False):
+        entered = st.text_input("مفتاح المالك", type="password", key="dev_console_key_input")
+        if st.button("🔓 فتح لوحة المطوّر", key="dev_console_unlock"):
+            if entered == _admin_key_env:
+                st.session_state["_dev_console_unlocked"] = True
+                st.rerun()
+            else:
+                st.error("❌ مفتاح غير صحيح.")
+        return
+
+    col_lock, _ = st.columns([1, 4])
+    with col_lock:
+        if st.button("🔒 قفل", key="dev_console_lock"):
+            st.session_state["_dev_console_unlocked"] = False
+            st.rerun()
+
+    st.markdown("#### تنفيذ أمر")
+    cmd_kind = st.radio("النوع", ["Bash", "Python"], horizontal=True, key="dev_console_kind")
+    cmd_text = st.text_area("الأمر", height=120, key="dev_console_cmd",
+                             placeholder="مثال: ls -la" if cmd_kind == "Bash" else "print(1 + 1)")
+    cmd_timeout = st.slider("مهلة التنفيذ (ثوانٍ)", 5, 60, 20, 5, key="dev_console_timeout")
+
+    if st.button("▶️ نفّذ", key="dev_console_run", type="primary"):
+        if not cmd_text.strip():
+            st.warning("أدخل أمراً أولاً.")
+        else:
+            import subprocess as _sp
+            try:
+                if cmd_kind == "Bash":
+                    result = _sp.run(
+                        cmd_text, shell=True, capture_output=True, text=True, timeout=cmd_timeout,
+                    )
+                else:
+                    result = _sp.run(
+                        ["python3", "-c", cmd_text], capture_output=True, text=True, timeout=cmd_timeout,
+                    )
+                st.markdown(f"**رمز الخروج:** `{result.returncode}`")
+                if result.stdout:
+                    st.markdown("**stdout:**")
+                    st.code(result.stdout[-5000:])
+                if result.stderr:
+                    st.markdown("**stderr:**")
+                    st.code(result.stderr[-5000:])
+                if not result.stdout and not result.stderr:
+                    st.caption("لا يوجد ناتج.")
+            except _sp.TimeoutExpired:
+                st.error(f"⏱️ انتهت المهلة ({cmd_timeout}s) قبل اكتمال التنفيذ.")
+            except Exception as _exec_err:
+                st.error(f"❌ خطأ أثناء التنفيذ: {_exec_err}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# تبويب ℹ️ عن NSM — معلومات المنتج
+# ══════════════════════════════════════════════════════════════════════════
+def render_product_info():
+    st.markdown('<div class="section-header">ℹ️ عن Neural Service Mesh (NSM)</div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div style="direction:rtl;line-height:2;font-size:1.02rem">
+    <p><strong>Neural Service Mesh (NSM)</strong> — النظام المعرفي العربي — هو منصة ذكاء اصطناعي
+    عربية متخصصة تجمع بين محرك معرفي ذاتي التعلّم (Cognitive Knowledge Graph) ونماذج لغوية كبيرة،
+    لتقديم تجربة بحث ومحادثة ومعرفة عربية أصيلة، مع تخصص خاص بالمعرفة الإسلامية والقرآن الكريم.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("#### 🧭 ماذا يقدّم NSM؟")
+    features = [
+        ("🌐", "بحث ويب حقيقي", "بحث فعلي في الإنترنت عبر DuckDuckGo بدون الحاجة لمفتاح API."),
+        ("🖼️", "بحث عن الصور", "بحث عن صور حقيقية عبر Unsplash مع الوصف واسم المصوّر."),
+        ("💬", "محادثة ذكية بذاكرة", "محادثة تتذكر السياق عبر الجلسات باستخدام ذاكرة SQLite طويلة الأمد."),
+        ("📖", "معرفة قرآنية", "فهرسة وتحليل لغوي للقرآن الكريم — جذور، مفاهيم، علاقات دلالية."),
+        ("🤖", "وكلاء AI", "وكلاء متخصصون لتحليل المشروع، البرمجة، والمهام المعرفية."),
+        ("🧩", "واجهات تفاعلية", "إنشاء وعرض محتوى HTML/SVG تفاعلي واستدعاء أي API مباشرة."),
+        ("🧠", "ذاكرة متقدمة", "ذاكرة دلالية (CKG) + ذاكرة حقائق + سجل محادثات قابل للاستعراض والبحث."),
+        ("🖥️", "لوحة مطوّر", "تنفيذ أوامر Bash/Python محمي بمفتاح خاص بالمالك فقط."),
+    ]
+    fcols = st.columns(2)
+    for i, (icon, title, desc) in enumerate(features):
+        with fcols[i % 2]:
+            st.markdown(f"""
+            <div class="root-item">
+                <strong>{icon} {title}</strong>
+                <br><small style="color:#aaa">{desc}</small>
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.markdown("")
+    st.markdown("#### 🔗 روابط")
+    st.markdown(
+        "- المستودع: [Neural-Service-Mesh على GitHub]"
+        "(https://github.com/aliahmed369000000-ai/Neural-Service-Mesh)\n"
+        "- بُني بـ Python · Streamlit · SQLite · نماذج لغوية عبر OpenRouter/Anthropic"
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════
