@@ -240,7 +240,9 @@ try:
 
     stored = pipe_store.get_recent(limit=1)[0]
     check("stored episode question matches", stored.question == "من هو الله ومن هو الرحمن؟")
-    check("stored episode has context_vector of len 7", len(stored.context_vector) == 7,
+    from ai.reasoning_pipeline import DEFAULT_INPUT_DIM
+    check(f"stored episode has context_vector of len {DEFAULT_INPUT_DIM}",
+          len(stored.context_vector) == DEFAULT_INPUT_DIM,
           f"len={len(stored.context_vector)}")
     check("stored episode has non-empty matched_concepts",
           len(stored.matched_concepts) > 0, f"matched={stored.matched_concepts}")
