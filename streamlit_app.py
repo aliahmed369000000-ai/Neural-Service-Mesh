@@ -4059,6 +4059,20 @@ try:
 except Exception:
     _ORCHESTRATOR_OK = False
 
+# ── 🐝 السرب الذكي (AgentFactory + SwarmCoordinator) — تبويب جديد إضافي ───
+# ملاحظة مهمة: هذا نظام منفصل تماماً عن "🤖 وكلاء AI" و"🤝 منسّق الوكلاء"
+# أعلاه (اللذان يعتمدان على ai/agent_categories.py و ai/godmode.py لتوجيه
+# أسئلة حسب الفئة المعرفية). هذا التبويب يعرض ai/agent_factory.py و
+# ai/swarm_coordinator.py: أدوار وظيفية (Research/Translation/Review/
+# Planning/Monitor/Optimization/Coding) تُنفَّذ فعلياً عبر محرك NSMAgent
+# مع تفكيك ديناميكي للأهداف وتنسيق متوازٍ حقيقي بين عدة وكلاء.
+try:
+    from ai.agent_factory import AgentFactory, AGENT_CATALOGUE
+    from ai.swarm_coordinator import SwarmCoordinator
+    _SWARM_OK = True
+except Exception:
+    _SWARM_OK = False
+
 try:
     from ai.ultraplinian import (
         ULTRAPLINIAN_MODELS, TIER_CUMULATIVE, DEFAULT_MAX_MODELS,
@@ -6703,7 +6717,8 @@ def main():
                     "🎭 إبداع", "🌐 ترجمة", "🎬 Higgsfield", "🎓 التدريب", "🧠 الذاكرة",
                     "🏥 صحة النظام", "🔬 API متقدمة", "⚙️ النظام الداخلي",
                     "🤝 منسّق الوكلاء", "📡 الوكيل الاجتماعي", "⚡ ULTRAPLINIAN",
-                    "🧩 الواجهات التفاعلية", "🖥️ لوحة المطوّر", "ℹ️ عن NSM"])
+                    "🧩 الواجهات التفاعلية", "🖥️ لوحة المطوّر", "ℹ️ عن NSM",
+                    "🐝 السرب الذكي"])
 
     with tabs[0]: render_home()
     with tabs[1]: render_search()
@@ -6725,6 +6740,7 @@ def main():
     with tabs[17]: render_artifacts_studio()
     with tabs[18]: render_dev_console()
     with tabs[19]: render_product_info()
+    with tabs[20]: render_swarm_studio()
 
     # ── تذييل الصفحة ─────────────────────────────────────────────────────
     st.markdown("---")
@@ -8945,6 +8961,118 @@ def render_agent_orchestrator():
                 st.markdown('<div class="section-header">✅ الإجابة الموحّدة</div>', unsafe_allow_html=True)
                 st.markdown(final)
 
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# تبويب 🐝 السرب الذكي — AgentFactory + SwarmCoordinator (تنفيذ حقيقي)
+# ══════════════════════════════════════════════════════════════════════════
+def render_swarm_studio():
+    """
+    واجهة فعلية لنظام الوكلاء الوظيفي (ai/agent_factory.py +
+    ai/swarm_coordinator.py): تفكيك هدف معقّد ديناميكياً عبر PlanningAgent
+    حقيقي، ثم توزيعه على الأدوار المتخصصة (Research/Translation/Review/
+    Planning/Monitor/Optimization/Coding) وتنفيذها فعلياً عبر محرك
+    NSMAgent (نفس محرك تبويب 💬 المحادثة)، مع عرض حي لنتيجة كل مهمة.
+    """
+    st.markdown("""
+    <div style="text-align:center;padding:1rem 0 0.5rem">
+        <span style="font-size:2rem">🐝</span>
+        <div style="font-size:1.5rem;font-weight:900;color:#38bdf8">
+            السرب الذكي — Multi-Agent Swarm
+        </div>
+        <div style="color:#999;font-size:0.85rem;direction:rtl">
+            هدف واحد ← تفكيك تلقائي ← تنفيذ فعلي متوازٍ عبر عدة وكلاء متخصصين
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if not _SWARM_OK:
+        st.error("⚠️ تعذّر تحميل نظام السرب. تأكد من وجود ai/agent_factory.py و ai/swarm_coordinator.py.")
+        return
+
+    st.markdown(
+        '<p style="color:#999;direction:rtl">اكتب هدفاً — بسيطاً أو معقداً — وسيُفكِّكه '
+        '<b>PlanningAgent</b> حقيقياً إلى مهام فرعية، ثم يوزّعها <b>SwarmCoordinator</b> على '
+        'الوكلاء المناسبين وينفذها فعلياً (وليس محاكاة) عبر نفس محرك المحادثة.</p>',
+        unsafe_allow_html=True,
+    )
+
+    # ── singleton بمستوى الجلسة حتى تتراكم إحصائيات الوكلاء بين التشغيلات ──
+    if "_swarm_factory" not in st.session_state:
+        st.session_state["_swarm_factory"] = AgentFactory()
+    if "_swarm_coordinator" not in st.session_state:
+        st.session_state["_swarm_coordinator"] = SwarmCoordinator(
+            st.session_state["_swarm_factory"], max_agents=6
+        )
+    factory = st.session_state["_swarm_factory"]
+    coordinator = st.session_state["_swarm_coordinator"]
+
+    with st.expander("📋 الأدوار المتاحة في الكتالوج"):
+        for role in AgentFactory.available_roles():
+            spec = AGENT_CATALOGUE[role]
+            st.markdown(
+                f"**{role}** — {spec['description']}  \n"
+                f"القدرات: `{', '.join(spec['capabilities'])}`"
+            )
+
+    goal = st.text_area(
+        "🎯 الهدف:",
+        placeholder="مثال: ابحث عن أحدث تطورات الذكاء الاصطناعي، لخّصها، وراجع جودة الملخص",
+        key="swarm_goal_input",
+        height=90,
+    )
+    extra_context = st.text_area(
+        "📎 سياق/بيانات إضافية (اختياري — نص خام يُمرَّر لكل مهمة فرعية):",
+        key="swarm_context_input",
+        height=70,
+    )
+    use_planner = st.toggle(
+        "🧠 تفكيك ديناميكي عبر PlanningAgent (إن أُطفئ: قواعد كلمات مفتاحية ثابتة فقط)",
+        value=True,
+        key="swarm_use_planner",
+    )
+
+    if st.button("🚀 نفّذ عبر السرب", type="primary", key="swarm_run") and goal.strip():
+        data = {"content": extra_context.strip()} if extra_context.strip() else {}
+        with st.spinner("⟳ السرب يعمل — تفكيك الهدف وتنفيذ المهام الفرعية..."):
+            result = coordinator.execute(goal.strip(), data=data, use_planner=use_planner)
+
+        status_emoji = {"done": "✅", "partial": "🟡", "failed": "❌"}.get(result.status, "❔")
+        st.markdown(
+            f'<div class="section-header">{status_emoji} حالة السرب: {result.status} '
+            f"({result.success_count}/{len(result.tasks)} مهمة نجحت)</div>",
+            unsafe_allow_html=True,
+        )
+
+        for task in result.tasks:
+            icon = "✅" if task.status == "done" else ("❌" if task.status == "failed" else "⏳")
+            with st.expander(
+                f"{icon} {task.sub_goal} — [{task.required_capability}] "
+                f"({task.duration_ms or 0:.0f} ms)",
+                expanded=(task.status == "failed"),
+            ):
+                st.caption(f"الوكيل: {task.assigned_agent_id or '—'}")
+                if task.result and task.result.get("result_text"):
+                    st.markdown(task.result["result_text"])
+                elif task.error:
+                    st.warning(task.error)
+                else:
+                    st.caption("لا توجد نتيجة (لم يُسنَد وكيل لهذه المهمة).")
+
+    st.markdown("---")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown("**📊 ملخص الوكلاء (AgentFactory)**")
+        st.json(factory.summary())
+    with col_b:
+        st.markdown("**📊 ملخص السرب (SwarmCoordinator)**")
+        st.json(coordinator.summary())
+
+    hist = coordinator.history(limit=5)
+    if hist:
+        with st.expander("🕓 آخر 5 عمليات سرب"):
+            for h in reversed(hist):
+                st.markdown(f"**{h['goal']}** — {h['status']} ({h['success_count']}/{h['total_tasks']})")
 
 
 if __name__ == "__main__":
