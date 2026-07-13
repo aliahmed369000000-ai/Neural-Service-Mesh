@@ -2232,6 +2232,34 @@ class NeuralCore:
 
     # ── معلومات ──────────────────────────────────────────────────────
 
+    def get_info(self) -> dict:
+        """
+        واجهة معلومات مسطّحة (flat) لواجهات العرض (مثل تبويب Streamlit):
+        تُرجع أرقام/قوائم جاهزة مباشرة بدل الهيكل المتداخل في summary().
+        """
+        net_summary = self.net.summary()
+        loss_history = list(self.net._loss_history)
+
+        architecture = []
+        for layer in self.net.layers:
+            architecture.append({
+                "type": type(layer).__name__,
+                "input_dim": layer.in_dim,
+                "output_dim": layer.out_dim,
+                "activation": layer.activation,
+            })
+
+        return {
+            "name": self.name,
+            "total_parameters": net_summary.get("total_parameters"),
+            "train_steps": net_summary.get("train_steps"),
+            "architecture": architecture,
+            "memory_size": len(self.memory),
+            "learning_rate": net_summary.get("learning_rate"),
+            "last_loss": net_summary.get("last_loss"),
+            "best_loss": round(min(loss_history), 8) if loss_history else None,
+        }
+
     def summary(self) -> dict:
         return {
             "name": self.name,

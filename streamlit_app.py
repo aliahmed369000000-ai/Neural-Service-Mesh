@@ -8419,7 +8419,6 @@ def render_system_core():
                     hidden_dims=[32, 16],
                     output_dim=8,
                     learning_rate=0.01,
-                    checkpoints_dir=str(CHECKPOINTS_DIR),
                 )
                 _nc_info = _nc.get_info()
 
