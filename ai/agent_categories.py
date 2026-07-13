@@ -12,6 +12,7 @@ Agent Categories — تبويبات وكلاء الذكاء الاصطناعي �
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -45,6 +46,15 @@ try:
 except Exception:
     _maintenance_command = None
     _HAS_MAINTENANCE_COMMANDS = False
+
+# خط أنابيب "صناعة المحتوى" الحقيقي (ترند → مقال SEO → نشر/جدولة) —
+# يُستخدَم حصراً في وكيل "صناعة المحتوى" أدناه، بدون أي تأثير على بقية الفئات.
+try:
+    from ai.content_agent import run_content_pipeline
+    _CONTENT_OK = True
+except Exception:
+    run_content_pipeline = None
+    _CONTENT_OK = False
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -230,13 +240,131 @@ AGENT_CATEGORIES: Dict[str, AgentCategory] = {
             "قائمة",
         ],
     ),
+
+    "content": AgentCategory(
+        key="content",
+        emoji="📝",
+        title="صناعة المحتوى",
+        subtitle="يكتشف المواضيع الرائجة فعلياً، يكتب مقالات متوافقة مع SEO، ويجدول نشرها",
+        system_prompt=(
+            "أنت وكيل \"صناعة المحتوى\" داخل نظام NSM (Neural Service Mesh).\n"
+            "تخصصك: اقتراح أفكار مقالات، شرح أساسيات SEO، ومساعدة المستخدم على "
+            "صياغة عناوين ووصف تعريفي (meta description) جذابين.\n"
+            "إذا طلب المستخدم بصيغة صريحة كتابة مقال أو البحث عن ترند "
+            "('اكتب مقال عن...'، 'ابحث عن ترند')، فهذا الأمر يُنفَّذ فعلياً "
+            "عبر خط أنابيب حقيقي (بحث ويب + توليد + جدولة نشر) — النتيجة "
+            "التي تصلك هي مخرجات حقيقية وليست شيئاً عليك اختلاقه.\n"
+            "قواعد الإجابة:\n"
+            "1. أجب بالعربية الفصحى، وضّح نصائح SEO بأمثلة عملية قصيرة.\n"
+            "2. لا تختلق إحصائيات بحث أو أرقام ترند — إن لم تُقدَّم لك بيانات "
+            "حقيقية، قل ذلك صراحة واقترح استخدام أمر 'ابحث عن ترند'.\n"
+            "3. ذكّر المستخدم أن النشر التلقائي يتطلب ذكر اسم منصة صراحة "
+            "(مثل: تويتر، تيليجرام) وإلا يتوقف الخط عند كتابة المقال فقط.\n"
+            "4. إذا سُئلت بجدية عن النموذج الأساسي، أجب بصدق ولا تنفِ ذلك."
+        ),
+        quick_prompts=[
+            "ابحث عن ترند واكتب مقال",
+            "اكتب مقال عن الذكاء الاصطناعي",
+            "ما أساسيات كتابة عنوان متوافق مع SEO؟",
+        ],
+    ),
 }
 
 
 CATEGORY_ORDER: List[str] = [
     "assistant", "automation", "analytics", "reasoning", "coding", "research",
-    "maintenance",
+    "maintenance", "content",
 ]
+
+
+# ══════════════════════════════════════════════════════════════════
+# أوامر وكيل "صناعة المحتوى" الحقيقية (ترند → مقال SEO → نشر/جدولة)
+# ══════════════════════════════════════════════════════════════════
+
+_CONTENT_TOPIC_RE = re.compile(r"مقال(?:اً|ا)?\s*(?:عن|حول)\s*(.+)$")
+
+_PLATFORM_KEYWORDS: Dict[str, List[str]] = {
+    "twitter":   ["تويتر", "twitter"],
+    "telegram":  ["تيليجرام", "telegram"],
+    "discord":   ["ديسكورد", "discord"],
+    "instagram": ["انستقرام", "انستغرام", "instagram"],
+    "facebook":  ["فيسبوك", "facebook"],
+    "youtube":   ["يوتيوب", "youtube"],
+    "tiktok":    ["تيك توك", "تيكتوك", "tiktok"],
+    "reddit":    ["ريديت", "reddit"],
+    "linkedin":  ["لينكدإن", "لينكدان", "linkedin"],
+    "threads":   ["ثريدز", "threads"],
+}
+
+
+def _detect_platforms(text: str) -> List[str]:
+    low = text.lower()
+    return [pid for pid, kws in _PLATFORM_KEYWORDS.items() if any(kw in low for kw in kws)]
+
+
+def _format_pipeline_result(result) -> str:
+    art = result.article
+    lines: List[str] = []
+    lines.append(f"📝 **{art.title}**" if art else f"📝 موضوع: {result.topic}")
+    if art:
+        lines += [
+            "",
+            f"_{art.meta_description}_" if art.meta_description else "",
+            "",
+            f"الكلمات المفتاحية: {', '.join(art.keywords) if art.keywords else '—'}",
+            f"عدد الكلمات: {art.word_count} | تقييم SEO: {art.seo_score}/100",
+        ]
+        if not art.structured:
+            lines.append("⚠️ لم يلتزم المزوّد النشط بصيغة JSON — راجع المقال قبل أي نشر (جودة أقل موثوقية).")
+        if art.seo_issues:
+            lines.append("ملاحظات SEO: " + " | ".join(art.seo_issues))
+        lines += ["", "--- نص المقال (Markdown) ---", art.to_markdown(), ""]
+
+    lines += ["--- التشويقة المقترحة للنشر ---", result.teaser, ""]
+
+    if result.platforms:
+        if result.publish_mode == "scheduled":
+            lines.append(
+                f"📅 تمت جدولة النشر على: {', '.join(result.platforms)} "
+                f"(معرّف الجدولة #{result.schedule_id})"
+            )
+        elif result.publish_mode == "published":
+            lines.append("🚀 نتيجة النشر الفوري:")
+            for pid, res in result.publish_result.items():
+                lines.append(f"  - {pid}: {res}")
+        else:
+            lines.append("⏭️ لم يُنشر — راجع الأخطاء أدناه.")
+    else:
+        lines.append(
+            "ℹ️ لم تُذكر منصة نشر صراحة، فتوقف الخط عند كتابة المقال فقط "
+            "(وضع مراجعة). اذكر اسم منصة (مثل: تويتر) لجدولة النشر تلقائياً."
+        )
+
+    if result.errors:
+        lines += ["", "❌ أخطاء: " + " | ".join(result.errors)]
+
+    return "\n".join(l for l in lines if l is not None)
+
+
+def _handle_content_command(user_input: str) -> Optional[str]:
+    """يتعرّف على أوامر صناعة المحتوى الحقيقية (اكتب/ابحث عن ترند/انشر
+    مقال) وينفّذها فعلياً عبر run_content_pipeline. يعيد None لو النص ليس
+    أمر محتوى معروفاً، فتتابع المحادثة بمسارها العادي (LLM حر)."""
+    if not _CONTENT_OK or run_content_pipeline is None:
+        return None
+    text = user_input.strip()
+    if "مقال" not in text and "ترند" not in text and "رائج" not in text:
+        return None
+
+    m = _CONTENT_TOPIC_RE.search(text)
+    topic = m.group(1).strip(" .؟!") if m else None
+    platforms = _detect_platforms(text)
+
+    try:
+        result = run_content_pipeline(topic=topic or None, platforms=platforms)
+    except Exception as e:
+        return f"❌ تعذّر تنفيذ خط أنابيب صناعة المحتوى: {e}"
+    return _format_pipeline_result(result)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -286,6 +414,15 @@ class CategoryAgentChat:
                 self._last_provider = "🛠️ Code Agent"
                 self.history.append((user_input, cmd_response))
                 self._log_audit(user_input, cmd_response, source, "🛠️ Code Agent", False)
+                return cmd_response
+
+        # ── وكيل صناعة المحتوى فقط: خط أنابيب حقيقي (ترند → مقال SEO → نشر) ──
+        if self.category.key == "content" and _CONTENT_OK:
+            cmd_response = _handle_content_command(user_input.strip())
+            if cmd_response is not None:
+                self._last_provider = "📝 Content Pipeline"
+                self.history.append((user_input, cmd_response))
+                self._log_audit(user_input, cmd_response, source, "📝 Content Pipeline", True)
                 return cmd_response
 
         # ── بحث ويب حقيقي (DuckDuckGo) قبل توليد الرد ──
