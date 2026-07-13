@@ -23,6 +23,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from typing import Dict, List
 
 _TIMEOUT = 10
@@ -140,3 +141,86 @@ def web_search(query: str, max_results: int = 5) -> str:
 
     detail = " | ".join(errors) if errors else "لا نتائج مطابقة"
     return f"❌ فشل البحث عن '{query}': {detail}"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# المواضيع الرائجة (Trending Topics) — لوكيل صناعة المحتوى
+# ═════════════════════════════════════════════════════════════════════════════
+# مصدر حقيقي بدون مفتاح API: Google Trends RSS (يومي، حسب الدولة).
+# نفس فلسفة web_search أعلاه: لا نتيجة وهمية أبداً — فشل المصدر = رسالة
+# خطأ صريحة، وليس بيانات ملفّقة.
+
+_TRENDS_NS = {"ht": "https://trends.google.com/trends/trendingsearches/daily"}
+
+
+def _fetch_google_trends_rss(geo: str) -> List[Dict[str, str]]:
+    """يجلب المواضيع الرائجة اليوم من Google Trends RSS لدولة معيّنة."""
+    url = f"https://trends.google.com/trends/trendingsearches/daily/rss?geo={geo}"
+    raw = _fetch(url)
+    root = ET.fromstring(raw)
+
+    results: List[Dict[str, str]] = []
+    for item in root.findall(".//item"):
+        title_el = item.find("title")
+        title = (title_el.text or "").strip() if title_el is not None else ""
+        if not title:
+            continue
+
+        traffic_el = item.find("ht:approx_traffic", _TRENDS_NS)
+        traffic = (traffic_el.text or "").strip() if traffic_el is not None else ""
+
+        news_item = item.find("ht:news_item", _TRENDS_NS)
+        news_title, news_url = "", ""
+        if news_item is not None:
+            nt = news_item.find("ht:news_item_title", _TRENDS_NS)
+            nu = news_item.find("ht:news_item_url", _TRENDS_NS)
+            news_title = (nt.text or "").strip() if nt is not None else ""
+            news_url = (nu.text or "").strip() if nu is not None else ""
+
+        results.append({
+            "title": title,
+            "traffic": traffic,
+            "news_title": news_title,
+            "news_url": news_url,
+        })
+    return results
+
+
+def get_trending_topics(geo: str = "SA", max_results: int = 10) -> List[Dict[str, str]]:
+    """
+    يُرجع المواضيع الرائجة فعلياً اليوم كبيانات مُهيكلة (للاستخدام البرمجي
+    من وكلاء آخرين، مثل وكيل كتابة المقالات القادم).
+    geo: رمز الدولة (SA، EG، AE، ...). القيمة الافتراضية SA.
+    يرفع Exception صراحة عند الفشل — لا يُرجع قائمة فارغة صامتة ولا بيانات
+    ملفّقة، حتى يستطيع المستدعي (البرمجي) التمييز بين "لا نتائج" و"فشل الجلب".
+    """
+    geo = (geo or "SA").strip().upper() or "SA"
+    max_results = max(1, min(int(max_results or 10), 20))
+    results = _fetch_google_trends_rss(geo)
+    return results[:max_results]
+
+
+def trending_topics_report(geo: str = "SA", max_results: int = 10) -> str:
+    """
+    نفس get_trending_topics لكن بصيغة نص منسّق جاهز للعرض المباشر
+    (مطابقة لأسلوب web_search أعلاه) — تُستخدم من واجهة المحادثة/الوكلاء.
+    """
+    geo = (geo or "SA").strip().upper() or "SA"
+    try:
+        results = get_trending_topics(geo, max_results)
+    except Exception as e:
+        return f"❌ فشل جلب المواضيع الرائجة لـ '{geo}': {e}"
+
+    if not results:
+        return f"❌ لا توجد مواضيع رائجة متاحة حالياً للمنطقة '{geo}'"
+
+    lines = [f"📈 المواضيع الرائجة الآن ({geo}) — المصدر: Google Trends\n"]
+    for i, r in enumerate(results, 1):
+        traffic_part = f" (بحث تقريبي: {r['traffic']})" if r.get("traffic") else ""
+        lines.append(f"{i}. **{r['title']}**{traffic_part}")
+        if r.get("news_title"):
+            lines.append(f"   خبر ذو صلة: {r['news_title']}")
+        if r.get("news_url"):
+            lines.append(f"   {r['news_url']}")
+        lines.append("")
+    return "\n".join(lines).strip()
