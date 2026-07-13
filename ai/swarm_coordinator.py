@@ -16,6 +16,8 @@ Example:
 """
 from __future__ import annotations
 
+import json
+import re
 import uuid
 import logging
 import threading
@@ -23,7 +25,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Callable
 
-from ai.agent_factory import AgentFactory, AgentInstance
+from ai.agent_factory import AgentFactory, AgentInstance, AGENT_CATALOGUE
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +168,7 @@ class SwarmCoordinator:
         goal: str,
         data: dict,
         custom_tasks: Optional[List[dict]] = None,
+        use_planner: bool = True,
     ) -> SwarmResult:
         """
         Execute a goal using the swarm.
@@ -175,12 +178,15 @@ class SwarmCoordinator:
             data:         Input data passed to each sub-task.
             custom_tasks: Optional manual task list
                           [{"sub_goal": ..., "capability": ..., "priority": ...}]
+            use_planner:  🆕 إذا True (الافتراضي)، يُستخدم PlanningAgent حقيقي
+                          لتفكيك الهدف ديناميكياً قبل اللجوء لقواعد الكلمات
+                          المفتاحية الثابتة (DECOMPOSITION_RULES) كخطة احتياطية.
         """
         swarm_id = f"swarm_{str(uuid.uuid4())[:8]}"
         result = SwarmResult(swarm_id, goal)
 
         # 1. Decompose goal into tasks
-        tasks = self._decompose(goal, data, custom_tasks)
+        tasks = self._decompose(goal, data, custom_tasks, use_planner=use_planner)
         result.tasks = tasks
 
         if not tasks:
@@ -251,6 +257,7 @@ class SwarmCoordinator:
         goal: str,
         data: dict,
         custom_tasks: Optional[List[dict]],
+        use_planner: bool = True,
     ) -> List[SwarmTask]:
         if custom_tasks:
             return [
@@ -263,6 +270,16 @@ class SwarmCoordinator:
                 )
                 for i, t in enumerate(custom_tasks)
             ]
+
+        # 🆕 المحاولة الأولى: تفكيك ديناميكي حقيقي عبر PlanningAgent، بدل
+        # الاعتماد فوراً على قواعد الكلمات المفتاحية الثابتة. يعمل مع أي
+        # هدف مهما كانت صياغته، وليس فقط الأهداف التي تحتوي كلمة مفتاحية
+        # معروفة مسبقاً (translate/research/review/...).
+        if use_planner:
+            planned = self._decompose_via_planner(goal, data)
+            if planned:
+                logger.info(f"PlanningAgent decomposed goal into {len(planned)} tasks")
+                return planned
 
         goal_lower = goal.lower()
         for keyword, sub_specs in self.DECOMPOSITION_RULES.items():
@@ -288,6 +305,72 @@ class SwarmCoordinator:
                 priority=5,
             )
         ]
+
+    def _decompose_via_planner(self, goal: str, data: dict) -> Optional[List[SwarmTask]]:
+        """
+        🆕 يستخدم PlanningAgent (محرك NSMAgent حقيقي) لتفكيك هدف معقد إلى
+        مهام فرعية ديناميكياً حسب محتوى الهدف الفعلي، بدل قواعد الكلمات
+        المفتاحية الثابتة. يُعيد None إذا فشل التخطيط (مثلاً: لا مفتاح
+        API) أو تعذّر تحليل الرد كـ JSON صالح — عندها _decompose() يرجع
+        تلقائياً لقواعد الكلمات المفتاحية كخطة احتياطية آمنة.
+        """
+        known_capabilities = sorted({
+            cap for spec in AGENT_CATALOGUE.values() for cap in spec.get("capabilities", [])
+        })
+        try:
+            planner = self._factory.spawn("PlanningAgent")
+        except Exception as exc:
+            logger.warning(f"تعذّر إنشاء PlanningAgent: {exc}")
+            return None
+
+        prompt = (
+            f'فكّك هذا الهدف إلى مهام فرعية منفذة قابلة للتوزيع على وكلاء متخصصين: "{goal}"\n\n'
+            f"القدرات المتاحة فقط (اختر لكل مهمة قدرة واحدة من هذه القائمة حصراً): "
+            f"{', '.join(known_capabilities)}\n\n"
+            "أجب بصيغة JSON فقط، مصفوفة من كائنات بهذا الشكل بالضبط، بدون أي "
+            "نص خارج المصفوفة:\n"
+            '[{"sub_goal": "وصف مختصر للمهمة الفرعية", "capability": "إحدى القدرات أعلاه", "priority": 1}]'
+        )
+
+        try:
+            exec_result = planner.execute(prompt)
+        except Exception as exc:
+            logger.warning(f"PlanningAgent decomposition raised: {exc}")
+            return None
+
+        if not exec_result.get("success"):
+            return None
+
+        raw = exec_result.get("result", "")
+        match = re.search(r"\[.*\]", raw, re.DOTALL)
+        if not match:
+            return None
+        try:
+            parsed = json.loads(match.group(0))
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+        tasks: List[SwarmTask] = []
+        for i, item in enumerate(parsed):
+            if not isinstance(item, dict):
+                continue
+            sub_goal = str(item.get("sub_goal") or "").strip()
+            capability = str(item.get("capability") or "").strip()
+            if not sub_goal or capability not in known_capabilities:
+                continue
+            try:
+                priority = int(item.get("priority", i + 1))
+            except (TypeError, ValueError):
+                priority = i + 1
+            tasks.append(SwarmTask(
+                task_id=f"task_{i}_{str(uuid.uuid4())[:6]}",
+                sub_goal=sub_goal,
+                required_capability=capability,
+                data=data,
+                priority=priority,
+            ))
+
+        return tasks or None
 
     def _run_task(self, task: SwarmTask, agent: AgentInstance) -> dict:
         import time
