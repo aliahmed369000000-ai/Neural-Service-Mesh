@@ -32,6 +32,13 @@ AGENT_CATALOGUE: Dict[str, dict] = {
         "input_schema": {"query": "str", "depth": "int"},
         "output_schema": {"findings": "list", "confidence": "float"},
         "tags": ["research", "knowledge", "search"],
+        "engine": "NSMAgent",
+        "role_prompt": (
+            "أنت الآن تعمل كـ ResearchAgent: استخدم web_search عند الحاجة لجمع "
+            "معلومات من مصادر متعددة وحديثة، لخّص النتائج بدقة ودون اختلاق "
+            "معلومات غير موجودة في نتائج البحث، واذكر في النهاية درجة ثقة "
+            "تقريبية (منخفضة/متوسطة/عالية) بناءً على قوة المصادر."
+        ),
     },
     "TranslationAgent": {
         "description": "Translates content between formats, languages, or schemas",
@@ -39,6 +46,13 @@ AGENT_CATALOGUE: Dict[str, dict] = {
         "input_schema": {"content": "any", "source_format": "str", "target_format": "str"},
         "output_schema": {"translated": "any", "mapping": "dict"},
         "tags": ["translation", "transform", "format"],
+        "engine": "NSMAgent",
+        "role_prompt": (
+            "أنت الآن تعمل كـ TranslationAgent: حوّل أو ترجم المحتوى المطلوب "
+            "بين اللغات أو الصيغ أو المخططات المطلوبة، مع الحفاظ الدقيق على "
+            "المعنى الأصلي والمصطلحات التقنية أو الشرعية إن وُجدت. إن كان "
+            "المطلوب تعديل ملف فعلي استخدم read_file ثم edit_file/create_file."
+        ),
     },
     "ReviewAgent": {
         "description": "Validates, audits, and scores outputs from other agents",
@@ -46,6 +60,14 @@ AGENT_CATALOGUE: Dict[str, dict] = {
         "input_schema": {"artifact": "any", "criteria": "list"},
         "output_schema": {"passed": "bool", "score": "float", "feedback": "list"},
         "tags": ["review", "quality", "audit"],
+        "engine": "NSMAgent",
+        "role_prompt": (
+            "أنت الآن تعمل كـ ReviewAgent: دقّق المخرج أو الملف أو الكود "
+            "المطلوب مراجعته مقابل معايير الجودة، اذكر نقاط القوة والضعف "
+            "بوضوح مع أمثلة محددة من المحتوى نفسه، وانتهِ بتقييم صريح "
+            "(نجح ✅ أو رسب ❌) مع الأسباب. استخدم read_file لقراءة أي ملف "
+            "قبل الحكم عليه."
+        ),
     },
     "PlanningAgent": {
         "description": "Decomposes high-level goals into executable sub-tasks",
@@ -53,6 +75,13 @@ AGENT_CATALOGUE: Dict[str, dict] = {
         "input_schema": {"goal": "str", "constraints": "dict"},
         "output_schema": {"tasks": "list", "timeline": "dict"},
         "tags": ["planning", "orchestration", "goals"],
+        "engine": "NSMAgent",
+        "role_prompt": (
+            "أنت الآن تعمل كـ PlanningAgent: فكّك الهدف الكبير المطلوب إلى "
+            "مهام فرعية واضحة وقابلة للتنفيذ، رتبها بترتيب منطقي، وحدد أي "
+            "اعتماديات أو مخاطر بين المهام. لا تنفذ الكود بنفسك — مهمتك "
+            "التخطيط فقط، ما لم يُطلب منك صراحة تنفيذ خطوة معينة."
+        ),
     },
     "MonitorAgent": {
         "description": "Continuously monitors node health and performance metrics",
@@ -60,6 +89,13 @@ AGENT_CATALOGUE: Dict[str, dict] = {
         "input_schema": {"node_ids": "list", "interval_s": "int"},
         "output_schema": {"health_report": "dict", "alerts": "list"},
         "tags": ["monitoring", "health", "metrics"],
+        "engine": "NSMAgent",
+        "role_prompt": (
+            "أنت الآن تعمل كـ MonitorAgent: افحص حالة الملفات أو المكوّنات "
+            "المطلوب مراقبتها (باستخدام read_file أو run_file عند الحاجة) "
+            "وأعطِ تقريراً واضحاً بالحالة الحالية، وأي أخطاء أو تحذيرات "
+            "مكتشفة، مع تصنيف كل تنبيه حسب الخطورة (منخفض/متوسط/عالٍ)."
+        ),
     },
     "OptimizationAgent": {
         "description": "Identifies and applies performance improvements autonomously",
@@ -67,12 +103,21 @@ AGENT_CATALOGUE: Dict[str, dict] = {
         "input_schema": {"target": "str", "metric": "str"},
         "output_schema": {"improvements": "list", "before": "dict", "after": "dict"},
         "tags": ["optimization", "performance", "tuning"],
+        "engine": "NSMAgent",
+        "role_prompt": (
+            "أنت الآن تعمل كـ OptimizationAgent: افحص الكود أو الأداء "
+            "المطلوب تحسينه عبر read_file، حدد نقاط الضعف بدقة (بطء، تكرار، "
+            "استهلاك ذاكرة، إلخ)، وطبّق تحسينات ملموسة عبر edit_file عند "
+            "الإمكان، مع توضيح الفرق بين الحالة قبل وبعد التحسين بشكل صريح."
+        ),
     },
     # ── CodingAgent ──────────────────────────────────────────────────
-    # 🆕 الدور الوحيد المربوط فعلياً بمحرك LLM حقيقي (NSMAgent).
-    # عند spawn("CodingAgent") ثم .execute(task) يُنشأ NSMAgent حقيقي
-    # وينفذ المهمة عبر نفس محرك ai/nsm_agent_core.py الذي يعمل بالفعل
-    # في التطبيق (تخطيط → كتابة كود → تشغيل/اختبار → تصحيح ذاتي → git push).
+    # 🆕 دور برمجي كامل مربوط بمحرك LLM حقيقي (NSMAgent)، بدون role_prompt
+    # إضافي لأن System Prompt الأساسي في nsm_agent_core.py مُصمَّم أصلاً
+    # للبرمجة (تخطيط → كتابة كود → تشغيل/اختبار → تصحيح ذاتي → git push).
+    # بقية الأدوار أدناه (Research/Translation/Review/Planning/Monitor/
+    # Optimization) مربوطة الآن بنفس المحرك، لكن كل واحد منها بـ
+    # role_prompt مختلف يوجّهه لتخصصه المحدد بدل السلوك البرمجي العام.
     "CodingAgent": {
         "description": "Autonomous coding agent: plans, writes, tests, and debugs code using a real LLM engine (NSMAgent)",
         "capabilities": ["plan", "write_code", "run_file", "run_tests", "debug", "web_search", "git_push"],
@@ -110,6 +155,7 @@ class AgentInstance:
         self.last_task_at: Optional[str] = None
         self.performance_score: float = 1.0
         self._engine_name: Optional[str] = spec.get("engine")  # 🆕 اسم المحرك الحقيقي إن وُجد
+        self._role_prompt: Optional[str] = spec.get("role_prompt")  # 🆕 توجيه دور مخصص يُدمج مع المهمة
         self._engine = None  # 🆕 نسخة المحرك الفعلي (lazy، تُبنى عند أول execute)
 
     @property
@@ -157,14 +203,17 @@ class AgentInstance:
         if not self.is_executable():
             raise NotImplementedError(
                 f"الدور '{self.role}' غير مربوط بمحرك تنفيذ حقيقي بعد. "
-                f"الأدوار القابلة للتنفيذ حالياً: CodingAgent."
+                f"الأدوار القابلة للتنفيذ حالياً: {', '.join(AgentFactory.available_roles())}."
             )
         if self.status != "active":
             raise RuntimeError(f"الوكيل {self.agent_id} ليس نشطاً (status={self.status})")
 
         engine = self._load_engine()
+        # 🆕 دمج توجيه الدور (إن وُجد) مع مهمة المستخدم، حتى يعرف المحرك
+        # العام (NSMAgent) أي شخصية/تخصص يتقمّص لهذا التنفيذ بالذات.
+        full_task = f"{self._role_prompt}\n\nالمهمة المطلوبة: {task}" if self._role_prompt else task
         try:
-            result_text = engine.run(task)
+            result_text = engine.run(full_task)
         except Exception as e:
             self.record_task(success=False)
             return {"result": f"❌ خطأ في التنفيذ: {e}", "success": False}
@@ -243,8 +292,10 @@ class AgentFactory:
     def run_task(self, role: str, task: str, reuse: Optional[AgentInstance] = None) -> Dict[str, Any]:
         """
         ينشئ وكيلاً (أو يعيد استخدام وكيل موجود) وينفذ مهمة فعلية عبر
-        محركه الحقيقي. يرفع NotImplementedError لو الدور غير قابل للتنفيذ
-        (مثل ResearchAgent/ReviewAgent إلخ التي مازالت بيانات وصفية فقط).
+        محركه الحقيقي. كل الأدوار في AGENT_CATALOGUE مربوطة الآن بمحرك
+        NSMAgent الحقيقي (كل دور بتوجيه/شخصية مختلفة عبر role_prompt).
+        يرفع NotImplementedError فقط لو أُضيف دور جديد مستقبلاً بدون
+        تحديد "engine" في الكتالوج.
 
         مثال:
             factory = AgentFactory()
