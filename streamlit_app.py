@@ -3551,61 +3551,60 @@ def render_fable():
                     chapter = engine.start_story(mode=mode, character=character, seed_idea=seed)
                 st.session_state.fable_chapter = chapter
                 st.rerun()
-            return
+        else:
+            # ── عرض الفصل الحالي ──
+            mode_info = STORY_MODES.get(cur.mode, {})
+            char_info = CHARACTERS.get(cur.character, {})
+            st.markdown(
+                f'<span class="badge badge-purple">{mode_info.get("emoji","")} {cur.mode}</span> '
+                f'<span class="badge badge-blue">{char_info.get("emoji","")} {cur.character}</span> '
+                f'<span class="badge badge-amber">المزوّد: {cur.provider}</span>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(f"""
+            <div class="root-item" style="font-size:1.05rem; line-height:2; text-align:right; direction:rtl">
+                {cur.text}
+            </div>
+            """, unsafe_allow_html=True)
 
-        # ── عرض الفصل الحالي ──
-        mode_info = STORY_MODES.get(cur.mode, {})
-        char_info = CHARACTERS.get(cur.character, {})
-        st.markdown(
-            f'<span class="badge badge-purple">{mode_info.get("emoji","")} {cur.mode}</span> '
-            f'<span class="badge badge-blue">{char_info.get("emoji","")} {cur.character}</span> '
-            f'<span class="badge badge-amber">المزوّد: {cur.provider}</span>',
-            unsafe_allow_html=True,
-        )
-        st.markdown(f"""
-        <div class="root-item" style="font-size:1.05rem; line-height:2; text-align:right; direction:rtl">
-            {cur.text}
-        </div>
-        """, unsafe_allow_html=True)
+            if cur.error:
+                st.caption(f"⚠️ ملاحظة تقنية: {cur.error}")
 
-        if cur.error:
-            st.caption(f"⚠️ ملاحظة تقنية: {cur.error}")
+            st.markdown("**ماذا يحدث بعد ذلك؟**")
+            cols = st.columns(len(cur.choices) or 1)
+            chosen = None
+            for i, choice in enumerate(cur.choices):
+                with cols[i]:
+                    if st.button(choice, key=f"fable_choice_{i}", use_container_width=True):
+                        chosen = choice
 
-        st.markdown("**ماذا يحدث بعد ذلك؟**")
-        cols = st.columns(len(cur.choices) or 1)
-        chosen = None
-        for i, choice in enumerate(cur.choices):
-            with cols[i]:
-                if st.button(choice, key=f"fable_choice_{i}", use_container_width=True):
-                    chosen = choice
+            custom_choice = st.text_input("أو اكتب مسارك الخاص:", key="fable_custom_choice")
+            if st.button("➡️ تابع") and custom_choice.strip():
+                chosen = custom_choice.strip()
 
-        custom_choice = st.text_input("أو اكتب مسارك الخاص:", key="fable_custom_choice")
-        if st.button("➡️ تابع") and custom_choice.strip():
-            chosen = custom_choice.strip()
+            if chosen:
+                with st.spinner("يُتابع نسج الأحداث..."):
+                    st.session_state.fable_chapter = engine.continue_story(cur.session_id, chosen)
+                st.rerun()
 
-        if chosen:
-            with st.spinner("يُتابع نسج الأحداث..."):
-                st.session_state.fable_chapter = engine.continue_story(cur.session_id, chosen)
-            st.rerun()
+            st.markdown("---")
+            st.markdown("**أوامر سريعة:**")
+            qc_cols = st.columns(4)
+            quick_labels = ["أنشد بيتاً", "صف المكان", "أضف حواراً", "لخّص"]
+            for i, label in enumerate(quick_labels):
+                with qc_cols[i]:
+                    if st.button(f"⚡ {label}", key=f"fable_qc_{i}", use_container_width=True):
+                        with st.spinner("..."):
+                            result = engine.quick_command(cur.session_id, label)
+                        st.markdown(f"""
+                        <div class="root-item" style="text-align:right; direction:rtl">
+                            {result.text}
+                        </div>
+                        """, unsafe_allow_html=True)
 
-        st.markdown("---")
-        st.markdown("**أوامر سريعة:**")
-        qc_cols = st.columns(4)
-        quick_labels = ["أنشد بيتاً", "صف المكان", "أضف حواراً", "لخّص"]
-        for i, label in enumerate(quick_labels):
-            with qc_cols[i]:
-                if st.button(f"⚡ {label}", key=f"fable_qc_{i}", use_container_width=True):
-                    with st.spinner("..."):
-                        result = engine.quick_command(cur.session_id, label)
-                    st.markdown(f"""
-                    <div class="root-item" style="text-align:right; direction:rtl">
-                        {result.text}
-                    </div>
-                    """, unsafe_allow_html=True)
-
-        if st.button("🔄 قصة جديدة"):
-            st.session_state.fable_chapter = None
-            st.rerun()
+            if st.button("🔄 قصة جديدة"):
+                st.session_state.fable_chapter = None
+                st.rerun()
 
     # ══════════════════ توليد شعر ══════════════════
     with poem_tab:
