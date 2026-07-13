@@ -217,7 +217,14 @@ class SwarmCoordinator:
                 try:
                     output = fut.result()
                     task.result = output
-                    task.status = "done"
+                    # 🆕 الحالة تُبنى على success الفعلي من agent.execute()،
+                    # وليس فقط على عدم وجود استثناء (لأن فشل التنفيذ —
+                    # مثل غياب مفتاح API — يعود كنتيجة عادية بدون استثناء).
+                    if output.get("success", True):
+                        task.status = "done"
+                    else:
+                        task.status = "failed"
+                        task.error = output.get("result_text") or "فشل تنفيذ المهمة"
                     task_outputs[task.task_id] = output
                 except Exception as exc:
                     task.status = "failed"
@@ -289,25 +296,47 @@ class SwarmCoordinator:
         t0 = time.time()
 
         try:
-            # Simulate agent execution (in production, call actual agent logic)
+            # 🆕 تنفيذ حقيقي عبر محرك الوكيل (NSMAgent)، بدل المحاكاة القديمة.
+            task_text = self._build_task_text(task)
+            exec_result = agent.execute(task_text)
             output = {
                 "task_id": task.task_id,
                 "sub_goal": task.sub_goal,
                 "agent_id": agent.agent_id,
                 "agent_role": agent.role,
                 "capability_used": task.required_capability,
-                "status": "completed",
+                "status": "completed" if exec_result.get("success") else "failed",
+                "success": exec_result.get("success", False),
+                "result_text": exec_result.get("result", ""),
                 "data_keys_processed": list(task.data.keys()),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-            agent.record_task(success=True)
+            # 🆕 ملاحظة: agent.execute() يسجّل نجاح/فشل المهمة داخلياً بالفعل
+            # (agent.record_task)، فلا نكرر التسجيل هنا لتفادي الازدواجية.
             return output
-        except Exception as exc:
+        except (NotImplementedError, RuntimeError) as exc:
+            # دور بلا محرك تنفيذ حقيقي، أو وكيل غير نشط — لم يُسجَّل داخل
+            # execute() لأنه رُفع قبل استدعاء المحرك، فنسجّله هنا يدوياً.
             agent.record_task(success=False)
             raise exc
         finally:
             task.finished_at = datetime.now(timezone.utc).isoformat()
             task.duration_ms = round((time.time() - t0) * 1000, 2)
+
+    def _build_task_text(self, task: SwarmTask) -> str:
+        """
+        🆕 يبني نص المهمة الفعلي المُرسل لمحرك الوكيل، بدمج الهدف الفرعي
+        مع أي بيانات نصية ذات صلة موجودة في task.data (مثل content/text/
+        query/goal/target)، حتى لا يستقبل المحرك جملة عامة قصيرة فقط
+        (مثل "translate content") بدون السياق الفعلي المطلوب تنفيذه عليه.
+        """
+        parts = [task.sub_goal]
+        if isinstance(task.data, dict):
+            for key in ("content", "text", "query", "goal", "artifact", "target", "path"):
+                val = task.data.get(key)
+                if val:
+                    parts.append(f"{key}: {val}")
+        return "\n".join(str(p) for p in parts)
 
     def _auto_spawn_for_capability(self, capability: str) -> Optional[AgentInstance]:
         """Find a role that has the required capability and spawn an agent."""
