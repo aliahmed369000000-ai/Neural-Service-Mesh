@@ -6582,6 +6582,46 @@ def render_advanced_api():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# 🆕 دوال تجميع التبويبات — تدمج تبويبات متشابهة عبر تبويبات فرعية (sub-tabs)
+# بدون حذف أي وظيفة أصلية؛ كل دالة render_ القديمة تبقى كما هي وتُستدعى
+# من الداخل فقط، لتقليل عدد التبويبات الرئيسية من 21 إلى 12.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def render_knowledge_hub():
+    """📚 المعرفة: يجمع البحث المعرفي + القرآن الكريم + الأسئلة والأجوبة."""
+    sub = st.tabs(["🔍 البحث المعرفي", "📖 القرآن الكريم", "❓ الأسئلة والأجوبة"])
+    with sub[0]: render_search()
+    with sub[1]: render_quran()
+    with sub[2]: render_qa()
+
+
+def render_agents_group():
+    """🤖 الوكلاء: يجمع وكلاء AI + منسّق الوكلاء + السرب الذكي."""
+    sub = st.tabs(["🤖 وكلاء AI", "🤝 منسّق الوكلاء", "🐝 السرب الذكي"])
+    with sub[0]: render_agents_hub()
+    with sub[1]: render_agent_orchestrator()
+    with sub[2]: render_swarm_studio()
+
+
+def render_system_group():
+    """⚙️ النظام: يجمع الذاكرة + صحة النظام + API متقدمة + النظام الداخلي + لوحة المطوّر."""
+    sub = st.tabs(["🧠 الذاكرة", "🏥 صحة النظام", "🔬 API متقدمة",
+                   "⚙️ النظام الداخلي", "🖥️ لوحة المطوّر"])
+    with sub[0]: render_memory()
+    with sub[1]: render_health()
+    with sub[2]: render_advanced_api()
+    with sub[3]: render_system_core()
+    with sub[4]: render_dev_console()
+
+
+def render_advanced_tools_group():
+    """🧪 أدوات متقدمة: يجمع ULTRAPLINIAN + الواجهات التفاعلية."""
+    sub = st.tabs(["⚡ ULTRAPLINIAN", "🧩 الواجهات التفاعلية"])
+    with sub[0]: render_ultraplinian()
+    with sub[1]: render_artifacts_studio()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # التطبيق الرئيسي
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -6712,35 +6752,22 @@ def main():
     """, unsafe_allow_html=True)
 
     # ── التبويبات ─────────────────────────────────────────────────────────
-    tabs = st.tabs(["🏠 الرئيسية", "🔍 البحث المعرفي", "📖 القرآن الكريم",
-                    "❓ الأسئلة والأجوبة", "💬 المحادثة", "🤖 وكلاء AI",
-                    "🎭 إبداع", "🌐 ترجمة", "🎬 Higgsfield", "🎓 التدريب", "🧠 الذاكرة",
-                    "🏥 صحة النظام", "🔬 API متقدمة", "⚙️ النظام الداخلي",
-                    "🤝 منسّق الوكلاء", "📡 الوكيل الاجتماعي", "⚡ ULTRAPLINIAN",
-                    "🧩 الواجهات التفاعلية", "🖥️ لوحة المطوّر", "ℹ️ عن NSM",
-                    "🐝 السرب الذكي"])
+    tabs = st.tabs(["🏠 الرئيسية", "📚 المعرفة", "💬 المحادثة", "🤖 الوكلاء",
+                    "🎭 إبداع", "🌐 ترجمة", "🎬 Higgsfield", "📡 الوكيل الاجتماعي",
+                    "🎓 التدريب", "⚙️ النظام", "🧪 أدوات متقدمة", "ℹ️ عن NSM"])
 
-    with tabs[0]: render_home()
-    with tabs[1]: render_search()
-    with tabs[2]: render_quran()
-    with tabs[3]: render_qa()
-    with tabs[4]: render_chat()
-    with tabs[5]: render_agents_hub()
-    with tabs[6]: render_fable()
-    with tabs[7]: render_translate()
-    with tabs[8]: render_higgsfield()
-    with tabs[9]: render_training()
-    with tabs[10]: render_memory()
-    with tabs[11]: render_health()
-    with tabs[12]: render_advanced_api()
-    with tabs[13]: render_system_core()
-    with tabs[14]: render_agent_orchestrator()
-    with tabs[15]: render_social_agent()
-    with tabs[16]: render_ultraplinian()
-    with tabs[17]: render_artifacts_studio()
-    with tabs[18]: render_dev_console()
-    with tabs[19]: render_product_info()
-    with tabs[20]: render_swarm_studio()
+    with tabs[0]:  render_home()
+    with tabs[1]:  render_knowledge_hub()
+    with tabs[2]:  render_chat()
+    with tabs[3]:  render_agents_group()
+    with tabs[4]:  render_fable()
+    with tabs[5]:  render_translate()
+    with tabs[6]:  render_higgsfield()
+    with tabs[7]:  render_social_agent()
+    with tabs[8]:  render_training()
+    with tabs[9]:  render_system_group()
+    with tabs[10]: render_advanced_tools_group()
+    with tabs[11]: render_product_info()
 
     # ── تذييل الصفحة ─────────────────────────────────────────────────────
     st.markdown("---")
