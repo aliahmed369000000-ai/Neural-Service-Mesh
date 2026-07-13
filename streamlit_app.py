@@ -6638,7 +6638,36 @@ def render_agents_group():
 
 
 def render_system_group():
-    """⚙️ النظام: يجمع الذاكرة + صحة النظام + API متقدمة + النظام الداخلي + لوحة المطوّر."""
+    """⚙️ النظام: يجمع الذاكرة + صحة النظام + API متقدمة + النظام الداخلي + لوحة المطوّر.
+    محمية بالكامل بمفتاح المالك (NSM_ADMIN_KEY) — هذه أدوات تشخيص داخلية،
+    مو ميزة للمستخدم النهائي، ولازم ما تكون ظاهرة لأي زائر بدون مصادقة."""
+    st.markdown('<div class="section-header">⚙️ النظام</div>', unsafe_allow_html=True)
+
+    _admin_key_env = os.environ.get("NSM_ADMIN_KEY", "")
+    if not _admin_key_env:
+        st.error(
+            "❌ لم يتم ضبط NSM_ADMIN_KEY في Secrets — هذا القسم معطّل بالكامل "
+            "حتى يُضاف المفتاح (يحمي بيانات الذاكرة والتشخيص الداخلي)."
+        )
+        return
+
+    if not st.session_state.get("_dev_console_unlocked", False):
+        st.info("🔒 هذا القسم (الذاكرة، صحة النظام، API متقدمة، النظام الداخلي، لوحة المطوّر) محمي بمفتاح المالك.")
+        entered = st.text_input("مفتاح المالك", type="password", key="system_group_key_input")
+        if st.button("🔓 فتح قسم النظام", key="system_group_unlock"):
+            if entered == _admin_key_env:
+                st.session_state["_dev_console_unlocked"] = True
+                st.rerun()
+            else:
+                st.error("❌ مفتاح غير صحيح.")
+        return
+
+    col_lock, _ = st.columns([1, 4])
+    with col_lock:
+        if st.button("🔒 قفل قسم النظام", key="system_group_lock"):
+            st.session_state["_dev_console_unlocked"] = False
+            st.rerun()
+
     sub = st.tabs(["🧠 الذاكرة", "🏥 صحة النظام", "🔬 API متقدمة",
                    "⚙️ النظام الداخلي", "🖥️ لوحة المطوّر"])
     with sub[0]: render_memory()
