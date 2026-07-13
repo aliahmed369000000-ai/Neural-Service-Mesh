@@ -153,42 +153,80 @@ def _fetch_cinematic_clip(narration: str, visual_notes: str, tmp_dir: str, seg_i
         return None
 
 
+def _font_actually_supports_arabic(path: str) -> bool:
+    """يتحقق فعلياً (وليس افتراضاً) أن ملف الخط صالح للفتح ويحتوي فعلياً
+    على تغطية Unicode لحروف عربية أساسية — لا يكفي وجود الملف على القرص:
+    قد يكون تالفاً، فارغاً، أو خطاً لاتينياً محضاً بامتداد .ttf. هذا هو
+    خط الدفاع الثاني بعد الإصلاح السابق (081e57a) الذي حلّ مشكلة اسم
+    الملف فقط، وليس صحة محتواه أو دعمه الفعلي للعربية."""
+    if not path or not os.path.isfile(path):
+        return False
+    try:
+        from fontTools.ttLib import TTFont  # type: ignore
+
+        tt = TTFont(path, lazy=True, fontNumber=0)
+        cmap = tt.getBestCmap() or {}
+        # 'ا' (ألف، U+0627) حرف عربي أساسي — أي خط عربي حقيقي يدعمه.
+        return 0x0627 in cmap
+    except Exception as exc:  # noqa: BLE001
+        # fontTools غير متاح أو الملف تالف — نتراجع لفحص أخفّ عبر Pillow:
+        # نرسم الحرف فعلياً ونتأكد أن عرضه (bbox) غير صفري (أي ليس .notdef
+        # فارغاً)، بدل الافتراض الأعمى أن وجود الملف يعني أنه صالح.
+        try:
+            from PIL import ImageFont, Image, ImageDraw
+
+            font = ImageFont.truetype(path, 40)
+            img = Image.new("RGB", (10, 10))
+            bbox = ImageDraw.Draw(img).textbbox((0, 0), "ا", font=font)
+            return (bbox[2] - bbox[0]) > 0
+        except Exception as exc2:  # noqa: BLE001
+            logger.warning("فشل التحقق من دعم الخط %s للعربية (%s / %s)", path, exc, exc2)
+            return False
+
+
 def _resolve_arabic_font() -> Optional[str]:
-    """يبحث عن خط عربي صالح بترتيب أولوية صارم:
+    """يبحث عن خط عربي صالح بترتيب أولوية صارم، **مع التحقق الفعلي** من
+    دعم كل مرشّح للعربية قبل قبوله (لا يكفي وجود الملف — راجع
+    _font_actually_supports_arabic):
     1) خطوط عربية بالنظام  2) نسخة مخبأة محلياً من تنزيل سابق
-    3) محاولة تنزيل من GitHub (مرة واحدة، تُخزَّن للمرات القادمة)
-    4) DejaVuSans كخيار أخير مطلق (لن يعرض العربية بشكل صحيح، لكن أفضل من فشل الرسم)."""
-    for path in _SYSTEM_FONT_CANDIDATES:
-        if os.path.isfile(path):
-            return path
-
+    3) أي .ttf عربي مُضمَّن فعلياً بـ assets/fonts
+    4) محاولة تنزيل من GitHub (مرة واحدة، تُخزَّن للمرات القادمة)
+    5) DejaVuSans كخيار أخير مطلق (لن يعرض العربية بشكل صحيح، لكن أفضل من فشل الرسم)."""
+    candidates: List[str] = list(_SYSTEM_FONT_CANDIDATES)
     if _FONT_CACHE_PATH.is_file():
-        return str(_FONT_CACHE_PATH)
-
-    # أي خط عربي مُضمَّن فعلياً داخل المشروع (assets/fonts) — يغطي حالة
-    # وجود خط مرفق باسم مختلف عن _FONT_CACHE_PATH (مثلاً تم رفع
-    # NotoNaskhArabic-Regular.ttf يدوياً بدل NotoKufiArabic-Bold.ttf).
-    # هذا هو السبب الفعلي لظهور مربعات (☐☐☐) بدل الحروف العربية بالفيديو:
-    # كان الكود لا يتحقق إلا من اسم ملف واحد محدد فيفشل الإيجاد رغم وجود
-    # خط عربي صالح بالمجلد فعلاً، فينتهي بخط DejaVuSans غير الداعم للعربية.
+        candidates.append(str(_FONT_CACHE_PATH))
     if _FONT_CACHE_DIR.is_dir():
-        for candidate in sorted(_FONT_CACHE_DIR.glob("*.ttf")):
-            return str(candidate)
+        candidates.extend(str(p) for p in sorted(_FONT_CACHE_DIR.glob("*.ttf")))
+
+    rejected: List[str] = []
+    for path in candidates:
+        if _font_actually_supports_arabic(path):
+            return path
+        rejected.append(path)
+
+    if rejected:
+        logger.warning(
+            "وُجدت %d ملف(ات) خط لكن رُفضت جميعها (تالفة أو لا تدعم العربية "
+            "فعلياً رغم وجودها بالقرص): %s", len(rejected), ", ".join(rejected),
+        )
 
     try:
         import urllib.request
 
         _FONT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         urllib.request.urlretrieve(_FONT_FALLBACK_URL, _FONT_CACHE_PATH)
-        logger.info("تم تنزيل خط عربي احتياطي إلى %s", _FONT_CACHE_PATH)
-        return str(_FONT_CACHE_PATH)
+        if _font_actually_supports_arabic(str(_FONT_CACHE_PATH)):
+            logger.info("تم تنزيل خط عربي احتياطي والتحقق من صلاحيته: %s", _FONT_CACHE_PATH)
+            return str(_FONT_CACHE_PATH)
+        logger.warning("الخط المُنزَّل احتياطياً فشل فحص دعم العربية أيضاً: %s", _FONT_CACHE_PATH)
     except Exception as exc:  # noqa: BLE001
         logger.warning(
-            "تعذّر إيجاد/تنزيل خط عربي (%s) — سيُستخدم خط بديل لا يدعم "
+            "تعذّر إيجاد/تنزيل خط عربي صالح (%s) — سيُستخدم خط بديل لا يدعم "
             "العربية بشكل صحيح. أضِف 'fonts-noto-core' لـ packages.txt "
             "(Streamlit Cloud) لحل هذا بشكل دائم.", exc,
         )
-        return _LAST_RESORT_FONT if os.path.isfile(_LAST_RESORT_FONT) else None
+
+    return _LAST_RESORT_FONT if os.path.isfile(_LAST_RESORT_FONT) else None
 
 
 def _shape_arabic(text: str) -> str:
@@ -260,7 +298,12 @@ class VideoEngine:
         draw = ImageDraw.Draw(img, "RGBA")
         try:
             font = ImageFont.truetype(self._font_path, font_size) if self._font_path else ImageFont.load_default()
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "فشل تحميل الخط العربي المُختار (%s) أثناء الرسم الفعلي — "
+                "تراجع لخط Pillow الافتراضي (لا يدعم العربية): %s",
+                self._font_path, exc,
+            )
             font = ImageFont.load_default()
 
         # ⚠️ مهم جداً — ترتيب العمليات هنا يمنع مشكلة النص المشوّه/المبعثر:
