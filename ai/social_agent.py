@@ -360,6 +360,27 @@ def generate_reply(item: SocialItem, persona_prompt: Optional[str] = None) -> st
         "إن وُجد سياق محادثة سابقة مع هذا الشخص أدناه، استخدمه لرد متّسق "
         "يتذكّر ما قيل، لا رداً منعزلاً كأول مرة."
     )
+
+    # ── سياق تعليمي: لو نص الرسالة يطابق مفاهيم من مصادر التخصصات
+    # (فيزياء/كيمياء/نحو/إنجليزي/جغرافيا/حاسوب...)، نرفقها كمرجع دقيق
+    # بدل الاعتماد فقط على معرفة النموذج العامة. لا يُفرض أي رد؛ فقط سياق
+    # إضافي يستخدمه النموذج إن كان مناسباً.
+    try:
+        from knowledge_sources.domain_lookup import search_domain_concepts
+
+        matches = search_domain_concepts(item.text, limit=3)
+        if matches:
+            refs = "\n".join(
+                f"- [{m['domain_ar']}] {m['concept']}: {m['text']}" for m in matches
+            )
+            sys_prompt += (
+                "\n\nمعلومات مرجعية دقيقة من قاعدة معرفة NSM التعليمية "
+                "(استخدمها إن كانت ذات صلة بسؤال الشخص، ولا تذكر أنها "
+                f"'قاعدة بيانات' صراحة):\n{refs}"
+            )
+    except Exception:
+        pass  # غياب السياق التعليمي لا يجب أن يمنع توليد رد عادي
+
     history = get_conversation_history(item.platform, item.author, limit=6)
     messages = [{"role": "system", "content": sys_prompt}]
     for h in history:
