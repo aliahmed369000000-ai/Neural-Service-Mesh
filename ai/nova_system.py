@@ -26,40 +26,20 @@ from typing import Dict, List, Optional, Tuple
 
 NOVA_PRODUCT_INFO = {
     "name": "NSM Agent",
-    "company": "NSM",
-    "current_model": "NSM Agent Fable 5",
-    "model_tier": "Mythos-class",
+    "company": "Neural Service Mesh (NSM)",
     "description": (
-        "NSM Agent Fable 5 هو أول نموذج في عائلة NSM Agent 5 الجديدة من NSM، "
-        "وجزء من فئة Mythos-class التي تتفوق على NSM Agent Opus في القدرات. "
-        "NSM Agent Fable 5 هو الأكثر ذكاءً بين النماذج المتاحة عموماً."
+        "NSM Agent هو مساعد ذكاء اصطناعي عربي متخصص في المعرفة الإسلامية "
+        "(قرآن، سنة، فقه، عقيدة) وأسئلة الذكاء الاصطناعي والتقنية، ضمن مشروع "
+        "Neural Service Mesh مفتوح المصدر."
     ),
-    "available_models": {
-        "claude-fable-5": "NSM Agent Fable 5",
-        "claude-opus-4-8": "NSM Agent Opus 4.8",
-        "claude-sonnet-4-6": "NSM Agent Sonnet 4.6",
-        "claude-haiku-4-5-20251001": "NSM Agent Haiku 4.5",
-    },
-    "products": [
-        "NSM Agent Code (أداة برمجة وكيلة من سطر الأوامر أو تطبيق سطح المكتب أو الجوال)",
-        "NSM Agent Cowork (تطبيق سطح مكتب وكيل للعمل المعرفي للمستخدمين غير المطورين)",
-        "NSM Agent in Chrome (وكيل تصفح - بيتا)",
-        "NSM Agent in Excel (وكيل جداول بيانات - بيتا)",
-        "NSM Agent in PowerPoint (وكيل شرائح - بيتا)",
-    ],
-    "docs_url": "https://docs.nova.ai",
-    "support_url": "https://support.nova.ai",
-    "prompting_guide": "https://docs.nova.ai/en/docs/build-with-nova/prompt-engineering/overview",
-    "news_url": "https://www.aurora-labs.ai/news/nova-fable-5-mythos-5",
-    "ads_policy_url": "https://www.aurora-labs.ai/news/nova-is-a-space-to-think",
-    "knowledge_cutoff": "نهاية يناير 2026",
+    "docs_url": "https://github.com/aliahmed369000000-ai/Neural-Service-Mesh",
+    "support_url": "https://github.com/aliahmed369000000-ai/Neural-Service-Mesh/issues",
+    "knowledge_cutoff": "غير محدَّد رسمياً — يُفضَّل التحقق عبر أداة البحث بدل الاعتماد على معرفة مخزَّنة لأي معلومة قد تكون تغيّرت",
     "features": [
-        "web search (بحث على الويب)",
-        "deep research (بحث معمّق)",
-        "Code Execution and File Creation (تنفيذ الكود وإنشاء الملفات)",
-        "Artifacts (القطع الأثرية)",
-        "Search and reference past chats (البحث والإحالة إلى المحادثات السابقة)",
-        "generate memory from chat history (إنشاء ذاكرة من تاريخ المحادثات)",
+        "الإجابة على أسئلة المعرفة الإسلامية والقرآنية",
+        "بحث في الويب والصور عند الحاجة لمعلومات حديثة",
+        "ذاكرة محادثات عبر nsm_memory لتخصيص الردود",
+        "تكامل مع واتساب ومنصات تواصل اجتماعي متعددة",
     ],
 }
 
