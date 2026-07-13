@@ -2644,6 +2644,19 @@ def get_default_core(
     تُستخدم القيم الافتراضية الثابتة (DEFAULT_*) للتوافق الخلفي فقط.
     """
     global _default_core
+
+    # ── تعافٍ ذاتي ──────────────────────────────────────────────────
+    # إن كانت نسخة singleton محفوظة في هذه العملية (process) من قبل
+    # نشر/تحديث للكود (مثلاً على Streamlit Cloud قبل إعادة تشغيل)، قد
+    # تكون كائناً من نسخة قديمة لا تملك الواجهة الحالية (مثل get_info).
+    # في هذه الحالة نتجاهلها ونعيد البناء بدل تعطّل التطبيق بالكامل.
+    if _default_core is not None and not hasattr(_default_core, "get_info"):
+        logger.warning(
+            "NeuralCore singleton غير متوافق مع الكود الحالي (لا تملك get_info) "
+            "— يُعاد بناؤها."
+        )
+        _default_core = None
+
     if _default_core is None:
         if os.path.exists(os.path.join(directory, "network.json")):
             try:
