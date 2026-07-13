@@ -3979,6 +3979,40 @@ from qa_episodic_memory import (  # noqa: E402
     consolidate_memory, get_semantic_rules,
 )
 
+# ── طبقة فحص أمان أولى (regex، بدون تكلفة API) ────────────────────────────
+try:
+    from ai.harm_classifier import classify_prompt as _classify_harm, get_domain_label as _harm_label
+    _HARM_CLASSIFIER_OK = True
+except Exception:
+    _HARM_CLASSIFIER_OK = False
+
+# نطاقات/فئات فرعية عالية الخطورة فقط — لا نحجب نقاشاً دينياً/تاريخياً عادياً
+# (مثال: آيات القتال، الجهاد التاريخي، أحكام العقوبات الشرعية ليست ضمن هذي القائمة)
+_HIGH_RISK_HARM_KEYS = {
+    ("cbrn", "chemical"), ("cbrn", "biological"), ("cbrn", "radiological"), ("cbrn", "dual_use_cbrn"),
+    ("violence", "mass_harm"),
+    ("sexual", "csam"), ("sexual", "non_consensual"), ("sexual", "trafficking"),
+    ("self_harm", "suicide"),
+    ("illegal", "drugs_synthesis"), ("illegal", "human_trafficking"),
+    ("cyber", "malware"), ("cyber", "exploit"),
+}
+
+
+def _nsm_safety_gate(text: str) -> Optional[str]:
+    """يفحص مدخل المستخدم؛ يرجع رسالة رفض فقط لو كان الطلب ضمن نطاقات عالية الخطورة
+    بثقة كافية. ملاحظة: أنماط الفحص حالياً بالإنجليزية بشكل أساسي، فتغطيتها
+    للمدخلات العربية محدودة — هذه طبقة إضافية وليست بديلاً عن سياسات النموذج نفسه."""
+    if not _HARM_CLASSIFIER_OK or not text or not text.strip():
+        return None
+    try:
+        result = _classify_harm(text)
+    except Exception:
+        return None
+    if (result.domain, result.subcategory) in _HIGH_RISK_HARM_KEYS and result.confidence >= 0.5:
+        emoji, label = _harm_label(result.domain)
+        return f"⚠️ ما بقدر أساعد بهذا الطلب ({emoji} {label}). لو عندك سؤال ديني أو معرفي مختلف، تفضّل."
+    return None
+
 # ── NSM Chat (+ Generative Fallback) ──────────────────────────────────────
 try:
     from nsm_chat_plus import NSMChatPlus as NSMChat   # generative wrapper
@@ -8023,6 +8057,14 @@ def render_chat():
         # ── أضف رسالة المستخدم فوراً ──
         st.session_state.nsm_messages.append(("user", display_text, "", ""))
 
+        # ── فحص أمان أولي (regex محلي، بدون تكلفة API) ──
+        _safety_msg = _nsm_safety_gate(text.strip())
+        if _safety_msg:
+            st.session_state.nsm_messages.append(("nsm", _safety_msg, "", "🛡️ فحص أمان"))
+            st.session_state.nsm_count += 1
+            st.rerun()
+            return
+
         # ── مسار OpenRouter مباشرة إذا تم إدخال مفتاح (يدعم الملفات/الصور) ──
         _or_key_p = st.session_state.get("_or_api_key", "").strip()
         if _or_key_p:
@@ -8413,6 +8455,14 @@ def _render_agent_page(category):
         if not text.strip():
             return
         st.session_state[msg_key].append(("user", text.strip(), ""))
+
+        _safety_msg = _nsm_safety_gate(text.strip())
+        if _safety_msg:
+            st.session_state[msg_key].append(("bot", _safety_msg, "🛡️ فحص أمان"))
+            st.session_state[cnt_key] += 1
+            st.rerun()
+            return
+
         response = bot.chat(text.strip(), force_web=web_toggle, source="hub")
         st.session_state[msg_key].append(("bot", response, bot.last_provider_badge()))
         st.session_state[cnt_key] += 1
