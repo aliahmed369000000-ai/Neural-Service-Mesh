@@ -3745,7 +3745,7 @@ def render_fable():
                     "لكل مشهد عبر Higgsfield. ⚠️ مزوّد مدفوع (بعكس بقية NSM "
                     "المجاني) — يستهلك رصيدك في Higgsfield لكل مشهد. "
                     "يتطلب HIGGSFIELD_API_KEY."
-                    + ("" if _hf_key_present else " — غير مُفعَّل حالياً: المفتاح غير موجود بالبيئة."),
+                    + ("" if _hf_key_present else " — غير مُفعَّل حالياً: المفتاح غير موجود بالبيئة.")
                 ),
                 disabled=not _hf_key_present,
             )
