@@ -8414,13 +8414,27 @@ def render_system_core():
             st.error("⚠️ تعذّر تحميل NeuralCore — تأكد من تثبيت numpy.")
         else:
             try:
-                _nc = NeuralCore(
-                    input_dim=16,
-                    hidden_dims=[32, 16],
-                    output_dim=8,
-                    learning_rate=0.01,
-                )
+                # ── تحميل النواة الحقيقية (784 بُعد) ─────────────────────────
+                # الأبعاد الافتراضية (784→[784,32]→4) هي نفسها التي تُحمَّل
+                # عندها أوزان L1 المدروسة المضمّنة داخل neural_core.py تلقائياً
+                # (784×784)، بدل النسخة التجريبية الصغيرة (16→[32,16]→8).
+                _nc_ckpt_dir = CHECKPOINTS_DIR / "neural_core_full"
+                _nc_loaded_from_checkpoint = False
+                if (_nc_ckpt_dir / "network.json").exists():
+                    try:
+                        _nc = NeuralCore.load(str(_nc_ckpt_dir))
+                        _nc_loaded_from_checkpoint = True
+                    except Exception:
+                        _nc = NeuralCore()  # فشل التحميل → نواة جديدة (L1 مدروسة تُحمَّل تلقائياً)
+                else:
+                    _nc = NeuralCore()  # لا يوجد checkpoint → نواة جديدة (L1 مدروسة تُحمَّل تلقائياً)
+
                 _nc_info = _nc.get_info()
+
+                if _nc_loaded_from_checkpoint:
+                    st.caption(f"📂 تم تحميل حالة محفوظة من `{_nc_ckpt_dir}`")
+                else:
+                    st.caption("🆕 لا يوجد checkpoint محفوظ — نواة جديدة (L1 المدروسة 784×784 محمّلة تلقائياً)")
 
                 col_nc1, col_nc2, col_nc3, col_nc4 = st.columns(4)
                 with col_nc1:
@@ -8465,11 +8479,19 @@ def render_system_core():
                 st.markdown("")
                 st.markdown("**اختبار التمرير الأمامي:**")
                 import numpy as np
-                _test_input = np.random.randn(16)
+                _test_input = np.random.randn(784)
                 _output = _nc.forward(_test_input)
-                _out_str = "، ".join(f"{v:.4f}" for v in _output[:8])
-                st.code(f"مدخل: متجه عشوائي (16 بُعد)\nمخرج: [{_out_str}]", language="text")
+                _out_str = "، ".join(f"{v:.4f}" for v in _output)
+                st.code(f"مدخل: متجه عشوائي (784 بُعد)\nمخرج (4 فئات): [{_out_str}]", language="text")
                 st.success("✅ النواة العصبية تعمل بشكل صحيح")
+
+                st.markdown("")
+                if st.button("💾 حفظ حالة النواة الحالية (checkpoint)", key="nc_save_ckpt"):
+                    try:
+                        _saved_path = _nc.save(str(_nc_ckpt_dir))
+                        st.success(f"✅ تم الحفظ → `{_saved_path}` — أعد تحميل الصفحة لرؤيته يُحمَّل تلقائياً")
+                    except Exception as _save_err:
+                        st.error(f"فشل الحفظ: {_save_err}")
 
             except Exception as _nc_err:
                 st.error(f"خطأ في NeuralCore: {_nc_err}")
