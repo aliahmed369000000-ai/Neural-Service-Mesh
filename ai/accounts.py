@@ -6,16 +6,29 @@ accounts.py — نظام حسابات عام بسيط (اسم مستخدم + ك�
 ستستخدمه بوابة واتساب (webhook منفصل) لمطابقة رسالة واردة بحساب موجود،
 بدل بناء نظام حسابات ثانٍ مخصص لواتساب.
 
-لا اعتماديات خارجية: تشفير كلمة المرور عبر hashlib.pbkdf2_hmac (مكتبة
-قياسية في بايثون) بدل bcrypt/passlib — تفادياً لأي تثبيت pip إضافي.
+لا اعتماديات خارجية إضافية عن المشروع: تشفير كلمة المرور عبر
+hashlib.pbkdf2_hmac (مكتبة قياسية)، وrequests (موجودة أصلاً بـ
+requirements.txt) لمزامنة Upstash الاختيارية أدناه.
 
-قاعدة البيانات: memory/accounts.db (ملف SQLite جديد ومستقل، لا يلمس أي
-قاعدة بيانات موجودة بالمشروع).
+قاعدة البيانات الأساسية: memory/accounts.db (SQLite، مصدر الحقيقة
+الوحيد لواجهة Streamlit — لا شي هنا يغيّر ذلك).
+
+⚠️ ملاحظة معمارية مهمة (اكتُشفت أثناء تصميم بوابة واتساب):
+memory/accounts.db يعيش على قرص Streamlit Community Cloud فقط. أي
+خدمة خارجية (مثل دالة Vercel لبوابة واتساب) لا تقدر تصل له إطلاقاً —
+نظامي ملفات منفصلين تماماً. لذلك عند توفّر رقم هاتف، نزامن نسخة خفيفة
+(اسم المستخدم + تاريخ الإنشاء فقط، بدون كلمة المرور) لـUpstash Redis
+بالتوازي — هذا هو المصدر اللي تقرأ منه بوابة واتساب. المزامنة اختيارية
+تماماً وصامتة الفشل (best-effort): لو متغيرات البيئة غير مضبوطة أو
+فشل الاتصال، إنشاء/تعديل الحساب بـStreamlit ينجح بشكل طبيعي كالمعتاد
+دون أي تأثير — فقط ميزة "حالة حسابي" بواتساب لن تعرف عن الحساب حتى
+تنجح المزامنة لاحقاً.
 """
 from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
 import re
 import secrets
@@ -23,6 +36,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict
+from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = ROOT / "memory" / "accounts.db"
@@ -30,6 +44,7 @@ DB_PATH.parent.mkdir(exist_ok=True)
 
 _PBKDF2_ITERATIONS = 260_000
 _USERNAME_RE = re.compile(r"^[a-zA-Z0-9_\.\u0600-\u06FF]{3,32}$")  # يدعم عربي/إنجليزي
+_UPSTASH_HTTP_TIMEOUT = 5
 
 
 class AccountError(ValueError):
@@ -68,6 +83,30 @@ def _hash_password(password: str, salt: Optional[bytes] = None) -> tuple[str, st
     return digest.hex(), salt.hex()
 
 
+def _sync_phone_to_upstash(phone_number: str, username: str, created_at: str) -> None:
+    """مزامنة اختيارية صامتة الفشل — تكتب {username, created_at} إلى
+    Upstash Redis تحت مفتاح مبني من رقم الهاتف، عشان بوابة واتساب
+    (دالة Vercel منفصلة، بدون وصول لـmemory/accounts.db) تقدر تعرف
+    إن هذا الرقم مرتبط بحساب. لا ترفع أي استثناء أبداً — فشلها لا يجب
+    أن يمنع إنشاء/تعديل الحساب الأساسي بـStreamlit."""
+    url = os.getenv("UPSTASH_REDIS_REST_URL", "").strip()
+    token = os.getenv("UPSTASH_REDIS_REST_TOKEN", "").strip()
+    if not url or not token:
+        return
+    try:
+        import requests
+
+        key = "wa_account_phone:" + quote(phone_number.strip(), safe="")
+        value = quote(json.dumps({"username": username, "created_at": created_at}), safe="")
+        requests.post(
+            f"{url.rstrip('/')}/set/{key}/{value}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=_UPSTASH_HTTP_TIMEOUT,
+        )
+    except Exception:
+        pass  # صامت عمداً — راجع الملاحظة المعمارية أعلى الملف
+
+
 def create_user(username: str, password: str, phone_number: Optional[str] = None) -> int:
     """ينشئ حساباً جديداً. يرفع AccountError برسالة عربية واضحة لو:
     اسم المستخدم غير صالح/مكرر، كلمة المرور قصيرة، أو الهاتف مستخدم مسبقاً."""
@@ -92,6 +131,8 @@ def create_user(username: str, password: str, phone_number: Optional[str] = None
                 (username, password_hash, salt, phone_number, now),
             )
             c.commit()
+            if phone_number:
+                _sync_phone_to_upstash(phone_number, username, now)
             return cur.lastrowid
         except sqlite3.IntegrityError as exc:
             if "username" in str(exc):
@@ -154,5 +195,10 @@ def link_phone(user_id: int, phone_number: str) -> None:
                 (phone_number, user_id),
             )
             c.commit()
+            row = c.execute(
+                "SELECT username, created_at FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+            if row:
+                _sync_phone_to_upstash(phone_number, row[0], row[1])
         except sqlite3.IntegrityError as exc:
             raise AccountError("رقم الهاتف هذا مرتبط بحساب آخر بالفعل") from exc
