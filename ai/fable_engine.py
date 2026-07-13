@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 import sqlite3
 import time
 import uuid
@@ -306,20 +307,30 @@ class FableEngine:
     def render_audio(self, script: "ExplainerScript", voice: str = "") -> "ExplainerScript":
         """يملأ audio_bytes لكل مقطع بالسيناريو عبر TTSEngine (Gemini →
         ElevenLabs → Edge TTS → gTTS، أول مزوّد ناجح). يُعدَّل الكائن
-        في مكانه ويُعاد أيضاً للراحة في الاستخدام المتسلسل."""
+        في مكانه ويُعاد أيضاً للراحة في الاستخدام المتسلسل.
+
+        استقرار: كل مقطع يُعاد محاولته حتى 3 مرات إجمالاً (محاولة + إعادتان)
+        عند الفشل، قبل الاستسلام لذلك المقطع — الفشل الوحيد لمقطع واحد
+        (مثلاً هفوة شبكية عابرة بالبيئة السحابية) لا يعود يُفشِل الفيديو
+        بالكامل كما كان يحدث سابقاً (has_audio كانت تتطلب نجاح كل المقاطع
+        من محاولة واحدة فقط لكل منها)."""
         if not script.segments:
             return script
         for seg in script.segments:
-            result = self.tts.synthesize(seg.narration, voice=voice)
-            if result.ok:
-                seg.audio_bytes = result.audio_bytes
-                seg.audio_format = result.format
-                seg.audio_provider = result.provider.value
+            last_error = ""
+            for attempt in range(3):
+                if attempt > 0:
+                    time.sleep(1.5 * attempt)  # backoff بسيط قبل إعادة المحاولة
+                    logger.info("إعادة محاولة توليد الصوت للمقطع %s (محاولة %d/3)", seg.index, attempt + 1)
+                result = self.tts.synthesize(seg.narration, voice=voice)
+                if result.ok:
+                    seg.audio_bytes = result.audio_bytes
+                    seg.audio_format = result.format
+                    seg.audio_provider = result.provider.value
+                    break
+                last_error = f"{result.error} (تُجرِّب: {', '.join(result.tried)})"
             else:
-                logger.warning(
-                    "فشل توليد الصوت للمقطع %s: %s (تُجرِّب: %s)",
-                    seg.index, result.error, ", ".join(result.tried),
-                )
+                logger.warning("فشل توليد الصوت للمقطع %s بعد 3 محاولات: %s", seg.index, last_error)
         return script
 
     # ── رندر الفيديو الفعلي (mp4) — يستدعي render_audio تلقائياً لو لزم ──
@@ -630,7 +641,14 @@ class FableEngine:
 
         segments = self._parse_explainer_segments(result.text)
         # ضبط المدة الإجمالية لتقارب target_seconds إن أمكن (بدون تلاعب بالنص)
-        title = source_text.strip().splitlines()[0][:60] if source_text.strip() else "فيديو قصير"
+        # العنوان: أول سطر من المصدر، مقصوص عند حدود الكلمات (لا يُقطَع
+        # حرف عشوائي في منتصف كلمة كما كان يحدث سابقاً مع [:60] الخام).
+        _raw_title = source_text.strip().splitlines()[0] if source_text.strip() else ""
+        if len(_raw_title) > 60:
+            _cut = _raw_title[:60].rsplit(" ", 1)[0].rstrip("،,؛:.-")
+            title = (_cut or _raw_title[:60]) + "…"
+        else:
+            title = _raw_title or "فيديو قصير"
 
         return ExplainerScript(
             topic=source_text,

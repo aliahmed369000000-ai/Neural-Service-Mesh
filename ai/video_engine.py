@@ -252,25 +252,30 @@ class VideoEngine:
 
     # ── بناء صورة خلفية متدرّجة للمشهد رقم N ─────────────────────────
     def _build_background(self, seg_index: int) -> "Image.Image":
+        import numpy as np
         from PIL import Image
 
         top, bottom = _GRADIENT_PAIRS[seg_index % len(_GRADIENT_PAIRS)]
-        img = Image.new("RGB", (FRAME_W, FRAME_H))
-        pixels = img.load()
-        for y in range(FRAME_H):
-            t = y / FRAME_H
-            r = int(top[0] + (bottom[0] - top[0]) * t)
-            g = int(top[1] + (bottom[1] - top[1]) * t)
-            b = int(top[2] + (bottom[2] - top[2]) * t)
-            for x in range(0, FRAME_W, 4):  # خطوة 4px لتسريع الرسم (فرق غير محسوس)
-                pixels[x, y] = (r, g, b)
-                if x + 1 < FRAME_W:
-                    pixels[x + 1, y] = (r, g, b)
-                if x + 2 < FRAME_W:
-                    pixels[x + 2, y] = (r, g, b)
-                if x + 3 < FRAME_W:
-                    pixels[x + 3, y] = (r, g, b)
-        return img
+
+        # تدرّج رأسي فعلي لكل بكسل (بدل حلقة يدوية بخطوة 4px) — أدق وأسرع
+        # عبر numpy المُتَّجه (vectorized)، بلا أي تكلفة إضافية.
+        t = np.linspace(0.0, 1.0, FRAME_H, dtype=np.float32).reshape(FRAME_H, 1)
+        top_arr = np.array(top, dtype=np.float32)
+        bottom_arr = np.array(bottom, dtype=np.float32)
+        row_colors = top_arr + (bottom_arr - top_arr) * t          # (FRAME_H, 3)
+        arr = np.broadcast_to(row_colors[:, None, :], (FRAME_H, FRAME_W, 3)).copy()
+
+        # تظليل خفيف بالحواف (Vignette) — يعطي عمقاً سينمائياً بسيطاً
+        # للخلفية المتدرّجة المجانية (بدون الحاجة لخلفيات Higgsfield المدفوعة)،
+        # بنفس أسلوب أدوات الفيديو الاحترافية (CapCut/Submagic/Premiere).
+        yy, xx = np.mgrid[0:FRAME_H, 0:FRAME_W]
+        cx, cy = FRAME_W / 2.0, FRAME_H / 2.0
+        dist = np.sqrt(((xx - cx) / cx) ** 2 + ((yy - cy) / cy) ** 2).astype(np.float32)
+        vignette = np.clip(1.0 - 0.30 * np.clip(dist - 0.55, 0, None), 0.62, 1.0)
+        arr *= vignette[:, :, None]
+
+        arr = np.clip(arr, 0, 255).astype(np.uint8)
+        return Image.fromarray(arr, mode="RGB")
 
     # ── تقسيم النص لعبارات قصيرة (كلمة-بكلمة/عبارة-بعبارة) ──────────
     @staticmethod
