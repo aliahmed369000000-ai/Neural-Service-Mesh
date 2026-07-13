@@ -8414,27 +8414,25 @@ def render_system_core():
             st.error("⚠️ تعذّر تحميل NeuralCore — تأكد من تثبيت numpy.")
         else:
             try:
-                # ── تحميل النواة الحقيقية (784 بُعد) ─────────────────────────
-                # الأبعاد الافتراضية (784→[784,32]→4) هي نفسها التي تُحمَّل
-                # عندها أوزان L1 المدروسة المضمّنة داخل neural_core.py تلقائياً
-                # (784×784)، بدل النسخة التجريبية الصغيرة (16→[32,16]→8).
-                _nc_ckpt_dir = CHECKPOINTS_DIR / "neural_core_full"
-                _nc_loaded_from_checkpoint = False
-                if (_nc_ckpt_dir / "network.json").exists():
-                    try:
-                        _nc = NeuralCore.load(str(_nc_ckpt_dir))
-                        _nc_loaded_from_checkpoint = True
-                    except Exception:
-                        _nc = NeuralCore()  # فشل التحميل → نواة جديدة (L1 مدروسة تُحمَّل تلقائياً)
-                else:
-                    _nc = NeuralCore()  # لا يوجد checkpoint → نواة جديدة (L1 مدروسة تُحمَّل تلقائياً)
-
+                # ── النواة الحية المشتركة (نفس singleton الذي يستخدمه ──
+                # ReasoningPipeline فعلياً في مسار الاستدلال الحي، بنفس
+                # مسار الحفظ models/neural_core. أي تدريب هنا يُحدِّث
+                # نفس الكائن الحي بالذاكرة، ونفس الملف عند الحفظ.
+                from ai.neural_core import get_default_core, DEFAULT_INPUT_DIM, \
+                    DEFAULT_HIDDEN_DIMS, DEFAULT_OUTPUT_DIM
+                _nc_path = "models/neural_core"
+                _nc = get_default_core(
+                    _nc_path,
+                    input_dim=DEFAULT_INPUT_DIM,
+                    hidden_dims=list(DEFAULT_HIDDEN_DIMS),
+                    output_dim=DEFAULT_OUTPUT_DIM,
+                )
                 _nc_info = _nc.get_info()
 
-                if _nc_loaded_from_checkpoint:
-                    st.caption(f"📂 تم تحميل حالة محفوظة من `{_nc_ckpt_dir}`")
+                if os.path.exists(os.path.join(_nc_path, "network.json")):
+                    st.caption(f"📂 النواة الحية — مُحمَّلة من `{_nc_path}` (نفس النواة التي يستخدمها الاستدلال الحقيقي)")
                 else:
-                    st.caption("🆕 لا يوجد checkpoint محفوظ — نواة جديدة (L1 المدروسة 784×784 محمّلة تلقائياً)")
+                    st.caption("🆕 نواة جديدة (لا يوجد ملف محفوظ بعد) — L1 المدروسة 784×784 محمّلة تلقائياً")
 
                 col_nc1, col_nc2, col_nc3, col_nc4 = st.columns(4)
                 with col_nc1:
@@ -8485,11 +8483,61 @@ def render_system_core():
                 st.code(f"مدخل: متجه عشوائي (784 بُعد)\nمخرج (4 فئات): [{_out_str}]", language="text")
                 st.success("✅ النواة العصبية تعمل بشكل صحيح")
 
-                st.markdown("")
-                if st.button("💾 حفظ حالة النواة الحالية (checkpoint)", key="nc_save_ckpt"):
+                # ── تدريب فعلي من التجارب الحقيقية (بدون تخزين بيانات خام) ──
+                st.markdown("---")
+                st.markdown("**🎓 تدريب من التجارب الحقيقية (Experience Replay)**")
+                st.caption(
+                    "يتدرّب على حلقات حقيقية من استخدام النظام الفعلي "
+                    "(memory/experience.db) عبر train_step() + evolve_if_plateau() — "
+                    "تحديث أوزان ونمو هيكلي فعلي، **بدون** تخزين أي متجهات خام "
+                    "بالذاكرة الترابطية."
+                )
+                _replay_strategy = st.selectbox(
+                    "استراتيجية الاختيار:",
+                    ["الأحدث (recent)", "الأعلى جودة (top)", "متنوعة (diverse)"],
+                    key="nc_replay_strategy",
+                )
+                if st.button("🎓 ابدأ التدريب الآن", key="nc_train_btn"):
                     try:
-                        _saved_path = _nc.save(str(_nc_ckpt_dir))
-                        st.success(f"✅ تم الحفظ → `{_saved_path}` — أعد تحميل الصفحة لرؤيته يُحمَّل تلقائياً")
+                        from ai.experience_trainer import ExperienceTrainer
+                        from ai.experience_store import EpisodeStore
+                        _params_before = _nc_info.get("total_parameters", 0)
+                        _store = EpisodeStore()
+                        _trainer = ExperienceTrainer(core=_nc, store=_store)
+                        if _replay_strategy.startswith("الأعلى"):
+                            _report = _trainer.replay_top(limit=20)
+                        elif _replay_strategy.startswith("متنوعة"):
+                            _report = _trainer.replay_diverse(limit=20)
+                        else:
+                            _report = _trainer.replay_recent(limit=20)
+
+                        if _report.episodes_used == 0:
+                            st.warning(
+                                "⚠️ لا توجد تجارب حقيقية محفوظة بعد (0 حلقة) في "
+                                "memory/experience.db — النواة تتعلم تلقائياً من "
+                                "الاستخدام الحقيقي للنظام (أسئلة حقيقية عبر "
+                                "ReasoningPipeline)، لا يوجد بعد ما تتدرّب عليه."
+                            )
+                        else:
+                            _params_after = _nc.get_info().get("total_parameters", 0)
+                            _grew = _params_after > _params_before
+                            st.success(
+                                f"✅ تدرّبت على {_report.episodes_used} حلقة حقيقية — "
+                                f"الخسارة: {_report.avg_loss_before:.6f} → {_report.avg_loss_after:.6f}"
+                            )
+                            if _grew:
+                                st.info(
+                                    f"📈 النواة توسّعت فعلياً: {_params_before:,} → "
+                                    f"{_params_after:,} معامل (نمو هيكلي بسبب ركود الخسارة)"
+                                )
+                    except Exception as _train_err:
+                        st.error(f"فشل التدريب: {_train_err}")
+
+                st.markdown("")
+                if st.button("💾 حفظ الأوزان فقط (بدون بيانات خام)", key="nc_save_ckpt"):
+                    try:
+                        _saved_path = _nc.save(_nc_path, include_memory=False)
+                        st.success(f"✅ تم حفظ الأوزان والحالة الهيكلية فقط → `{_saved_path}`")
                     except Exception as _save_err:
                         st.error(f"فشل الحفظ: {_save_err}")
 

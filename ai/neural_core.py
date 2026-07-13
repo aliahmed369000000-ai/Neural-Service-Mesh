@@ -2178,11 +2178,12 @@ class NeuralCore:
 
     # ── حفظ/تحميل النواة بالكامل ──────────────────────────────────────
 
-    def save(self, directory: str) -> str:
+    def save(self, directory: str, include_memory: bool = True) -> str:
         d = Path(directory)
         d.mkdir(parents=True, exist_ok=True)
         self.net.save(str(d / "network.json"))
-        self.memory.save(str(d / "memory.json"))
+        if include_memory:
+            self.memory.save(str(d / "memory.json"))
         state = {
             "name": self.name,
             "plateau_window": self.plateau_window,
@@ -2195,7 +2196,8 @@ class NeuralCore:
         }
         with open(d / "core_state.json", "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False)
-        logger.info(f"NeuralCore '{self.name}' saved → {d.resolve()}")
+        logger.info(f"NeuralCore '{self.name}' saved → {d.resolve()}"
+                    f"{' (بدون ذاكرة خام)' if not include_memory else ''}")
         return str(d.resolve())
 
     @classmethod
@@ -2203,7 +2205,12 @@ class NeuralCore:
         d = Path(directory)
         core = cls.__new__(cls)
         core.net = NeuralNetwork.load(str(d / "network.json"))
-        core.memory = AssociativeMemory.load(str(d / "memory.json"))
+        memory_path = d / "memory.json"
+        if memory_path.exists():
+            core.memory = AssociativeMemory.load(str(memory_path))
+        else:
+            core.memory = AssociativeMemory(dim=core.net.layer_dims[0], capacity=5000,
+                                             name=f"{core.name if hasattr(core, 'name') else 'neural_core'}_memory")
 
         state_path = d / "core_state.json"
         if state_path.exists():
