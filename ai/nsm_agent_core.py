@@ -23,6 +23,33 @@ import subprocess
 import textwrap
 import time
 import urllib.request
+
+# ── وضع المالك — يحدد هل أفعال الوكيل الخطرة (كتابة/تنفيذ/push) مفعّلة ──
+# نفس الآلية المستخدمة في nsm_chat.py و streamlit_app.py: هذه الأفعال
+# تكتب/تنفذ/تدفع فعلياً على الخادم والمستودع، ويجب ألا تُنفَّذ أبداً
+# لمحادثة عامة يقودها LLM بناءً على نص زائر مجهول — الحكم بالسماح لا
+# يجوز أن يُترك لتقدير النموذج نفسه (عرضة لحقن التعليمات/prompt injection).
+try:
+    import streamlit as _st
+    _HAS_STREAMLIT_AGENT = True
+except Exception:
+    _HAS_STREAMLIT_AGENT = False
+
+
+def _is_admin_unlocked() -> bool:
+    if not _HAS_STREAMLIT_AGENT:
+        return False
+    try:
+        return bool(_st.session_state.get("_dev_console_unlocked", False))
+    except Exception:
+        return False
+
+
+# الأفعال الآمنة لأي زائر: تجيب على سؤال، أو تبحث (ويب/صور) بدون لمس
+# الخادم. كل ما عداها (قراءة/كتابة/تعديل ملفات، تشغيل أوامر shell،
+# git push، إنشاء واجهة تفاعلية مشتركة، استدعاء API عام) يتطلب فتح
+# وضع المالك أولاً.
+_PUBLIC_SAFE_ACTIONS = {"answer", "web_search", "image_search"}
 import urllib.error
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Tuple
@@ -352,6 +379,14 @@ def _run_step(step: Dict[str, Any]) -> str:
                 f"💡 يجب اختيار فعل واحد بالضبط من: "
                 f"read_file, create_file, edit_file, run_file, run_tests, git_push, "
                 f"web_search, image_search, create_artifact, api_call, answer")
+
+    # ── 🔒 حماية: الأفعال الخطرة (ملفات/تنفيذ/push/API عام) للمالك فقط ──
+    # لا يجوز الاعتماد على تقدير النموذج نفسه هنا؛ التحقق صريح وقاطع.
+    if action not in _PUBLIC_SAFE_ACTIONS and not _is_admin_unlocked():
+        return (
+            "🔒 هذا الإجراء (" + action + ") متاح لوضع المالك فقط. "
+            "افتحه من الشريط الجانبي إذا كنت المالك."
+        )
 
     # ── read_file ──
     if action == "read_file":
