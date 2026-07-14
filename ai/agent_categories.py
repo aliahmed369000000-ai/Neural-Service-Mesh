@@ -284,7 +284,6 @@ CATEGORY_ORDER: List[str] = [
 _CONTENT_TOPIC_RE = re.compile(r"مقال(?:اً|ا)?\s*(?:عن|حول)\s*(.+)$")
 
 _PLATFORM_KEYWORDS: Dict[str, List[str]] = {
-    "twitter":   ["تويتر", "twitter"],
     "telegram":  ["تيليجرام", "telegram"],
     "discord":   ["ديسكورد", "discord"],
     "instagram": ["انستقرام", "انستغرام", "instagram"],
@@ -292,7 +291,6 @@ _PLATFORM_KEYWORDS: Dict[str, List[str]] = {
     "youtube":   ["يوتيوب", "youtube"],
     "tiktok":    ["تيك توك", "تيكتوك", "tiktok"],
     "reddit":    ["ريديت", "reddit"],
-    "linkedin":  ["لينكدإن", "لينكدان", "linkedin"],
     "threads":   ["ثريدز", "threads"],
 }
 
