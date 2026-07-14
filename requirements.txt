@@ -6,6 +6,7 @@ gTTS>=2.5.0
 imageio-ffmpeg>=0.4.9
 librosa
 llvmlite>=0.43.0
+mcp>=1.28.0
 moviepy>=2.0
 numba>=0.60.0
 numpy
