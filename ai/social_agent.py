@@ -572,6 +572,14 @@ class SocialAgentManager:
                 st = self._status.get(pid)
                 if not adapter or not adapter.is_configured():
                     continue
+                if not adapter.supports_monitoring:
+                    # مثال: Pinterest — النشر يعمل عبر publish_to، لكن لا
+                    # يوجد API لقراءة تعليقات لمراقبتها أصلاً (قيد من
+                    # المنصة نفسها، راجع pinterest_adapter.py). استدعاء
+                    # fetch_new_items هنا سيرفع PlatformCapabilityError
+                    # بلا فائدة في كل دورة — نتخطى بصمت بدل تسجيل خطأ
+                    # متكرر عن شيء ليس خطأً أصلاً.
+                    continue
                 try:
                     since = _seen_ids_for(pid)
                     new_items = adapter.fetch_new_items(since)
