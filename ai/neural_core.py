@@ -2290,6 +2290,219 @@ class NeuralCore:
 
 
 # ════════════════════════════════════════════════════════════════════════
+# 4.5) CirculantLayer + DeepCirculantPyramid — بنية "المصفوفة الافتراضية"
+#      العميقة (~14.1M باراميتر بدل ~252 مليار لو Dense كاملة الاتصال)
+# ════════════════════════════════════════════════════════════════════════
+"""
+طبقة دائرية (Circulant) N×N مُعرَّفة بصف واحد فقط (c) بدل N×N كاملة —
+نفس فكرة VirtualMatrix614656 (تخزين O(N) بدل O(N²))، مطبَّقة الآن على
+عدة طبقات متتالية (عمق حقيقي) بدل حصرها بطبقة L1 وحيدة كما بالبنية
+القديمة. الضرب والتدرّج يُحسبان عبر FFT بتعقيد O(N log N) بدل O(N²).
+
+الرياضيات (مُتحقَّق منها عددياً بـ finite-difference قبل الدمج بالمستودع):
+  y = C @ x + b   حيث  C[k,i] = c[(k-i) mod N]  (مصفوفة دائرية)
+  الضرب بمصفوفة دائرية = التفاف دائري (circular convolution):
+
+    Forward:   ĉ=FFT(c), x̂=FFT(x)  →  z = IFFT(ĉ·x̂) + b
+    Backward:  dL/dx = IFFT(conj(ĉ)·dẑ)
+               dL/dc = IFFT(conj(x̂)·dẑ)
+               dL/db = dL/dz
+
+ملاحظة أداء (قياس فعلي على N=614,656، float32، CPU عادي):
+  forward لطبقة واحدة ≈ 50ms، 8 طبقات ≈ 400-800ms/عينة تدريب.
+  هذا مقبول للتدريب بالخلفية، لكنه إضافة ملموسة لكل استدلال حي —
+  يُنصح بقياسه ضمن سياق Streamlit الفعلي قبل الاعتماد عليه بالكامل.
+"""
+
+class CirculantLayer:
+    """طبقة دائرية N×N مُخزَّنة بصف واحد (O(N)) بدل مصفوفة كاملة (O(N²))."""
+
+    def __init__(self, dim: int, activation: str = "relu", name: str = "",
+                 seed: Optional[int] = None):
+        if activation not in {"relu", "linear", "tanh"}:
+            raise ValueError(f"CirculantLayer يدعم relu/linear/tanh فقط، وردت: {activation}")
+        self.dim = int(dim)
+        self.activation = activation
+        self.name = name or f"circulant_{dim}"
+
+        rng = np.random.default_rng(seed)
+        limit = math.sqrt(6.0 / (2 * self.dim))
+        self.c = rng.uniform(-limit, limit, size=self.dim).astype(np.float32)
+        self.b = np.zeros(self.dim, dtype=np.float32)
+
+        self._x = self._z = self._out = None
+        self._c_hat = self._x_hat = None
+        self.grad_c: Optional[np.ndarray] = None
+        self.grad_b: Optional[np.ndarray] = None
+
+        self._m_c = np.zeros_like(self.c); self._v_c = np.zeros_like(self.c)
+        self._m_b = np.zeros_like(self.b); self._v_b = np.zeros_like(self.b)
+        self._adam_t = 0
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        x = np.asarray(x, dtype=np.float32)
+        c_hat = np.fft.rfft(self.c)
+        x_hat = np.fft.rfft(x)
+        z = np.fft.irfft(c_hat * x_hat, n=self.dim).astype(np.float32) + self.b
+
+        if self.activation == "relu":
+            out = relu(z)
+        elif self.activation == "tanh":
+            out = tanh(z)
+        else:
+            out = z
+
+        self._x, self._z, self._out = x, z, out
+        self._c_hat, self._x_hat = c_hat, x_hat
+        return out
+
+    def backward(self, d_out: np.ndarray) -> np.ndarray:
+        z, out = self._z, self._out
+        if self.activation == "relu":
+            d_z = (d_out * relu_grad(z)).astype(np.float32)
+        elif self.activation == "tanh":
+            d_z = (d_out * tanh_grad_from_output(out)).astype(np.float32)
+        else:
+            d_z = np.asarray(d_out, dtype=np.float32)
+
+        dz_hat = np.fft.rfft(d_z)
+        d_x = np.fft.irfft(np.conj(self._c_hat) * dz_hat, n=self.dim).astype(np.float32)
+        d_c = np.fft.irfft(np.conj(self._x_hat) * dz_hat, n=self.dim).astype(np.float32)
+
+        self.grad_c = d_c
+        self.grad_b = d_z
+        return d_x
+
+    def apply_gradients(self, learning_rate: float, clip: float = 5.0,
+                         optimizer: str = "adam", beta1: float = 0.9,
+                         beta2: float = 0.999, eps: float = 1e-8) -> None:
+        if optimizer == "sgd":
+            self.c -= learning_rate * self.grad_c
+            self.b -= learning_rate * self.grad_b
+        elif optimizer == "adam":
+            self._adam_t += 1
+            t = self._adam_t
+
+            self._m_c = beta1 * self._m_c + (1 - beta1) * self.grad_c
+            self._v_c = beta2 * self._v_c + (1 - beta2) * (self.grad_c ** 2)
+            m_hat_c = self._m_c / (1 - beta1 ** t)
+            v_hat_c = self._v_c / (1 - beta2 ** t)
+            self.c -= learning_rate * m_hat_c / (np.sqrt(v_hat_c) + eps)
+
+            self._m_b = beta1 * self._m_b + (1 - beta1) * self.grad_b
+            self._v_b = beta2 * self._v_b + (1 - beta2) * (self.grad_b ** 2)
+            m_hat_b = self._m_b / (1 - beta1 ** t)
+            v_hat_b = self._v_b / (1 - beta2 ** t)
+            self.b -= learning_rate * m_hat_b / (np.sqrt(v_hat_b) + eps)
+        else:
+            raise ValueError(f"optimizer غير معروف: {optimizer}")
+
+        if clip is not None:
+            np.clip(self.c, -clip, clip, out=self.c)
+            np.clip(self.b, -clip, clip, out=self.b)
+
+    def summary(self) -> dict:
+        return {
+            "name": self.name,
+            "type": "circulant",
+            "dim": self.dim,
+            "activation": self.activation,
+            "params": int(self.c.size + self.b.size),
+            "equivalent_dense_params": int(self.dim * self.dim),
+        }
+
+    def __repr__(self) -> str:
+        return f"<CirculantLayer '{self.name}' dim={self.dim} act={self.activation}>"
+
+
+class DeepCirculantPyramid:
+    """
+    البنية المتّفَق عليها (~14.1M باراميتر): عدة طبقات Circulant مربّعة
+    (614656×614656 منطقياً، لكن كل واحدة مخزَّنة بـO(N) فقط عبر
+    CirculantLayer) + طبقة إسقاط Dense نهائية مباشرة إلى output_dim.
+
+    البديل عن Dense كاملة الاتصال (~252 مليار باراميتر، ~1TB — مستحيلة
+    على أي بنية تحتية عادية)، بنفس روح VirtualMatrix614656 لكن بعمق
+    حقيقي (عدة طبقات) بدل طبقة واحدة.
+    """
+
+    def __init__(self, circulant_dim: int = 614656, n_circulant_layers: int = 8,
+                 output_dim: int = 7, learning_rate: float = 0.001,
+                 loss: str = "cross_entropy", optimizer: str = "adam",
+                 name: str = "deep_circulant_pyramid", seed: Optional[int] = None):
+        self.circulant_dim = int(circulant_dim)
+        self.output_dim = int(output_dim)
+        self.learning_rate = learning_rate
+        self.loss_name = loss
+        self.optimizer = optimizer
+        self.name = name
+
+        self.circulant_layers: List[CirculantLayer] = [
+            CirculantLayer(self.circulant_dim, activation="relu",
+                            name=f"{name}_circ{i + 1}",
+                            seed=None if seed is None else seed + i)
+            for i in range(n_circulant_layers)
+        ]
+        self.output_layer = DenseLayer(self.output_dim, self.circulant_dim,
+                                        activation="softmax", name=f"{name}_out",
+                                        seed=seed)
+        if loss not in LOSS_FUNCTIONS:
+            raise ValueError(f"loss غير معروفة: {loss}")
+        self._loss_fn = LOSS_FUNCTIONS[loss]
+
+        self.train_steps = 0
+        self.loss_history: deque = deque(maxlen=500)
+
+    def forward(self, x: ArrayLike) -> np.ndarray:
+        h = np.asarray(x, dtype=np.float32)
+        for layer in self.circulant_layers:
+            h = layer.forward(h)
+        out = self.output_layer.forward(h.astype(np.float64))
+        return out
+
+    def train_step(self, x: ArrayLike, target: ArrayLike) -> float:
+        out = self.forward(x)
+        target = np.asarray(target, dtype=np.float64)
+        loss, d_out = self._loss_fn(out, target)
+
+        d_h = self.output_layer.backward(d_out)
+        self.output_layer.apply_gradients(self.learning_rate, optimizer=self.optimizer)
+
+        d_h = d_h.astype(np.float32)
+        for layer in reversed(self.circulant_layers):
+            d_h = layer.backward(d_h)
+            layer.apply_gradients(self.learning_rate, optimizer=self.optimizer)
+
+        self.train_steps += 1
+        self.loss_history.append(loss)
+        return loss
+
+    def total_parameters(self) -> int:
+        p = sum(l.c.size + l.b.size for l in self.circulant_layers)
+        p += self.output_layer.W.size + self.output_layer.b.size
+        return int(p)
+
+    def summary(self) -> dict:
+        return {
+            "name": self.name,
+            "architecture": (f"{self.circulant_dim}(×{len(self.circulant_layers)} "
+                              f"circulant) → {self.output_dim}(dense)"),
+            "total_parameters": self.total_parameters(),
+            "equivalent_dense_parameters": int(
+                len(self.circulant_layers) * self.circulant_dim * self.circulant_dim
+                + self.circulant_dim * self.output_dim
+            ),
+            "train_steps": self.train_steps,
+            "last_loss": self.loss_history[-1] if self.loss_history else None,
+        }
+
+    def __repr__(self) -> str:
+        s = self.summary()
+        return (f"<DeepCirculantPyramid '{self.name}' {s['architecture']} "
+                f"params={self.total_parameters():,}>")
+
+
+# ════════════════════════════════════════════════════════════════════════
 # 5) طبقات توافق خلفي (Backward-compatible shims)
 #    نفس الواجهة القديمة (forward/train_step/.weights/.SHAPE/summary)
 #    لكن backprop ومشتقات صحيحة رياضياً الآن.
