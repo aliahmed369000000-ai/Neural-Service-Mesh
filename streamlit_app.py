@@ -3111,7 +3111,7 @@ def main():
     ]
     if st.session_state.get("_dev_console_unlocked", False):
         _tab_defs.append(("⚙️ النظام", render_system_group))
-    _tab_defs.append(("🧪 أدوات متقدمة", render_advanced_tools_group))
+        _tab_defs.append(("🧪 أدوات متقدمة", render_advanced_tools_group))
     _tab_defs.append(("ℹ️ عن NSM", render_product_info))
 
     tabs = st.tabs([_label for _label, _fn in _tab_defs])
