@@ -13,7 +13,7 @@ from pathlib import Path
 # إضافة مسار المشروع
 sys.path.insert(0, str(Path(__file__).parent))
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -70,6 +70,41 @@ async def process(payload: dict):
         return {"status": "ok", "result": result}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/webhook/telegram/{secret}")
+async def telegram_webhook(secret: str, request: Request):
+    """نقطة استقبال webhook تيليجرام (بديل عن getUpdates عند تفعيله عبر
+    SocialAgentManager.enable_webhook). التحقق مزدوج قبل أي معالجة:
+    1) الجزء السري في المسار نفسه يجب أن يطابق TELEGRAM_WEBHOOK_SECRET.
+    2) رأس X-Telegram-Bot-Api-Secret-Token (يرسله تيليجرام تلقائياً مع
+       كل طلب بعد تفعيل webhook بـsecret_token) يجب أن يطابقه أيضاً.
+    أي طلب لا يطابق الاثنين يُرفض بـ403 دون قراءة الجسم أو لمس قاعدة
+    البيانات — نفس مبدأ 'لا بيانات مزيّفة، لا معالجة غير موثّقة' المتّبع
+    بكل محولات المنصة."""
+    configured_secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
+    header_secret = request.headers.get("x-telegram-bot-api-secret-token")
+    if not configured_secret or secret != configured_secret or header_secret != configured_secret:
+        return JSONResponse(status_code=403, content={"error": "secret غير مطابق"})
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "جسم JSON غير صالح"})
+
+    try:
+        from ai.social_agent import get_manager
+        from ai.social_platforms.telegram_adapter import TelegramAdapter
+
+        item = TelegramAdapter._parse_update(payload)
+        if item is not None:
+            get_manager().ingest_webhook_item("telegram", item)
+    except Exception as e:
+        # تيليجرام يعيد المحاولة/يعطّل الـwebhook عند رؤية أخطاء متكررة —
+        # نرجّع 200 دائماً ونسجّل الخطأ فقط، بنفس نمط whatsapp_gateway.
+        return JSONResponse(status_code=200, content={"status": "ok", "warning": str(e)})
+
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":

@@ -36,6 +36,11 @@ class PlatformAdapter:
     platform_id: str = "base"
     #: أسماء متغيرات البيئة/الأسرار المطلوبة لتفعيل هذا المحول
     required_env: List[str] = []
+    #: هل تدعم هذه المنصة webhook حقيقي (استقبال أحداث بدلاً من polling)؟
+    #: True فقط للمنصات التي توفّر فعلياً HTTP push API موثّق للأحداث
+    #: الواردة (وليس فقط webhooks صادرة للنشر). راجع WEBHOOKS.md لتفصيل
+    #: كل منصة وسبب True/False قبل تغيير هذه القيمة.
+    supports_webhook: bool = False
 
     def is_configured(self) -> bool:
         return all(os.environ.get(k) for k in self.required_env)
