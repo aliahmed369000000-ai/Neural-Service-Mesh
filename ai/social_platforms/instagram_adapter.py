@@ -19,6 +19,7 @@ from typing import List
 import requests
 
 from .base import PlatformAdapter, SocialItem, NotConfiguredError
+from .retry import with_retry
 
 GRAPH = "https://graph.facebook.com/v19.0"
 
@@ -27,6 +28,7 @@ class InstagramAdapter(PlatformAdapter):
     platform_id = "instagram"
     required_env = ["INSTAGRAM_ACCESS_TOKEN", "INSTAGRAM_BUSINESS_ACCOUNT_ID"]
 
+    @with_retry()
     def publish(self, text: str) -> str:
         # Instagram Graph API لا يسمح بمنشور نصي بلا صورة/فيديو — هذا قيد
         # من المنصة نفسها وليس نقصاً في الكود.
@@ -34,6 +36,7 @@ class InstagramAdapter(PlatformAdapter):
             "Instagram لا يدعم نشر نص فقط عبر Graph API — يلزم رابط صورة/فيديو عام."
         )
 
+    @with_retry()
     def fetch_new_items(self, since_ids: set) -> List[SocialItem]:
         self._require_configured()
         acc = os.environ["INSTAGRAM_BUSINESS_ACCOUNT_ID"]
@@ -88,6 +91,7 @@ class InstagramAdapter(PlatformAdapter):
 
         return items
 
+    @with_retry()
     def reply(self, item: SocialItem, text: str) -> str:
         self._require_configured()
         token = os.environ["INSTAGRAM_ACCESS_TOKEN"]

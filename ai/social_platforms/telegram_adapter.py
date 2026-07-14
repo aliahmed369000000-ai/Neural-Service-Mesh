@@ -12,6 +12,7 @@ from typing import List
 import requests
 
 from .base import PlatformAdapter, SocialItem
+from .retry import with_retry
 
 API_BASE = "https://api.telegram.org/bot{token}"
 
@@ -23,6 +24,7 @@ class TelegramAdapter(PlatformAdapter):
     def _base(self):
         return API_BASE.format(token=os.environ["TELEGRAM_BOT_TOKEN"])
 
+    @with_retry()
     def publish(self, text: str) -> str:
         self._require_configured()
         r = requests.post(
@@ -33,6 +35,7 @@ class TelegramAdapter(PlatformAdapter):
         r.raise_for_status()
         return str(r.json()["result"]["message_id"])
 
+    @with_retry()
     def fetch_new_items(self, since_ids: set) -> List[SocialItem]:
         self._require_configured()
         offset = None
@@ -62,6 +65,7 @@ class TelegramAdapter(PlatformAdapter):
             ))
         return items
 
+    @with_retry()
     def reply(self, item: SocialItem, text: str) -> str:
         self._require_configured()
         r = requests.post(

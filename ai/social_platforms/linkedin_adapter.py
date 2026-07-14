@@ -22,6 +22,7 @@ from urllib.parse import quote
 import requests
 
 from .base import PlatformAdapter, SocialItem
+from .retry import with_retry
 
 API_BASE = "https://api.linkedin.com"
 DEFAULT_API_VERSION = "202501"  # حدّثها دورياً حسب إصدارات LinkedIn الشهرية
@@ -39,6 +40,7 @@ class LinkedInAdapter(PlatformAdapter):
             "LinkedIn-Version": os.environ.get("LINKEDIN_API_VERSION", DEFAULT_API_VERSION),
         }
 
+    @with_retry()
     def publish(self, text: str) -> str:
         self._require_configured()
         payload = {
@@ -57,6 +59,7 @@ class LinkedInAdapter(PlatformAdapter):
         r.raise_for_status()
         return r.headers.get("x-restli-id", "")
 
+    @with_retry()
     def fetch_new_items(self, since_ids: set) -> List[SocialItem]:
         self._require_configured()
         author = os.environ["LINKEDIN_AUTHOR_URN"]
@@ -91,6 +94,7 @@ class LinkedInAdapter(PlatformAdapter):
                 ))
         return items
 
+    @with_retry()
     def reply(self, item: SocialItem, text: str) -> str:
         self._require_configured()
         parent = item.thread_id or item.external_id

@@ -20,6 +20,7 @@ from typing import List
 import requests
 
 from .base import PlatformAdapter, SocialItem
+from .retry import with_retry
 
 API_BASE = "https://graph.threads.net/v1.0"
 
@@ -50,6 +51,7 @@ class ThreadsAdapter(PlatformAdapter):
         publish.raise_for_status()
         return publish.json()["id"]
 
+    @with_retry()
     def publish(self, text: str) -> str:
         self._require_configured()
         return self._create_and_publish(text)
@@ -65,6 +67,7 @@ class ThreadsAdapter(PlatformAdapter):
         data = r.json().get("data", [])
         return data[0]["id"] if data else ""
 
+    @with_retry()
     def fetch_new_items(self, since_ids: set) -> List[SocialItem]:
         self._require_configured()
         thread_id = self._latest_own_thread_id()
@@ -88,6 +91,7 @@ class ThreadsAdapter(PlatformAdapter):
             ))
         return items
 
+    @with_retry()
     def reply(self, item: SocialItem, text: str) -> str:
         self._require_configured()
         return self._create_and_publish(text, reply_to_id=item.external_id)

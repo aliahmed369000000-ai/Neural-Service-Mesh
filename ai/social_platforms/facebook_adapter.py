@@ -11,6 +11,7 @@ from typing import List
 import requests
 
 from .base import PlatformAdapter, SocialItem
+from .retry import with_retry
 
 GRAPH = "https://graph.facebook.com/v19.0"
 
@@ -19,6 +20,7 @@ class FacebookAdapter(PlatformAdapter):
     platform_id = "facebook"
     required_env = ["FACEBOOK_PAGE_ACCESS_TOKEN", "FACEBOOK_PAGE_ID"]
 
+    @with_retry()
     def publish(self, text: str) -> str:
         self._require_configured()
         page = os.environ["FACEBOOK_PAGE_ID"]
@@ -30,6 +32,7 @@ class FacebookAdapter(PlatformAdapter):
         r.raise_for_status()
         return r.json()["id"]
 
+    @with_retry()
     def fetch_new_items(self, since_ids: set) -> List[SocialItem]:
         self._require_configured()
         page = os.environ["FACEBOOK_PAGE_ID"]
@@ -54,6 +57,7 @@ class FacebookAdapter(PlatformAdapter):
                 ))
         return items
 
+    @with_retry()
     def reply(self, item: SocialItem, text: str) -> str:
         self._require_configured()
         token = os.environ["FACEBOOK_PAGE_ACCESS_TOKEN"]
