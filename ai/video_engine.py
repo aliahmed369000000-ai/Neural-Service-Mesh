@@ -229,6 +229,55 @@ def _resolve_arabic_font() -> Optional[str]:
     return _LAST_RESORT_FONT if os.path.isfile(_LAST_RESORT_FONT) else None
 
 
+def _ease_out_cubic(x: float) -> float:
+    """منحنى تسارع/تباطؤ (easing) بدل الحركة الخطّية — أساس أي موشن جرافيك
+    احترافي (After Effects/CapCut تستخدم نفس المنطق لكل انتقال): البداية
+    سريعة والنهاية ناعمة، بعكس الحركة الخطّية الميكانيكية الملحوظة سابقاً."""
+    x = min(1.0, max(0.0, x))
+    return 1.0 - (1.0 - x) ** 3
+
+
+def _make_particles_layer(duration: float, seed: int, size=(FRAME_W, FRAME_H), count: int = 26):
+    """طبقة "بوكيه" من جزيئات ضوء ناعمة تطفو للأعلى ببطء طوال المشهد —
+    لمسة موشن جرافيك خفيفة (بنفس روح خلفيات After Effects الاحترافية)
+    تعمل فوق أي خلفية (متدرّجة أو سينمائية) دون التأثير على وضوح النص،
+    لأنها شفافة جداً ومحدودة العدد."""
+    import numpy as np
+    from moviepy import VideoClip
+
+    rng = np.random.default_rng(seed)
+    w, h = size
+    n = count
+    x0 = rng.uniform(0, w, n)
+    y0 = rng.uniform(0, h, n)
+    speed = rng.uniform(14, 34, n)          # بكسل/ثانية صعوداً
+    # أقطار صغيرة جداً (غبار/بريق) بدل "كرات" واضحة — أسلوب bokeh خفيف
+    # يُلاحَظ بزاوية العين لا يتصادم مع النص أبداً.
+    radius = rng.uniform(1.3, 3.2, n)
+    phase = rng.uniform(0, 2 * np.pi, n)
+    drift_amp = rng.uniform(3, 10, n)
+    base_alpha = rng.uniform(0.05, 0.14, n)
+
+    yy, xx = np.mgrid[0:h, 0:w]
+
+    def make_alpha_frame(t):
+        alpha = np.zeros((h, w), dtype=np.float32)
+        y_t = (y0 - speed * t) % h
+        x_t = x0 + drift_amp * np.sin(phase + t * 0.6)
+        for i in range(n):
+            cx, cy, r, a = x_t[i], y_t[i], radius[i], base_alpha[i]
+            dist2 = (xx - cx) ** 2 + (yy - cy) ** 2
+            alpha += np.exp(-dist2 / (2 * (r * 1.8) ** 2)) * a
+        return np.clip(alpha, 0, 0.32)
+
+    def make_rgb_frame(_t):
+        return np.full((h, w, 3), 255, dtype=np.uint8)
+
+    rgb_clip = VideoClip(make_rgb_frame, duration=duration).with_fps(FPS)
+    mask_clip = VideoClip(make_alpha_frame, duration=duration, is_mask=True).with_fps(FPS)
+    return rgb_clip.with_mask(mask_clip)
+
+
 def _shape_arabic(text: str) -> str:
     """يهيّئ النص العربي للعرض الصحيح (اتصال الحروف + اتجاه RTL)."""
     try:
@@ -337,6 +386,16 @@ class VideoEngine:
             block_h = total_h + pad_y * 2
             bx = (FRAME_W - block_w) // 2
             by = y - pad_y
+            # ظل ناعم أسفل الحاجز (drop shadow) — يفصله بصرياً عن الخلفية
+            # ويعطي إحساس عمق/ارتفاع (elevation) بنفس أسلوب تصميم الحركة
+            # الاحترافي (Material/After Effects)، بدل الحاجز المستوي تماماً
+            # على الخلفية سابقاً.
+            shadow_offset = 10
+            draw.rounded_rectangle(
+                [bx + shadow_offset, by + shadow_offset,
+                 bx + block_w + shadow_offset, by + block_h + shadow_offset],
+                radius=32, fill=(0, 0, 0, 90),
+            )
             draw.rounded_rectangle(
                 [bx, by, bx + block_w, by + block_h],
                 radius=32, fill=(*accent_color, 235),
@@ -465,9 +524,12 @@ class VideoEngine:
                 # الفعلية بالخلفية.
                 zoom_amount = 0.05 if cinematic_bg is not None else 0.14
                 base_zoom = 1.0 + zoom_amount * local
-                # "نبضة" ظهور خفيفة (scale-in) في أول لحظات كل عبارة، بنفس
-                # روح أنيميشن "Pop Up" بمنصات الترجمات الاحترافية.
-                pop = 0.88 + 0.12 * min(1.0, t / pd) if pd > 0 else 1.0
+                # "نبضة" ظهور خفيفة (scale-in) في أول لحظات كل عبارة، بمنحنى
+                # ease-out (تسارع أول ثم تباطؤ ناعم) بدل الحركة الخطّية —
+                # نفس روح أنيميشن "Pop Up" بمنصات الترجمات الاحترافية
+                # (CapCut/Submagic)، لكن بإحساس حركي أنعم وأقرب لـ After Effects.
+                pop_progress = _ease_out_cubic(t / pd) if pd > 0 else 1.0
+                pop = 0.88 + 0.12 * pop_progress
                 return base_zoom * pop
 
             chunk_clip = (
@@ -481,14 +543,26 @@ class VideoEngine:
 
         captions_track = concatenate_videoclips(sub_clips, method="compose")
 
-        from moviepy import vfx
+        # طبقة موشن جرافيك خفيفة (بوكيه/جزيئات ضوء طافية) فوق الخلفية وتحت
+        # النص مباشرة — تضيف حركة وعمقاً سينمائياً بسيطاً حتى بدون خلفية
+        # Higgsfield المدفوعة، بنفس روح حزم قوالب After Effects الجاهزة.
+        particles = _make_particles_layer(duration, seed=index)
+
+        from moviepy import vfx, CompositeVideoClip
         if cinematic_bg is not None:
-            from moviepy import CompositeVideoClip
+            # captions_track هنا شفافة (بدون خلفية مرسومة عليها — راجع
+            # frame_img أعلاه)، فترتيب الطبقات: فيديو حقيقي ← جزيئات ← نص.
             captioned = CompositeVideoClip(
-                [cinematic_bg, captions_track], size=(FRAME_W, FRAME_H),
+                [cinematic_bg, particles, captions_track], size=(FRAME_W, FRAME_H),
             ).with_duration(duration)
         else:
-            captioned = captions_track
+            # captions_track هنا مُركَّبة أصلاً فوق الخلفية المتدرّجة
+            # (frame_img = bg_base + النص معاً، بما يشمل زووم Ken-Burns
+            # المشترك) — فالجزيئات تُركَّب فوق الكل كطبقة غبار/بريق خفيفة
+            # أمام الكاميرا، بنفس أسلوب لقطات After Effects الاحترافية.
+            captioned = CompositeVideoClip(
+                [captions_track, particles], size=(FRAME_W, FRAME_H),
+            ).with_duration(duration)
 
         captioned = captioned.with_audio(audio_clip.with_duration(duration))
         return captioned.with_effects([vfx.CrossFadeIn(0.2)])
@@ -515,13 +589,27 @@ class VideoEngine:
             final = final.with_fps(FPS)
 
             out_path = os.path.join(tmp_dir, "output.mp4")
+            # جودة إنتاج احترافية: كان الرندر سابقاً بـ preset="veryfast" بدون
+            # ضبط CRF (يعتمد على القيمة الافتراضية لـ libx264 وهي 23، مع فقدان
+            # وضوح ملحوظ بالتفاصيل الدقيقة/الحركة السريعة) — الآن نستخدم
+            # preset أبطأ (ضغط أفضل لكل بت) + CRF منخفض (جودة أعلى، شبه
+            # بلا فقد بصري) + معدل بت صوت أعلى، بما يطابق مخرجات أدوات مثل
+            # CapCut/Submagic الاحترافية. المدة قصيرة (Shorts) فتحمل وقت
+            # رندر أطول قليلاً دون مشكلة.
             final.write_videofile(
                 out_path,
                 fps=FPS,
                 codec="libx264",
                 audio_codec="aac",
-                preset="veryfast",
-                threads=2,
+                audio_bitrate="192k",
+                preset="slow",
+                ffmpeg_params=[
+                    "-crf", "16",
+                    "-profile:v", "high",
+                    "-pix_fmt", "yuv420p",
+                    "-movflags", "+faststart",
+                ],
+                threads=4,
                 logger=None,
             )
 
