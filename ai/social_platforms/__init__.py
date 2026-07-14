@@ -60,11 +60,30 @@ PLATFORM_LABELS_AR = {
     "pinterest": "📌 Pinterest",
 }
 
+#: أقصى طول نص معروف موثَّق لكل منصة (لتحذير المستخدم بالواجهة *قبل*
+#: النشر بدل اكتشاف فشل النشر بعد إرساله). None = لا حد عملي معروف/غير
+#: قابل للتطبيق. أرقام تقريبية موثّقة من كل منصة وقد تتغيّر — تحذير فقط،
+#: ليست تحققاً صارماً (المنصة نفسها هي الحكم النهائي عند النشر الفعلي).
+PLATFORM_CHAR_LIMITS = {
+    "twitter": 280,
+    "threads": 500,
+    "discord": 2000,
+    "telegram": 4096,
+    "whatsapp": 4096,
+    "linkedin": 3000,
+    "facebook": None,
+    "instagram": 2200,
+    "youtube": None,
+    "tiktok": 2200,
+    "reddit": None,
+    "pinterest": 100,  # العنوان (title) فقط — الوصف الكامل يُستخدم كـdescription بلا حد صارم
+}
+
 __all__ = [
     "PlatformAdapter", "SocialItem", "NotConfiguredError", "PlatformCapabilityError",
     "DiscordAdapter", "TelegramAdapter", "TwitterAdapter",
     "InstagramAdapter", "FacebookAdapter", "YouTubeAdapter", "TikTokAdapter",
     "RedditAdapter", "LinkedInAdapter", "ThreadsAdapter",
     "WhatsAppAdapter", "PinterestAdapter",
-    "ALL_ADAPTERS", "PLATFORM_LABELS_AR",
+    "ALL_ADAPTERS", "PLATFORM_LABELS_AR", "PLATFORM_CHAR_LIMITS",
 ]
