@@ -2902,23 +2902,12 @@ def render_system_group():
     مو ميزة للمستخدم النهائي، ولازم ما تكون ظاهرة لأي زائر بدون مصادقة."""
     st.markdown('<div class="section-header">⚙️ النظام</div>', unsafe_allow_html=True)
 
+    # تحقق أمان احتياطي (defense-in-depth): هذا التبويب أصلاً لا يُضاف لقائمة
+    # التبويبات في main() إلا بعد فتح وضع المالك من الشريط الجانبي، لكن نبقي
+    # هذا الفحص هنا كخط دفاع ثانٍ في حال استُدعيت الدالة من مكان آخر مستقبلاً.
     _admin_key_env = os.environ.get("NSM_ADMIN_KEY", "")
-    if not _admin_key_env:
-        st.error(
-            "❌ لم يتم ضبط NSM_ADMIN_KEY في Secrets — هذا القسم معطّل بالكامل "
-            "حتى يُضاف المفتاح (يحمي بيانات الذاكرة والتشخيص الداخلي)."
-        )
-        return
-
-    if not st.session_state.get("_dev_console_unlocked", False):
-        st.info("🔒 هذا القسم (الذاكرة، صحة النظام، API متقدمة، النظام الداخلي، لوحة المطوّر) محمي بمفتاح المالك.")
-        entered = st.text_input("مفتاح المالك", type="password", key="system_group_key_input")
-        if st.button("🔓 فتح قسم النظام", key="system_group_unlock"):
-            if entered == _admin_key_env:
-                st.session_state["_dev_console_unlocked"] = True
-                st.rerun()
-            else:
-                st.error("❌ مفتاح غير صحيح.")
+    if not _admin_key_env or not st.session_state.get("_dev_console_unlocked", False):
+        st.error("❌ هذا القسم محمي بوضع المالك — افتحه من الشريط الجانبي.")
         return
 
     col_lock, _ = st.columns([1, 4])
@@ -3064,6 +3053,29 @@ def main():
             st.session_state["_or_model"] = "google/gemini-2.5-flash"
 
         st.markdown("---")
+
+        # ── 🔐 وضع المالك — يتحكم بظهور تبويب ⚙️ النظام بالكامل ─────────────
+        st.markdown("### 🔐 وضع المالك")
+        _sidebar_admin_key_env = os.environ.get("NSM_ADMIN_KEY", "")
+        if not _sidebar_admin_key_env:
+            st.caption("قسم النظام معطّل (NSM_ADMIN_KEY غير مضبوط في Secrets)")
+        elif st.session_state.get("_dev_console_unlocked", False):
+            st.success("🔓 وضع المالك مفعّل — تبويب ⚙️ النظام ظاهر")
+            if st.button("🔒 قفل وضع المالك", key="sidebar_admin_lock", use_container_width=True):
+                st.session_state["_dev_console_unlocked"] = False
+                st.rerun()
+        else:
+            _sidebar_admin_key_input = st.text_input(
+                "مفتاح المالك", type="password", key="sidebar_admin_key_input",
+            )
+            if st.button("🔓 فتح وضع المالك", key="sidebar_admin_unlock", use_container_width=True):
+                if _sidebar_admin_key_input == _sidebar_admin_key_env:
+                    st.session_state["_dev_console_unlocked"] = True
+                    st.rerun()
+                else:
+                    st.error("❌ مفتاح غير صحيح")
+
+        st.markdown("---")
         st.caption("🧠 النظام المعرفي العربي")
         st.caption("CKG · قرآن · AutoTune")
 
@@ -3074,22 +3086,29 @@ def main():
     """, unsafe_allow_html=True)
 
     # ── التبويبات ─────────────────────────────────────────────────────────
-    tabs = st.tabs(["🏠 الرئيسية", "📚 المعرفة", "💬 المحادثة", "🤖 الوكلاء",
-                    "🎭 إبداع", "🌐 ترجمة", "🎬 Higgsfield", "📡 الوكيل الاجتماعي",
-                    "🎓 التدريب", "⚙️ النظام", "🧪 أدوات متقدمة", "ℹ️ عن NSM"])
+    # تبويب ⚙️ النظام لا يُضاف لقائمة التبويبات أصلاً إلا بعد فتح وضع المالك
+    # من الشريط الجانبي — أي أنه مخفي كلياً عن الزوار العاديين، لا مجرد
+    # محتوى محمي داخل تبويب ظاهر.
+    _tab_defs = [
+        ("🏠 الرئيسية", render_home),
+        ("📚 المعرفة", render_knowledge_hub),
+        ("💬 المحادثة", render_chat),
+        ("🤖 الوكلاء", render_agents_group),
+        ("🎭 إبداع", render_fable),
+        ("🌐 ترجمة", render_translate),
+        ("🎬 Higgsfield", render_higgsfield),
+        ("📡 الوكيل الاجتماعي", render_social_agent),
+        ("🎓 التدريب", render_training),
+    ]
+    if st.session_state.get("_dev_console_unlocked", False):
+        _tab_defs.append(("⚙️ النظام", render_system_group))
+    _tab_defs.append(("🧪 أدوات متقدمة", render_advanced_tools_group))
+    _tab_defs.append(("ℹ️ عن NSM", render_product_info))
 
-    with tabs[0]:  render_home()
-    with tabs[1]:  render_knowledge_hub()
-    with tabs[2]:  render_chat()
-    with tabs[3]:  render_agents_group()
-    with tabs[4]:  render_fable()
-    with tabs[5]:  render_translate()
-    with tabs[6]:  render_higgsfield()
-    with tabs[7]:  render_social_agent()
-    with tabs[8]:  render_training()
-    with tabs[9]:  render_system_group()
-    with tabs[10]: render_advanced_tools_group()
-    with tabs[11]: render_product_info()
+    tabs = st.tabs([_label for _label, _fn in _tab_defs])
+    for _tab, (_label, _fn) in zip(tabs, _tab_defs):
+        with _tab:
+            _fn()
 
     # ── تذييل الصفحة ─────────────────────────────────────────────────────
     st.markdown("---")
