@@ -14,6 +14,27 @@ from __future__ import annotations
 import math, re, sys
 from pathlib import Path
 from typing import List, Tuple
+
+# ── وضع المالك — يحدد هل أوامر Code Agent (افحص/عدل/أنشئ/ارفع) مفعّلة ──
+# هذه الأوامر تقرأ/تكتب ملفات فعلية على الخادم وتنفّذ git push — يجب ألا
+# تُنفَّذ أبداً من نص محادثة عام يكتبه زائر مجهول، فقط بعد فتح وضع المالك
+# من الشريط الجانبي في streamlit_app.py.
+try:
+    import streamlit as _st
+    _HAS_STREAMLIT = True
+except Exception:
+    _HAS_STREAMLIT = False
+
+
+def _is_admin_unlocked() -> bool:
+    if not _HAS_STREAMLIT:
+        return False
+    try:
+        return bool(_st.session_state.get("_dev_console_unlocked", False))
+    except Exception:
+        return False
+
+
 try:
     from nsm_memory import ConversationMemory
     _HAS_MEMORY = True
@@ -263,11 +284,14 @@ class NSMChat:
         t = user_input.strip()
 
         # ── Code Agent — أولوية 1 للأوامر المباشرة فقط (افحص/قائمة/ارفع/عدل) ──
-        agent_response = _handle_code_command(t)
-        if agent_response is not None:
-            self._last_source = "code_agent"
-            self.history.append((t, agent_response))
-            return agent_response
+        # مقصورة على وضع المالك فقط: هذه الأوامر تقرأ/تكتب ملفات فعلية على
+        # الخادم وتنفّذ git push — لا يجوز تنفيذها من محادثة عامة.
+        if _is_admin_unlocked():
+            agent_response = _handle_code_command(t)
+            if agent_response is not None:
+                self._last_source = "code_agent"
+                self.history.append((t, agent_response))
+                return agent_response
 
         # ── NSM Agent / LLM — كل شيء آخر يذهب هنا ──
         if _HAS_NSM_AGENT and _nsm_agent:
