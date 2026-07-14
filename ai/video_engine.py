@@ -257,8 +257,14 @@ def _make_particles_layer(duration: float, seed: int, size=(FRAME_W, FRAME_H), c
     phase = rng.uniform(0, 2 * np.pi, n)
     drift_amp = rng.uniform(3, 10, n)
     base_alpha = rng.uniform(0.05, 0.14, n)
-
-    yy, xx = np.mgrid[0:h, 0:w]
+    # نطاق التصحيح المحلي (patch) حول كل جزيء — أوسع من نصف قطره بكثير
+    # لضمان انتقال ناعم بلا حواف مقصوصة، لكن أصغر بكثير جداً من الإطار
+    # الكامل. ⚠️ حاسم للأداء: حساب مسافة Gaussian على الإطار الكامل
+    # (1080×1920) لكل جزيء وكل إطار كان يستغرق ~0.84 ثانية/إطار (أبطأ
+    # بمقدار ~380× من هذا التصحيح المحلي) — كافٍ لجعل رندر فيديو Shorts
+    # كامل يتجاوز دقائق طويلة بلا فائدة بصرية إضافية تُذكر خارج هذا النطاق
+    # الصغير أصلاً (قيمة Gaussian تقترب من الصفر خارجه).
+    box_half = 10
 
     def make_alpha_frame(t):
         alpha = np.zeros((h, w), dtype=np.float32)
@@ -266,8 +272,13 @@ def _make_particles_layer(duration: float, seed: int, size=(FRAME_W, FRAME_H), c
         x_t = x0 + drift_amp * np.sin(phase + t * 0.6)
         for i in range(n):
             cx, cy, r, a = x_t[i], y_t[i], radius[i], base_alpha[i]
+            x_lo, x_hi = max(0, int(cx - box_half)), min(w, int(cx + box_half) + 1)
+            y_lo, y_hi = max(0, int(cy - box_half)), min(h, int(cy + box_half) + 1)
+            if x_lo >= x_hi or y_lo >= y_hi:
+                continue
+            yy, xx = np.mgrid[y_lo:y_hi, x_lo:x_hi]
             dist2 = (xx - cx) ** 2 + (yy - cy) ** 2
-            alpha += np.exp(-dist2 / (2 * (r * 1.8) ** 2)) * a
+            alpha[y_lo:y_hi, x_lo:x_hi] += np.exp(-dist2 / (2 * (r * 1.8) ** 2)) * a
         return np.clip(alpha, 0, 0.32)
 
     def make_rgb_frame(_t):
@@ -336,6 +347,51 @@ class VideoEngine:
             " ".join(words[i:i + max_words])
             for i in range(0, len(words), max_words)
         ]
+
+    # ── تجميع الترجمات حسب توقيت الكلمات الحقيقي (WordBoundary من Edge
+    #    TTS) بدل التقدير التناسبي حسب عدد الحروف — مزامنة فعلية للنص مع
+    #    الصوت المنطوق (بالضبط كما تفعل أدوات professional captioning مثل
+    #    CapCut/Submagic التي تعتمد على ASR/TTS timestamps حقيقية) ───────
+    @staticmethod
+    def _group_word_timings(
+        word_timings: List[tuple], duration: float, max_words: int = 3,
+    ) -> Optional[List[Tuple[str, float, float]]]:
+        """يُرجِع [(نص المجموعة, بداية بالثانية, مدة بالثانية), ...] تغطي
+        كامل المدة [0, duration] بلا فجوات، أو None إن كانت التوقيتات غير
+        صالحة (عدد غير منطقي أو توقيتات معكوسة) — VideoEngine يتراجع
+        فوراً للتقدير التناسبي القديم في هذه الحالة."""
+        if not word_timings:
+            return None
+        try:
+            words = [(str(w[0]), float(w[1]), float(w[2])) for w in word_timings]
+        except (TypeError, ValueError, IndexError):
+            return None
+        if any(d < 0 or s < 0 for _, s, d in words):
+            return None
+
+        groups: List[Tuple[str, float, float]] = []
+        for i in range(0, len(words), max_words):
+            batch = words[i:i + max_words]
+            text = " ".join(w[0] for w in batch)
+            start = batch[0][1]
+            end = batch[-1][1] + batch[-1][2]
+            groups.append([text, start, end])  # end مؤقتاً بدل المدة
+
+        if not groups:
+            return None
+
+        # لا فجوات: كل مجموعة تبدأ حيث انتهت السابقة، أول مجموعة من 0،
+        # وآخر مجموعة تمتد حتى نهاية الصوت الفعلية بالكامل.
+        groups[0][1] = 0.0
+        for i in range(1, len(groups)):
+            groups[i][1] = groups[i - 1][2]
+        groups[-1][2] = max(duration, groups[-1][2])
+
+        result = [
+            (text, start, max(0.15, end - start))
+            for text, start, end in groups
+        ]
+        return result
 
     # ── رسم عبارة نصية واحدة بأسلوب الترجمات المتحركة (Kinetic Caption):
     #    حاجز (pill) ملوّن خلف نص عريض بحدّ أبيض، أعلى قابلية للقراءة
@@ -491,13 +547,22 @@ class VideoEngine:
 
         # نقسّم سرد المشهد إلى عبارات قصيرة (2-3 كلمات) تظهر تباعاً —
         # نفس منطق CapCut/Submagic لترجمات كلمة-بكلمة أكثر جاذبية من فقرة
-        # ثابتة كاملة طوال المشهد.
-        chunks = self._split_into_chunks(segment.narration, max_words=3)
-        total_chars = sum(len(c) for c in chunks) or 1
-        min_chunk_dur = 0.42
-        raw_durations = [max(min_chunk_dur, duration * (len(c) / total_chars)) for c in chunks]
-        scale = duration / sum(raw_durations)
-        chunk_durations = [d * scale for d in raw_durations]
+        # ثابتة كاملة طوال المشهد. الأولوية لتوقيت الكلمات الحقيقي (Edge
+        # TTS WordBoundary) إن توفّر — مزامنة فعلية دقيقة بالصوت المنطوق؛
+        # وإلا تراجع للتقدير التناسبي القديم حسب طول النص (بقية المزوّدين).
+        real_groups = self._group_word_timings(
+            getattr(segment, "word_timings", None) or [], duration, max_words=3,
+        )
+        if real_groups:
+            chunks = [g[0] for g in real_groups]
+            chunk_durations = [g[2] for g in real_groups]
+        else:
+            chunks = self._split_into_chunks(segment.narration, max_words=3)
+            total_chars = sum(len(c) for c in chunks) or 1
+            min_chunk_dur = 0.42
+            raw_durations = [max(min_chunk_dur, duration * (len(c) / total_chars)) for c in chunks]
+            scale = duration / sum(raw_durations)
+            chunk_durations = [d * scale for d in raw_durations]
 
         sub_clips = []
         elapsed = 0.0

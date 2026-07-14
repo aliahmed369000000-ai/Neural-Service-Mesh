@@ -81,6 +81,11 @@ class TTSResult:
     duration_est_sec: float = 0.0
     error: Optional[str] = None
     tried: List[str] = field(default_factory=list)
+    # توقيت كل كلمة فعلياً بالصوت المولَّد — (النص, البداية بالثانية,
+    # المدة بالثانية). يُملأ فقط عبر Edge TTS (الوحيد الذي يُصدر
+    # WordBoundary events حقيقية)؛ يبقى [] لبقية المزوّدين، وVideoEngine
+    # يتراجع تلقائياً لتقدير تناسبي عند غيابه (راجع ai/video_engine.py).
+    word_timings: List[tuple] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -189,16 +194,32 @@ def _synthesize_edge(text: str, voice: str) -> TTSResult:
 
     voice = voice or _DEFAULT_VOICE[TTSProvider.EDGE]
 
-    async def _run() -> bytes:
-        communicate = edge_tts.Communicate(text, voice)
+    async def _run():
+        # boundary="WordBoundary" ضروري صريحاً — الافتراضي بمكتبة edge-tts
+        # هو "SentenceBoundary" (لا يُصدر توقيت كل كلمة على حدة، فتبقى
+        # word_timings فارغة دائماً بصمت دون هذا التصريح).
+        communicate = edge_tts.Communicate(text, voice, boundary="WordBoundary")
         chunks = bytearray()
+        # edge-tts يُصدر أحداث "WordBoundary" فعلية (توقيت حقيقي من محرك
+        # النطق نفسه، لا تقدير) بجانب أحداث الصوت — نجمعها هنا لاستخدامها
+        # لاحقاً في مزامنة الترجمات المتحركة بدقة (كاريوكي كلمة-بكلمة)
+        # بمحرك الفيديو، بدل التقدير التناسبي القديم القائم على طول النص فقط.
+        timings: list = []
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
                 chunks.extend(chunk["data"])
-        return bytes(chunks)
+            elif chunk["type"] == "WordBoundary":
+                # offset/duration بوحدة 100-نانوثانية (100ns ticks) حسب SSML/Edge
+                start_sec = chunk["offset"] / 1e7
+                dur_sec = chunk["duration"] / 1e7
+                timings.append((chunk["text"], start_sec, dur_sec))
+        return bytes(chunks), timings
 
-    audio_bytes = asyncio.run(_run())
-    return TTSResult(audio_bytes=audio_bytes, provider=TTSProvider.EDGE, format="mp3", voice=voice)
+    audio_bytes, word_timings = asyncio.run(_run())
+    return TTSResult(
+        audio_bytes=audio_bytes, provider=TTSProvider.EDGE, format="mp3", voice=voice,
+        word_timings=word_timings,
+    )
 
 
 # ════════════════════════════════════════════════════════════════════════════
