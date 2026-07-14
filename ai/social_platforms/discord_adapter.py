@@ -11,6 +11,7 @@ from typing import List
 import requests
 
 from .base import PlatformAdapter, SocialItem, NotConfiguredError
+from .retry import with_retry
 
 API_BASE = "https://discord.com/api/v10"
 
@@ -25,6 +26,7 @@ class DiscordAdapter(PlatformAdapter):
             "Content-Type": "application/json",
         }
 
+    @with_retry()
     def publish(self, text: str) -> str:
         self._require_configured()
         chan = os.environ["DISCORD_CHANNEL_ID"]
@@ -35,6 +37,7 @@ class DiscordAdapter(PlatformAdapter):
         r.raise_for_status()
         return r.json()["id"]
 
+    @with_retry()
     def fetch_new_items(self, since_ids: set) -> List[SocialItem]:
         self._require_configured()
         chan = os.environ["DISCORD_CHANNEL_ID"]
@@ -60,6 +63,7 @@ class DiscordAdapter(PlatformAdapter):
             ))
         return items
 
+    @with_retry()
     def reply(self, item: SocialItem, text: str) -> str:
         self._require_configured()
         chan = item.thread_id or os.environ["DISCORD_CHANNEL_ID"]

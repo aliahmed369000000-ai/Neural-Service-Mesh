@@ -19,6 +19,7 @@ from typing import List, Optional
 import requests
 
 from .base import PlatformAdapter, SocialItem
+from .retry import with_retry
 
 TOKEN_URL = "https://www.reddit.com/api/v1/access_token"
 API_BASE = "https://oauth.reddit.com"
@@ -63,6 +64,7 @@ class RedditAdapter(PlatformAdapter):
             "User-Agent": os.environ["REDDIT_USER_AGENT"],
         }
 
+    @with_retry()
     def publish(self, text: str) -> str:
         self._require_configured()
         title = (text[:97] + "...") if len(text) > 100 else text
@@ -85,6 +87,7 @@ class RedditAdapter(PlatformAdapter):
             raise RuntimeError(f"reddit: فشل النشر — {errors}")
         return data["json"]["data"]["name"]
 
+    @with_retry()
     def fetch_new_items(self, since_ids: set) -> List[SocialItem]:
         self._require_configured()
         r = requests.get(
@@ -108,6 +111,7 @@ class RedditAdapter(PlatformAdapter):
             ))
         return items
 
+    @with_retry()
     def reply(self, item: SocialItem, text: str) -> str:
         self._require_configured()
         thing_id = item.raw.get("name") or (

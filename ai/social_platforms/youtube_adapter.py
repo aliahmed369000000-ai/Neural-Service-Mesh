@@ -17,6 +17,7 @@ from typing import List, Optional
 import requests
 
 from .base import PlatformAdapter, SocialItem, NotConfiguredError
+from .retry import with_retry
 
 API_BASE = "https://www.googleapis.com/youtube/v3"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -68,6 +69,7 @@ class YouTubeAdapter(PlatformAdapter):
         items = r.json().get("items", [])
         return items[0]["id"]["videoId"] if items else None
 
+    @with_retry()
     def publish(self, text: str) -> str:
         vid = self._latest_video_id()
         if not vid:
@@ -83,6 +85,7 @@ class YouTubeAdapter(PlatformAdapter):
         r.raise_for_status()
         return r.json()["id"]
 
+    @with_retry()
     def fetch_new_items(self, since_ids: set) -> List[SocialItem]:
         self._require_configured()
         vid = self._latest_video_id()
@@ -106,6 +109,7 @@ class YouTubeAdapter(PlatformAdapter):
             ))
         return items
 
+    @with_retry()
     def reply(self, item: SocialItem, text: str) -> str:
         token = self._access_token()
         r = requests.post(

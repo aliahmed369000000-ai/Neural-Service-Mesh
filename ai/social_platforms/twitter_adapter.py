@@ -15,6 +15,7 @@ import requests
 from requests_oauthlib import OAuth1
 
 from .base import PlatformAdapter, SocialItem
+from .retry import with_retry
 
 API_BASE = "https://api.twitter.com/2"
 
@@ -32,6 +33,7 @@ class TwitterAdapter(PlatformAdapter):
             os.environ["TWITTER_ACCESS_TOKEN"], os.environ["TWITTER_ACCESS_TOKEN_SECRET"],
         )
 
+    @with_retry()
     def publish(self, text: str) -> str:
         self._require_configured()
         r = requests.post(f"{API_BASE}/tweets", auth=self._auth(),
@@ -39,6 +41,7 @@ class TwitterAdapter(PlatformAdapter):
         r.raise_for_status()
         return r.json()["data"]["id"]
 
+    @with_retry()
     def fetch_new_items(self, since_ids: set) -> List[SocialItem]:
         self._require_configured()
         me = requests.get(f"{API_BASE}/users/me", auth=self._auth(), timeout=30)
@@ -65,6 +68,7 @@ class TwitterAdapter(PlatformAdapter):
             ))
         return items
 
+    @with_retry()
     def reply(self, item: SocialItem, text: str) -> str:
         self._require_configured()
         r = requests.post(

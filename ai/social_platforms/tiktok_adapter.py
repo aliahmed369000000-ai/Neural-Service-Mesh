@@ -24,6 +24,7 @@ from typing import List, Optional
 import requests
 
 from .base import PlatformAdapter, SocialItem, NotConfiguredError
+from .retry import with_retry
 
 TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/"
 INIT_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/"
@@ -71,17 +72,20 @@ class TikTokAdapter(PlatformAdapter):
         r.raise_for_status()
         return r.json().get("data", {})
 
+    @with_retry()
     def publish(self, text: str) -> str:
         raise NotImplementedError(
             "tiktok: لا يوجد نشر نصي مستقل — استخدم upload_video() لنشر فيديو "
             "(TikTok منصة فيديو فقط عبر Content Posting API)."
         )
 
+    @with_retry()
     def fetch_new_items(self, since_ids: set) -> List[SocialItem]:
         raise NotImplementedError(
             "tiktok: لا يوفّر TikTok API عاماً لجلب التعليقات/المنشنات لحساب فردي."
         )
 
+    @with_retry()
     def reply(self, item: SocialItem, text: str) -> str:
         raise NotImplementedError("tiktok: لا يدعم الرد عبر API عام حالياً.")
 
