@@ -33,7 +33,7 @@ import time
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple, Union, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ai.benchmark_suite import BenchmarkSuite
@@ -2460,19 +2460,73 @@ class DeepCirculantPyramid:
         out = self.output_layer.forward(h.astype(np.float64))
         return out
 
-    def train_step(self, x: ArrayLike, target: ArrayLike) -> float:
+    def compute_gradients(self, x: ArrayLike, target: ArrayLike) -> Tuple[float, Dict[str, np.ndarray]]:
+        """
+        Forward + backward كاملان بدون تحديث الأوزان (بدون apply_gradients).
+        يُستخدم من train_step()، ومن EWC (continual_learner.py) لحساب
+        Fisher Information على عيّنات من مهمة سابقة دون المساس بالأوزان
+        الحالية.
+
+        Returns: (loss, grads) حيث grads قاموس بمفاتيح تطابق get_parameters()
+        بالضبط (نفس الأسماء، لسهولة المطابقة عند حساب عقوبة EWC).
+        """
         out = self.forward(x)
         target = np.asarray(target, dtype=np.float64)
         loss, d_out = self._loss_fn(out, target)
 
         d_h = self.output_layer.backward(d_out)
-        self.output_layer.apply_gradients(self.learning_rate, optimizer=self.optimizer)
+        grads: Dict[str, np.ndarray] = {
+            "output_W": self.output_layer._grad_W.copy(),
+            "output_b": self.output_layer._grad_b.copy(),
+        }
 
         d_h = d_h.astype(np.float32)
-        for layer in reversed(self.circulant_layers):
+        for i, layer in enumerate(reversed(self.circulant_layers)):
             d_h = layer.backward(d_h)
+            idx = len(self.circulant_layers) - 1 - i
+            grads[f"circ{idx}_c"] = layer.grad_c.copy()
+            grads[f"circ{idx}_b"] = layer.grad_b.copy()
+
+        return loss, grads
+
+    def get_parameters(self) -> Dict[str, np.ndarray]:
+        """قاموس بكل الأوزان القابلة للتدريب (نفس مفاتيح compute_gradients)."""
+        params: Dict[str, np.ndarray] = {
+            "output_W": self.output_layer.W,
+            "output_b": self.output_layer.b,
+        }
+        for i, layer in enumerate(self.circulant_layers):
+            params[f"circ{i}_c"] = layer.c
+            params[f"circ{i}_b"] = layer.b
+        return params
+
+    def _apply_gradients(self, grads: Dict[str, np.ndarray]) -> None:
+        """يطبّق قاموس تدرجات (بنفس مفاتيح get_parameters) على الأوزان فعلياً."""
+        self.output_layer._grad_W = grads["output_W"]
+        self.output_layer._grad_b = grads["output_b"]
+        self.output_layer.apply_gradients(self.learning_rate, optimizer=self.optimizer)
+
+        for i, layer in enumerate(self.circulant_layers):
+            layer.grad_c = grads[f"circ{i}_c"]
+            layer.grad_b = grads[f"circ{i}_b"]
             layer.apply_gradients(self.learning_rate, optimizer=self.optimizer)
 
+    def train_step(self, x: ArrayLike, target: ArrayLike, ewc: Optional[Any] = None) -> float:
+        """
+        خطوة تدريب واحدة. نفس السلوك السابق تماماً عند ewc=None (توافق خلفي
+        كامل). لو مُرِّر كائن EWC (من ai.continual_learner.PyramidEWC)، تُضاف
+        عقوبة الحماية من النسيان الكارثي لكل من الخسارة والتدرجات قبل التحديث.
+        """
+        loss, grads = self.compute_gradients(x, target)
+
+        if ewc is not None:
+            penalty_grads = ewc.penalty_gradients(self)
+            for k in grads:
+                if k in penalty_grads:
+                    grads[k] = grads[k] + penalty_grads[k].astype(grads[k].dtype)
+            loss = loss + ewc.penalty(self)
+
+        self._apply_gradients(grads)
         self.train_steps += 1
         self.loss_history.append(loss)
         return loss
