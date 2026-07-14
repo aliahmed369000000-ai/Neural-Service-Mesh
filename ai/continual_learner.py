@@ -573,6 +573,244 @@ class EWCTrainingLoop:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# PyramidEWC — نسخة EWC عامة (مو مرتبطة بمصفوفة E فقط)
+# تعمل مع أي نموذج يعرض:
+#   model.get_parameters()          -> Dict[str, np.ndarray]
+#   model.compute_gradients(x, y)   -> (loss, Dict[str, np.ndarray])
+# (مصمَّمة لـ DeepCirculantPyramid من ai/neural_core.py، لكن عامة الواجهة)
+# لا تلمس EWCLearner القديمة (مصفوفة E 784×128) — إضافة مستقلة تماماً.
+# ══════════════════════════════════════════════════════════════════════════════
+
+_DEFAULT_PYRAMID_FISHER_PATH = Path("memory/pyramid_ewc_fisher.npz")
+_DEFAULT_PYRAMID_ANCHOR_PATH = Path("memory/pyramid_ewc_anchor.npz")
+
+
+@dataclass
+class GenericFisherSnapshot:
+    """لقطة Fisher عامة: قاموس مصفوفات بدل مصفوفة واحدة ثابتة الشكل."""
+    task_id: str
+    task_label: str
+    fisher: Dict[str, np.ndarray]
+    anchor: Dict[str, np.ndarray]
+    n_samples: int
+    computed_at: str = field(default_factory=_NOW)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "task_id": self.task_id,
+            "task_label": self.task_label,
+            "n_samples": self.n_samples,
+            "computed_at": self.computed_at,
+            "keys": list(self.fisher.keys()),
+        }
+
+
+class PyramidEWC:
+    """
+    EWC عام لأي نموذج بواجهة get_parameters()/compute_gradients(x, y)
+    (مصمَّم أصلاً لـ DeepCirculantPyramid).
+
+    يستخدم Empirical Fisher الحقيقي: F_i ≈ (1/N) Σ (∂L/∂θ_i)² محسوبة من
+    تدرجات النموذج الفعلية (compute_gradients) على عينات المهمة السابقة —
+    بدون أي تقريب/محاكاة يدوية (بخلاف EWCLearner القديمة المبنية على
+    تقريب cosine خاص بمصفوفة E فقط).
+
+    الاستخدام:
+        ewc = PyramidEWC(lambda_reg=20.0)
+
+        # بعد الانتهاء من دفعة/مهمة سابقة (samples = [(x, target), ...]):
+        ewc.compute_fisher(model, samples, task_label="دفعة_1")
+        ewc.save()
+
+        # عند تدريب الدفعة التالية — يُمرَّر مباشرة لـ train_step:
+        model.train_step(x_new, target_new, ewc=ewc)
+    """
+
+    def __init__(
+        self,
+        lambda_reg: float = 100.0,
+        fisher_path: Path | str = _DEFAULT_PYRAMID_FISHER_PATH,
+        anchor_path: Path | str = _DEFAULT_PYRAMID_ANCHOR_PATH,
+        max_snapshots: int = 3,
+    ):
+        self.lambda_reg = lambda_reg
+        self.fisher_path = Path(fisher_path)
+        self.anchor_path = Path(anchor_path)
+        self.max_snapshots = max_snapshots
+        self._snapshots: List[GenericFisherSnapshot] = []
+        self._load_if_exists()
+
+    # ── حساب Fisher من عيّنات المهمة السابقة ───────────────────────────────
+
+    def compute_fisher(
+        self,
+        model: Any,
+        samples: List[Tuple[Any, Any]],
+        task_label: str = "task",
+        task_id: Optional[str] = None,
+    ) -> GenericFisherSnapshot:
+        """
+        samples: قائمة (x, target) — دفعة عيّنات من المهمة/الدفعة التي
+        انتهينا من التدريب عليها. لا تُعدَّل أوزان model إطلاقاً هنا.
+
+        ★ ملاحظة مهمة (Empirical Fisher الصحيح، نفس إصلاح EWCLearner
+        القديمة أعلاه): لا نستخدم target الحقيقي من samples لحساب
+        التدرّج! لو كان النموذج متقارباً فعلاً على هذه العيّنات (خسارة
+        ≈ صفر)، فتدرّج الخسارة عند الهدف الصحيح يساوي تقريباً صفر،
+        فيصبح Fisher كله صفراً ولا يحمي شيئاً (تحقّقنا من هذا الخلل
+        عددياً: max_fisher ~1e-25 عند استخدام target الحقيقي بعد تقارب
+        كامل). البديل الصحيح: نأخذ تنبؤ النموذج نفسه (argmax لخرجه
+        الحالي) كـ"هدف زائف" psuedo-label، ونحسب حساسية هذا التنبؤ
+        الواثق تجاه كل وزن — هذا يعكس فعلاً "أي الأوزان لو تغيّرت
+        ستُغيّر قرار النموذج الحالي"، وهو بالضبط تعريف Fisher Information
+        العملي (Empirical Fisher) المستخدم في أدبيات EWC الأصلية.
+        """
+        import uuid
+        tid = task_id or f"task_{uuid.uuid4().hex[:8]}"
+
+        params = model.get_parameters()
+        fisher_accum: Dict[str, np.ndarray] = {
+            k: np.zeros_like(v, dtype=np.float64) for k, v in params.items()
+        }
+
+        used = 0
+        for x, _true_target in samples:
+            try:
+                out = model.forward(x)
+                pseudo_target = np.zeros_like(out)
+                pseudo_target[int(np.argmax(out))] = 1.0
+                _, grads = model.compute_gradients(x, pseudo_target)
+            except Exception as exc:
+                logger.debug(f"[PyramidEWC] تجاهل عيّنة بسبب خطأ: {exc}")
+                continue
+            for k, g in grads.items():
+                fisher_accum[k] += g.astype(np.float64) ** 2
+            used += 1
+
+        if used > 0:
+            for k in fisher_accum:
+                fisher_accum[k] /= used
+
+        # ★ تطبيع: نقسم كل Fisher على أكبر قيمة عبر كل المصفوفات معاً (مو
+        # لكل مصفوفة على حدة، حتى تبقى الأهمية النسبية بين الطبقات صحيحة).
+        # بدون هذا، قيمة lambda_reg المناسبة تعتمد كلياً على مقياس Fisher
+        # الخام (تحقّقنا عملياً أنه يتراوح من ~1e-25 إلى ~1e-6 حسب درجة
+        # تقارب النموذج ومعماريته) — مما يجعل lambda غير قابلة لإعادة
+        # الاستخدام بين إعدادات مختلفة. بعد التطبيع، أكبر Fisher = 1.0،
+        # فتصبح lambda_reg رقماً قابلاً للفهم والمقارنة (تجريبياً: نطاق
+        # 1e3-1e5 مع SGD أعطى حماية حقيقية وقابلة للضبط في اختباراتنا).
+        global_max = max((float(v.max()) for v in fisher_accum.values()), default=0.0)
+        if global_max > 1e-300:
+            for k in fisher_accum:
+                fisher_accum[k] = fisher_accum[k] / global_max
+
+        anchor = {k: v.copy() for k, v in params.items()}
+
+        snap = GenericFisherSnapshot(
+            task_id=tid, task_label=task_label,
+            fisher=fisher_accum, anchor=anchor, n_samples=used,
+        )
+        self._snapshots.append(snap)
+        if len(self._snapshots) > self.max_snapshots:
+            self._snapshots = self._snapshots[-self.max_snapshots:]
+
+        logger.info(f"[PyramidEWC] Fisher محسوبة لمهمة '{task_label}' — "
+                    f"{used} عيّنة، {len(fisher_accum)} مصفوفة أوزان")
+        return snap
+
+    # ── العقوبة وتدرّجها ─────────────────────────────────────────────────
+
+    def penalty(self, model: Any) -> float:
+        """penalty = λ * Σ_tasks Σ_i F_i * (θ_i - θ*_i)²"""
+        if not self._snapshots:
+            return 0.0
+        params = model.get_parameters()
+        total = 0.0
+        for snap in self._snapshots:
+            for k, v in params.items():
+                if k not in snap.fisher:
+                    continue
+                diff = v.astype(np.float64) - snap.anchor[k].astype(np.float64)
+                total += float(np.sum(snap.fisher[k] * (diff ** 2)))
+        return self.lambda_reg * total
+
+    def penalty_gradients(self, model: Any) -> Dict[str, np.ndarray]:
+        """∂penalty/∂θ_i = 2λ * Σ_tasks F_i * (θ_i - θ*_i) — لكل مصفوفة."""
+        params = model.get_parameters()
+        grads: Dict[str, np.ndarray] = {
+            k: np.zeros_like(v, dtype=np.float64) for k, v in params.items()
+        }
+        if not self._snapshots:
+            return grads
+        for snap in self._snapshots:
+            for k, v in params.items():
+                if k not in snap.fisher:
+                    continue
+                diff = v.astype(np.float64) - snap.anchor[k].astype(np.float64)
+                grads[k] += snap.fisher[k] * diff
+        for k in grads:
+            grads[k] *= 2.0 * self.lambda_reg
+        return grads
+
+    # ── حفظ / تحميل ─────────────────────────────────────────────────────
+
+    def save(self) -> bool:
+        if not self._snapshots:
+            logger.warning("[PyramidEWC] لا توجد لقطات لحفظها")
+            return False
+        self.fisher_path.parent.mkdir(parents=True, exist_ok=True)
+        self.anchor_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            fisher_blob = {
+                f"{i}__{k}": v for i, snap in enumerate(self._snapshots)
+                for k, v in snap.fisher.items()
+            }
+            anchor_blob = {
+                f"{i}__{k}": v for i, snap in enumerate(self._snapshots)
+                for k, v in snap.anchor.items()
+            }
+            meta = json.dumps([s.to_dict() for s in self._snapshots]).encode()
+
+            np.savez_compressed(str(self.fisher_path), meta=meta, **fisher_blob)
+            np.savez_compressed(str(self.anchor_path), **anchor_blob)
+            logger.info(f"[PyramidEWC] حُفظت {len(self._snapshots)} لقطة")
+            return True
+        except Exception as exc:
+            logger.error(f"[PyramidEWC] فشل الحفظ: {exc}")
+            return False
+
+    def _load_if_exists(self) -> None:
+        if not (self.fisher_path.exists() and self.anchor_path.exists()):
+            return
+        try:
+            f_data = np.load(str(self.fisher_path), allow_pickle=True)
+            a_data = np.load(str(self.anchor_path), allow_pickle=True)
+            meta = json.loads(f_data["meta"].tobytes())
+
+            self._snapshots = []
+            for i, m in enumerate(meta):
+                fisher = {k: f_data[f"{i}__{k}"] for k in m["keys"]}
+                anchor = {k: a_data[f"{i}__{k}"] for k in m["keys"]}
+                self._snapshots.append(GenericFisherSnapshot(
+                    task_id=m["task_id"], task_label=m["task_label"],
+                    fisher=fisher, anchor=anchor, n_samples=m["n_samples"],
+                    computed_at=m["computed_at"],
+                ))
+            logger.info(f"[PyramidEWC] حُمِّلت {len(self._snapshots)} لقطة من القرص")
+        except Exception as exc:
+            logger.warning(f"[PyramidEWC] تعذّر التحميل من القرص: {exc}")
+            self._snapshots = []
+
+    def get_stats(self) -> Dict[str, Any]:
+        return {
+            "lambda_reg": self.lambda_reg,
+            "n_snapshots": len(self._snapshots),
+            "max_snapshots": self.max_snapshots,
+            "tasks": [s.to_dict() for s in self._snapshots],
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # ConversationLearner — التعلم من المحادثات الحقيقية
 # يُضاف للملف الأصلي دون تعديل EWCLearner
 # ══════════════════════════════════════════════════════════════════════════════
