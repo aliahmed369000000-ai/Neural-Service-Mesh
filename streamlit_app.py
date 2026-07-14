@@ -4501,6 +4501,43 @@ def render_social_agent():
         st.rerun()
 
     st.markdown("---")
+    st.markdown("#### ⚡ وضع Telegram: Webhook مقابل Polling")
+    st.caption(
+        "Webhook يدفع الرسائل فوراً بدل الاستطلاع الدوري، لكنه يتطلب "
+        "endpoint HTTPS عام ثابت (خادم api_server.py، منفصل عن Streamlit) "
+        "ومتغيرَي بيئة: TELEGRAM_WEBHOOK_BASE_URL وTELEGRAM_WEBHOOK_SECRET. "
+        "بدونهما يبقى النظام يعمل بـpolling كالمعتاد — لا كسر لأي سلوك حالي."
+    )
+    webhook_platforms_cfg = set(get_config("webhook_enabled_platforms", []))
+    tg_webhook_on = "telegram" in webhook_platforms_cfg
+    col_tg1, col_tg2 = st.columns([2, 1])
+    with col_tg1:
+        st.markdown(f"**الوضع الحالي:** {'🔗 Webhook' if tg_webhook_on else '🔁 Polling'}")
+    with col_tg2:
+        base_url = os.environ.get("TELEGRAM_WEBHOOK_BASE_URL", "")
+        secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
+        if not tg_webhook_on:
+            if st.button("🔗 تفعيل Webhook", key="tg_webhook_enable", use_container_width=True):
+                if not base_url or not secret:
+                    st.error("يلزم ضبط TELEGRAM_WEBHOOK_BASE_URL وTELEGRAM_WEBHOOK_SECRET أولاً.")
+                else:
+                    try:
+                        url = f"{base_url.rstrip('/')}/webhook/telegram/{secret}"
+                        mgr.enable_webhook("telegram", url, secret_token=secret)
+                        st.success("✅ تم تفعيل webhook تيليجرام.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"فشل التفعيل: {e}")
+        else:
+            if st.button("🔁 العودة لـPolling", key="tg_webhook_disable", use_container_width=True):
+                try:
+                    mgr.disable_webhook("telegram")
+                    st.success("✅ تم إلغاء webhook والعودة لـpolling.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"فشل الإلغاء: {e}")
+
+    st.markdown("---")
     st.markdown("#### 📊 حالة المنصات")
     for pid, s in status.items():
         label = PLATFORM_LABELS_AR.get(pid, pid)

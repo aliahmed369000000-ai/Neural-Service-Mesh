@@ -494,11 +494,65 @@ class SocialAgentManager:
             self._stop_flag.set()
             set_config("agent_running", False)
 
+    # ── معالجة عنصر وارد واحد (مشتركة بين polling و webhook) ─────────────
+    def _handle_item(self, pid: str, adapter: "PlatformAdapter", item: SocialItem,
+                      keywords: List[str], auto_reply: bool) -> None:
+        """يطبّق نفس منطق: تفادي التكرار → مطابقة الكلمات → تسجيل/تحليل
+        مشاعر → رد تلقائي (إن فُعّل) — بغض النظر إن كان العنصر جاء من
+        استطلاع دوري (fetch_new_items) أو من webhook فوري."""
+        if _is_seen(pid, item.external_id):
+            return
+        _mark_seen(pid, item.external_id)
+        matched = (not keywords) or any(k in item.text.lower() for k in keywords)
+        if matched:
+            label, score = analyze_sentiment(item.text)
+            log_event(pid, "monitor_hit", item.author, item.text,
+                      sentiment=label, sentiment_score=score)
+            append_conversation(pid, item.author, "user", item.text)
+        if matched and auto_reply:
+            try:
+                reply_text = generate_reply(item)
+                adapter.reply(item, reply_text)
+                log_event(pid, "reply", item.author, item.text,
+                          reply_content=reply_text, ok=True)
+                append_conversation(pid, item.author, "assistant", reply_text)
+            except Exception as e:  # noqa: BLE001
+                log_event(pid, "reply", item.author, item.text,
+                          reply_content=str(e), ok=False)
+
+    # ── استقبال عنصر فوري من webhook خارجي (api_server.py) ───────────────
+    def ingest_webhook_item(self, pid: str, item: SocialItem) -> None:
+        """نقطة الدخول التي يستدعيها endpoint الـwebhook (مثال: تيليجرام)
+        عند وصول تحديث فوري. تُطبَّق عليه كل قواعد المراقبة (كلمات
+        مفتاحية، رد تلقائي، تسجيل الأحداث) تماماً كما لو جاء من polling،
+        دون انتظار دورة الاستطلاع التالية. لا تُنفَّذ إن كانت المنصة غير
+        مُهيّأة أو غير مفعّلة أصلاً."""
+        adapter = self.adapters.get(pid)
+        if not adapter or not adapter.is_configured():
+            return
+        enabled_platforms = set(get_config("enabled_platforms", []))
+        if pid not in enabled_platforms:
+            return
+        keywords = [k.strip().lower() for k in get_config("keywords", []) if k.strip()]
+        auto_reply = get_config("auto_reply", False)
+        try:
+            self._handle_item(pid, adapter, item, keywords, auto_reply)
+            st = self._status.get(pid)
+            if st:
+                st.last_poll = datetime.now(timezone.utc).isoformat()
+                st.last_error = None
+        except Exception as e:  # noqa: BLE001
+            st = self._status.get(pid)
+            if st:
+                st.last_error = f"{e}"
+            log_event(pid, "monitor_error", "-", str(e), ok=False)
+
     # ── دورة الاستطلاع الرئيسية ──────────────────────────────────────────
     def _loop(self):
         while not self._stop_flag.is_set():
             interval = get_config("poll_interval", DEFAULT_POLL_INTERVAL)
             enabled_platforms = set(get_config("enabled_platforms", []))
+            webhook_platforms = set(get_config("webhook_enabled_platforms", []))
             keywords = [k.strip().lower() for k in get_config("keywords", []) if k.strip()]
             auto_reply = get_config("auto_reply", False)
 
@@ -509,6 +563,11 @@ class SocialAgentManager:
             for pid in enabled_platforms:
                 if self._stop_flag.is_set():
                     break
+                # منصة بوضع webhook فعّال: تصلها التحديثات فوراً عبر
+                # ingest_webhook_item من api_server.py — استطلاعها بالتوازي
+                # هنا سيُعالج نفس العناصر مرتين ويُهدر حصة الـAPI بلا فائدة.
+                if pid in webhook_platforms:
+                    continue
                 adapter = self.adapters.get(pid)
                 st = self._status.get(pid)
                 if not adapter or not adapter.is_configured():
@@ -517,25 +576,7 @@ class SocialAgentManager:
                     since = _seen_ids_for(pid)
                     new_items = adapter.fetch_new_items(since)
                     for item in new_items:
-                        if _is_seen(pid, item.external_id):
-                            continue
-                        _mark_seen(pid, item.external_id)
-                        matched = (not keywords) or any(k in item.text.lower() for k in keywords)
-                        if matched:
-                            label, score = analyze_sentiment(item.text)
-                            log_event(pid, "monitor_hit", item.author, item.text,
-                                      sentiment=label, sentiment_score=score)
-                            append_conversation(pid, item.author, "user", item.text)
-                        if matched and auto_reply:
-                            try:
-                                reply_text = generate_reply(item)
-                                adapter.reply(item, reply_text)
-                                log_event(pid, "reply", item.author, item.text,
-                                          reply_content=reply_text, ok=True)
-                                append_conversation(pid, item.author, "assistant", reply_text)
-                            except Exception as e:  # noqa: BLE001
-                                log_event(pid, "reply", item.author, item.text,
-                                          reply_content=str(e), ok=False)
+                        self._handle_item(pid, adapter, item, keywords, auto_reply)
                     if st:
                         st.last_poll = datetime.now(timezone.utc).isoformat()
                         st.last_error = None
@@ -545,6 +586,37 @@ class SocialAgentManager:
                     log_event(pid, "monitor_error", "-", str(e), ok=False)
 
             self._stop_flag.wait(timeout=interval)
+
+    # ── تفعيل/إلغاء وضع webhook لمنصة تدعمه (مثال: تيليجرام) ─────────────
+    def enable_webhook(self, pid: str, url: str, secret_token: Optional[str] = None) -> dict:
+        """يفعّل webhook فعلياً لدى مزوّد المنصة (وليس فقط محلياً) عبر
+        adapter.set_webhook، ثم يسجّل المنصة ضمن webhook_enabled_platforms
+        كي تتوقف دورة polling عن استطلاعها. يرفع ValueError إن كانت
+        المنصة لا تدعم webhook حقيقياً (راجع WEBHOOKS.md)."""
+        adapter = self.adapters.get(pid)
+        if not adapter:
+            raise ValueError(f"منصة غير معروفة: {pid}")
+        if not adapter.supports_webhook:
+            raise ValueError(
+                f"{pid}: لا يوفّر API الرسمي webhook حقيقياً لهذه الحالة "
+                "(استقبال أحداث) — راجع ai/social_platforms/WEBHOOKS.md."
+            )
+        result = adapter.set_webhook(url, secret_token=secret_token)
+        current = set(get_config("webhook_enabled_platforms", []))
+        current.add(pid)
+        set_config("webhook_enabled_platforms", sorted(current))
+        return result
+
+    def disable_webhook(self, pid: str) -> dict:
+        """يلغي webhook لدى مزوّد المنصة ويعيدها لوضع polling العادي."""
+        adapter = self.adapters.get(pid)
+        if not adapter:
+            raise ValueError(f"منصة غير معروفة: {pid}")
+        result = adapter.delete_webhook() if hasattr(adapter, "delete_webhook") else {}
+        current = set(get_config("webhook_enabled_platforms", []))
+        current.discard(pid)
+        set_config("webhook_enabled_platforms", sorted(current))
+        return result
 
     # ── معالجة المنشورات المجدولة المستحقة ──────────────────────────────
     def _process_due_scheduled(self):
