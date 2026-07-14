@@ -2926,10 +2926,19 @@ def render_system_group():
 
 
 def render_advanced_tools_group():
-    """🧪 أدوات متقدمة: يجمع ULTRAPLINIAN + الواجهات التفاعلية."""
-    sub = st.tabs(["⚡ ULTRAPLINIAN", "🧩 الواجهات التفاعلية"])
-    with sub[0]: render_ultraplinian()
-    with sub[1]: render_artifacts_studio()
+    """🧪 أدوات متقدمة: يجمع ULTRAPLINIAN + الواجهات التفاعلية.
+    الواجهات التفاعلية (Artifacts) لا صلة لها بمهمة المشروع، وتخزينها
+    مشترك بين كل الزوار بدون عزل ملكية (أي زائر يشوف/يحذف واجهات غيره،
+    وأي HTML/JS محفوظ يُنفَّذ تلقائياً لكل الزوار) — لذلك تظهر للمالك
+    فقط بعد فتح وضع المالك من الشريط الجانبي."""
+    _tool_tab_defs = [("⚡ ULTRAPLINIAN", render_ultraplinian)]
+    if st.session_state.get("_dev_console_unlocked", False):
+        _tool_tab_defs.append(("🧩 الواجهات التفاعلية", render_artifacts_studio))
+
+    sub = st.tabs([_label for _label, _fn in _tool_tab_defs])
+    for _tab, (_label, _fn) in zip(sub, _tool_tab_defs):
+        with _tab:
+            _fn()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
