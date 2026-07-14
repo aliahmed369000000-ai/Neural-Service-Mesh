@@ -264,6 +264,11 @@ class ExplainerSegment:
     audio_bytes:  Optional[bytes] = None   # يُملأ بعد render_audio()
     audio_format: str = "mp3"
     audio_provider: str = ""
+    # توقيت حقيقي لكل كلمة (نص, بداية بالثانية, مدة بالثانية) — يُملأ فقط
+    # عند نجاح Edge TTS (المزوّد الوحيد الذي يُصدر WordBoundary فعلية عبر
+    # ai/tts_engine.py)، يبقى [] لبقية المزوّدين ويتراجع VideoEngine
+    # لتقدير تناسبي عند غيابه.
+    word_timings: List[tuple] = field(default_factory=list)
 
 
 @dataclass
@@ -327,6 +332,7 @@ class FableEngine:
                     seg.audio_bytes = result.audio_bytes
                     seg.audio_format = result.format
                     seg.audio_provider = result.provider.value
+                    seg.word_timings = result.word_timings
                     break
                 last_error = f"{result.error} (تُجرِّب: {', '.join(result.tried)})"
             else:
