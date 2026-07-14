@@ -4438,8 +4438,9 @@ def render_social_agent():
     st.markdown('<div class="section-header">📡 الوكيل الاجتماعي</div>', unsafe_allow_html=True)
     st.caption(
         "نشر + رد تلقائي + مراقبة عبر Discord وTelegram وTwitter/X وInstagram "
-        "وFacebook وYouTube وTikTok وReddit وLinkedIn وThreads، بنفس شخصية NSM "
-        "الموحّدة — مع جدولة منشورات وتحليل مشاعر وردود تتذكّر كل شخص."
+        "وFacebook وYouTube وTikTok وReddit وLinkedIn وThreads وWhatsApp، "
+        "ونشر فقط عبر Pinterest (لا يوفّر API مراقبة/رد — راجع تلميح المنصة)، "
+        "بنفس شخصية NSM الموحّدة — مع جدولة منشورات وتحليل مشاعر وردود تتذكّر كل شخص."
     )
 
     try:
@@ -4543,6 +4544,8 @@ def render_social_agent():
         label = PLATFORM_LABELS_AR.get(pid, pid)
         badge = "🟢 مُهيّأة" if s.configured else f"🔴 غير مُهيّأة (يلزم: {', '.join(s.missing_env) or '—'})"
         line = f"- **{label}** — {badge}"
+        if not mgr.adapters[pid].supports_monitoring:
+            line += " · ⚡ نشر فقط (لا يوفّر API مراقبة/رد)"
         if s.last_poll:
             line += f" · آخر استطلاع: {s.last_poll}"
         st.markdown(line)

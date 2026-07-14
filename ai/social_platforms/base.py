@@ -14,6 +14,14 @@ class NotConfiguredError(RuntimeError):
     """تُرفع عندما تكون بيانات اعتماد المنصة غير متوفرة — لا نلفّق نتائج بديلة أبداً."""
 
 
+class PlatformCapabilityError(RuntimeError):
+    """تُرفع عندما تكون العملية غير مدعومة إطلاقاً بواجهة برمجة المنصة
+    الرسمية (وليست مسألة بيانات اعتماد ناقصة) — مثال: Pinterest API v5
+    لا يوفّر أي endpoint لقراءة أو الرد على التعليقات مهما كانت الصلاحيات
+    الممنوحة. تُستخدم بدل NotImplementedError الصامت لتوضيح أن القيد من
+    المنصة نفسها، وبدل NotConfiguredError لأن المشكلة ليست بيانات اعتماد."""
+
+
 @dataclass
 class SocialItem:
     """عنصر وارد من منصة (منشن، تعليق، رسالة خاصة) بصيغة موحّدة."""
@@ -41,6 +49,13 @@ class PlatformAdapter:
     #: الواردة (وليس فقط webhooks صادرة للنشر). راجع WEBHOOKS.md لتفصيل
     #: كل منصة وسبب True/False قبل تغيير هذه القيمة.
     supports_webhook: bool = False
+    #: هل تدعم هذه المنصة مراقبة (fetch_new_items) ورداً (reply) أصلاً عبر
+    #: API عام موثّق؟ False لمنصات تسمح بالنشر فقط (مثل Pinterest API v5
+    #: الذي لا يوفّر أي endpoint للتعليقات) — عندها fetch_new_items/reply
+    #: يرفعان PlatformCapabilityError بدل محاولة استدعاء endpoint غير موجود.
+    #: دورة الاستطلاع بـsocial_agent.py تتخطى استدعاء fetch_new_items
+    #: أصلاً لهذه المنصات (لا رفع أخطاء متكررة بلا فائدة بالسجل).
+    supports_monitoring: bool = True
 
     def is_configured(self) -> bool:
         return all(os.environ.get(k) for k in self.required_env)

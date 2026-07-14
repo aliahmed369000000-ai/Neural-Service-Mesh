@@ -107,6 +107,54 @@ async def telegram_webhook(secret: str, request: Request):
     return {"status": "ok"}
 
 
+@app.get("/webhook/whatsapp")
+async def whatsapp_webhook_verify(request: Request):
+    """تحقق Meta الأولي عند ربط الـwebhook (hub.mode/hub.verify_token/
+    hub.challenge) — يجب إرجاع hub.challenge كنص خام إن تطابق الرمز."""
+    from ai.social_platforms.whatsapp_adapter import WhatsAppAdapter
+
+    q = request.query_params
+    result = WhatsAppAdapter.verify_webhook_challenge(
+        q.get("hub.mode"), q.get("hub.verify_token"), q.get("hub.challenge"),
+    )
+    if result is None:
+        return JSONResponse(status_code=403, content={"error": "verify_token غير مطابق"})
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(result)
+
+
+@app.post("/webhook/whatsapp")
+async def whatsapp_webhook_receive(request: Request):
+    """استقبال رسائل واتساب الواردة. تحقق التوقيع (X-Hub-Signature-256)
+    إلزامي قبل أي معالجة أو حتى قبل قراءة JSON — نفس مبدأ الرفض الآمن
+    المتّبع بمحول تيليجرام. نرد 200 لـMeta دائماً بعد التحقق الناجح حتى
+    لو فشلت المعالجة الداخلية، تفادياً لتعطيل الـwebhook من طرف Meta."""
+    from ai.social_platforms.whatsapp_adapter import WhatsAppAdapter
+
+    raw_body = await request.body()
+    signature = request.headers.get("x-hub-signature-256")
+    if not WhatsAppAdapter.verify_signature(raw_body, signature):
+        return JSONResponse(status_code=403, content={"error": "توقيع غير صالح"})
+
+    try:
+        import json as _json
+        payload = _json.loads(raw_body)
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "جسم JSON غير صالح"})
+
+    try:
+        from ai.social_agent import get_manager
+
+        items = WhatsAppAdapter.parse_webhook_payload(payload)
+        for item in items:
+            WhatsAppAdapter.enqueue_incoming(item)
+            get_manager().ingest_webhook_item("whatsapp", item)
+    except Exception as e:
+        return JSONResponse(status_code=200, content={"status": "ok", "warning": str(e)})
+
+    return {"status": "ok"}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("api_server:app", host="0.0.0.0", port=5000, reload=True)
