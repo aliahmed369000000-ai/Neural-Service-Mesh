@@ -3135,16 +3135,7 @@ def render_artifacts_studio():
         _ART_STORE_OK = False
         st.error(f"⚠️ تعذّر تحميل مخزن الواجهات التفاعلية: {_art_err}")
 
-    # تبويب "🔌 استدعاء API" أداة HTTP عامة بدون تحقق من الوجهة (خطر SSRF) —
-    # لذلك لا يُضاف لقائمة التبويبات الفرعية أصلاً إلا بعد فتح وضع المالك
-    # من الشريط الجانبي، تماماً كما فعلنا مع تبويب ⚙️ النظام.
-    _art_tab_defs = [("🖼️ محرّر HTML/SVG", "editor")]
-    if st.session_state.get("_dev_console_unlocked", False):
-        _art_tab_defs.append(("🔌 استدعاء API", "api_caller"))
-
-    _art_tabs = st.tabs([_label for _label, _kind in _art_tab_defs])
-    art_tab1 = _art_tabs[0]
-    art_tab2 = _art_tabs[1] if len(_art_tabs) > 1 else None
+    art_tab1, art_tab2 = st.tabs(["🖼️ محرّر HTML/SVG", "🔌 استدعاء API"])
 
     # ── محرّر ومعرض الواجهات التفاعلية ───────────────────────────────────
     with art_tab1:
@@ -3204,10 +3195,8 @@ def render_artifacts_studio():
                                 delete_artifact(item["id"])
                                 st.rerun()
 
-    # ── استدعاء APIs مباشرة من الواجهة — للمالك فقط ──────────────────────
-    if art_tab2 is not None:
-      with art_tab2:
-        st.warning("🔒 أداة داخلية للمالك — ترسل طلبات HTTP فعلية من الخادم لأي رابط تُدخله. لا تشاركها مع أحد.")
+    # ── استدعاء APIs مباشرة من الواجهة ───────────────────────────────────
+    with art_tab2:
         st.markdown("""
         <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;
                     padding:0.9rem 1.2rem;direction:rtl;margin-bottom:1rem">
