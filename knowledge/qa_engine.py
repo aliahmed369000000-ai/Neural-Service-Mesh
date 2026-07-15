@@ -51,6 +51,74 @@ def _get_neural_booster():
     return _NEURAL_BOOSTER if _NEURAL_BOOSTER is not False else None
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# LoRA: تدريب خفيف إضافي من ملاحظات المستخدمين (لا يمسّ الأوزان الأساسية)
+# ═══════════════════════════════════════════════════════════════════════════
+_LORA_ADAPTER = None
+_LORA_TRIED = False
+_LORA_FEEDBACK_COUNT = 0
+LORA_SAVE_DIR = "models/lora_feedback_v1"
+LORA_SAVE_EVERY = 10  # حفظ الـadapter كل 10 ملاحظات إيجابية
+
+
+def _get_lora_adapter():
+    """
+    يُغلّف ArabicTransformer بـ LoRA adapters (rank=8) لتدريب خفيف جداً
+    (~548K باراميتر بدل 27M) من ملاحظات المستخدمين، دون أي تعديل على
+    الأوزان الأساسية المدرَّبة. يُرجع None لو الشبكة الأساسية غير متاحة.
+    """
+    global _LORA_ADAPTER, _LORA_TRIED
+    if _LORA_TRIED:
+        return _LORA_ADAPTER if _LORA_ADAPTER is not False else None
+    _LORA_TRIED = True
+    booster = _get_neural_booster()
+    if booster is None:
+        _LORA_ADAPTER = False
+        return None
+    try:
+        from ai.lora_adapter import LoRATransformerAdapter
+        import os
+        lora = LoRATransformerAdapter(booster, rank=8, alpha=16.0)
+        if os.path.exists(f"{LORA_SAVE_DIR}_meta.json"):
+            lora.load(LORA_SAVE_DIR)
+            logger.info(f"[qa_engine] LoRA adapter محمَّل من {LORA_SAVE_DIR}")
+        _LORA_ADAPTER = lora
+    except Exception as e:
+        _LORA_ADAPTER = False
+        logger.warning(f"[qa_engine] تعذّر تهيئة LoRA adapter: {e}")
+    return _LORA_ADAPTER if _LORA_ADAPTER is not False else None
+
+
+def record_positive_feedback(question: str, answer_summary: str = "", lr: float = 5e-3) -> bool:
+    """
+    يُسجِّل ملاحظة إيجابية من المستخدم على إجابة معيّنة: خطوة تدريب LoRA
+    واحدة صغيرة تُعزِّز نمط السؤال (+الإجابة إن وُجدت) داخل الشبكة، دون
+    أي تعديل على الأوزان الأساسية (~27M) — فقط adapters صغيرة (~548K).
+
+    يُستدعى مستقبلاً من واجهة streamlit_app.py عند ضغط المستخدم على 👍.
+    يُرجع True لو نجحت خطوة التدريب، False عند أي فشل (fallback آمن —
+    لا يكسر أي شيء، فقط لا يحدث تحسين).
+    """
+    global _LORA_FEEDBACK_COUNT
+    lora = _get_lora_adapter()
+    if lora is None:
+        return False
+    try:
+        text = (question + " " + answer_summary).strip() if answer_summary else question
+        ids, targets = lora.prepare_lm_sample(text)
+        if ids is None:
+            return False
+        lora.train_step(ids, targets, lr=lr)
+        _LORA_FEEDBACK_COUNT += 1
+        if _LORA_FEEDBACK_COUNT % LORA_SAVE_EVERY == 0:
+            lora.save(LORA_SAVE_DIR)
+            logger.info(f"[qa_engine] LoRA adapter محفوظ بعد {_LORA_FEEDBACK_COUNT} ملاحظة")
+        return True
+    except Exception as e:
+        logger.warning(f"[qa_engine] فشل تسجيل ملاحظة LoRA: {e}")
+        return False
+
+
 def _apply_neural_boost(
     question: str, related_concepts: List[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
