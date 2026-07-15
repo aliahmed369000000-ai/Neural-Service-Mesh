@@ -14,8 +14,86 @@ qa_engine.py
 from __future__ import annotations
 
 import re
+import logging
 from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# طبقة تعزيز عصبي اختيارية (ArabicTransformer 40M) — إضافية فوق قواعد qa_engine
+# ═══════════════════════════════════════════════════════════════════════════
+# مبدأ التصميم: qa_engine.py يبقى يعمل بالكامل بمفرده حتى لو فشلت هذه الطبقة
+# تماماً (استيراد، تحميل أوزان، أو أي استثناء أثناء التنفيذ) — أي خطأ هنا
+# يُصمَّت ويُرجَع الترتيب الأصلي دون تعديل. لا يوجد أي مسار يعتمد على نجاح
+# هذه الطبقة.
+
+_NEURAL_BOOSTER = None       # ArabicTransformer المحمَّل، أو False لو فشل نهائياً
+_NEURAL_BOOST_TRIED = False  # نحاول التحميل مرة واحدة فقط (لا نعيد المحاولة كل سؤال)
+
+
+def _get_neural_booster():
+    """يُحمِّل ArabicTransformer مرة واحدة (lazy singleton). يُرجع None عند أي فشل."""
+    global _NEURAL_BOOSTER, _NEURAL_BOOST_TRIED
+    if _NEURAL_BOOST_TRIED:
+        return _NEURAL_BOOSTER if _NEURAL_BOOSTER is not False else None
+    _NEURAL_BOOST_TRIED = True
+    try:
+        from ai.arabic_transformer import ArabicTransformer
+        t = ArabicTransformer()
+        t.load("models/transformer_ckg_v1")
+        _NEURAL_BOOSTER = t
+        logger.info("[qa_engine] طبقة التعزيز العصبي (ArabicTransformer) محمَّلة بنجاح")
+    except Exception as e:
+        _NEURAL_BOOSTER = False
+        logger.warning(f"[qa_engine] تعذّر تحميل طبقة التعزيز العصبي — "
+                        f"سيعمل qa_engine بقواعده الأصلية فقط: {e}")
+    return _NEURAL_BOOSTER if _NEURAL_BOOSTER is not False else None
+
+
+def _apply_neural_boost(
+    question: str, related_concepts: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """
+    يعزّز ترتيب related_concepts دلالياً عبر مقارنة hash IDs (بدون توليد
+    نص حر — انظر توثيق HashTokenizer في ai/arabic_transformer.py).
+    عند أي فشل: يُرجع القائمة كما هي دون أي تعديل (fallback آمن كامل).
+    """
+    if not related_concepts:
+        return related_concepts
+    booster = _get_neural_booster()
+    if booster is None:
+        return related_concepts
+    try:
+        top = booster.predict_next(question, top_k=15)
+        top_ids = [i for i, _ in top]
+        top_id_set = set(top_ids)
+        n = len(top_ids)
+
+        def boost_of(name: str) -> float:
+            ids = booster.tokenizer.encode(name, 3)
+            if len(ids) == 0:
+                return 0.0
+            first_id = int(ids[0])
+            if first_id not in top_id_set:
+                return 0.0
+            rank = top_ids.index(first_id)
+            return 1.0 - (rank / n)
+
+        for r in related_concepts:
+            r["neural_boost"] = round(boost_of(r["concept"]), 4)
+
+        # إعادة الترتيب: الوزن الأصلي يبقى العامل الأساسي، والتعزيز
+        # العصبي يُستخدم فقط لكسر التعادل/تحسين طفيف (وزن صغير 0.1)
+        related_concepts.sort(
+            key=lambda r: (r.get("weight", 0.0) * (1.0 + 0.1 * r.get("neural_boost", 0.0))),
+            reverse=True,
+        )
+        return related_concepts
+    except Exception as e:
+        logger.warning(f"[qa_engine] فشل التعزيز العصبي لهذا السؤال — "
+                        f"استخدام الترتيب الأصلي: {e}")
+        return related_concepts
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -666,6 +744,7 @@ def answer_question(
     non_meta_primary = [c for c in all_primary if c not in META_CONCEPTS]
     primary_names = non_meta_primary if non_meta_primary else all_primary
     related_concepts = find_related_concepts(primary_names, relations_db, concepts_db, top_k=max_related) if primary_names else []
+    related_concepts = _apply_neural_boost(question, related_concepts)
 
     # 3. الآيات الداعمة
     verses = retrieve_supporting_verses(concept_matches, concepts_db, ayat_by_ref, max_verses=max_verses)
