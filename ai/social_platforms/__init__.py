@@ -19,27 +19,27 @@ publish() / fetch_new_items() / reply() / is_configured().
 from .base import PlatformAdapter, SocialItem, NotConfiguredError, PlatformCapabilityError
 from .discord_adapter import DiscordAdapter
 from .telegram_adapter import TelegramAdapter
-from .twitter_adapter import TwitterAdapter
 from .instagram_adapter import InstagramAdapter
 from .facebook_adapter import FacebookAdapter
 from .youtube_adapter import YouTubeAdapter
 from .tiktok_adapter import TikTokAdapter
 from .reddit_adapter import RedditAdapter
-from .linkedin_adapter import LinkedInAdapter
 from .threads_adapter import ThreadsAdapter
 from .whatsapp_adapter import WhatsAppAdapter
 from .pinterest_adapter import PinterestAdapter
 
+# ملاحظة: تمّ تعطيل Twitter/X وLinkedIn من القائمة النشطة (2026-07-15)
+# بسبب تكلفة API غير مجانية. ملفا twitter_adapter.py وlinkedin_adapter.py
+# ما زالا موجودين في المجلد (غير محذوفين) لإعادة التفعيل لاحقاً لو لزم.
+
 ALL_ADAPTERS = {
     "discord": DiscordAdapter,
     "telegram": TelegramAdapter,
-    "twitter": TwitterAdapter,
     "instagram": InstagramAdapter,
     "facebook": FacebookAdapter,
     "youtube": YouTubeAdapter,
     "tiktok": TikTokAdapter,
     "reddit": RedditAdapter,
-    "linkedin": LinkedInAdapter,
     "threads": ThreadsAdapter,
     "whatsapp": WhatsAppAdapter,
     "pinterest": PinterestAdapter,
@@ -48,13 +48,11 @@ ALL_ADAPTERS = {
 PLATFORM_LABELS_AR = {
     "discord": "🎮 Discord",
     "telegram": "✈️ Telegram",
-    "twitter": "𝕏 Twitter/X",
     "instagram": "📷 Instagram",
     "facebook": "📘 Facebook",
     "youtube": "▶️ YouTube",
     "tiktok": "🎵 TikTok",
     "reddit": "👽 Reddit",
-    "linkedin": "💼 LinkedIn",
     "threads": "🧵 Threads",
     "whatsapp": "💬 WhatsApp",
     "pinterest": "📌 Pinterest",
@@ -65,12 +63,10 @@ PLATFORM_LABELS_AR = {
 #: قابل للتطبيق. أرقام تقريبية موثّقة من كل منصة وقد تتغيّر — تحذير فقط،
 #: ليست تحققاً صارماً (المنصة نفسها هي الحكم النهائي عند النشر الفعلي).
 PLATFORM_CHAR_LIMITS = {
-    "twitter": 280,
     "threads": 500,
     "discord": 2000,
     "telegram": 4096,
     "whatsapp": 4096,
-    "linkedin": 3000,
     "facebook": None,
     "instagram": 2200,
     "youtube": None,
@@ -81,9 +77,9 @@ PLATFORM_CHAR_LIMITS = {
 
 __all__ = [
     "PlatformAdapter", "SocialItem", "NotConfiguredError", "PlatformCapabilityError",
-    "DiscordAdapter", "TelegramAdapter", "TwitterAdapter",
+    "DiscordAdapter", "TelegramAdapter",
     "InstagramAdapter", "FacebookAdapter", "YouTubeAdapter", "TikTokAdapter",
-    "RedditAdapter", "LinkedInAdapter", "ThreadsAdapter",
+    "RedditAdapter", "ThreadsAdapter",
     "WhatsAppAdapter", "PinterestAdapter",
     "ALL_ADAPTERS", "PLATFORM_LABELS_AR", "PLATFORM_CHAR_LIMITS",
 ]
