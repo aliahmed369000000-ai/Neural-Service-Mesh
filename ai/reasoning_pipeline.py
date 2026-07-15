@@ -185,6 +185,7 @@ class ReasoningPipeline:
         autosave_every: int = 1,
         episode_store: Optional[EpisodeStore] = None,
         record_episodes: bool = True,
+        transformer_weights_path: Optional[str] = "models/transformer_ckg_v1",
     ):
         self.encoder = VectorEncoder()
         self.ckg = ckg if ckg is not None else CKGManager()
@@ -209,6 +210,22 @@ class ReasoningPipeline:
                 self.arabic_engine = ArabicNLPEngine(ckg=self.ckg)
             except Exception as e:
                 logger.warning(f"ArabicNLPEngine init failed: {e}")
+
+        # ── ArabicTransformer (~40M) — يُستخدم فقط لتعزيز الفهم/الترتيب
+        # عبر مقارنة hash IDs (predict_next مقابل tokenizer.encode للمفاهيم)،
+        # وليس لتوليد نص حر — لأن الـ tokenizer لا يخزّن مفردات (hash-only،
+        # لا يوجد decode()، مبدأ معماري متعمّد).
+        self.transformer = None
+        if transformer_weights_path is not None:
+            try:
+                from ai.arabic_transformer import ArabicTransformer
+                _t = ArabicTransformer()
+                _t.load(transformer_weights_path)
+                self.transformer = _t
+                logger.info(f"ArabicTransformer محمّل من {transformer_weights_path} "
+                            f"لتعزيز الترتيب الدلالي")
+            except Exception as e:
+                logger.warning(f"ArabicTransformer init failed (سيعمل النظام بدونه): {e}")
 
         self.max_matched_concepts = max_matched_concepts
         self.max_related_per_concept = max_related_per_concept
@@ -347,12 +364,35 @@ class ReasoningPipeline:
     # الخطوة 4: Decision → ترتيب المفاهيم
     # ────────────────────────────────────────────────────────────────
 
+    def _transformer_boost(self, question: str, concept_name: str) -> float:
+        """
+        يستخدم ArabicTransformer.predict_next() لمقارنة hash IDs بدون فك تشفير:
+        لو أول hash ID لاسم المفهوم ظهر ضمن أعلى توقعات النموذج للسؤال،
+        يُعتبر ده إشارة فهم دلالي حقيقي من الشبكة الـ40M. يُعيد 0..1.
+        """
+        if self.transformer is None:
+            return 0.0
+        try:
+            top = self.transformer.predict_next(question, top_k=15)
+            top_ids = {i for i, _ in top}
+            concept_ids = self.transformer.tokenizer.encode(concept_name, 3)
+            if len(concept_ids) == 0:
+                return 0.0
+            first_id = int(concept_ids[0])
+            if first_id not in top_ids:
+                return 0.0
+            rank = [i for i, _ in top].index(first_id)
+            return round(1.0 - (rank / len(top)), 4)
+        except Exception:
+            return 0.0
+
     def _decide(
         self,
         weights: Dict[str, float],
         matched: List[MatchedConcept],
         related: List[RelatedConcept],
         memory_hits: List[MemoryHit],
+        question: str = "",
     ) -> List[Dict[str, Any]]:
         """
         يحسب نتيجة مركّبة لكل عنصر (مفهوم مطابق/مرتبط/ذكرى) باستخدام
@@ -369,18 +409,23 @@ class ReasoningPipeline:
 
         ranked: List[Dict[str, Any]] = []
 
+        TRANSFORMER_WEIGHT = 0.15  # وزن ثابت صغير — لا يطغى على قرار NeuralCore المدرَّب
+
         for m in matched:
-            m.score = round(w_sem * m.strength * (1.0 + w_score), 6)
+            boost = self._transformer_boost(question, m.name) if question else 0.0
+            m.score = round(w_sem * m.strength * (1.0 + w_score) * (1.0 + TRANSFORMER_WEIGHT * boost), 6)
             ranked.append({
                 "type": "matched_concept",
                 "name": m.name,
                 "cluster": m.cluster,
                 "strength": m.strength,
                 "score": m.score,
+                "transformer_boost": boost,
             })
 
         for r in related:
-            r.score = round(w_topo * r.relation_weight * (1.0 + w_score), 6)
+            boost = self._transformer_boost(question, r.name) if question else 0.0
+            r.score = round(w_topo * r.relation_weight * (1.0 + w_score) * (1.0 + TRANSFORMER_WEIGHT * boost), 6)
             ranked.append({
                 "type": "related_concept",
                 "name": r.name,
@@ -389,6 +434,7 @@ class ReasoningPipeline:
                 "relation_type": r.relation_type,
                 "relation_weight": r.relation_weight,
                 "score": r.score,
+                "transformer_boost": boost,
             })
 
         for h in memory_hits:
@@ -551,7 +597,7 @@ class ReasoningPipeline:
             target = self._build_target(matched, related, memory_hits)
 
         # 4: Decision
-        ranked = self._decide(weights, matched, related, memory_hits)
+        ranked = self._decide(weights, matched, related, memory_hits, question=question)
 
         # 5: Answer
         answer_text = self._build_answer_text(question, ranked, weights)
