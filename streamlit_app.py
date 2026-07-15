@@ -4480,8 +4480,8 @@ def render_social_agent():
     اليدوي الفوري، وعرض آخر الأحداث/الأخطاء لكل منصة."""
     st.markdown('<div class="section-header">📡 الوكيل الاجتماعي</div>', unsafe_allow_html=True)
     st.caption(
-        "نشر + رد تلقائي + مراقبة عبر Discord وTelegram وTwitter/X وInstagram "
-        "وFacebook وYouTube وTikTok وReddit وLinkedIn وThreads وWhatsApp، "
+        "نشر + رد تلقائي + مراقبة عبر Discord وTelegram وInstagram "
+        "وFacebook وYouTube وTikTok وReddit وThreads وWhatsApp، "
         "ونشر فقط عبر Pinterest (لا يوفّر API مراقبة/رد — راجع تلميح المنصة)، "
         "بنفس شخصية NSM الموحّدة — مع جدولة منشورات وتحليل مشاعر وردود تتذكّر كل شخص."
     )
