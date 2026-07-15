@@ -348,14 +348,53 @@ class DeepRoutingNetwork:
         return str(d.resolve())
 
     def load(self, directory: str = WEIGHTS_DIR) -> None:
+        """
+        يحمّل الأوزان المحفوظة مع تحقق من توافق الأبعاد أولاً.
+
+        إصلاح باغ: قبل هذا الإصلاح كانت load() تقرأ أبعاد ملف .npy القديم
+        حرفياً بدون أي تحقق (عبر DenseLayer.load الذي يضبط
+        out_dim/in_dim = shape الملف مباشرة)، فلو كان الملف المحفوظ من
+        معمارية قديمة غير متوافقة (مثلاً L1 بمدخل 128 بدل 784)، كانت
+        الشبكة ترجع بأبعاد خاطئة (128→2728→256→16) لا تتوافق مع متجهات
+        CKG الحقيقية (784 بُعد) — يسبب كسر forward() أو نتائج غير صحيحة
+        بصمت. الآن: أي طبقة أبعادها غير متوافقة تُرفض وتبقى بأوزانها
+        المهيّأة حديثاً (الصحيحة)، مع تحذير واضح بدل فشل صامت.
+        """
         d = Path(directory)
+        expected_in_dim = INPUT_DIM  # L1 دائماً يجب أن تكون أعمدتها 784
         for i, layer in enumerate(self.layers):
             prefix = str(d / f"deep_network_layer_{i+1}")
-            if os.path.exists(f"{prefix}_weights.npy"):
-                try:
-                    layer.load(prefix)
-                except Exception as e:
-                    logger.warning(f"layer {i+1} load failed: {e}")
+            wpath = f"{prefix}_weights.npy"
+            if not os.path.exists(wpath):
+                continue
+            try:
+                saved_w = np.load(wpath).astype(np.float64)
+            except Exception as e:
+                logger.warning(f"layer {i+1} load failed (تعذّرت قراءة الملف): {e}")
+                continue
+
+            saved_out, saved_in = saved_w.shape
+            if i == 0 and saved_in != expected_in_dim:
+                logger.warning(
+                    f"⚠️ layer 1 load مرفوض: الملف المحفوظ بمدخل {saved_in} "
+                    f"لكن المعمارية الحالية تتطلب {expected_in_dim} — "
+                    f"الاحتفاظ بالأوزان المهيّأة حديثاً الصحيحة بدل تحميل "
+                    f"أبعاد قديمة غير متوافقة."
+                )
+                continue
+            if i > 0 and saved_in != self.layers[i - 1].out_dim:
+                logger.warning(
+                    f"⚠️ layer {i+1} load مرفوض: مدخلها المحفوظ {saved_in} "
+                    f"لا يتوافق مع مخرج الطبقة السابقة الحالية "
+                    f"{self.layers[i - 1].out_dim} — تحميل غير آمن، تم التجاهل."
+                )
+                continue
+
+            try:
+                layer.load(prefix)
+            except Exception as e:
+                logger.warning(f"layer {i+1} load failed: {e}")
+
         state_path = str(d / "deep_network_state.npy")
         if os.path.exists(state_path):
             state = np.load(state_path)
