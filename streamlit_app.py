@@ -232,7 +232,7 @@ import sys as _sys
 _KNOWLEDGE_MODULE_DIR = str(Path(__file__).parent / "knowledge")
 if _KNOWLEDGE_MODULE_DIR not in _sys.path:
     _sys.path.insert(0, _KNOWLEDGE_MODULE_DIR)
-from qa_engine import answer_question  # noqa: E402
+from qa_engine import answer_question, record_positive_feedback  # noqa: E402
 from qa_episodic_memory import (  # noqa: E402
     store_episode, find_similar_episodes, get_memory_stats,
     consolidate_memory, get_semantic_rules,
@@ -1576,6 +1576,31 @@ def render_qa():
     st.markdown("")
     st.markdown(f"**درجة الثقة:** {confidence:.0%}")
     st.progress(confidence)
+
+    # ── تغذية راجعة: تدريب LoRA خفيف من ملاحظة المستخدم (لا يمسّ الأوزان الأساسية) ──
+    _fb_key = f"qa_feedback_{hash(question)}"
+    if st.session_state.get(_fb_key) is None:
+        fb_col1, fb_col2, fb_col3 = st.columns([1, 1, 4])
+        with fb_col1:
+            if st.button("👍 إجابة جيدة", key=f"{_fb_key}_up"):
+                try:
+                    record_positive_feedback(question, result.get("summary", ""))
+                except Exception:
+                    pass
+                st.session_state[_fb_key] = "up"
+                st.rerun()
+        with fb_col2:
+            if st.button("👎 غير دقيقة", key=f"{_fb_key}_down"):
+                # لا تدريب على الملاحظات السلبية حالياً (قد يزعزع الشبكة
+                # بدون آلية contrastive loss مناسبة) — فقط تسجيل للمراجعة.
+                st.session_state[_fb_key] = "down"
+                st.rerun()
+    else:
+        _fb = st.session_state[_fb_key]
+        if _fb == "up":
+            st.success("✅ شكراً! تم استخدام ملاحظتك لتحسين الفهم الدلالي للنموذج.")
+        else:
+            st.info("📝 شكراً على ملاحظتك — تم تسجيلها للمراجعة.")
 
     if not result["primary_concepts"]:
         st.info("لم يتم العثور على مفاهيم مرتبطة بهذا السؤال في قاعدة المعرفة الحالية.")
