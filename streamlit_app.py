@@ -588,6 +588,7 @@ h1, h2, h3, h4, h5, h6 {
     color: var(--text);
 }
 .stMarkdown, .stMarkdown p, label { color: var(--text); }
+.stMarkdown p, .stMarkdown li { line-height: 1.9; letter-spacing: 0.01em; }
 /* ملاحظة: تعمّدنا استبعاد وسم span من القاعدة العامة أعلاه — عناصر
    Streamlit الداخلية (عارض JSON، st.metric، شارات الحالة...) تستخدم span
    لأغراضها الخاصة بألوان تمييز لغوي (syntax highlight) خاصة بها، وفرض
@@ -712,7 +713,8 @@ hr { border-color: var(--border) !important; }
     font-family: 'IBM Plex Sans Arabic', sans-serif;
     font-size: clamp(1.6rem, 6vw, 2.4rem);
     font-weight: 800;
-    background: var(--accent-grad);
+    background: linear-gradient(100deg, var(--gold) 0%, var(--emerald) 45%, var(--gold) 90%);
+    background-size: 220% auto;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -720,6 +722,15 @@ hr { border-color: var(--border) !important; }
     padding: 0 0 0.3rem 0;
     direction: rtl;
     letter-spacing: -0.01em;
+    animation: nsmTitleShimmer 6s ease-in-out infinite;
+}
+@keyframes nsmTitleShimmer {
+    0%   { background-position: 0% 50%; }
+    50%  { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .main-title { animation: none !important; }
 }
 
 .subtitle {
