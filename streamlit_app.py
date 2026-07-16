@@ -467,12 +467,12 @@ KNOWLEDGE_DIR  = BASE / "knowledge"
 CHECKPOINTS_DIR = BASE / "checkpoints"
 MEMORY_DIR     = BASE / "memory"
 
-# ── نظام السمتين (الليل / المخطوطة) ─────────────────────────────────────
+# ── نظام السمتين (داكن / فاتح) ────────────────────────────────────────────
 # ── لوحتا الألوان ────────────────────────────────────────────────────────
-# مستوحاتان من عالم المخطوطات القرآنية: "الليل" (مخطوطة تحت ضوء قنديل مسجد
-# ليلاً — نيلي عميق وذهب التذهيب)، و"المخطوطة" (ورق رَق/parchment نهاري
-# بحبر سيبيا وتذهيب أفتح). كلا اللونين الذهبيين مختلفان فعلياً عن بعضهما
-# (وليس نفس hex مع تغيير الخلفية فقط) لضمان تباين كافٍ بكل سمة.
+# هوية SaaS تقنية حديثة: تدرّج بنفسجي→فيروزي (#7C5CFC → #2DD4BF) يعكس اسم
+# المشروع "Neural Service Mesh" — عقد شبكة متصلة، لا زخرفة تراثية. سمة
+# "داكن" (خلفية شبه سوداء بنفسجية) وسمة "فاتح" (خلفية بيضاء ناصعة) بنفس
+# التدرّج، بتباين ألوان مضبوط لكل سمة على حدة.
 THEMES = {
     "dark": {
         "label": "🌙 داكن",
@@ -3079,13 +3079,13 @@ def main():
     with st.sidebar:
         st.markdown("## 🌐 Neural Service Mesh")
 
-        # مبدّل السمة: الليل (نيلي + تذهيب) / المخطوطة (ورق رَق + سيبيا)
+        # مبدّل السمة: داكن (بنفسجي/فيروزي) / فاتح
         st.markdown('<div class="theme-toggle-caption">🎨 المظهر</div>', unsafe_allow_html=True)
         _theme_cols = st.columns(2)
         _current_theme = st.session_state.get("ui_theme", "dark")
         with _theme_cols[0]:
             if st.button(
-                ("● " if _current_theme == "dark" else "") + "🌙 الليل",
+                ("● " if _current_theme == "dark" else "") + "🌙 داكن",
                 key="theme_btn_dark", use_container_width=True,
             ):
                 st.session_state.ui_theme = "dark"
@@ -3097,7 +3097,7 @@ def main():
                 st.rerun()
         with _theme_cols[1]:
             if st.button(
-                ("● " if _current_theme == "light" else "") + "📜 المخطوطة",
+                ("● " if _current_theme == "light" else "") + "☀️ فاتح",
                 key="theme_btn_light", use_container_width=True,
             ):
                 st.session_state.ui_theme = "light"
