@@ -4600,6 +4600,8 @@ def render_chat():
         background:var(--bg);border-radius:18px;
         border:1px solid var(--border);margin-bottom:0.9rem;
         scroll-behavior:smooth;
+        -webkit-overflow-scrolling:touch;
+        overscroll-behavior:contain;
         box-shadow:inset 0 0 24px var(--shadow);
     }
     .chat-box::-webkit-scrollbar{width:5px;}
@@ -4611,6 +4613,18 @@ def render_chat():
         animation:pulse 1.2s infinite;
     }
     @keyframes pulse{0%,100%{opacity:.4;}50%{opacity:1;}}
+
+    /* ── استجابة الجوال ── */
+    @media (max-width: 640px) {
+        .chat-box {
+            height:56vh;min-height:320px;max-height:520px;
+            padding:0.8rem;border-radius:14px;
+        }
+        .chat-user .bbl, .chat-nsm .bbl {
+            max-width:92%;font-size:0.92rem;padding:0.65rem 0.9rem;
+        }
+        .chat-nsm .bbl { line-height:1.7; }
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -4736,8 +4750,22 @@ def render_chat():
     st.markdown("""
     <script>
     (function() {
-        const box = window.parent.document.getElementById('nsm-chat-box');
-        if (box) { box.scrollTop = box.scrollHeight; }
+        function scrollToBottom() {
+            const doc = window.parent ? window.parent.document : document;
+            const box = doc.getElementById('nsm-chat-box');
+            if (box) { box.scrollTop = box.scrollHeight; return true; }
+            return false;
+        }
+        // Streamlit يعيد رسم الـ DOM بشكل غير متزامن أحياناً — نحاول عدة مرات
+        // بدل الاعتماد على تنفيذ واحد فوري قد يسبق اكتمال العنصر.
+        let attempts = 0;
+        const tryScroll = () => {
+            attempts++;
+            if (!scrollToBottom() && attempts < 10) {
+                setTimeout(tryScroll, 60);
+            }
+        };
+        tryScroll();
     })();
     </script>
     """, unsafe_allow_html=True)
@@ -4784,6 +4812,12 @@ def render_chat():
     }
     .st-key-nsm_send_wrap button:active {
         transform:translateY(0);
+    }
+    @media (max-width: 640px) {
+        div[data-testid="stTextArea"] textarea {
+            min-height:76px !important;font-size:0.98rem !important;
+        }
+        .st-key-nsm_send_wrap button { height:52px !important; }
     }
     </style>""", unsafe_allow_html=True)
     c1, c2 = st.columns([5, 1.2], gap="small")
