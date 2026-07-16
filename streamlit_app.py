@@ -1061,15 +1061,6 @@ hr { border-color: var(--border) !important; }
     text-align: right !important;
 }
 
-/* ── مربع البحث السريع بالصفحة الرئيسية — توهّج عند التركيز ── */
-.st-key-home_search input {
-    transition: box-shadow .2s ease, border-color .2s ease !important;
-}
-.st-key-home_search input:focus {
-    border-color: var(--gold) !important;
-    box-shadow: 0 0 0 4px var(--gold-soft) !important;
-}
-
 .root-item {
     background: var(--emerald-soft);
     border: 1px solid var(--border);
@@ -1515,33 +1506,14 @@ def render_home():
 
     st.markdown("")
     st.markdown('<div class="section-header">🔍 ابحث في المعرفة</div>', unsafe_allow_html=True)
-    st.markdown("أدخل مفهوماً للبحث عنه مباشرةً في قلب النظام:")
-
-    col_s, col_b = st.columns([4, 1])
-    with col_s:
-        quick_q = st.text_input("بحث", placeholder="مثال: الصبر، الجاذبية، الرحمة، العدل...",
-                                key="home_search", label_visibility="collapsed")
-    with col_b:
-        _home_search_clicked = st.button("🔍 بحث", use_container_width=True, key="home_btn")
-
-    if _home_search_clicked and quick_q.strip():
-        with st.spinner("🔍 جارٍ البحث في قاعدة المعرفة..."):
-            _home_result = search_knowledge(quick_q.strip())
-        if not _home_result["found"]:
-            st.warning(f"لم يُعثر على معلومات كافية عن «{quick_q.strip()}» حتى الآن.")
-        else:
-            _cdata = _home_result["concept_data"]
-            st.markdown(f"""
-            <div class="concept-card">
-                <div class="concept-name">💡 {_home_result['query']}</div>
-            </div>
-            """, unsafe_allow_html=True)
-            if _cdata:
-                _hc1, _hc2, _hc3 = st.columns(3)
-                with _hc1: st.markdown(f"**التصنيف:** {_cdata.get('cluster', 'غير مصنّف')}")
-                with _hc2: st.markdown(f"**التكرار:** {_cdata.get('frequency', 0):,} مرة")
-                with _hc3: st.markdown(f"**قوة المفهوم:** {_cdata.get('strength', 0.0):.2%}")
-            st.caption("للتفاصيل الكاملة (الآيات المرتبطة، الجذور، العلاقات) → تبويب «📚 المعرفة».")
+    st.markdown(f"""
+    <div class="feature-card" data-tab-target="📚 المعرفة">
+        <div class="feature-icon">🔍</div>
+        <div class="feature-title">البحث المعرفي الكامل</div>
+        <div class="feature-desc">ابحث عن أي مفهوم (الصبر، الجاذبية، الرحمة، العدل...) وشاهد الآيات المرتبطة والجذور والعلاقات المعرفية.</div>
+        <div class="feature-nav-hint">← اضغط للانتقال إلى البحث</div>
+    </div>
+    """, unsafe_allow_html=True)
 
     st.markdown("")
     st.markdown('<div class="section-header">🚀 استكشف NSM</div>', unsafe_allow_html=True)
