@@ -794,6 +794,55 @@ hr { border-color: var(--border) !important; }
     .metric-card { padding: 0.8rem 0.4rem; min-height: 80px; }
 }
 
+/* ── بطاقات الاستكشاف (الصفحة الرئيسية) ── */
+.feature-card {
+    position: relative;
+    background: var(--surface);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.3rem 1.2rem;
+    text-align: center;
+    height: 100%;
+    box-shadow: 0 4px 18px var(--shadow);
+    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+    direction: rtl;
+    overflow: hidden;
+}
+.feature-card::before {
+    content: "";
+    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: var(--accent-grad);
+    opacity: 0; transition: opacity .2s ease;
+}
+.feature-card:hover {
+    transform: translateY(-4px);
+    border-color: transparent;
+    box-shadow: 0 12px 30px var(--shadow);
+}
+.feature-card:hover::before { opacity: 1; }
+.feature-icon {
+    width: 46px; height: 46px;
+    margin: 0 auto 0.7rem auto;
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.4rem;
+    background: var(--accent-grad);
+    box-shadow: 0 4px 14px var(--gold-soft);
+}
+.feature-title {
+    font-family: 'IBM Plex Sans Arabic', sans-serif;
+    font-weight: 700;
+    font-size: 1rem;
+    color: var(--text);
+    margin-bottom: 0.35rem;
+}
+.feature-desc {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    line-height: 1.6;
+}
+
 /* ── بطاقة المفهوم ── */
 .concept-card {
     background: var(--surface);
@@ -1274,6 +1323,26 @@ def render_home():
         st.session_state["search_query"] = quick_q.strip()
         st.session_state["active_tab"] = 1
         st.rerun()
+
+    st.markdown("")
+    st.markdown('<div class="section-header">🚀 استكشف NSM</div>', unsafe_allow_html=True)
+
+    _features = [
+        ("💬", "محادثة ذكية", "تحدّث مع النظام بالعربية الفصحى، مدعوماً بشبكة المفاهيم المعرفية."),
+        ("📖", "القرآن الكريم", "بحث آية بآية، مرتبط تلقائياً بشبكة المفاهيم والجذور العربية."),
+        ("🤖", "الوكلاء الأذكياء", "وكلاء مستقلون للتنفيذ والتنسيق ضمن سرب ذكي متكامل."),
+        ("🎭", "المحتوى الإبداعي", "توليد نصوص ومحتوى إبداعي عربي بأسلوب متعدد الأنماط."),
+    ]
+    _fcols = st.columns(4)
+    for _col, (_icon, _title, _desc) in zip(_fcols, _features):
+        with _col:
+            st.markdown(f"""
+            <div class="feature-card">
+                <div class="feature-icon">{_icon}</div>
+                <div class="feature-title">{_title}</div>
+                <div class="feature-desc">{_desc}</div>
+            </div>
+            """, unsafe_allow_html=True)
 
 
 def render_search():
