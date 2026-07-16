@@ -631,9 +631,12 @@ hr { border-color: var(--border) !important; }
 /* ── عنوان الصفحة ── */
 .main-title {
     font-family: 'Noto Kufi Arabic', sans-serif;
-    font-size: 2.2rem;
+    font-size: clamp(1.5rem, 6vw, 2.2rem);
     font-weight: 800;
-    color: var(--gold);
+    background: linear-gradient(135deg, var(--gold) 0%, var(--emerald) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
     text-align: center;
     padding: 1rem 0 0.3rem 0;
     direction: rtl;
@@ -642,33 +645,61 @@ hr { border-color: var(--border) !important; }
 .subtitle {
     text-align: center;
     color: var(--text-muted);
-    font-size: 1rem;
-    margin-bottom: 1.2rem;
+    font-size: clamp(0.85rem, 3vw, 1rem);
+    margin-bottom: 0.4rem;
     direction: rtl;
+}
+
+.welcome-line {
+    text-align: center;
+    color: var(--text);
+    font-size: 0.92rem;
+    max-width: 620px;
+    margin: 0 auto 1.4rem auto;
+    line-height: 1.9;
+    direction: rtl;
+    opacity: 0.85;
 }
 
 /* ── بطاقات المقاييس ── */
 .metric-card {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1rem 1.2rem;
+    border-radius: 14px;
+    padding: 1rem 0.6rem;
     text-align: center;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.6rem;
     box-shadow: 0 2px 10px var(--shadow);
+    transition: transform 0.15s ease, border-color 0.15s ease;
+    min-height: 92px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+.metric-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--gold);
 }
 .metric-value {
     font-family: 'Noto Kufi Arabic', sans-serif;
-    font-size: 2rem;
+    font-size: clamp(1.05rem, 4.5vw, 1.9rem);
     font-weight: 800;
     color: var(--gold);
     direction: ltr;
+    line-height: 1.15;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .metric-label {
-    font-size: 0.85rem;
+    font-size: clamp(0.68rem, 2.6vw, 0.85rem);
     color: var(--text-muted);
-    margin-top: 0.2rem;
+    margin-top: 0.3rem;
     direction: rtl;
+    line-height: 1.3;
+}
+@media (max-width: 480px) {
+    .metric-card { padding: 0.8rem 0.4rem; min-height: 80px; }
 }
 
 /* ── بطاقة المفهوم ── */
@@ -1345,7 +1376,7 @@ def render_search():
             with st.spinner("⟳ جارٍ البحث في الإنترنت (DuckDuckGo)..."):
                 _ws_result = _web_search(_ws_q.strip(), max_results=6)
             st.markdown(f"""
-            <div style="background:#0f172a;color:#e2e8f0;border-radius:10px;
+            <div style="background:var(--surface2);color:var(--text);border-radius:10px;
                         padding:1rem 1.4rem;direction:rtl;line-height:1.9;
                         white-space:pre-wrap;font-size:0.93rem;border:1px solid #1e3a5f">
             {_ws_result}
@@ -2430,12 +2461,12 @@ def render_health():
         for col, (key, (model_id, label, desc)) in zip(cols, model_rows.items()):
             with col:
                 is_active = ANTHROPIC_MODELS.get(key) == model_id
-                border_color = "#1a73e8" if is_active else "#e2e8f0"
+                border_color = "var(--gold)" if is_active else "var(--text-muted)"
                 st.markdown(f"""
                 <div style="background:#f8faff;border:2px solid {border_color};border-radius:10px;
                             padding:0.8rem;text-align:center;direction:ltr">
                     <div style="font-size:1.3rem">{label}</div>
-                    <code style="font-size:0.72rem;color:#1a73e8">{model_id}</code>
+                    <code style="font-size:0.72rem;color:var(--gold)">{model_id}</code>
                     <div style="font-size:0.78rem;color:#555;margin-top:0.4rem;direction:rtl">{desc}</div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -2692,7 +2723,7 @@ def render_advanced_api():
                 else:
                     st.markdown("#### 📝 الإجابة")
                     st.markdown(f"""
-                    <div style="background:#1e2a3a;color:#e2e8f0;border-radius:10px;
+                    <div style="background:var(--surface2);color:var(--text);border-radius:10px;
                                 padding:1rem 1.4rem;direction:rtl;line-height:1.9;
                                 white-space:pre-wrap;font-size:0.97rem">
                     {result.text or "لا توجد إجابة نصية."}
@@ -2761,7 +2792,7 @@ def render_advanced_api():
 
                 st.markdown("#### 📝 تحليل النموذج")
                 st.markdown(f"""
-                <div style="background:#1e2a3a;color:#e2e8f0;border-radius:10px;
+                <div style="background:var(--surface2);color:var(--text);border-radius:10px;
                             padding:1rem 1.4rem;direction:rtl;line-height:1.9;
                             white-space:pre-wrap;font-size:0.97rem">
                 {answer or "لم يُنتج النموذج إجابة."}
@@ -3052,62 +3083,66 @@ def main():
 
         st.markdown("---")
 
-        st.markdown("### 🔑 OpenRouter API")
-        st.caption("مفتاح اختياري — يُفعّل النماذج التجارية في تبويبَي المحادثة و G0DM0D3")
+        # ── ⚙️ الإعدادات المتقدمة — مطوية افتراضياً لواجهة أنظف للزائر ─────
+        _admin_unlocked_now = st.session_state.get("_dev_console_unlocked", False)
+        _adv_label = "🔓 الإعدادات المتقدمة (وضع المالك مفعّل)" if _admin_unlocked_now else "⚙️ الإعدادات المتقدمة"
+        with st.expander(_adv_label, expanded=False):
+            st.markdown("##### 🔑 OpenRouter API")
+            st.caption("مفتاح اختياري — يُفعّل النماذج التجارية في تبويبَي المحادثة و G0DM0D3")
 
-        if "_or_api_key" not in st.session_state:
-            st.session_state["_or_api_key"] = os.getenv("OPENROUTER_API_KEY", "")
+            if "_or_api_key" not in st.session_state:
+                st.session_state["_or_api_key"] = os.getenv("OPENROUTER_API_KEY", "")
 
-        _or_key_stored = st.session_state.get("_or_api_key", "")
-        _or_key_input = st.text_input(
-            "OpenRouter API Key",
-            value=_or_key_stored,
-            type="password",
-            placeholder="sk-or-v1-...",
-            label_visibility="collapsed",
-            key="or_key_input_widget",
-        )
-        if _or_key_input != _or_key_stored:
-            st.session_state["_or_api_key"] = _or_key_input
-
-        _or_key = st.session_state.get("_or_api_key", "").strip()
-
-        if _or_key:
-            st.success("✅ OpenRouter مُفعَّل")
-            _or_model_label = st.selectbox(
-                "النموذج",
-                list(OPENROUTER_MODEL_OPTIONS.keys()),
-                index=0,
-                key="or_model_select",
+            _or_key_stored = st.session_state.get("_or_api_key", "")
+            _or_key_input = st.text_input(
+                "OpenRouter API Key",
+                value=_or_key_stored,
+                type="password",
+                placeholder="sk-or-v1-...",
                 label_visibility="collapsed",
+                key="or_key_input_widget",
             )
-            st.session_state["_or_model"] = OPENROUTER_MODEL_OPTIONS[_or_model_label]
-        else:
-            st.info("بدون مفتاح → يُستخدم NSM/LLMFallback")
-            st.session_state["_or_model"] = "google/gemini-2.5-flash"
+            if _or_key_input != _or_key_stored:
+                st.session_state["_or_api_key"] = _or_key_input
 
-        st.markdown("---")
+            _or_key = st.session_state.get("_or_api_key", "").strip()
 
-        # ── 🔐 وضع المالك — يتحكم بظهور تبويب ⚙️ النظام بالكامل ─────────────
-        st.markdown("### 🔐 وضع المالك")
-        _sidebar_admin_key_env = os.environ.get("NSM_ADMIN_KEY", "")
-        if not _sidebar_admin_key_env:
-            st.caption("قسم النظام معطّل (NSM_ADMIN_KEY غير مضبوط في Secrets)")
-        elif st.session_state.get("_dev_console_unlocked", False):
-            st.success("🔓 وضع المالك مفعّل — تبويب ⚙️ النظام ظاهر")
-            if st.button("🔒 قفل وضع المالك", key="sidebar_admin_lock", use_container_width=True):
-                st.session_state["_dev_console_unlocked"] = False
-                st.rerun()
-        else:
-            _sidebar_admin_key_input = st.text_input(
-                "مفتاح المالك", type="password", key="sidebar_admin_key_input",
-            )
-            if st.button("🔓 فتح وضع المالك", key="sidebar_admin_unlock", use_container_width=True):
-                if _sidebar_admin_key_input == _sidebar_admin_key_env:
-                    st.session_state["_dev_console_unlocked"] = True
+            if _or_key:
+                st.success("✅ OpenRouter مُفعَّل")
+                _or_model_label = st.selectbox(
+                    "النموذج",
+                    list(OPENROUTER_MODEL_OPTIONS.keys()),
+                    index=0,
+                    key="or_model_select",
+                    label_visibility="collapsed",
+                )
+                st.session_state["_or_model"] = OPENROUTER_MODEL_OPTIONS[_or_model_label]
+            else:
+                st.info("بدون مفتاح → يُستخدم NSM/LLMFallback")
+                st.session_state["_or_model"] = "google/gemini-2.5-flash"
+
+            st.markdown("---")
+
+            # ── 🔐 وضع المالك — يتحكم بظهور تبويب ⚙️ النظام بالكامل ─────
+            st.markdown("##### 🔐 وضع المالك")
+            _sidebar_admin_key_env = os.environ.get("NSM_ADMIN_KEY", "")
+            if not _sidebar_admin_key_env:
+                st.caption("قسم النظام معطّل (NSM_ADMIN_KEY غير مضبوط في Secrets)")
+            elif st.session_state.get("_dev_console_unlocked", False):
+                st.success("🔓 وضع المالك مفعّل — تبويب ⚙️ النظام ظاهر")
+                if st.button("🔒 قفل وضع المالك", key="sidebar_admin_lock", use_container_width=True):
+                    st.session_state["_dev_console_unlocked"] = False
                     st.rerun()
-                else:
-                    st.error("❌ مفتاح غير صحيح")
+            else:
+                _sidebar_admin_key_input = st.text_input(
+                    "مفتاح المالك", type="password", key="sidebar_admin_key_input",
+                )
+                if st.button("🔓 فتح وضع المالك", key="sidebar_admin_unlock", use_container_width=True):
+                    if _sidebar_admin_key_input == _sidebar_admin_key_env:
+                        st.session_state["_dev_console_unlocked"] = True
+                        st.rerun()
+                    else:
+                        st.error("❌ مفتاح غير صحيح")
 
         st.markdown("---")
         st.caption("🧠 النظام المعرفي العربي")
@@ -3117,6 +3152,10 @@ def main():
     st.markdown("""
     <div class="main-title">🧠 النظام المعرفي العربي</div>
     <div class="subtitle">Neural Service Mesh · ذكاء اصطناعي عربي متخصص بالمعرفة الإسلامية</div>
+    <div class="welcome-line">
+        اسأل عن أي مفهوم إسلامي أو عربي، وسيربطه النظام بشبكة معرفية حيّة
+        مبنية على القرآن الكريم وعلوم اللغة — بحث، محادثة، ومحتوى إبداعي، كل ذلك بالعربية.
+    </div>
     """, unsafe_allow_html=True)
 
     # ── التبويبات ─────────────────────────────────────────────────────────
@@ -3184,7 +3223,7 @@ def render_artifacts_studio():
     with art_tab1:
         _default_html = (
             "<div style=\"font-family:sans-serif;text-align:center;padding:2rem;"
-            "background:linear-gradient(135deg,#1a73e8,#0d47a1);color:#fff;border-radius:16px\">"
+            "background:linear-gradient(135deg,var(--gold),var(--emerald));color:#fff;border-radius:16px\">"
             "<h2>مرحباً من NSM 🧠</h2><p>هذا مثال بسيط — عدّل الكود وشاهد النتيجة فوراً.</p></div>"
         )
         col_edit, col_preview = st.columns([1, 1])
@@ -4104,53 +4143,54 @@ def render_chat():
     }
     .chat-user {display:flex;justify-content:flex-end;margin:0.55rem 0;animation:bubbleIn .25s ease-out;}
     .chat-user .bbl {
-        background:linear-gradient(135deg,#1a73e8,#0d47a1);
-        color:#fff;padding:0.75rem 1.15rem;
+        background:linear-gradient(135deg,var(--gold),var(--emerald));
+        color:var(--bg);padding:0.75rem 1.15rem;
         border-radius:18px 18px 4px 18px;max-width:85%;
         font-size:0.98rem;line-height:1.75;text-align:right;direction:rtl;
-        box-shadow:0 3px 12px rgba(26,115,232,.3);
+        box-shadow:0 3px 12px var(--shadow);
         white-space:pre-wrap;word-break:break-word;
+        font-weight:600;
     }
     .chat-nsm {display:flex;justify-content:flex-start;margin:0.55rem 0;gap:0.55rem;align-items:flex-start;animation:bubbleIn .25s ease-out;}
     .chat-nsm .bbl {
-        background:linear-gradient(135deg,#1e2a3a,#162032);
-        color:#e2e8f0;padding:0.75rem 1.15rem;
+        background:var(--surface2);
+        color:var(--text);padding:0.75rem 1.15rem;
         border-radius:18px 18px 18px 4px;max-width:85%;
         font-size:0.98rem;line-height:1.85;text-align:right;direction:rtl;
-        border:1px solid #2d4a6e;
-        box-shadow:0 2px 8px rgba(0,0,0,.25);
+        border:1px solid var(--border);
+        box-shadow:0 2px 8px var(--shadow);
         white-space:pre-wrap;word-break:break-word;
     }
     .chat-nsm .bbl code {
-        background:#0d1b2a;color:#81e6d9;padding:0.15rem 0.4rem;
+        background:var(--surface);color:var(--emerald);padding:0.15rem 0.4rem;
         border-radius:4px;font-size:0.88rem;font-family:monospace;
         white-space:pre-wrap;
     }
     .chat-nsm .bbl pre {
-        background:#0d1b2a;border:1px solid #2d4a6e;border-radius:8px;
+        background:var(--surface);border:1px solid var(--border);border-radius:8px;
         padding:0.8rem;overflow-x:auto;margin:0.5rem 0;
-        font-size:0.85rem;color:#a8d8ea;
+        font-size:0.85rem;color:var(--text-muted);
         white-space:pre;
     }
     .ctx-tag {
-        display:inline-block;background:#0f1923;border:1px solid #2d4a6e;
+        display:inline-block;background:var(--surface);border:1px solid var(--border);
         border-radius:20px;padding:0.18rem 0.7rem;font-size:0.72rem;
-        color:#90cdf4;margin-bottom:0.45rem;direction:rtl;
+        color:var(--gold);margin-bottom:0.45rem;direction:rtl;
     }
     .chat-box {
         height:62vh;min-height:420px;max-height:680px;
         overflow-y:auto;padding:1.1rem;
-        background:#0a0f1a;border-radius:18px;
-        border:1px solid #1e2a3a;margin-bottom:0.9rem;
+        background:var(--bg);border-radius:18px;
+        border:1px solid var(--border);margin-bottom:0.9rem;
         scroll-behavior:smooth;
-        box-shadow:inset 0 0 24px rgba(0,0,0,.25);
+        box-shadow:inset 0 0 24px var(--shadow);
     }
     .chat-box::-webkit-scrollbar{width:5px;}
-    .chat-box::-webkit-scrollbar-track{background:#0a0f1a;}
-    .chat-box::-webkit-scrollbar-thumb{background:#2d4a6e;border-radius:6px;}
-    .chat-box::-webkit-scrollbar-thumb:hover{background:#3d6a9e;}
+    .chat-box::-webkit-scrollbar-track{background:var(--bg);}
+    .chat-box::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px;}
+    .chat-box::-webkit-scrollbar-thumb:hover{background:var(--gold);}
     .typing-indicator {
-        display:inline-block;color:#90cdf4;font-size:0.85rem;
+        display:inline-block;color:var(--gold);font-size:0.85rem;
         animation:pulse 1.2s infinite;
     }
     @keyframes pulse{0%,100%{opacity:.4;}50%{opacity:1;}}
@@ -4238,7 +4278,7 @@ def render_chat():
     # عرض المحادثة
     html = '<div class="chat-box" id="nsm-chat-box">'
     if not st.session_state.nsm_messages:
-        html += '<div style="text-align:center;color:#2d4a6e;padding:2.5rem 1rem">🧠<br><br>ابدأ محادثتك — أسألني أي شيء</div>'
+        html += '<div style="text-align:center;color:var(--text-muted);padding:2.5rem 1rem">🧠<br><br>ابدأ محادثتك — أسألني أي شيء</div>'
     else:
         for msg in st.session_state.nsm_messages:
             role, text = msg[0], msg[1]
@@ -4251,7 +4291,7 @@ def render_chat():
             else:
                 ctx_html = f'<div class="ctx-tag">📎 {ctx_tag}</div>' if ctx_tag else ""
                 src_html = (
-                    f'<div class="ctx-tag" style="color:#81e6d9">{src_badge}</div>'
+                    f'<div class="ctx-tag" style="color:var(--emerald)">{src_badge}</div>'
                     if src_badge else ""
                 )
                 import html as _html
@@ -4285,34 +4325,34 @@ def render_chat():
         direction:rtl;
         text-align:right;
         resize:none !important;
-        background:#0f1923 !important;
-        border:1.5px solid #2d4a6e !important;
+        background:var(--surface2) !important;
+        border:1.5px solid var(--border) !important;
         border-radius:18px !important;
         padding:0.9rem 1.1rem !important;
-        color:#e2e8f0 !important;
+        color:var(--text) !important;
         transition:border-color .15s ease, box-shadow .15s ease;
     }
     div[data-testid="stTextArea"] textarea:focus {
-        border-color:#1a73e8 !important;
-        box-shadow:0 0 0 3px rgba(26,115,232,.25) !important;
+        border-color:var(--gold) !important;
+        box-shadow:0 0 0 3px var(--gold-soft) !important;
     }
     div[data-testid="stTextArea"] textarea::placeholder {
-        color:#5a7a9e;
+        color:var(--text-muted);
     }
     .st-key-nsm_send_wrap button {
         height:96px !important;
         border-radius:18px !important;
-        background:linear-gradient(135deg,#1a73e8,#0d47a1) !important;
-        color:#fff !important;
+        background:linear-gradient(135deg,var(--gold),var(--emerald)) !important;
+        color:var(--bg) !important;
         font-size:1.02rem !important;
-        font-weight:600 !important;
+        font-weight:700 !important;
         border:none !important;
-        box-shadow:0 3px 12px rgba(26,115,232,.35) !important;
+        box-shadow:0 3px 12px var(--shadow) !important;
         transition:transform .12s ease, box-shadow .12s ease;
     }
     .st-key-nsm_send_wrap button:hover {
         transform:translateY(-1px);
-        box-shadow:0 5px 16px rgba(26,115,232,.45) !important;
+        box-shadow:0 5px 16px var(--shadow) !important;
     }
     .st-key-nsm_send_wrap button:active {
         transform:translateY(0);
@@ -4813,27 +4853,28 @@ def render_agents_hub():
     }
     .agent-user {display:flex;justify-content:flex-end;margin:0.5rem 0;animation:agentBubbleIn .25s ease-out;}
     .agent-user .bbl {
-        background:linear-gradient(135deg,#1a73e8,#0d47a1);
-        color:#fff;padding:0.7rem 1.05rem;border-radius:18px 18px 4px 18px;
+        background:linear-gradient(135deg,var(--gold),var(--emerald));
+        color:var(--bg);padding:0.7rem 1.05rem;border-radius:18px 18px 4px 18px;
         max-width:85%;font-size:0.96rem;line-height:1.7;text-align:right;direction:rtl;
-        box-shadow:0 3px 12px rgba(26,115,232,.3);white-space:pre-wrap;word-break:break-word;
+        box-shadow:0 3px 12px var(--shadow);white-space:pre-wrap;word-break:break-word;
+        font-weight:600;
     }
     .agent-bot {display:flex;justify-content:flex-start;margin:0.5rem 0;gap:0.5rem;align-items:flex-start;animation:agentBubbleIn .25s ease-out;}
     .agent-bot .bbl {
-        background:linear-gradient(135deg,#1e2a3a,#162032);
-        color:#e2e8f0;padding:0.7rem 1.05rem;border-radius:18px 18px 18px 4px;
+        background:var(--surface2);
+        color:var(--text);padding:0.7rem 1.05rem;border-radius:18px 18px 18px 4px;
         max-width:85%;font-size:0.96rem;line-height:1.8;text-align:right;direction:rtl;
-        border:1px solid #2d4a6e;box-shadow:0 2px 8px rgba(0,0,0,.25);
+        border:1px solid var(--border);box-shadow:0 2px 8px var(--shadow);
         white-space:pre-wrap;word-break:break-word;
     }
     .agent-box {
         height:48vh;min-height:320px;max-height:520px;overflow-y:auto;padding:1rem;
-        background:#0a0f1a;border-radius:16px;border:1px solid #1e2a3a;margin-bottom:0.8rem;
-        scroll-behavior:smooth;box-shadow:inset 0 0 20px rgba(0,0,0,.25);
+        background:var(--bg);border-radius:16px;border:1px solid var(--border);margin-bottom:0.8rem;
+        scroll-behavior:smooth;box-shadow:inset 0 0 20px var(--shadow);
     }
     .agent-badge {
-        display:inline-block;background:#0f1923;border:1px solid #2d4a6e;border-radius:20px;
-        padding:0.15rem 0.65rem;font-size:0.72rem;color:#90cdf4;direction:rtl;
+        display:inline-block;background:var(--surface);border:1px solid var(--border);border-radius:20px;
+        padding:0.15rem 0.65rem;font-size:0.72rem;color:var(--gold);direction:rtl;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -4881,7 +4922,7 @@ def _render_agent_page(category):
     html_out = f'<div class="agent-box" id="{box_id}">'
     if not st.session_state[msg_key]:
         html_out += (
-            f'<div style="text-align:center;color:#2d4a6e;padding:2rem 1rem">'
+            f'<div style="text-align:center;color:var(--text-muted);padding:2rem 1rem">'
             f'{category.emoji}<br><br>ابدأ محادثتك مع وكيل {category.title}</div>'
         )
     else:
@@ -5373,7 +5414,7 @@ def render_system_core():
 
                 st.markdown('<div class="section-header">📋 النتائج</div>', unsafe_allow_html=True)
                 st.markdown(f"""
-                <div style="background:#0f172a;color:#e2e8f0;border-radius:10px;
+                <div style="background:var(--surface2);color:var(--text);border-radius:10px;
                             padding:1.2rem 1.5rem;direction:rtl;line-height:2.0;
                             white-space:pre-wrap;font-size:0.95rem;border:1px solid #1e3a5f">
                 {_ws_out}
