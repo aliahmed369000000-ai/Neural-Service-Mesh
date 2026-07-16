@@ -475,54 +475,61 @@ MEMORY_DIR     = BASE / "memory"
 # (وليس نفس hex مع تغيير الخلفية فقط) لضمان تباين كافٍ بكل سمة.
 THEMES = {
     "dark": {
-        "label": "🌙 الليل",
-        "bg_grad": "linear-gradient(180deg, #0B1220 0%, #121A2E 100%)",
-        "bg": "#0B1220",
-        "surface": "#141B2E",
-        "surface2": "#1B2438",
-        "border": "#2A3654",
-        "text": "#EDE6D6",
-        "text_muted": "#9AA5C0",
-        "gold": "#C9A24B",
-        "gold_soft": "rgba(201,162,75,0.15)",
-        "emerald": "#2E9C77",
-        "emerald_soft": "rgba(46,156,119,0.16)",
-        "rose": "#C2686B",
-        "rose_soft": "rgba(194,104,107,0.16)",
-        "shadow": "rgba(0,0,0,0.45)",
-        "pattern_stroke": "#C9A24B",
-        "pattern_opacity": "0.05",
+        "label": "🌙 داكن",
+        "bg_grad": "radial-gradient(ellipse 1200px 800px at 50% -10%, #1A1B3A 0%, #0A0E17 55%), linear-gradient(180deg, #0A0E17 0%, #0A0E17 100%)",
+        "bg": "#0A0E17",
+        "surface": "rgba(20,26,41,0.72)",
+        "surface2": "#1B2333",
+        "border": "#262F42",
+        "text": "#F1F5F9",
+        "text_muted": "#8B96AC",
+        "gold": "#7C5CFC",
+        "gold_soft": "rgba(124,92,252,0.14)",
+        "emerald": "#2DD4BF",
+        "emerald_soft": "rgba(45,212,191,0.14)",
+        "rose": "#F87171",
+        "rose_soft": "rgba(248,113,113,0.14)",
+        "shadow": "rgba(0,0,0,0.55)",
+        "pattern_stroke": "#7C5CFC",
+        "pattern_opacity": "0.07",
     },
     "light": {
-        "label": "📜 المخطوطة",
-        "bg_grad": "linear-gradient(180deg, #F6F0E1 0%, #EFE6CE 100%)",
-        "bg": "#F3ECDA",
-        "surface": "#FFFBF2",
-        "surface2": "#F8F1DE",
-        "border": "#D8C9A3",
-        "text": "#241F16",
-        "text_muted": "#6B5F47",
-        "gold": "#9C7A2E",
-        "gold_soft": "rgba(156,122,46,0.12)",
-        "emerald": "#0F6B52",
-        "emerald_soft": "rgba(15,107,82,0.10)",
-        "rose": "#9C4A4D",
-        "rose_soft": "rgba(156,74,77,0.10)",
-        "shadow": "rgba(90,70,30,0.16)",
-        "pattern_stroke": "#9C7A2E",
-        "pattern_opacity": "0.06",
+        "label": "☀️ فاتح",
+        "bg_grad": "radial-gradient(ellipse 1200px 800px at 50% -10%, #EDE9FE 0%, #F8FAFC 55%), linear-gradient(180deg, #F8FAFC 0%, #F8FAFC 100%)",
+        "bg": "#F8FAFC",
+        "surface": "rgba(255,255,255,0.85)",
+        "surface2": "#FFFFFF",
+        "border": "#E2E8F0",
+        "text": "#0F172A",
+        "text_muted": "#64748B",
+        "gold": "#6D28D9",
+        "gold_soft": "rgba(109,40,217,0.10)",
+        "emerald": "#0D9488",
+        "emerald_soft": "rgba(13,148,136,0.10)",
+        "rose": "#DC2626",
+        "rose_soft": "rgba(220,38,38,0.10)",
+        "shadow": "rgba(15,23,42,0.10)",
+        "pattern_stroke": "#6D28D9",
+        "pattern_opacity": "0.05",
     },
 }
 
 
 def _pattern_svg(stroke: str, opacity: str) -> str:
-    """نمط هندسي إسلامي بسيط (نجمة ثمانية من تقاطع مربعين) كخلفية مُبلَّطة
-    خفيفة جداً — التوقيع البصري المميّز لهذا التصميم."""
+    """نمط 'الشبكة العصبية' — عقد متصلة بخطوط رفيعة جداً، توقيع بصري
+    يعكس اسم المشروع Neural Service Mesh حرفياً، كخلفية مُبلَّطة خفيفة."""
     svg = (
-        f"<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'>"
-        f"<g fill='none' stroke='{stroke}' stroke-opacity='{opacity}' stroke-width='1'>"
-        f"<rect x='24' y='24' width='72' height='72'/>"
-        f"<rect x='24' y='24' width='72' height='72' transform='rotate(45 60 60)'/>"
+        f"<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'>"
+        f"<g fill='{stroke}' fill-opacity='{opacity}' stroke='{stroke}' "
+        f"stroke-opacity='{opacity}' stroke-width='1'>"
+        f"<circle cx='20' cy='20' r='2.5'/><circle cx='100' cy='35' r='2.5'/>"
+        f"<circle cx='55' cy='75' r='2.5'/><circle cx='120' cy='110' r='2.5'/>"
+        f"<circle cx='15' cy='115' r='2.5'/>"
+        f"<line x1='20' y1='20' x2='100' y2='35'/>"
+        f"<line x1='100' y1='35' x2='55' y2='75'/>"
+        f"<line x1='55' y1='75' x2='20' y2='20'/>"
+        f"<line x1='55' y1='75' x2='120' y2='110'/>"
+        f"<line x1='55' y1='75' x2='15' y2='115'/>"
         f"</g></svg>"
     )
     return quote(svg)
@@ -530,12 +537,13 @@ def _pattern_svg(stroke: str, opacity: str) -> str:
 
 CSS_TEMPLATE = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@400;600;700&family=Noto+Kufi+Arabic:wght@500;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=IBM+Plex+Sans+Arabic:wght@500;600;700&display=swap');
 
 :root {
     --bg: __BG__;
     --surface: __SURFACE__;
     --surface-2: __SURFACE2__;
+    --surface2: __SURFACE2__;
     --border: __BORDER__;
     --text: __TEXT__;
     --text-muted: __TEXT_MUTED__;
@@ -546,14 +554,17 @@ CSS_TEMPLATE = """
     --rose: __ROSE__;
     --rose-soft: __ROSE_SOFT__;
     --shadow: __SHADOW__;
+    --accent-grad: linear-gradient(135deg, var(--gold) 0%, var(--emerald) 100%);
+    --radius: 16px;
 }
 
 html, body, [class*="css"] {
     direction: rtl;
-    font-family: 'Noto Naskh Arabic', 'Segoe UI', sans-serif;
+    font-family: 'Tajawal', 'IBM Plex Sans Arabic', 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
 }
 
-/* ── القماشة العامة للتطبيق (تتجاوز سمة Streamlit المبنية مسبقاً) ── */
+/* ── القماشة العامة للتطبيق ── */
 .stApp {
     background: __BG_GRAD__;
     background-image: __BG_GRAD__, url("data:image/svg+xml,__PATTERN__");
@@ -563,128 +574,189 @@ html, body, [class*="css"] {
 }
 [data-testid="stHeader"] { background: transparent; }
 [data-testid="stSidebar"] {
-    background: var(--surface);
+    background: var(--surface2);
     border-left: 1px solid var(--border);
+    backdrop-filter: blur(20px);
 }
 [data-testid="stSidebar"] * { color: var(--text) !important; }
 [data-testid="stAppViewContainer"] { color: var(--text); }
 
-h1, h2, h3, h4, h5, h6, p, span, label, .stMarkdown { color: var(--text); }
+h1, h2, h3, h4, h5, h6 {
+    font-family: 'IBM Plex Sans Arabic', 'Tajawal', sans-serif;
+    color: var(--text);
+}
+p, span, label, .stMarkdown { color: var(--text); }
 
-/* ── التبويبات بأسلوب "فصول مخطوطة" ── */
+/* ── التبويبات — أسلوب pill حديث بدل الخط التقليدي ── */
 .stTabs [data-baseweb="tab-list"] {
-    gap: 4px;
-    border-bottom: 1px solid var(--border);
+    gap: 6px;
+    border-bottom: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 5px;
+    backdrop-filter: blur(16px);
 }
 .stTabs [data-baseweb="tab"] {
-    font-family: 'Noto Kufi Arabic', sans-serif;
+    font-family: 'IBM Plex Sans Arabic', sans-serif;
     font-weight: 600;
-    font-size: 0.95rem;
+    font-size: 0.92rem;
     color: var(--text-muted);
     direction: rtl;
-    padding: 0.5rem 1rem;
+    padding: 0.5rem 1.1rem;
+    border-radius: 10px;
+    transition: color .15s ease, background .15s ease;
 }
+.stTabs [data-baseweb="tab"]:hover { color: var(--text); }
 .stTabs [aria-selected="true"] {
-    color: var(--gold) !important;
-    border-bottom: 2px solid var(--gold) !important;
+    color: var(--bg) !important;
+    background: var(--accent-grad) !important;
+    border-bottom: none !important;
+    font-weight: 700;
 }
 
 /* ── الأزرار ── */
 .stButton>button, .stDownloadButton>button {
-    background: var(--surface-2);
+    background: var(--surface2);
     color: var(--text);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    font-family: 'Noto Kufi Arabic', sans-serif;
+    border-radius: 12px;
+    font-family: 'IBM Plex Sans Arabic', sans-serif;
     font-weight: 600;
-    transition: border-color 0.15s ease, transform 0.1s ease;
+    transition: border-color 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
 }
 .stButton>button:hover, .stDownloadButton>button:hover {
     border-color: var(--gold);
     color: var(--gold);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px var(--shadow);
 }
 .stButton>button[kind="primary"] {
-    background: linear-gradient(135deg, var(--gold) 0%, __GOLD_DARK_OR_LIGHT__ 100%);
-    color: __BG__;
+    background: var(--accent-grad);
+    color: #fff;
     border: none;
+    font-weight: 700;
+    box-shadow: 0 4px 16px var(--gold-soft);
+}
+.stButton>button[kind="primary"]:hover {
+    color: #fff;
+    box-shadow: 0 6px 20px var(--gold-soft);
 }
 
 /* ── الحقول ── */
 .stTextInput input, .stTextArea textarea, .stNumberInput input,
 [data-baseweb="select"] > div {
-    background: var(--surface-2) !important;
+    background: var(--surface2) !important;
     color: var(--text) !important;
     border: 1px solid var(--border) !important;
-    border-radius: 8px !important;
+    border-radius: 10px !important;
     direction: rtl !important;
+    transition: border-color .15s ease, box-shadow .15s ease;
+}
+.stTextInput input:focus, .stTextArea textarea:focus, .stNumberInput input:focus {
+    border-color: var(--gold) !important;
+    box-shadow: 0 0 0 3px var(--gold-soft) !important;
 }
 
 /* ── الموسّعات (expanders) ── */
 [data-testid="stExpander"] {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--radius);
+    backdrop-filter: blur(16px);
 }
 
 hr { border-color: var(--border) !important; }
 
-/* ── عنوان الصفحة ── */
+/* ── عنوان الصفحة — مع توهّج توقيعي خلفه (عقدة الشبكة العصبية) ── */
+.hero-wrap {
+    position: relative;
+    text-align: center;
+    padding: 1.4rem 0 0.3rem 0;
+}
+.hero-wrap::before {
+    content: "";
+    position: absolute;
+    top: -40px; left: 50%;
+    width: 380px; height: 220px;
+    transform: translateX(-50%);
+    background: radial-gradient(ellipse at center, var(--gold-soft) 0%, transparent 70%);
+    filter: blur(4px);
+    z-index: 0;
+    pointer-events: none;
+}
 .main-title {
-    font-family: 'Noto Kufi Arabic', sans-serif;
-    font-size: clamp(1.5rem, 6vw, 2.2rem);
+    position: relative; z-index: 1;
+    font-family: 'IBM Plex Sans Arabic', sans-serif;
+    font-size: clamp(1.6rem, 6vw, 2.4rem);
     font-weight: 800;
-    background: linear-gradient(135deg, var(--gold) 0%, var(--emerald) 100%);
+    background: var(--accent-grad);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
     text-align: center;
-    padding: 1rem 0 0.3rem 0;
+    padding: 0 0 0.3rem 0;
     direction: rtl;
+    letter-spacing: -0.01em;
 }
 
 .subtitle {
+    position: relative; z-index: 1;
     text-align: center;
     color: var(--text-muted);
     font-size: clamp(0.85rem, 3vw, 1rem);
     margin-bottom: 0.4rem;
     direction: rtl;
+    font-weight: 500;
 }
 
 .welcome-line {
+    position: relative; z-index: 1;
     text-align: center;
-    color: var(--text);
+    color: var(--text-muted);
     font-size: 0.92rem;
     max-width: 620px;
     margin: 0 auto 1.4rem auto;
     line-height: 1.9;
     direction: rtl;
-    opacity: 0.85;
 }
+
 
 /* ── بطاقات المقاييس ── */
 .metric-card {
+    position: relative;
     background: var(--surface);
+    backdrop-filter: blur(16px);
     border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 1rem 0.6rem;
+    border-radius: var(--radius);
+    padding: 1.1rem 0.6rem;
     text-align: center;
     margin-bottom: 0.6rem;
-    box-shadow: 0 2px 10px var(--shadow);
-    transition: transform 0.15s ease, border-color 0.15s ease;
+    box-shadow: 0 4px 18px var(--shadow);
+    transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
     min-height: 92px;
     display: flex;
     flex-direction: column;
     justify-content: center;
+    overflow: hidden;
+}
+.metric-card::before {
+    content: "";
+    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: var(--accent-grad);
+    opacity: 0; transition: opacity .18s ease;
 }
 .metric-card:hover {
-    transform: translateY(-2px);
-    border-color: var(--gold);
+    transform: translateY(-3px);
+    border-color: transparent;
+    box-shadow: 0 10px 28px var(--shadow);
 }
+.metric-card:hover::before { opacity: 1; }
 .metric-value {
-    font-family: 'Noto Kufi Arabic', sans-serif;
+    font-family: 'IBM Plex Sans Arabic', sans-serif;
     font-size: clamp(1.05rem, 4.5vw, 1.9rem);
     font-weight: 800;
-    color: var(--gold);
+    color: var(--text);
     direction: ltr;
     line-height: 1.15;
     white-space: nowrap;
@@ -697,6 +769,7 @@ hr { border-color: var(--border) !important; }
     margin-top: 0.3rem;
     direction: rtl;
     line-height: 1.3;
+
 }
 @media (max-width: 480px) {
     .metric-card { padding: 0.8rem 0.4rem; min-height: 80px; }
@@ -713,7 +786,7 @@ hr { border-color: var(--border) !important; }
     direction: rtl;
 }
 .concept-name {
-    font-family: 'Noto Kufi Arabic', sans-serif;
+    font-family: 'IBM Plex Sans Arabic', sans-serif;
     font-size: 1.6rem;
     font-weight: 700;
     color: var(--gold);
@@ -756,7 +829,7 @@ hr { border-color: var(--border) !important; }
 
 /* ── عنوان قسم بتوقيع هندسي إسلامي بسيط بدل خط عادي ── */
 .section-header {
-    font-family: 'Noto Kufi Arabic', sans-serif;
+    font-family: 'IBM Plex Sans Arabic', sans-serif;
     font-size: 1.3rem;
     font-weight: 700;
     color: var(--text);
@@ -807,7 +880,7 @@ hr { border-color: var(--border) !important; }
 
 /* ── مبدّل السمة ── */
 .theme-toggle-caption {
-    font-family: 'Noto Kufi Arabic', sans-serif;
+    font-family: 'IBM Plex Sans Arabic', sans-serif;
     font-size: 0.78rem;
     color: var(--text-muted);
     margin-bottom: 0.2rem;
@@ -3150,11 +3223,13 @@ def main():
 
     # ── العنوان ──────────────────────────────────────────────────────────
     st.markdown("""
+    <div class="hero-wrap">
     <div class="main-title">🧠 النظام المعرفي العربي</div>
     <div class="subtitle">Neural Service Mesh · ذكاء اصطناعي عربي متخصص بالمعرفة الإسلامية</div>
     <div class="welcome-line">
         اسأل عن أي مفهوم إسلامي أو عربي، وسيربطه النظام بشبكة معرفية حيّة
         مبنية على القرآن الكريم وعلوم اللغة — بحث، محادثة، ومحتوى إبداعي، كل ذلك بالعربية.
+    </div>
     </div>
     """, unsafe_allow_html=True)
 
