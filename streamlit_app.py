@@ -563,6 +563,8 @@ html, body, [class*="css"] {
     font-family: 'Tajawal', 'IBM Plex Sans Arabic', 'Segoe UI', sans-serif;
     -webkit-font-smoothing: antialiased;
 }
+html, body { overflow-x: hidden; }
+.stApp { overflow-x: hidden; }
 
 /* ── القماشة العامة للتطبيق ── */
 .stApp {
@@ -692,6 +694,7 @@ hr { border-color: var(--border) !important; }
     position: relative;
     text-align: center;
     padding: 1.4rem 0 0.3rem 0;
+    overflow: hidden;
 }
 .hero-wrap::before {
     content: "";
