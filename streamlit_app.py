@@ -740,6 +740,36 @@ hr { border-color: var(--border) !important; }
     direction: rtl;
 }
 
+.hero-badges {
+    position: relative; z-index: 1;
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.9rem;
+    direction: rtl;
+}
+.hero-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 0.3rem 0.85rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    backdrop-filter: blur(12px);
+}
+.hero-badge .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--emerald);
+    box-shadow: 0 0 6px var(--emerald);
+    flex-shrink: 0;
+}
+
 
 /* ── بطاقات المقاييس ── */
 .metric-card {
@@ -3312,6 +3342,11 @@ def main():
     # ── العنوان ──────────────────────────────────────────────────────────
     st.markdown("""
     <div class="hero-wrap">
+    <div class="hero-badges">
+        <div class="hero-badge"><span class="dot"></span> شبكة معرفية حيّة</div>
+        <div class="hero-badge"><span class="dot"></span> عربي 100٪</div>
+        <div class="hero-badge"><span class="dot"></span> مبني على القرآن الكريم</div>
+    </div>
     <div class="main-title">🧠 النظام المعرفي العربي</div>
     <div class="subtitle">Neural Service Mesh · ذكاء اصطناعي عربي متخصص بالمعرفة الإسلامية</div>
     <div class="welcome-line">
