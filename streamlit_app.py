@@ -833,6 +833,33 @@ hr { border-color: var(--border) !important; }
     .metric-card { padding: 0.8rem 0.4rem; min-height: 80px; }
 }
 
+/* ── تجاوب الجوال والأجهزة اللوحية (≤768px) ── */
+@media (max-width: 768px) {
+    /* أهداف لمس ≥44px لكل الأزرار والحقول وفق توصيات إمكانية الوصول */
+    .stButton>button, .stDownloadButton>button {
+        min-height: 44px;
+        padding: 0.6rem 1rem;
+        font-size: 0.95rem;
+    }
+    .stTextInput input, .stNumberInput input {
+        min-height: 44px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        min-height: 44px;
+        padding: 0.5rem 0.85rem;
+        font-size: 0.85rem;
+    }
+    .stTabs [data-baseweb="tab-list"] {
+        overflow-x: auto;
+        flex-wrap: nowrap;
+    }
+    /* صندوق المحادثة: ارتفاع أنسب على شاشات أقصر */
+    .chat-box { height: 56vh; min-height: 320px; padding: 0.8rem; }
+    .chat-nsm .bbl, .chat-user .bbl { max-width: 92%; font-size: 0.93rem; padding: 0.65rem 1rem; }
+    /* الشريط الجانبي: حشوة أصغر عند فتحه كطبقة فوق المحتوى بالجوال */
+    [data-testid="stSidebar"] { padding-top: 0.5rem; }
+}
+
 /* ── بطاقات الاستكشاف (الصفحة الرئيسية) ── */
 .feature-card {
     position: relative;
