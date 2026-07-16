@@ -589,6 +589,10 @@ h1, h2, h3, h4, h5, h6 {
 }
 .stMarkdown, .stMarkdown p, label { color: var(--text); }
 .stMarkdown p, .stMarkdown li { line-height: 1.9; letter-spacing: 0.01em; }
+/* محاذاة افتراضية من اليمين لكل نص Markdown عادي (RTL) — العناصر المخصصة
+   (welcome-line, subtitle...) لها محاذاتها الخاصة معرّفة مباشرة عليها فتبقى
+   كما هي، لأن القاعدة على العنصر نفسه دائماً أقوى من الموروثة من الحاوية. */
+[data-testid="stMarkdownContainer"] { text-align: right; direction: rtl; }
 /* ملاحظة: تعمّدنا استبعاد وسم span من القاعدة العامة أعلاه — عناصر
    Streamlit الداخلية (عارض JSON، st.metric، شارات الحالة...) تستخدم span
    لأغراضها الخاصة بألوان تمييز لغوي (syntax highlight) خاصة بها، وفرض
@@ -1037,6 +1041,7 @@ hr { border-color: var(--border) !important; }
     padding-bottom: 0.5rem;
     margin: 1rem 0 0.8rem 0;
     direction: rtl;
+    text-align: right !important;
     border-bottom: 1px solid var(--border);
     position: relative;
 }
