@@ -4589,6 +4589,15 @@ def render_chat():
         font-size:0.85rem;color:var(--text-muted);
         white-space:pre;
     }
+    .copy-btn {
+        display:inline-block;margin-top:0.55rem;padding:0.28rem 0.7rem;
+        font-size:0.74rem;font-weight:600;color:var(--text-muted);
+        background:var(--surface);border:1px solid var(--border);
+        border-radius:10px;cursor:pointer;transition:all .15s ease;
+        direction:rtl;font-family:inherit;
+    }
+    .copy-btn:hover { color:var(--gold);border-color:var(--gold);}
+    .copy-btn:active { transform:scale(0.96); }
     .ctx-tag {
         display:inline-block;background:var(--surface);border:1px solid var(--border);
         border-radius:20px;padding:0.18rem 0.7rem;font-size:0.72rem;
@@ -4722,7 +4731,7 @@ def render_chat():
             </div>
         </div>'''
     else:
-        for msg in st.session_state.nsm_messages:
+        for _i, msg in enumerate(st.session_state.nsm_messages):
             role, text = msg[0], msg[1]
             ctx_tag    = msg[2] if len(msg) > 2 else ""
             src_badge  = msg[3] if len(msg) > 3 else ""
@@ -4743,7 +4752,15 @@ def render_chat():
                     safe_reply = text
                 html += f'''<div class="chat-nsm">
                     <span style="font-size:1.4rem;margin-top:3px">🧠</span>
-                    <div class="bbl">{ctx_html}{src_html}{safe_reply}</div>
+                    <div class="bbl">{ctx_html}{src_html}<div class="bbl-text" id="nsm-bbl-{_i}">{safe_reply}</div>
+                        <button class="copy-btn" title="نسخ الرد"
+                            onclick="var t=document.getElementById('nsm-bbl-{_i}').innerText;
+                                     navigator.clipboard.writeText(t).then(function(){{
+                                        var b=event.currentTarget; var old=b.textContent;
+                                        b.textContent='✓ تم النسخ';
+                                        setTimeout(function(){{b.textContent=old;}}, 1300);
+                                     }});">📋 نسخ</button>
+                    </div>
                 </div>'''
     html += "</div>"
     st.markdown(html, unsafe_allow_html=True)
@@ -4986,8 +5003,15 @@ def render_chat():
             if hasattr(bot, "_last_source"):
                 bot._last_source = "nsm_agent"
         else:
-            # ── fallback: bot.chat العادي ──
-            response = bot.chat(text.strip(), system_prompt=NSM_SYSTEM_PROMPT)
+            # ── fallback: bot.chat العادي (غير متدفق) — نعرض مؤشر كتابة حي أثناء الانتظار ──
+            with st.chat_message("assistant", avatar="🧠"):
+                _typing_ph = st.empty()
+                _typing_ph.markdown(
+                    '<span class="typing-indicator">● ● ● NSM يكتب الآن…</span>',
+                    unsafe_allow_html=True,
+                )
+                response = bot.chat(text.strip(), system_prompt=NSM_SYSTEM_PROMPT)
+                _typing_ph.empty()
 
         ctx_tag   = bot.context_info()
         src_badge = (
