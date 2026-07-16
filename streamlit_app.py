@@ -585,7 +585,13 @@ h1, h2, h3, h4, h5, h6 {
     font-family: 'IBM Plex Sans Arabic', 'Tajawal', sans-serif;
     color: var(--text);
 }
-p, span, label, .stMarkdown { color: var(--text); }
+.stMarkdown, .stMarkdown p, label { color: var(--text); }
+/* ملاحظة: تعمّدنا استبعاد وسم span من القاعدة العامة أعلاه — عناصر
+   Streamlit الداخلية (عارض JSON، st.metric، شارات الحالة...) تستخدم span
+   لأغراضها الخاصة بألوان تمييز لغوي (syntax highlight) خاصة بها، وفرض
+   لون موحّد عليها كان يُخفي نصوصاً بالكامل (مثال: مفاتيح JSON تختفي فوق
+   خلفية العارض الداكنة الثابتة بالوضع الفاتح). عناصرنا المخصّصة (badge،
+   metric-label، verse-ref...) لها ألوان صريحة معرّفة أدناه فلا تتأثر.
 
 /* ── التبويبات — أسلوب pill حديث بدل الخط التقليدي ── */
 .stTabs [data-baseweb="tab-list"] {
@@ -656,6 +662,19 @@ p, span, label, .stMarkdown { color: var(--text); }
 .stTextInput input:focus, .stTextArea textarea:focus, .stNumberInput input:focus {
     border-color: var(--gold) !important;
     box-shadow: 0 0 0 3px var(--gold-soft) !important;
+}
+
+/* ── أيقونة إظهار/إخفاء كلمة المرور — Streamlit تستخدم ستايل داكن ثابت
+   لها بغض النظر عن سمتنا (لأن .streamlit/config.toml مضبوط base=dark
+   دائماً)، فتظهر ككتلة سوداء غريبة فوق حقل أبيض بالوضع الفاتح. نجبرها
+   على التكيّف مع متغيرات ثيمنا الحالية. ─────────────────────────────── */
+[data-testid="stTextInput"] button,
+[data-testid="textInputRootElement"] button {
+    background: transparent !important;
+}
+[data-testid="stTextInput"] button svg,
+[data-testid="textInputRootElement"] button svg {
+    fill: var(--text-muted) !important;
 }
 
 /* ── الموسّعات (expanders) ── */
