@@ -1582,26 +1582,16 @@ def render_home():
         metric_card(last_update, _last_label, wrap=True)
 
     st.markdown("")
-    st.markdown('<div class="section-header">🔍 ابحث في المعرفة</div>', unsafe_allow_html=True)
-    st.markdown(f"""
-    <div class="feature-card" data-tab-target="📚 المعرفة">
-        <div class="feature-icon">🔍</div>
-        <div class="feature-title">البحث المعرفي الكامل</div>
-        <div class="feature-desc">ابحث عن أي مفهوم (الصبر، الجاذبية، الرحمة، العدل...) وشاهد الآيات المرتبطة والجذور والعلاقات المعرفية.</div>
-        <div class="feature-nav-hint">← اضغط للانتقال إلى البحث</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("")
     st.markdown('<div class="section-header">🚀 استكشف NSM</div>', unsafe_allow_html=True)
 
     _features = [
+        ("🔍", "البحث المعرفي", "ابحث عن أي مفهوم (الصبر، الجاذبية، الرحمة، العدل...) وشاهد الآيات المرتبطة والجذور والعلاقات المعرفية.", "📚 المعرفة"),
         ("💬", "محادثة ذكية", "تحدّث مع النظام بالعربية الفصحى، مدعوماً بشبكة المفاهيم المعرفية.", "💬 المحادثة"),
         ("📖", "القرآن الكريم", "بحث آية بآية، مرتبط تلقائياً بشبكة المفاهيم والجذور العربية.", "📚 المعرفة"),
         ("🤖", "الوكلاء الأذكياء", "وكلاء مستقلون للتنفيذ والتنسيق ضمن سرب ذكي متكامل.", "🤖 الوكلاء"),
         ("🎭", "المحتوى الإبداعي", "توليد نصوص ومحتوى إبداعي عربي بأسلوب متعدد الأنماط.", "🎭 إبداع"),
     ]
-    _fcols = st.columns(4)
+    _fcols = st.columns(5)
     for _col, (_icon, _title, _desc, _target_tab) in zip(_fcols, _features):
         with _col:
             st.markdown(f"""
