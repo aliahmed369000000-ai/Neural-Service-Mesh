@@ -614,18 +614,30 @@ h1, h2, h3, h4, h5, h6 {
     font-family: 'IBM Plex Sans Arabic', sans-serif;
     font-weight: 600;
     font-size: 0.92rem;
-    color: var(--text-muted);
+    color: var(--text-muted) !important;
     direction: rtl;
     padding: 0.5rem 1.1rem;
     border-radius: 10px;
     transition: color .15s ease, background .15s ease;
 }
-.stTabs [data-baseweb="tab"]:hover { color: var(--text); }
+.stTabs [data-baseweb="tab"] p,
+.stTabs [data-baseweb="tab"] span,
+.stTabs [data-baseweb="tab"] div {
+    color: inherit !important;
+}
+.stTabs [data-baseweb="tab"]:hover,
+.stTabs [data-baseweb="tab"]:hover p,
+.stTabs [data-baseweb="tab"]:hover span { color: var(--text) !important; }
 .stTabs [aria-selected="true"] {
     color: var(--bg) !important;
     background: var(--accent-grad) !important;
     border-bottom: none !important;
     font-weight: 700;
+}
+.stTabs [aria-selected="true"] p,
+.stTabs [aria-selected="true"] span,
+.stTabs [aria-selected="true"] div {
+    color: var(--bg) !important;
 }
 
 /* ── الأزرار ── */
