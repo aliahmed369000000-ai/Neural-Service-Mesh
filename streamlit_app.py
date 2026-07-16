@@ -774,6 +774,32 @@ hr { border-color: var(--border) !important; }
 }
 
 
+/* ── دخول متدرّج للبطاقات (يعكس فكرة "شبكة معرفية حيّة" تتيقّظ) ── */
+@keyframes nsmRise {
+    from { opacity: 0; transform: translateY(14px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .metric-card, .feature-card { animation: none !important; opacity: 1 !important; }
+}
+
+/* ── مؤشر "مباشر" نابض بجانب عناوين الأقسام الحيّة ── */
+.live-dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--emerald);
+    box-shadow: 0 0 0 0 var(--emerald-soft);
+    animation: nsmPulseDot 2s ease-out infinite;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+@keyframes nsmPulseDot {
+    0%   { box-shadow: 0 0 0 0 var(--emerald-soft); }
+    70%  { box-shadow: 0 0 0 8px rgba(0,0,0,0); }
+    100% { box-shadow: 0 0 0 0 rgba(0,0,0,0); }
+}
+
 /* ── بطاقات المقاييس ── */
 .metric-card {
     position: relative;
@@ -791,7 +817,13 @@ hr { border-color: var(--border) !important; }
     flex-direction: column;
     justify-content: center;
     overflow: hidden;
+    opacity: 0;
+    animation: nsmRise 0.55s cubic-bezier(.22,.9,.35,1) forwards;
 }
+.metric-card:nth-of-type(1) { animation-delay: .02s; }
+.metric-card:nth-of-type(2) { animation-delay: .08s; }
+.metric-card:nth-of-type(3) { animation-delay: .14s; }
+.metric-card:nth-of-type(4) { animation-delay: .20s; }
 .metric-card::before {
     content: "";
     position: absolute; top: 0; left: 0; right: 0; height: 2px;
@@ -874,28 +906,52 @@ hr { border-color: var(--border) !important; }
     transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
     direction: rtl;
     overflow: hidden;
+    cursor: pointer;
+    opacity: 0;
+    animation: nsmRise 0.55s cubic-bezier(.22,.9,.35,1) forwards;
 }
+.feature-card:nth-of-type(1) { animation-delay: .26s; }
+.feature-card:nth-of-type(2) { animation-delay: .32s; }
+.feature-card:nth-of-type(3) { animation-delay: .38s; }
+.feature-card:nth-of-type(4) { animation-delay: .44s; }
 .feature-card::before {
     content: "";
     position: absolute; top: 0; left: 0; right: 0; height: 2px;
-    background: var(--accent-grad);
+    background: var(--card-accent, var(--accent-grad));
     opacity: 0; transition: opacity .2s ease;
 }
 .feature-card:hover {
-    transform: translateY(-4px);
+    transform: translateY(-6px);
     border-color: transparent;
-    box-shadow: 0 12px 30px var(--shadow);
+    box-shadow: 0 14px 34px var(--shadow);
 }
 .feature-card:hover::before { opacity: 1; }
+.feature-card:hover .feature-icon { transform: scale(1.1) rotate(-4deg); }
+.feature-card:active { transform: translateY(-2px) scale(0.98); }
+/* تنويع لوني دقيق لكل بطاقة — يكسر رتابة تكرار نفس التدرّج أربع مرات */
+.feature-card:nth-of-type(4n+1) { --card-accent: linear-gradient(135deg, var(--gold), var(--emerald)); }
+.feature-card:nth-of-type(4n+2) { --card-accent: linear-gradient(135deg, var(--emerald), var(--gold)); }
+.feature-card:nth-of-type(4n+3) { --card-accent: linear-gradient(135deg, var(--rose), var(--gold)); }
+.feature-card:nth-of-type(4n+4) { --card-accent: linear-gradient(135deg, var(--gold), var(--rose)); }
 .feature-icon {
     width: 46px; height: 46px;
     margin: 0 auto 0.7rem auto;
     border-radius: 12px;
     display: flex; align-items: center; justify-content: center;
     font-size: 1.4rem;
-    background: var(--accent-grad);
+    background: var(--card-accent, var(--accent-grad));
     box-shadow: 0 4px 14px var(--gold-soft);
+    transition: transform .25s cubic-bezier(.34,1.56,.64,1);
 }
+.feature-nav-hint {
+    margin-top: 0.6rem;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    opacity: 0;
+    transform: translateY(3px);
+    transition: opacity .2s ease, transform .2s ease;
+}
+.feature-card:hover .feature-nav-hint { opacity: 1; transform: translateY(0); }
 .feature-title {
     font-family: 'IBM Plex Sans Arabic', sans-serif;
     font-weight: 700;
@@ -987,6 +1043,15 @@ hr { border-color: var(--border) !important; }
     font-size: 1.2rem !important;
     direction: rtl !important;
     text-align: right !important;
+}
+
+/* ── مربع البحث السريع بالصفحة الرئيسية — توهّج عند التركيز ── */
+.st-key-home_search input {
+    transition: box-shadow .2s ease, border-color .2s ease !important;
+}
+.st-key-home_search input:focus {
+    border-color: var(--gold) !important;
+    box-shadow: 0 0 0 4px var(--gold-soft) !important;
 }
 
 .root-item {
@@ -1317,11 +1382,15 @@ def search_knowledge(query: str) -> Dict:
 # دوال العرض
 # ═══════════════════════════════════════════════════════════════════════════
 
-def metric_card(value, label: str, wrap: bool = False):
+def metric_card(value, label: str, wrap: bool = False, count_target: int | None = None):
+    """بطاقة مقياس. إن مُرِّر count_target (عدد صحيح) فسيُشغَّل عدّاد
+    متحرك من 0 حتى القيمة عند ظهور البطاقة، بدل عرضها ثابتة فوراً."""
     value_class = "metric-value metric-value--wrap" if wrap else "metric-value"
+    data_attr = f' data-count-target="{count_target}"' if count_target is not None else ""
+    display_value = "0" if count_target is not None else value
     st.markdown(f"""
     <div class="metric-card">
-        <div class="{value_class}">{value}</div>
+        <div class="{value_class}"{data_attr}>{display_value}</div>
         <div class="metric-label">{label}</div>
     </div>
     """, unsafe_allow_html=True)
@@ -1345,31 +1414,49 @@ def render_home():
 
     train_steps = training.get("train_steps", 0)
 
-    # آخر تحديث
+    # آخر تحديث — وقت مطلق + وقت نسبي ("منذ...") لملاحظة الحيوية بلمحة
     saved_at = checkpoint.get("saved_at", "")
+    last_update = "غير محدد"
+    last_update_relative = ""
     if saved_at:
         try:
             dt = datetime.fromisoformat(saved_at.replace("Z", "+00:00"))
             last_update = dt.strftime("%Y-%m-%d %H:%M") + " UTC"
+            _now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.utcnow()
+            _delta_sec = max(0, (_now - dt).total_seconds())
+            if _delta_sec < 60:
+                last_update_relative = "منذ لحظات"
+            elif _delta_sec < 3600:
+                last_update_relative = f"منذ {int(_delta_sec // 60)} دقيقة"
+            elif _delta_sec < 86400:
+                last_update_relative = f"منذ {int(_delta_sec // 3600)} ساعة"
+            else:
+                last_update_relative = f"منذ {int(_delta_sec // 86400)} يوم"
         except Exception:
             last_update = saved_at[:19]
-    else:
-        last_update = "غير محدد"
 
-    st.markdown('<div class="section-header">📊 إحصاءات النظام المعرفي</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-header">📊 إحصاءات النظام المعرفي <span class="live-dot"></span></div>',
+        unsafe_allow_html=True,
+    )
 
     col1, col2, col3, col4 = st.columns(4)
-    with col1: metric_card(f"{concepts_count:,}", "مفهوم في CKG")
-    with col2: metric_card(f"{relations_count:,}", "علاقة معرفية")
-    with col3: metric_card(f"{meaningful_roots:,}", "جذر عربي مكتشف")
-    with col4: metric_card(f"{train_steps:,}", "خطوة تدريب")
+    with col1: metric_card(f"{concepts_count:,}", "مفهوم في CKG", count_target=concepts_count)
+    with col2: metric_card(f"{relations_count:,}", "علاقة معرفية", count_target=relations_count)
+    with col3: metric_card(f"{meaningful_roots:,}", "جذر عربي مكتشف", count_target=meaningful_roots)
+    with col4: metric_card(f"{train_steps:,}", "خطوة تدريب", count_target=train_steps)
 
     st.markdown("")
     col5, col6, col7, col8 = st.columns(4)
-    with col5: metric_card(f"{quran_index.get('total_ayat', 6236):,}", "آية قرآنية محملة")
-    with col6: metric_card(f"{quran_index.get('total_surahs', 114)}", "سورة كريمة")
-    with col7: metric_card(f"{episodic.get('episodic', 0):,}", "ذكرى تجريبية")
-    with col8: metric_card(last_update, "آخر تحديث", wrap=True)
+    with col5: metric_card(f"{quran_index.get('total_ayat', 6236):,}", "آية قرآنية محملة",
+                            count_target=quran_index.get('total_ayat', 6236))
+    with col6: metric_card(f"{quran_index.get('total_surahs', 114)}", "سورة كريمة",
+                            count_target=quran_index.get('total_surahs', 114))
+    with col7: metric_card(f"{episodic.get('episodic', 0):,}", "ذكرى تجريبية",
+                            count_target=episodic.get('episodic', 0))
+    with col8:
+        _last_label = f"آخر تحديث · {last_update_relative}" if last_update_relative else "آخر تحديث"
+        metric_card(last_update, _last_label, wrap=True)
 
     st.markdown("")
     st.markdown('<div class="section-header">🔍 ابحث في المعرفة</div>', unsafe_allow_html=True)
@@ -1405,21 +1492,67 @@ def render_home():
     st.markdown('<div class="section-header">🚀 استكشف NSM</div>', unsafe_allow_html=True)
 
     _features = [
-        ("💬", "محادثة ذكية", "تحدّث مع النظام بالعربية الفصحى، مدعوماً بشبكة المفاهيم المعرفية."),
-        ("📖", "القرآن الكريم", "بحث آية بآية، مرتبط تلقائياً بشبكة المفاهيم والجذور العربية."),
-        ("🤖", "الوكلاء الأذكياء", "وكلاء مستقلون للتنفيذ والتنسيق ضمن سرب ذكي متكامل."),
-        ("🎭", "المحتوى الإبداعي", "توليد نصوص ومحتوى إبداعي عربي بأسلوب متعدد الأنماط."),
+        ("💬", "محادثة ذكية", "تحدّث مع النظام بالعربية الفصحى، مدعوماً بشبكة المفاهيم المعرفية.", "💬 المحادثة"),
+        ("📖", "القرآن الكريم", "بحث آية بآية، مرتبط تلقائياً بشبكة المفاهيم والجذور العربية.", "📚 المعرفة"),
+        ("🤖", "الوكلاء الأذكياء", "وكلاء مستقلون للتنفيذ والتنسيق ضمن سرب ذكي متكامل.", "🤖 الوكلاء"),
+        ("🎭", "المحتوى الإبداعي", "توليد نصوص ومحتوى إبداعي عربي بأسلوب متعدد الأنماط.", "🎭 إبداع"),
     ]
     _fcols = st.columns(4)
-    for _col, (_icon, _title, _desc) in zip(_fcols, _features):
+    for _col, (_icon, _title, _desc, _target_tab) in zip(_fcols, _features):
         with _col:
             st.markdown(f"""
-            <div class="feature-card">
+            <div class="feature-card" data-tab-target="{_target_tab}">
                 <div class="feature-icon">{_icon}</div>
                 <div class="feature-title">{_title}</div>
                 <div class="feature-desc">{_desc}</div>
+                <div class="feature-nav-hint">← انتقل إلى هذا القسم</div>
             </div>
             """, unsafe_allow_html=True)
+
+    # ── سكربت: عدّادات متحركة للمقاييس + نقر بطاقات الاستكشاف للتنقّل ──
+    # يتّبع نفس أسلوب حقن JS المستخدم في render_chat عبر window.parent.document
+    st.markdown("""
+    <script>
+    (function() {
+        const doc = window.parent.document;
+
+        // 1) عدّاد متحرك من 0 حتى القيمة الفعلية لكل بطاقة مقياس
+        const counters = doc.querySelectorAll('.metric-value[data-count-target]');
+        counters.forEach(function(el) {
+            if (el.dataset.nsmAnimated) return;
+            el.dataset.nsmAnimated = "1";
+            const target = parseInt(el.getAttribute('data-count-target'), 10) || 0;
+            const duration = 900;
+            const start = performance.now();
+            function tick(now) {
+                const p = Math.min(1, (now - start) / duration);
+                const eased = 1 - Math.pow(1 - p, 3);
+                el.textContent = Math.round(eased * target).toLocaleString('en-US');
+                if (p < 1) requestAnimationFrame(tick);
+                else el.textContent = target.toLocaleString('en-US');
+            }
+            requestAnimationFrame(tick);
+        });
+
+        // 2) نقر بطاقة الاستكشاف ← تفعيل تبويب Streamlit المطابق بالاسم
+        const cards = doc.querySelectorAll('.feature-card[data-tab-target]');
+        cards.forEach(function(card) {
+            if (card.dataset.nsmBound) return;
+            card.dataset.nsmBound = "1";
+            card.addEventListener('click', function() {
+                const label = card.getAttribute('data-tab-target');
+                const tabs = doc.querySelectorAll('[data-baseweb="tab-list"] [data-baseweb="tab"]');
+                for (const t of tabs) {
+                    if (t.textContent && t.textContent.trim() === label) {
+                        t.click();
+                        break;
+                    }
+                }
+            });
+        });
+    })();
+    </script>
+    """, unsafe_allow_html=True)
 
 
 def render_search():
