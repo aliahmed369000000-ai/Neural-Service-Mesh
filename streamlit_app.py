@@ -1159,6 +1159,63 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible,
     .stTextInput input, .stTextArea textarea, [data-baseweb="select"] > div,
     .metric-card, .feature-card, [data-testid="stExpander"] { transition: none !important; }
 }
+
+/* ── طبقة تحسينات بصرية إضافية ──────────────────────────────────────── */
+
+/* عرض القراءة على الشاشات العريضة جداً — يمنع تمدد المحتوى بلا حدود
+   ويُبقي عرضاً مريحاً للعين بدل النص الممطوط من حافة لحافة. */
+[data-testid="stMainBlockContainer"], .block-container {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+/* ضغط خفيف عند الضغط على الأزرار — إحساس ملموس بالتفاعل */
+.stButton>button:active, .stDownloadButton>button:active,
+[data-testid="stFormSubmitButton"] button:active {
+    transform: translateY(0) scale(0.97) !important;
+    transition: transform 0.08s ease !important;
+}
+
+/* ── لون التمييز الموحّد لعناصر الإدخال الأصلية (راديو/تشيك/سلايدر) ──
+   بدل الأزرق الافتراضي في المتصفح، تنسجم مع هوية المشروع. */
+input[type="radio"], input[type="checkbox"] { accent-color: var(--gold); }
+[data-testid="stSlider"] [role="slider"] {
+    background-color: var(--gold) !important;
+    border-color: var(--gold) !important;
+}
+[data-testid="stSlider"] div[data-baseweb="slider"] > div > div {
+    background: var(--accent-grad) !important;
+}
+
+/* ── صناديق التنبيه (info/success/warning/error) — بحياد الثيم بدل
+   الألوان الافتراضية الصارخة، مع شريط لوني جانبي هادئ ── */
+[data-testid="stAlert"] {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 12px !important;
+    backdrop-filter: blur(12px);
+}
+[data-testid="stAlertContentInfo"], [data-testid="stAlertContentSuccess"],
+[data-testid="stAlertContentWarning"], [data-testid="stAlertContentError"] {
+    color: var(--text) !important;
+}
+
+/* ── تدرّج هرمي أوضح للعناوين ── */
+h1 { font-size: clamp(1.5rem, 5vw, 2.1rem); font-weight: 800; }
+h2 { font-size: clamp(1.25rem, 4vw, 1.6rem); font-weight: 700; }
+h3 { font-size: clamp(1.05rem, 3.2vw, 1.3rem); font-weight: 700; }
+
+/* ── الروابط النصية داخل المحتوى ── */
+[data-testid="stMarkdownContainer"] a {
+    color: var(--emerald);
+    text-decoration: none;
+    border-bottom: 1px solid var(--emerald-soft);
+    transition: border-color .15s ease, opacity .15s ease;
+}
+[data-testid="stMarkdownContainer"] a:hover {
+    border-color: var(--emerald);
+    opacity: 0.85;
+}
 </style>
 """
 
