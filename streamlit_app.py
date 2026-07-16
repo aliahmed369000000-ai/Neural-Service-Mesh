@@ -4486,7 +4486,18 @@ def render_chat():
     # عرض المحادثة
     html = '<div class="chat-box" id="nsm-chat-box">'
     if not st.session_state.nsm_messages:
-        html += '<div style="text-align:center;color:var(--text-muted);padding:2.5rem 1rem">🧠<br><br>ابدأ محادثتك — أسألني أي شيء</div>'
+        html += '''<div style="text-align:center;color:var(--text-muted);padding:3rem 1rem;
+                    display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%">
+            <div style="width:56px;height:56px;border-radius:16px;display:flex;align-items:center;
+                        justify-content:center;font-size:1.8rem;background:var(--accent-grad);
+                        box-shadow:0 6px 20px var(--gold-soft);margin-bottom:1rem">🧠</div>
+            <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:0.3rem">
+                ابدأ محادثتك مع NSM
+            </div>
+            <div style="font-size:0.85rem;max-width:340px;line-height:1.8">
+                اسأل عن مفهوم إسلامي، آية قرآنية، أو أي موضوع آخر — أو جرّب أحد الأسئلة السريعة بالأسفل
+            </div>
+        </div>'''
     else:
         for msg in st.session_state.nsm_messages:
             role, text = msg[0], msg[1]
