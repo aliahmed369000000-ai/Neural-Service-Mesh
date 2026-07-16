@@ -4590,9 +4590,7 @@ def render_chat():
         with st.container(key="nsm_send_wrap"):
             send = st.button("➤\nإرسال", key="nsm_send", use_container_width=True)
 
-    # أسئلة سريعة
-    st.markdown("**⚡ أسئلة سريعة:**")
-    quick_cols = st.columns(4)
+    # أسئلة سريعة — كاملة عند بداية المحادثة فقط، ثم مطوية لتقليل الازدحام البصري
     quick_qs = [
         "ما هي أركان الإسلام؟",
         "ما هو الذكاء الاصطناعي؟",
@@ -4603,10 +4601,20 @@ def render_chat():
         "ما هي سورة الكهف؟",
         "ما هي التغذية السليمة؟",
     ]
-    for i, q in enumerate(quick_qs):
-        with quick_cols[i % 4]:
-            if st.button(q, key=f"chat_q_{i}", use_container_width=True):
-                st.session_state._chat_pending = q
+    if not st.session_state.nsm_messages:
+        st.markdown("**⚡ أسئلة سريعة:**")
+        quick_cols = st.columns(4)
+        for i, q in enumerate(quick_qs):
+            with quick_cols[i % 4]:
+                if st.button(q, key=f"chat_q_{i}", use_container_width=True):
+                    st.session_state._chat_pending = q
+    else:
+        with st.expander("⚡ أسئلة سريعة"):
+            quick_cols = st.columns(4)
+            for i, q in enumerate(quick_qs):
+                with quick_cols[i % 4]:
+                    if st.button(q, key=f"chat_q_{i}", use_container_width=True):
+                        st.session_state._chat_pending = q
 
     # ── أزرار تحليل المشروع (NSM Agent) — للمالك فقط ─────────────
     # الأوامر خلف هذه الأزرار (افحص/عدل/أنشئ/ارفع) تقرأ/تكتب ملفات فعلية
