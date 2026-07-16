@@ -1,7 +1,0 @@
-modules = ["python-3.12", "nodejs-20", "web"]
-[agent]
-expertMode = true
-
-[nix]
-channel = "stable-25_05"
-packages = ["ffmpeg-full", "freetype", "glibcLocales", "imagemagickBig", "lcms2", "libcxx", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "llvm", "openjpeg", "tcl", "tk", "zlib"]
