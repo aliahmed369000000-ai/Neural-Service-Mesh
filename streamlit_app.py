@@ -812,6 +812,12 @@ hr { border-color: var(--border) !important; }
     overflow: hidden;
     text-overflow: ellipsis;
 }
+.metric-value--wrap {
+    font-size: clamp(0.72rem, 3.2vw, 1.05rem);
+    white-space: normal;
+    overflow-wrap: break-word;
+    text-overflow: clip;
+}
 .metric-label {
     font-size: clamp(0.68rem, 2.6vw, 0.85rem);
     color: var(--text-muted);
@@ -1281,10 +1287,11 @@ def search_knowledge(query: str) -> Dict:
 # دوال العرض
 # ═══════════════════════════════════════════════════════════════════════════
 
-def metric_card(value, label: str):
+def metric_card(value, label: str, wrap: bool = False):
+    value_class = "metric-value metric-value--wrap" if wrap else "metric-value"
     st.markdown(f"""
     <div class="metric-card">
-        <div class="metric-value">{value}</div>
+        <div class="{value_class}">{value}</div>
         <div class="metric-label">{label}</div>
     </div>
     """, unsafe_allow_html=True)
@@ -1332,7 +1339,7 @@ def render_home():
     with col5: metric_card(f"{quran_index.get('total_ayat', 6236):,}", "آية قرآنية محملة")
     with col6: metric_card(f"{quran_index.get('total_surahs', 114)}", "سورة كريمة")
     with col7: metric_card(f"{episodic.get('episodic', 0):,}", "ذكرى تجريبية")
-    with col8: metric_card(last_update, "آخر تحديث")
+    with col8: metric_card(last_update, "آخر تحديث", wrap=True)
 
     st.markdown("")
     st.markdown('<div class="section-header">🔍 ابحث في المعرفة</div>', unsafe_allow_html=True)
