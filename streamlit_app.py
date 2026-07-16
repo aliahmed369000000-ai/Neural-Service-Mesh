@@ -1421,7 +1421,12 @@ def metric_card(value, label: str, wrap: bool = False, count_target: int | None 
     متحرك من 0 حتى القيمة عند ظهور البطاقة، بدل عرضها ثابتة فوراً."""
     value_class = "metric-value metric-value--wrap" if wrap else "metric-value"
     data_attr = f' data-count-target="{count_target}"' if count_target is not None else ""
-    display_value = "0" if count_target is not None else value
+    # ملاحظة مهمة: نعرض القيمة الحقيقية "value" فوراً دائماً (وليس "0")،
+    # لأن سكربت العدّاد المتحرك أدناه مُحقَن عبر st.markdown وليس عبر
+    # components.html، وحقن <script> بهذا الأسلوب لا يُنفَّذه المتصفح
+    # بشكل مضمون في كل مرة. لو فشل السكربت تبقى الأرقام الحقيقية ظاهرة
+    # بدل أن تعلق على صفر؛ ولو نجح، يبدأ العدّ من 0 حتى نفس هذه القيمة.
+    display_value = value
     st.markdown(f"""
     <div class="metric-card">
         <div class="{value_class}"{data_attr}>{display_value}</div>
