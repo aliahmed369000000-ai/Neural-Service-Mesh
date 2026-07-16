@@ -2882,7 +2882,7 @@ def render_health():
                 border_color = "var(--gold)" if is_active else "var(--text-muted)"
                 st.markdown(f"""
                 <div style="background:#f8faff;border:2px solid {border_color};border-radius:10px;
-                            padding:0.8rem;text-align:center;direction:ltr">
+                            padding:0.8rem;text-align:center;direction:ltr;color:#1e293b">
                     <div style="font-size:1.3rem">{label}</div>
                     <code style="font-size:0.72rem;color:var(--gold)">{model_id}</code>
                     <div style="font-size:0.78rem;color:#555;margin-top:0.4rem;direction:rtl">{desc}</div>
@@ -2992,7 +2992,7 @@ def render_health():
             st.rerun()
     with col_r2:
         st.markdown("""
-        <div style="background:#f8faff; border:1px solid #c7d2fe; border-radius:8px; padding:0.6rem 1rem; font-size:0.85rem; direction:rtl">
+        <div style="background:#f8faff; border:1px solid #c7d2fe; border-radius:8px; padding:0.6rem 1rem; font-size:0.85rem; direction:rtl; color:#1e293b">
             لتشغيل دورة تدريب، افتح Google Colab وشغّل <code>train_simulate.py</code>
         </div>
         """, unsafe_allow_html=True)
@@ -3111,7 +3111,7 @@ def render_advanced_api():
     with sec1:
         st.markdown("""
         <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;
-                    padding:0.9rem 1.2rem;direction:rtl;margin-bottom:1rem">
+                    padding:0.9rem 1.2rem;direction:rtl;margin-bottom:1rem;color:#1e293b">
             <strong>🌐 Web Search Tool</strong><br>
             <small>يُفعّل أداة البحث في الويب المدمجة في Anthropic API —
             النموذج يقرر بنفسه متى وكيف يبحث ثم يدمج النتائج في إجابته.</small>
@@ -3169,7 +3169,7 @@ def render_advanced_api():
     with sec2:
         st.markdown("""
         <div style="background:#fdf4ff;border:1px solid #e9d5ff;border-radius:10px;
-                    padding:0.9rem 1.2rem;direction:rtl;margin-bottom:1rem">
+                    padding:0.9rem 1.2rem;direction:rtl;margin-bottom:1rem;color:#1e293b">
             <strong>🖼️ تحليل الصور</strong><br>
             <small>ارفع صورة (JPEG · PNG · GIF · WebP) واطرح سؤالاً عنها —
             النموذج سيحلّلها ويجيب بالعربية.</small>
@@ -3223,7 +3223,7 @@ def render_advanced_api():
     with sec3:
         st.markdown("""
         <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;
-                    padding:0.9rem 1.2rem;direction:rtl;margin-bottom:1rem">
+                    padding:0.9rem 1.2rem;direction:rtl;margin-bottom:1rem;color:#1e293b">
             <strong>📐 استخراج JSON منظّم</strong><br>
             <small>اطلب من النموذج إجابة JSON خالصة — مناسب لاستخراج البيانات
             وتحليل النصوص وبناء APIs.</small>
@@ -3277,7 +3277,7 @@ def render_advanced_api():
     with sec4:
         st.markdown("""
         <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;
-                    padding:0.9rem 1.2rem;direction:rtl;margin-bottom:1rem">
+                    padding:0.9rem 1.2rem;direction:rtl;margin-bottom:1rem;color:#1e293b">
             <strong>🔌 MCP Servers (Model Context Protocol)</strong><br>
             <small>يتصل النموذج مباشرة بخوادم MCP بعيدة (Google Drive، Gmail، Google
             Calendar، Canva، Figma، أو أي خادم MCP آخر) وينفّذ أدواتها الفعلية أثناء
@@ -3712,7 +3712,7 @@ def render_artifacts_studio():
         st.warning("🔒 أداة داخلية للمالك — ترسل طلبات HTTP فعلية من الخادم لأي رابط تُدخله. لا تشاركها مع أحد.")
         st.markdown("""
         <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;
-                    padding:0.9rem 1.2rem;direction:rtl;margin-bottom:1rem">
+                    padding:0.9rem 1.2rem;direction:rtl;margin-bottom:1rem;color:#1e293b">
             <strong>🔌 جرّب أي API مباشرة</strong><br>
             <small>أدخل رابط API، الطريقة، والترويسات/الجسم (JSON) — وشاهد الاستجابة فوراً.</small>
         </div>
