@@ -1343,16 +1343,26 @@ def render_home():
         quick_q = st.text_input("بحث", placeholder="مثال: الصبر، الجاذبية، الرحمة، العدل...",
                                 key="home_search", label_visibility="collapsed")
     with col_b:
-        if st.button("🔍 بحث", use_container_width=True, key="home_btn"):
-            if quick_q.strip():
-                st.session_state["search_query"] = quick_q.strip()
-                st.session_state["active_tab"] = 1
-                st.rerun()
+        _home_search_clicked = st.button("🔍 بحث", use_container_width=True, key="home_btn")
 
-    if quick_q.strip() and st.session_state.get("home_auto"):
-        st.session_state["search_query"] = quick_q.strip()
-        st.session_state["active_tab"] = 1
-        st.rerun()
+    if _home_search_clicked and quick_q.strip():
+        with st.spinner("🔍 جارٍ البحث في قاعدة المعرفة..."):
+            _home_result = search_knowledge(quick_q.strip())
+        if not _home_result["found"]:
+            st.warning(f"لم يُعثر على معلومات كافية عن «{quick_q.strip()}» حتى الآن.")
+        else:
+            _cdata = _home_result["concept_data"]
+            st.markdown(f"""
+            <div class="concept-card">
+                <div class="concept-name">💡 {_home_result['query']}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            if _cdata:
+                _hc1, _hc2, _hc3 = st.columns(3)
+                with _hc1: st.markdown(f"**التصنيف:** {_cdata.get('cluster', 'غير مصنّف')}")
+                with _hc2: st.markdown(f"**التكرار:** {_cdata.get('frequency', 0):,} مرة")
+                with _hc3: st.markdown(f"**قوة المفهوم:** {_cdata.get('strength', 0.0):.2%}")
+            st.caption("للتفاصيل الكاملة (الآيات المرتبطة، الجذور، العلاقات) → تبويب «📚 المعرفة».")
 
     st.markdown("")
     st.markdown('<div class="section-header">🚀 استكشف NSM</div>', unsafe_allow_html=True)
