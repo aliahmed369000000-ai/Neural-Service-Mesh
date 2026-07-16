@@ -671,6 +671,26 @@ h1, h2, h3, h4, h5, h6 {
     box-shadow: 0 0 0 3px var(--gold-soft) !important;
 }
 
+/* ── نماذج st.form (دخول/تسجيل) — إزالة الحدود الافتراضية واستبدالها بستايل السمة ── */
+[data-testid="stForm"] {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+}
+[data-testid="stFormSubmitButton"] button {
+    background: linear-gradient(135deg, var(--gold), var(--emerald)) !important;
+    color: var(--bg) !important;
+    font-weight: 700 !important;
+    border: none !important;
+    border-radius: 10px !important;
+    box-shadow: 0 3px 10px var(--shadow) !important;
+    transition: transform .12s ease, box-shadow .12s ease;
+}
+[data-testid="stFormSubmitButton"] button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 5px 14px var(--shadow) !important;
+}
+
 /* ── أيقونة إظهار/إخفاء كلمة المرور — Streamlit تستخدم ستايل داكن ثابت
    لها بغض النظر عن سمتنا (لأن .streamlit/config.toml مضبوط base=dark
    دائماً)، فتظهر ككتلة سوداء غريبة فوق حقل أبيض بالوضع الفاتح. نجبرها
@@ -3454,9 +3474,11 @@ def main():
         else:
             _acc_tab_login, _acc_tab_register = st.tabs(["دخول", "حساب جديد"])
             with _acc_tab_login:
-                _li_user = st.text_input("اسم المستخدم", key="account_login_username")
-                _li_pass = st.text_input("كلمة المرور", type="password", key="account_login_password")
-                if st.button("دخول", key="account_login_btn", use_container_width=True):
+                with st.form(key="account_login_form", clear_on_submit=False):
+                    _li_user = st.text_input("اسم المستخدم", key="account_login_username")
+                    _li_pass = st.text_input("كلمة المرور", type="password", key="account_login_password")
+                    _li_submit = st.form_submit_button("دخول 🔐", use_container_width=True)
+                if _li_submit:
                     _user = _acc_login(_li_user, _li_pass) if _li_user and _li_pass else None
                     if _user:
                         st.session_state["_account"] = _user
@@ -3464,13 +3486,15 @@ def main():
                     else:
                         st.error("اسم المستخدم أو كلمة المرور غير صحيحة")
             with _acc_tab_register:
-                _reg_user = st.text_input("اسم المستخدم", key="account_reg_username")
-                _reg_pass = st.text_input("كلمة المرور", type="password", key="account_reg_password")
-                _reg_phone = st.text_input(
-                    "رقم الهاتف (اختياري — لربط واتساب لاحقاً)",
-                    key="account_reg_phone", placeholder="+9677xxxxxxxx",
-                )
-                if st.button("إنشاء حساب", key="account_reg_btn", use_container_width=True):
+                with st.form(key="account_register_form", clear_on_submit=False):
+                    _reg_user = st.text_input("اسم المستخدم", key="account_reg_username")
+                    _reg_pass = st.text_input("كلمة المرور", type="password", key="account_reg_password")
+                    _reg_phone = st.text_input(
+                        "رقم الهاتف (اختياري — لربط واتساب لاحقاً)",
+                        key="account_reg_phone", placeholder="+9677xxxxxxxx",
+                    )
+                    _reg_submit = st.form_submit_button("إنشاء حساب ✨", use_container_width=True)
+                if _reg_submit:
                     try:
                         _acc_create(_reg_user, _reg_pass, phone_number=_reg_phone or None)
                         st.success("تم إنشاء الحساب! سجّل دخولك من تبويب «دخول»")
