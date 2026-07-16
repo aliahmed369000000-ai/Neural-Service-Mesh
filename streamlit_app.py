@@ -1098,6 +1098,40 @@ div[data-testid="InputInstructions"] > span {
     direction: ltr !important;
     unicode-bidi: isolate;
 }
+
+/* ── سكرول بار عام لكامل الصفحة — يوحّد المظهر مع سكرول الشات ── */
+html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--gold); }
+
+/* ── تحديد النص — بلون الهوية بدل الأزرق الافتراضي ── */
+::selection { background: var(--gold-soft); color: var(--text); }
+
+/* ── حالة تركيز واضحة عبر لوحة المفاتيح (إمكانية وصول) دون كسر focus
+   الافتراضي بالماوس/اللمس — نعتمد :focus-visible فقط ── */
+a:focus-visible, button:focus-visible, [tabindex]:focus-visible,
+.stButton>button:focus-visible, .stDownloadButton>button:focus-visible,
+.feature-card:focus-visible {
+    outline: 2px solid var(--gold) !important;
+    outline-offset: 2px !important;
+}
+
+/* ── انتقال سلس عند تبديل السمة (داكن/فاتح) بدل القفزة المفاجئة ── */
+.stApp, [data-testid="stSidebar"], .stButton>button, .stDownloadButton>button,
+.stTextInput input, .stTextArea textarea, [data-baseweb="select"] > div,
+.metric-card, .feature-card, [data-testid="stExpander"] {
+    transition: background-color .25s ease, border-color .25s ease, color .25s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+    .stApp, [data-testid="stSidebar"], .stButton>button, .stDownloadButton>button,
+    .stTextInput input, .stTextArea textarea, [data-baseweb="select"] > div,
+    .metric-card, .feature-card, [data-testid="stExpander"] { transition: none !important; }
+}
 </style>
 """
 
