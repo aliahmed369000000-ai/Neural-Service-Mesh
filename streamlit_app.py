@@ -321,6 +321,12 @@ except Exception:
     _ARABIC_NLP_OK = False
 
 try:
+    from ai.episodic_memory import EpisodicMemoryEngine
+    _EPISODIC_OK = True
+except Exception:
+    _EPISODIC_OK = False
+
+try:
     from ai.self_awareness import SelfAwarenessEngine
     _SELF_AWARE_OK = True
 except Exception:
@@ -2163,6 +2169,61 @@ def load_entities() -> Dict:
         return {}
 
 
+@st.cache_resource(show_spinner=False)
+def _get_episodic_engine():
+    """singleton واحد لعملية Streamlit كاملة (وليس لكل جلسة) — يبدأ خيط
+    التوحيد (consolidation) بالخلفية مرة واحدة فقط. يعيد None إن تعذّر
+    الاستيراد بدل رفع استثناء يكسر الواجهة."""
+    if not _EPISODIC_OK:
+        return None
+    try:
+        engine = EpisodicMemoryEngine(db_path=str(MEMORY_DIR / "episodic.db"))
+        engine.start()  # يوحّد working_memory → قاعدة البيانات كل 60 ثانية تلقائياً
+        return engine
+    except Exception:
+        return None
+
+
+def _record_chat_episode(query: str, response: str, source: str = "chat") -> None:
+    """يسجّل تبادل محادثة واحد كذاكرة إيبيسودية حقيقية — لا يرفع استثناءً أبداً
+    (فشل التسجيل لا يجوز أن يكسر تجربة المحادثة).
+
+    القيم المستخدمة مشتقة من إشارات حقيقية للتبادل نفسه (لا بيانات وهمية):
+      - feature_vec: أبعاد بسيطة عن طول السؤال/الرد ونسبتهما
+      - target/outcome = 1.0 إن كان هناك رد فعلي غير فارغ، وإلا 0.0 (فشل حقيقي)
+      - reward محايد (0.0) لعدم وجود تقييم مستخدم فعلي بعد (لا نختلق رضا وهمياً)
+    """
+    engine = _get_episodic_engine()
+    if engine is None:
+        return
+    try:
+        q_len = min(len(query or ""), 2000)
+        r_len = min(len(response or ""), 4000)
+        ok    = 1.0 if (response or "").strip() else 0.0
+        feature_vec = [
+            q_len / 2000.0,
+            r_len / 4000.0,
+            (r_len / q_len) if q_len else 0.0,
+            ok,
+            1.0 if "؟" in (query or "") else 0.0,
+            float(len((query or "").split())) / 100.0,
+            float(len((response or "").split())) / 200.0,
+        ]
+        engine.record(
+            feature_vec=feature_vec,
+            target=ok,
+            outcome=ok,
+            source=source,
+            reward=0.0,
+            context={
+                "query":    (query or "")[:500],
+                "response": (response or "")[:1000],
+            },
+        )
+    except Exception:
+        pass
+
+
 def get_episodic_stats() -> Dict:
     db_path = MEMORY_DIR / "episodic.db"
     stats = {"working": 0, "semantic": 0, "episodic": 0, "rules": 0}
@@ -2173,6 +2234,16 @@ def get_episodic_stats() -> Dict:
         episodes_count = conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
         stats["episodic"] = episodes_count
         conn.close()
+    except Exception:
+        pass
+    # working memory / semantic rules — تُقرأ من المحرك الحي إن كان مهيّأً
+    # بهذه العملية (best-effort، لا تُفشل الدالة إن لم يكن متاحاً بعد)
+    try:
+        engine = _get_episodic_engine()
+        if engine is not None:
+            stats["working"]  = len(engine.working_memory)
+            stats["semantic"] = len(engine.semantic_rules)
+            stats["rules"]    = len(engine.semantic_rules)
     except Exception:
         pass
     return stats
@@ -6313,6 +6384,7 @@ def render_chat():
             response = full_response
             ctx_tag = ""
             src_badge = f"🌐 OpenRouter · {_or_model_p.split('/')[-1]}"
+            _record_chat_episode(text.strip(), response, source="chat_openrouter")
             st.session_state.nsm_messages.append(("nsm", response, ctx_tag, src_badge, datetime.now().strftime("%H:%M")))
             st.session_state.nsm_count += 1
             st.rerun()
@@ -6361,6 +6433,7 @@ def render_chat():
             bot.source_badge()
             if hasattr(bot, "source_badge") else "🤖 NSM Agent v3"
         )
+        _record_chat_episode(text.strip(), response, source="chat_nsm_agent")
         st.session_state.nsm_messages.append(("nsm",  response, ctx_tag, src_badge, datetime.now().strftime("%H:%M")))
         st.session_state.nsm_count += 1
         st.rerun()
