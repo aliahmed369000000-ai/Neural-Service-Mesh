@@ -2875,13 +2875,15 @@ def render_search():
                     st.metric("الكثافة الدلالية", f"{_fv.semantic_concept_score:.0%}")
                     st.metric("تماسك السياق", f"{_fv.context_score:.0%}")
                 if _analysis.syntactic.tokens:
+                    _pos_badge = {"verb": "blue", "noun": "purple", "adj": "purple", "particle": "amber"}
                     _tokens_html = " ".join(
-                        f'<span class="badge badge-{"blue" if t.is_verb else "purple" if t.is_noun else "amber"}" style="margin:2px">{t.surface}</span>'
+                        f'<span class="badge badge-{_pos_badge.get(t.pos, "amber")}" style="margin:2px" '
+                        f'title="جذر: {t.root or "—"} · وزن: {t.wazn or "—"}">{t.raw}</span>'
                         for t in _analysis.syntactic.tokens[:20]
                     )
                     st.markdown(f"**الرموز المُحلَّلة:** {_tokens_html}", unsafe_allow_html=True)
-                if _analysis.morphological.roots_found:
-                    st.markdown(f"**الجذور المكتشفة:** `{'، '.join(_analysis.morphological.roots_found[:8])}`")
+                if _analysis.morphological.unique_roots:
+                    st.markdown(f"**الجذور المكتشفة:** `{'، '.join(_analysis.morphological.unique_roots[:8])}`")
             except Exception as _nlp_err:
                 st.caption(f"تعذّر التحليل: {_nlp_err}")
 
