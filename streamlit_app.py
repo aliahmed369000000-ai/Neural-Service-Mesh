@@ -955,6 +955,38 @@ hr { border-color: var(--border) !important; }
 
 }
 
+/* ── بينتو-جريد للإحصاءات — بطاقة مميزة كبيرة + بقية البطاقات بأحجام متفاوتة ── */
+.bento-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-auto-flow: dense;
+    gap: 0.8rem;
+    margin-bottom: 0.6rem;
+}
+.bento-grid .metric-card { margin-bottom: 0; }
+.bento-featured {
+    grid-column: span 2;
+    grid-row: span 2;
+    align-items: flex-end;
+    text-align: right;
+    direction: rtl;
+    padding: 1.4rem 1.5rem;
+    background: linear-gradient(135deg, var(--gold-soft), var(--emerald-soft)), var(--surface);
+}
+.bento-featured::before { opacity: 1; height: 3px; }
+.bento-featured .metric-value {
+    font-size: clamp(2rem, 7vw, 3.2rem);
+    background: var(--accent-grad);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.bento-featured .metric-label { font-size: clamp(0.8rem, 2.8vw, 0.95rem); font-weight: 600; }
+@media (max-width: 768px) {
+    .bento-grid { grid-template-columns: repeat(2, 1fr); }
+    .bento-featured { grid-column: span 2; grid-row: span 1; align-items: center; text-align: center; }
+}
+
 /* ── بطاقة زجاجية عامة قابلة لإعادة الاستخدام بأي تبويب ── */
 .glass-card {
     background: var(--surface);
@@ -1820,23 +1852,43 @@ def render_home():
         unsafe_allow_html=True,
     )
 
-    col1, col2, col3, col4 = st.columns(4)
-    with col1: metric_card(f"{concepts_count:,}", "مفهوم في CKG", count_target=concepts_count)
-    with col2: metric_card(f"{relations_count:,}", "علاقة معرفية", count_target=relations_count)
-    with col3: metric_card(f"{meaningful_roots:,}", "جذر عربي مكتشف", count_target=meaningful_roots)
-    with col4: metric_card(f"{train_steps:,}", "خطوة تدريب", count_target=train_steps)
-
-    st.markdown("")
-    col5, col6, col7, col8 = st.columns(4)
-    with col5: metric_card(f"{quran_index.get('total_ayat', 6236):,}", "آية قرآنية محملة",
-                            count_target=quran_index.get('total_ayat', 6236))
-    with col6: metric_card(f"{quran_index.get('total_surahs', 114)}", "سورة كريمة",
-                            count_target=quran_index.get('total_surahs', 114))
-    with col7: metric_card(f"{episodic.get('episodic', 0):,}", "ذكرى تجريبية",
-                            count_target=episodic.get('episodic', 0))
-    with col8:
-        _last_label = f"آخر تحديث · {last_update_relative}" if last_update_relative else "آخر تحديث"
-        metric_card(last_update, _last_label, wrap=True)
+    _last_label = f"آخر تحديث · {last_update_relative}" if last_update_relative else "آخر تحديث"
+    st.markdown(f"""
+    <div class="bento-grid">
+        <div class="metric-card bento-featured">
+            <div class="metric-value" data-count-target="{concepts_count}">{concepts_count:,}</div>
+            <div class="metric-label">مفهوم في CKG</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value" data-count-target="{relations_count}">{relations_count:,}</div>
+            <div class="metric-label">علاقة معرفية</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value" data-count-target="{meaningful_roots}">{meaningful_roots:,}</div>
+            <div class="metric-label">جذر عربي مكتشف</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value" data-count-target="{train_steps}">{train_steps:,}</div>
+            <div class="metric-label">خطوة تدريب</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value" data-count-target="{quran_index.get('total_ayat', 6236)}">{quran_index.get('total_ayat', 6236):,}</div>
+            <div class="metric-label">آية قرآنية محملة</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value" data-count-target="{quran_index.get('total_surahs', 114)}">{quran_index.get('total_surahs', 114)}</div>
+            <div class="metric-label">سورة كريمة</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value" data-count-target="{episodic.get('episodic', 0)}">{episodic.get('episodic', 0):,}</div>
+            <div class="metric-label">ذكرى تجريبية</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value metric-value--wrap">{last_update}</div>
+            <div class="metric-label">{_last_label}</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     st.markdown("")
     st.markdown('<div class="section-header">🚀 استكشف NSM</div>', unsafe_allow_html=True)
