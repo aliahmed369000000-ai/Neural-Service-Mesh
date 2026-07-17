@@ -2128,20 +2128,24 @@ def render_quran():
             names = [v.get("top_token", k) for k, v in top_concepts[:15]]
             freqs = [v.get("frequency", 0) for _, v in top_concepts[:15]]
 
+            _theme = THEMES.get(st.session_state.get("ui_theme", "dark"), THEMES["dark"])
             fig = go.Figure(go.Bar(
                 x=freqs,
                 y=names,
                 orientation='h',
-                marker_color='#3b82f6',
+                marker_color=_theme["gold"],
                 text=freqs,
                 textposition='outside',
+                textfont=dict(color=_theme["text"]),
             ))
             fig.update_layout(
                 height=450,
                 margin=dict(l=20, r=60, t=20, b=20),
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
-                yaxis=dict(autorange="reversed"),
+                font=dict(color=_theme["text"]),
+                yaxis=dict(autorange="reversed", color=_theme["text"], gridcolor=_theme["border"]),
+                xaxis=dict(color=_theme["text"], gridcolor=_theme["border"]),
                 xaxis_title="التكرار",
             )
             st.plotly_chart(fig, use_container_width=True)
