@@ -895,6 +895,16 @@ class NSMAgent:
             yield "⚠️ لا يوجد مفتاح API — أضف GOOGLE_API_KEY في Streamlit Secrets"
             return
 
+        # 🆕 نظام المهام المتعددة — استعلام مباشر عن حالة الخطط بدون LLM
+        _status_triggers = ("حالة المهام", "قائمة المهام", "مهامي", "الخطط الحالية", "حالة الخطط")
+        if any(user_input.strip().startswith(t) or user_input.strip() == t for t in _status_triggers):
+            try:
+                from ai.task_manager import format_status_report
+                yield format_status_report()
+            except Exception:
+                yield "⚠️ نظام المهام المتعددة غير متاح حالياً."
+            return
+
         # 🆕 Planning Engine — يكشف طلبات بناء التطبيقات
         try:
             from ai.nsm_planner import NSMPlanner, is_planning_request
