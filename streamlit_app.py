@@ -926,6 +926,62 @@ hr { border-color: var(--border) !important; }
     direction: rtl;
     margin-bottom: 1.1rem;
 }
+
+/* ── 🔔 Toast — إعادة تصميم st.toast الأصلي ليطابق هوية التدرّج ── */
+[data-testid="stToast"] {
+    background: var(--surface2) !important;
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--border) !important;
+    border-right: 3px solid var(--gold) !important;
+    border-radius: 12px !important;
+    box-shadow: 0 8px 28px var(--shadow) !important;
+}
+[data-testid="stToast"] * { color: var(--text) !important; }
+
+/* ── 📋 زر نسخ — لمسة SaaS قياسية للنتائج والردود ── */
+.nsm-copy-btn, .copy-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: var(--surface2);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.3rem 0.7rem;
+    font-size: 0.78rem;
+    font-family: 'IBM Plex Sans Arabic', sans-serif;
+    font-weight: 600;
+    cursor: pointer;
+    direction: rtl;
+    transition: border-color .15s ease, color .15s ease, transform .1s ease;
+}
+.nsm-copy-btn:hover {
+    border-color: var(--gold);
+    color: var(--gold);
+}
+.nsm-copy-btn:active { transform: scale(0.96); }
+
+/* ── 💀 Skeleton loading — حالة تحميل أنيقة بدل الدوارة العادية ── */
+.skeleton-line, .skeleton-block {
+    background: linear-gradient(
+        90deg,
+        var(--surface2) 25%,
+        var(--border) 50%,
+        var(--surface2) 75%
+    );
+    background-size: 200% 100%;
+    animation: skeletonShimmer 1.4s ease-in-out infinite;
+    border-radius: 8px;
+}
+.skeleton-line { height: 14px; margin-bottom: 0.55rem; }
+.skeleton-line.w-70 { width: 70%; }
+.skeleton-line.w-90 { width: 90%; }
+.skeleton-line.w-50 { width: 50%; }
+.skeleton-block { height: 90px; border-radius: var(--radius); margin-bottom: 0.6rem; }
+@keyframes skeletonShimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
 @media (max-width: 480px) {
     .metric-card { padding: 0.8rem 0.4rem; min-height: 80px; }
 }
@@ -1547,6 +1603,38 @@ def metric_card(value, label: str, wrap: bool = False, count_target: int | None 
         <div class="metric-label">{label}</div>
     </div>
     """, unsafe_allow_html=True)
+
+
+def _copy_button(text: str, key: str, label: str = "📋 نسخ") -> None:
+    """زر نسخ حديث بلمسة SaaS — ينسخ أي نص للحافظة عبر Clipboard API،
+    قابل لإعادة الاستخدام بأي تبويب (نتيجة ترجمة، رد شات، سيناريو...)."""
+    safe_text = json.dumps(text or "")
+    btn_id = f"nsm_copy_{key}"
+    st.markdown(f"""
+    <button id="{btn_id}" class="nsm-copy-btn" onclick="
+        navigator.clipboard.writeText({safe_text});
+        this.innerText='✅ تم النسخ';
+        setTimeout(()=>{{ this.innerText='{label}'; }}, 1500);
+    ">{label}</button>
+    """, unsafe_allow_html=True)
+
+
+def _skeleton(kind: str = "text", lines: int = 3) -> None:
+    """حالة تحميل أنيقة (shimmer) بدل الدوارة الافتراضية — تُستخدم مع
+    st.empty() فتُستبدل بالمحتوى الحقيقي فور جاهزيته:
+        ph = st.empty()
+        with ph.container(): _skeleton()
+        ... عملية طويلة ...
+        ph.empty()
+    """
+    if kind == "cards":
+        html = '<div style="display:flex;gap:0.6rem;flex-wrap:wrap;">' + "".join(
+            '<div class="skeleton-block" style="flex:1;min-width:120px;"></div>' for _ in range(4)
+        ) + "</div>"
+    else:
+        widths = (["w-90", "w-70", "w-50"] * ((lines // 3) + 1))[:lines]
+        html = "".join(f'<div class="skeleton-line {w}"></div>' for w in widths)
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def render_home():
@@ -4585,7 +4673,7 @@ def render_translate():
         tgt = _TRANSLATE_LANGS[tgt_label]
 
         if src == tgt and src != "auto":
-            st.warning("⚠️ لغة المصدر ولغة الهدف متطابقتان.")
+            st.toast("⚠️ لغة المصدر ولغة الهدف متطابقتان", icon="⚠️")
         else:
             src_instruction = "اكتشف لغة النص تلقائياً ثم" if src == "auto" else f"ترجم من {src} إلى"
             system_prompt = (
@@ -4593,15 +4681,20 @@ def render_translate():
                 "أعد فقط النص المترجم دون أي شرح أو مقدمات أو علامات اقتباس إضافية، "
                 "مع الحفاظ على المعنى والأسلوب الأصلي بدقة."
             )
-            with st.spinner("⏳ يترجم..."):
-                try:
-                    from ai.llm_fallback import LLMFallback
-                    _tr_llm = LLMFallback(max_tokens=1200, temperature=0.2)
-                    result = _tr_llm.generate(source_text.strip(), history=[], system_prompt=system_prompt)
-                    st.session_state.tr_result = result
-                except Exception as e:  # noqa: BLE001
-                    st.error(f"⚠️ فشلت الترجمة: {e}")
-                    st.session_state.tr_result = None
+            _tr_skeleton_ph = st.empty()
+            with _tr_skeleton_ph.container():
+                _skeleton(lines=3)
+            try:
+                from ai.llm_fallback import LLMFallback
+                _tr_llm = LLMFallback(max_tokens=1200, temperature=0.2)
+                result = _tr_llm.generate(source_text.strip(), history=[], system_prompt=system_prompt)
+                st.session_state.tr_result = result
+                _tr_skeleton_ph.empty()
+                st.toast("✅ تمت الترجمة بنجاح", icon="✅")
+            except Exception as e:  # noqa: BLE001
+                _tr_skeleton_ph.empty()
+                st.toast(f"⚠️ فشلت الترجمة: {e}", icon="⚠️")
+                st.session_state.tr_result = None
 
     result = st.session_state.get("tr_result")
     if result is not None:
@@ -4613,13 +4706,17 @@ def render_translate():
         """, unsafe_allow_html=True)
         provider_label = getattr(result.provider, "value", str(result.provider))
         st.caption(f"المزوّد: {provider_label}" + (f" · ⚠️ {result.error}" if getattr(result, "error", None) else ""))
-        st.download_button(
-            "⬇️ تحميل الترجمة (txt)",
-            data=result.text,
-            file_name="translation.txt",
-            mime="text/plain",
-            key="tr_download_btn",
-        )
+        _copy_col, _dl_col = st.columns([1, 2])
+        with _copy_col:
+            _copy_button(result.text, key="tr_result")
+        with _dl_col:
+            st.download_button(
+                "⬇️ تحميل الترجمة (txt)",
+                data=result.text,
+                file_name="translation.txt",
+                mime="text/plain",
+                key="tr_download_btn",
+            )
 
 
 # ══════════════════════════════════════════════════════════════════════════
