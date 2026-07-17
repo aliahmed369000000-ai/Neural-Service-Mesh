@@ -866,7 +866,13 @@ hr { border-color: var(--border) !important; }
     flex-direction: column;
     justify-content: center;
     overflow: hidden;
+    opacity: 0;
+    animation: nsmRise 0.55s cubic-bezier(.22,.9,.35,1) forwards;
 }
+.metric-card:nth-of-type(1) { animation-delay: .02s; }
+.metric-card:nth-of-type(2) { animation-delay: .08s; }
+.metric-card:nth-of-type(3) { animation-delay: .14s; }
+.metric-card:nth-of-type(4) { animation-delay: .20s; }
 .metric-card::before {
     content: "";
     position: absolute; top: 0; left: 0; right: 0; height: 2px;
@@ -1033,7 +1039,13 @@ hr { border-color: var(--border) !important; }
     direction: rtl;
     overflow: hidden;
     cursor: pointer;
+    opacity: 0;
+    animation: nsmRise 0.55s cubic-bezier(.22,.9,.35,1) forwards;
 }
+.feature-card:nth-of-type(1) { animation-delay: .26s; }
+.feature-card:nth-of-type(2) { animation-delay: .32s; }
+.feature-card:nth-of-type(3) { animation-delay: .38s; }
+.feature-card:nth-of-type(4) { animation-delay: .44s; }
 .feature-card::before {
     content: "";
     position: absolute; top: 0; left: 0; right: 0; height: 2px;
