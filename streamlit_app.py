@@ -566,6 +566,18 @@ html, body, [class*="css"] {
 html, body { overflow-x: hidden; }
 .stApp { overflow-x: hidden; }
 
+/* ── انتقال لوني ناعم عند تبديل الثيم (داكن/فاتح) بدل القفزة الفجائية.
+   يعمل تلقائياً لأن Streamlit يعيد حقن هذا الـ<style> بقيم ألوان جديدة
+   عند rerun، والمتصفح يحرّك أي عنصر باقٍ في الـDOM بين القيمتين ما دام
+   لديه transition معرَّفة — لا حاجة لجافاسكربت إضافي. عناصر لها transition
+   خاصة (الأزرار، البطاقات...) تبقى كما هي لأنها أكثر تحديداً وتطغى هنا. ── */
+*, *::before, *::after {
+    transition: background-color .35s ease, border-color .35s ease, color .35s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition: none !important; }
+}
+
 /* ── القماشة العامة للتطبيق ── */
 .stApp {
     background: __BG_GRAD__;
@@ -573,12 +585,14 @@ html, body { overflow-x: hidden; }
     background-repeat: no-repeat, repeat;
     background-attachment: fixed, fixed;
     color: var(--text);
+    transition: color .35s ease;
 }
 [data-testid="stHeader"] { background: transparent; }
 [data-testid="stSidebar"] {
     background: var(--surface2);
     border-left: 1px solid var(--border);
     backdrop-filter: blur(20px);
+    transition: background-color .35s ease, border-color .35s ease;
 }
 [data-testid="stSidebar"] * { color: var(--text) !important; }
 [data-testid="stAppViewContainer"] { color: var(--text); }
