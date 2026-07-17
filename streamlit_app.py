@@ -5194,10 +5194,10 @@ def render_chat():
     st.markdown("""
     <style>
     @keyframes bubbleIn {
-        from {opacity:0;transform:translateY(6px);}
-        to   {opacity:1;transform:translateY(0);}
+        from {opacity:0;transform:translateY(8px) scale(0.985);}
+        to   {opacity:1;transform:translateY(0) scale(1);}
     }
-    .chat-user {display:flex;justify-content:flex-end;margin:0.55rem 0;animation:bubbleIn .25s ease-out;}
+    .chat-user {display:flex;justify-content:flex-end;margin:0.55rem 0;animation:bubbleIn .32s cubic-bezier(.22,.9,.35,1);}
     .chat-user .bbl {
         background:linear-gradient(135deg,var(--gold),var(--emerald));
         color:var(--bg);padding:0.75rem 1.15rem;
@@ -5207,7 +5207,7 @@ def render_chat():
         white-space:pre-wrap;word-break:break-word;
         font-weight:600;
     }
-    .chat-nsm {display:flex;justify-content:flex-start;margin:0.55rem 0;gap:0.55rem;align-items:flex-start;animation:bubbleIn .25s ease-out;}
+    .chat-nsm {display:flex;justify-content:flex-start;margin:0.55rem 0;gap:0.55rem;align-items:flex-start;animation:bubbleIn .32s cubic-bezier(.22,.9,.35,1);}
     .chat-nsm .bbl {
         background:var(--surface2);
         color:var(--text);padding:0.75rem 1.15rem;
@@ -5261,6 +5261,39 @@ def render_chat():
         animation:pulse 1.2s infinite;
     }
     @keyframes pulse{0%,100%{opacity:.4;}50%{opacity:1;}}
+
+    /* ── مؤشر "يكتب الآن" بنقاط متتابعة + توهّج حول أيقونة NSM ── */
+    .typing-wrap { display:flex; align-items:center; gap:0.6rem; }
+    .thinking-ring {
+        width:34px; height:34px; border-radius:50%;
+        display:flex; align-items:center; justify-content:center;
+        font-size:1.15rem;
+        background:var(--surface2); border:1px solid var(--border);
+        box-shadow:0 0 0 0 var(--gold-soft);
+        animation:nsmThinkRing 1.6s ease-out infinite;
+        flex-shrink:0;
+    }
+    @keyframes nsmThinkRing {
+        0%   { box-shadow:0 0 0 0 var(--gold-soft); }
+        70%  { box-shadow:0 0 0 9px rgba(0,0,0,0); }
+        100% { box-shadow:0 0 0 0 rgba(0,0,0,0); }
+    }
+    .typing-dots { display:inline-flex; gap:4px; align-items:center; padding:0.55rem 0.9rem;
+        background:var(--surface2); border:1px solid var(--border); border-radius:18px 18px 18px 4px; }
+    .typing-dots span {
+        width:7px; height:7px; border-radius:50%;
+        background:var(--gold); display:inline-block;
+        animation:nsmDotBounce 1.1s ease-in-out infinite;
+    }
+    .typing-dots span:nth-child(2) { animation-delay:.15s; background:var(--emerald); }
+    .typing-dots span:nth-child(3) { animation-delay:.3s; }
+    @keyframes nsmDotBounce {
+        0%, 60%, 100% { transform:translateY(0); opacity:.55; }
+        30% { transform:translateY(-5px); opacity:1; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .thinking-ring, .typing-dots span { animation:none !important; }
+    }
 
     /* ── استجابة الجوال ── */
     @media (max-width: 640px) {
@@ -5646,7 +5679,10 @@ def render_chat():
             with st.chat_message("assistant", avatar="🧠"):
                 _typing_ph = st.empty()
                 _typing_ph.markdown(
-                    '<span class="typing-indicator">● ● ● NSM يكتب الآن…</span>',
+                    '''<div class="typing-wrap">
+                        <span class="thinking-ring">🧠</span>
+                        <span class="typing-dots"><span></span><span></span><span></span></span>
+                    </div>''',
                     unsafe_allow_html=True,
                 )
                 response = bot.chat(text.strip(), system_prompt=NSM_SYSTEM_PROMPT)
