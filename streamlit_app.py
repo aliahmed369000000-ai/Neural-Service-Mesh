@@ -609,30 +609,36 @@ h1, h2, h3, h4, h5, h6 {
     border-radius: 14px;
     padding: 5px;
     backdrop-filter: blur(16px);
+    flex-wrap: nowrap;
 }
 .stTabs [data-baseweb="tab"] {
     font-family: 'IBM Plex Sans Arabic', sans-serif;
     font-weight: 600;
     font-size: 0.92rem;
-    color: var(--text-muted) !important;
+    color: var(--text) !important;
+    opacity: 0.62;
     direction: rtl;
     padding: 0.5rem 1.1rem;
     border-radius: 10px;
-    transition: color .15s ease, background .15s ease;
+    transition: color .15s ease, background .15s ease, opacity .15s ease;
+    white-space: nowrap;
+    flex: 0 0 auto;
 }
 .stTabs [data-baseweb="tab"] p,
 .stTabs [data-baseweb="tab"] span,
 .stTabs [data-baseweb="tab"] div {
     color: inherit !important;
+    white-space: nowrap !important;
 }
 .stTabs [data-baseweb="tab"]:hover,
 .stTabs [data-baseweb="tab"]:hover p,
-.stTabs [data-baseweb="tab"]:hover span { color: var(--text) !important; }
+.stTabs [data-baseweb="tab"]:hover span { opacity: 1; }
 .stTabs [aria-selected="true"] {
     color: var(--bg) !important;
     background: var(--accent-grad) !important;
     border-bottom: none !important;
     font-weight: 700;
+    opacity: 1;
 }
 .stTabs [aria-selected="true"] p,
 .stTabs [aria-selected="true"] span,
