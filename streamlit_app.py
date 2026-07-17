@@ -7377,11 +7377,11 @@ def render_agent_orchestrator():
                 try:
                     from ai.llm_fallback import LLMFallback
                     _llm = LLMFallback()
-                    final = _llm.chat(messages=[
-                        {"role": "system", "content": COORDINATOR_SYSTEM_PROMPT},
-                        {"role": "user", "content":
-                            f"السؤال الأصلي: {task.strip()}\n\nردود الوكلاء:\n{combined_input}"},
-                    ])
+                    _synth_result = _llm.generate(
+                        query=f"السؤال الأصلي: {task.strip()}\n\nردود الوكلاء:\n{combined_input}",
+                        system_prompt=COORDINATOR_SYSTEM_PROMPT,
+                    )
+                    final = _synth_result.text
                 except Exception as _synth_err:
                     final = f"⚠️ تعذّر التوليف: {_synth_err}"
                 _synth_skel_ph.empty()
