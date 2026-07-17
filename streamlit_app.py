@@ -1357,37 +1357,47 @@ st.markdown(render_css(st.session_state.ui_theme), unsafe_allow_html=True)
 # السبب: .streamlit/config.toml يثبّت ثيم Streamlit الأصلي على "dark"
 # دائماً (لأسباب أخرى غير متعلقة بتبديلنا الداخلي للثيم)، وبعض مكوّنات
 # BaseWeb الداخلية (مثل st.tabs) قد تُطبّق ألوان مشتقة من ذلك الثيم
-# الأصلي بطريقة تُفلت أحياناً من تجاوزات CSS العادية. نفرض اللون هنا
-# مباشرة كـ inline style بأولوية "important" — وهي أعلى أولوية ممكنة
-# في CSS، لا يوجد ما يتجاوزها.
+# الأصلي بطريقة تُفلت أحياناً من تجاوزات CSS العادية.
+#
+# ملاحظة مهمة: حقن <script> عبر st.markdown (كما كان سابقاً) لا يُنفَّذه
+# المتصفح — عنصر <script> المُدرَج عبر innerHTML/markdown لا يعمل أبداً،
+# هذا سلوك موثّق بمتصفحات الويب وليس مجرد "أحياناً". الحل الصحيح
+# المضمون هو st.components.v1.html الذي يُنشئ iframe حقيقياً يُنفَّذ فيه
+# JS فعلياً، ومن داخله نصل لمستند الصفحة الأم عبر window.parent.document.
 _tab_text_color = THEMES.get(st.session_state.ui_theme, THEMES["dark"])["gold"]
-st.markdown(f"""
+_tab_selected_bg_color = THEMES.get(st.session_state.ui_theme, THEMES["dark"])["bg"]
+st.components.v1.html(f"""
 <script>
 (function() {{
     function nsmForceTabColor() {{
-        const doc = window.parent.document || document;
-        const tabs = doc.querySelectorAll('.stTabs [data-baseweb="tab"]');
-        tabs.forEach(function(tab) {{
-            const selected = tab.getAttribute('aria-selected') === 'true';
-            const color = selected ? '{THEMES.get(st.session_state.ui_theme, THEMES["dark"])["bg"]}' : '{_tab_text_color}';
-            tab.style.setProperty('color', color, 'important');
-            tab.querySelectorAll('*').forEach(function(child) {{
-                child.style.setProperty('color', color, 'important');
+        try {{
+            const doc = window.parent.document;
+            const tabs = doc.querySelectorAll('.stTabs [data-baseweb="tab"]');
+            tabs.forEach(function(tab) {{
+                const selected = tab.getAttribute('aria-selected') === 'true';
+                const color = selected ? '{_tab_selected_bg_color}' : '{_tab_text_color}';
+                tab.style.setProperty('color', color, 'important');
+                tab.querySelectorAll('*').forEach(function(child) {{
+                    child.style.setProperty('color', color, 'important');
+                }});
             }});
-        }});
+        }} catch (e) {{ /* تجاهل صامت — بيئة قد لا تسمح بالوصول للمستند الأب */ }}
     }}
     nsmForceTabColor();
     setTimeout(nsmForceTabColor, 150);
     setTimeout(nsmForceTabColor, 500);
-    const doc2 = window.parent.document || document;
-    if (!doc2.__nsmTabObserver) {{
-        const obs = new MutationObserver(function() {{ nsmForceTabColor(); }});
-        obs.observe(doc2.body, {{ childList: true, subtree: true, attributes: true, attributeFilter: ['aria-selected'] }});
-        doc2.__nsmTabObserver = obs;
-    }}
+    setTimeout(nsmForceTabColor, 1200);
+    try {{
+        const doc2 = window.parent.document;
+        if (!doc2.__nsmTabObserver) {{
+            const obs = new MutationObserver(function() {{ nsmForceTabColor(); }});
+            obs.observe(doc2.body, {{ childList: true, subtree: true, attributes: true, attributeFilter: ['aria-selected', 'class'] }});
+            doc2.__nsmTabObserver = obs;
+        }}
+    }} catch (e) {{}}
 }})();
 </script>
-""", unsafe_allow_html=True)
+""", height=0, width=0)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
