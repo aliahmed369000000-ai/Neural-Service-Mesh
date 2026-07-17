@@ -102,6 +102,14 @@ _GEMINI_MODEL     = "gemini-2.5-flash"  # gemini-1.5-flash أُطفئ نهائي
 _GROQ_MODELS          = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "openai/gpt-oss-20b"]
 _FAILURE_COOLDOWN_SEC = 300   # 5 دقائق قبل إعادة تجربة مزوّد فاشل
 
+# ── اكتشاف نماذج OpenRouter المجانية تلقائياً ────────────────────────────
+_OPENROUTER_MODELS_URL   = "https://openrouter.ai/api/v1/models"
+_OPENROUTER_CACHE_PATH   = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "openrouter_models_cache.json"
+)
+_OPENROUTER_CACHE_TTL    = 6 * 3600   # 6 ساعات قبل إعادة الاكتشاف
+_OPENROUTER_MAX_MODELS   = 5          # أقصى عدد نماذج نجرّبها بالتتابع
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # Result Dataclass
@@ -130,6 +138,86 @@ def _post_json(url: str, payload: dict, headers: dict, timeout: int = 15) -> dic
     req  = urllib.request.Request(url, data=body, headers=headers, method="POST")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+def _get_json(url: str, headers: dict, timeout: int = 10) -> dict:
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def discover_openrouter_models(
+    api_key: str,
+    cache_path: str = _OPENROUTER_CACHE_PATH,
+    ttl_sec: int = _OPENROUTER_CACHE_TTL,
+    max_models: int = _OPENROUTER_MAX_MODELS,
+    fetcher=_get_json,
+) -> List[str]:
+    """
+    يكتشف نماذج OpenRouter المجانية المتاحة تلقائياً (بدل الاعتماد على نموذج
+    واحد ثابت). يُخزَّن الناتج في cache محلي (TTL) لتفادي طلب /models في كل
+    استدعاء. عند فشل الاكتشاف أو انتهاء الشبكة، يعود لآخر cache صالح، ثم
+    أخيراً للنموذج الثابت الافتراضي _OPENROUTER_MODEL.
+
+    الترتيب: النماذج المجانية (":free" أو pricing.prompt == "0") أولاً،
+    مع إبقاء _OPENROUTER_MODEL دائماً كخيار أخير مضمون.
+    """
+    now = time.time()
+
+    # 1) جرّب الـ cache أولاً إن كان ما زال صالحاً
+    cached = _load_openrouter_cache(cache_path)
+    if cached and (now - cached.get("ts", 0)) < ttl_sec:
+        models = cached.get("models", [])
+        if models:
+            return _ensure_default_last(models, max_models)
+
+    # 2) اكتشاف حي عبر واجهة OpenRouter
+    try:
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        data = fetcher(_OPENROUTER_MODELS_URL, headers, 10)
+        free_models = []
+        for m in data.get("data", []):
+            mid = m.get("id", "")
+            pricing = m.get("pricing", {}) or {}
+            is_free = mid.endswith(":free") or str(pricing.get("prompt", "")) == "0"
+            if mid and is_free:
+                free_models.append(mid)
+        if free_models:
+            _save_openrouter_cache(cache_path, free_models, now)
+            return _ensure_default_last(free_models, max_models)
+    except Exception as exc:
+        logger.warning(f"[OpenRouterDiscover] فشل الاكتشاف الحي: {exc}")
+
+    # 3) استخدم آخر cache معروف حتى لو منتهي الصلاحية (أفضل من لا شيء)
+    if cached and cached.get("models"):
+        return _ensure_default_last(cached["models"], max_models)
+
+    # 4) fallback نهائي: النموذج الثابت فقط
+    return [_OPENROUTER_MODEL]
+
+
+def _ensure_default_last(models: List[str], max_models: int) -> List[str]:
+    ordered = [m for m in models if m != _OPENROUTER_MODEL][:max_models - 1]
+    ordered.append(_OPENROUTER_MODEL)
+    seen = set()
+    return [m for m in ordered if not (m in seen or seen.add(m))]
+
+
+def _load_openrouter_cache(path: str) -> Optional[dict]:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _save_openrouter_cache(path: str, models: List[str], ts: float) -> None:
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"ts": ts, "models": models}, f, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        logger.warning(f"[OpenRouterDiscover] فشل حفظ الـ cache: {exc}")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -240,6 +328,7 @@ class LLMFallback:
         # الافتراضي "sonnet" كما كان سابقاً — لا تغيير في السلوك القديم.
         self._model_key  = model_key if model_key in ANTHROPIC_MODELS else None
 
+        self._openrouter_models: List[str] = [_OPENROUTER_MODEL]
         self._provider, self._api_key, self._model = self._detect_provider()
         if self._model_key and self._provider == Provider.ANTHROPIC:
             self._model = ANTHROPIC_MODELS[self._model_key]
@@ -286,10 +375,12 @@ class LLMFallback:
         if k and k.startswith("AIzaSy"):
             chain.append((Provider.GEMINI, k, _GEMINI_MODEL))
 
-        # 4) OpenRouter
+        # 4) OpenRouter — اكتشاف تلقائي للنماذج المجانية المتاحة
         k = os.getenv("OPENROUTER_API_KEY", "").strip()
         if k:
-            chain.append((Provider.OPENROUTER, k, _OPENROUTER_MODEL))
+            models = discover_openrouter_models(k)
+            self._openrouter_models = models
+            chain.append((Provider.OPENROUTER, k, models[0]))
 
         # 5) Groq
         k = os.getenv("GROQ_API_KEY", "").strip()
@@ -534,27 +625,39 @@ class LLMFallback:
             ]
         messages.append({"role": "user", "content": query})
 
-        data = _post_json(
-            _OPENROUTER_URL,
-            {
-                "model":       self._model,
-                "messages":    messages,
-                "max_tokens":  self.max_tokens,
-                "temperature": self.temperature,
-            },
-            {
-                "Authorization":  f"Bearer {self._api_key}",
-                "Content-Type":   "application/json",
-                "HTTP-Referer":   "https://neural-service-mesh.streamlit.app",
-                "X-Title":        "Neural Service Mesh",
-            },
-            self.timeout,
-        )
-        return FallbackResult(
-            text=data["choices"][0]["message"]["content"].strip(),
-            provider=Provider.OPENROUTER,
-            model=self._model,
-        )
+        # جرّب النماذج المكتشَفة تلقائياً بالتتابع (نفس نمط Groq) —
+        # كل نموذج مجاني مكتشَف يُعامَل كـ "عقدة" بديلة عند فشل الأول.
+        candidates = list(dict.fromkeys(self._openrouter_models + [self._model]))
+
+        last_err = None
+        for model in candidates:
+            try:
+                data = _post_json(
+                    _OPENROUTER_URL,
+                    {
+                        "model":       model,
+                        "messages":    messages,
+                        "max_tokens":  self.max_tokens,
+                        "temperature": self.temperature,
+                    },
+                    {
+                        "Authorization":  f"Bearer {self._api_key}",
+                        "Content-Type":   "application/json",
+                        "HTTP-Referer":   "https://neural-service-mesh.streamlit.app",
+                        "X-Title":        "Neural Service Mesh",
+                    },
+                    self.timeout,
+                )
+                return FallbackResult(
+                    text=data["choices"][0]["message"]["content"].strip(),
+                    provider=Provider.OPENROUTER,
+                    model=model,
+                )
+            except Exception as e:
+                last_err = str(e)
+                continue
+
+        raise Exception(f"فشلت كل نماذج OpenRouter المكتشَفة: {last_err}")
 
     # ── OpenAI ───────────────────────────────────────────────────────────
 
