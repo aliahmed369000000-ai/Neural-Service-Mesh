@@ -612,6 +612,10 @@ h1, h2, h3, h4, h5, h6 {
     flex-wrap: nowrap;
     overflow-x: auto;
     overflow-y: hidden;
+    position: sticky !important;
+    top: 2.8rem !important;
+    z-index: 100 !important;
+    box-shadow: 0 6px 20px var(--shadow);
 }
 .stTabs [data-baseweb="tab"] {
     font-family: 'IBM Plex Sans Arabic', sans-serif;
@@ -1425,6 +1429,90 @@ h3 { font-size: clamp(1.05rem, 3.2vw, 1.3rem); font-weight: 700; }
     border-color: var(--emerald);
     opacity: 0.85;
 }
+
+/* ── كشف تدريجي عند التمرير (scroll-reveal) ── */
+.nsm-reveal {
+    opacity: 0;
+    transform: translateY(18px);
+    transition: opacity .6s ease, transform .6s cubic-bezier(.22,.9,.35,1);
+}
+.nsm-reveal.is-visible { opacity: 1; transform: translateY(0); }
+@media (prefers-reduced-motion: reduce) {
+    .nsm-reveal { opacity: 1 !important; transform: none !important; transition: none !important; }
+}
+
+/* ── انتقال سلس عند تبديل الوضع الداكن/الفاتح (بدل التبديل الفجائي) ── */
+.stApp, .metric-card, .feature-card, .glass-card, .concept-card,
+.hero-badge, [data-testid="stSidebar"], .stTabs [data-baseweb="tab-list"],
+.stTabs [data-baseweb="tab"] {
+    transition: background-color .35s ease, border-color .35s ease,
+                color .35s ease, box-shadow .35s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+    .stApp, .metric-card, .feature-card, .glass-card, .concept-card,
+    .hero-badge, [data-testid="stSidebar"] { transition: none !important; }
+}
+
+/* ── لوحة أوامر سريعة (Ctrl+K) ── */
+.nsm-cmdk-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5);
+    backdrop-filter: blur(3px);
+    z-index: 99999;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 12vh;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .15s ease;
+}
+.nsm-cmdk-overlay.is-open { opacity: 1; pointer-events: auto; }
+.nsm-cmdk-box {
+    width: min(520px, 90vw);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: 0 24px 60px var(--shadow);
+    overflow: hidden;
+    direction: rtl;
+}
+.nsm-cmdk-input {
+    width: 100%; box-sizing: border-box;
+    padding: 1rem 1.2rem;
+    font-size: 1rem;
+    border: none; outline: none;
+    background: transparent;
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+    font-family: 'Tajawal', sans-serif;
+}
+.nsm-cmdk-list { max-height: 50vh; overflow-y: auto; }
+.nsm-cmdk-item {
+    padding: 0.75rem 1.2rem;
+    cursor: pointer;
+    color: var(--text);
+    font-size: 0.92rem;
+    font-family: 'Tajawal', sans-serif;
+}
+.nsm-cmdk-item:hover, .nsm-cmdk-item.active { background: var(--gold-soft); }
+.nsm-cmdk-fab {
+    position: fixed; bottom: 20px; left: 20px;
+    z-index: 9998;
+    width: 48px; height: 48px;
+    border-radius: 50%;
+    background: var(--accent-grad);
+    color: #fff;
+    border: none;
+    font-weight: 800;
+    font-size: 0.82rem;
+    box-shadow: 0 8px 24px var(--shadow);
+    cursor: pointer;
+}
+.nsm-cmdk-fab:hover { filter: brightness(1.08); }
+@media (max-width: 768px) {
+    .nsm-cmdk-fab { bottom: 16px; left: 16px; width: 44px; height: 44px; }
+}
 </style>
 """
 
@@ -1497,14 +1585,148 @@ st.components.v1.html(f"""
             }});
         }} catch (e) {{ /* تجاهل صامت — بيئة قد لا تسمح بالوصول للمستند الأب */ }}
     }}
+
+    // ── كشف تدريجي عند التمرير (scroll-reveal) ─────────────────────────
+    function nsmInitScrollReveal() {{
+        try {{
+            const doc = window.parent.document;
+            const targets = doc.querySelectorAll(
+                '.section-header, .glass-card, .concept-card, [data-testid="stExpander"]'
+            );
+            targets.forEach(function(el) {{
+                if (!el.classList.contains('nsm-reveal')) el.classList.add('nsm-reveal');
+            }});
+            if (!doc.__nsmRevealIO) {{
+                doc.__nsmRevealIO = new IntersectionObserver(function(entries) {{
+                    entries.forEach(function(e) {{
+                        if (e.isIntersecting) {{
+                            e.target.classList.add('is-visible');
+                            doc.__nsmRevealIO.unobserve(e.target);
+                        }}
+                    }});
+                }}, {{ threshold: 0.12 }});
+            }}
+            doc.querySelectorAll('.nsm-reveal:not(.is-visible)').forEach(function(el) {{
+                doc.__nsmRevealIO.observe(el);
+            }});
+        }} catch (e) {{ /* تجاهل صامت */ }}
+    }}
+
+    // ── لوحة أوامر سريعة (Ctrl+K / ⌘K) للتنقّل الفوري بين الأقسام ──────
+    function nsmBuildPalette() {{
+        try {{
+            const doc = window.parent.document;
+            if (doc.__nsmPaletteBuilt) return;
+            doc.__nsmPaletteBuilt = true;
+
+            const overlay = doc.createElement('div');
+            overlay.id = 'nsm-cmdk-overlay';
+            overlay.className = 'nsm-cmdk-overlay';
+            overlay.innerHTML =
+                '<div class="nsm-cmdk-box">' +
+                    '<input id="nsm-cmdk-input" class="nsm-cmdk-input" placeholder="ابحث عن قسم... (Esc للإغلاق)" />' +
+                    '<div id="nsm-cmdk-list" class="nsm-cmdk-list"></div>' +
+                '</div>';
+            doc.body.appendChild(overlay);
+
+            const fab = doc.createElement('button');
+            fab.id = 'nsm-cmdk-fab';
+            fab.className = 'nsm-cmdk-fab';
+            fab.type = 'button';
+            fab.title = 'بحث سريع (Ctrl+K)';
+            fab.textContent = '⌘K';
+            doc.body.appendChild(fab);
+
+            function getTabs() {{
+                return Array.from(doc.querySelectorAll('[data-baseweb="tab-list"] [data-baseweb="tab"]'));
+            }}
+            function renderList(filterText) {{
+                const list = doc.getElementById('nsm-cmdk-list');
+                list.innerHTML = '';
+                const f = (filterText || '').trim();
+                let first = true;
+                getTabs().forEach(function(t) {{
+                    const label = (t.textContent || '').trim();
+                    if (f && label.indexOf(f) === -1) return;
+                    const item = doc.createElement('div');
+                    item.className = 'nsm-cmdk-item' + (first ? ' active' : '');
+                    first = false;
+                    item.textContent = label;
+                    item.addEventListener('click', function() {{
+                        t.click();
+                        closePalette();
+                    }});
+                    list.appendChild(item);
+                }});
+            }}
+            function openPalette() {{
+                overlay.classList.add('is-open');
+                const inp = doc.getElementById('nsm-cmdk-input');
+                inp.value = '';
+                renderList('');
+                setTimeout(function() {{ inp.focus(); }}, 30);
+            }}
+            function closePalette() {{
+                overlay.classList.remove('is-open');
+            }}
+            overlay.addEventListener('click', function(e) {{
+                if (e.target === overlay) closePalette();
+            }});
+            fab.addEventListener('click', function() {{
+                if (overlay.classList.contains('is-open')) closePalette(); else openPalette();
+            }});
+            doc.getElementById('nsm-cmdk-input').addEventListener('input', function(e) {{
+                renderList(e.target.value);
+            }});
+            doc.addEventListener('keydown', function(e) {{
+                const isOpen = overlay.classList.contains('is-open');
+                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {{
+                    e.preventDefault();
+                    if (isOpen) closePalette(); else openPalette();
+                    return;
+                }}
+                if (!isOpen) return;
+                if (e.key === 'Escape') {{ closePalette(); return; }}
+                const items = Array.from(doc.querySelectorAll('.nsm-cmdk-item'));
+                if (!items.length) return;
+                let idx = items.findIndex(function(i) {{ return i.classList.contains('active'); }});
+                if (e.key === 'ArrowDown') {{
+                    e.preventDefault();
+                    if (idx < items.length - 1) {{
+                        items[idx].classList.remove('active');
+                        items[idx + 1].classList.add('active');
+                        items[idx + 1].scrollIntoView({{ block: 'nearest' }});
+                    }}
+                }} else if (e.key === 'ArrowUp') {{
+                    e.preventDefault();
+                    if (idx > 0) {{
+                        items[idx].classList.remove('active');
+                        items[idx - 1].classList.add('active');
+                        items[idx - 1].scrollIntoView({{ block: 'nearest' }});
+                    }}
+                }} else if (e.key === 'Enter') {{
+                    e.preventDefault();
+                    if (items[idx]) items[idx].click();
+                }}
+            }});
+        }} catch (e) {{ /* تجاهل صامت */ }}
+    }}
+
     nsmForceTabColor();
+    nsmInitScrollReveal();
+    nsmBuildPalette();
     setTimeout(nsmForceTabColor, 150);
     setTimeout(nsmForceTabColor, 500);
     setTimeout(nsmForceTabColor, 1200);
+    setTimeout(nsmInitScrollReveal, 200);
+    setTimeout(nsmInitScrollReveal, 700);
     try {{
         const doc2 = window.parent.document;
         if (!doc2.__nsmTabObserver) {{
-            const obs = new MutationObserver(function() {{ nsmForceTabColor(); }});
+            const obs = new MutationObserver(function() {{
+                nsmForceTabColor();
+                nsmInitScrollReveal();
+            }});
             obs.observe(doc2.body, {{ childList: true, subtree: true, attributes: true, attributeFilter: ['aria-selected', 'class'] }});
             doc2.__nsmTabObserver = obs;
         }}
@@ -1512,6 +1734,7 @@ st.components.v1.html(f"""
 }})();
 </script>
 """, height=0, width=0)
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3938,6 +4161,7 @@ def main():
         st.markdown("---")
         st.caption("🧠 النظام المعرفي العربي")
         st.caption("CKG · قرآن · AutoTune")
+        st.caption("⌘K / Ctrl+K — بحث سريع للتنقّل بين الأقسام")
 
     # ── العنوان ──────────────────────────────────────────────────────────
     st.markdown("""
