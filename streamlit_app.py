@@ -6604,10 +6604,13 @@ def _render_agent_page(category):
             f'{category.emoji}<br><br>ابدأ محادثتك مع وكيل {category.title}</div>'
         )
     else:
-        for _mi, (role, text, badge) in enumerate(st.session_state[msg_key]):
+        for _mi, msg_tuple in enumerate(st.session_state[msg_key]):
+            role, text, badge = msg_tuple[0], msg_tuple[1], msg_tuple[2]
+            ts = msg_tuple[3] if len(msg_tuple) > 3 else ""
+            ts_html = f'<div class="bbl-ts">{ts}</div>' if ts else ""
             safe = _html.escape(text).replace("\n", "<br>")
             if role == "user":
-                html_out += f'<div class="agent-user"><div class="bbl">{safe}</div></div>'
+                html_out += f'<div class="agent-user"><div class="bbl">{safe}{ts_html}</div></div>'
             else:
                 badge_html = f'<div class="agent-badge">{badge}</div>' if badge else ""
                 bbl_id = f"{box_id}-msg-{_mi}"
@@ -6620,7 +6623,7 @@ def _render_agent_page(category):
                     f"navigator.clipboard.writeText(t).then(function(){{"
                     f"var b=event.currentTarget;var old=b.textContent;b.textContent='✓ تم النسخ';"
                     f"setTimeout(function(){{b.textContent=old;}},1300);}});\">📋 نسخ</button>"
-                    f'</div></div>'
+                    f'{ts_html}</div></div>'
                 )
     html_out += "</div>"
     st.markdown(html_out, unsafe_allow_html=True)
@@ -6652,6 +6655,25 @@ def _render_agent_page(category):
     with c2:
         send = st.button("➤ إرسال", key=f"agent_send_{category.key}", use_container_width=True)
 
+    # ── مشاركة ملف نصي مع الوكيل (اختياري) ──
+    uploaded_file = st.file_uploader(
+        "📎 أرفق ملفاً نصياً ليطّلع عليه الوكيل قبل الرد (اختياري)",
+        type=["txt", "py", "md", "json", "csv", "log", "yaml", "yml"],
+        key=f"agent_file_{category.key}",
+    )
+    _MAX_FILE_CHARS = 6000
+    file_context, file_label = "", ""
+    if uploaded_file is not None:
+        try:
+            _raw = uploaded_file.getvalue().decode("utf-8", errors="replace")
+        except Exception:
+            _raw = ""
+        if _raw.strip():
+            _truncated = len(_raw) > _MAX_FILE_CHARS
+            file_context = _raw[:_MAX_FILE_CHARS]
+            file_label = f"📎 {uploaded_file.name}" + (" (مقتطع للطول)" if _truncated else "")
+            st.caption(f"{file_label} — سيُرسَل محتواه مع رسالتك التالية للوكيل.")
+
     if category.quick_prompts:
         st.markdown("**⚡ أسئلة سريعة:**")
         qcols = st.columns(len(category.quick_prompts))
@@ -6660,27 +6682,65 @@ def _render_agent_page(category):
                 if st.button(q, key=f"agent_q_{category.key}_{i}", use_container_width=True):
                     st.session_state[f"_agent_pending_{category.key}"] = q
 
-    if st.button("🗑 مسح المحادثة", key=f"agent_clear_{category.key}"):
-        st.session_state[msg_key] = []
-        st.session_state[cnt_key] = 0
-        bot.clear_history()
-        st.rerun()
+    col_clear, col_export = st.columns(2)
+    with col_clear:
+        if st.button("🗑 مسح المحادثة", key=f"agent_clear_{category.key}", use_container_width=True):
+            st.session_state[msg_key] = []
+            st.session_state[cnt_key] = 0
+            bot.clear_history()
+            st.rerun()
+    with col_export:
+        if st.session_state[msg_key]:
+            _export_lines = [f"# محادثة مع وكيل {category.title}\n"]
+            for _m in st.session_state[msg_key]:
+                _role, _text = _m[0], _m[1]
+                _ts = _m[3] if len(_m) > 3 else ""
+                _who = "أنت" if _role == "user" else category.title
+                _export_lines.append(f"**{_who}** _{_ts}_\n\n{_text}\n\n---\n")
+            st.download_button(
+                "⬇️ تصدير المحادثة", data="\n".join(_export_lines).encode("utf-8"),
+                file_name=f"محادثة_{category.key}.md", mime="text/markdown",
+                key=f"agent_export_{category.key}", use_container_width=True,
+            )
+        else:
+            st.button("⬇️ تصدير المحادثة", disabled=True, use_container_width=True,
+                       key=f"agent_export_disabled_{category.key}", help="لا توجد رسائل بعد")
+
+    if st.session_state[msg_key]:
+        with st.expander(f"📜 سجل الجلسة ({st.session_state[cnt_key]} تبادل)"):
+            for _m in st.session_state[msg_key]:
+                _role, _text = _m[0], _m[1]
+                _ts = _m[3] if len(_m) > 3 else ""
+                _tag = "🧑" if _role == "user" else category.emoji
+                _preview = _text if len(_text) <= 140 else _text[:140] + "…"
+                st.caption(f"{_tag} `{_ts}` — {_preview}")
 
     def _process(text: str):
         if not text.strip():
             return
-        st.session_state[msg_key].append(("user", text.strip(), ""))
+        _ts_now = datetime.now().strftime("%H:%M")
+        _display_text = text.strip()
+        if file_label:
+            _display_text = f"{_display_text}\n\n{file_label}"
+        st.session_state[msg_key].append(("user", _display_text, "", _ts_now))
 
         _safety_msg = _nsm_safety_gate(text.strip())
         if _safety_msg:
-            st.session_state[msg_key].append(("bot", _safety_msg, "🛡️ فحص أمان"))
+            st.session_state[msg_key].append(("bot", _safety_msg, "🛡️ فحص أمان", datetime.now().strftime("%H:%M")))
             st.session_state[cnt_key] += 1
             st.rerun()
             return
 
+        _query = text.strip()
+        if file_context:
+            _query = (
+                f"محتوى الملف المرفق ({uploaded_file.name if uploaded_file else 'ملف'}):\n"
+                f"```\n{file_context}\n```\n\nسؤال/طلب المستخدم:\n{text.strip()}"
+            )
+
         with st.spinner(f"⟳ {category.title} يفكّر..."):
-            response = bot.chat(text.strip(), force_web=web_toggle, source="hub")
-        st.session_state[msg_key].append(("bot", response, bot.last_provider_badge()))
+            response = bot.chat(_query, force_web=web_toggle, source="hub")
+        st.session_state[msg_key].append(("bot", response, bot.last_provider_badge(), datetime.now().strftime("%H:%M")))
         st.session_state[cnt_key] += 1
         st.rerun()
 
