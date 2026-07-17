@@ -458,7 +458,7 @@ st.set_page_config(
     page_title="النظام المعرفي العربي | Neural Service Mesh",
     page_icon="🧠",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 
 # ── مسارات الملفات ────────────────────────────────────────────────────────
