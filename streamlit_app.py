@@ -615,10 +615,9 @@ h1, h2, h3, h4, h5, h6 {
 }
 .stTabs [data-baseweb="tab"] {
     font-family: 'IBM Plex Sans Arabic', sans-serif;
-    font-weight: 600;
+    font-weight: 700;
     font-size: 0.92rem;
-    color: var(--text) !important;
-    opacity: 0.62;
+    color: var(--gold) !important;
     direction: rtl;
     padding: 0.5rem 1.1rem;
     border-radius: 10px;
