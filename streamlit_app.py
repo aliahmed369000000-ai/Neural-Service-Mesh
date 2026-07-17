@@ -1116,6 +1116,23 @@ hr { border-color: var(--border) !important; }
     .chat-nsm .bbl, .chat-user .bbl { max-width: 92%; font-size: 0.93rem; padding: 0.65rem 1rem; }
     /* الشريط الجانبي: حشوة أصغر عند فتحه كطبقة فوق المحتوى بالجوال */
     [data-testid="stSidebar"] { padding-top: 0.5rem; }
+
+    /* أداء: تقليل ثقل الـblur على معالجات الجوال الأضعف */
+    .metric-card, .feature-card, [data-testid="stSidebar"] { backdrop-filter: blur(8px); }
+
+    /* استجابة لمسية فورية بدل تأخير hover — نفس سرعة النقر الفعلي */
+    .metric-card, .feature-card, .quran-verse, .concept-card {
+        -webkit-tap-highlight-color: transparent;
+        transition-duration: .15s !important;
+    }
+    .feature-card:active { transform: scale(0.97); }
+    .metric-card:active { transform: scale(0.97); }
+
+    /* حركات دخول أسرع على الجوال — الانتظار الطويل يبدو تباطؤاً لا أناقة */
+    .metric-card, .feature-card { animation-duration: .35s !important; }
+
+    /* دعم شاشات النوتش (safe-area) لأسفل الصفحة */
+    .stApp { padding-bottom: env(safe-area-inset-bottom, 0); }
 }
 
 /* ── بطاقات الاستكشاف (الصفحة الرئيسية) ── */
