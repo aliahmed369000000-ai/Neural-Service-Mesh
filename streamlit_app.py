@@ -2276,7 +2276,7 @@ def render_home():
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown("""
+    st.components.v1.html("""
     <script>
     (function() {
         const doc = window.parent.document;
@@ -2341,7 +2341,7 @@ def render_home():
         restart();
     })();
     </script>
-    """, unsafe_allow_html=True)
+    """, height=0)
 
     st.markdown("")
     st.markdown('<div class="section-header">🚀 استكشف NSM</div>', unsafe_allow_html=True)
@@ -3435,8 +3435,9 @@ def render_training():
     </div>
     """, unsafe_allow_html=True)
 
-    # عدّاد متحرك من 0 حتى القيمة الفعلية — نفس أسلوب الحقن المستخدم بالصفحة الرئيسية
-    st.markdown("""
+    # عدّاد متحرك من 0 حتى القيمة الفعلية — نفس أسلوب حقن JS المضمون
+    # (components.html بدل st.markdown الذي لا يُنفَّذ فيه <script> إطلاقاً)
+    st.components.v1.html("""
     <script>
     (function() {
         const doc = window.parent.document;
@@ -3458,7 +3459,7 @@ def render_training():
         });
     })();
     </script>
-    """, unsafe_allow_html=True)
+    """, height=0)
 
     st.markdown("")
     st.markdown('<div class="section-header">🎓 حالة التدريب</div>', unsafe_allow_html=True)
@@ -5830,7 +5831,7 @@ def render_chat():
                 </div>'''
     html += "</div>"
     st.markdown(html, unsafe_allow_html=True)
-    st.markdown("""
+    st.components.v1.html("""
     <script>
     (function() {
         function scrollToBottom() {
@@ -5851,7 +5852,7 @@ def render_chat():
         tryScroll();
     })();
     </script>
-    """, unsafe_allow_html=True)
+    """, height=0)
 
     # صندوق الإدخال
     st.markdown("""
@@ -6511,14 +6512,24 @@ def _render_agent_page(category):
                 )
     html_out += "</div>"
     st.markdown(html_out, unsafe_allow_html=True)
-    st.markdown(f"""
+    st.components.v1.html(f"""
     <script>
     (function() {{
-        const box = window.parent.document.getElementById('{box_id}');
-        if (box) {{ box.scrollTop = box.scrollHeight; }}
+        function scrollToBottom() {{
+            const doc = window.parent ? window.parent.document : document;
+            const box = doc.getElementById('{box_id}');
+            if (box) {{ box.scrollTop = box.scrollHeight; return true; }}
+            return false;
+        }}
+        let attempts = 0;
+        const tryScroll = () => {{
+            attempts++;
+            if (!scrollToBottom() && attempts < 10) {{ setTimeout(tryScroll, 60); }}
+        }};
+        tryScroll();
     }})();
     </script>
-    """, unsafe_allow_html=True)
+    """, height=0)
 
     c1, c2 = st.columns([5, 1.2], gap="small")
     with c1:
