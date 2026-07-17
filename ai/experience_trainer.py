@@ -191,6 +191,18 @@ class ExperienceTrainer:
         self._gap_scheduler = None
         self._gap_explore_every: int = 3
 
+        # ── EWC: حماية من النسيان الكارثي بين دورات الـ replay المختلفة ──
+        # (كل استدعاء replay_* يدرّب على دفعة مختلفة من الحلقات؛ بدون EWC
+        # فالتدريب على دفعة جديدة قد يمحو ما تعلّمته النواة من الدفعة
+        # السابقة). اختياري تماماً: لو تعذّر الاستيراد، تستمر بلا حماية
+        # (نفس السلوك القديم).
+        self._ewc = None
+        try:
+            from ai.continual_learner import PyramidEWC
+            self._ewc = PyramidEWC(lambda_reg=5000.0)
+        except Exception:
+            logger.warning("ExperienceTrainer: PyramidEWC غير متاح — التدريب بلا حماية EWC")
+
     def set_pipeline(self, pipeline, gap_explore_every: int = 3):
         """
         يربط ReasoningPipeline بـ ExperienceTrainer لتفعيل الاستكشاف التلقائي.
@@ -270,11 +282,21 @@ class ExperienceTrainer:
 
         losses_after = []
         for x, target in signals:
-            l = self.core.train_step(x, target)
+            l = self.core.train_step(x, target, ewc=self._ewc)
             losses_after.append(l)
             self.core.evolve_if_plateau()
 
         self.store.mark_replayed(used_ids)
+
+        # ── حماية هذه الدفعة قبل دفعة الـreplay التالية (قد تكون حلقات
+        # مختلفة تماماً — بدون هذا فتدريب الدفعة القادمة قد يمحو ما
+        # تعلّمته النواة للتو). فشل صامت مقصود: لا يوقف تقرير الـreplay. ──
+        if self._ewc is not None:
+            try:
+                self._ewc.compute_fisher(self.core.net, signals, task_label=f"replay_{strategy}")
+                self._ewc.save()
+            except Exception as exc:
+                logger.warning(f"[ExperienceTrainer] تعذّر حفظ لقطة EWC: {exc}")
 
         return ReplayReport(
             strategy=strategy,

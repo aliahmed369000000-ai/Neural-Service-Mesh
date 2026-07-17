@@ -728,7 +728,11 @@ class PyramidEWC:
         total = 0.0
         for snap in self._snapshots:
             for k, v in params.items():
-                if k not in snap.fisher:
+                if k not in snap.fisher or snap.fisher[k].shape != v.shape:
+                    # المصفوفة غير موجودة باللقطة، أو تغيّر شكلها منذ اللقطة
+                    # (مثلاً نمو طبقة عبر evolve_if_plateau) — نتجاهلها بأمان
+                    # بدل الانهيار؛ الحماية القديمة لم تعد قابلة للتطبيق على
+                    # شكل جديد للمعامل.
                     continue
                 diff = v.astype(np.float64) - snap.anchor[k].astype(np.float64)
                 total += float(np.sum(snap.fisher[k] * (diff ** 2)))
@@ -744,7 +748,7 @@ class PyramidEWC:
             return grads
         for snap in self._snapshots:
             for k, v in params.items():
-                if k not in snap.fisher:
+                if k not in snap.fisher or snap.fisher[k].shape != v.shape:
                     continue
                 diff = v.astype(np.float64) - snap.anchor[k].astype(np.float64)
                 grads[k] += snap.fisher[k] * diff

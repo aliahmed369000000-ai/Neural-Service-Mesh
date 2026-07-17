@@ -417,16 +417,22 @@ class NeuralNetwork:
 
     # ── Train step (backprop كامل وصحيح) ──────────────────────────────
 
-    def train_step(self, x: ArrayLike, target: ArrayLike) -> float:
-        """
-        خطوة تدريب واحدة:
-          1. forward كامل
-          2. حساب الخسارة + dL/dout
-          3. backward عبر كل الطبقات بالعكس (chain rule كامل)
-          4. تحديث كل طبقة (Adam أو SGD)
+    def get_parameters(self) -> Dict[str, np.ndarray]:
+        """قاموس بكل أوزان الشبكة القابلة للتدريب — بنفس واجهة
+        DeepCirculantPyramid.get_parameters(), يستخدمه ai.continual_learner
+        (EWC) لحساب/تطبيق عقوبة الحماية من النسيان الكارثي. المفاتيح تعتمد
+        على فهرس الطبقة، فتبقى صالحة حتى بعد نمو الشبكة (evolve_if_plateau) —
+        الطبقات الجديدة تظهر بمفاتيح إضافية، والقديمة تحتفظ بمفاتيحها."""
+        params: Dict[str, np.ndarray] = {}
+        for i, layer in enumerate(self.layers):
+            params[f"L{i}_W"] = layer.W
+            params[f"L{i}_b"] = layer.b
+        return params
 
-        Returns: قيمة الخسارة قبل التحديث.
-        """
+    def compute_gradients(self, x: ArrayLike, target: ArrayLike) -> Tuple[float, Dict[str, np.ndarray]]:
+        """forward + backward كامل بدون تطبيق التحديث (لا يغيّر الأوزان).
+        يعيد (loss, grads) بنفس مفاتيح get_parameters() — يُستخدم مباشرة
+        من PyramidEWC.compute_fisher() ومن train_step() أدناه."""
         out = self.forward(x)
 
         target_arr = np.array(target, dtype=np.float64)
@@ -437,14 +443,49 @@ class NeuralNetwork:
         loss_fn = LOSS_FUNCTIONS[self.loss_name]
         loss, d_out = loss_fn(out, target_arr)
 
-        # backward chain — من الطبقة الأخيرة إلى الأولى
         grad = d_out
         for layer in reversed(self.layers):
             grad = layer.backward(grad)
 
-        # تحديث كل الطبقات
-        for layer in self.layers:
+        grads: Dict[str, np.ndarray] = {}
+        for i, layer in enumerate(self.layers):
+            grads[f"L{i}_W"] = layer._grad_W
+            grads[f"L{i}_b"] = layer._grad_b
+        return loss, grads
+
+    def _apply_gradients(self, grads: Dict[str, np.ndarray]) -> None:
+        """يطبّق قاموس تدرجات (بنفس مفاتيح get_parameters()، قد تكون
+        معدَّلة بعقوبة EWC) على الأوزان فعلياً."""
+        for i, layer in enumerate(self.layers):
+            layer._grad_W = grads[f"L{i}_W"]
+            layer._grad_b = grads[f"L{i}_b"]
             layer.apply_gradients(self.learning_rate, optimizer=self.optimizer)
+
+    def train_step(self, x: ArrayLike, target: ArrayLike, ewc: Optional[Any] = None) -> float:
+        """
+        خطوة تدريب واحدة:
+          1. forward كامل
+          2. حساب الخسارة + dL/dout
+          3. backward عبر كل الطبقات بالعكس (chain rule كامل)
+          4. تحديث كل طبقة (Adam أو SGD)
+
+        Returns: قيمة الخسارة قبل التحديث.
+
+        نفس السلوك السابق تماماً عند ewc=None (توافق خلفي كامل — نفس
+        الأرقام الناتجة حرفياً). لو مُرِّر كائن EWC (من
+        ai.continual_learner.PyramidEWC)، تُضاف عقوبة الحماية من النسيان
+        الكارثي لكل من الخسارة والتدرجات قبل التحديث.
+        """
+        loss, grads = self.compute_gradients(x, target)
+
+        if ewc is not None:
+            penalty_grads = ewc.penalty_gradients(self)
+            for k in grads:
+                if k in penalty_grads:
+                    grads[k] = grads[k] + penalty_grads[k].astype(grads[k].dtype)
+            loss = loss + ewc.penalty(self)
+
+        self._apply_gradients(grads)
 
         self._train_steps += 1
         self._last_loss = loss
@@ -1749,9 +1790,12 @@ class NeuralCore:
     def forward(self, x: ArrayLike) -> np.ndarray:
         return self.net.forward(x)
 
-    def train_step(self, x: ArrayLike, target: ArrayLike) -> float:
-        """خطوة تدريب واحدة (backprop صحيح كامل) + فحص تطوّر اختياري."""
-        loss = self.net.train_step(x, target)
+    def train_step(self, x: ArrayLike, target: ArrayLike, ewc: Optional[Any] = None) -> float:
+        """خطوة تدريب واحدة (backprop صحيح كامل) + فحص تطوّر اختياري.
+        ewc: كائن اختياري من ai.continual_learner.PyramidEWC — يُمرَّر
+        مباشرة إلى self.net.train_step لحماية الأوزان من النسيان الكارثي.
+        نفس السلوك تماماً عند ewc=None (توافق خلفي كامل)."""
+        loss = self.net.train_step(x, target, ewc=ewc)
         self._steps_since_growth += 1
         return loss
 
