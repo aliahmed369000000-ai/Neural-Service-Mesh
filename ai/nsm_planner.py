@@ -28,6 +28,17 @@ from typing import Any, Dict, Generator, List, Optional
 
 ROOT = Path(__file__).parent.parent
 
+try:
+    from ai.task_manager import (
+        create_plan as _tm_create_plan,
+        update_task_status as _tm_update_task,
+        mark_plan_status as _tm_mark_plan,
+        topological_order as _tm_topological_order,
+    )
+    _TASK_MGR_OK = True
+except Exception:
+    _TASK_MGR_OK = False
+
 # ══════════════════════════════════════════════════════════════════
 # هياكل البيانات
 # ══════════════════════════════════════════════════════════════════
@@ -367,11 +378,28 @@ class NSMPlanner:
         yield "\n---\n\n"
         yield f"🚀 **المرحلة 2: تنفيذ {len(plan.tasks)} مهام...**\n\n"
 
+        # ── تسجيل الخطة في نظام المهام المتعددة (إن توفر) ──────────────
+        plan_id = -1
+        if _TASK_MGR_OK:
+            try:
+                plan_id = _tm_create_plan(plan)
+            except Exception:
+                plan_id = -1
+
+        # ── ترتيب تنفيذ حقيقي يحترم depends_on بدل ترتيب القائمة فقط ──
+        if _TASK_MGR_OK:
+            try:
+                exec_order = _tm_topological_order(plan.tasks)
+            except Exception:
+                exec_order = plan.tasks
+        else:
+            exec_order = plan.tasks
+
         # ── تنفيذ المهام ──
         completed: List[PlanTask] = []
         all_files: List[str] = []
 
-        for task in plan.tasks:
+        for task in exec_order:
             task.status = "running"
             yield f"### 🔧 المهمة {task.id}/{len(plan.tasks)}: {task.title}\n"
 
@@ -387,14 +415,23 @@ class NSMPlanner:
             except Exception as e:
                 task.status = "failed"
                 task.result = str(e)
+                if _TASK_MGR_OK and plan_id > 0:
+                    _tm_update_task(plan_id, task.id, "failed", str(e))
                 yield f"\n❌ فشلت المهمة: {e}\n\n"
                 continue
 
             task.status = "done"
             task.result = task_output
+            if _TASK_MGR_OK and plan_id > 0:
+                _tm_update_task(plan_id, task.id, "done", task_output)
             all_files.extend(task.files)
             completed.append(task)
             yield "\n"
+
+        # ── تحديث حالة الخطة النهائية في نظام المهام المتعددة ──────────
+        if _TASK_MGR_OK and plan_id > 0:
+            _has_failed = any(t.status == "failed" for t in plan.tasks)
+            _tm_mark_plan(plan_id, "failed" if _has_failed else "done")
 
         # ── ملخص نهائي ──
         yield "\n---\n\n"
