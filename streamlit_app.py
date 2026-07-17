@@ -1353,6 +1353,42 @@ if "ui_theme" not in st.session_state:
         st.session_state.ui_theme = "dark"
 st.markdown(render_css(st.session_state.ui_theme), unsafe_allow_html=True)
 
+# ── فرض قسري للون نص التبويبات عبر JS (طبقة حماية أخيرة) ──────────────────
+# السبب: .streamlit/config.toml يثبّت ثيم Streamlit الأصلي على "dark"
+# دائماً (لأسباب أخرى غير متعلقة بتبديلنا الداخلي للثيم)، وبعض مكوّنات
+# BaseWeb الداخلية (مثل st.tabs) قد تُطبّق ألوان مشتقة من ذلك الثيم
+# الأصلي بطريقة تُفلت أحياناً من تجاوزات CSS العادية. نفرض اللون هنا
+# مباشرة كـ inline style بأولوية "important" — وهي أعلى أولوية ممكنة
+# في CSS، لا يوجد ما يتجاوزها.
+_tab_text_color = THEMES.get(st.session_state.ui_theme, THEMES["dark"])["gold"]
+st.markdown(f"""
+<script>
+(function() {{
+    function nsmForceTabColor() {{
+        const doc = window.parent.document || document;
+        const tabs = doc.querySelectorAll('.stTabs [data-baseweb="tab"]');
+        tabs.forEach(function(tab) {{
+            const selected = tab.getAttribute('aria-selected') === 'true';
+            const color = selected ? '{THEMES.get(st.session_state.ui_theme, THEMES["dark"])["bg"]}' : '{_tab_text_color}';
+            tab.style.setProperty('color', color, 'important');
+            tab.querySelectorAll('*').forEach(function(child) {{
+                child.style.setProperty('color', color, 'important');
+            }});
+        }});
+    }}
+    nsmForceTabColor();
+    setTimeout(nsmForceTabColor, 150);
+    setTimeout(nsmForceTabColor, 500);
+    const doc2 = window.parent.document || document;
+    if (!doc2.__nsmTabObserver) {{
+        const obs = new MutationObserver(function() {{ nsmForceTabColor(); }});
+        obs.observe(doc2.body, {{ childList: true, subtree: true, attributes: true, attributeFilter: ['aria-selected'] }});
+        doc2.__nsmTabObserver = obs;
+    }}
+}})();
+</script>
+""", unsafe_allow_html=True)
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # دوال تحميل البيانات
