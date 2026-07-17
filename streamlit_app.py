@@ -2098,88 +2098,7 @@ def _skeleton(kind: str = "text", lines: int = 3) -> None:
 
 
 def render_home():
-    """الصفحة الرئيسية — إحصاءات النظام."""
-    roots         = load_arabic_roots()
-    ckg           = load_ckg()
-    quran_index   = load_quran_index()
-    graph_metrics = load_graph_metrics()
-    training      = load_training_summary()
-    checkpoint    = load_latest_checkpoint()
-    episodic      = get_episodic_stats()
-
-    concepts_count  = len(ckg.get("concepts", {}))
-    relations_count = len(ckg.get("relations", {}))
-
-    # عدد الجذور ذات المعنى (أكثر من 3 أحرف)
-    meaningful_roots = sum(1 for k in roots if len(k) >= 3 and roots[k].get("frequency", 0) > 10)
-
-    train_steps = training.get("train_steps", 0)
-
-    # آخر تحديث — وقت مطلق + وقت نسبي ("منذ...") لملاحظة الحيوية بلمحة
-    saved_at = checkpoint.get("saved_at", "")
-    last_update = "غير محدد"
-    last_update_relative = ""
-    if saved_at:
-        try:
-            dt = datetime.fromisoformat(saved_at.replace("Z", "+00:00"))
-            last_update = dt.strftime("%Y-%m-%d %H:%M") + " UTC"
-            _now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.utcnow()
-            _delta_sec = max(0, (_now - dt).total_seconds())
-            if _delta_sec < 60:
-                last_update_relative = "منذ لحظات"
-            elif _delta_sec < 3600:
-                last_update_relative = f"منذ {int(_delta_sec // 60)} دقيقة"
-            elif _delta_sec < 86400:
-                last_update_relative = f"منذ {int(_delta_sec // 3600)} ساعة"
-            else:
-                last_update_relative = f"منذ {int(_delta_sec // 86400)} يوم"
-        except Exception:
-            last_update = saved_at[:19]
-
-    st.markdown(
-        '<div class="section-header">📊 إحصاءات النظام المعرفي <span class="live-dot"></span></div>',
-        unsafe_allow_html=True,
-    )
-
-    _last_label = f"آخر تحديث · {last_update_relative}" if last_update_relative else "آخر تحديث"
-    st.markdown(f"""
-    <div class="bento-grid">
-        <div class="metric-card bento-featured">
-            <div class="metric-value" data-count-target="{concepts_count}">{concepts_count:,}</div>
-            <div class="metric-label">مفهوم في CKG</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-value" data-count-target="{relations_count}">{relations_count:,}</div>
-            <div class="metric-label">علاقة معرفية</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-value" data-count-target="{meaningful_roots}">{meaningful_roots:,}</div>
-            <div class="metric-label">جذر عربي مكتشف</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-value" data-count-target="{train_steps}">{train_steps:,}</div>
-            <div class="metric-label">خطوة تدريب</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-value" data-count-target="{quran_index.get('total_ayat', 6236)}">{quran_index.get('total_ayat', 6236):,}</div>
-            <div class="metric-label">آية قرآنية محملة</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-value" data-count-target="{quran_index.get('total_surahs', 114)}">{quran_index.get('total_surahs', 114)}</div>
-            <div class="metric-label">سورة كريمة</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-value" data-count-target="{episodic.get('episodic', 0)}">{episodic.get('episodic', 0):,}</div>
-            <div class="metric-label">ذكرى تجريبية</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-value metric-value--wrap">{last_update}</div>
-            <div class="metric-label">{_last_label}</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("")
+    """الصفحة الرئيسية — نظرة سريعة واستكشاف أقسام NSM."""
     st.markdown('<div class="section-header">🚀 استكشف NSM</div>', unsafe_allow_html=True)
 
     _features = [
@@ -3133,6 +3052,109 @@ def _render_hf_result(result):
 
 def render_training():
     """تبويب التدريب."""
+    # ── 📊 إحصاءات النظام المعرفي — انتقلت هنا من الصفحة الرئيسية ──
+    _roots       = load_arabic_roots()
+    _ckg_overview = load_ckg()
+    _quran_index = load_quran_index()
+    _training_ov = load_training_summary()
+    _checkpoint  = load_latest_checkpoint()
+    _episodic    = get_episodic_stats()
+
+    _concepts_count  = len(_ckg_overview.get("concepts", {}))
+    _relations_count = len(_ckg_overview.get("relations", {}))
+    _meaningful_roots = sum(1 for k in _roots if len(k) >= 3 and _roots[k].get("frequency", 0) > 10)
+    _train_steps_ov = _training_ov.get("train_steps", 0)
+
+    # آخر تحديث — وقت مطلق + وقت نسبي ("منذ...") لملاحظة الحيوية بلمحة
+    _saved_at = _checkpoint.get("saved_at", "")
+    _last_update = "غير محدد"
+    _last_update_relative = ""
+    if _saved_at:
+        try:
+            _dt = datetime.fromisoformat(_saved_at.replace("Z", "+00:00"))
+            _last_update = _dt.strftime("%Y-%m-%d %H:%M") + " UTC"
+            _now = datetime.now(_dt.tzinfo) if _dt.tzinfo else datetime.utcnow()
+            _delta_sec = max(0, (_now - _dt).total_seconds())
+            if _delta_sec < 60:
+                _last_update_relative = "منذ لحظات"
+            elif _delta_sec < 3600:
+                _last_update_relative = f"منذ {int(_delta_sec // 60)} دقيقة"
+            elif _delta_sec < 86400:
+                _last_update_relative = f"منذ {int(_delta_sec // 3600)} ساعة"
+            else:
+                _last_update_relative = f"منذ {int(_delta_sec // 86400)} يوم"
+        except Exception:
+            _last_update = _saved_at[:19]
+
+    st.markdown(
+        '<div class="section-header">📊 إحصاءات النظام المعرفي <span class="live-dot"></span></div>',
+        unsafe_allow_html=True,
+    )
+
+    _last_label_ov = f"آخر تحديث · {_last_update_relative}" if _last_update_relative else "آخر تحديث"
+    st.markdown(f"""
+    <div class="bento-grid">
+        <div class="metric-card bento-featured">
+            <div class="metric-value" data-count-target="{_concepts_count}">{_concepts_count:,}</div>
+            <div class="metric-label">مفهوم في CKG</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value" data-count-target="{_relations_count}">{_relations_count:,}</div>
+            <div class="metric-label">علاقة معرفية</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value" data-count-target="{_meaningful_roots}">{_meaningful_roots:,}</div>
+            <div class="metric-label">جذر عربي مكتشف</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value" data-count-target="{_train_steps_ov}">{_train_steps_ov:,}</div>
+            <div class="metric-label">خطوة تدريب</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value" data-count-target="{_quran_index.get('total_ayat', 6236)}">{_quran_index.get('total_ayat', 6236):,}</div>
+            <div class="metric-label">آية قرآنية محملة</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value" data-count-target="{_quran_index.get('total_surahs', 114)}">{_quran_index.get('total_surahs', 114)}</div>
+            <div class="metric-label">سورة كريمة</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value" data-count-target="{_episodic.get('episodic', 0)}">{_episodic.get('episodic', 0):,}</div>
+            <div class="metric-label">ذكرى تجريبية</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value metric-value--wrap">{_last_update}</div>
+            <div class="metric-label">{_last_label_ov}</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # عدّاد متحرك من 0 حتى القيمة الفعلية — نفس أسلوب الحقن المستخدم بالصفحة الرئيسية
+    st.markdown("""
+    <script>
+    (function() {
+        const doc = window.parent.document;
+        const counters = doc.querySelectorAll('.metric-value[data-count-target]');
+        counters.forEach(function(el) {
+            if (el.dataset.nsmAnimated) return;
+            el.dataset.nsmAnimated = "1";
+            const target = parseInt(el.getAttribute('data-count-target'), 10) || 0;
+            const duration = 900;
+            const start = performance.now();
+            function tick(now) {
+                const p = Math.min(1, (now - start) / duration);
+                const eased = 1 - Math.pow(1 - p, 3);
+                el.textContent = Math.round(eased * target).toLocaleString('en-US');
+                if (p < 1) requestAnimationFrame(tick);
+                else el.textContent = target.toLocaleString('en-US');
+            }
+            requestAnimationFrame(tick);
+        });
+    })();
+    </script>
+    """, unsafe_allow_html=True)
+
+    st.markdown("")
     st.markdown('<div class="section-header">🎓 حالة التدريب</div>', unsafe_allow_html=True)
 
     training   = load_training_summary()
