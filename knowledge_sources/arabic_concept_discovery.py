@@ -101,6 +101,12 @@ _SUFFIXES = [
 ]
 
 
+# كلمات محمية: لا يجوز اقتطاع لاحقة منها لأنها ليست ضميراً متصلاً حقيقياً
+# (مثال العلة السابقة: "الله" كانت تُختزل خطأً لجذر "الل" لأن "ه" الأخيرة
+# تُعامَل كضمير غائب متصل، بينما هي جزء أصيل من لفظ الجلالة).
+_PROTECTED_WORDS: Set[str] = {"الله"}
+
+
 def extract_root(token: str) -> str:
     """
     Extract an approximate trilateral root from a normalised Arabic token.
@@ -115,6 +121,10 @@ def extract_root(token: str) -> str:
         if word.startswith(prefix) and len(word) - len(prefix) >= 3:
             word = word[len(prefix):]
             break
+
+    # حماية الكلمات المحمية بعد تجريد السوابق فقط (لا لواحق)
+    if word in _PROTECTED_WORDS:
+        return word
 
     # Strip suffixes
     for suffix in _SUFFIXES:
@@ -132,6 +142,7 @@ def extract_root(token: str) -> str:
 
     # Too short — return original token
     return token
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -154,7 +165,7 @@ class ArabicConceptDiscovery:
         self,
         knowledge_dir:    Path = Path("./knowledge"),
         roots_index_path: Path = Path("./knowledge/arabic_roots_index.json"),
-        min_frequency:    int  = 10,
+        min_frequency:    int  = 5,
         min_token_length: int  = 3,
     ):
         self._knowledge_dir    = Path(knowledge_dir)
@@ -447,7 +458,7 @@ class ArabicConceptDiscovery:
 #  Convenience runner
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run_discovery(min_frequency: int = 10) -> Dict[str, Any]:
+def run_discovery(min_frequency: int = 5) -> Dict[str, Any]:
     """
     Module-level convenience function.
     Call this from quran_continuous_trainer.py after each batch.

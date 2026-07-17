@@ -3497,7 +3497,7 @@ def render_training():
 
     _concepts_count  = len(_ckg_overview.get("concepts", {}))
     _relations_count = len(_ckg_overview.get("relations", {}))
-    _meaningful_roots = sum(1 for k in _roots if len(k) >= 3 and _roots[k].get("frequency", 0) > 10)
+    _meaningful_roots = sum(1 for k in _roots if len(k) >= 3 and _roots[k].get("frequency", 0) >= 5)
     _train_steps_ov = _training_ov.get("train_steps", 0)
 
     # آخر تحديث — وقت مطلق + وقت نسبي ("منذ...") لملاحظة الحيوية بلمحة
