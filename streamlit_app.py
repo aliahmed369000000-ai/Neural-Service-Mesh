@@ -408,6 +408,14 @@ except Exception:
     def available_providers():
         return {}
 
+# ── NSM Router Bridge — RoutingEngine + ScoringEngine + MemoryEngine + LearningValidator ──
+try:
+    import ai.nsm_router_bridge as _nsm_bridge
+    _NSM_BRIDGE_OK = _nsm_bridge.is_ready()
+except Exception as _e_bridge:
+    _nsm_bridge    = None   # type: ignore[assignment]
+    _NSM_BRIDGE_OK = False
+
 # ── مساعدات رفع الملفات (PDF / صور) لدعم multimodal مع OpenRouter ──────────
 MAX_FILE_MB = 20
 IMAGE_MIMES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
@@ -3832,6 +3840,166 @@ def render_training():
         with col_b:
             st.markdown(f"**معدل التعلم:** `{lr}`" if lr else "**معدل التعلم:** `—`")
 
+    # ── [NSM Router Bridge] تبويب التوجيه الذكي ──────────────────────────
+    st.markdown("")
+    render_nsm_routing()
+
+
+def render_nsm_routing():
+    """تبويب NSM Mesh — التوجيه الذكي بين العقد + إثبات التعلم."""
+    st.markdown(
+        '<div class="section-header">🕸️ NSM Mesh — التوجيه الذكي بين العقد '
+        '<span class="live-dot"></span></div>',
+        unsafe_allow_html=True,
+    )
+
+    if not _NSM_BRIDGE_OK or not _nsm_bridge:
+        st.warning("⚠️ NSM Router Bridge غير مُفعَّل. تحقق من ai/nsm_router_bridge.py والسجلات.")
+        return
+
+    # ── درجات العقد الثلاث ─────────────────────────────────────────────────
+    st.markdown("#### 📡 عقد الشبكة وأداؤها التاريخي")
+    node_scores = _nsm_bridge.get_node_scores_for_display()
+    n_cols = st.columns(len(node_scores))
+    for col, ns in zip(n_cols, node_scores):
+        score_color = (
+            "var(--emerald)" if ns["connection_score"] >= 70
+            else "var(--gold)" if ns["connection_score"] >= 45
+            else "#e74c3c"
+        )
+        with col:
+            st.markdown(f"""
+            <div class="metric-card" style="text-align:center">
+                <div style="font-size:1.4rem;margin-bottom:0.3rem">{ns["label"]}</div>
+                <div class="metric-value" style="color:{score_color};font-size:2rem">
+                    {ns["connection_score"]:.1f}
+                </div>
+                <div class="metric-label">درجة الاتصال (0-100)</div>
+                <hr style="margin:0.4rem 0;border-color:var(--border)">
+                <div style="font-size:0.8rem;color:var(--text-muted);direction:rtl">
+                    🔁 تشغيلات: <strong>{ns["total_runs"]}</strong><br>
+                    ✅ نجاح: <strong>{ns["success_rate"]:.1f}%</strong><br>
+                    ⏱️ زمن: <strong>{int(ns["avg_latency_ms"])} مللي</strong>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.markdown("")
+
+    # ── تقرير التعلم (prove_learning + get_learning_curve) ────────────────
+    st.markdown("#### 🎓 إثبات التعلم")
+    report = _nsm_bridge.get_learning_report()
+
+    if "error" in report:
+        st.error(f"خطأ: {report['error']}")
+        return
+
+    proof = report.get("proof", {})
+    verdict = proof.get("verdict", "insufficient_data")
+    verdict_icons = {
+        "learning_confirmed":      ("✅", "var(--emerald)", "تعلّم مؤكد"),
+        "learning_in_progress":    ("🔄", "var(--gold)",   "التعلم قيد التقدم"),
+        "learning_not_yet_evident": ("⏳", "#e74c3c",       "بيانات غير كافية بعد"),
+        "insufficient_data":       ("⏳", "var(--text-muted)", "بيانات غير كافية بعد"),
+    }
+    icon, vcolor, vlabel = verdict_icons.get(verdict, ("❓", "var(--text-muted)", verdict))
+    st.markdown(f"""
+    <div class="metric-card" style="border-right:4px solid {vcolor};padding:1rem 1.2rem;direction:rtl">
+        <span style="font-size:1.5rem">{icon}</span>
+        <strong style="color:{vcolor};font-size:1.1rem"> {vlabel}</strong>
+        <p style="margin:0.5rem 0 0;color:var(--text-muted);font-size:0.9rem">
+            {proof.get("message", "")}
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    evidence = proof.get("evidence", [])
+    if evidence:
+        st.markdown("")
+        st.markdown("**الأدلة المرصودة:**")
+        for ev in evidence:
+            st.markdown(f"- {ev}")
+
+    # مقاييس التعلم
+    metrics = proof.get("metrics", {})
+    if metrics.get("total_executions", 0) > 0:
+        st.markdown("")
+        mc1, mc2, mc3, mc4 = st.columns(4)
+        with mc1:
+            metric_card(metrics.get("total_executions", 0), "إجمالي التشغيلات")
+        with mc2:
+            metric_card(
+                f"{metrics.get('success_rate', 0)*100:.1f}%",
+                "معدل النجاح الكلي",
+            )
+        with mc3:
+            metric_card(
+                f"{metrics.get('learning_improvement_pct', 0):.1f}%",
+                "تحسّن vs الأساس",
+            )
+        with mc4:
+            top_nodes = proof.get("top_nodes", [])
+            best_label = top_nodes[0].get("name", "—") if top_nodes else "—"
+            metric_card(best_label, "أكثر العقد ثقةً")
+
+    # ── منحنى التعلم ──────────────────────────────────────────────────────
+    curve = report.get("curve", {})
+    trend = curve.get("trend", "insufficient_data")
+    data_points = curve.get("data_points", [])
+    if data_points:
+        st.markdown("")
+        st.markdown("#### 📈 منحنى التعلم")
+        trend_label = {
+            "improving":         "📈 تحسّن مستمر",
+            "degrading":         "📉 تراجع",
+            "stable":            "➡️ مستقر",
+            "insufficient_data": "⏳ بيانات غير كافية",
+        }.get(trend, trend)
+        st.caption(f"الاتجاه: {trend_label}")
+        try:
+            import pandas as _pd
+            _df = _pd.DataFrame(data_points)
+            if "avg_connection_score" in _df.columns:
+                st.line_chart(_df.set_index("index")["avg_connection_score"])
+        except Exception:
+            for dp in data_points[-10:]:
+                st.text(f"[{dp.get('index','')}] درجة={dp.get('avg_connection_score','?')}  نجاح={dp.get('success_rate','?')}")
+    else:
+        st.info("📊 سيظهر منحنى التعلم بعد تراكم بيانات كافية من المحادثات.")
+
+    # ── سمعة العقد ────────────────────────────────────────────────────────
+    reputation = report.get("reputation", [])
+    if reputation:
+        st.markdown("")
+        st.markdown("#### 🏅 ترتيب سمعة العقد")
+        tier_colors = {
+            "platinum": "var(--emerald)",
+            "gold":     "var(--gold)",
+            "silver":   "#aaa",
+            "bronze":   "#cd7f32",
+            "unrated":  "var(--text-muted)",
+        }
+        for node in reputation:
+            tier = node.get("tier", "unrated")
+            col = tier_colors.get(tier, "var(--text-muted)")
+            runs = node.get("total_runs", 0)
+            st.markdown(f"""
+            <div class="root-item" style="direction:rtl">
+                <strong>{node.get("name", node.get("node_id","?"))}</strong>
+                <span class="badge badge-blue" style="background:{col};color:#fff;margin-right:6px">
+                    {tier}
+                </span>
+                <span class="badge badge-amber">سمعة: {node.get("reputation_score",0):.1f}</span>
+                <span class="badge badge-blue">نجاح: {node.get("success_rate",0)*100:.1f}%</span>
+                <span style="color:var(--text-muted);font-size:0.8rem"> ({runs} تشغيل)</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.caption(
+        "🔁 تُحدَّث هذه البيانات تلقائياً بعد كل رسالة في تبويب المحادثة. "
+        "أرسل رسائل للبناء التدريجي لسجل التعلم."
+    )
+
 
 def render_memory():
     """تبويب الذاكرة."""
@@ -6464,9 +6632,39 @@ def render_chat():
             st.rerun()
             return
 
-        # ── مسار OpenRouter مباشرة إذا تم إدخال مفتاح (يدعم الملفات/الصور) ──
+        # ── [NSM Router Bridge] حدّد العقد المتاحة فعلاً ─────────────────────
+        import time as _time_mod
         _or_key_p = st.session_state.get("_or_api_key", "").strip()
+        _available_nodes: list = []
         if _or_key_p:
+            _available_nodes.append(_nsm_bridge.NODE_OPENROUTER if _nsm_bridge else "nsm:openrouter")
+        # فحص NSM Agent مبكراً لمعرفة توفره قبل قرار التوجيه
+        _agent = None
+        try:
+            from ai.nsm_agent_core import NSMAgent as _AgentCls
+            _agent = getattr(st.session_state, "_nsm_agent_instance", None)
+            if _agent is None:
+                _agent = _AgentCls()
+                st.session_state._nsm_agent_instance = _agent
+            _agent.available = _agent._check_available()
+            if _agent.available:
+                _available_nodes.append(_nsm_bridge.NODE_AGENT if _nsm_bridge else "nsm:agent")
+        except Exception:
+            _agent = None
+        _available_nodes.append(_nsm_bridge.NODE_FREE_ROUTER if _nsm_bridge else "nsm:free_router")
+
+        # ── [NSM Router Bridge] اختَر أفضل عقدة بناءً على السجل التاريخي ──
+        if _NSM_BRIDGE_OK and _nsm_bridge:
+            _selected_node = _nsm_bridge.select_node(_available_nodes)
+        else:
+            _selected_node = _available_nodes[0]
+
+        _t0_route = _time_mod.time()
+
+        # ══ تنفيذ المسار المختار ════════════════════════════════════════════
+
+        if _selected_node == (_nsm_bridge.NODE_OPENROUTER if _nsm_bridge else "nsm:openrouter"):
+            # ── مسار OpenRouter ──────────────────────────────────────────────
             _or_model_p = st.session_state.get("_or_model", "google/gemini-2.5-flash")
             can_vision = _or_model_p in VISION_MODELS
             doc_files   = [f for f in files if not f["is_image"]]
@@ -6477,9 +6675,9 @@ def render_chat():
             for m in st.session_state.nsm_messages[:-1]:
                 role = "user" if m[0] == "user" else "assistant"
                 history_msgs.append({"role": role, "content": m[1]})
-
             api_messages = history_msgs + [{"role": "user", "content": user_content}]
 
+            _or_success = False
             with st.chat_message("assistant", avatar="🌐"):
                 placeholder = st.empty()
                 full_response = ""
@@ -6491,19 +6689,30 @@ def render_chat():
                         _af_params, _af_applied, _af_note = _af_apply_adjustments(_af_params, _af_ctx)
                     except Exception:
                         _af_applied = False
-                for chunk in _or_stream(
-                    api_messages, model=_or_model_p, api_key=_or_key_p,
-                    temperature=_af_params.get("temperature", 0.7),
-                    top_p=_af_params.get("top_p", 0.9),
-                ):
-                    full_response += chunk
-                    placeholder.markdown(full_response + "▌")
-                placeholder.markdown(full_response)
+                try:
+                    for chunk in _or_stream(
+                        api_messages, model=_or_model_p, api_key=_or_key_p,
+                        temperature=_af_params.get("temperature", 0.7),
+                        top_p=_af_params.get("top_p", 0.9),
+                    ):
+                        full_response += chunk
+                        placeholder.markdown(full_response + "▌")
+                    placeholder.markdown(full_response)
+                    _or_success = bool(full_response.strip())
+                except Exception:
+                    placeholder.markdown(full_response or "⚠️ خطأ في OpenRouter")
                 if _af_note:
                     st.caption(_af_note)
-            response = full_response
-            ctx_tag = ""
+            response  = full_response
+            ctx_tag   = ""
             src_badge = f"🌐 OpenRouter · {_or_model_p.split('/')[-1]}"
+            # ── [NSM Router Bridge] سجّل النتيجة الحقيقية ──────────────────
+            if _NSM_BRIDGE_OK and _nsm_bridge:
+                _nsm_bridge.record_result(
+                    _nsm_bridge.NODE_OPENROUTER,
+                    _or_success,
+                    (_time_mod.time() - _t0_route) * 1000,
+                )
             _record_chat_episode(text.strip(), response, source="chat_openrouter")
             st.session_state.nsm_messages.append(("nsm", response, ctx_tag, src_badge, datetime.now().strftime("%H:%M")))
             if _AUTOTUNE_OK:
@@ -6515,32 +6724,34 @@ def render_chat():
             st.rerun()
             return
 
-        # ── Streaming عبر NSM Agent مباشرة إذا كان متاحاً ──
-        try:
-            from ai.nsm_agent_core import NSMAgent as _AgentCls
-            _agent = getattr(st.session_state, "_nsm_agent_instance", None)
-            if _agent is None:
-                _agent = _AgentCls()
-                st.session_state._nsm_agent_instance = _agent
-            _agent.available = _agent._check_available()
-        except Exception:
-            _agent = None
-
-        if _agent and _agent.available:
-            # ── Streaming: يظهر الرد حرفاً بحرف ──
+        elif _selected_node == (_nsm_bridge.NODE_AGENT if _nsm_bridge else "nsm:agent") and _agent and _agent.available:
+            # ── مسار NSM Agent — Streaming ──────────────────────────────────
+            _agent_success = False
             with st.chat_message("assistant", avatar="🧠"):
                 placeholder = st.empty()
                 full_response = ""
-                for chunk in _agent.run_stream(text.strip()):
-                    full_response += chunk
-                    placeholder.markdown(full_response + "▌")
-                placeholder.markdown(full_response)
+                try:
+                    for chunk in _agent.run_stream(text.strip()):
+                        full_response += chunk
+                        placeholder.markdown(full_response + "▌")
+                    placeholder.markdown(full_response)
+                    _agent_success = bool(full_response.strip())
+                except Exception:
+                    placeholder.markdown(full_response or "⚠️ خطأ في NSM Agent")
             response = full_response.replace("⏳ *أفكر...*\n\n", "", 1)
-            # ── مزامنة الشارة: bot.chat() لم يُستدعَ هنا، فنحدّث المصدر يدوياً ──
             if hasattr(bot, "_last_source"):
                 bot._last_source = "nsm_agent"
+            # ── [NSM Router Bridge] سجّل النتيجة الحقيقية ──────────────────
+            if _NSM_BRIDGE_OK and _nsm_bridge:
+                _nsm_bridge.record_result(
+                    _nsm_bridge.NODE_AGENT,
+                    _agent_success,
+                    (_time_mod.time() - _t0_route) * 1000,
+                )
+
         else:
-            # ── fallback: bot.chat العادي (غير متدفق) — نعرض مؤشر كتابة حي أثناء الانتظار ──
+            # ── مسار free_router (fallback) — bot.chat غير متدفق ────────────
+            _free_success = False
             with st.chat_message("assistant", avatar="🧠"):
                 _typing_ph = st.empty()
                 _typing_ph.markdown(
@@ -6550,8 +6761,19 @@ def render_chat():
                     </div>''',
                     unsafe_allow_html=True,
                 )
-                response = bot.chat(text.strip(), system_prompt=NSM_SYSTEM_PROMPT)
+                try:
+                    response = bot.chat(text.strip(), system_prompt=NSM_SYSTEM_PROMPT)
+                    _free_success = bool(response and response.strip())
+                except Exception:
+                    response = "⚠️ تعذّر الحصول على رد."
                 _typing_ph.empty()
+            # ── [NSM Router Bridge] سجّل النتيجة الحقيقية ──────────────────
+            if _NSM_BRIDGE_OK and _nsm_bridge:
+                _nsm_bridge.record_result(
+                    _nsm_bridge.NODE_FREE_ROUTER,
+                    _free_success,
+                    (_time_mod.time() - _t0_route) * 1000,
+                )
 
         ctx_tag   = bot.context_info()
         src_badge = (
