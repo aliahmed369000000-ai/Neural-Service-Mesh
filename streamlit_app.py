@@ -908,6 +908,24 @@ hr { border-color: var(--border) !important; }
     line-height: 1.3;
 
 }
+
+/* ── بطاقة زجاجية عامة قابلة لإعادة الاستخدام بأي تبويب ── */
+.glass-card {
+    background: var(--surface);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.2rem 1.3rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 4px 18px var(--shadow);
+}
+.tab-intro {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    line-height: 1.8;
+    direction: rtl;
+    margin-bottom: 1.1rem;
+}
 @media (max-width: 480px) {
     .metric-card { padding: 0.8rem 0.4rem; min-height: 80px; }
 }
@@ -1747,7 +1765,7 @@ def render_search():
             <div class="root-item">
                 <span class="badge {badge_color}">{rel_type}</span>
                 &nbsp;→&nbsp; <strong>{target}</strong>
-                &nbsp;&nbsp; <small style="color:#999">قوة: {weight:.2f}</small>
+                &nbsp;&nbsp; <small style="color:var(--text-muted)">قوة: {weight:.2f}</small>
             </div>
             """, unsafe_allow_html=True)
 
@@ -1989,7 +2007,7 @@ def render_qa():
     """تبويب الأسئلة والأجوبة القرآني — يعتمد على CKG والآيات فقط."""
     st.markdown('<div class="section-header">❓ الأسئلة والأجوبة القرآني</div>', unsafe_allow_html=True)
     st.markdown(
-        '<p style="color:#999">اسأل سؤالاً بالعربية، وسيحلل النظام السؤال '
+        '<p style="color:var(--text-muted)">اسأل سؤالاً بالعربية، وسيحلل النظام السؤال '
         'ويبحث في 173 مفهوماً و2149 علاقة دلالية و6236 آية للإجابة.</p>',
         unsafe_allow_html=True,
     )
@@ -2195,7 +2213,7 @@ def render_higgsfield():
     st.markdown("""
     <div style="direction:rtl; text-align:right">
         <h2 style="margin-bottom:0.25rem">🎬 Higgsfield Explainer</h2>
-        <p style="color:#aaa; font-size:0.95rem; margin-top:0">
+        <p style="color:var(--text-muted); font-size:0.95rem; margin-top:0">
             أنشئ فيديو وثائقياً من أي موضوع — حتى 10 دقائق —
             بالاستعانة بـ <strong>Gemini Omni Flash</strong> للبحث
             و<strong>NSM Agent Fable 5</strong> للسرد
@@ -2253,7 +2271,7 @@ def render_higgsfield():
             <li><strong>🎬 Higgsfield API</strong> — يُولّد مقطع فيديو قصير
                 (3-8 ثوانٍ) لكل مشهد. <em>يتطلب HIGGSFIELD_API_KEY</em></li>
         </ol>
-        <p style="color:#888">بدون مفتاح Higgsfield تحصل على السيناريو الكامل
+        <p style="color:var(--text-muted)">بدون مفتاح Higgsfield تحصل على السيناريو الكامل
         جاهزاً للنسخ إلى أي أداة توليد فيديو خارجية.</p>
         </div>
         """, unsafe_allow_html=True)
@@ -2286,7 +2304,7 @@ def render_higgsfield():
     def _prog(msg: str, pct: float):
         progress_bar.progress(int(min(pct, 100)), text=msg)
         status_text.markdown(
-            f'<p style="color:#aaa; direction:rtl">{msg}</p>',
+            f'<p style="color:var(--text-muted); direction:rtl">{msg}</p>',
             unsafe_allow_html=True,
         )
 
@@ -2387,11 +2405,11 @@ def _render_hf_result(result):
                 <p style="margin-top:0.75rem">
                     <strong>🔊 السرد الصوتي:</strong><br>{scene.narration}
                 </p>
-                <p style="color:#aaa; font-size:0.9rem">
+                <p style="color:var(--text-muted); font-size:0.9rem">
                     <strong>🎥 التوجيه المرئي:</strong> {scene.visual_notes or "—"}
                 </p>
                 <details>
-                    <summary style="color:#888; cursor:pointer; font-size:0.85rem">
+                    <summary style="color:var(--text-muted); cursor:pointer; font-size:0.85rem">
                         🎬 Higgsfield Video Prompt (إنجليزي)
                     </summary>
                     <pre style="background:#1e1e1e; padding:0.5rem; border-radius:6px;
@@ -2433,7 +2451,7 @@ def _render_hf_result(result):
     st.markdown(
         '<div style="direction:rtl; text-align:right">'
         '<h4 style="margin-bottom:0.3rem">📤 تصدير ومشاركة الوثائقي</h4>'
-        '<p style="color:#aaa; font-size:0.85rem; margin-top:0">'
+        '<p style="color:var(--text-muted); font-size:0.85rem; margin-top:0">'
         'يجمّع مقاطع كل المشاهد المكتملة (من Higgsfield API) في فيديو واحد متسلسل، '
         'ثم يتيح رفعه مباشرة على يوتيوب أو تيك توك.'
         '</p></div>',
@@ -2637,7 +2655,7 @@ def render_memory():
                 <span class="badge badge-purple" style="margin-right:8px">{cluster}</span>
                 <span class="badge badge-blue">تكرار: {freq}</span>
                 <span class="badge badge-amber">قوة: {strength:.2f}</span>
-                <br><small style="color:#888">المصادر: {', '.join(sources[:3]) if sources else 'غير محددة'}</small>
+                <br><small style="color:var(--text-muted)">المصادر: {', '.join(sources[:3]) if sources else 'غير محددة'}</small>
             </div>
             """, unsafe_allow_html=True)
     else:
@@ -2670,7 +2688,7 @@ def render_memory():
         st.markdown("")
         st.markdown('<div class="section-header">📖 ملامح السور الموضوعية</div>', unsafe_allow_html=True)
         st.markdown(
-            f'<p style="color:#999">تم بناء ملامح موضوعية لـ {len(surah_profiles)} سورة '
+            f'<p style="color:var(--text-muted)">تم بناء ملامح موضوعية لـ {len(surah_profiles)} سورة '
             f'بناءً على المفاهيم الأكثر ظهوراً في كل سورة.</p>',
             unsafe_allow_html=True,
         )
@@ -2732,7 +2750,7 @@ def render_memory():
             <div class="root-item">
                 <strong>{ep['question']}</strong>
                 <span class="badge badge-amber">ثقة: {ep['confidence']:.0%}</span>
-                <br><small style="color:#888">{ts} UTC</small>
+                <br><small style="color:var(--text-muted)">{ts} UTC</small>
             </div>
             """, unsafe_allow_html=True)
 
@@ -2740,7 +2758,7 @@ def render_memory():
         st.markdown("")
         st.markdown('<div class="section-header">🧬 توحيد الذاكرة (Consolidation)</div>', unsafe_allow_html=True)
         st.markdown(
-            '<p style="color:#999">يستخرج هذا الإجراء أزواج المفاهيم المتكررة في الأسئلة السابقة، '
+            '<p style="color:var(--text-muted)">يستخرج هذا الإجراء أزواج المفاهيم المتكررة في الأسئلة السابقة، '
             'ويولّد منها قواعد دلالية، ويضيفها كعلاقات جديدة في الذاكرة الدلالية (CKG) '
             'دون حذف أو تعديل أي علاقة موجودة.</p>',
             unsafe_allow_html=True,
@@ -2818,7 +2836,7 @@ def render_memory():
                 <div class="root-item">
                     <span class="badge badge-blue">👤 {_t['user'][:200]}</span><br>
                     <span class="badge badge-purple" style="margin-top:4px">🧠 {_t['bot'][:300]}</span>
-                    <br><small style="color:#888">{_ts_str} · {_t.get('topic') or 'بدون موضوع'}</small>
+                    <br><small style="color:var(--text-muted)">{_ts_str} · {_t.get('topic') or 'بدون موضوع'}</small>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -2919,7 +2937,7 @@ def render_health():
                     border-radius: 8px; border: 1px solid {'#bbf7d0' if ok else '#fecaca'};">
             <span style="font-size:1.2rem">{icon}</span>
             &nbsp;<strong>{name}</strong>
-            &nbsp;&nbsp;<small style="color:#666">{detail}</small>
+            &nbsp;&nbsp;<small style="color:var(--text-muted)">{detail}</small>
         </div>
         """, unsafe_allow_html=True)
 
@@ -2944,7 +2962,7 @@ def render_health():
                             padding:0.8rem;text-align:center;direction:ltr;color:#1e293b">
                     <div style="font-size:1.3rem">{label}</div>
                     <code style="font-size:0.72rem;color:var(--gold)">{model_id}</code>
-                    <div style="font-size:0.78rem;color:#555;margin-top:0.4rem;direction:rtl">{desc}</div>
+                    <div style="font-size:0.78rem;color:var(--text-muted);margin-top:0.4rem;direction:rtl">{desc}</div>
                 </div>
                 """, unsafe_allow_html=True)
         st.caption("المصدر: Claude.ai System Prompt (That.md) — محدَّث 2026")
@@ -3674,7 +3692,7 @@ def main():
     # ── تذييل الصفحة ─────────────────────────────────────────────────────
     st.markdown("---")
     st.markdown("""
-    <div style="text-align:center; color:#999; font-size:0.8rem; direction:rtl">
+    <div style="text-align:center; color:var(--text-muted); font-size:0.8rem; direction:rtl">
         Neural Service Mesh · نظام معرفي عربي ذاتي التعلم · مبني بـ Python & Streamlit
     </div>
     """, unsafe_allow_html=True)
@@ -3921,7 +3939,7 @@ def render_product_info():
             st.markdown(f"""
             <div class="root-item">
                 <strong>{icon} {title}</strong>
-                <br><small style="color:#aaa">{desc}</small>
+                <br><small style="color:var(--text-muted)">{desc}</small>
             </div>
             """, unsafe_allow_html=True)
 
@@ -4052,10 +4070,10 @@ def render_ultraplinian():
         if successes:
             winner = successes[0]
             st.markdown(
-                f"""<div style="border:2px solid #a855f7;border-radius:10px;padding:16px;
-                background:#a855f710;margin-bottom:16px;">
-                🏆 <b style="color:#a855f7;font-size:1.1rem;"> {winner.model.split('/')[-1]}</b>
-                <span style="color:#999;font-size:.75rem;"> — نقاط مركّبة: {winner.compound_score}</span>
+                f"""<div style="border:2px solid var(--gold);border-radius:10px;padding:16px;
+                background:var(--gold-soft);margin-bottom:16px;">
+                🏆 <b style="color:var(--gold);font-size:1.1rem;"> {winner.model.split('/')[-1]}</b>
+                <span style="color:var(--text-muted);font-size:.75rem;"> — نقاط مركّبة: {winner.compound_score}</span>
                 </div>""",
                 unsafe_allow_html=True,
             )
@@ -4094,7 +4112,7 @@ def render_fable():
         return
 
     st.markdown(
-        '<p style="color:#999">اختر وضع القصة والراوي، وابدأ حكاية تفاعلية '
+        '<p style="color:var(--text-muted)">اختر وضع القصة والراوي، وابدأ حكاية تفاعلية '
         'تتطور حسب اختياراتك، أو اطلب قصيدة على أحد بحور الشعر العربي.</p>',
         unsafe_allow_html=True,
     )
@@ -4219,7 +4237,7 @@ def render_fable():
     # ══════════════════ وثائقي (سيناريو Explainer) ══════════════════
     with explainer_tab:
         st.markdown(
-            '<p style="color:#999">يولّد سيناريو وثائقياً مُقسّماً إلى مشاهد '
+            '<p style="color:var(--text-muted)">يولّد سيناريو وثائقياً مُقسّماً إلى مشاهد '
             '(نص السرد + توجيه مرئي مقترح لكل مشهد) — فكرة مستوحاة من أدوات '
             'مثل Higgsfield Explainer. <strong>ملاحظة:</strong> NSM لا يملك '
             'نموذج توليد فيديو فعلي، لذا الناتج هنا نص سيناريو فقط جاهز '
@@ -4252,7 +4270,7 @@ def render_fable():
                     <span class="badge badge-purple">المشهد {seg.index}</span>
                     <span class="badge badge-amber">~{seg.est_seconds} ثانية</span>
                     <p style="margin-top:0.5rem"><strong>السرد:</strong> {seg.narration}</p>
-                    <p style="color:#999"><strong>🎥 اللقطة المقترحة:</strong> {seg.visual_notes}</p>
+                    <p style="color:var(--text-muted)"><strong>🎥 اللقطة المقترحة:</strong> {seg.visual_notes}</p>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -4262,7 +4280,7 @@ def render_fable():
     # ══════════════════ ⚡ Shorts (فيديو قصير عمودي) ══════════════════
     with shorts_tab:
         st.markdown(
-            '<p style="color:#999">يحوّل نصاً أو موضوعاً إلى فيديو '
+            '<p style="color:var(--text-muted)">يحوّل نصاً أو موضوعاً إلى فيديو '
             'قصير عمودي فعلي (~دقيقة واحدة) بسرد صوتي ورسوم متحركة نصية '
             '(Kinetic Typography) — فكرة مستوحاة من ميزة NotebookLM: Shorts، '
             'مع رندر mp4 حقيقي داخل المشروع (بدون أدوات خارجية).</p>',
@@ -4298,7 +4316,7 @@ def render_fable():
                     <span class="badge badge-purple">لقطة {seg.index}</span>
                     <span class="badge badge-amber">~{seg.est_seconds} ثانية</span>
                     <p style="margin-top:0.5rem"><strong>السرد:</strong> {seg.narration}</p>
-                    <p style="color:#999"><strong>🎞️ رسم متحرك مقترح:</strong> {seg.visual_notes}</p>
+                    <p style="color:var(--text-muted)"><strong>🎞️ رسم متحرك مقترح:</strong> {seg.visual_notes}</p>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -4436,7 +4454,7 @@ def render_fable():
     # ══════════════════ مكتبة القصص المحفوظة ══════════════════
     with library_tab:
         st.markdown(
-            '<p style="color:#999">كل قصة تفاعلية تُحفظ تلقائياً في قاعدة بيانات SQLite محلية '
+            '<p style="color:var(--text-muted)">كل قصة تفاعلية تُحفظ تلقائياً في قاعدة بيانات SQLite محلية '
             '(<code>memory/fable.db</code>) — هذه الواجهة تستعرضها.</p>',
             unsafe_allow_html=True,
         )
@@ -4476,7 +4494,7 @@ def render_fable():
                 with st.expander(header):
                     st.caption(f"🆔 {session_id} · عدد الفصول: {len(narrations)}")
                     st.markdown(
-                        f"<p style='direction:rtl; text-align:right; color:#bbb'>{preview}</p>",
+                        f"<p style='direction:rtl; text-align:right; color:var(--text-muted)'>{preview}</p>",
                         unsafe_allow_html=True,
                     )
 
@@ -4539,12 +4557,13 @@ def render_translate():
 
     st.markdown('<div class="section-header">🌐 ترجمة فورية</div>', unsafe_allow_html=True)
     st.markdown(
-        '<p style="color:#999">ترجمة نص باستخدام نفس نماذج NSM اللغوية '
+        '<p class="tab-intro">ترجمة نص باستخدام نفس نماذج NSM اللغوية '
         '(Anthropic ← Cloudflare ← Gemini ← OpenRouter ← Groq) — بدون حاجة '
         'لأي مفتاح Google Translate أو DeepL.</p>',
         unsafe_allow_html=True,
     )
 
+    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     with c1:
         src_label = st.selectbox("من لغة:", list(_TRANSLATE_LANGS.keys()), index=0, key="tr_src_lang")
@@ -4558,7 +4577,10 @@ def render_translate():
         key="tr_source_text",
     )
 
-    if st.button("🌐 ترجم الآن", type="primary", key="tr_translate_btn") and source_text.strip():
+    translate_clicked = st.button("🌐 ترجم الآن", type="primary", key="tr_translate_btn", use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    if translate_clicked and source_text.strip():
         src = _TRANSLATE_LANGS[src_label]
         tgt = _TRANSLATE_LANGS[tgt_label]
 
@@ -5570,7 +5592,7 @@ def render_system_core():
     st.markdown('<div class="section-header">⚙️ النظام الداخلي — Neural Core & Intelligence</div>',
                 unsafe_allow_html=True)
     st.markdown(
-        '<p style="color:#999;direction:rtl">هذا التبويب يعرض الوحدات الداخلية للنظام: '
+        '<p style="color:var(--text-muted);direction:rtl">هذا التبويب يعرض الوحدات الداخلية للنظام: '
         'النواة العصبية، الوعي الذاتي، مخطط الأهداف، والمفكر الفوقي.</p>',
         unsafe_allow_html=True,
     )
@@ -5802,7 +5824,7 @@ def render_system_core():
         st.markdown('<div class="section-header">🎯 مخطط الأهداف (Goal Planner)</div>',
                     unsafe_allow_html=True)
         st.markdown(
-            '<p style="color:#999">حدّد هدفاً بالعربية وسيبني النظام خطة تنفيذ تلقائية.</p>',
+            '<p style="color:var(--text-muted)">حدّد هدفاً بالعربية وسيبني النظام خطة تنفيذ تلقائية.</p>',
             unsafe_allow_html=True,
         )
 
@@ -5956,7 +5978,7 @@ def render_system_core():
         st.markdown('<div class="section-header">🌐 بحث الويب الحقيقي (DuckDuckGo)</div>',
                     unsafe_allow_html=True)
         st.markdown(
-            '<p style="color:#999">بحث حقيقي في الإنترنت بدون مفتاح API — '
+            '<p style="color:var(--text-muted)">بحث حقيقي في الإنترنت بدون مفتاح API — '
             'يستخدم DuckDuckGo ويُرجع نتائج فعلية.</p>',
             unsafe_allow_html=True,
         )
@@ -6007,10 +6029,10 @@ def render_agent_orchestrator():
     st.markdown("""
     <div style="text-align:center;padding:1rem 0 0.5rem">
         <span style="font-size:2rem">🤝</span>
-        <div style="font-size:1.5rem;font-weight:900;color:#38bdf8">
+        <div style="font-size:1.5rem;font-weight:900;color:var(--gold)">
             منسّق الوكلاء
         </div>
-        <div style="color:#999;font-size:0.85rem;direction:rtl">
+        <div style="color:var(--text-muted);font-size:0.85rem;direction:rtl">
             وزّع مهمتك تلقائياً على وكلاء "🤖 وكلاء AI" المتخصصين، ثم احصل على إجابة موحّدة
         </div>
     </div>
@@ -6021,7 +6043,7 @@ def render_agent_orchestrator():
         return
 
     st.markdown(
-        '<p style="color:#999;direction:rtl">اكتب مهمة أو سؤالاً مركّباً، وسيُحدَّد تلقائياً '
+        '<p style="color:var(--text-muted);direction:rtl">اكتب مهمة أو سؤالاً مركّباً، وسيُحدَّد تلقائياً '
         'أنسب وكيل/وكلاء من تبويب "🤖 وكلاء AI" للإجابة عليه — بنفس ذاكرة محادثتهم الفعلية. '
         'يمكنك أيضاً اختيار الوكلاء يدوياً.</p>',
         unsafe_allow_html=True,
@@ -6138,10 +6160,10 @@ def render_swarm_studio():
     st.markdown("""
     <div style="text-align:center;padding:1rem 0 0.5rem">
         <span style="font-size:2rem">🐝</span>
-        <div style="font-size:1.5rem;font-weight:900;color:#38bdf8">
+        <div style="font-size:1.5rem;font-weight:900;color:var(--gold)">
             السرب الذكي — Multi-Agent Swarm
         </div>
-        <div style="color:#999;font-size:0.85rem;direction:rtl">
+        <div style="color:var(--text-muted);font-size:0.85rem;direction:rtl">
             هدف واحد ← تفكيك تلقائي ← تنفيذ فعلي متوازٍ عبر عدة وكلاء متخصصين
         </div>
     </div>
@@ -6152,7 +6174,7 @@ def render_swarm_studio():
         return
 
     st.markdown(
-        '<p style="color:#999;direction:rtl">اكتب هدفاً — بسيطاً أو معقداً — وسيُفكِّكه '
+        '<p style="color:var(--text-muted);direction:rtl">اكتب هدفاً — بسيطاً أو معقداً — وسيُفكِّكه '
         '<b>PlanningAgent</b> حقيقياً إلى مهام فرعية، ثم يوزّعها <b>SwarmCoordinator</b> على '
         'الوكلاء المناسبين وينفذها فعلياً (وليس محاكاة) عبر نفس محرك المحادثة.</p>',
         unsafe_allow_html=True,
