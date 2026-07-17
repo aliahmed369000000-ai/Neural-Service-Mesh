@@ -2182,9 +2182,13 @@ def render_quran():
 def render_qa():
     """تبويب الأسئلة والأجوبة القرآني — يعتمد على CKG والآيات فقط."""
     st.markdown('<div class="section-header">❓ الأسئلة والأجوبة القرآني</div>', unsafe_allow_html=True)
+    _qa_ckg = load_ckg()
+    _qa_concepts_n = len(_qa_ckg.get("concepts", {}))
+    _qa_relations_n = len(_qa_ckg.get("relations", {}))
+    _qa_ayat_n = load_quran_index().get("total_ayat", 6236)
     st.markdown(
-        '<p style="color:var(--text-muted)">اسأل سؤالاً بالعربية، وسيحلل النظام السؤال '
-        'ويبحث في 173 مفهوماً و2149 علاقة دلالية و6236 آية للإجابة.</p>',
+        f'<p style="color:var(--text-muted)">اسأل سؤالاً بالعربية، وسيحلل النظام السؤال '
+        f'ويبحث في {_qa_concepts_n:,} مفهوماً و{_qa_relations_n:,} علاقة دلالية و{_qa_ayat_n:,} آية للإجابة.</p>',
         unsafe_allow_html=True,
     )
 
