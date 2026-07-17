@@ -1075,12 +1075,13 @@ hr { border-color: var(--border) !important; }
     backdrop-filter: blur(16px);
     border: 1px solid var(--border);
     border-radius: var(--radius);
+    clip-path: polygon(0 16px, 16px 0, 100% 0, 100% 100%, 0 100%);
     padding: 1.3rem 1.2rem;
-    text-align: center;
+    text-align: right;
+    direction: rtl;
     height: 100%;
     box-shadow: 0 4px 18px var(--shadow);
     transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-    direction: rtl;
     overflow: hidden;
     cursor: pointer;
     opacity: 0;
@@ -1092,9 +1093,16 @@ hr { border-color: var(--border) !important; }
 .feature-card:nth-of-type(4) { animation-delay: .44s; }
 .feature-card::before {
     content: "";
-    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    position: absolute; top: 0; left: 0; right: 0; height: 3px;
     background: var(--card-accent, var(--accent-grad));
     opacity: 0; transition: opacity .2s ease;
+}
+.feature-card::after {
+    content: "";
+    position: absolute; top: 0; left: 0;
+    width: 26px; height: 26px;
+    background: var(--card-accent, var(--accent-grad));
+    clip-path: polygon(0 0, 100% 0, 0 100%);
 }
 .feature-card:hover {
     transform: translateY(-6px);
@@ -1111,12 +1119,13 @@ hr { border-color: var(--border) !important; }
 .feature-card:nth-of-type(4n+4) { --card-accent: linear-gradient(135deg, var(--gold), var(--rose)); }
 .feature-icon {
     width: 46px; height: 46px;
-    margin: 0 auto 0.7rem auto;
-    border-radius: 12px;
+    margin: 0 0 0.7rem auto;
+    border-radius: 10px;
     display: flex; align-items: center; justify-content: center;
     font-size: 1.4rem;
     background: var(--card-accent, var(--accent-grad));
     box-shadow: 0 4px 14px var(--gold-soft);
+    transform: rotate(-6deg);
     transition: transform .25s cubic-bezier(.34,1.56,.64,1);
 }
 .feature-nav-hint {
