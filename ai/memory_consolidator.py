@@ -498,7 +498,13 @@ class MemoryConsolidator:
                     law     = law.description,
                     confidence = law.confidence,
                 )
-            elif hasattr(self._episodic_memory, "semantic_rules"):
+            elif isinstance(getattr(self._episodic_memory, "semantic_rules", None), dict):
+                # فقط لو كانت semantic_rules فعلاً قاموساً (بعض التطبيقات
+                # القديمة). لو كانت List[SemanticRule] (مثل
+                # EpisodicMemoryEngine الفعلية) فلا يوجد شكل توافقي آمن —
+                # القانون يبقى محفوظاً داخل MemoryConsolidator نفسه
+                # (get_consolidated_laws) بدل محاولة دفع غير متوافق قد يكسر
+                # بنية الذاكرة الدلالية للمحرك الآخر.
                 self._episodic_memory.semantic_rules[law.pattern_key] = {
                     "description": law.description,
                     "confidence":  law.confidence,
