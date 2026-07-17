@@ -182,6 +182,60 @@ def get_learning_report() -> dict:
         return {"error": str(exc)}
 
 
+def select_node_with_semantic(
+    query: str,
+    available_nodes: List[str],
+    sem_category: str = "general",
+    sem_confidence: float = 0.3,
+) -> str:
+    """
+    اختر أفضل عقدة بالجمع بين:
+      - connection_score التاريخي (ScoringEngine)
+      - التحيُّز الدلالي (SemanticRouter)
+    """
+    _init()
+    if not available_nodes:
+        return NODE_FREE_ROUTER
+
+    # استيراد SemanticRouter ديناميكياً لتجنب الدائرة
+    try:
+        from ai.semantic_router import combined_score as _sem_combined
+        _has_sem = True
+    except ImportError:
+        _has_sem = False
+
+    best_node  = available_nodes[0]
+    best_score = -1.0
+
+    for node in available_nodes:
+        hist = _scoring.get_score(NSM_INPUT_NODE, node).connection_score if _scoring else 50.0
+        if _has_sem:
+            score = _sem_combined(sem_category, node, hist, sem_confidence)
+        else:
+            score = hist
+        logger.debug(f"NSM Bridge (semantic): {node} hist={hist:.1f} combined={score:.1f}")
+        if score > best_score:
+            best_score = score
+            best_node  = node
+
+    logger.info(
+        f"NSM Bridge: اختار «{best_node}» "
+        f"(مركَّب={best_score:.1f}, فئة={sem_category}, ثقة={sem_confidence:.2f})"
+    )
+    return best_node
+
+
+def select_next_node(available_nodes: List[str], excluded: List[str]) -> str:
+    """
+    اختر أفضل عقدة من المتاحة مع استبعاد الفاشلة (للـ Failover).
+    """
+    _init()
+    remaining = [n for n in available_nodes if n not in excluded]
+    if not remaining:
+        return available_nodes[-1] if available_nodes else NODE_FREE_ROUTER
+    return select_node(remaining)
+
+
 def get_node_scores_for_display() -> List[dict]:
     """
     درجات العقد الثلاث بصيغة مناسبة للعرض في الواجهة.
