@@ -610,6 +610,8 @@ h1, h2, h3, h4, h5, h6 {
     padding: 5px;
     backdrop-filter: blur(16px);
     flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
 }
 .stTabs [data-baseweb="tab"] {
     font-family: 'IBM Plex Sans Arabic', sans-serif;
@@ -624,15 +626,12 @@ h1, h2, h3, h4, h5, h6 {
     white-space: nowrap;
     flex: 0 0 auto;
 }
-.stTabs [data-baseweb="tab"] p,
-.stTabs [data-baseweb="tab"] span,
-.stTabs [data-baseweb="tab"] div {
+.stTabs [data-baseweb="tab"] *,
+[data-testid="stTab"] * {
     color: inherit !important;
     white-space: nowrap !important;
 }
-.stTabs [data-baseweb="tab"]:hover,
-.stTabs [data-baseweb="tab"]:hover p,
-.stTabs [data-baseweb="tab"]:hover span { opacity: 1; }
+.stTabs [data-baseweb="tab"]:hover { opacity: 1; }
 .stTabs [aria-selected="true"] {
     color: var(--bg) !important;
     background: var(--accent-grad) !important;
@@ -640,9 +639,7 @@ h1, h2, h3, h4, h5, h6 {
     font-weight: 700;
     opacity: 1;
 }
-.stTabs [aria-selected="true"] p,
-.stTabs [aria-selected="true"] span,
-.stTabs [aria-selected="true"] div {
+.stTabs [aria-selected="true"] * {
     color: var(--bg) !important;
 }
 
