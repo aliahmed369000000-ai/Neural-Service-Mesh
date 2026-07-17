@@ -238,6 +238,13 @@ from qa_episodic_memory import (  # noqa: E402
     consolidate_memory, get_semantic_rules,
 )
 
+# ── الذاكرة التراكمية لسجل التوجيه (SQLite عبر الجلسات) ───────────────────
+try:
+    from ai.route_log_store import append_entry as _rlog_append, get_recent as _rlog_get_recent, clear_all as _rlog_clear_all
+    _ROUTE_LOG_DB_OK = True
+except Exception:
+    _ROUTE_LOG_DB_OK = False
+
 # ── طبقة فحص أمان أولى (regex، بدون تكلفة API) ────────────────────────────
 try:
     from ai.harm_classifier import classify_prompt as _classify_harm, get_domain_label as _harm_label
@@ -3901,6 +3908,11 @@ def render_nsm_routing():
     st.markdown("#### 🔴 سجل التوجيه الحي")
 
     _rlog = st.session_state.get("nsm_route_log", [])
+    if not _rlog and _ROUTE_LOG_DB_OK:
+        # استرجاع الذاكرة التراكمية من SQLite عند عدم وجود سجل في الجلسة الحالية
+        _rlog = _rlog_get_recent(limit=100)
+        if _rlog:
+            st.session_state["nsm_route_log"] = _rlog
     if not _rlog:
         st.info("📋 سيظهر سجل التوجيه هنا فور إرسال أول رسالة في تبويب المحادثة.")
     else:
@@ -3981,6 +3993,8 @@ def render_nsm_routing():
 
         if st.button("🗑 مسح سجل التوجيه", key="clear_route_log"):
             st.session_state["nsm_route_log"] = []
+            if _ROUTE_LOG_DB_OK:
+                _rlog_clear_all()
             st.rerun()
 
     # ════════════════════════════════════════════════════════════════════════
@@ -6921,6 +6935,8 @@ def render_chat():
             _rlog.append(_route_entry)
             if len(_rlog) > 100:
                 st.session_state["nsm_route_log"] = _rlog[-100:]
+            if _ROUTE_LOG_DB_OK:
+                _rlog_append(_route_entry)
 
             if _attempt_success:
                 break   # نجاح — توقّف
