@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS route_log (
     success     INTEGER,
     attempt     INTEGER,
     failover    INTEGER,
+    quality_score REAL,
     created_at  TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_route_log_created ON route_log(created_at);
@@ -48,6 +49,13 @@ def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH), timeout=10)
     conn.executescript(_SCHEMA)
+    # ترحيل آمن: قواعد منشورة سابقاً قد لا تملك عمود quality_score
+    try:
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(route_log)")]
+        if "quality_score" not in cols:
+            conn.execute("ALTER TABLE route_log ADD COLUMN quality_score REAL")
+    except Exception:
+        pass
     return conn
 
 
@@ -60,8 +68,8 @@ def append_entry(entry: Dict[str, Any]) -> None:
                 conn.execute(
                     """INSERT INTO route_log
                        (ts, query, category, cat_icon, confidence, node,
-                        latency_ms, success, attempt, failover)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        latency_ms, success, attempt, failover, quality_score)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         entry.get("ts", ""),
                         entry.get("query", ""),
@@ -73,6 +81,7 @@ def append_entry(entry: Dict[str, Any]) -> None:
                         1 if entry.get("success") else 0,
                         int(entry.get("attempt", 1)),
                         1 if entry.get("failover") else 0,
+                        entry.get("quality_score"),
                     ),
                 )
                 # تقليم السجل إذا تجاوز السقف
@@ -95,7 +104,7 @@ def get_recent(limit: int = 100) -> List[Dict[str, Any]]:
             conn = _connect()
             cur = conn.execute(
                 """SELECT ts, query, category, cat_icon, confidence, node,
-                          latency_ms, success, attempt, failover
+                          latency_ms, success, attempt, failover, quality_score
                    FROM route_log ORDER BY id DESC LIMIT ?""",
                 (limit,),
             )
@@ -118,6 +127,7 @@ def get_recent(limit: int = 100) -> List[Dict[str, Any]]:
             "success": bool(r[7]),
             "attempt": r[8],
             "failover": bool(r[9]),
+            "quality_score": r[10],
         })
     return result
 
