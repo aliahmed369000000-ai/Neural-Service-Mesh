@@ -4244,8 +4244,10 @@ def render_fable():
                 placeholder="مثال: قصة عن تاجر يبحث عن كنز مفقود في الصحراء",
             )
             if st.button("✨ ابدأ القصة", type="primary"):
-                with st.spinner("يُنسج الفصل الأول..."):
-                    chapter = engine.start_story(mode=mode, character=character, seed_idea=seed)
+                _story_skel_ph = st.empty()
+                with _story_skel_ph.container():
+                    _skeleton(lines=6)
+                chapter = engine.start_story(mode=mode, character=character, seed_idea=seed)
                 st.session_state.fable_chapter = chapter
                 st.rerun()
         else:
@@ -4263,6 +4265,7 @@ def render_fable():
                 {cur.text}
             </div>
             """, unsafe_allow_html=True)
+            _copy_button(cur.text, key="fable_chapter")
 
             if cur.error:
                 st.caption(f"⚠️ ملاحظة تقنية: {cur.error}")
@@ -4280,8 +4283,10 @@ def render_fable():
                 chosen = custom_choice.strip()
 
             if chosen:
-                with st.spinner("يُتابع نسج الأحداث..."):
-                    st.session_state.fable_chapter = engine.continue_story(cur.session_id, chosen)
+                _story_cont_skel_ph = st.empty()
+                with _story_cont_skel_ph.container():
+                    _skeleton(lines=6)
+                st.session_state.fable_chapter = engine.continue_story(cur.session_id, chosen)
                 st.rerun()
 
             st.markdown("---")
@@ -4313,14 +4318,19 @@ def render_fable():
             format_func=lambda m: f"{m} — {ARABIC_METERS[m]['وصف']}",
         )
         if st.button("🪶 أنشئ القصيدة", type="primary") and topic.strip():
-            with st.spinner("تُنظَم الأبيات..."):
-                poem = engine.generate_poem(topic.strip(), meter=meter)
+            _poem_skel_ph = st.empty()
+            with _poem_skel_ph.container():
+                _skeleton(lines=5)
+            poem = engine.generate_poem(topic.strip(), meter=meter)
+            _poem_skel_ph.empty()
+            st.toast("✅ القصيدة جاهزة", icon="🪶")
             st.markdown(f"""
             <div class="root-item" style="font-size:1.1rem; line-height:2.1; text-align:center; direction:rtl">
                 {poem.text}
             </div>
             """, unsafe_allow_html=True)
             st.caption(f"المزوّد: {poem.provider}")
+            _copy_button(poem.text, key="fable_poem")
 
     # ══════════════════ وثائقي (سيناريو Explainer) ══════════════════
     with explainer_tab:
@@ -5610,15 +5620,23 @@ def _render_agent_page(category):
             f'{category.emoji}<br><br>ابدأ محادثتك مع وكيل {category.title}</div>'
         )
     else:
-        for role, text, badge in st.session_state[msg_key]:
+        for _mi, (role, text, badge) in enumerate(st.session_state[msg_key]):
             safe = _html.escape(text).replace("\n", "<br>")
             if role == "user":
                 html_out += f'<div class="agent-user"><div class="bbl">{safe}</div></div>'
             else:
                 badge_html = f'<div class="agent-badge">{badge}</div>' if badge else ""
+                bbl_id = f"{box_id}-msg-{_mi}"
                 html_out += (
                     f'<div class="agent-bot"><span style="font-size:1.3rem;margin-top:3px">'
-                    f'{category.emoji}</span><div class="bbl">{badge_html}{safe}</div></div>'
+                    f'{category.emoji}</span><div class="bbl">{badge_html}'
+                    f'<div id="{bbl_id}">{safe}</div>'
+                    f'<button class="copy-btn" title="نسخ الرد" style="margin-top:0.4rem"'
+                    f' onclick="var t=document.getElementById(\'{bbl_id}\').innerText;'
+                    f"navigator.clipboard.writeText(t).then(function(){{"
+                    f"var b=event.currentTarget;var old=b.textContent;b.textContent='✓ تم النسخ';"
+                    f"setTimeout(function(){{b.textContent=old;}},1300);}});\">📋 نسخ</button>"
+                    f'</div></div>'
                 )
     html_out += "</div>"
     st.markdown(html_out, unsafe_allow_html=True)
@@ -5666,7 +5684,8 @@ def _render_agent_page(category):
             st.rerun()
             return
 
-        response = bot.chat(text.strip(), force_web=web_toggle, source="hub")
+        with st.spinner(f"⟳ {category.title} يفكّر..."):
+            response = bot.chat(text.strip(), force_web=web_toggle, source="hub")
         st.session_state[msg_key].append(("bot", response, bot.last_provider_badge()))
         st.session_state[cnt_key] += 1
         st.rerun()
@@ -6214,32 +6233,43 @@ def render_agent_orchestrator():
                 else:
                     agent_input = task.strip()
 
-                with st.spinner(f"⟳ {cat.title} يعمل على المهمة..."):
-                    try:
-                        resp = bot.chat(agent_input, source="orchestrator")
-                    except Exception as _orch_err:
-                        resp = f"⚠️ خطأ: {_orch_err}"
+                _orch_skel_ph = st.empty()
+                with _orch_skel_ph.container():
+                    st.caption(f"⟳ {cat.title} يعمل على المهمة...")
+                    _skeleton(lines=3)
+                try:
+                    resp = bot.chat(agent_input, source="orchestrator")
+                except Exception as _orch_err:
+                    resp = f"⚠️ خطأ: {_orch_err}"
+                _orch_skel_ph.empty()
                 responses[key] = resp
                 with st.expander(f"{cat.emoji} {cat.title}", expanded=not synth):
                     st.markdown(resp)
+                    _copy_button(resp, key=f"orch_{key}")
 
             if synth and responses:
                 combined_input = "\n\n".join(
                     f"[{AGENT_CATEGORIES[k].title}]\n{v}" for k, v in responses.items()
                 )
-                with st.spinner("⟳ يجري توليف الإجابة النهائية..."):
-                    try:
-                        from ai.llm_fallback import LLMFallback
-                        _llm = LLMFallback()
-                        final = _llm.chat(messages=[
-                            {"role": "system", "content": COORDINATOR_SYSTEM_PROMPT},
-                            {"role": "user", "content":
-                                f"السؤال الأصلي: {task.strip()}\n\nردود الوكلاء:\n{combined_input}"},
-                        ])
-                    except Exception as _synth_err:
-                        final = f"⚠️ تعذّر التوليف: {_synth_err}"
+                _synth_skel_ph = st.empty()
+                with _synth_skel_ph.container():
+                    st.caption("⟳ يجري توليف الإجابة النهائية...")
+                    _skeleton(lines=4)
+                try:
+                    from ai.llm_fallback import LLMFallback
+                    _llm = LLMFallback()
+                    final = _llm.chat(messages=[
+                        {"role": "system", "content": COORDINATOR_SYSTEM_PROMPT},
+                        {"role": "user", "content":
+                            f"السؤال الأصلي: {task.strip()}\n\nردود الوكلاء:\n{combined_input}"},
+                    ])
+                except Exception as _synth_err:
+                    final = f"⚠️ تعذّر التوليف: {_synth_err}"
+                _synth_skel_ph.empty()
+                st.toast("✅ تم توليف الإجابة الموحّدة", icon="✅")
                 st.markdown('<div class="section-header">✅ الإجابة الموحّدة</div>', unsafe_allow_html=True)
                 st.markdown(final)
+                _copy_button(final, key="orch_final")
 
 
 
@@ -6314,17 +6344,26 @@ def render_swarm_studio():
 
     if st.button("🚀 نفّذ عبر السرب", type="primary", key="swarm_run") and goal.strip():
         data = {"content": extra_context.strip()} if extra_context.strip() else {}
-        with st.spinner("⟳ السرب يعمل — تفكيك الهدف وتنفيذ المهام الفرعية..."):
-            result = coordinator.execute(goal.strip(), data=data, use_planner=use_planner)
+        _swarm_skeleton_ph = st.empty()
+        with _swarm_skeleton_ph.container():
+            st.caption("⟳ السرب يعمل — تفكيك الهدف وتنفيذ المهام الفرعية...")
+            _skeleton(kind="cards")
+            _skeleton(lines=4)
+        result = coordinator.execute(goal.strip(), data=data, use_planner=use_planner)
+        _swarm_skeleton_ph.empty()
 
         status_emoji = {"done": "✅", "partial": "🟡", "failed": "❌"}.get(result.status, "❔")
+        st.toast(
+            f"{status_emoji} السرب انتهى: {result.success_count}/{len(result.tasks)} مهمة نجحت",
+            icon=status_emoji,
+        )
         st.markdown(
             f'<div class="section-header">{status_emoji} حالة السرب: {result.status} '
             f"({result.success_count}/{len(result.tasks)} مهمة نجحت)</div>",
             unsafe_allow_html=True,
         )
 
-        for task in result.tasks:
+        for _ti, task in enumerate(result.tasks):
             icon = "✅" if task.status == "done" else ("❌" if task.status == "failed" else "⏳")
             with st.expander(
                 f"{icon} {task.sub_goal} — [{task.required_capability}] "
@@ -6334,6 +6373,7 @@ def render_swarm_studio():
                 st.caption(f"الوكيل: {task.assigned_agent_id or '—'}")
                 if task.result and task.result.get("result_text"):
                     st.markdown(task.result["result_text"])
+                    _copy_button(task.result["result_text"], key=f"swarm_task_{_ti}")
                 elif task.error:
                     st.warning(task.error)
                 else:
