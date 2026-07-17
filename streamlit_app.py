@@ -728,38 +728,82 @@ h1, h2, h3, h4, h5, h6 {
 
 hr { border-color: var(--border) !important; }
 
-/* ── عنوان الصفحة — مع توهّج توقيعي خلفه (عقدة الشبكة العصبية) ── */
+/* ── عنوان الصفحة — تصميم غير متماثل (نص + لوحة بصرية مائلة) ── */
 .hero-wrap {
     position: relative;
-    text-align: center;
-    padding: 1.4rem 0 0.3rem 0;
+    padding: 1.6rem 0 0.6rem 0;
     overflow: hidden;
 }
-.hero-wrap::before {
-    content: "";
+.hero-split {
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr;
+    gap: 1.8rem;
+    align-items: center;
+    position: relative;
+    z-index: 1;
+}
+.hero-split-text { text-align: right; direction: rtl; }
+.hero-split-visual {
+    position: relative;
+    min-height: 230px;
+}
+.hero-visual-panel {
     position: absolute;
-    top: -40px; left: 50%;
-    width: 380px; height: 220px;
-    transform: translateX(-50%);
-    background: radial-gradient(ellipse at center, var(--gold-soft) 0%, transparent 70%);
-    filter: blur(4px);
-    z-index: 0;
-    pointer-events: none;
+    inset: 6px;
+    border-radius: 22px;
+    clip-path: polygon(18% 0%, 100% 0%, 100% 100%, 0% 100%);
+    background: linear-gradient(150deg, var(--gold) 0%, var(--emerald) 100%);
+    background-image:
+        linear-gradient(150deg, var(--gold) 0%, var(--emerald) 100%),
+        url("data:image/svg+xml,__PATTERN_LIGHT__");
+    background-repeat: no-repeat, repeat;
+    box-shadow: 0 20px 50px -12px var(--shadow);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.hero-visual-icon {
+    font-size: clamp(3.5rem, 9vw, 5.5rem);
+    filter: drop-shadow(0 6px 16px rgba(0,0,0,0.25));
+}
+.hero-chip {
+    position: absolute;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--text);
+    backdrop-filter: blur(14px);
+    box-shadow: 0 10px 26px -8px var(--shadow);
+    z-index: 2;
+    direction: rtl;
+    white-space: nowrap;
+}
+.hero-chip--top { top: -10px; right: 8%; transform: rotate(-4deg); }
+.hero-chip--bottom { bottom: -10px; left: 4%; transform: rotate(3deg); }
+@media (max-width: 768px) {
+    .hero-split { grid-template-columns: 1fr; }
+    .hero-split-visual { min-height: 130px; order: -1; }
+    .hero-split-text { text-align: center; }
+    .hero-chip { display: none; }
 }
 .main-title {
     position: relative; z-index: 1;
     font-family: 'IBM Plex Sans Arabic', sans-serif;
-    font-size: clamp(1.6rem, 6vw, 2.4rem);
-    font-weight: 800;
+    font-size: clamp(1.9rem, 5.5vw, 3.1rem);
+    font-weight: 900;
     background: linear-gradient(100deg, var(--gold) 0%, var(--emerald) 45%, var(--gold) 90%);
     background-size: 220% auto;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
-    text-align: center;
+    text-align: right;
     padding: 0 0 0.3rem 0;
     direction: rtl;
     letter-spacing: -0.01em;
+    line-height: 1.15;
     animation: nsmTitleShimmer 6s ease-in-out infinite;
 }
 @keyframes nsmTitleShimmer {
@@ -773,21 +817,21 @@ hr { border-color: var(--border) !important; }
 
 .subtitle {
     position: relative; z-index: 1;
-    text-align: center;
+    text-align: right;
     color: var(--text-muted);
-    font-size: clamp(0.85rem, 3vw, 1rem);
+    font-size: clamp(0.85rem, 3vw, 1.05rem);
     margin-bottom: 0.4rem;
     direction: rtl;
-    font-weight: 500;
+    font-weight: 600;
 }
 
 .welcome-line {
     position: relative; z-index: 1;
-    text-align: center;
+    text-align: right;
     color: var(--text-muted);
     font-size: 0.92rem;
-    max-width: 620px;
-    margin: 0 auto 1.4rem auto;
+    max-width: 560px;
+    margin: 0 0 1rem 0;
     line-height: 1.9;
     direction: rtl;
 }
@@ -795,7 +839,7 @@ hr { border-color: var(--border) !important; }
 .hero-badges {
     position: relative; z-index: 1;
     display: flex;
-    justify-content: center;
+    justify-content: flex-end;
     flex-wrap: wrap;
     gap: 0.5rem;
     margin-bottom: 0.9rem;
@@ -1348,6 +1392,7 @@ def render_css(theme_key: str) -> str:
     t = THEMES.get(theme_key, THEMES["dark"])
     gold_alt = "#E4C87A" if theme_key == "dark" else "#7A5E20"
     pattern = _pattern_svg(t["pattern_stroke"], t["pattern_opacity"])
+    pattern_light = _pattern_svg("#FFFFFF", "0.22")
     css = CSS_TEMPLATE
     replacements = {
         "__BG__": t["bg"],
@@ -1365,6 +1410,7 @@ def render_css(theme_key: str) -> str:
         "__ROSE_SOFT__": t["rose_soft"],
         "__SHADOW__": t["shadow"],
         "__PATTERN__": pattern,
+        "__PATTERN_LIGHT__": pattern_light,
         "__GOLD_DARK_OR_LIGHT__": gold_alt,
     }
     for k, v in replacements.items():
@@ -3835,16 +3881,27 @@ def main():
     # ── العنوان ──────────────────────────────────────────────────────────
     st.markdown("""
     <div class="hero-wrap">
-    <div class="hero-badges">
-        <div class="hero-badge"><span class="dot"></span> شبكة معرفية حيّة</div>
-        <div class="hero-badge"><span class="dot"></span> عربي 100٪</div>
-        <div class="hero-badge"><span class="dot"></span> مبني على القرآن الكريم</div>
-    </div>
-    <div class="main-title">🧠 النظام المعرفي العربي</div>
-    <div class="subtitle">Neural Service Mesh · ذكاء اصطناعي عربي متخصص بالمعرفة الإسلامية</div>
-    <div class="welcome-line">
-        اسأل عن أي مفهوم إسلامي أو عربي، وسيربطه النظام بشبكة معرفية حيّة
-        مبنية على القرآن الكريم وعلوم اللغة — بحث، محادثة، ومحتوى إبداعي، كل ذلك بالعربية.
+    <div class="hero-split">
+        <div class="hero-split-text">
+            <div class="hero-badges">
+                <div class="hero-badge"><span class="dot"></span> شبكة معرفية حيّة</div>
+                <div class="hero-badge"><span class="dot"></span> عربي 100٪</div>
+                <div class="hero-badge"><span class="dot"></span> مبني على القرآن الكريم</div>
+            </div>
+            <div class="main-title">🧠 النظام المعرفي العربي</div>
+            <div class="subtitle">Neural Service Mesh · ذكاء اصطناعي عربي متخصص بالمعرفة الإسلامية</div>
+            <div class="welcome-line">
+                اسأل عن أي مفهوم إسلامي أو عربي، وسيربطه النظام بشبكة معرفية حيّة
+                مبنية على القرآن الكريم وعلوم اللغة — بحث، محادثة، ومحتوى إبداعي، كل ذلك بالعربية.
+            </div>
+        </div>
+        <div class="hero-split-visual">
+            <div class="hero-chip hero-chip--top">📖 قرآن كريم</div>
+            <div class="hero-visual-panel">
+                <div class="hero-visual-icon">🧠</div>
+            </div>
+            <div class="hero-chip hero-chip--bottom">🕸️ شبكة معرفية</div>
+        </div>
     </div>
     </div>
     """, unsafe_allow_html=True)
