@@ -5698,6 +5698,44 @@ def render_chat():
         .thinking-ring, .typing-dots span { animation:none !important; }
     }
 
+    /* ── توقيت الرسائل (يظهر بأسفل كل فقاعة) ── */
+    .bbl-ts {
+        font-size: 0.68rem;
+        color: var(--text-muted);
+        opacity: 0.75;
+        margin-top: 0.3rem;
+        direction: ltr;
+        text-align: left;
+    }
+    .chat-user .bbl-ts { color: rgba(0,0,0,0.55); text-align: right; }
+    .bbl-footer { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-top: 0.2rem; }
+    .bbl-footer .bbl-ts { margin-top: 0; }
+
+    /* ── زر عائم "النزول لآخر رسالة" — يظهر فقط عند التمرير لأعلى بعيداً
+       عن نهاية المحادثة (يُتحكّم بإظهاره/إخفائه عبر JS بالأسفل) ── */
+    .chat-box-wrap { position: relative; }
+    .scroll-bottom-btn {
+        position: absolute;
+        bottom: 1.1rem;
+        left: 50%;
+        transform: translateX(-50%) translateY(8px);
+        width: 38px; height: 38px;
+        border-radius: 50%;
+        border: 1px solid var(--border);
+        background: var(--surface2);
+        color: var(--gold);
+        font-size: 1.1rem;
+        box-shadow: 0 6px 18px var(--shadow);
+        cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity .2s ease, transform .2s ease;
+        z-index: 5;
+    }
+    .scroll-bottom-btn.visible { opacity: 1; pointer-events: auto; transform: translateX(-50%) translateY(0); }
+    .scroll-bottom-btn:hover { border-color: var(--gold); }
+
     /* ── تنسيق st.chat_message الأصلي (يُستخدم فقط أثناء بث الرد حرفاً
        بحرف قبل أن يُطوى داخل .chat-box المخصص بعد rerun) — بدون هذا
        التنسيق يظهر بمظهر Streamlit الافتراضي غير المرتبط بصرياً بهوية
@@ -5820,7 +5858,7 @@ def render_chat():
                 st.rerun()
 
     # عرض المحادثة
-    html = '<div class="chat-box" id="nsm-chat-box">'
+    html = '<div class="chat-box-wrap"><div class="chat-box" id="nsm-chat-box">'
     if not st.session_state.nsm_messages:
         html += '''<div style="text-align:center;color:var(--text-muted);padding:3rem 1rem;
                     display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%">
@@ -5839,10 +5877,12 @@ def render_chat():
             role, text = msg[0], msg[1]
             ctx_tag    = msg[2] if len(msg) > 2 else ""
             src_badge  = msg[3] if len(msg) > 3 else ""
+            ts         = msg[4] if len(msg) > 4 else ""
+            ts_html    = f'<div class="bbl-ts">{ts}</div>' if ts else ""
             if role == "user":
                 import html as _html
                 safe_text = _html.escape(text).replace("\n", "<br>")
-                html += f'<div class="chat-user"><div class="bbl">{safe_text}</div></div>'
+                html += f'<div class="chat-user"><div class="bbl">{safe_text}{ts_html}</div></div>'
             else:
                 ctx_html = f'<div class="ctx-tag">📎 {ctx_tag}</div>' if ctx_tag else ""
                 src_html = (
@@ -5857,16 +5897,21 @@ def render_chat():
                 html += f'''<div class="chat-nsm">
                     <span style="font-size:1.4rem;margin-top:3px">🧠</span>
                     <div class="bbl">{ctx_html}{src_html}<div class="bbl-text" id="nsm-bbl-{_i}">{safe_reply}</div>
-                        <button class="copy-btn" title="نسخ الرد"
-                            onclick="var t=document.getElementById('nsm-bbl-{_i}').innerText;
-                                     navigator.clipboard.writeText(t).then(function(){{
-                                        var b=event.currentTarget; var old=b.textContent;
-                                        b.textContent='✓ تم النسخ';
-                                        setTimeout(function(){{b.textContent=old;}}, 1300);
-                                     }});">📋 نسخ</button>
+                        <div class="bbl-footer">
+                            <button class="copy-btn" title="نسخ الرد"
+                                onclick="var t=document.getElementById('nsm-bbl-{_i}').innerText;
+                                         navigator.clipboard.writeText(t).then(function(){{
+                                            var b=event.currentTarget; var old=b.textContent;
+                                            b.textContent='✓ تم النسخ';
+                                            setTimeout(function(){{b.textContent=old;}}, 1300);
+                                         }});">📋 نسخ</button>
+                            {ts_html}
+                        </div>
                     </div>
                 </div>'''
-    html += "</div>"
+    html += '''</div>
+        <button class="scroll-bottom-btn" id="nsm-scroll-bottom" title="النزول لآخر رسالة" aria-label="النزول لآخر رسالة">↓</button>
+    </div>'''
     st.markdown(html, unsafe_allow_html=True)
     st.components.v1.html("""
     <script>
@@ -5887,6 +5932,34 @@ def render_chat():
             }
         };
         tryScroll();
+
+        // ── زر "النزول لآخر رسالة": يظهر فقط عندما يكون المستخدم بعيداً
+        // عن أسفل الصندوق (بأكثر من 80px)، ويختفي تلقائياً عند الوصول للأسفل ──
+        function bindScrollButton() {
+            const doc = window.parent ? window.parent.document : document;
+            const box = doc.getElementById('nsm-chat-box');
+            const btn = doc.getElementById('nsm-scroll-bottom');
+            if (!box || !btn) return false;
+            if (btn.dataset.nsmBound) { updateVisibility(); return true; }
+            btn.dataset.nsmBound = "1";
+
+            function updateVisibility() {
+                const distanceFromBottom = box.scrollHeight - box.scrollTop - box.clientHeight;
+                btn.classList.toggle('visible', distanceFromBottom > 80);
+            }
+            box.addEventListener('scroll', updateVisibility, { passive: true });
+            btn.addEventListener('click', function() {
+                box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
+            });
+            updateVisibility();
+            return true;
+        }
+        let btnAttempts = 0;
+        const tryBind = () => {
+            btnAttempts++;
+            if (!bindScrollButton() && btnAttempts < 10) { setTimeout(tryBind, 60); }
+        };
+        tryBind();
     })();
     </script>
     """, height=0)
@@ -6040,13 +6113,15 @@ def render_chat():
             names = ", ".join(f["name"] for f in files)
             display_text += f"\n\n📎 {names}"
 
+        _ts = datetime.now().strftime("%H:%M")
+
         # ── أضف رسالة المستخدم فوراً ──
-        st.session_state.nsm_messages.append(("user", display_text, "", ""))
+        st.session_state.nsm_messages.append(("user", display_text, "", "", _ts))
 
         # ── فحص أمان أولي (regex محلي، بدون تكلفة API) ──
         _safety_msg = _nsm_safety_gate(text.strip())
         if _safety_msg:
-            st.session_state.nsm_messages.append(("nsm", _safety_msg, "", "🛡️ فحص أمان"))
+            st.session_state.nsm_messages.append(("nsm", _safety_msg, "", "🛡️ فحص أمان", datetime.now().strftime("%H:%M")))
             st.session_state.nsm_count += 1
             st.rerun()
             return
@@ -6077,7 +6152,7 @@ def render_chat():
             response = full_response
             ctx_tag = ""
             src_badge = f"🌐 OpenRouter · {_or_model_p.split('/')[-1]}"
-            st.session_state.nsm_messages.append(("nsm", response, ctx_tag, src_badge))
+            st.session_state.nsm_messages.append(("nsm", response, ctx_tag, src_badge, datetime.now().strftime("%H:%M")))
             st.session_state.nsm_count += 1
             st.rerun()
             return
@@ -6125,7 +6200,7 @@ def render_chat():
             bot.source_badge()
             if hasattr(bot, "source_badge") else "🤖 NSM Agent v3"
         )
-        st.session_state.nsm_messages.append(("nsm",  response, ctx_tag, src_badge))
+        st.session_state.nsm_messages.append(("nsm",  response, ctx_tag, src_badge, datetime.now().strftime("%H:%M")))
         st.session_state.nsm_count += 1
         st.rerun()
 
