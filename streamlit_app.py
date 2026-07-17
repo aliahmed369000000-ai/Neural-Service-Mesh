@@ -1114,6 +1114,33 @@ hr { border-color: var(--border) !important; }
     color: var(--gold);
     margin-bottom: 0.5rem;
 }
+.concept-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin-top: 0.8rem;
+    padding-top: 0.8rem;
+    border-top: 1px solid var(--border);
+}
+.concept-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    background: var(--surface2);
+    border-radius: 8px;
+    padding: 0.5rem 0.9rem;
+    flex: 1;
+    min-width: 110px;
+}
+.concept-stat-label {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+.concept-stat-value {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text);
+}
 .related-tag {
     display: inline-block;
     background: var(--gold-soft);
@@ -1864,25 +1891,25 @@ def render_search():
 
     # ── عرض النتائج ──────────────────────────────────────────────────────
 
-    # بطاقة المفهوم الرئيسية
+    # بطاقة المفهوم الرئيسية — بنداء واحد متكامل (كانت مقسّمة على 3 نداءات
+    # منفصلة سابقاً، ما يجعل Streamlit يرسم كل جزء كعنصر DOM مستقل، فلا
+    # تلتف البطاقة فعلياً حول محتواها البصري رغم تطابق المظهر ظاهرياً)
     cdata = result["concept_data"]
+    _stats_html = ""
+    if cdata:
+        _stats_html = f"""
+        <div class="concept-stats">
+            <div class="concept-stat"><span class="concept-stat-label">التصنيف</span><span class="concept-stat-value">{cdata.get('cluster', 'غير مصنّف')}</span></div>
+            <div class="concept-stat"><span class="concept-stat-label">التكرار</span><span class="concept-stat-value">{cdata.get('frequency', 0):,} مرة</span></div>
+            <div class="concept-stat"><span class="concept-stat-label">قوة المفهوم</span><span class="concept-stat-value">{cdata.get('strength', 0.0):.2%}</span></div>
+        </div>
+        """
     st.markdown(f"""
     <div class="concept-card">
         <div class="concept-name">💡 {result['query']}</div>
+        {_stats_html}
+    </div>
     """, unsafe_allow_html=True)
-
-    if cdata:
-        col_a, col_b, col_c = st.columns(3)
-        with col_a:
-            st.markdown(f"**التصنيف:** {cdata.get('cluster', 'غير مصنّف')}")
-        with col_b:
-            freq = cdata.get("frequency", 0)
-            st.markdown(f"**التكرار:** {freq:,} مرة")
-        with col_c:
-            strength = cdata.get("strength", 0.0)
-            st.markdown(f"**قوة المفهوم:** {strength:.2%}")
-
-    st.markdown("</div>", unsafe_allow_html=True)
 
     # ── المفاهيم المرتبطة ────────────────────────────────────────────────
     related_concepts = []
