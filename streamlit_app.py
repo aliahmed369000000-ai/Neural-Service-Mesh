@@ -919,6 +919,15 @@ hr { border-color: var(--border) !important; }
     margin-bottom: 1rem;
     box-shadow: 0 4px 18px var(--shadow);
 }
+
+/* ── شريط التقدم — كان بلون Streamlit الافتراضي (أحمر/زهري)، غريب
+   تماماً عن هوية التدرّج البنفسجي/الفيروزي ── */
+[data-testid="stProgress"] > div > div > div {
+    background: var(--accent-grad) !important;
+}
+[data-testid="stProgress"] > div > div {
+    background: var(--surface2) !important;
+}
 .tab-intro {
     color: var(--text-muted);
     font-size: 0.9rem;
@@ -2412,6 +2421,7 @@ def render_higgsfield():
         st.session_state["hf_result"] = result
         progress_bar.progress(100, text="✅ اكتمل الوثائقي!")
         status_text.empty()
+        st.toast("✅ اكتمل السيناريو الوثائقي", icon="🎬")
 
     except Exception as exc:
         progress_bar.empty()
@@ -2463,6 +2473,10 @@ def _render_hf_result(result):
         f'<h3 style="direction:rtl; text-align:right">📜 مشاهد الوثائقي — {script.title}</h3>',
         unsafe_allow_html=True,
     )
+    _full_script_text = "\n\n".join(
+        f"[المشهد {s.index} — {s.title}]\n{s.narration}" for s in scenes
+    )
+    _copy_button(_full_script_text, key="hf_full_script", label="📋 نسخ السيناريو كاملاً")
 
     for scene in scenes:
         # لون البادج بحسب حالة الفيديو
@@ -5438,6 +5452,8 @@ def render_social_agent():
             else:
                 with st.spinner("⟳ ينشر..."):
                     results = mgr.publish_to(publish_platforms, publish_text.strip())
+                _pub_ok = sum(1 for r in results.values() if not str(r).startswith("ERROR"))
+                st.toast(f"🚀 تم النشر على {_pub_ok}/{len(results)} منصة", icon="🚀")
                 for pid, res in results.items():
                     label = PLATFORM_LABELS_AR.get(pid, pid)
                     if str(res).startswith("ERROR"):
@@ -5467,7 +5483,7 @@ def render_social_agent():
                 with st.spinner("⟳ يجدول..."):
                     sched_dt = datetime.combine(sch_date, sch_time).isoformat() + "+00:00"
                     schedule_post(sch_platforms, sch_text.strip(), sched_dt)
-                st.success(f"✅ تمت الجدولة على {sched_dt}")
+                st.toast(f"📌 تمت الجدولة على {sched_dt}", icon="📌")
                 st.rerun()
 
         scheduled = get_scheduled(status="pending")
