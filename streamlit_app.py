@@ -537,7 +537,7 @@ def _pattern_svg(stroke: str, opacity: str) -> str:
 
 CSS_TEMPLATE = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=IBM+Plex+Sans+Arabic:wght@500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=IBM+Plex+Sans+Arabic:wght@500;600;700&family=Amiri+Quran&family=Amiri:wght@400;700&display=swap');
 
 :root {
     --bg: __BG__;
@@ -1256,24 +1256,59 @@ hr { border-color: var(--border) !important; }
     cursor: pointer;
 }
 
-/* ── آية قرآنية ── */
+/* ── آية قرآنية — طابع مصحفي: خط Amiri Quran + زخرفة قوسي الآية ﴾ ﴿ ── */
 .quran-verse {
-    background: var(--surface-2);
-    border-right: 4px solid var(--gold);
-    border-radius: 8px;
-    padding: 0.9rem 1.2rem;
-    margin: 0.5rem 0;
-    font-size: 1.15rem;
-    line-height: 2.3;
+    position: relative;
+    background: linear-gradient(135deg, var(--surface) 0%, var(--surface-2) 100%);
+    border: 1px solid var(--border);
+    border-right: 3px solid var(--gold);
+    border-radius: 14px;
+    padding: 1.3rem 1.7rem;
+    margin: 0.7rem 0;
+    font-family: 'Amiri Quran', 'Amiri', 'Traditional Arabic', serif;
+    font-size: 1.3rem;
+    line-height: 2.5;
     direction: rtl;
     color: var(--text);
+    box-shadow: 0 3px 14px var(--shadow);
+    transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+    overflow: hidden;
+}
+.quran-verse::before {
+    content: "﴾";
+    position: absolute; top: -10px; right: 8px;
+    font-size: 3.2rem; color: var(--gold); opacity: .14;
+    font-family: 'Amiri Quran', 'Amiri', serif;
+    pointer-events: none; line-height: 1;
+}
+.quran-verse::after {
+    content: "﴿";
+    position: absolute; bottom: -22px; left: 8px;
+    font-size: 3.2rem; color: var(--emerald); opacity: .12;
+    font-family: 'Amiri Quran', 'Amiri', serif;
+    pointer-events: none; line-height: 1;
+}
+.quran-verse:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 26px var(--shadow);
+    border-right-color: var(--emerald);
+}
+@media (max-width: 640px) {
+    .quran-verse { font-size: 1.08rem; line-height: 2.15; padding: 1.05rem 1.2rem; }
+    .quran-verse::before, .quran-verse::after { font-size: 2.3rem; }
 }
 .verse-ref {
-    font-size: 0.8rem;
+    display: table;
+    position: relative; z-index: 1;
+    font-size: 0.76rem;
     color: var(--gold);
-    font-weight: 600;
-    margin-top: 0.3rem;
+    font-weight: 700;
+    margin-top: 0.65rem;
+    padding: 0.22rem 0.75rem;
+    background: var(--gold-soft);
+    border-radius: 20px;
     direction: rtl;
+    font-family: 'IBM Plex Sans Arabic', sans-serif;
 }
 
 .health-ok  { color: var(--emerald); font-weight: 600; }
