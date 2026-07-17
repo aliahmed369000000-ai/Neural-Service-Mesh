@@ -885,14 +885,14 @@ hr { border-color: var(--border) !important; }
 .metric-card:hover::before { opacity: 1; }
 .metric-value {
     font-family: 'IBM Plex Sans Arabic', sans-serif;
-    font-size: clamp(1.05rem, 4.5vw, 1.9rem);
+    font-size: clamp(0.92rem, 4.2vw, 1.9rem);
     font-weight: 800;
     color: var(--text);
     direction: ltr;
     line-height: 1.15;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: keep-all;
 }
 .metric-value--wrap {
     font-size: clamp(0.72rem, 3.2vw, 1.05rem);
