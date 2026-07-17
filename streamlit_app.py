@@ -1135,6 +1135,103 @@ hr { border-color: var(--border) !important; }
     .stApp { padding-bottom: env(safe-area-inset-bottom, 0); }
 }
 
+/* ── دليل "كيف يعمل NSM؟" — خط أنابيب تفاعلي متحرك ── */
+.nsm-pipeline-wrap {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.7rem 1.5rem 1.9rem;
+    margin-bottom: 0.4rem;
+    box-shadow: 0 4px 20px var(--shadow);
+    overflow: hidden;
+}
+.nsm-pipeline-wrap::before {
+    content: "";
+    position: absolute; width: 260px; height: 260px; border-radius: 50%;
+    background: var(--accent-grad); opacity: .09; filter: blur(46px);
+    top: -110px; left: -70px; pointer-events: none;
+}
+.nsm-pipeline-wrap::after {
+    content: "";
+    position: absolute; width: 200px; height: 200px; border-radius: 50%;
+    background: var(--rose); opacity: .06; filter: blur(46px);
+    bottom: -90px; right: -50px; pointer-events: none;
+}
+.nsm-pipeline {
+    position: relative;
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 0.4rem; margin-top: 0.5rem; direction: rtl; z-index: 1;
+}
+.nsm-pipeline-track {
+    position: absolute; top: 25px; right: 9%; left: 9%; height: 3px;
+    background: var(--border); border-radius: 3px; z-index: 0; overflow: hidden;
+}
+.nsm-pipeline-track-fill {
+    position: absolute; top: 0; right: 0; height: 100%; width: 0%;
+    background: var(--accent-grad);
+    transition: width .5s cubic-bezier(.4,0,.2,1);
+    border-radius: 3px;
+}
+.pipeline-node {
+    position: relative; z-index: 1;
+    display: flex; flex-direction: column; align-items: center;
+    gap: 0.5rem; cursor: pointer; flex: 1; min-width: 0;
+    -webkit-tap-highlight-color: transparent;
+}
+.pipeline-node-icon {
+    width: 50px; height: 50px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.35rem; background: var(--surface2); border: 2px solid var(--border);
+    transition: all .35s cubic-bezier(.34,1.56,.64,1);
+}
+.pipeline-node:hover .pipeline-node-icon { border-color: var(--gold); }
+.pipeline-node.active .pipeline-node-icon {
+    background: var(--accent-grad); border-color: transparent;
+    box-shadow: 0 0 0 6px var(--gold-soft), 0 6px 20px var(--gold-soft);
+    transform: scale(1.14);
+    animation: nsmNodePulse 2.2s ease-in-out infinite;
+}
+@keyframes nsmNodePulse {
+    0%, 100% { box-shadow: 0 0 0 6px var(--gold-soft), 0 6px 20px var(--gold-soft); }
+    50% { box-shadow: 0 0 0 10px rgba(0,0,0,0), 0 6px 20px var(--gold-soft); }
+}
+.pipeline-node-title {
+    font-size: 0.76rem; font-weight: 700; color: var(--text-muted); text-align: center;
+    line-height: 1.3; transition: color .3s ease;
+}
+.pipeline-node.active .pipeline-node-title { color: var(--text); }
+.pipeline-detail {
+    margin-top: 1.5rem; padding: 1.15rem 1.35rem;
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 14px;
+    direction: rtl; min-height: 70px; position: relative; z-index: 1;
+}
+.pipeline-detail-title {
+    font-weight: 700; color: var(--gold); margin-bottom: 0.35rem; font-size: 0.98rem;
+    display: flex; align-items: center; gap: 0.4rem;
+}
+.pipeline-detail-text {
+    font-size: 0.92rem; line-height: 1.85; color: var(--text);
+}
+.pipeline-detail-inner { transition: opacity .22s ease; }
+.pipeline-progress-hint {
+    margin-top: 0.7rem; display: flex; gap: 5px; justify-content: center;
+}
+.pipeline-progress-hint span {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--border);
+    transition: background .3s ease, transform .3s ease;
+}
+.pipeline-progress-hint span.active { background: var(--gold); transform: scale(1.3); }
+@media (max-width: 640px) {
+    .nsm-pipeline { flex-wrap: wrap; row-gap: 1.3rem; }
+    .nsm-pipeline-track { display: none; }
+    .pipeline-node { flex: 1 1 30%; }
+    .pipeline-node-title { font-size: 0.7rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .pipeline-node.active .pipeline-node-icon { animation: none; }
+}
+
 /* ── بطاقات الاستكشاف (الصفحة الرئيسية) ── */
 .feature-card {
     position: relative;
@@ -2099,6 +2196,103 @@ def _skeleton(kind: str = "text", lines: int = 3) -> None:
 
 def render_home():
     """الصفحة الرئيسية — نظرة سريعة واستكشاف أقسام NSM."""
+
+    # ── 🎬 كيف يعمل NSM؟ — دليل تفاعلي بخط أنابيب متحرك يشرح رحلة السؤال ──
+    st.markdown('<div class="section-header">🎬 كيف يعمل NSM؟ <span class="live-dot"></span></div>',
+                unsafe_allow_html=True)
+
+    _pipeline_steps = [
+        ("📝", "إدخال عربي", "تكتب سؤالك", "تكتب سؤالك أو مفهومك بالعربية الفصحى — بدون أي قوالب أو صياغة خاصة، تماماً كما تتحدث."),
+        ("🌱", "تحليل الجذر", "استخراج الجذر اللغوي", "يحلّل النظام الجذر الثلاثي/الرباعي والبنية الصرفية للكلمة من قاعدة تضم آلاف الجذور العربية المكتشفة."),
+        ("🕸️", "ربط CKG", "شبكة المفاهيم المعرفية", "يربط المفهوم بشبكة المعرفة الحية (CKG) — آلاف المفاهيم وعشرات آلاف العلاقات المستنتجة بينها."),
+        ("📖", "مطابقة قرآنية", "بحث آية بآية", "يبحث آلياً عن الآيات القرآنية ذات الصلة الدلالية بالمفهوم، مربوطة بنفس شبكة الجذور والمعاني."),
+        ("💬", "رد ذكي", "إجابة مدعومة بالسياق", "يولّد رداً نهائياً مدعوماً بالمصادر والسياق المستخرج من كل الخطوات السابقة، بالعربية الفصحى."),
+    ]
+
+    _nodes_html = "".join(
+        f'''<div class="pipeline-node{' active' if i == 0 else ''}" data-step="{i}"
+                data-title="{title}" data-text="{text}" data-icon="{icon}">
+            <div class="pipeline-node-icon">{icon}</div>
+            <div class="pipeline-node-title">{label}</div>
+        </div>'''
+        for i, (icon, label, title, text) in enumerate(_pipeline_steps)
+    )
+    _dots_html = "".join(
+        f'<span class="{"active" if i == 0 else ""}" data-dot="{i}"></span>'
+        for i in range(len(_pipeline_steps))
+    )
+    _icon0, _label0, _title0, _text0 = _pipeline_steps[0]
+
+    st.markdown(f"""
+    <div class="nsm-pipeline-wrap">
+        <div class="nsm-pipeline" id="nsm-pipeline">
+            <div class="nsm-pipeline-track"><div class="nsm-pipeline-track-fill" id="nsm-pipeline-fill"></div></div>
+            {_nodes_html}
+        </div>
+        <div class="pipeline-detail">
+            <div class="pipeline-detail-inner" id="nsm-pipeline-detail">
+                <div class="pipeline-detail-title"><span id="nsm-pd-icon">{_icon0}</span>
+                    <span id="nsm-pd-title">{_title0}</span></div>
+                <div class="pipeline-detail-text" id="nsm-pd-text">{_text0}</div>
+            </div>
+        </div>
+        <div class="pipeline-progress-hint">{_dots_html}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <script>
+    (function() {
+        const doc = window.parent.document;
+        const pipeline = doc.getElementById('nsm-pipeline');
+        if (!pipeline || pipeline.dataset.nsmBound) return;
+        pipeline.dataset.nsmBound = "1";
+
+        const nodes = Array.from(pipeline.querySelectorAll('.pipeline-node'));
+        const fill  = doc.getElementById('nsm-pipeline-fill');
+        const dInner= doc.getElementById('nsm-pipeline-detail');
+        const dIcon = doc.getElementById('nsm-pd-icon');
+        const dTitle= doc.getElementById('nsm-pd-title');
+        const dText = doc.getElementById('nsm-pd-text');
+        const dots  = Array.from(doc.querySelectorAll('.pipeline-progress-hint span'));
+        let current = 0;
+        let timer = null;
+
+        function setActive(idx, fromClick) {
+            current = idx;
+            nodes.forEach((n, i) => n.classList.toggle('active', i === idx));
+            dots.forEach((d, i) => d.classList.toggle('active', i === idx));
+            if (fill) fill.style.width = ((idx) / (nodes.length - 1) * 100) + '%';
+            if (dInner) {
+                dInner.style.opacity = '0';
+                setTimeout(function() {
+                    const n = nodes[idx];
+                    dIcon.textContent  = n.getAttribute('data-icon');
+                    dTitle.textContent = n.getAttribute('data-title');
+                    dText.textContent  = n.getAttribute('data-text');
+                    dInner.style.opacity = '1';
+                }, 180);
+            }
+            if (fromClick) restart();
+        }
+
+        function tick() { setActive((current + 1) % nodes.length, false); }
+        function restart() {
+            if (timer) clearInterval(timer);
+            timer = setInterval(tick, 3400);
+        }
+
+        nodes.forEach((n, i) => {
+            n.addEventListener('click', function() { setActive(i, true); });
+        });
+
+        setActive(0, false);
+        restart();
+    })();
+    </script>
+    """, unsafe_allow_html=True)
+
+    st.markdown("")
     st.markdown('<div class="section-header">🚀 استكشف NSM</div>', unsafe_allow_html=True)
 
     _features = [
