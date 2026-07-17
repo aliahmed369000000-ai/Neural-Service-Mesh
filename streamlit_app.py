@@ -333,6 +333,19 @@ except Exception:
     _CHECKPOINT_OK = False
 
 try:
+    from ai.autotune_feedback import (
+        FeedbackRecord as _AFFeedbackRecord,
+        NEUTRAL_PARAMS as _AF_NEUTRAL_PARAMS,
+        compute_heuristics as _af_compute_heuristics,
+        process_feedback as _af_process_feedback,
+        apply_learned_adjustments as _af_apply_adjustments,
+        get_feedback_stats as _af_get_stats,
+    )
+    _AUTOTUNE_OK = True
+except Exception:
+    _AUTOTUNE_OK = False
+
+try:
     from ai.self_awareness import SelfAwarenessEngine
     _SELF_AWARE_OK = True
 except Exception:
@@ -6251,6 +6264,44 @@ def render_chat():
     </script>
     """, height=0)
 
+    # ── تقييم آخر رد (👍/👎) لتغذية autotune_feedback ──
+    if _AUTOTUNE_OK:
+        _af_turn = st.session_state.get("_af_last_turn")
+        if _af_turn and not _af_turn.get("rated"):
+            _af_c1, _af_c2, _af_c3 = st.columns([1, 1, 6])
+            with _af_c1:
+                if st.button("👍", key="_af_up", help="رد جيد — ساعد النظام يتعلّم"):
+                    _heur = _af_compute_heuristics(_af_turn["response"])
+                    _af_process_feedback(_AFFeedbackRecord(
+                        message_id=str(st.session_state.nsm_count),
+                        timestamp=datetime.now().timestamp(),
+                        context_type=_af_turn["context_type"],
+                        model=_af_turn["model"],
+                        persona=_af_turn["persona"],
+                        params=_af_turn["params"],
+                        rating=1,
+                        heuristics=vars(_heur),
+                    ))
+                    _af_turn["rated"] = True
+                    st.toast("✅ شكراً — تم تسجيل التقييم")
+                    st.rerun()
+            with _af_c2:
+                if st.button("👎", key="_af_down", help="رد غير جيد — ساعد النظام يتعلّم"):
+                    _heur = _af_compute_heuristics(_af_turn["response"])
+                    _af_process_feedback(_AFFeedbackRecord(
+                        message_id=str(st.session_state.nsm_count),
+                        timestamp=datetime.now().timestamp(),
+                        context_type=_af_turn["context_type"],
+                        model=_af_turn["model"],
+                        persona=_af_turn["persona"],
+                        params=_af_turn["params"],
+                        rating=-1,
+                        heuristics=vars(_heur),
+                    ))
+                    _af_turn["rated"] = True
+                    st.toast("✅ شكراً — تم تسجيل التقييم")
+                    st.rerun()
+
     # صندوق الإدخال
     st.markdown("""
     <style>
@@ -6432,15 +6483,34 @@ def render_chat():
             with st.chat_message("assistant", avatar="🌐"):
                 placeholder = st.empty()
                 full_response = ""
-                for chunk in _or_stream(api_messages, model=_or_model_p, api_key=_or_key_p):
+                _af_params  = dict(_AF_NEUTRAL_PARAMS) if _AUTOTUNE_OK else {"temperature": 0.7, "top_p": 0.9}
+                _af_ctx     = "conversational"
+                _af_note    = ""
+                if _AUTOTUNE_OK:
+                    try:
+                        _af_params, _af_applied, _af_note = _af_apply_adjustments(_af_params, _af_ctx)
+                    except Exception:
+                        _af_applied = False
+                for chunk in _or_stream(
+                    api_messages, model=_or_model_p, api_key=_or_key_p,
+                    temperature=_af_params.get("temperature", 0.7),
+                    top_p=_af_params.get("top_p", 0.9),
+                ):
                     full_response += chunk
                     placeholder.markdown(full_response + "▌")
                 placeholder.markdown(full_response)
+                if _af_note:
+                    st.caption(_af_note)
             response = full_response
             ctx_tag = ""
             src_badge = f"🌐 OpenRouter · {_or_model_p.split('/')[-1]}"
             _record_chat_episode(text.strip(), response, source="chat_openrouter")
             st.session_state.nsm_messages.append(("nsm", response, ctx_tag, src_badge, datetime.now().strftime("%H:%M")))
+            if _AUTOTUNE_OK:
+                st.session_state["_af_last_turn"] = {
+                    "response": response, "params": _af_params, "context_type": _af_ctx,
+                    "model": _or_model_p, "persona": "nsm", "rated": False,
+                }
             st.session_state.nsm_count += 1
             st.rerun()
             return
@@ -6490,6 +6560,11 @@ def render_chat():
         )
         _record_chat_episode(text.strip(), response, source="chat_nsm_agent")
         st.session_state.nsm_messages.append(("nsm",  response, ctx_tag, src_badge, datetime.now().strftime("%H:%M")))
+        if _AUTOTUNE_OK:
+            st.session_state["_af_last_turn"] = {
+                "response": response, "params": dict(_AF_NEUTRAL_PARAMS), "context_type": "conversational",
+                "model": src_badge, "persona": "nsm", "rated": False,
+            }
         st.session_state.nsm_count += 1
         st.rerun()
 
