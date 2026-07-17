@@ -1260,6 +1260,30 @@ hr { border-color: var(--border) !important; }
     opacity: 0;
     animation: nsmRise 0.55s cubic-bezier(.22,.9,.35,1) forwards;
 }
+/* ── شريط أفقي قابل للتمرير لبطاقات "استكشف NSM" — بدل شبكة أعمدة
+   Streamlit التي تتكدّس عمودياً بالجوال. عرض ثابت لكل بطاقة + تمرير
+   أفقي سلس مع snap، وسهم اتجاه RTL طبيعي (يبدأ من اليمين). ────────── */
+.feature-scroll {
+    display: flex;
+    flex-direction: row;
+    gap: 1rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.3rem 0.15rem 0.9rem;
+    scroll-snap-type: x proximity;
+    direction: rtl;
+    -webkit-overflow-scrolling: touch;
+}
+.feature-scroll .feature-card {
+    flex: 0 0 min(78vw, 250px);
+    scroll-snap-align: start;
+}
+@media (min-width: 1100px) {
+    .feature-scroll .feature-card { flex-basis: calc((100% - 4rem) / 5); }
+}
+.feature-scroll::-webkit-scrollbar { height: 6px; }
+.feature-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
+.feature-scroll::-webkit-scrollbar-thumb:hover { background: var(--gold); }
 .feature-card:nth-of-type(1) { animation-delay: .26s; }
 .feature-card:nth-of-type(2) { animation-delay: .32s; }
 .feature-card:nth-of-type(3) { animation-delay: .38s; }
@@ -2329,17 +2353,14 @@ def render_home():
         ("🤖", "الوكلاء الأذكياء", "وكلاء مستقلون للتنفيذ والتنسيق ضمن سرب ذكي متكامل.", "🤖 الوكلاء"),
         ("🎭", "المحتوى الإبداعي", "توليد نصوص ومحتوى إبداعي عربي بأسلوب متعدد الأنماط.", "🎭 إبداع"),
     ]
-    _fcols = st.columns(5)
-    for _col, (_icon, _title, _desc, _target_tab) in zip(_fcols, _features):
-        with _col:
-            st.markdown(f"""
-            <div class="feature-card" data-tab-target="{_target_tab}">
+    _cards_html = "".join(f"""
+            <div class="feature-card" data-tab-target="{_target_tab}" tabindex="0" role="button">
                 <div class="feature-icon">{_icon}</div>
                 <div class="feature-title">{_title}</div>
                 <div class="feature-desc">{_desc}</div>
                 <div class="feature-nav-hint">← انتقل إلى هذا القسم</div>
-            </div>
-            """, unsafe_allow_html=True)
+            </div>""" for _icon, _title, _desc, _target_tab in _features)
+    st.markdown(f'<div class="feature-scroll">{_cards_html}</div>', unsafe_allow_html=True)
 
     # ── سكربت: عدّادات متحركة للمقاييس + نقر بطاقات الاستكشاف للتنقّل ──
     # يتّبع نفس أسلوب حقن JS المستخدم في render_chat عبر window.parent.document
