@@ -327,6 +327,12 @@ except Exception:
     _EPISODIC_OK = False
 
 try:
+    from ai.brain_checkpoint import BrainCheckpoint
+    _CHECKPOINT_OK = True
+except Exception:
+    _CHECKPOINT_OK = False
+
+try:
     from ai.self_awareness import SelfAwarenessEngine
     _SELF_AWARE_OK = True
 except Exception:
@@ -2249,6 +2255,41 @@ def get_episodic_stats() -> Dict:
     return stats
 
 
+class _RealMeshSnapshot:
+    """كائن خفيف يعرض فقط ما يفهمه BrainCheckpoint._extract_state من سمات
+    (episodic_memory بدالة summary()، knowledge بدالة keys()) — يُغذَّى ببيانات
+    حقيقية من النظام الحي فقط. أي وحدة غير موجودة فعلياً (neural_weights،
+    deep_network...) تُترك غائبة عمداً بدل اختلاق أرقام؛ BrainCheckpoint
+    يتجاوزها تلقائياً عبر getattr(..., None) في كل قسم."""
+
+    VERSION = "NSM-Dashboard-1.0"
+
+    def __init__(self, episodic_engine, ckg: Dict):
+        if episodic_engine is not None:
+            self.episodic_memory = episodic_engine
+        self.knowledge = ckg.get("concepts", {})
+
+
+def save_real_checkpoint() -> Optional[str]:
+    """يحفظ Checkpoint حقيقياً يعكس حالة النظام الفعلية الآن (لا بيانات وهمية):
+    عدد مفاهيم/علاقات CKG الحقيقي + ملخص الذاكرة الإيبيسودية الحي (working
+    memory، semantic rules، أقوى الذكريات). يحاول أيضاً الدفع لـ GitHub
+    تلقائياً بالخلفية إن كانت متغيرات GITHUB_TOKEN/GITHUB_REMOTE معرَّفة.
+
+    يعيد مسار الملف المحفوظ، أو None إن تعذّر (بدون رفع استثناء)."""
+    if not _CHECKPOINT_OK:
+        return None
+    try:
+        ckg    = load_ckg()
+        engine = _get_episodic_engine() if _EPISODIC_OK else None
+        mesh   = _RealMeshSnapshot(episodic_engine=engine, ckg=ckg)
+        bc     = BrainCheckpoint(checkpoint_dir=str(CHECKPOINTS_DIR))
+        path   = bc.save(mesh)
+        return path
+    except Exception:
+        return None
+
+
 # ── تطبيع النص العربي ────────────────────────────────────────────────────
 def normalize_arabic(text: str) -> str:
     text = re.sub(r'[\u064B-\u065F\u0670\u0640]', '', text)
@@ -3672,7 +3713,7 @@ def render_training():
     ckg_size     = len(ckg.get("concepts", {}))
     _is_active   = train_steps > 0
 
-    _hdr_col, _btn_col = st.columns([5, 1])
+    _hdr_col, _btn_col, _save_col = st.columns([4.2, 1, 1.5])
     with _hdr_col:
         _pill = (
             '<span class="status-pill status-pill--active"><span class="status-pill-dot"></span>نشط</span>'
@@ -3686,6 +3727,17 @@ def render_training():
             load_latest_checkpoint.clear()
             load_ckg.clear()
             st.rerun()
+    with _save_col:
+        if st.button("💾 حفظ Checkpoint", key="save_checkpoint_btn", use_container_width=True,
+                      disabled=not _CHECKPOINT_OK, help="يحفظ حالة CKG + الذاكرة الإيبيسودية الحقيقية الآن"):
+            with st.spinner("💾 جارٍ حفظ الحالة الحقيقية..."):
+                _saved_path = save_real_checkpoint()
+            if _saved_path:
+                st.toast(f"✅ تم الحفظ: {os.path.basename(_saved_path)}", icon="💾")
+                load_latest_checkpoint.clear()
+                st.rerun()
+            else:
+                st.toast("⚠️ تعذّر الحفظ — راجع السجلّات", icon="⚠️")
 
     if not _is_active:
         st.markdown("""
@@ -3733,6 +3785,7 @@ def render_training():
                 "world_model":     ("🌍", "نموذج العالم"),
                 "system_dna":      ("🧿", "الحمض النووي للنظام"),
                 "self_awareness":  ("👁️", "الوعي الذاتي"),
+                "knowledge_keys":  ("📚", "مفاهيم CKG"),
                 "meta":            ("📋", "البيانات الوصفية"),
             }
             _chips_html = '<div class="module-chip-grid">'
