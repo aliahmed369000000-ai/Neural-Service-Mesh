@@ -2363,49 +2363,65 @@ def render_home():
     st.markdown(f'<div class="feature-scroll">{_cards_html}</div>', unsafe_allow_html=True)
 
     # ── سكربت: عدّادات متحركة للمقاييس + نقر بطاقات الاستكشاف للتنقّل ──
-    # يتّبع نفس أسلوب حقن JS المستخدم في render_chat عبر window.parent.document
-    st.markdown("""
+    # تنبيه: كان هذا مُحقناً سابقاً عبر st.markdown، وهو أسلوب لا يُنفَّذ
+    # فيه <script> أبداً (عنصر <script> المُدرَج عبر innerHTML لا يعمل،
+    # سلوك موثّق بالمتصفحات وليس مجرد "أحياناً" — لهذا كان النقر على
+    # البطاقات بلا أي أثر). الحل المضمون: st.components.v1.html الذي
+    # يُنشئ iframe حقيقياً يُنفَّذ فيه JS، ومنه نصل للصفحة الأم عبر
+    # window.parent.document (نفس الحل المطبَّق أعلاه لتلوين التبويبات).
+    st.components.v1.html("""
     <script>
     (function() {
         const doc = window.parent.document;
 
-        // 1) عدّاد متحرك من 0 حتى القيمة الفعلية لكل بطاقة مقياس
-        const counters = doc.querySelectorAll('.metric-value[data-count-target]');
-        counters.forEach(function(el) {
-            if (el.dataset.nsmAnimated) return;
-            el.dataset.nsmAnimated = "1";
-            const target = parseInt(el.getAttribute('data-count-target'), 10) || 0;
-            const duration = 900;
-            const start = performance.now();
-            function tick(now) {
-                const p = Math.min(1, (now - start) / duration);
-                const eased = 1 - Math.pow(1 - p, 3);
-                el.textContent = Math.round(eased * target).toLocaleString('en-US');
-                if (p < 1) requestAnimationFrame(tick);
-                else el.textContent = target.toLocaleString('en-US');
-            }
-            requestAnimationFrame(tick);
-        });
-
-        // 2) نقر بطاقة الاستكشاف ← تفعيل تبويب Streamlit المطابق بالاسم
-        const cards = doc.querySelectorAll('.feature-card[data-tab-target]');
-        cards.forEach(function(card) {
-            if (card.dataset.nsmBound) return;
-            card.dataset.nsmBound = "1";
-            card.addEventListener('click', function() {
-                const label = card.getAttribute('data-tab-target');
-                const tabs = doc.querySelectorAll('[data-baseweb="tab-list"] [data-baseweb="tab"]');
-                for (const t of tabs) {
-                    if (t.textContent && t.textContent.trim() === label) {
-                        t.click();
-                        break;
-                    }
+        function bindAll() {
+            // 1) عدّاد متحرك من 0 حتى القيمة الفعلية لكل بطاقة مقياس
+            const counters = doc.querySelectorAll('.metric-value[data-count-target]');
+            counters.forEach(function(el) {
+                if (el.dataset.nsmAnimated) return;
+                el.dataset.nsmAnimated = "1";
+                const target = parseInt(el.getAttribute('data-count-target'), 10) || 0;
+                const duration = 900;
+                const start = performance.now();
+                function tick(now) {
+                    const p = Math.min(1, (now - start) / duration);
+                    const eased = 1 - Math.pow(1 - p, 3);
+                    el.textContent = Math.round(eased * target).toLocaleString('en-US');
+                    if (p < 1) requestAnimationFrame(tick);
+                    else el.textContent = target.toLocaleString('en-US');
                 }
+                requestAnimationFrame(tick);
             });
-        });
+
+            // 2) نقر بطاقة الاستكشاف ← تفعيل تبويب Streamlit المطابق بالاسم
+            const cards = doc.querySelectorAll('.feature-card[data-tab-target]');
+            cards.forEach(function(card) {
+                if (card.dataset.nsmBound) return;
+                card.dataset.nsmBound = "1";
+                card.addEventListener('click', function() {
+                    const label = card.getAttribute('data-tab-target');
+                    const tabs = doc.querySelectorAll('[data-baseweb="tab-list"] [data-baseweb="tab"]');
+                    for (const t of tabs) {
+                        if (t.textContent && t.textContent.trim() === label) {
+                            t.click();
+                            break;
+                        }
+                    }
+                });
+                // إتاحة: تفعيل بالضغط على Enter/مسافة أيضاً (tabindex="0" role="button")
+                card.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click(); }
+                });
+            });
+        }
+
+        bindAll();
+        // البطاقات تُعاد رسمتها بكل rerun من Streamlit، فنراقب DOM
+        // الصفحة الأم ونعيد الربط تلقائياً بدل الاكتفاء بمرة واحدة فقط.
+        new MutationObserver(bindAll).observe(doc.body, { childList: true, subtree: true });
     })();
     </script>
-    """, unsafe_allow_html=True)
+    """, height=0)
 
 
 def render_search():
