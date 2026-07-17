@@ -416,6 +416,14 @@ except Exception as _e_bridge:
     _nsm_bridge    = None   # type: ignore[assignment]
     _NSM_BRIDGE_OK = False
 
+# ── NSM Semantic Router — تصنيف الاستعلام + توجيه دلالي ───────────────────
+try:
+    import ai.semantic_router as _nsm_semantic
+    _NSM_SEMANTIC_OK = True
+except Exception:
+    _nsm_semantic    = None   # type: ignore[assignment]
+    _NSM_SEMANTIC_OK = False
+
 # ── مساعدات رفع الملفات (PDF / صور) لدعم multimodal مع OpenRouter ──────────
 MAX_FILE_MB = 20
 IMAGE_MIMES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
@@ -3846,159 +3854,243 @@ def render_training():
 
 
 def render_nsm_routing():
-    """تبويب NSM Mesh — التوجيه الذكي بين العقد + إثبات التعلم."""
+    """لوحة NSM Mesh — توجيه دلالي + self-healing + سجل حي + إثبات تعلم."""
     st.markdown(
-        '<div class="section-header">🕸️ NSM Mesh — التوجيه الذكي بين العقد '
+        '<div class="section-header">🕸️ NSM Mesh — الشبكة الذكية الحية '
         '<span class="live-dot"></span></div>',
         unsafe_allow_html=True,
     )
 
     if not _NSM_BRIDGE_OK or not _nsm_bridge:
-        st.warning("⚠️ NSM Router Bridge غير مُفعَّل. تحقق من ai/nsm_router_bridge.py والسجلات.")
+        st.warning("⚠️ NSM Router Bridge غير مُفعَّل.")
         return
 
-    # ── درجات العقد الثلاث ─────────────────────────────────────────────────
-    st.markdown("#### 📡 عقد الشبكة وأداؤها التاريخي")
+    # ════════════════════════════════════════════════════════════════════════
+    # [A] درجات العقد الثلاث — أداء تاريخي فوري
+    # ════════════════════════════════════════════════════════════════════════
+    st.markdown("#### 📡 درجات العقد الحية")
     node_scores = _nsm_bridge.get_node_scores_for_display()
     n_cols = st.columns(len(node_scores))
     for col, ns in zip(n_cols, node_scores):
-        score_color = (
-            "var(--emerald)" if ns["connection_score"] >= 70
-            else "var(--gold)" if ns["connection_score"] >= 45
-            else "#e74c3c"
-        )
+        score = ns["connection_score"]
+        sc = "var(--emerald)" if score >= 70 else ("var(--gold)" if score >= 45 else "var(--text-muted)")
+        bar_w = int(score)
         with col:
             st.markdown(f"""
-            <div class="metric-card" style="text-align:center">
-                <div style="font-size:1.4rem;margin-bottom:0.3rem">{ns["label"]}</div>
-                <div class="metric-value" style="color:{score_color};font-size:2rem">
-                    {ns["connection_score"]:.1f}
+            <div class="metric-card" style="text-align:center;padding:0.9rem">
+                <div style="font-size:1.3rem;margin-bottom:0.25rem">{ns["label"]}</div>
+                <div class="metric-value" style="color:{sc};font-size:2.2rem;line-height:1">
+                    {score:.1f}
                 </div>
-                <div class="metric-label">درجة الاتصال (0-100)</div>
-                <hr style="margin:0.4rem 0;border-color:var(--border)">
-                <div style="font-size:0.8rem;color:var(--text-muted);direction:rtl">
-                    🔁 تشغيلات: <strong>{ns["total_runs"]}</strong><br>
-                    ✅ نجاح: <strong>{ns["success_rate"]:.1f}%</strong><br>
-                    ⏱️ زمن: <strong>{int(ns["avg_latency_ms"])} مللي</strong>
+                <div class="metric-label" style="margin-bottom:0.5rem">/ 100</div>
+                <div style="background:var(--surface);border-radius:6px;height:6px;overflow:hidden;margin-bottom:0.6rem">
+                    <div style="background:{sc};width:{bar_w}%;height:6px;border-radius:6px"></div>
+                </div>
+                <div style="font-size:0.78rem;color:var(--text-muted);direction:rtl;line-height:1.8">
+                    🔁 <strong>{ns["total_runs"]}</strong> تشغيل &nbsp;
+                    ✅ <strong>{ns["success_rate"]:.0f}%</strong> &nbsp;
+                    ⏱️ <strong>{int(ns["avg_latency_ms"])}ms</strong>
                 </div>
             </div>
             """, unsafe_allow_html=True)
 
+    # ════════════════════════════════════════════════════════════════════════
+    # [B] سجل التوجيه الحي — آخر القرارات في هذه الجلسة
+    # ════════════════════════════════════════════════════════════════════════
     st.markdown("")
+    st.markdown("#### 🔴 سجل التوجيه الحي")
 
-    # ── تقرير التعلم (prove_learning + get_learning_curve) ────────────────
-    st.markdown("#### 🎓 إثبات التعلم")
-    report = _nsm_bridge.get_learning_report()
-
-    if "error" in report:
-        st.error(f"خطأ: {report['error']}")
-        return
-
-    proof = report.get("proof", {})
-    verdict = proof.get("verdict", "insufficient_data")
-    verdict_icons = {
-        "learning_confirmed":      ("✅", "var(--emerald)", "تعلّم مؤكد"),
-        "learning_in_progress":    ("🔄", "var(--gold)",   "التعلم قيد التقدم"),
-        "learning_not_yet_evident": ("⏳", "#e74c3c",       "بيانات غير كافية بعد"),
-        "insufficient_data":       ("⏳", "var(--text-muted)", "بيانات غير كافية بعد"),
-    }
-    icon, vcolor, vlabel = verdict_icons.get(verdict, ("❓", "var(--text-muted)", verdict))
-    st.markdown(f"""
-    <div class="metric-card" style="border-right:4px solid {vcolor};padding:1rem 1.2rem;direction:rtl">
-        <span style="font-size:1.5rem">{icon}</span>
-        <strong style="color:{vcolor};font-size:1.1rem"> {vlabel}</strong>
-        <p style="margin:0.5rem 0 0;color:var(--text-muted);font-size:0.9rem">
-            {proof.get("message", "")}
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    evidence = proof.get("evidence", [])
-    if evidence:
-        st.markdown("")
-        st.markdown("**الأدلة المرصودة:**")
-        for ev in evidence:
-            st.markdown(f"- {ev}")
-
-    # مقاييس التعلم
-    metrics = proof.get("metrics", {})
-    if metrics.get("total_executions", 0) > 0:
-        st.markdown("")
-        mc1, mc2, mc3, mc4 = st.columns(4)
-        with mc1:
-            metric_card(metrics.get("total_executions", 0), "إجمالي التشغيلات")
-        with mc2:
-            metric_card(
-                f"{metrics.get('success_rate', 0)*100:.1f}%",
-                "معدل النجاح الكلي",
-            )
-        with mc3:
-            metric_card(
-                f"{metrics.get('learning_improvement_pct', 0):.1f}%",
-                "تحسّن vs الأساس",
-            )
-        with mc4:
-            top_nodes = proof.get("top_nodes", [])
-            best_label = top_nodes[0].get("name", "—") if top_nodes else "—"
-            metric_card(best_label, "أكثر العقد ثقةً")
-
-    # ── منحنى التعلم ──────────────────────────────────────────────────────
-    curve = report.get("curve", {})
-    trend = curve.get("trend", "insufficient_data")
-    data_points = curve.get("data_points", [])
-    if data_points:
-        st.markdown("")
-        st.markdown("#### 📈 منحنى التعلم")
-        trend_label = {
-            "improving":         "📈 تحسّن مستمر",
-            "degrading":         "📉 تراجع",
-            "stable":            "➡️ مستقر",
-            "insufficient_data": "⏳ بيانات غير كافية",
-        }.get(trend, trend)
-        st.caption(f"الاتجاه: {trend_label}")
-        try:
-            import pandas as _pd
-            _df = _pd.DataFrame(data_points)
-            if "avg_connection_score" in _df.columns:
-                st.line_chart(_df.set_index("index")["avg_connection_score"])
-        except Exception:
-            for dp in data_points[-10:]:
-                st.text(f"[{dp.get('index','')}] درجة={dp.get('avg_connection_score','?')}  نجاح={dp.get('success_rate','?')}")
+    _rlog = st.session_state.get("nsm_route_log", [])
+    if not _rlog:
+        st.info("📋 سيظهر سجل التوجيه هنا فور إرسال أول رسالة في تبويب المحادثة.")
     else:
-        st.info("📊 سيظهر منحنى التعلم بعد تراكم بيانات كافية من المحادثات.")
+        # إحصاءات سريعة
+        _total_req     = len(_rlog)
+        _failover_reqs = sum(1 for r in _rlog if r.get("failover"))
+        _ok_reqs       = sum(1 for r in _rlog if r.get("success"))
+        _avg_lat       = sum(r.get("latency_ms", 0) for r in _rlog) / max(_total_req, 1)
 
-    # ── سمعة العقد ────────────────────────────────────────────────────────
-    reputation = report.get("reputation", [])
-    if reputation:
+        _sc1, _sc2, _sc3, _sc4 = st.columns(4)
+        with _sc1: metric_card(_total_req, "طلبات في الجلسة")
+        with _sc2: metric_card(f"{_ok_reqs/_total_req*100:.0f}%", "معدل النجاح")
+        with _sc3: metric_card(_failover_reqs, "إعادة توجيه تلقائي")
+        with _sc4: metric_card(f"{_avg_lat:.0f}ms", "متوسط الاستجابة")
+
         st.markdown("")
-        st.markdown("#### 🏅 ترتيب سمعة العقد")
-        tier_colors = {
-            "platinum": "var(--emerald)",
-            "gold":     "var(--gold)",
-            "silver":   "#aaa",
-            "bronze":   "#cd7f32",
-            "unrated":  "var(--text-muted)",
-        }
-        for node in reputation:
-            tier = node.get("tier", "unrated")
-            col = tier_colors.get(tier, "var(--text-muted)")
-            runs = node.get("total_runs", 0)
-            st.markdown(f"""
-            <div class="root-item" style="direction:rtl">
-                <strong>{node.get("name", node.get("node_id","?"))}</strong>
-                <span class="badge badge-blue" style="background:{col};color:#fff;margin-right:6px">
-                    {tier}
-                </span>
-                <span class="badge badge-amber">سمعة: {node.get("reputation_score",0):.1f}</span>
-                <span class="badge badge-blue">نجاح: {node.get("success_rate",0)*100:.1f}%</span>
-                <span style="color:var(--text-muted);font-size:0.8rem"> ({runs} تشغيل)</span>
-            </div>
-            """, unsafe_allow_html=True)
 
-    st.caption(
-        "🔁 تُحدَّث هذه البيانات تلقائياً بعد كل رسالة في تبويب المحادثة. "
-        "أرسل رسائل للبناء التدريجي لسجل التعلم."
-    )
+        # توزيع الفئات الدلالية
+        if _NSM_SEMANTIC_OK and _nsm_semantic:
+            _cat_counts: dict = {}
+            for r in _rlog:
+                _cat = r.get("category", "general")
+                _cat_counts[_cat] = _cat_counts.get(_cat, 0) + 1
+            if _cat_counts:
+                _cat_html = '<div style="direction:rtl;margin-bottom:0.8rem">'
+                _cat_html += '<span style="font-size:0.8rem;color:var(--text-muted)">توزيع الاستعلامات: </span>'
+                for _cat, _cnt in sorted(_cat_counts.items(), key=lambda x: -x[1]):
+                    _lbl = _nsm_semantic.CATEGORY_LABELS.get(_cat, ("💬", _cat))
+                    _cat_html += (
+                        f'<span class="badge badge-blue" style="margin:2px">'
+                        f'{_lbl[0]} {_lbl[1]}: {_cnt}</span>'
+                    )
+                _cat_html += '</div>'
+                st.markdown(_cat_html, unsafe_allow_html=True)
+
+        # توزيع العقد المختارة
+        _node_counts: dict = {}
+        for r in _rlog:
+            _nd = r.get("node", "?").replace("nsm:", "")
+            _node_counts[_nd] = _node_counts.get(_nd, 0) + 1
+        _node_html = '<div style="direction:rtl;margin-bottom:1rem">'
+        _node_html += '<span style="font-size:0.8rem;color:var(--text-muted)">العقد المختارة: </span>'
+        for _nd, _cnt in sorted(_node_counts.items(), key=lambda x: -x[1]):
+            _node_html += f'<span class="badge badge-amber" style="margin:2px">{_nd}: {_cnt}</span>'
+        _node_html += '</div>'
+        st.markdown(_node_html, unsafe_allow_html=True)
+
+        # جدول آخر 20 قراراً
+        _last20 = list(reversed(_rlog[-20:]))
+        _rows_html = ""
+        for r in _last20:
+            _ico    = r.get("cat_icon", "💬")
+            _cat    = r.get("category", "general")
+            _nd     = r.get("node", "?").replace("nsm:", "")
+            _lat    = r.get("latency_ms", 0)
+            _ok     = r.get("success", False)
+            _fo     = r.get("failover", False)
+            _ok_ico = "✅" if _ok else "❌"
+            _fo_badge = '<span class="badge badge-purple" style="font-size:0.65rem">↩️ failover</span>' if _fo else ""
+            _q      = r.get("query", "")
+            _ts     = r.get("ts", "")
+            _rows_html += f"""
+            <div class="root-item" style="direction:rtl;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;padding:0.4rem 0.7rem">
+                <span style="color:var(--text-muted);font-size:0.72rem;min-width:60px">{_ts}</span>
+                <span>{_ico}</span>
+                <span class="badge badge-blue">{_cat}</span>
+                <span class="badge badge-amber">{_nd}</span>
+                <span style="font-size:0.8rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{_q}</span>
+                <span style="min-width:55px;font-size:0.78rem;color:var(--text-muted)">{_lat}ms</span>
+                <span>{_ok_ico}</span>
+                {_fo_badge}
+            </div>"""
+        st.markdown(
+            f'<div style="max-height:380px;overflow-y:auto;border:1px solid var(--border);'
+            f'border-radius:12px;padding:0.3rem">{_rows_html}</div>',
+            unsafe_allow_html=True,
+        )
+
+        if st.button("🗑 مسح سجل التوجيه", key="clear_route_log"):
+            st.session_state["nsm_route_log"] = []
+            st.rerun()
+
+    # ════════════════════════════════════════════════════════════════════════
+    # [C] إثبات التعلم — prove_learning + learning_curve
+    # ════════════════════════════════════════════════════════════════════════
+    st.markdown("")
+    st.markdown("#### 🎓 إثبات التعلم التراكمي")
+
+    report = _nsm_bridge.get_learning_report()
+    if "error" in report:
+        st.warning(f"⚠️ {report['error']}")
+    else:
+        proof   = report.get("proof", {})
+        verdict = proof.get("verdict", "insufficient_data")
+        _vmap   = {
+            "learning_confirmed":       ("✅", "var(--emerald)", "تعلّم مؤكَّد"),
+            "learning_in_progress":     ("🔄", "var(--gold)",   "التعلم قيد التقدم"),
+            "learning_not_yet_evident": ("⏳", "var(--text-muted)", "بيانات غير كافية بعد"),
+            "insufficient_data":        ("⏳", "var(--text-muted)", "بيانات غير كافية بعد"),
+        }
+        _ico, _vc, _vl = _vmap.get(verdict, ("❓", "var(--text-muted)", verdict))
+        st.markdown(
+            f'<div class="metric-card" style="border-right:4px solid {_vc};direction:rtl;padding:0.9rem 1.1rem">'
+            f'<span style="font-size:1.3rem">{_ico}</span>'
+            f' <strong style="color:{_vc}">{_vl}</strong>'
+            f'<p style="margin:0.4rem 0 0;color:var(--text-muted);font-size:0.85rem">'
+            f'{proof.get("message","")}</p></div>',
+            unsafe_allow_html=True,
+        )
+
+        _evs = proof.get("evidence", [])
+        if _evs:
+            st.markdown("")
+            for ev in _evs:
+                st.markdown(f"- {ev}")
+
+        _metrics = proof.get("metrics", {})
+        if _metrics.get("total_executions", 0) > 0:
+            st.markdown("")
+            _lm1, _lm2, _lm3, _lm4 = st.columns(4)
+            with _lm1: metric_card(_metrics.get("total_executions", 0), "تشغيلات تراكمية")
+            with _lm2: metric_card(f"{_metrics.get('success_rate',0)*100:.1f}%", "معدل النجاح")
+            with _lm3: metric_card(f"{_metrics.get('learning_improvement_pct',0):+.1f}%", "تحسّن vs الأساس")
+            with _lm4:
+                _tn = proof.get("top_nodes", [])
+                metric_card(_tn[0].get("name","—") if _tn else "—", "أكثر العقد ثقةً")
+
+        # منحنى التعلم
+        _curve  = report.get("curve", {})
+        _pts    = _curve.get("data_points", [])
+        _trend  = _curve.get("trend", "insufficient_data")
+        _tmap   = {"improving": "📈 تحسّن", "degrading": "📉 تراجع",
+                   "stable": "➡️ مستقر", "insufficient_data": "⏳ غير كافٍ"}
+        if _pts:
+            st.markdown("")
+            st.caption(f"منحنى التعلم — الاتجاه: {_tmap.get(_trend, _trend)}")
+            try:
+                import pandas as _pd
+                _df = _pd.DataFrame(_pts)
+                if "avg_connection_score" in _df.columns:
+                    st.line_chart(_df.set_index("index")["avg_connection_score"],
+                                  use_container_width=True)
+            except Exception:
+                for _dp in _pts[-8:]:
+                    st.text(f"[{_dp.get('index','')}] {_dp.get('avg_connection_score','?'):.1f}")
+        else:
+            st.caption("📊 منحنى التعلم سيظهر بعد تراكم بيانات كافية.")
+
+        # سمعة العقد
+        _rep = report.get("reputation", [])
+        if _rep:
+            st.markdown("")
+            st.markdown("#### 🏅 سمعة العقد")
+            _tier_c = {"platinum":"var(--emerald)","gold":"var(--gold)",
+                       "silver":"#aaa","bronze":"#cd7f32","unrated":"var(--text-muted)"}
+            for _nd in _rep:
+                _t  = _nd.get("tier","unrated")
+                _tc = _tier_c.get(_t,"var(--text-muted)")
+                st.markdown(
+                    f'<div class="root-item" style="direction:rtl">'
+                    f'<strong>{_nd.get("name",_nd.get("node_id","?"))}</strong>'
+                    f' <span class="badge badge-blue" style="background:{_tc};color:#fff">{_t}</span>'
+                    f' <span class="badge badge-amber">سمعة: {_nd.get("reputation_score",0):.1f}</span>'
+                    f' <span class="badge badge-blue">نجاح: {_nd.get("success_rate",0)*100:.0f}%</span>'
+                    f' <span style="color:var(--text-muted);font-size:0.78rem">'
+                    f'({_nd.get("total_runs",0)} تشغيل)</span></div>',
+                    unsafe_allow_html=True,
+                )
+
+    # ════════════════════════════════════════════════════════════════════════
+    # [D] معلومات التوجيه الدلالي
+    # ════════════════════════════════════════════════════════════════════════
+    if _NSM_SEMANTIC_OK and _nsm_semantic:
+        st.markdown("")
+        with st.expander("🧠 كيف يعمل التوجيه الدلالي؟", expanded=False):
+            st.markdown("""
+**الصيغة:** `درجة_مركَّبة = 65% × ScoringEngine_التاريخي + 35% × تحيُّز_دلالي`
+
+| الفئة | العقدة المُفضَّلة | السبب |
+|---|---|---|
+| 🕌 عربي/إسلامي | NSM Agent | مُدرَّب ومُخصَّص للعربية والمعرفة الإسلامية |
+| 💻 برمجة | OpenRouter (GPT-4o/Claude) | نماذج الكود الأقوى |
+| ✍️ إبداعي | OpenRouter | إبداع أغنى مع نماذج كبيرة |
+| 🔍 تحليل | OpenRouter | تحليل أعمق مع سياق أوسع |
+| 💬 عام | NSM Agent | الافتراضي المُحسَّن للعربية |
+
+⚡ **Failover:** إذا فشل المسار الأول — يُعاد التوجيه تلقائياً للتالي مع تسجيل الفشل.
+            """)
+
+    st.caption("🔁 كل رسالة في المحادثة تُحدِّث هذه اللوحة تلقائياً.")
 
 
 def render_memory():
@@ -6632,13 +6724,17 @@ def render_chat():
             st.rerun()
             return
 
-        # ── [NSM Router Bridge] حدّد العقد المتاحة فعلاً ─────────────────────
+        # ════════════════════════════════════════════════════════════════════
+        # [1] بناء قائمة العقد المتاحة فعلاً
+        # ════════════════════════════════════════════════════════════════════
         import time as _time_mod
+
         _or_key_p = st.session_state.get("_or_api_key", "").strip()
         _available_nodes: list = []
         if _or_key_p:
-            _available_nodes.append(_nsm_bridge.NODE_OPENROUTER if _nsm_bridge else "nsm:openrouter")
-        # فحص NSM Agent مبكراً لمعرفة توفره قبل قرار التوجيه
+            _available_nodes.append("nsm:openrouter")
+
+        # فحص NSM Agent مبكراً قبل قرار التوجيه
         _agent = None
         try:
             from ai.nsm_agent_core import NSMAgent as _AgentCls
@@ -6648,144 +6744,202 @@ def render_chat():
                 st.session_state._nsm_agent_instance = _agent
             _agent.available = _agent._check_available()
             if _agent.available:
-                _available_nodes.append(_nsm_bridge.NODE_AGENT if _nsm_bridge else "nsm:agent")
+                _available_nodes.append("nsm:agent")
         except Exception:
             _agent = None
-        _available_nodes.append(_nsm_bridge.NODE_FREE_ROUTER if _nsm_bridge else "nsm:free_router")
+        _available_nodes.append("nsm:free_router")   # دائماً متاح
 
-        # ── [NSM Router Bridge] اختَر أفضل عقدة بناءً على السجل التاريخي ──
+        # ════════════════════════════════════════════════════════════════════
+        # [2] التوجيه الدلالي — صنّف الاستعلام وانحَز للعقدة الأنسب
+        # ════════════════════════════════════════════════════════════════════
+        _sem_category   = "general"
+        _sem_confidence = 0.2
+        _sem_biased     = list(_available_nodes)
+        if _NSM_SEMANTIC_OK and _nsm_semantic:
+            try:
+                _sem_category, _sem_confidence = _nsm_semantic.classify(text.strip())
+                _sem_biased = _nsm_semantic.bias_order(
+                    _sem_category, _available_nodes, _sem_confidence
+                )
+            except Exception:
+                pass
+
+        # ════════════════════════════════════════════════════════════════════
+        # [3] اختَر العقدة (تاريخي 65% + دلالي 35%)
+        # ════════════════════════════════════════════════════════════════════
         if _NSM_BRIDGE_OK and _nsm_bridge:
-            _selected_node = _nsm_bridge.select_node(_available_nodes)
+            _selected_node = _nsm_bridge.select_node_with_semantic(
+                text.strip(), _sem_biased, _sem_category, _sem_confidence
+            )
         else:
-            _selected_node = _available_nodes[0]
+            _selected_node = _sem_biased[0]
 
-        _t0_route = _time_mod.time()
+        # ════════════════════════════════════════════════════════════════════
+        # [4] حلقة تنفيذ مع Failover تلقائي (حتى 2 إعادة توجيه)
+        # ════════════════════════════════════════════════════════════════════
+        _excluded_nodes: list = []
+        _response       = ""
+        _ctx_tag        = ""
+        _src_badge      = "🤖 NSM"
+        _af_params_last = dict(_AF_NEUTRAL_PARAMS) if _AUTOTUNE_OK else {"temperature": 0.7}
+        _af_ctx_last    = "conversational"
+        _or_model_last  = st.session_state.get("_or_model", "google/gemini-2.5-flash")
+        _final_node     = _selected_node
+        _total_latency  = 0.0
 
-        # ══ تنفيذ المسار المختار ════════════════════════════════════════════
+        for _attempt in range(len(_available_nodes)):
+            # Failover: اختر التالية إذا فشلت السابقة
+            if _attempt > 0:
+                if _NSM_BRIDGE_OK and _nsm_bridge:
+                    _selected_node = _nsm_bridge.select_next_node(_available_nodes, _excluded_nodes)
+                else:
+                    _rem = [n for n in _available_nodes if n not in _excluded_nodes]
+                    _selected_node = _rem[0] if _rem else "nsm:free_router"
+                _final_node = _selected_node
 
-        if _selected_node == (_nsm_bridge.NODE_OPENROUTER if _nsm_bridge else "nsm:openrouter"):
-            # ── مسار OpenRouter ──────────────────────────────────────────────
-            _or_model_p = st.session_state.get("_or_model", "google/gemini-2.5-flash")
-            can_vision = _or_model_p in VISION_MODELS
-            doc_files   = [f for f in files if not f["is_image"]]
-            image_files = [f for f in files if f["is_image"]] if can_vision else []
-            user_content = _build_user_content(text.strip(), doc_files, image_files)
+                # مؤشر إعادة التوجيه للمستخدم
+                st.toast(f"🔄 إعادة توجيه تلقائي → {_selected_node.replace('nsm:','')}", icon="⚡")
 
-            history_msgs = []
-            for m in st.session_state.nsm_messages[:-1]:
-                role = "user" if m[0] == "user" else "assistant"
-                history_msgs.append({"role": role, "content": m[1]})
-            api_messages = history_msgs + [{"role": "user", "content": user_content}]
+            _t0_route = _time_mod.time()
+            _attempt_success = False
 
-            _or_success = False
-            with st.chat_message("assistant", avatar="🌐"):
-                placeholder = st.empty()
-                full_response = ""
+            # ── تنفيذ العقدة المختارة ─────────────────────────────────────
+            if _selected_node == "nsm:openrouter" and _or_key_p:
+                # ── مسار OpenRouter ──────────────────────────────────────
+                _or_model_p = st.session_state.get("_or_model", "google/gemini-2.5-flash")
+                _or_model_last = _or_model_p
+                can_vision  = _or_model_p in VISION_MODELS
+                doc_files   = [f for f in files if not f["is_image"]]
+                image_files = [f for f in files if f["is_image"]] if can_vision else []
+                user_content = _build_user_content(text.strip(), doc_files, image_files)
+                history_msgs = []
+                for m in st.session_state.nsm_messages[:-1]:
+                    role = "user" if m[0] == "user" else "assistant"
+                    history_msgs.append({"role": role, "content": m[1]})
+                api_messages = history_msgs + [{"role": "user", "content": user_content}]
+
                 _af_params  = dict(_AF_NEUTRAL_PARAMS) if _AUTOTUNE_OK else {"temperature": 0.7, "top_p": 0.9}
                 _af_ctx     = "conversational"
                 _af_note    = ""
                 if _AUTOTUNE_OK:
                     try:
-                        _af_params, _af_applied, _af_note = _af_apply_adjustments(_af_params, _af_ctx)
+                        _af_params, _, _af_note = _af_apply_adjustments(_af_params, _af_ctx)
                     except Exception:
-                        _af_applied = False
-                try:
-                    for chunk in _or_stream(
-                        api_messages, model=_or_model_p, api_key=_or_key_p,
-                        temperature=_af_params.get("temperature", 0.7),
-                        top_p=_af_params.get("top_p", 0.9),
-                    ):
-                        full_response += chunk
-                        placeholder.markdown(full_response + "▌")
-                    placeholder.markdown(full_response)
-                    _or_success = bool(full_response.strip())
-                except Exception:
-                    placeholder.markdown(full_response or "⚠️ خطأ في OpenRouter")
-                if _af_note:
-                    st.caption(_af_note)
-            response  = full_response
-            ctx_tag   = ""
-            src_badge = f"🌐 OpenRouter · {_or_model_p.split('/')[-1]}"
-            # ── [NSM Router Bridge] سجّل النتيجة الحقيقية ──────────────────
-            if _NSM_BRIDGE_OK and _nsm_bridge:
-                _nsm_bridge.record_result(
-                    _nsm_bridge.NODE_OPENROUTER,
-                    _or_success,
-                    (_time_mod.time() - _t0_route) * 1000,
-                )
-            _record_chat_episode(text.strip(), response, source="chat_openrouter")
-            st.session_state.nsm_messages.append(("nsm", response, ctx_tag, src_badge, datetime.now().strftime("%H:%M")))
-            if _AUTOTUNE_OK:
-                st.session_state["_af_last_turn"] = {
-                    "response": response, "params": _af_params, "context_type": _af_ctx,
-                    "model": _or_model_p, "persona": "nsm", "rated": False,
-                }
-            st.session_state.nsm_count += 1
-            st.rerun()
-            return
+                        pass
+                _af_params_last = _af_params
+                _af_ctx_last    = _af_ctx
 
-        elif _selected_node == (_nsm_bridge.NODE_AGENT if _nsm_bridge else "nsm:agent") and _agent and _agent.available:
-            # ── مسار NSM Agent — Streaming ──────────────────────────────────
-            _agent_success = False
-            with st.chat_message("assistant", avatar="🧠"):
-                placeholder = st.empty()
                 full_response = ""
-                try:
-                    for chunk in _agent.run_stream(text.strip()):
-                        full_response += chunk
-                        placeholder.markdown(full_response + "▌")
-                    placeholder.markdown(full_response)
-                    _agent_success = bool(full_response.strip())
-                except Exception:
-                    placeholder.markdown(full_response or "⚠️ خطأ في NSM Agent")
-            response = full_response.replace("⏳ *أفكر...*\n\n", "", 1)
-            if hasattr(bot, "_last_source"):
-                bot._last_source = "nsm_agent"
-            # ── [NSM Router Bridge] سجّل النتيجة الحقيقية ──────────────────
-            if _NSM_BRIDGE_OK and _nsm_bridge:
-                _nsm_bridge.record_result(
-                    _nsm_bridge.NODE_AGENT,
-                    _agent_success,
-                    (_time_mod.time() - _t0_route) * 1000,
-                )
+                with st.chat_message("assistant", avatar="🌐"):
+                    placeholder = st.empty()
+                    try:
+                        for chunk in _or_stream(
+                            api_messages, model=_or_model_p, api_key=_or_key_p,
+                            temperature=_af_params.get("temperature", 0.7),
+                            top_p=_af_params.get("top_p", 0.9),
+                        ):
+                            full_response += chunk
+                            placeholder.markdown(full_response + "▌")
+                        placeholder.markdown(full_response)
+                        _attempt_success = bool(full_response.strip())
+                    except Exception:
+                        placeholder.markdown(full_response or "⚠️ خطأ في OpenRouter — جاري الإعادة...")
+                    if _af_note:
+                        st.caption(_af_note)
 
-        else:
-            # ── مسار free_router (fallback) — bot.chat غير متدفق ────────────
-            _free_success = False
-            with st.chat_message("assistant", avatar="🧠"):
-                _typing_ph = st.empty()
-                _typing_ph.markdown(
-                    '''<div class="typing-wrap">
-                        <span class="thinking-ring">🧠</span>
-                        <span class="typing-dots"><span></span><span></span><span></span></span>
-                    </div>''',
-                    unsafe_allow_html=True,
-                )
-                try:
-                    response = bot.chat(text.strip(), system_prompt=NSM_SYSTEM_PROMPT)
-                    _free_success = bool(response and response.strip())
-                except Exception:
-                    response = "⚠️ تعذّر الحصول على رد."
-                _typing_ph.empty()
-            # ── [NSM Router Bridge] سجّل النتيجة الحقيقية ──────────────────
-            if _NSM_BRIDGE_OK and _nsm_bridge:
-                _nsm_bridge.record_result(
-                    _nsm_bridge.NODE_FREE_ROUTER,
-                    _free_success,
-                    (_time_mod.time() - _t0_route) * 1000,
-                )
+                _response  = full_response
+                _ctx_tag   = ""
+                _src_badge = f"🌐 OpenRouter · {_or_model_p.split('/')[-1]}"
 
-        ctx_tag   = bot.context_info()
-        src_badge = (
-            bot.source_badge()
-            if hasattr(bot, "source_badge") else "🤖 NSM Agent v3"
-        )
-        _record_chat_episode(text.strip(), response, source="chat_nsm_agent")
-        st.session_state.nsm_messages.append(("nsm",  response, ctx_tag, src_badge, datetime.now().strftime("%H:%M")))
+            elif _selected_node == "nsm:agent" and _agent and _agent.available:
+                # ── مسار NSM Agent — Streaming ──────────────────────────
+                full_response = ""
+                with st.chat_message("assistant", avatar="🧠"):
+                    placeholder = st.empty()
+                    try:
+                        for chunk in _agent.run_stream(text.strip()):
+                            full_response += chunk
+                            placeholder.markdown(full_response + "▌")
+                        placeholder.markdown(full_response)
+                        _attempt_success = bool(full_response.strip())
+                    except Exception:
+                        placeholder.markdown(full_response or "⚠️ خطأ في NSM Agent — جاري الإعادة...")
+                if hasattr(bot, "_last_source"):
+                    bot._last_source = "nsm_agent"
+                _response  = full_response.replace("⏳ *أفكر...*\n\n", "", 1)
+                _ctx_tag   = bot.context_info() if hasattr(bot, "context_info") else ""
+                _src_badge = bot.source_badge() if hasattr(bot, "source_badge") else "🧠 NSM Agent"
+
+            else:
+                # ── مسار free_router (الاحتياطي الأخير) ──────────────────
+                with st.chat_message("assistant", avatar="🧠"):
+                    _typing_ph = st.empty()
+                    _typing_ph.markdown(
+                        '''<div class="typing-wrap">
+                            <span class="thinking-ring">🧠</span>
+                            <span class="typing-dots"><span></span><span></span><span></span></span>
+                        </div>''',
+                        unsafe_allow_html=True,
+                    )
+                    try:
+                        _resp_raw = bot.chat(text.strip(), system_prompt=NSM_SYSTEM_PROMPT)
+                        _attempt_success = bool(_resp_raw and _resp_raw.strip())
+                    except Exception:
+                        _resp_raw = "⚠️ تعذّر الحصول على رد."
+                    _typing_ph.empty()
+                _response  = _resp_raw
+                _ctx_tag   = bot.context_info() if hasattr(bot, "context_info") else ""
+                _src_badge = bot.source_badge() if hasattr(bot, "source_badge") else "⚡ Free Router"
+
+            # ── قياس الزمن + تسجيل النتيجة ──────────────────────────────
+            _latency_ms = (_time_mod.time() - _t0_route) * 1000
+            _total_latency += _latency_ms
+
+            if _NSM_BRIDGE_OK and _nsm_bridge:
+                _nsm_bridge.record_result(_selected_node, _attempt_success, _latency_ms)
+
+            # ── سجل التوجيه الحي (آخر 100 قرار) ──────────────────────────
+            _sem_icon = ""
+            if _NSM_SEMANTIC_OK and _nsm_semantic:
+                try:
+                    _sem_icon = _nsm_semantic.CATEGORY_LABELS.get(_sem_category, ("💬", ""))[0]
+                except Exception:
+                    _sem_icon = "💬"
+            _route_entry = {
+                "ts":         datetime.now().strftime("%H:%M:%S"),
+                "query":      text.strip()[:55] + ("…" if len(text.strip()) > 55 else ""),
+                "category":   _sem_category,
+                "cat_icon":   _sem_icon,
+                "confidence": round(_sem_confidence, 2),
+                "node":       _selected_node,
+                "latency_ms": round(_latency_ms),
+                "success":    _attempt_success,
+                "attempt":    _attempt + 1,
+                "failover":   _attempt > 0,
+            }
+            _rlog = st.session_state.setdefault("nsm_route_log", [])
+            _rlog.append(_route_entry)
+            if len(_rlog) > 100:
+                st.session_state["nsm_route_log"] = _rlog[-100:]
+
+            if _attempt_success:
+                break   # نجاح — توقّف
+            _excluded_nodes.append(_selected_node)
+
+        # ════════════════════════════════════════════════════════════════════
+        # [5] حفظ + إظهار الرد النهائي
+        # ════════════════════════════════════════════════════════════════════
+        _source_key = "chat_openrouter" if "openrouter" in _final_node else "chat_nsm_agent"
+        _record_chat_episode(text.strip(), _response, source=_source_key)
+        st.session_state.nsm_messages.append((
+            "nsm", _response, _ctx_tag, _src_badge, datetime.now().strftime("%H:%M")
+        ))
         if _AUTOTUNE_OK:
             st.session_state["_af_last_turn"] = {
-                "response": response, "params": dict(_AF_NEUTRAL_PARAMS), "context_type": "conversational",
-                "model": src_badge, "persona": "nsm", "rated": False,
+                "response": _response, "params": _af_params_last,
+                "context_type": _af_ctx_last,
+                "model": _or_model_last if "openrouter" in _final_node else _src_badge,
+                "persona": "nsm", "rated": False,
             }
         st.session_state.nsm_count += 1
         st.rerun()
