@@ -245,6 +245,13 @@ try:
 except Exception:
     _ROUTE_LOG_DB_OK = False
 
+# ── تقييم جودة الرد تلقائياً (تماسك + صلة + جودة لغة عربية) ────────────────
+try:
+    from ai.quality_scorer import score_response as _score_response
+    _QUALITY_SCORER_OK = True
+except Exception:
+    _QUALITY_SCORER_OK = False
+
 # ── طبقة فحص أمان أولى (regex، بدون تكلفة API) ────────────────────────────
 try:
     from ai.harm_classifier import classify_prompt as _classify_harm, get_domain_label as _harm_label
@@ -3974,6 +3981,11 @@ def render_nsm_routing():
             _fo_badge = '<span class="badge badge-purple" style="font-size:0.65rem">↩️ failover</span>' if _fo else ""
             _q      = r.get("query", "")
             _ts     = r.get("ts", "")
+            _qs     = r.get("quality_score")
+            _qs_badge = ""
+            if _qs is not None:
+                _qs_cls = "badge-green" if _qs >= 70 else ("badge-amber" if _qs >= 40 else "badge-purple")
+                _qs_badge = f'<span class="badge {_qs_cls}" style="font-size:0.65rem">⭐ {_qs:.0f}</span>'
             _rows_html += f"""
             <div class="root-item" style="direction:rtl;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;padding:0.4rem 0.7rem">
                 <span style="color:var(--text-muted);font-size:0.72rem;min-width:60px">{_ts}</span>
@@ -3983,6 +3995,7 @@ def render_nsm_routing():
                 <span style="font-size:0.8rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{_q}</span>
                 <span style="min-width:55px;font-size:0.78rem;color:var(--text-muted)">{_lat}ms</span>
                 <span>{_ok_ico}</span>
+                {_qs_badge}
                 {_fo_badge}
             </div>"""
         st.markdown(
@@ -6905,9 +6918,19 @@ def render_chat():
                 _ctx_tag   = bot.context_info() if hasattr(bot, "context_info") else ""
                 _src_badge = bot.source_badge() if hasattr(bot, "source_badge") else "⚡ Free Router"
 
-            # ── قياس الزمن + تسجيل النتيجة ──────────────────────────────
+            # ── قياس الزمن + تقييم الجودة + تسجيل النتيجة ────────────────
             _latency_ms = (_time_mod.time() - _t0_route) * 1000
             _total_latency += _latency_ms
+
+            # التقييم الثنائي القديم (فارغ/غير فارغ) يبقى كحد أدنى أولي،
+            # ثم نُدقّقه بتقييم الجودة الحقيقي إن كان متاحاً
+            _quality: dict = {}
+            if _attempt_success and _QUALITY_SCORER_OK:
+                try:
+                    _quality = _score_response(text.strip(), _response)
+                    _attempt_success = bool(_quality.get("is_quality", True))
+                except Exception:
+                    _quality = {}
 
             if _NSM_BRIDGE_OK and _nsm_bridge:
                 _nsm_bridge.record_result(_selected_node, _attempt_success, _latency_ms)
@@ -6930,6 +6953,7 @@ def render_chat():
                 "success":    _attempt_success,
                 "attempt":    _attempt + 1,
                 "failover":   _attempt > 0,
+                "quality_score": _quality.get("score"),
             }
             _rlog = st.session_state.setdefault("nsm_route_log", [])
             _rlog.append(_route_entry)
