@@ -69,6 +69,23 @@ def _fnv1a_hash(s: str) -> int:
     return h
 
 
+def _normalize_hamza(s: str) -> str:
+    """
+    توحيد كل أشكال الهمزة (أ إ آ ٱ ؤ ئ) إلى ألف عادية (ا).
+
+    لماذا هذا ضروري: الكود السابق كان يطبّع فقط همزات الألف
+    (أ إ آ ٱ) ويترك همزتي الواو والياء (ؤ ئ) بلا تطبيع. بما أن نص
+    الإدخال يُطبَّع بينما مفاتيح _KNOWN_ROOTS الأصلية (أمن، أخذ،
+    أكل، أمر، سأل...) تحتفظ بالهمزة على الألف، كانت كل كلمة تُكتب
+    فيها همزة الجذر على حامل مختلف حسب موضعها الإعرابي (مثل "مؤمن"
+    من جذر "أمن") تفشل في المطابقة تماماً وتحصل على جذر خاطئ بثقة
+    منخفضة بدل الجذر الصحيح بثقة عالية. توحيد كل الأشكال هنا +
+    تطبيع مفاتيح _KNOWN_ROOTS و_PARTICLES بنفس الدالة (أسفل) يجعل
+    المطابقة متسقة دون التأثير على الكلمات الخالية من الهمزة أصلاً.
+    """
+    return re.sub(r"[أإآٱؤئ]", "ا", s)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Arabic constants
 # ═══════════════════════════════════════════════════════════════════════════
@@ -152,6 +169,17 @@ _KNOWN_ROOTS: Dict[str, List[str]] = {
     "فرح": ["فرح", "عاطفة"],
 }
 
+# نسخة مطبَّعة الهمزة من _KNOWN_ROOTS لأغراض المطابقة الداخلية (word يصل
+# دائماً مطبَّعاً من SyntacticAnalyser)، مع خريطة عكسية لإرجاع الإملاء
+# الأصلي (بالهمزة) عند العرض للمستخدم أو ربط الحقول الدلالية.
+_KNOWN_ROOTS_NORM: Dict[str, List[str]] = {}
+_NORM_TO_ORIG_ROOT: Dict[str, str] = {}
+for _r, _fields in _KNOWN_ROOTS.items():
+    _rn = _normalize_hamza(_r)
+    _KNOWN_ROOTS_NORM[_rn] = _fields
+    _NORM_TO_ORIG_ROOT[_rn] = _r
+del _r, _fields, _rn
+
 # ── Morphological patterns (أوزان صرفية) with POS tag ─────────────────────
 # Pattern: (regex for stripped root+pattern, pos, wazn_name)
 _MORPHO_PATTERNS: List[Tuple[str, str, str]] = [
@@ -188,13 +216,16 @@ _MORPHO_PATTERNS: List[Tuple[str, str, str]] = [
 ]
 
 # ── Precompiled particle set ──────────────────────────────────────────────
-_PARTICLES = {
+# مطبَّعة الهمزة (عبر _normalize_hamza) لأنها تُقارَن دائماً مع نص `clean`
+# المطبَّع في _tag_token — قبل التطبيع كانت "إن"/"أن"/"لأن" لا تُطابَق
+# أبداً لأن clean النص يصل بالفعل بلا همزة (مثال: "وإن" → "وان").
+_PARTICLES = {_normalize_hamza(p) for p in {
     "في", "من", "إلى", "على", "عن", "مع", "بعد", "قبل", "حتى",
     "لأن", "إن", "أن", "لا", "ما", "هل", "قد", "لم", "لن",
     "هذا", "هذه", "ذلك", "تلك", "الذي", "التي", "الذين", "اللاتي",
     "هو", "هي", "هم", "هن", "نحن", "أنت", "أنتم", "أنا",
     "كان", "ليس", "كانت", "يكون", "تكون",
-}
+}}
 
 # ── Semantic concept dictionary (مفردات → مفاهيم) ─────────────────────────
 _SEMANTIC_DICT: Dict[str, List[str]] = {
@@ -525,9 +556,9 @@ class SyntacticAnalyser:
         return layer
 
     def _clean(self, text: str) -> str:
-        """Remove tashkeel, normalise alef variants."""
+        """Remove tashkeel, normalise alef and hamza variants."""
         text = _TASHKEEL_RE.sub("", text)
-        text = re.sub(r"[أإآٱ]", "ا", text)
+        text = _normalize_hamza(text)
         return text.strip()
 
     def _strip_affixes(self, word: str) -> Tuple[str, str, str]:
@@ -560,7 +591,7 @@ class SyntacticAnalyser:
     def _tag_token(self, raw: str) -> ArabicToken:
         """Classify a single token."""
         clean = _TASHKEEL_RE.sub("", raw)
-        clean = re.sub(r"[أإآٱ]", "ا", clean)
+        clean = _normalize_hamza(clean)
 
         # Fast particle check
         if clean in _PARTICLES or len(clean) <= 2:
@@ -692,18 +723,22 @@ class MorphologicalAnalyser:
         # Remove remaining long vowel signs
         w = re.sub(r"[اويى]", "", word)
 
-        # Check known roots directly
-        for root in _KNOWN_ROOTS:
-            if root in word or word in root:
-                return root, 0.9
+        # Check known roots directly (مطابقة على النسخة المطبَّعة الهمزة —
+        # word يصل مطبَّعاً بالفعل من SyntacticAnalyser، فهذا يضمن أن
+        # جذوراً مثل "أمن" تُطابَق حتى لو ظهرت الهمزة على حامل مختلف
+        # بالكلمة الأصلية قبل التطبيع، مثل "مؤمن")
+        for root_norm in _KNOWN_ROOTS_NORM:
+            if root_norm in word or word in root_norm:
+                return _NORM_TO_ORIG_ROOT[root_norm], 0.9
 
         # Attempt to pick 3 consonants
         consonants = re.findall(r"[\u0600-\u06FF]", w)
         if len(consonants) >= 3:
             root = "".join(consonants[:3])
-            # Verify it's in known roots
-            conf = 0.7 if root in _KNOWN_ROOTS else 0.4
-            return root, conf
+            # Verify it's in known roots (مطبَّعة) وأرجع الإملاء الأصلي إن وُجد
+            if root in _KNOWN_ROOTS_NORM:
+                return _NORM_TO_ORIG_ROOT[root], 0.7
+            return root, 0.4
 
         if consonants:
             return "".join(consonants), 0.3
@@ -795,10 +830,10 @@ class SemanticAnalyser:
 
         # ── Step 1: dictionary + token semantic fields ─────────────────────
         clean = _TASHKEEL_RE.sub("", text)
-        clean = re.sub(r"[أإآٱ]", "ا", clean)
+        clean = _normalize_hamza(clean)
 
         for key, fields in _SEMANTIC_DICT.items():
-            key_clean = re.sub(r"[أإآٱ]", "ا", key)
+            key_clean = _normalize_hamza(key)
             if key_clean in clean:
                 for f in fields:
                     concept_freq[f] = concept_freq.get(f, 0) + clean.count(key_clean)
@@ -931,7 +966,7 @@ class ArabicNLPEngine:
         )
 
         clean = _TASHKEEL_RE.sub("", text)
-        clean = re.sub(r"[أإآٱ]", "ا", clean).strip()
+        clean = _normalize_hamza(clean).strip()
 
         return ArabicAnalysisResult(
             text        = text,
