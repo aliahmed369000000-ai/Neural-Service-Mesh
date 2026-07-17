@@ -970,6 +970,76 @@ hr { border-color: var(--border) !important; }
     100% { box-shadow: 0 0 0 0 rgba(0,0,0,0); }
 }
 
+/* ── تبويب التدريب: شارة حالة (نشط/متوقف) ── */
+.status-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 0.3rem 0.8rem;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    vertical-align: middle;
+    margin-right: 8px;
+}
+.status-pill--active {
+    background: var(--emerald-soft);
+    color: var(--emerald);
+    border: 1px solid var(--emerald);
+}
+.status-pill--idle {
+    background: var(--surface2);
+    color: var(--text-dim, #94a3b8);
+    border: 1px solid var(--border);
+}
+.status-pill .status-pill-dot {
+    width: 7px; height: 7px; border-radius: 50%; background: currentColor;
+}
+.status-pill--active .status-pill-dot { animation: nsmPulseDot 2s ease-out infinite; }
+
+/* ── شبكة رقاقات وحدات نقطة الحفظ ── */
+.module-chip-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0.6rem;
+    margin: 0.4rem 0 0.2rem 0;
+}
+.module-chip {
+    display: flex; align-items: center; gap: 0.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.6rem 0.8rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+}
+.module-chip:hover { transform: translateY(-2px); border-color: var(--emerald); }
+.module-chip-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--emerald); flex-shrink: 0;
+    box-shadow: 0 0 0 3px var(--emerald-soft);
+}
+
+/* ── بطاقة بنية الشبكة العصبية ── */
+.arch-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.2rem 0.2rem 0.9rem 0.2rem;
+    margin-top: 0.3rem;
+}
+
+/* ── حالة فارغة أنيقة (لم يبدأ التدريب بعد) ── */
+.training-empty {
+    display: flex; align-items: center; gap: 1rem;
+    background: var(--surface);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 1.1rem 1.3rem;
+    margin: 0.4rem 0 0.6rem 0;
+}
+.training-empty-icon { font-size: 1.8rem; flex-shrink: 0; }
+.training-empty-text { font-size: 0.9rem; line-height: 1.8; color: var(--text); }
+
 /* ── بطاقات المقاييس ── */
 .metric-card {
     position: relative;
@@ -3521,22 +3591,53 @@ def render_training():
     """, height=0)
 
     st.markdown("")
-    st.markdown('<div class="section-header">🎓 حالة التدريب</div>', unsafe_allow_html=True)
-
     training   = load_training_summary()
     checkpoint = load_latest_checkpoint()
     ckg        = load_ckg()
 
-    train_steps = training.get("train_steps", 0)
-    last_loss   = training.get("last_loss", 0.0)
-    total_params= training.get("total_parameters", 0)
-    ckg_size    = len(ckg.get("concepts", {}))
+    train_steps  = training.get("train_steps", 0)
+    last_loss    = training.get("last_loss", 0.0)
+    total_params = training.get("total_parameters", 0)
+    ckg_size     = len(ckg.get("concepts", {}))
+    _is_active   = train_steps > 0
+
+    _hdr_col, _btn_col = st.columns([5, 1])
+    with _hdr_col:
+        _pill = (
+            '<span class="status-pill status-pill--active"><span class="status-pill-dot"></span>نشط</span>'
+            if _is_active else
+            '<span class="status-pill status-pill--idle"><span class="status-pill-dot"></span>لم يبدأ بعد</span>'
+        )
+        st.markdown(f'<div class="section-header">🎓 حالة التدريب {_pill}</div>', unsafe_allow_html=True)
+    with _btn_col:
+        if st.button("🔄 تحديث", key="training_refresh_btn", use_container_width=True):
+            load_training_summary.clear()
+            load_latest_checkpoint.clear()
+            load_ckg.clear()
+            st.rerun()
+
+    if not _is_active:
+        st.markdown("""
+        <div class="training-empty">
+            <div class="training-empty-icon">🌱</div>
+            <div class="training-empty-text">
+                لم تُسجَّل أي خطوة تدريب بعد على هذه النسخة. بمجرد تشغيل دورة تدريب
+                (<code>ai/knowledge_trainer.py</code> أو <code>ai/continual_learner.py</code>)
+                ستظهر هنا خطوات التدريب، قيمة الخسارة، ونقاط الحفظ فور توفّرها.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
     col1, col2, col3, col4 = st.columns(4)
-    with col1: metric_card(f"{train_steps:,}", "خطوات التدريب")
-    with col2: metric_card(f"{last_loss:.2e}", "آخر خسارة (Loss)")
-    with col3: metric_card(f"{total_params:,}", "معامل في الشبكة")
-    with col4: metric_card(f"{ckg_size:,}", "مفهوم في CKG")
+    with col1:
+        metric_card(f"{train_steps:,}", "خطوات التدريب")
+    with col2:
+        _loss_display = f"{last_loss:.2e}" if last_loss else "—"
+        metric_card(_loss_display, "آخر خسارة (Loss)")
+    with col3:
+        metric_card(f"{total_params:,}" if total_params else "—", "معامل في الشبكة")
+    with col4:
+        metric_card(f"{ckg_size:,}", "مفهوم في CKG")
 
     st.markdown("")
 
@@ -3553,19 +3654,25 @@ def render_training():
         state = checkpoint.get("state", {})
         if state:
             st.markdown('<div class="section-header">🧠 محتوى نقطة الحفظ</div>', unsafe_allow_html=True)
+            module_labels = {
+                "neural_weights":  ("⚙️", "الأوزان العصبية"),
+                "deep_network":    ("🧬", "الشبكة العميقة"),
+                "dynamic_layer":   ("🔀", "الطبقة الديناميكية"),
+                "episodic_memory": ("💭", "الذاكرة التجريبية"),
+                "world_model":     ("🌍", "نموذج العالم"),
+                "system_dna":      ("🧿", "الحمض النووي للنظام"),
+                "self_awareness":  ("👁️", "الوعي الذاتي"),
+                "meta":            ("📋", "البيانات الوصفية"),
+            }
+            _chips_html = '<div class="module-chip-grid">'
             for module_name in state.keys():
-                module_labels = {
-                    "neural_weights":  "الأوزان العصبية ✅",
-                    "deep_network":    "الشبكة العميقة ✅",
-                    "dynamic_layer":   "الطبقة الديناميكية ✅",
-                    "episodic_memory": "الذاكرة التجريبية ✅",
-                    "world_model":     "نموذج العالم ✅",
-                    "system_dna":      "الحمض النووي للنظام ✅",
-                    "self_awareness":  "الوعي الذاتي ✅",
-                    "meta":            "البيانات الوصفية ✅",
-                }
-                label = module_labels.get(module_name, f"{module_name} ✅")
-                st.markdown(f'<span class="badge badge-green">{label}</span>&nbsp;', unsafe_allow_html=True)
+                _icon, _label = module_labels.get(module_name, ("✅", module_name))
+                _chips_html += (
+                    f'<div class="module-chip"><span class="module-chip-dot"></span>'
+                    f'<span>{_icon} {_label}</span></div>'
+                )
+            _chips_html += '</div>'
+            st.markdown(_chips_html, unsafe_allow_html=True)
 
     # معلومات التدريب التفصيلية
     if training:
@@ -3573,15 +3680,18 @@ def render_training():
         st.markdown('<div class="section-header">📐 بنية الشبكة العصبية</div>', unsafe_allow_html=True)
         arch = training.get("architecture", "")
         if arch:
+            st.markdown('<div class="arch-card">', unsafe_allow_html=True)
             st.code(arch, language=None)
+            st.markdown('</div>', unsafe_allow_html=True)
 
         avg_loss = training.get("avg_recent_loss", 0)
         lr       = training.get("learning_rate", 0)
         col_a, col_b = st.columns(2)
         with col_a:
-            st.markdown(f"**متوسط الخسارة الأخيرة:** `{avg_loss:.2e}`")
+            _avg_display = f"`{avg_loss:.2e}`" if avg_loss else "`—`"
+            st.markdown(f"**متوسط الخسارة الأخيرة:** {_avg_display}")
         with col_b:
-            st.markdown(f"**معدل التعلم:** `{lr}`")
+            st.markdown(f"**معدل التعلم:** `{lr}`" if lr else "**معدل التعلم:** `—`")
 
 
 def render_memory():
