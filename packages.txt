@@ -1,2 +1,4 @@
 ffmpeg
 fonts-noto-core
+tesseract-ocr
+tesseract-ocr-ara

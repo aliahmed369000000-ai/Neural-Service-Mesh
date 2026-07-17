@@ -395,6 +395,57 @@ VISION_MODELS = {
     "qwen/qwen3-235b-a22b",
 }
 
+# ── OCR اختياري (Tesseract) — يُستخدَم فقط في تبويب وكلاء AI لاستخراج نص من
+# الصور للمزوّدين غير المزوَّدين برؤية (LLMFallback نصّي بالكامل). فشل
+# الاستيراد لا يكسر شيئاً — فقط يُعطَّل استخراج نص الصور بأدب.
+try:
+    import pytesseract
+    from PIL import Image as _PILImage
+    _OCR_OK = True
+except Exception:
+    pytesseract = None
+    _PILImage = None
+    _OCR_OK = False
+
+
+def _ocr_image_text(raw_bytes: bytes) -> str:
+    """يستخرج نصاً من صورة عبر Tesseract. يجرّب ترتيبي أولوية لغة مختلفين
+    (ara+eng وeng+ara) ويختار الأعلى ثقةً — لأن Tesseract يُرجّح حرف اللغة
+    المذكورة أولاً، فترتيب ثابت واحد يُفسد دقة إحدى اللغتين حسب محتوى
+    الصورة الفعلي. يُعيد نصاً فارغاً بصمت عند أي فشل."""
+    if not _OCR_OK:
+        return ""
+    try:
+        img = _PILImage.open(io.BytesIO(raw_bytes))
+    except Exception:
+        return ""
+
+    def _mean_conf(lang: str):
+        try:
+            data = pytesseract.image_to_data(img, lang=lang, output_type=pytesseract.Output.DICT)
+            confs = [int(c) for c in data.get("conf", []) if str(c).lstrip("-").isdigit() and int(c) >= 0]
+            return (sum(confs) / len(confs)) if confs else -1.0
+        except Exception:
+            return -1.0
+
+    best_text, best_conf = "", -1.0
+    for lang in ("ara+eng", "eng+ara"):
+        conf = _mean_conf(lang)
+        if conf > best_conf:
+            try:
+                text = pytesseract.image_to_string(img, lang=lang).strip()
+            except Exception:
+                text = ""
+            if text:
+                best_text, best_conf = text, conf
+
+    if not best_text:
+        try:
+            best_text = pytesseract.image_to_string(img).strip()
+        except Exception:
+            best_text = ""
+    return best_text
+
 
 def _extract_file(uploaded) -> Optional[Dict]:
     """يقرأ ملفاً مرفوعاً (صورة أو PDF أو نص) ويُعيد dict موحّد لبنائه ضمن رسالة OpenRouter."""
@@ -6655,24 +6706,38 @@ def _render_agent_page(category):
     with c2:
         send = st.button("➤ إرسال", key=f"agent_send_{category.key}", use_container_width=True)
 
-    # ── مشاركة ملف نصي مع الوكيل (اختياري) ──
+    # ── مشاركة ملف مع الوكيل (اختياري): نص، PDF، أو صورة (عبر OCR) ──
+    _uploader_types = ["txt", "py", "md", "json", "csv", "log", "yaml", "yml", "pdf"]
+    if _OCR_OK:
+        _uploader_types += ["png", "jpg", "jpeg"]
     uploaded_file = st.file_uploader(
-        "📎 أرفق ملفاً نصياً ليطّلع عليه الوكيل قبل الرد (اختياري)",
-        type=["txt", "py", "md", "json", "csv", "log", "yaml", "yml"],
+        "📎 أرفق ملفاً ليطّلع عليه الوكيل قبل الرد — نص/PDF" + (
+            "/صورة (OCR)" if _OCR_OK else ""
+        ) + " (اختياري)",
+        type=_uploader_types,
         key=f"agent_file_{category.key}",
     )
     _MAX_FILE_CHARS = 6000
     file_context, file_label = "", ""
     if uploaded_file is not None:
-        try:
-            _raw = uploaded_file.getvalue().decode("utf-8", errors="replace")
-        except Exception:
-            _raw = ""
-        if _raw.strip():
-            _truncated = len(_raw) > _MAX_FILE_CHARS
-            file_context = _raw[:_MAX_FILE_CHARS]
-            file_label = f"📎 {uploaded_file.name}" + (" (مقتطع للطول)" if _truncated else "")
-            st.caption(f"{file_label} — سيُرسَل محتواه مع رسالتك التالية للوكيل.")
+        _extracted = _extract_file(uploaded_file)
+        if _extracted is None:
+            st.warning(f"⚠️ الملف أكبر من {MAX_FILE_MB}MB — لم يُرفَع.")
+        elif _extracted.get("is_image"):
+            _ocr_text = _ocr_image_text(_extracted.get("raw_bytes", b""))
+            if _ocr_text:
+                file_context = _ocr_text[:_MAX_FILE_CHARS]
+                file_label = f"🖼️ {uploaded_file.name} (نص مستخرَج بـ OCR)"
+                st.caption(f"{file_label} — سيُرسَل مع رسالتك التالية للوكيل.")
+            else:
+                st.caption(f"🖼️ {uploaded_file.name} — لم يُستخرَج نص من الصورة (قد تكون بلا نص واضح).")
+        else:
+            _raw_text = (_extracted.get("text_content") or "").strip()
+            if _raw_text:
+                _truncated = len(_raw_text) > _MAX_FILE_CHARS
+                file_context = _raw_text[:_MAX_FILE_CHARS]
+                file_label = f"📎 {uploaded_file.name}" + (" (مقتطع للطول)" if _truncated else "")
+                st.caption(f"{file_label} — سيُرسَل محتواه مع رسالتك التالية للوكيل.")
 
     if category.quick_prompts:
         st.markdown("**⚡ أسئلة سريعة:**")
