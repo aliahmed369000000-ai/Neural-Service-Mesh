@@ -601,6 +601,14 @@ h1, h2, h3, h4, h5, h6 {
     font-family: 'IBM Plex Sans Arabic', 'Tajawal', sans-serif;
     color: var(--text);
 }
+/* ── تدرّج أحجام موحّد للعناوين الفرعية (###/####/#####) — كانت تعتمد
+   أحجام Streamlit الافتراضية العشوائية وتختلف بصرياً عن .section-header
+   المخصص رغم كونها بنفس الوظيفة (عنوان قسم فرعي) بأماكن كثيرة بالتطبيق.
+   لا نضيف الخط الذهبي السفلي هنا عمداً — هذا التمييز البصري نُبقيه حصراً
+   لعناوين الأقسام الرئيسية (.section-header) حتى يبقى له معنى هرمي واضح. */
+.stMarkdown h3 { font-size: 1.15rem; font-weight: 700; margin: 0.9rem 0 0.5rem; }
+.stMarkdown h4 { font-size: 1.02rem; font-weight: 700; margin: 0.8rem 0 0.45rem; color: var(--text); }
+.stMarkdown h5 { font-size: 0.92rem; font-weight: 700; margin: 0.7rem 0 0.4rem; color: var(--text-muted); }
 .stMarkdown, .stMarkdown p, label { color: var(--text); }
 .stMarkdown p, .stMarkdown li { line-height: 1.9; letter-spacing: 0.01em; }
 /* محاذاة افتراضية من اليمين لكل نص Markdown عادي (RTL) — العناصر المخصصة
@@ -5690,6 +5698,34 @@ def render_chat():
         .thinking-ring, .typing-dots span { animation:none !important; }
     }
 
+    /* ── تنسيق st.chat_message الأصلي (يُستخدم فقط أثناء بث الرد حرفاً
+       بحرف قبل أن يُطوى داخل .chat-box المخصص بعد rerun) — بدون هذا
+       التنسيق يظهر بمظهر Streamlit الافتراضي غير المرتبط بصرياً بهوية
+       الشات، ما يسبب "قفزة" بصرية واضحة لحظة انتهاء البث. ────────────── */
+    [data-testid="stChatMessage"] {
+        background: var(--surface2) !important;
+        border: 1px solid var(--border) !important;
+        border-radius: 18px 18px 18px 4px !important;
+        padding: 0.75rem 1.15rem !important;
+        margin: 0.55rem 0 0.9rem !important;
+        box-shadow: 0 2px 8px var(--shadow);
+        direction: rtl !important;
+        max-width: 85%;
+    }
+    [data-testid="stChatMessage"] [data-testid="stChatMessageContent"],
+    [data-testid="stChatMessage"] p {
+        color: var(--text) !important;
+        text-align: right !important;
+        direction: rtl !important;
+        font-size: 0.98rem !important;
+        line-height: 1.85 !important;
+    }
+    [data-testid="stChatMessage"] [data-testid="stChatMessageAvatarAssistant"],
+    [data-testid="stChatMessage"] [class*="Avatar"] {
+        background: var(--accent-grad) !important;
+        border-radius: 10px !important;
+    }
+
     /* ── استجابة الجوال ── */
     @media (max-width: 640px) {
         .chat-box {
@@ -5700,6 +5736,7 @@ def render_chat():
             max-width:92%;font-size:0.92rem;padding:0.65rem 0.9rem;
         }
         .chat-nsm .bbl { line-height:1.7; }
+        [data-testid="stChatMessage"] { max-width: 92%; }
     }
     </style>
     """, unsafe_allow_html=True)
