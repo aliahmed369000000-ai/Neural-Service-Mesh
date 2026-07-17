@@ -2369,10 +2369,61 @@ def render_home():
     # البطاقات بلا أي أثر). الحل المضمون: st.components.v1.html الذي
     # يُنشئ iframe حقيقياً يُنفَّذ فيه JS، ومنه نصل للصفحة الأم عبر
     # window.parent.document (نفس الحل المطبَّق أعلاه لتلوين التبويبات).
+    #
+    # ملاحظة إضافية: فهرس كل تبويب هدف بترتيب قائمة _tab_defs الفعلية
+    # (بدالة main، أسفل الملف) — يُستخدم كخط دفاع ثانٍ بعد المطابقة
+    # النصية، لأن بنية DOM الداخلية لِـ st.tabs قد تختلف بين إصدارات
+    # Streamlit (data-baseweb مقابل role="tab" ...إلخ)، فالاعتماد على
+    # نص + فهرس معاً أكثر مقاومة لتغيّر الإصدار من نص فقط.
+    # الترتيب الحالي: 0=الرئيسية 1=المعرفة 2=المحادثة 3=الوكلاء 4=إبداع
+    _tab_index_map = {"📚 المعرفة": 1, "💬 المحادثة": 2, "🤖 الوكلاء": 3, "🎭 إبداع": 4}
     st.components.v1.html("""
     <script>
     (function() {
         const doc = window.parent.document;
+        const TAB_INDEX = """ + str(_tab_index_map).replace("'", '"') + """;
+
+        function findTabElements() {
+            // عدّة استراتيجيات بترتيب الأولوية — أول واحدة تُعيد نتائج تُستخدم
+            const strategies = [
+                '.stTabs [role="tablist"] [role="tab"]',
+                '[role="tablist"] [role="tab"]',
+                '.stTabs [data-baseweb="tab-list"] [data-baseweb="tab"]',
+                '[data-baseweb="tab-list"] [data-baseweb="tab"]',
+                '[data-testid="stTab"]'
+            ];
+            for (const sel of strategies) {
+                const found = doc.querySelectorAll(sel);
+                if (found && found.length) return Array.from(found);
+            }
+            return [];
+        }
+
+        function fireFullClick(el) {
+            const opts = { bubbles: true, cancelable: true, view: doc.defaultView || window };
+            try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (e) {}
+            el.dispatchEvent(new MouseEvent('mousedown', opts));
+            el.dispatchEvent(new MouseEvent('mouseup', opts));
+            el.dispatchEvent(new MouseEvent('click', opts));
+            el.click();
+        }
+
+        function goToTab(label) {
+            const tabs = findTabElements();
+            if (!tabs.length) return false;
+            const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
+            // 1) مطابقة نصية دقيقة
+            let target = tabs.find(t => norm(t.textContent) === norm(label));
+            // 2) مطابقة نصية جزئية (احتياط لو أضيف نص إضافي مخفي بالعنصر)
+            if (!target) target = tabs.find(t => norm(t.textContent).includes(norm(label)));
+            // 3) مطابقة بالفهرس الرقمي كخط دفاع أخير
+            if (!target && TAB_INDEX.hasOwnProperty(label) && tabs[TAB_INDEX[label]]) {
+                target = tabs[TAB_INDEX[label]];
+            }
+            if (!target) return false;
+            fireFullClick(target);
+            return true;
+        }
 
         function bindAll() {
             // 1) عدّاد متحرك من 0 حتى القيمة الفعلية لكل بطاقة مقياس
@@ -2400,12 +2451,9 @@ def render_home():
                 card.dataset.nsmBound = "1";
                 card.addEventListener('click', function() {
                     const label = card.getAttribute('data-tab-target');
-                    const tabs = doc.querySelectorAll('[data-baseweb="tab-list"] [data-baseweb="tab"]');
-                    for (const t of tabs) {
-                        if (t.textContent && t.textContent.trim() === label) {
-                            t.click();
-                            break;
-                        }
+                    if (!goToTab(label)) {
+                        // إعادة محاولة واحدة بعد لحظة قصيرة احتياطاً لتأخر رسم التبويبات
+                        setTimeout(function() { goToTab(label); }, 200);
                     }
                 });
                 // إتاحة: تفعيل بالضغط على Enter/مسافة أيضاً (tabindex="0" role="button")
