@@ -1210,6 +1210,15 @@ hr { border-color: var(--border) !important; }
     font-weight: 700; color: var(--gold); margin-bottom: 0.35rem; font-size: 0.98rem;
     display: flex; align-items: center; gap: 0.4rem;
 }
+.pipeline-step-counter {
+    margin-right: auto;
+    font-size: 0.72rem; font-weight: 600; color: var(--text-muted);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 20px; padding: 0.12rem 0.6rem; direction: ltr;
+}
+.nsm-pipeline:focus-visible {
+    outline: 2px solid var(--gold); outline-offset: 6px; border-radius: 10px;
+}
 .pipeline-detail-text {
     font-size: 0.92rem; line-height: 1.85; color: var(--text);
 }
@@ -2225,14 +2234,17 @@ def render_home():
 
     st.markdown(f"""
     <div class="nsm-pipeline-wrap">
-        <div class="nsm-pipeline" id="nsm-pipeline">
+        <div class="nsm-pipeline" id="nsm-pipeline" tabindex="0"
+             role="group" aria-label="خطوات عمل NSM — استخدم الأسهم للتنقّل">
             <div class="nsm-pipeline-track"><div class="nsm-pipeline-track-fill" id="nsm-pipeline-fill"></div></div>
             {_nodes_html}
         </div>
         <div class="pipeline-detail">
             <div class="pipeline-detail-inner" id="nsm-pipeline-detail">
                 <div class="pipeline-detail-title"><span id="nsm-pd-icon">{_icon0}</span>
-                    <span id="nsm-pd-title">{_title0}</span></div>
+                    <span id="nsm-pd-title">{_title0}</span>
+                    <span class="pipeline-step-counter" id="nsm-pd-counter">1 / {len(_pipeline_steps)}</span>
+                </div>
                 <div class="pipeline-detail-text" id="nsm-pd-text">{_text0}</div>
             </div>
         </div>
@@ -2254,29 +2266,33 @@ def render_home():
         const dIcon = doc.getElementById('nsm-pd-icon');
         const dTitle= doc.getElementById('nsm-pd-title');
         const dText = doc.getElementById('nsm-pd-text');
+        const dCounter = doc.getElementById('nsm-pd-counter');
         const dots  = Array.from(doc.querySelectorAll('.pipeline-progress-hint span'));
+        const total = nodes.length;
         let current = 0;
         let timer = null;
+        let paused = false;
 
         function setActive(idx, fromClick) {
-            current = idx;
-            nodes.forEach((n, i) => n.classList.toggle('active', i === idx));
-            dots.forEach((d, i) => d.classList.toggle('active', i === idx));
-            if (fill) fill.style.width = ((idx) / (nodes.length - 1) * 100) + '%';
+            current = ((idx % total) + total) % total;
+            nodes.forEach((n, i) => n.classList.toggle('active', i === current));
+            dots.forEach((d, i) => d.classList.toggle('active', i === current));
+            if (fill) fill.style.width = (current / (total - 1) * 100) + '%';
             if (dInner) {
                 dInner.style.opacity = '0';
                 setTimeout(function() {
-                    const n = nodes[idx];
-                    dIcon.textContent  = n.getAttribute('data-icon');
-                    dTitle.textContent = n.getAttribute('data-title');
-                    dText.textContent  = n.getAttribute('data-text');
+                    const n = nodes[current];
+                    dIcon.textContent    = n.getAttribute('data-icon');
+                    dTitle.textContent   = n.getAttribute('data-title');
+                    dText.textContent    = n.getAttribute('data-text');
+                    if (dCounter) dCounter.textContent = (current + 1) + ' / ' + total;
                     dInner.style.opacity = '1';
                 }, 180);
             }
             if (fromClick) restart();
         }
 
-        function tick() { setActive((current + 1) % nodes.length, false); }
+        function tick() { if (!paused) setActive(current + 1, false); }
         function restart() {
             if (timer) clearInterval(timer);
             timer = setInterval(tick, 3400);
@@ -2284,6 +2300,17 @@ def render_home():
 
         nodes.forEach((n, i) => {
             n.addEventListener('click', function() { setActive(i, true); });
+        });
+
+        // إيقاف مؤقت أثناء التحويم/اللمس حتى لا يفوّت القارئ الوصف
+        pipeline.addEventListener('mouseenter', function() { paused = true; });
+        pipeline.addEventListener('mouseleave', function() { paused = false; });
+        pipeline.addEventListener('touchstart', function() { paused = true; }, { passive: true });
+
+        // تنقّل بالأسهم (يمين/يسار) عند تركيز العنصر — يدعم اتجاه RTL
+        pipeline.addEventListener('keydown', function(e) {
+            if (e.key === 'ArrowLeft') { setActive(current + 1, true); e.preventDefault(); }
+            else if (e.key === 'ArrowRight') { setActive(current - 1, true); e.preventDefault(); }
         });
 
         setActive(0, false);
