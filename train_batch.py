@@ -2,11 +2,14 @@ import sys, time, json, pickle, os
 sys.path.insert(0, '.')
 from ai.arabic_transformer import ArabicTransformer
 
-WEIGHTS_DIR = "models/transformer_ckg_v1"
-STATE_FILE = "ckg_train_state.json"
-BATCH_SIZE = 300
+# قابلة للتخصيص عبر متغيرات بيئة (مثلاً للتدريب على ckg_sentences_v2.pkl
+# الأنظف/الأوسع بدل الجيل الأول) — الافتراضي يطابق السلوك القديم تماماً.
+WEIGHTS_DIR   = os.environ.get("CKG_WEIGHTS_DIR", "models/transformer_ckg_v1")
+STATE_FILE    = os.environ.get("CKG_STATE_FILE", "ckg_train_state.json")
+SENTENCES_FILE = os.environ.get("CKG_SENTENCES_FILE", "ckg_sentences.pkl")
+BATCH_SIZE = int(os.environ.get("CKG_BATCH_SIZE", "300"))
 
-with open('ckg_sentences.pkl', 'rb') as f:
+with open(SENTENCES_FILE, 'rb') as f:
     sentences = pickle.load(f)
 N = len(sentences)
 
