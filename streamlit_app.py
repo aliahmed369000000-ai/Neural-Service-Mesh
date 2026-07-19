@@ -5061,12 +5061,15 @@ def main():
                     _li_pass = st.text_input("كلمة المرور", type="password", key="account_login_password")
                     _li_submit = st.form_submit_button("دخول 🔐", use_container_width=True)
                 if _li_submit:
-                    _user = _acc_login(_li_user, _li_pass) if _li_user and _li_pass else None
-                    if _user:
-                        st.session_state["_account"] = _user
-                        st.rerun()
-                    else:
-                        st.error("اسم المستخدم أو كلمة المرور غير صحيحة")
+                    try:
+                        _user = _acc_login(_li_user, _li_pass) if _li_user and _li_pass else None
+                        if _user:
+                            st.session_state["_account"] = _user
+                            st.rerun()
+                        else:
+                            st.error("اسم المستخدم أو كلمة المرور غير صحيحة")
+                    except _AccErr as _e:
+                        st.error(str(_e))
             with _acc_tab_register:
                 with st.form(key="account_register_form", clear_on_submit=False):
                     _reg_user = st.text_input("اسم المستخدم", key="account_reg_username")

@@ -33,7 +33,7 @@ import os
 import re
 import secrets
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional, Dict
 from urllib.parse import quote
@@ -69,8 +69,73 @@ def _db() -> sqlite3.Connection:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone_number)"
     )
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS login_attempts (
+            username      TEXT PRIMARY KEY,
+            failed_count  INTEGER NOT NULL DEFAULT 0,
+            locked_until  TEXT
+        )""")
     conn.commit()
     return conn
+
+
+# ── حماية من محاولات الدخول المتكررة (brute-force) ─────────────────────────
+MAX_FAILED_ATTEMPTS = 5      # عدد المحاولات الفاشلة المسموحة قبل القفل
+LOCKOUT_MINUTES = 15         # مدة القفل المؤقت بالدقائق
+
+
+def _check_lockout(c: sqlite3.Connection, username: str) -> None:
+    """يرفع AccountError إن كان الحساب مقفلاً حالياً. لا يفعل شيئاً غير ذلك."""
+    row = c.execute(
+        "SELECT locked_until FROM login_attempts WHERE username = ?", (username,)
+    ).fetchone()
+    if not row or not row[0]:
+        return
+    locked_until = datetime.fromisoformat(row[0])
+    now = datetime.now(timezone.utc)
+    if now < locked_until:
+        remaining_min = max(1, int((locked_until - now).total_seconds() // 60) + 1)
+        raise AccountError(
+            f"⛔ تم قفل الحساب مؤقتاً بسبب محاولات دخول فاشلة متكررة. "
+            f"حاول مرة أخرى بعد {remaining_min} دقيقة."
+        )
+
+
+def _record_failed_attempt(c: sqlite3.Connection, username: str) -> None:
+    """يزيد عدّاد الفشل، ويقفل الحساب مؤقتاً عند بلوغ الحد الأقصى."""
+    row = c.execute(
+        "SELECT failed_count FROM login_attempts WHERE username = ?", (username,)
+    ).fetchone()
+    failed_count = (row[0] if row else 0) + 1
+
+    if failed_count >= MAX_FAILED_ATTEMPTS:
+        locked_until = (
+            datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_MINUTES)
+        ).isoformat()
+        c.execute(
+            """INSERT INTO login_attempts (username, failed_count, locked_until)
+               VALUES (?, ?, ?)
+               ON CONFLICT(username) DO UPDATE SET failed_count = ?, locked_until = ?""",
+            (username, 0, locked_until, 0, locked_until),
+        )
+    else:
+        c.execute(
+            """INSERT INTO login_attempts (username, failed_count, locked_until)
+               VALUES (?, ?, NULL)
+               ON CONFLICT(username) DO UPDATE SET failed_count = ?""",
+            (username, failed_count, failed_count),
+        )
+    c.commit()
+
+
+def _clear_failed_attempts(c: sqlite3.Connection, username: str) -> None:
+    c.execute(
+        """INSERT INTO login_attempts (username, failed_count, locked_until)
+           VALUES (?, 0, NULL)
+           ON CONFLICT(username) DO UPDATE SET failed_count = 0, locked_until = NULL""",
+        (username,),
+    )
+    c.commit()
 
 
 def _hash_password(password: str, salt: Optional[bytes] = None) -> tuple[str, str]:
@@ -144,23 +209,31 @@ def create_user(username: str, password: str, phone_number: Optional[str] = None
 
 def verify_login(username: str, password: str) -> Optional[Dict]:
     """يتحقق من اسم المستخدم/كلمة المرور. يعيد بيانات المستخدم (بدون
-    password_hash/salt) عند النجاح، أو None عند الفشل — لا يرفع استثناء
-    أبداً (فشل تسجيل الدخول حالة متوقعة، ليست خطأ برمجياً)."""
+    password_hash/salt) عند النجاح، أو None عند فشل بيانات الدخول
+    (حالة متوقعة). يرفع AccountError فقط عند قفل الحساب مؤقتاً بسبب
+    محاولات فاشلة متكررة (حماية brute-force)."""
+    username = username.strip()
     with _db() as c:
+        _check_lockout(c, username)  # يرفع AccountError إن كان مقفلاً
+
         row = c.execute(
             "SELECT id, username, password_hash, salt, phone_number, created_at "
             "FROM users WHERE username = ?",
-            (username.strip(),),
+            (username,),
         ).fetchone()
-    if not row:
-        return None
-    uid, uname, stored_hash, salt_hex, phone, created_at = row
-    computed_hash, _ = _hash_password(password, bytes.fromhex(salt_hex))
-    if not hmac.compare_digest(computed_hash, stored_hash):
-        return None
 
-    now = datetime.now(timezone.utc).isoformat()
-    with _db() as c:
+        if not row:
+            _record_failed_attempt(c, username)
+            return None
+
+        uid, uname, stored_hash, salt_hex, phone, created_at = row
+        computed_hash, _ = _hash_password(password, bytes.fromhex(salt_hex))
+        if not hmac.compare_digest(computed_hash, stored_hash):
+            _record_failed_attempt(c, username)
+            return None
+
+        _clear_failed_attempts(c, username)
+        now = datetime.now(timezone.utc).isoformat()
         c.execute("UPDATE users SET last_login_at = ? WHERE id = ?", (now, uid))
         c.commit()
 
