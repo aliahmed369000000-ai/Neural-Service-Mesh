@@ -19,7 +19,7 @@ qdrant-client
 requests>=2.31.0
 requests_oauthlib
 scikit-learn
-streamlit>=1.35.0
+streamlit>=1.38.0
 uvicorn
 arabic-reshaper
 edge-tts
@@ -41,5 +41,4 @@ qdrant-client
 requests
 requests_oauthlib
 scikit-learn
-streamlit
 uvicorn
