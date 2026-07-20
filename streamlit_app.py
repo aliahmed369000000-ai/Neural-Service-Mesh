@@ -252,6 +252,19 @@ try:
 except Exception:
     _QUALITY_SCORER_OK = False
 
+# ── الواجهة الصوتية: تفريغ صوت→نص (STT) وقراءة رد نص→صوت (TTS) ────────────
+try:
+    from ai.stt_engine import transcribe_audio as _stt_transcribe
+    _STT_OK = True
+except Exception:
+    _STT_OK = False
+
+try:
+    from ai.tts_engine import TTSEngine as _TTSEngineCls
+    _TTS_OK = True
+except Exception:
+    _TTS_OK = False
+
 # ── طبقة فحص أمان أولى (regex، بدون تكلفة API) ────────────────────────────
 try:
     from ai.harm_classifier import classify_prompt as _classify_harm, get_domain_label as _harm_label
@@ -6479,6 +6492,14 @@ def render_chat():
                     f'<div class="ctx-tag" style="color:var(--emerald)">{src_badge}</div>'
                     if src_badge else ""
                 )
+                _audio_html = ""
+                _audio_entry = st.session_state.get("_nsm_audio_cache", {}).get(_i)
+                if _audio_entry:
+                    _a_b64, _a_fmt = _audio_entry
+                    _audio_html = (
+                        f'<audio controls style="width:100%;margin-top:0.5rem;height:36px" '
+                        f'src="data:audio/{_a_fmt};base64,{_a_b64}"></audio>'
+                    )
                 import html as _html
                 if "<" not in text and ">" not in text:
                     safe_reply = _html.escape(text).replace("\n", "<br>")
@@ -6486,7 +6507,7 @@ def render_chat():
                     safe_reply = text
                 html += f'''<div class="chat-nsm">
                     <span style="font-size:1.4rem;margin-top:3px">🧠</span>
-                    <div class="bbl">{ctx_html}{src_html}<div class="bbl-text" id="nsm-bbl-{_i}">{safe_reply}</div>
+                    <div class="bbl">{ctx_html}{src_html}<div class="bbl-text" id="nsm-bbl-{_i}">{safe_reply}</div>{_audio_html}
                         <div class="bbl-footer">
                             <button class="copy-btn" title="نسخ الرد"
                                 onclick="var t=document.getElementById('nsm-bbl-{_i}').innerText;
@@ -6654,6 +6675,32 @@ def render_chat():
     with c2:
         with st.container(key="nsm_send_wrap"):
             send = st.button("➤\nإرسال", key="nsm_send", use_container_width=True)
+
+    # ── الواجهة الصوتية: تسجيل سؤال بالصوت + قراءة الردود صوتياً ─────────
+    voice_col1, voice_col2 = st.columns([3, 2], gap="small")
+    _voice_query = None
+    with voice_col1:
+        if _STT_OK:
+            _mic_audio = st.audio_input("🎤 أو سجّل سؤالك صوتياً", key="nsm_mic_input")
+            if _mic_audio is not None:
+                _mic_bytes = _mic_audio.getvalue()
+                _mic_hash = hash(_mic_bytes)
+                if st.session_state.get("_nsm_last_mic_hash") != _mic_hash:
+                    st.session_state["_nsm_last_mic_hash"] = _mic_hash
+                    with st.spinner("⟳ جارٍ تفريغ الصوت..."):
+                        _transcribed, _stt_err = _stt_transcribe(_mic_bytes, mime_type="audio/wav")
+                    if _stt_err:
+                        st.warning(f"⚠️ {_stt_err}")
+                    elif _transcribed:
+                        _voice_query = _transcribed
+        else:
+            st.caption("🎤 الإدخال الصوتي غير متاح حالياً")
+    with voice_col2:
+        _voice_output_on = st.toggle(
+            "🔊 قراءة الردود صوتياً", key="_nsm_voice_output",
+            value=st.session_state.get("_nsm_voice_output", False),
+            disabled=not _TTS_OK,
+        )
 
     # أسئلة سريعة — كاملة عند بداية المحادثة فقط، ثم مطوية لتقليل الازدحام البصري
     quick_qs = [
@@ -6977,6 +7024,20 @@ def render_chat():
         st.session_state.nsm_messages.append((
             "nsm", _response, _ctx_tag, _src_badge, datetime.now().strftime("%H:%M")
         ))
+        _msg_idx = len(st.session_state.nsm_messages) - 1
+        if _TTS_OK and st.session_state.get("_nsm_voice_output") and _response.strip():
+            try:
+                with st.spinner("⟳ جارٍ تحويل الرد لصوت..."):
+                    _tts_result = _TTSEngineCls().synthesize(_response.strip())
+                if _tts_result.ok:
+                    import base64 as _b64
+                    _audio_cache = st.session_state.setdefault("_nsm_audio_cache", {})
+                    _audio_cache[_msg_idx] = (
+                        _b64.b64encode(_tts_result.audio_bytes).decode("ascii"),
+                        _tts_result.format,
+                    )
+            except Exception:
+                pass  # فشل TTS لا يجب أن يُعطّل عرض الرد النصي
         if _AUTOTUNE_OK:
             st.session_state["_af_last_turn"] = {
                 "response": _response, "params": _af_params_last,
@@ -6989,6 +7050,9 @@ def render_chat():
 
     if send and (user_input or st.session_state["chat_pending_files"]):
         _process(user_input)
+
+    if _voice_query:
+        _process(_voice_query)
 
     if hasattr(st.session_state, "_chat_pending"):
         q = st.session_state._chat_pending
