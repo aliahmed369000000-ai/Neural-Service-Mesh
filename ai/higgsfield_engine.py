@@ -330,6 +330,36 @@ class HiggsfieldClient:
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# توليد صور UGC تسويقية (نص → صورة فقط عبر Higgsfield Soul) — مستقل عن
+# pipeline الوثائقي الثلاثي المراحل أعلاه؛ يُستخدم لصور منتج/تطبيق احترافية
+# بأسلوب UGC (محتوى ينشئه المستخدم) لمنصات التواصل الاجتماعي.
+# ══════════════════════════════════════════════════════════════════════════
+
+_UGC_PROMPT_TEMPLATE = (
+    "Ultra-premium UGC-style vertical smartphone photo, cinematic editorial "
+    "quality rivaling top tech startup ad campaigns. {subject} "
+    "Shallow depth of field, creamy bokeh background, professional color "
+    "grading, subtle film grain, hyper-realistic texture, natural candid "
+    "genuine expression, flawless composition, rule of thirds, soft rim "
+    "lighting, 8k detail, award-winning advertising photography, trending "
+    "viral social media aesthetic."
+)
+
+
+def build_ugc_prompt(product_description: str) -> str:
+    """يبني video/image prompt احترافياً بأسلوب UGC من وصف منتج مختصر.
+
+    مثال: build_ugc_prompt('شاب يستخدم تطبيق NSM على الجوال في مقهى')
+    """
+    subject = (product_description or "").strip()
+    if not subject:
+        subject = "A person using a modern mobile app."
+    if not subject.endswith("."):
+        subject += "."
+    return _UGC_PROMPT_TEMPLATE.format(subject=subject)
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # System Prompts — بجودة إنتاجية استثنائية
 # ══════════════════════════════════════════════════════════════════════════
 

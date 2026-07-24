@@ -3378,6 +3378,62 @@ def render_higgsfield():
 
     st.markdown("---")
 
+    # ── قسم منفصل: توليد صورة UGC تسويقية للمنتج ────────────────────────
+    with st.expander("📸 توليد صورة UGC احترافية للمنتج", expanded=False):
+        st.markdown(
+            '<p style="direction:rtl; text-align:right; '
+            'color:var(--text-muted); font-size:0.9rem">'
+            "صورة واحدة (نص → صورة عبر Higgsfield Soul) بأسلوب UGC احترافي "
+            "— منفصلة عن pipeline الوثائقي أعلاه.</p>",
+            unsafe_allow_html=True,
+        )
+        ugc_desc = st.text_input(
+            "🎯 صف المشهد/المنتج:",
+            placeholder="مثال: شاب يستخدم تطبيق NSM على جواله في مقهى بإضاءة طبيعية",
+            key="hf_ugc_desc",
+        )
+        ugc_ratio = st.selectbox(
+            "📐 نسبة العرض:",
+            ["9:16", "1:1", "16:9"],
+            key="hf_ugc_ratio",
+        )
+        ugc_btn = st.button(
+            "📸 أنشئ صورة UGC",
+            use_container_width=True,
+            disabled=not bool(ugc_desc and ugc_desc.strip()),
+            key="hf_ugc_btn",
+        )
+        if ugc_btn:
+            if not hf_key:
+                st.warning(
+                    "أدخل HIGGSFIELD_API_KEY أعلاه أولاً "
+                    "(بصيغة KEY_ID:KEY_SECRET)."
+                )
+            else:
+                try:
+                    from ai.higgsfield_engine import (
+                        HiggsfieldClient, build_ugc_prompt,
+                    )
+                    with st.spinner("⟳ يُولّد صورة UGC..."):
+                        client = HiggsfieldClient(hf_key)
+                        prompt = build_ugc_prompt(ugc_desc.strip())
+                        image_url = client.text_to_image(
+                            prompt, aspect_ratio=ugc_ratio,
+                        )
+                    st.session_state["hf_ugc_image_url"] = image_url
+                    st.toast("✅ تم توليد صورة UGC", icon="📸")
+                except Exception as ugc_exc:
+                    st.error(f"❌ فشل توليد الصورة: {ugc_exc}")
+
+        if st.session_state.get("hf_ugc_image_url"):
+            st.image(
+                st.session_state["hf_ugc_image_url"],
+                caption="صورة UGC الناتجة",
+                use_container_width=True,
+            )
+
+    st.markdown("---")
+
     # ── زر الإنشاء ────────────────────────────────────────────────────
     generate_btn = st.button(
         "🎬 أنشئ الوثائقي",
