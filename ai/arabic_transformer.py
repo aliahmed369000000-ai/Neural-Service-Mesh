@@ -32,10 +32,10 @@ logger = logging.getLogger(__name__)
 # ══════════════════════════════════════════════════════════════════════════════
 # Constants
 # ══════════════════════════════════════════════════════════════════════════════
-D_MODEL      = 672
-N_HEADS      = 8
-D_FF         = 1536
-N_LAYERS     = 7
+D_MODEL      = 2304
+N_HEADS      = 16
+D_FF         = 8384
+N_LAYERS     = 16
 MAX_SEQ_LEN  = 128
 VOCAB_SIZE   = 8192     # حجم ثابت — hash space، لا يتوسع
 LEARNING_RATE = 1e-4
