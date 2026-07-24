@@ -56,7 +56,30 @@ ARABIC_STOPWORDS: List[str] = [
     "ثم", "أو", "إذا", "حيث", "هو", "هي", "هم", "أنت", "أنا", "نحن",
     "كما", "بعد", "قبل", "فوق", "تحت", "أيضا", "أيضاً", "إلا", "لكن",
     "لكنه", "لكنها", "كانا", "يوجد", "توجد", "وجود", "غيره", "غيرها",
+    "عشر", "عشرة", "آلاف", "ألف", "مئة", "مائة", "أكبر", "أصغر", "بشكل",
+    "مناطق", "منطقة", "خلال", "عبر", "نحو", "حول", "لها", "له", "به", "بها",
 ]
+
+
+def _tokenize_ar(text: str) -> List[str]:
+    """
+    استخراج كلمات عربية نظيفة: نطاق [\\u0621-\\u064A] (حروف عربية فقط،
+    يستبعد الفاصلة العربية وعلامات الترقيم الواقعة في 0600-0620 والتشكيل
+    في 064B-065F)، مع تجريد بادئتي "و" و"ال" الشائعتين لتقليل تكرار نفس
+    الكلمة بصيغتين مختلفتين (و+تعد مقابل تعد).
+    """
+    tokens = re.findall(r"[\u0621-\u064A]+", text)
+    out = []
+    for t in tokens:
+        if t.startswith("وال") and len(t) > 5:
+            t = t[3:]
+        elif t.startswith("و") and len(t) > 3:
+            t = t[1:]
+        elif t.startswith("ال") and len(t) > 4:
+            t = t[2:]
+        if len(t) > 1 and t not in ARABIC_STOPWORDS:
+            out.append(t)
+    return out
 
 
 class GenericConceptExtractor:
@@ -106,12 +129,13 @@ class GenericConceptExtractor:
         logger.info(f"[GenericConceptExtractor] تدريب TF-IDF على {len(texts)} نص …")
         self._vectorizer = TfidfVectorizer(
             analyzer="word",
-            token_pattern=r"[\u0600-\u06FF]+",
+            tokenizer=_tokenize_ar,
+            preprocessor=lambda x: x,   # نعطّل المعالجة المسبقة الافتراضية (lowercase غير مفيد للعربية)
+            token_pattern=None,
             min_df=2,
             max_df=0.9,
             max_features=8000,
             sublinear_tf=True,
-            stop_words=ARABIC_STOPWORDS,
         )
         try:
             self._tfidf_matrix = self._vectorizer.fit_transform(clean_texts)

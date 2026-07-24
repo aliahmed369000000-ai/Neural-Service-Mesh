@@ -70,9 +70,21 @@ def build_sentences(graph_file: Path) -> List[str]:
         tpl = _CONCEPT_TEMPLATES[hash(name) % len(_CONCEPT_TEMPLATES)]
         sentences.append(tpl.format(concept=name, cluster=cluster))
 
-    # 2) جمل العلاقات (قوالب متنوعة حسب نوع العلاقة)
+    # 2) جمل العلاقات — تصفية جودة حقيقية (لا نولّد جملة من أي علاقة خام):
+    #    - "semantic" (مصدرها cluster_affinity) تُستبعد بالكامل: كل علاقاتها
+    #      بنفس القوة الثابتة 0.2 بلا أي إشارة تمييزية حقيقية بحجم مستندات
+    #      صغير (<500) — مجرد "نفس العنقود" ينتج تفجّراً تركيبياً بلا معنى
+    #      (عنقود من 205 مفهوم ⇒ ~20,900 زوج عشوائي).
+    #    - "co_occurrence" تُقبل فقط لو تكررت في مستندين مختلفين فأكثر
+    #      (count>=2) — علاقة من مستند واحد إشارة ضعيفة جداً وقابلة للصدفة.
+    MIN_COOCCURRENCE_COUNT = 2
+    seen_pairs = set()
     for key, r in relations.items():
         rtype = r.get("relation_type", "")
+        if rtype == "semantic":
+            continue  # مستبعدة بالكامل، انظر التعليق أعلاه
+        if rtype == "co_occurrence" and r.get("count", 1) < MIN_COOCCURRENCE_COUNT:
+            continue
         if rtype in _NOISE_RELATION_TYPES:
             continue
         templates = _RELATION_TEMPLATES.get(rtype)
@@ -81,6 +93,10 @@ def build_sentences(graph_file: Path) -> List[str]:
         a, b = r.get("source", ""), r.get("target", "")
         if not a or not b or a == b:
             continue
+        pair_key = (rtype, frozenset((a, b)))
+        if pair_key in seen_pairs:
+            continue  # نفس العلاقة مخزّنة بالاتجاهين (a→b وb→a) في الجراف
+        seen_pairs.add(pair_key)
         for tpl in templates:
             sentences.append(tpl.format(a=a, b=b))
 
