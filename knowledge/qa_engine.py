@@ -13,6 +13,7 @@ qa_engine.py
 
 from __future__ import annotations
 
+import os
 import re
 import logging
 from collections import Counter
@@ -703,6 +704,109 @@ def _try_generate_free_text(
         return tokenizer.decode(generated_ids, skip_special=True, stop_at_eos=True)
     except Exception as e:
         logger.warning(f"[qa_engine] فشل التوليد الحر (Yemeni LLM) — "
+                        f"سيُستخدم المسار الرمزي فقط: {e}")
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# [production-7b-llm] استدلال بعيد (Decoupled Remote Inference)
+# ═══════════════════════════════════════════════════════════════════════════
+# مسار إضافي منفصل تماماً عن _try_generate_free_text (YemeniDecoder المحلي
+# أعلاه) — لا يحمّل أي أوزان 7B/8B داخل عملية Streamlit نفسها (يتجاوز حدود
+# ذاكرة Streamlit Community Cloud). بدلاً من ذلك يرسل طلب HTTP POST لخادم
+# استدلال خارجي (Hugging Face Inference Endpoint أو RunPod) يستضيف نموذج
+# Qwen2.5-7B + LoRA adapters المدرَّبة عبر train_production_yemeni.py.
+#
+# نفس مبدأ الأمان الآمن (fail-safe): أي خطأ شبكة/مهلة/استجابة غير متوقعة
+# يُرجع None بصمت — answer_question يتجاهل النتيجة ويكمل بمساره الرمزي.
+# لا اعتمادية إجبارية، ولا يُستدعى إلا عند تمرير generation_backend="remote"
+# صراحة (الافتراضي "local" يحافظ على السلوك الحالي دون أي تغيير).
+
+REMOTE_INFERENCE_URL = os.environ.get("NSM_REMOTE_INFERENCE_URL", "")
+REMOTE_INFERENCE_TOKEN = os.environ.get("NSM_REMOTE_INFERENCE_TOKEN", "")
+REMOTE_INFERENCE_TIMEOUT = float(os.environ.get("NSM_REMOTE_INFERENCE_TIMEOUT", "30"))
+
+
+def _try_generate_remote_production(
+    question: str,
+    concept_matches: List[Tuple[str, float]],
+    verses: List[Dict[str, Any]],
+    temperature: float,
+    top_p: float,
+    top_k: int,
+) -> Optional[str]:
+    """
+    يبني برومبت مؤسَّس (RAG: حقائق SQLite/CKG محلية → حدّ نظام آمن) ويرسله
+    كطلب HTTP POST إلى خادم استدلال 7B/8B خارجي. يُرجع None بصمت عند أي
+    فشل (لا رابط مُهيَّأ، خطأ شبكة، مهلة، استجابة غير صالحة) — لا يرمي
+    استثناءً للخارج أبداً، ولا يوقف answer_question عن إكمال مساره الرمزي.
+
+    التهيئة عبر متغيرات بيئة (لا مفاتيح مكتوبة في الكود):
+      NSM_REMOTE_INFERENCE_URL     مطلوب — رابط الـEndpoint (HF Inference
+                                    Endpoint أو RunPod serverless URL)
+      NSM_REMOTE_INFERENCE_TOKEN   اختياري — Bearer token للمصادقة
+      NSM_REMOTE_INFERENCE_TIMEOUT اختياري — مهلة الطلب بالثواني (افتراضي 30)
+    """
+    if not REMOTE_INFERENCE_URL:
+        logger.info("[qa_engine] NSM_REMOTE_INFERENCE_URL غير مُهيَّأ — تخطّي الاستدلال البعيد")
+        return None
+    try:
+        import requests
+
+        grounding_text = _build_grounding_text(concept_matches, verses)
+        system_prompt = (
+            (
+                "أنت مساعد يتحدث اللهجة اليمنية، متخصص بالمعرفة الإسلامية. "
+                "استخدم فقط الحقائق التالية كسياق موثوق ولا تخترع معلومات خارجها:\n"
+                f"{grounding_text}"
+            )
+            if grounding_text else
+            "أنت مساعد يتحدث اللهجة اليمنية، متخصص بالمعرفة الإسلامية."
+        )
+
+        payload = {
+            "inputs": {
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": question},
+                ],
+            },
+            "parameters": {
+                "temperature": temperature,
+                "top_p": top_p,
+                "top_k": top_k,
+                "max_new_tokens": 256,
+            },
+        }
+        headers = {"Content-Type": "application/json"}
+        if REMOTE_INFERENCE_TOKEN:
+            headers["Authorization"] = f"Bearer {REMOTE_INFERENCE_TOKEN}"
+
+        resp = requests.post(
+            REMOTE_INFERENCE_URL, json=payload, headers=headers,
+            timeout=REMOTE_INFERENCE_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        # يدعم صيغتَي استجابة شائعتين (HF TGI-style و OpenAI-compatible)
+        if isinstance(data, list) and data and "generated_text" in data[0]:
+            return data[0]["generated_text"].strip()
+        if isinstance(data, dict):
+            choices = data.get("choices")
+            if choices and isinstance(choices, list):
+                msg = choices[0].get("message", {}) or {}
+                text = msg.get("content") or choices[0].get("text")
+                if text:
+                    return text.strip()
+            if "generated_text" in data:
+                return str(data["generated_text"]).strip()
+
+        preview = list(data)[:5] if hasattr(data, "__iter__") else type(data)
+        logger.warning(f"[qa_engine] استجابة استدلال بعيد بصيغة غير متوقعة: {preview}")
+        return None
+    except Exception as e:
+        logger.warning(f"[qa_engine] فشل الاستدلال البعيد (7B endpoint) — "
                         f"سيُستخدم المسار الرمزي فقط: {e}")
         return None
 
@@ -1399,7 +1503,7 @@ def answer_question(
     max_related: int = 8,
     entities: Optional[Dict[str, Any]] = None,
     generation_mode: bool = False,
-    generation_backend: str = "llm_fallback",  # "llm_fallback" أو "yemeni_decoder"
+    generation_backend: str = "llm_fallback",  # "llm_fallback" أو "yemeni_decoder" أو "remote" (7B/8B خارجي)
     dialect: str = "عام",
     temperature: float = 0.8,
     top_p: float = 0.95,
@@ -1419,11 +1523,17 @@ def answer_question(
       2. البحث في العلاقات عن مفاهيم مرتبطة
       3. استرجاع الآيات الداعمة من sources
       4. توليد إجابة منظمة مع درجة ثقة
-      5. (اختياري) generation_mode=True: توليد نص حر إضافي عبر YemeniDecoder،
-         مؤسَّس على نفس المفاهيم/الآيات المسترجَعة في الخطوات 1-3. لا يستبدل
-         أبداً الإجابة الرمزية أعلاه — يُضاف كحقل إضافي فقط، وعند أي فشل
-         (لا torch، لا checkpoint، إلخ) يُتجاهل بصمت والإجابة الرمزية تبقى
-         كما هي دون أي تغيير في السلوك الافتراضي (generation_mode=False).
+      5. (اختياري) generation_mode=True: توليد نص حر إضافي، مؤسَّس على نفس
+         المفاهيم/الآيات المسترجَعة في الخطوات 1-3. لا يستبدل أبداً الإجابة
+         الرمزية أعلاه — يُضاف كحقل إضافي فقط، وعند أي فشل يُتجاهل بصمت
+         والإجابة الرمزية تبقى كما هي دون أي تغيير (generation_mode=False
+         الافتراضي لا يلمس أياً من المسارين التاليين):
+           - generation_backend="local"  (افتراضي): YemeniDecoder المحلي
+             (~1B عشوائي القديم، انظر _try_generate_free_text).
+           - generation_backend="remote" [production-7b-llm]: طلب HTTP
+             لخادم استدلال 7B/8B خارجي (Qwen2.5 + LoRA)، بدون تحميل أي
+             أوزان داخل عملية Streamlit — انظر _try_generate_remote_production
+             ومتغيرات البيئة NSM_REMOTE_INFERENCE_URL/TOKEN.
     """
     concepts_db  = ckg.get("concepts", {})
     relations_db = ckg.get("relations", {})
@@ -1537,7 +1647,12 @@ def answer_question(
     )
     if generation_mode:
         generated: Optional[str] = None
-        if generation_backend == "llm_fallback":
+        if generation_backend == "remote":
+            generated = _try_generate_remote_production(
+                question, concept_matches, verses, temperature, top_p, top_k,
+            )
+            backend_used = "remote" if generated else None
+        elif generation_backend == "llm_fallback":
             generated = _rephrase_in_yemeni_dialect(
                 question, result, dialect,
                 arabic_roots=arabic_roots, surah_profiles=surah_profiles,

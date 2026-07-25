@@ -1382,6 +1382,102 @@ def get_yemeni_decoder(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# [production-7b-llm] Qwen2.5-7B-Instruct — قاعدة صناعية حقيقية (Hugging Face)
+# ══════════════════════════════════════════════════════════════════════════════
+# مسار منفصل تماماً عن YemeniDecoder/ArabicTransformer أعلاه — لا يمسّ أي كود
+# سابق ولا يضيف اعتمادية إجبارية على مسار الاستدلال المحلي/Streamlit Cloud.
+# الغرض: تحميل نموذج أساس صناعي (7B/8B) بكمّية 4-bit/8-bit للتدريب على
+# جهاز GPU سحابي فقط (train_production_yemeni.py). لا يُستدعى أبداً من
+# streamlit_app.py أو qa_engine.py في المسار الافتراضي.
+#
+# المتطلبات (غير موجودة في requirements.txt الرئيسي عمداً — بيئة GPU منفصلة):
+#   pip install transformers accelerate peft bitsandbytes trl
+#
+# لماذا Qwen2.5-7B-Instruct افتراضياً:
+#   - رخصة Apache 2.0 (استخدام تجاري حر، بدون قيود Llama Community License).
+#   - أداء عربي قوي نسبياً بين النماذج مفتوحة المصدر بحجم مشابه.
+#   - Tokenizer الأساسي يُستخدم كما هو (لا إعادة تدريب Tokenizer) — الاعتماد
+#     الكامل على بيانات التدريب اليمنية لغرس الدلالة اللهجية، حسب توجيه
+#     الخطة المعتمدة.
+
+QWEN_BASE_MODEL_ID = os.environ.get(
+    "NSM_PRODUCTION_BASE_MODEL", "Qwen/Qwen2.5-7B-Instruct"
+)
+
+
+def get_production_base_model(
+    model_id: str = QWEN_BASE_MODEL_ID,
+    quantization: str = "4bit",
+    device_map: str = "auto",
+):
+    """
+    يُحمِّل نموذج أساس صناعي (Qwen2.5-7B-Instruct افتراضياً) بكمّية 4-bit أو
+    8-bit عبر bitsandbytes لتقليل بصمة VRAM أثناء التدريب/الاستدلال على GPU
+    سحابي (A100/H100 مثلاً).
+
+    ⚠️ هذه الدالة تتطلب GPU فعلياً (CUDA) ومكتبات transformers/bitsandbytes/
+    accelerate مثبَّتة. لا تُستدعى على Streamlit Community Cloud أو أي بيئة
+    CPU فقط — ستفشل بوضوح مع رسالة خطأ واضحة بدل صمت أو سلوك غير متوقع.
+
+    Args:
+        model_id: معرف النموذج على Hugging Face Hub.
+        quantization: "4bit" أو "8bit" أو "none" (fp16/bf16 كامل، يتطلب VRAM أكبر).
+        device_map: تمرَّر مباشرة إلى from_pretrained (افتراضياً "auto").
+
+    Returns:
+        (model, tokenizer) — جاهزان لـ PEFT/LoRA أو الاستدلال المباشر.
+
+    Raises:
+        RuntimeError: لو transformers/bitsandbytes غير مثبَّتة، أو لا يوجد GPU.
+    """
+    try:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    except ImportError as e:
+        raise RuntimeError(
+            "هذا المسار (production 7B base) يتطلب: "
+            "pip install transformers accelerate peft bitsandbytes trl — "
+            f"مكتبة ناقصة: {e}"
+        ) from e
+
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "get_production_base_model يتطلب GPU (CUDA) فعلياً. "
+            "شغّله على جهاز سحابي (A100/H100) وليس CPU/Streamlit Cloud."
+        )
+
+    bnb_config = None
+    torch_dtype = torch.bfloat16
+    if quantization == "4bit":
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
+        )
+    elif quantization == "8bit":
+        bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+    elif quantization != "none":
+        raise ValueError(f"quantization غير معروف: {quantization} (استخدم 4bit/8bit/none)")
+
+    logger.info(f"[production-7b] تحميل {model_id} بكمّية={quantization} على device_map={device_map}")
+
+    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=False)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        quantization_config=bnb_config,
+        torch_dtype=torch_dtype,
+        device_map=device_map,
+        trust_remote_code=False,
+    )
+    logger.info("[production-7b] النموذج الأساس محمَّل بنجاح")
+    return model, tokenizer
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Quick Test
 # ══════════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
