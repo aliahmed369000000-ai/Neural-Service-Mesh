@@ -1,3 +1,4 @@
+torch
 fonttools
 arabic-reshaper
 edge-tts>=6.1.0
