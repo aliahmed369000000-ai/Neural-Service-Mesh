@@ -68,6 +68,53 @@ _SPECIAL_TOKENS: Dict[str, int] = {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
+# سقف القاموس — يطابق VOCAB_SIZE في arabic_transformer.py (طبقة الإخراج ثابتة
+# الحجم). لا يمكن لأي id صادر عن هذا المرمِّز أن يتجاوز MAX_VOCAB_SIZE - 1،
+# مهما نما القاموس — هذا يمنع IndexError عند الربط بـ OutputHead/Embedding.
+# ══════════════════════════════════════════════════════════════════════════════
+MAX_VOCAB_SIZE = 8192
+
+_SUBWORD_HASH_START = MAX_VOCAB_SIZE - 1024   # 7168
+_SUBWORD_MARK        = "##"                    # علامة "بقية كلمة" على غرار BPE
+
+_COMMON_PREFIXES = ("وال", "بال", "كال", "فال", "ال", "و", "ف", "ب", "ك", "ل")
+_COMMON_SUFFIXES = ("ونها", "اتها", "كموها", "ون", "ين", "ات", "ها", "هم",
+                     "كم", "تم", "نا", "ة", "ي", "ه")
+
+
+def _fnv1a_bounded(text: str, span: int) -> int:
+    """FNV-1a قياسي، مُقيَّد ضمن [0, span) — لا يعتمد على أي قاموس محفوظ."""
+    h = 2166136261
+    for ch in text.encode("utf-8"):
+        h ^= ch
+        h = (h * 16777619) & 0xFFFFFFFF
+    return h % span
+
+
+def _segment_subwords(word: str) -> List[str]:
+    """
+    تجزئة مورفولوجية مبسّطة: يفصل بادئة/لاحقة شائعة عن الجذر إن وُجدتا،
+    فيعطي 1-3 مقاطع بدل كلمة كاملة واحدة.
+    """
+    if len(word) <= 3:
+        return [word]
+
+    prefix, root = "", word
+    for p in sorted(_COMMON_PREFIXES, key=len, reverse=True):
+        if root.startswith(p) and len(root) - len(p) >= 2:
+            prefix, root = p, root[len(p):]
+            break
+
+    suffix = ""
+    for s in sorted(_COMMON_SUFFIXES, key=len, reverse=True):
+        if root.endswith(s) and len(root) - len(s) >= 2:
+            root, suffix = root[: -len(s)], s
+            break
+
+    parts = [p for p in (prefix, root, suffix) if p]
+    return parts if len(parts) > 1 else [word]
+
+# ══════════════════════════════════════════════════════════════════════════════
 # القاموس المبدئي — عربي كلاسيكي + لهجة يمنية
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -299,13 +346,35 @@ class YemeniTokenizer:
     # ──────────────────────────────────────────────────────────────────────
 
     def _add_word(self, word: str) -> int:
-        """يضيف كلمة إن لم تكن موجودة ويُعيد ID-ها."""
+        """
+        يضيف كلمة إن لم تكن موجودة ويُعيد ID-ها. عند امتلاء منطقة الكلمات
+        الكاملة (_SUBWORD_HASH_START)، تُجزَّأ الكلمة صرفياً ويُطوى كل مقطع
+        إلى ID ثابت داخل نطاق الـ hash المحجوز — يضمن عدم تجاوز MAX_VOCAB_SIZE.
+        """
         if word in self._word2id:
             return self._word2id[word]
-        new_id = len(self._word2id)
-        self._word2id[word] = new_id
-        self._id2word[new_id] = word
-        return new_id
+
+        if len(self._word2id) < _SUBWORD_HASH_START:
+            new_id = len(self._word2id)
+            self._word2id[word] = new_id
+            self._id2word[new_id] = word
+            return new_id
+
+        return self._hash_into_subword_region(word)
+
+    def _hash_into_subword_region(self, word: str) -> int:
+        """يطوي كلمة/مقطعاً إلى ID ثابت داخل [_SUBWORD_HASH_START, MAX_VOCAB_SIZE)."""
+        span = MAX_VOCAB_SIZE - _SUBWORD_HASH_START
+        tid = _SUBWORD_HASH_START + _fnv1a_bounded(word, span)
+        self._id2word.setdefault("_subword_debug", {})
+        self._id2word["_subword_debug"][tid] = word  # type: ignore[index]
+        return tid
+
+    def _word_or_subwords_to_ids(self, word: str) -> List[int]:
+        """يعطي ID مباشر إن توفّرت مساحة، وإلا يجزّئ الكلمة صرفياً."""
+        if word in self._word2id or len(self._word2id) < _SUBWORD_HASH_START:
+            return [self._add_word(word)]
+        return [self._hash_into_subword_region(p) for p in _segment_subwords(word)]
 
     @property
     def vocab_size(self) -> int:
@@ -322,7 +391,17 @@ class YemeniTokenizer:
 
     def id_to_word(self, token_id: int) -> str:
         """ID → كلمة (أو '<UNK>' إن لم يوجد)."""
-        return self._id2word.get(token_id, "<UNK>")
+        if token_id in self._id2word:
+            return self._id2word[token_id]
+        subword_debug = self._id2word.get("_subword_debug", {})
+        if isinstance(subword_debug, dict) and token_id in subword_debug:
+            return _SUBWORD_MARK + subword_debug[token_id]
+        return "<UNK>"
+
+    @property
+    def total_id_space(self) -> int:
+        """الحد الأقصى المطلق لأي ID — استخدمه لحجم Embedding، وليس vocab_size."""
+        return MAX_VOCAB_SIZE
 
     # ──────────────────────────────────────────────────────────────────────
     # Encode — نص → تسلسل IDs
@@ -363,7 +442,7 @@ class YemeniTokenizer:
             ids.append(self.BOS)
 
         for w in words:
-            ids.append(self.word_to_id(w))
+            ids.extend(self._word_or_subwords_to_ids(w))
 
         if add_eos:
             ids.append(self.EOS)
