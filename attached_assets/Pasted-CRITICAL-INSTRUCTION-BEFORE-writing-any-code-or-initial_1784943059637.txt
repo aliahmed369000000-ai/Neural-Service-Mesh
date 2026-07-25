@@ -1,0 +1,37 @@
+CRITICAL INSTRUCTION: BEFORE writing any code or initializing new applications, you MUST thoroughly inspect and read the existing repository files in this workspace. This is a large, pre-existing advanced project called "Neural Service Mesh (NSM)". Do NOT create a standalone app or placeholders. We are upgrading the existing codebase in-place.
+
+Please perform the transformation of the existing NSM project into a hybrid Generative Yemeni Language Model (Yemeni LLM) by carefully executing the following phase-by-phase architectural plan:
+
+--- PHASE 0: MANDATORY CODE INSPECTION (DO THIS FIRST) ---
+1. Use your file viewing tools to inspect the following existing modules to understand their deep structure:
+   - `ai/arabic_transformer.py` (Currently has a 2304-dimension, 16-layer, 16-head attention matrix setup)
+   - `ai/reasoning_pipeline.py` (Currently utilizes a symbolic CKG and NeuralCore router for exact matching)
+   - `ai/lora_adapter.py` (Currently written using pure NumPy matrices)
+   - `streamlit_app.py` (Our main pre-existing comprehensive Streamlit user interface)
+2. Summarize the findings to ensure you understand our custom weights, sizes, and layout before making any modifications.
+
+--- PHASE 1: GENERATIVE TOKENIZATION UPGRADE ---
+1. Replace the current non-generative `HashTokenizer` (which uses a fixed FNV-1a hash and lacks a decode function) with a reversible tokenizer.
+2. Implement a new class `YemeniTokenizer` inside `ai/yemeni_tokenizer.py` that fully supports both `encode()` and `decode()` methods to allow free-text auto-regressive generation.
+3. Seed the vocabulary dictionary with classical Arabic tokens and specific Yemeni dialect terms/idioms (e.g., "كيف حالك يا صاحبي", "جهال", "سدا", "أبشر").
+
+--- PHASE 2: CONVERTING CUSTOM ARCHITECTURE TO PYTORCH DECODER-ONLY ---
+1. Upgrade the internal model layers inside `ai/arabic_transformer.py` from NumPy to a lightweight generative PyTorch (`torch`) decoder-only sequence configuration optimized for local CPU execution.
+2. Incorporate Grouped-Query Attention (GQA) and dynamic attention masking into this PyTorch path to handle varying text sequences efficiently without high CPU overhead.
+3. Ensure to safely append `torch` and any necessary deep learning packages to the existing `requirements.txt` file.
+
+--- PHASE 3: TRAINING PATH & ADAPTER COUPLING ---
+1. Refactor or extend `ai/lora_adapter.py` and the training pipeline (`train_batch.py`) to couple the existing LoRA components with our newly implemented PyTorch neural layer projections (specifically targeting Query/Value weights).
+2. Ensure the training system can ingest small instruction-following text datasets (Yemeni phrases formatted as inputs and expected outputs) and visualize the loss convergence directly.
+
+--- PHASE 4: HYBRID RAG ROUTING & SYMBOLIC FALLBACK ---
+1. Modify `ai/reasoning_pipeline.py` to support a dual-engine architecture governed by a `generation_mode` flag (True by default).
+2. When `generation_mode` is True: The pipeline queries the current SQLite database (`memory/nsm_context.db`) and CKG graphs for factual anchors, injects them as a grounding context, and feeds them into the new generative Yemeni PyTorch pipeline to produce fluid responses.
+3. When `generation_mode` is False: Fall back completely and safely to the classic symbolic template generation mechanism to ensure zero hallucinations for strict queries.
+4. Seamlessly wire these execution logs and control toggles into our existing `streamlit_app.py` dashboard layout.
+
+--- COMPILATION & SAFETY RULE ---
+- Do NOT worry about pushing changes to GitHub via terminal commands for now.
+- Perform targeted code edits using string replacement tools. Validate that every modified file compiles cleanly (`python -m py_compile`) and that the existing Streamlit app launches successfully without crashing.
+
+Please start by executing PHASE 0 now. Inspect the files, confirm the structural dimensions, and report back before writing any new code.
