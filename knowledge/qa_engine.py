@@ -119,6 +119,117 @@ def record_positive_feedback(question: str, answer_summary: str = "", lr: float 
         return False
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# التوليد الحر الاختياري (Yemeni LLM) — طبقة إضافية فوق qa_engine الرمزي
+# ═══════════════════════════════════════════════════════════════════════════
+# نفس مبدأ _get_neural_booster: qa_engine يعمل بالكامل حتى لو فشلت هذه الطبقة
+# تماماً (torch غير مثبّت، لا يوجد checkpoint، أي استثناء أثناء التوليد).
+# لا يوجد أي مسار افتراضي يعتمد على نجاح هذه الطبقة — generation_mode=False
+# (الافتراضي) لا يلمسها إطلاقاً.
+
+_YEMENI_DECODER = None    # YemeniDecoder المحمَّل، أو False لو فشل نهائياً
+_YEMENI_TOKENIZER = None  # YemeniTokenizer المحمَّل، أو False لو فشل نهائياً
+_YEMENI_TRIED = False     # نحاول التحميل مرة واحدة فقط
+
+
+def _get_yemeni_generator():
+    """
+    يُحمِّل YemeniDecoder + YemeniTokenizer مرة واحدة (lazy singleton).
+    يُرجع (decoder, tokenizer) أو (None, None) عند أي فشل (torch غير متاح،
+    لا يوجد checkpoint، إلخ). لا يرمي أي استثناء للخارج أبداً.
+    """
+    global _YEMENI_DECODER, _YEMENI_TOKENIZER, _YEMENI_TRIED
+    if _YEMENI_TRIED:
+        ok = _YEMENI_DECODER is not False and _YEMENI_TOKENIZER is not False
+        return (_YEMENI_DECODER, _YEMENI_TOKENIZER) if ok else (None, None)
+    _YEMENI_TRIED = True
+    try:
+        from ai.arabic_transformer import get_yemeni_decoder
+        from ai.yemeni_tokenizer import get_yemeni_tokenizer
+        _YEMENI_DECODER = get_yemeni_decoder()
+        _YEMENI_TOKENIZER = get_yemeni_tokenizer()
+        logger.info("[qa_engine] YemeniDecoder + YemeniTokenizer محمَّلان بنجاح "
+                     "(التوليد الحر متاح — قد يكون بأوزان غير مدرَّبة إن لم "
+                     "يوجد checkpoint في models/yemeni_decoder)")
+    except Exception as e:
+        _YEMENI_DECODER = False
+        _YEMENI_TOKENIZER = False
+        logger.warning(f"[qa_engine] تعذّر تحميل طبقة التوليد الحر — "
+                        f"generation_mode سيُعامَل كأنه False: {e}")
+    ok = _YEMENI_DECODER is not False and _YEMENI_TOKENIZER is not False
+    return (_YEMENI_DECODER, _YEMENI_TOKENIZER) if ok else (None, None)
+
+
+def _build_grounding_text(
+    concept_matches: List[Tuple[str, float]],
+    verses: List[Dict[str, Any]],
+    max_concepts: int = 5,
+    max_verses: int = 3,
+) -> str:
+    """
+    يبني نص سياق تأسيسي (grounding) من نفس المعطيات الرمزية التي يحسبها
+    answer_question أصلاً (مفاهيم مطابقة + آيات داعمة) — لا يستدعي أي
+    مصدر خارجي جديد، فقط يعيد صياغتها كنص متصل يُغذّى للـ decoder.
+    """
+    parts: List[str] = []
+    if concept_matches:
+        names = "، ".join(c for c, _ in concept_matches[:max_concepts])
+        parts.append(f"المفاهيم ذات الصلة: {names}.")
+    if verses:
+        for v in verses[:max_verses]:
+            text = v.get("text", "")
+            if text:
+                parts.append(f"سورة {v.get('surah', '')} آية {v.get('ayah', '')}: {text}")
+    return " ".join(parts)
+
+
+def _try_generate_free_text(
+    question: str,
+    concept_matches: List[Tuple[str, float]],
+    verses: List[Dict[str, Any]],
+    temperature: float,
+    top_p: float,
+    top_k: int,
+) -> Optional[str]:
+    """
+    يحاول توليد نص حر عبر YemeniDecoder، مؤسَّس (grounded) على المفاهيم
+    والآيات المسترجَعة رمزياً. يُرجع None عند أي فشل (fallback آمن كامل —
+    answer_question يتجاهل النتيجة ويكمل بمساره الرمزي الافتراضي).
+    """
+    decoder, tokenizer = _get_yemeni_generator()
+    if decoder is None or tokenizer is None:
+        return None
+    try:
+        import torch
+
+        grounding_text = _build_grounding_text(concept_matches, verses)
+        grounding_ids = tokenizer.encode(grounding_text, add_bos=False, add_eos=False) \
+            if grounding_text else None
+        prompt_ids = tokenizer.encode(question, add_bos=True, add_eos=False)
+
+        grounding_tensor = (
+            torch.tensor(grounding_ids, dtype=torch.int64).unsqueeze(0)
+            if grounding_ids is not None and len(grounding_ids) > 0 else None
+        )
+        prompt_tensor = torch.tensor(prompt_ids, dtype=torch.int64).unsqueeze(0)
+
+        with torch.no_grad():
+            out_ids = decoder.generate(
+                prompt_ids=prompt_tensor,
+                grounding_ids=grounding_tensor,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+            )
+
+        generated_ids = out_ids[0].tolist()
+        return tokenizer.decode(generated_ids, skip_special=True, stop_at_eos=True)
+    except Exception as e:
+        logger.warning(f"[qa_engine] فشل التوليد الحر (Yemeni LLM) — "
+                        f"سيُستخدم المسار الرمزي فقط: {e}")
+        return None
+
+
 def _apply_neural_boost(
     question: str, related_concepts: List[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
@@ -782,6 +893,10 @@ def answer_question(
     max_verses: int = 5,
     max_related: int = 8,
     entities: Optional[Dict[str, Any]] = None,
+    generation_mode: bool = False,
+    temperature: float = 0.8,
+    top_p: float = 0.95,
+    top_k: int = 50,
 ) -> Dict[str, Any]:
     """
     نقطة الدخول الرئيسية لمحرك الأسئلة والأجوبة.
@@ -794,6 +909,11 @@ def answer_question(
       2. البحث في العلاقات عن مفاهيم مرتبطة
       3. استرجاع الآيات الداعمة من sources
       4. توليد إجابة منظمة مع درجة ثقة
+      5. (اختياري) generation_mode=True: توليد نص حر إضافي عبر YemeniDecoder،
+         مؤسَّس على نفس المفاهيم/الآيات المسترجَعة في الخطوات 1-3. لا يستبدل
+         أبداً الإجابة الرمزية أعلاه — يُضاف كحقل إضافي فقط، وعند أي فشل
+         (لا torch، لا checkpoint، إلخ) يُتجاهل بصمت والإجابة الرمزية تبقى
+         كما هي دون أي تغيير في السلوك الافتراضي (generation_mode=False).
     """
     concepts_db  = ckg.get("concepts", {})
     relations_db = ckg.get("relations", {})
@@ -818,17 +938,31 @@ def answer_question(
     verses = retrieve_supporting_verses(concept_matches, concepts_db, ayat_by_ref, max_verses=max_verses)
 
     # 0/4. تفعيل طبقة الكيانات المعرفية لأسئلة "من هو/ما هي..."
+    result: Optional[Dict[str, Any]] = None
     if entities_db and is_entity_question(question):
         entity_match = find_entity_match(concept_matches, entities_db)
         if entity_match:
             entity_name, entity_data = entity_match
-            return generate_entity_answer(
+            result = generate_entity_answer(
                 question, entity_name, entity_data,
                 concept_matches, related_concepts, verses, concepts_db,
             )
 
-    # 4. الإجابة المنظمة (المسار العام: مفهوم → علاقات → آيات)
-    result = generate_answer(question, concept_matches, related_concepts, verses, concepts_db)
+    # 4. الإجابة المنظمة (المسار العام: مفهوم → علاقات → آيات) — إن لم يُعثر
+    # على كيان مطابق أعلاه
+    if result is None:
+        result = generate_answer(question, concept_matches, related_concepts, verses, concepts_db)
+
+    # 5. توليد حر اختياري (Yemeni LLM) — إضافي فقط، لا يمسّ أي من المسارين أعلاه
+    result["generation_used"] = False
+    result["generated_text"] = None
+    if generation_mode:
+        generated = _try_generate_free_text(
+            question, concept_matches, verses, temperature, top_p, top_k,
+        )
+        if generated:
+            result["generated_text"] = generated
+            result["generation_used"] = True
 
     return result
 

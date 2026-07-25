@@ -3150,7 +3150,19 @@ def render_qa():
 
     with st.spinner("يتم تحليل السؤال والبحث في قاعدة المعرفة..."):
         entities = load_entities()
-        result = answer_question(question, ckg, ayat, entities=entities)
+        result = answer_question(
+            question, ckg, ayat, entities=entities,
+            generation_mode=st.session_state.get("yemeni_generation_mode", False),
+            temperature=st.session_state.get("yemeni_temperature", 0.8),
+            top_p=st.session_state.get("yemeni_top_p", 0.95),
+            top_k=st.session_state.get("yemeni_top_k", 50),
+        )
+
+    if result.get("generation_used") and result.get("generated_text"):
+        st.markdown("---")
+        st.markdown('<div class="section-header">🗣️ توليد حر (تجريبي)</div>', unsafe_allow_html=True)
+        st.caption("نص مولَّد بواسطة YemeniDecoder — تجريبي وغير مضمون الدقة، منفصل عن الإجابة الرمزية أدناه.")
+        st.info(result["generated_text"])
 
     # ── حفظ الحلقة في الذاكرة التجريبية ──
     db_path = MEMORY_DIR / "episodic.db"
@@ -5219,6 +5231,37 @@ def main():
                         st.rerun()
                     else:
                         st.error("❌ مفتاح غير صحيح")
+
+            st.markdown("---")
+
+            # ── 🗣️ التوليد الحر التجريبي (Yemeni LLM) ────────────────────
+            st.markdown("##### 🗣️ التوليد الحر (تجريبي)")
+            st.session_state["yemeni_generation_mode"] = st.toggle(
+                "تفعيل التوليد الحر (Yemeni LLM)",
+                value=st.session_state.get("yemeni_generation_mode", False),
+                key="yemeni_generation_toggle",
+            )
+            if st.session_state["yemeni_generation_mode"]:
+                st.caption(
+                    "⚠️ ميزة تجريبية: النموذج التوليدي (YemeniDecoder) لم يخضع "
+                    "لتدريب فعلي بعد — النص المولَّد قد يكون غير مفهوم حالياً. "
+                    "الإجابة الرمزية الأساسية تبقى تُعرض دائماً بجانبه."
+                )
+                st.session_state["yemeni_temperature"] = st.slider(
+                    "الحرارة (Temperature)", min_value=0.1, max_value=1.5,
+                    value=st.session_state.get("yemeni_temperature", 0.8),
+                    step=0.05, key="yemeni_temp_slider",
+                )
+                st.session_state["yemeni_top_p"] = st.slider(
+                    "Top-P", min_value=0.1, max_value=1.0,
+                    value=st.session_state.get("yemeni_top_p", 0.95),
+                    step=0.05, key="yemeni_top_p_slider",
+                )
+                st.session_state["yemeni_top_k"] = st.slider(
+                    "Top-K", min_value=1, max_value=100,
+                    value=st.session_state.get("yemeni_top_k", 50),
+                    step=1, key="yemeni_top_k_slider",
+                )
 
         st.markdown("---")
         st.caption("🧠 النظام المعرفي العربي")
