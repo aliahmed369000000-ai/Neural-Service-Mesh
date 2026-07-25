@@ -362,15 +362,19 @@ class DeepRoutingNetwork:
         """
         d = Path(directory)
         expected_in_dim = INPUT_DIM  # L1 دائماً يجب أن تكون أعمدتها 784
+        any_layer_found = False
+        all_loaded_ok = True
         for i, layer in enumerate(self.layers):
             prefix = str(d / f"deep_network_layer_{i+1}")
             wpath = f"{prefix}_weights.npy"
             if not os.path.exists(wpath):
                 continue
+            any_layer_found = True
             try:
                 saved_w = np.load(wpath).astype(np.float64)
             except Exception as e:
                 logger.warning(f"layer {i+1} load failed (تعذّرت قراءة الملف): {e}")
+                all_loaded_ok = False
                 continue
 
             saved_out, saved_in = saved_w.shape
@@ -381,6 +385,7 @@ class DeepRoutingNetwork:
                     f"الاحتفاظ بالأوزان المهيّأة حديثاً الصحيحة بدل تحميل "
                     f"أبعاد قديمة غير متوافقة."
                 )
+                all_loaded_ok = False
                 continue
             if i > 0 and saved_in != self.layers[i - 1].out_dim:
                 logger.warning(
@@ -388,18 +393,32 @@ class DeepRoutingNetwork:
                     f"لا يتوافق مع مخرج الطبقة السابقة الحالية "
                     f"{self.layers[i - 1].out_dim} — تحميل غير آمن، تم التجاهل."
                 )
+                all_loaded_ok = False
                 continue
 
             try:
                 layer.load(prefix)
             except Exception as e:
                 logger.warning(f"layer {i+1} load failed: {e}")
+                all_loaded_ok = False
 
+        # إصلاح توافق: state.npy (train_steps/last_loss) يوصف الأوزان التي
+        # حُفظت معه في نفس اللحظة. لو رُفضت أي طبقة أوزان لعدم توافق الأبعاد
+        # (معمارية قديمة)، فالحالة المحفوظة معها لا تصف الأوزان الفعلية
+        # الحالية (المهيّأة حديثاً) — تحميلها كان يُنتج خطوات تدريب/loss
+        # لا تطابق الأوزان الفعلية بصمت. الآن: تُحمَّل الحالة فقط لو كل
+        # الطبقات الموجودة على القرص توافقت وحُمّلت فعلياً.
         state_path = str(d / "deep_network_state.npy")
-        if os.path.exists(state_path):
+        if any_layer_found and all_loaded_ok and os.path.exists(state_path):
             state = np.load(state_path)
             self._train_steps = int(state[0])
             self._last_loss = float(state[1]) if state[1] != 0.0 else None
+        elif any_layer_found and not all_loaded_ok:
+            logger.warning(
+                "⚠️ تم تجاهل deep_network_state.npy المحفوظة لعدم توافقها مع "
+                "الأوزان الفعلية الحالية (بعضها رُفض أعلاه) — الشبكة تُعامَل "
+                "كشبكة جديدة (train_steps=0) بدل استخدام رقم غير متطابق."
+            )
 
     @property
     def weights(self) -> np.ndarray:
