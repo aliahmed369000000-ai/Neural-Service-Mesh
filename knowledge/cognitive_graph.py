@@ -237,6 +237,12 @@ class CognitiveKnowledgeGraph:
         # إحصائيات سريعة
         self._max_freq: int = 1
 
+        # حقول علوية إضافية غير معروفة لهذا الكلاس (مثل arabic_roots،
+        # surah_profiles، meta الغنية من بنّاءات خاصة مثل ckg_bootstrap.py)
+        # — تُحفَظ كما هي round-trip بدل حذفها بصمت عند save(). انظر شرح
+        # الباغ المُصلَح في save()/load() أدناه.
+        self._extra_top_level: Dict[str, Any] = {}
+
         self._file.parent.mkdir(parents=True, exist_ok=True)
         if self._file.exists():
             self.load()
@@ -569,9 +575,18 @@ class CognitiveKnowledgeGraph:
     # ══════════════════════════════════════════════════════════════════════
 
     def save(self) -> None:
-        """حفظ الجراف atomically إلى JSON."""
+        """حفظ الجراف atomically إلى JSON.
+
+        إصلاح باغ فقدان بيانات: كانت هذه الدالة تكتب فقط
+        {_meta, concepts, relations} فتحذف بصمت أي حقول علوية أخرى كانت
+        موجودة في الملف الأصلي (مثلاً arabic_roots، surah_profiles، meta
+        الغنية من ckg_bootstrap.py) — أول تشغيل حي للنظام (مثل
+        quran_continuous_trainer.py) كان يدمّرها فعلياً. الآن: أي حقول
+        علوية غير معروفة مُلتقَطة عند load() تُعاد كتابتها كما هي.
+        """
         with self._lock:
-            data = {
+            data: Dict[str, Any] = dict(self._extra_top_level)  # حفاظ round-trip أولاً
+            data.update({
                 "_meta": {
                     "schema_version": "1.0.0",
                     "saved_at":       _NOW(),
@@ -581,7 +596,7 @@ class CognitiveKnowledgeGraph:
                 },
                 "concepts":  {k: v.to_dict() for k, v in self._concepts.items()},
                 "relations": {k: v.to_dict() for k, v in self._relations.items()},
-            }
+            })
         tmp = self._file.with_suffix(".tmp")
         try:
             tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -624,6 +639,12 @@ class CognitiveKnowledgeGraph:
             self._relations.clear()
             self._adj.clear()
             self._radj.clear()
+
+            # حفظ أي حقول علوية غير معروفة لهذا الكلاس (round-trip-safe)
+            _KNOWN_TOP_LEVEL_KEYS = {"concepts", "relations", "_meta"}
+            self._extra_top_level = {
+                k: v for k, v in data.items() if k not in _KNOWN_TOP_LEVEL_KEYS
+            }
 
             for name, d in data.get("concepts", {}).items():
                 self._concepts[name] = Concept.from_dict(d)

@@ -145,9 +145,12 @@ def _process_batch(
     result = ckg.ingest_batch(all_matches, references=references, auto_save=False)
 
     # ── 3. Run RelationInferencer ─────────────────────────────────────────
+    # نمرّر مفاهيم هذه الدفعة فقط (affected_concepts) بدل تشغيل O(n²) على
+    # كامل الـCKG (7,338+ مفهوم) في كل دفعة — كان هذا يسبّب OOM فعلياً على
+    # مستودعات بحجم الإنتاج. انظر شرح الإصلاح في relation_inferencer.py.
     try:
         inf = inferencer_cls(ckg)
-        inf.run(verbose=False)
+        inf.run(verbose=False, affected_concepts=set(concept_freq.keys()))
     except Exception as exc:
         logger.warning(f"[QCT] RelationInferencer error: {exc}")
 

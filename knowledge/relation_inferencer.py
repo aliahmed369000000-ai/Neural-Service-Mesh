@@ -46,12 +46,23 @@ class RelationInferencer:
         self._decay_factor     = decay_factor
         self._decay_days       = decay_days
 
-    def run(self, verbose: bool = False) -> Dict:
+    def run(
+        self,
+        verbose: bool = False,
+        affected_concepts: Optional[set] = None,
+    ) -> Dict:
         """
         شغّل كل آليات الاستنتاج وارجع تقريراً.
+
+        affected_concepts: لو مُمرَّرة (مثلاً أسماء مفاهيم دفعة ayahs واحدة)،
+        تُقيَّد _infer_cluster_affinity لتربط فقط الأزواج التي تخصّ مفهوماً
+        واحداً على الأقل من هذه المجموعة، بدل O(حجم_العنقود²) على كامل
+        الـCKG في كل استدعاء — تجنّباً لانفجار الذاكرة/الحساب على CKG كبير
+        (رأيناه فعلياً: OOM على 7,338 مفهوم). لو None، السلوك القديم الكامل
+        يبقى كما هو (متوافق خلفياً مع bootstrap builders أحادية التشغيل).
         """
         report = {
-            "cluster_affinity":  self._infer_cluster_affinity(verbose),
+            "cluster_affinity":  self._infer_cluster_affinity(verbose, affected_concepts),
             "chain_inference":   self._infer_chains(verbose),
             "strength_decay":    self._apply_decay(verbose),
         }
@@ -63,7 +74,39 @@ class RelationInferencer:
 
     # ── 1. Cluster Affinity ───────────────────────────────────────────────
 
-    def _infer_cluster_affinity(self, verbose: bool) -> Dict:
+    @staticmethod
+    def _cluster_pairs(names: List[str], affected_concepts: Optional[set]):
+        """
+        يولّد أزواج (a, b) غير مكرَّرة من names.
+
+        - affected_concepts=None: كل الأزواج (السلوك القديم الكامل O(n²)).
+        - affected_concepts مُمرَّرة: فقط الأزواج التي تخصّ مفهوماً واحداً
+          على الأقل من هذه المجموعة → O(len(names) × len(affected∩names))
+          بدل O(len(names)²)، مع تجنّب تكرار نفس الزوج مرتين.
+        """
+        if affected_concepts is None:
+            for i in range(len(names)):
+                for j in range(i + 1, len(names)):
+                    yield names[i], names[j]
+            return
+
+        affected_in_cluster = [n for n in names if n in affected_concepts]
+        if not affected_in_cluster:
+            return
+        seen: set = set()
+        for a in affected_in_cluster:
+            for b in names:
+                if a == b:
+                    continue
+                key = frozenset((a, b))
+                if key in seen:
+                    continue
+                seen.add(key)
+                yield a, b
+
+    def _infer_cluster_affinity(
+        self, verbose: bool, affected_concepts: Optional[set] = None,
+    ) -> Dict:
         """
         المفاهيم في نفس الـ cluster لها علاقة دلالية ضمنية.
         مثال: "صبر" و"تقوى" كلاهما في cluster "أخلاق" → علاقة دلالية بوزن 0.2
@@ -82,33 +125,31 @@ class RelationInferencer:
             for cluster, names in by_cluster.items():
                 if len(names) < 2:
                     continue
-                # ربط كل المفاهيم في نفس الـ cluster ببعضها (semantic)
-                for i in range(len(names)):
-                    for j in range(i + 1, len(names)):
-                        a, b = names[i], names[j]
-                        key_ab = f"{a}→{b}"
-                        key_ba = f"{b}→{a}"
+                # ربط المفاهيم المتأثرة بهذه الدفعة ببقية العنقود (semantic)
+                for a, b in self._cluster_pairs(names, affected_concepts):
+                    key_ab = f"{a}→{b}"
+                    key_ba = f"{b}→{a}"
 
-                        # أضف فقط إذا لم تكن علاقة co_occurrence أقوى موجودة
-                        existing_ab = ckg._relations.get(key_ab)
-                        if not existing_ab or existing_ab.relation_type != "co_occurrence":
-                            ckg.add_relation(
-                                a, b,
-                                evidence=f"cluster:{cluster}",
-                                relation_type="semantic",
-                                weight_boost=self._affinity_weight,
-                            )
-                            added += 1
+                    # أضف فقط إذا لم تكن علاقة co_occurrence أقوى موجودة
+                    existing_ab = ckg._relations.get(key_ab)
+                    if not existing_ab or existing_ab.relation_type != "co_occurrence":
+                        ckg.add_relation(
+                            a, b,
+                            evidence=f"cluster:{cluster}",
+                            relation_type="semantic",
+                            weight_boost=self._affinity_weight,
+                        )
+                        added += 1
 
-                        existing_ba = ckg._relations.get(key_ba)
-                        if not existing_ba or existing_ba.relation_type != "co_occurrence":
-                            ckg.add_relation(
-                                b, a,
-                                evidence=f"cluster:{cluster}",
-                                relation_type="semantic",
-                                weight_boost=self._affinity_weight,
-                            )
-                            added += 1
+                    existing_ba = ckg._relations.get(key_ba)
+                    if not existing_ba or existing_ba.relation_type != "co_occurrence":
+                        ckg.add_relation(
+                            b, a,
+                            evidence=f"cluster:{cluster}",
+                            relation_type="semantic",
+                            weight_boost=self._affinity_weight,
+                        )
+                        added += 1
 
         return {"relations_inferred": added}
 
