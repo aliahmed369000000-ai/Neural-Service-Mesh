@@ -160,6 +160,88 @@ def _get_yemeni_generator():
     return (_YEMENI_DECODER, _YEMENI_TOKENIZER) if ok else (None, None)
 
 
+_LLM_FALLBACK = None        # LLMFallback المحمَّل، أو False لو فشل نهائياً
+_LLM_FALLBACK_TRIED = False
+
+_YEMENI_DIALECT_SYSTEM_PROMPT = (
+    "أنت مساعد يصوغ إجابات دينية/معرفية موثوقة بلهجة يمنية طبيعية وسلسة "
+    "(صنعانية أو عدنية أو حضرمية بحسب سياق السؤال)، لقارئ يمني عادي.\n\n"
+    "قواعد صارمة يجب الالتزام بها دون استثناء:\n"
+    "1. الحقائق أدناه (المفاهيم، الآيات، درجة الثقة) هي المصدر الوحيد المسموح "
+    "به للإجابة. لا تُضِف معلومة دينية أو تاريخية واحدة غير موجودة فيها، ولا "
+    "تُغيّر نص أي آية قرآنية أو رقم سورة/آية حرفياً — انقلها كما هي إذا ذكرتها.\n"
+    "2. مهمتك محصورة في إعادة الصياغة الأسلوبية فقط: حوّل الأسلوب الرسمي إلى "
+    "لهجة يمنية دارجة، طبيعية، ودودة، دون حشو أو مبالغة.\n"
+    "3. إن شعرت أن الحقائق المعطاة غير كافية للإجابة، قل ذلك صراحة بدلاً من "
+    "الاختلاق.\n"
+    "4. لا تذكر كلمة 'CKG' أو 'نظام' أو أي مصطلح تقني داخلي."
+)
+
+
+def _get_llm_fallback():
+    """يُحمِّل LLMFallback مرة واحدة (lazy singleton). يُرجع None عند أي فشل."""
+    global _LLM_FALLBACK, _LLM_FALLBACK_TRIED
+    if _LLM_FALLBACK_TRIED:
+        return _LLM_FALLBACK if _LLM_FALLBACK is not False else None
+    _LLM_FALLBACK_TRIED = True
+    try:
+        from ai.llm_fallback import LLMFallback
+        _LLM_FALLBACK = LLMFallback(max_tokens=500, temperature=0.6)
+        logger.info("[qa_engine] LLMFallback محمَّل — صياغة يمنية عبر API متاحة")
+    except Exception as e:
+        _LLM_FALLBACK = False
+        logger.warning(f"[qa_engine] تعذّر تحميل LLMFallback — "
+                        f"سيُستخدم المسار الرمزي فقط: {e}")
+    return _LLM_FALLBACK if _LLM_FALLBACK is not False else None
+
+
+def _rephrase_in_yemeni_dialect(
+    question: str,
+    result: Dict[str, Any],
+    dialect: str = "عام",
+) -> Optional[str]:
+    """
+    يمرّر الإجابة الرمزية المؤسَّسة (result['summary'] + الآيات + المفاهيم)
+    عبر LLMFallback لإعادة صياغتها بلهجة يمنية طبيعية، دون تحريف الحقائق.
+    يُرجع None عند أي فشل (fallback آمن كامل — answer_question يتجاهل
+    النتيجة ويُبقي result['summary'] الرمزي كما هو دون أي تغيير).
+    """
+    llm = _get_llm_fallback()
+    if llm is None:
+        return None
+    try:
+        facts_lines = [f"الملخص الرمزي المسترجَع: {result.get('summary', '')}"]
+        verses = result.get("verses") or []
+        for v in verses[:3]:
+            text = v.get("text", "")
+            if text:
+                facts_lines.append(
+                    f"آية — سورة {v.get('surah', '')} آية {v.get('ayah', '')}: {text}"
+                )
+        related = result.get("related_concepts") or []
+        if related:
+            names = "، ".join(
+                c.get("name", "") if isinstance(c, dict) else str(c)
+                for c in related[:5]
+            )
+            facts_lines.append(f"مفاهيم مرتبطة: {names}")
+        facts_lines.append(f"درجة الثقة: {result.get('confidence', 0.0)}")
+
+        query = (
+            f"السؤال الأصلي: {question}\n\n"
+            f"الحقائق المسترجَعة (لا تُغيّرها، فقط أعد صياغتها بلهجة يمنية "
+            f"{dialect}):\n" + "\n".join(facts_lines)
+        )
+
+        fb_result = llm.generate(query, system_prompt=_YEMENI_DIALECT_SYSTEM_PROMPT)
+        text = (fb_result.text or "").strip()
+        return text or None
+    except Exception as e:
+        logger.warning(f"[qa_engine] فشلت صياغة اللهجة اليمنية عبر LLMFallback — "
+                        f"سيُستخدم الملخص الرمزي فقط: {e}")
+        return None
+
+
 def _build_grounding_text(
     concept_matches: List[Tuple[str, float]],
     verses: List[Dict[str, Any]],
@@ -894,6 +976,8 @@ def answer_question(
     max_related: int = 8,
     entities: Optional[Dict[str, Any]] = None,
     generation_mode: bool = False,
+    generation_backend: str = "llm_fallback",  # "llm_fallback" أو "yemeni_decoder"
+    dialect: str = "عام",
     temperature: float = 0.8,
     top_p: float = 0.95,
     top_k: int = 50,
@@ -956,13 +1040,27 @@ def answer_question(
     # 5. توليد حر اختياري (Yemeni LLM) — إضافي فقط، لا يمسّ أي من المسارين أعلاه
     result["generation_used"] = False
     result["generated_text"] = None
+    result["generation_backend"] = None
     if generation_mode:
-        generated = _try_generate_free_text(
-            question, concept_matches, verses, temperature, top_p, top_k,
-        )
+        generated: Optional[str] = None
+        if generation_backend == "llm_fallback":
+            generated = _rephrase_in_yemeni_dialect(question, result, dialect)
+            backend_used = "llm_fallback"
+            if generated is None:
+                generated = _try_generate_free_text(
+                    question, concept_matches, verses, temperature, top_p, top_k,
+                )
+                backend_used = "yemeni_decoder" if generated else None
+        else:
+            generated = _try_generate_free_text(
+                question, concept_matches, verses, temperature, top_p, top_k,
+            )
+            backend_used = "yemeni_decoder" if generated else None
+
         if generated:
             result["generated_text"] = generated
             result["generation_used"] = True
+            result["generation_backend"] = backend_used
 
     return result
 

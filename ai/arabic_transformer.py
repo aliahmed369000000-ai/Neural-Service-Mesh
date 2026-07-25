@@ -120,7 +120,7 @@ class TokenEmbedding:
     عن "معنى" الكلمات. لا نصوص، فقط أوزان رقمية.
     """
     def __init__(self, vocab_size: int, d_model: int):
-        self.W = np.random.randn(vocab_size, d_model).astype(np.float64) * 0.02
+        self.W = (np.random.randn(vocab_size, d_model) * 0.02).astype(np.float32)
         self._last_ids = None
 
     def forward(self, ids: np.ndarray) -> np.ndarray:
@@ -128,13 +128,19 @@ class TokenEmbedding:
         return self.W[self._last_ids]
 
     def backward(self, grad: np.ndarray, lr: float):
-        for i, idx in enumerate(self._last_ids):
-            self.W[idx] -= lr * grad[i]
+        """
+        تحديث مصفوفي مجمَّع بدل حلقة for على كل token.
+        ⚠️ لا تستبدلها بـ self.W[ids] -= lr*grad العادية — عند تكرار نفس الـ
+        ID داخل نفس التسلسل، الفانسي إندكسنغ العادي يفقد التحديثات ويكتب
+        فوق آخرها فقط. np.subtract.at يُراكم المساهمات بشكل صحيح.
+        """
+        grad32 = grad.astype(np.float32, copy=False)
+        np.subtract.at(self.W, self._last_ids, lr * grad32)
         np.clip(self.W, -5.0, 5.0, out=self.W)
 
     def save(self, path: str): np.save(path, self.W)
     def load(self, path: str):
-        self.W = np.load(path).astype(np.float64)
+        self.W = np.load(path).astype(np.float32)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
