@@ -750,6 +750,616 @@ def get_nsm_bridge(weights_dir=WEIGHTS_DIR, core_csv=None,
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 12. PyTorch Decoder-Only Path — Yemeni Generative LLM
+# ══════════════════════════════════════════════════════════════════════════════
+"""
+هذا القسم يُضيف مسار توليدي كامل (decoder-only) فوق النظام الحالي بدون
+تعديل أي شيء في الـ NumPy path.
+
+التصميم:
+  • Grouped-Query Attention (GQA) — n_kv_heads أقل من n_heads لتوفير ذاكرة KV
+  • RMSNorm بدل LayerNorm (أسرع على CPU)
+  • قناع سببي ديناميكي يُبنى تلقائياً من طول التسلسل
+  • float32 بدل float64 (أسرع على CPU بمرتين عملياً)
+  • التوافق الكامل مع YemeniTokenizer (vocab_size مرن)
+
+الفصل المعماري:
+  NumPy path  (ArabicTransformer)     — قائم / مدرَّب / يُستخدم للـ routing
+  PyTorch path (YemeniDecoder)        — جديد / للتوليد النصي الحر
+"""
+
+try:
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+    _TORCH_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _TORCH_AVAILABLE = False
+    logger.warning(
+        "[YemeniDecoder] PyTorch غير متاح — المسار التوليدي معطّل. "
+        "ثبّت الحزمة بـ: pip install torch"
+    )
+
+
+def _require_torch(fn):
+    """ديكوراتور: يرفع ImportError واضحة إن استُدعيت دالة تحتاج torch."""
+    def wrapper(*args, **kwargs):
+        if not _TORCH_AVAILABLE:
+            raise ImportError(
+                "PyTorch مطلوب لهذه الوظيفة. ثبّته بـ: pip install torch"
+            )
+        return fn(*args, **kwargs)
+    wrapper.__name__ = fn.__name__
+    return wrapper
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 12-A. RMSNorm
+# ────────────────────────────────────────────────────────────────────────────
+
+class YemeniRMSNorm(nn.Module if _TORCH_AVAILABLE else object):
+    """
+    Root Mean Square Layer Normalisation.
+    أسرع من LayerNorm (لا طرح للمتوسط) — نفس الاستقرار.
+    """
+    def __init__(self, d_model: int, eps: float = 1e-6):
+        if not _TORCH_AVAILABLE:
+            return
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(d_model))
+
+    def forward(self, x):          # x: (..., d_model)
+        rms = x.pow(2).mean(-1, keepdim=True).add(self.eps).sqrt()
+        return self.weight * (x / rms)
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 12-B. Grouped-Query Attention (GQA)
+# ────────────────────────────────────────────────────────────────────────────
+
+class YemeniGQAAttention(nn.Module if _TORCH_AVAILABLE else object):
+    """
+    Grouped-Query Attention — يقلّل عدد رؤوس K/V مع الحفاظ على رؤوس Q الكاملة.
+
+    مثال: n_heads=16, n_kv_heads=4
+      → 4 مجموعات، كل مجموعة تشارك نفس K/V عبر 4 رؤوس Q.
+      → يوفّر 75% من ذاكرة KV cache مقارنةً بـ MHA كاملة.
+
+    يدعم:
+      • قناع سببي ديناميكي (يُبنى تلقائياً من seq_len)
+      • قناع PAD خارجي (key_padding_mask: bool tensor, True = PAD)
+      • float32 لكفاءة CPU
+    """
+
+    def __init__(
+        self,
+        d_model:    int,
+        n_heads:    int,
+        n_kv_heads: int,
+        dropout:    float = 0.0,
+    ):
+        if not _TORCH_AVAILABLE:
+            return
+        super().__init__()
+        assert d_model % n_heads == 0, \
+            f"d_model({d_model}) يجب أن يقبل القسمة على n_heads({n_heads})"
+        assert n_heads % n_kv_heads == 0, \
+            f"n_heads({n_heads}) يجب أن يقبل القسمة على n_kv_heads({n_kv_heads})"
+
+        self.n_heads    = n_heads
+        self.n_kv_heads = n_kv_heads
+        self.n_groups   = n_heads // n_kv_heads   # عدد رؤوس Q لكل مجموعة KV
+        self.d_head     = d_model // n_heads
+        self.d_kv       = self.d_head * n_kv_heads
+        self.scale      = self.d_head ** -0.5
+
+        self.Wq  = nn.Linear(d_model, d_model,      bias=False)
+        self.Wk  = nn.Linear(d_model, self.d_kv,    bias=False)
+        self.Wv  = nn.Linear(d_model, self.d_kv,    bias=False)
+        self.Wo  = nn.Linear(d_model, d_model,      bias=False)
+        self.drop = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+
+        # تهيئة Xavier
+        for layer in [self.Wq, self.Wk, self.Wv, self.Wo]:
+            nn.init.xavier_uniform_(layer.weight)
+
+    def forward(
+        self,
+        x:                  "torch.Tensor",   # (B, S, d_model)
+        causal_mask:        Optional["torch.Tensor"] = None,  # (S, S) bool
+        key_padding_mask:   Optional["torch.Tensor"] = None,  # (B, S) bool — True=PAD
+    ) -> "torch.Tensor":
+        B, S, _ = x.shape
+
+        # ── Projections ──────────────────────────────────────────────────
+        Q = self.Wq(x)                        # (B, S, d_model)
+        K = self.Wk(x)                        # (B, S, d_kv)
+        V = self.Wv(x)                        # (B, S, d_kv)
+
+        # ── Reshape → heads ──────────────────────────────────────────────
+        Q = Q.view(B, S, self.n_heads,    self.d_head).transpose(1, 2)   # (B, H, S, dh)
+        K = K.view(B, S, self.n_kv_heads, self.d_head).transpose(1, 2)   # (B, Hkv, S, dh)
+        V = V.view(B, S, self.n_kv_heads, self.d_head).transpose(1, 2)   # (B, Hkv, S, dh)
+
+        # ── GQA: توسيع K/V ليطابق n_heads ──────────────────────────────
+        # كل مجموعة KV تُكرَّر n_groups مرات لتطابق رؤوس Q
+        K = K.repeat_interleave(self.n_groups, dim=1)   # (B, H, S, dh)
+        V = V.repeat_interleave(self.n_groups, dim=1)   # (B, H, S, dh)
+
+        # ── Scaled Dot-Product Attention ─────────────────────────────────
+        scores = torch.matmul(Q, K.transpose(-2, -1)) * self.scale  # (B, H, S, S)
+
+        # قناع سببي
+        if causal_mask is not None:
+            # causal_mask: (S, S) bool — True = يُحجَب
+            scores = scores.masked_fill(causal_mask[None, None, :, :], float("-inf"))
+
+        # قناع PAD
+        if key_padding_mask is not None:
+            # key_padding_mask: (B, S) bool — True = PAD
+            scores = scores.masked_fill(
+                key_padding_mask[:, None, None, :], float("-inf")
+            )
+
+        attn   = F.softmax(scores, dim=-1)       # (B, H, S, S)
+        attn   = self.drop(attn)
+        out    = torch.matmul(attn, V)            # (B, H, S, dh)
+
+        # ── Merge heads ──────────────────────────────────────────────────
+        out = out.transpose(1, 2).contiguous().view(B, S, -1)   # (B, S, d_model)
+        return self.Wo(out)
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 12-C. Feed-Forward Network (SwiGLU variant — موثوق على CPU)
+# ────────────────────────────────────────────────────────────────────────────
+
+class YemeniFFN(nn.Module if _TORCH_AVAILABLE else object):
+    """
+    FFN بنمط SwiGLU:
+        FFN(x) = SiLU(xW1) ⊙ (xW2)·W3
+    توازن جيد بين الأداء والسرعة على CPU.
+    d_ff الافتراضي = 4/3 × d_model × 2 (تقريب LLaMA: 8/3 × d_model).
+    """
+    def __init__(self, d_model: int, d_ff: Optional[int] = None):
+        if not _TORCH_AVAILABLE:
+            return
+        super().__init__()
+        # 8/3 × d_model مقرّباً لأقرب 256
+        d_ff = d_ff or int(((d_model * 8 // 3) + 255) // 256 * 256)
+        self.W1 = nn.Linear(d_model, d_ff, bias=False)
+        self.W2 = nn.Linear(d_model, d_ff, bias=False)
+        self.W3 = nn.Linear(d_ff,   d_model, bias=False)
+        for layer in [self.W1, self.W2, self.W3]:
+            nn.init.xavier_uniform_(layer.weight)
+
+    def forward(self, x):
+        return self.W3(F.silu(self.W1(x)) * self.W2(x))
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 12-D. Decoder Block
+# ────────────────────────────────────────────────────────────────────────────
+
+class YemeniDecoderBlock(nn.Module if _TORCH_AVAILABLE else object):
+    """
+    طبقة decoder-only واحدة:
+      Pre-Norm → GQA → Residual → Pre-Norm → FFN → Residual
+    """
+    def __init__(
+        self,
+        d_model:    int,
+        n_heads:    int,
+        n_kv_heads: int,
+        d_ff:       Optional[int] = None,
+        dropout:    float = 0.0,
+    ):
+        if not _TORCH_AVAILABLE:
+            return
+        super().__init__()
+        self.norm1 = YemeniRMSNorm(d_model)
+        self.attn  = YemeniGQAAttention(d_model, n_heads, n_kv_heads, dropout)
+        self.norm2 = YemeniRMSNorm(d_model)
+        self.ffn   = YemeniFFN(d_model, d_ff)
+        self.drop  = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+
+    def forward(
+        self,
+        x:                "torch.Tensor",
+        causal_mask:      Optional["torch.Tensor"] = None,
+        key_padding_mask: Optional["torch.Tensor"] = None,
+    ) -> "torch.Tensor":
+        # Self-attention + residual
+        x = x + self.drop(self.attn(self.norm1(x), causal_mask, key_padding_mask))
+        # FFN + residual
+        x = x + self.drop(self.ffn(self.norm2(x)))
+        return x
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 12-E. YemeniDecoder — Full Decoder-Only Model
+# ────────────────────────────────────────────────────────────────────────────
+
+class YemeniDecoder(nn.Module if _TORCH_AVAILABLE else object):
+    """
+    نموذج توليدي decoder-only مُحسَّن لـ CPU بالعربية اليمنية.
+
+    البنية الافتراضية (مطابقة لأبعاد ArabicTransformer الموجودة):
+      d_model    = 2304
+      n_heads    = 16
+      n_kv_heads = 4      ← GQA: 4 KV groups لـ 16 query heads (توفير 75% ذاكرة KV)
+      n_layers   = 16
+      vocab_size = 32000   ← حجم YemeniTokenizer بعد نموه
+
+    المسار:
+      tokens → Embedding → (RMSNorm + GQA + FFN) × N → RMSNorm → LM Head → logits
+
+    التكامل مع ReasoningPipeline:
+      يُستخدم عند generation_mode=True فقط.
+      يستقبل grounding_context (نص من CKG/SQLite) كـ prefix tokens.
+    """
+
+    VERSION = "1.0.0-Yemeni"
+
+    def __init__(
+        self,
+        vocab_size:  int   = 32000,
+        d_model:     int   = D_MODEL,        # 2304 — مطابق لـ ArabicTransformer
+        n_heads:     int   = N_HEADS,         # 16
+        n_kv_heads:  int   = 4,               # GQA: 4 مجموعات KV
+        n_layers:    int   = N_LAYERS,        # 16
+        d_ff:        Optional[int] = None,    # None → 8/3 × d_model
+        max_seq_len: int   = MAX_SEQ_LEN,     # 128
+        dropout:     float = 0.0,
+        pad_id:      int   = 0,
+        weights_dir: str   = "models/yemeni_decoder",
+    ):
+        if not _TORCH_AVAILABLE:
+            raise ImportError("PyTorch مطلوب. ثبّته بـ: pip install torch")
+        super().__init__()
+
+        self.vocab_size  = vocab_size
+        self.d_model     = d_model
+        self.n_heads     = n_heads
+        self.n_kv_heads  = n_kv_heads
+        self.n_layers    = n_layers
+        self.max_seq_len = max_seq_len
+        self.pad_id      = pad_id
+        self.weights_dir = weights_dir
+
+        # ── Embedding ────────────────────────────────────────────────────
+        self.embed     = nn.Embedding(vocab_size, d_model, padding_idx=pad_id)
+        self.embed_drop = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+
+        # ── Sinusoidal positional encoding (ثابت، غير متعلَّم) ──────────
+        self.register_buffer(
+            "pos_enc",
+            self._build_sinusoidal(max_seq_len, d_model),
+            persistent=False,
+        )
+
+        # ── Decoder blocks ───────────────────────────────────────────────
+        self.layers = nn.ModuleList([
+            YemeniDecoderBlock(d_model, n_heads, n_kv_heads, d_ff, dropout)
+            for _ in range(n_layers)
+        ])
+
+        # ── Output ───────────────────────────────────────────────────────
+        self.norm_out = YemeniRMSNorm(d_model)
+        self.lm_head  = nn.Linear(d_model, vocab_size, bias=False)
+
+        # Weight tying: embedding ↔ lm_head (يقلّل الأوزان ويُحسّن التقارب)
+        self.lm_head.weight = self.embed.weight
+
+        # ── Training state ───────────────────────────────────────────────
+        self._steps: int = 0
+        self._loss_history: List[float] = []
+
+        n_params = sum(p.numel() for p in self.parameters())
+        logger.info(
+            f"[YemeniDecoder] ✓ جاهز | "
+            f"vocab={vocab_size} d_model={d_model} "
+            f"n_heads={n_heads} n_kv={n_kv_heads} layers={n_layers} | "
+            f"params={n_params:,}"
+        )
+
+    # ── Helpers ───────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _build_sinusoidal(max_len: int, d_model: int) -> "torch.Tensor":
+        """Sinusoidal positional encoding — نفس المعادلة الأصلية (Vaswani 2017)."""
+        pe  = torch.zeros(max_len, d_model)
+        pos = torch.arange(max_len).unsqueeze(1).float()
+        div = torch.exp(
+            torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model)
+        )
+        pe[:, 0::2] = torch.sin(pos * div)
+        pe[:, 1::2] = torch.cos(pos * div)
+        return pe  # (max_len, d_model)
+
+    def _causal_mask(self, seq_len: int, device: "torch.device") -> "torch.Tensor":
+        """
+        قناع سببي ديناميكي — يُبنى من طول التسلسل الفعلي.
+        True = يُحجَب (المستقبل).
+        """
+        return torch.triu(
+            torch.ones(seq_len, seq_len, dtype=torch.bool, device=device), diagonal=1
+        )
+
+    def _pad_mask(
+        self, ids: "torch.Tensor"
+    ) -> Optional["torch.Tensor"]:
+        """قناع PAD — True حيث يوجد PAD token."""
+        mask = ids == self.pad_id
+        return mask if mask.any() else None
+
+    # ── Forward ───────────────────────────────────────────────────────────
+
+    def forward(
+        self,
+        ids:              "torch.Tensor",              # (B, S) int64
+        key_padding_mask: Optional["torch.Tensor"] = None,  # (B, S) bool
+    ) -> "torch.Tensor":                               # (B, S, vocab_size)
+        """
+        Forward pass كامل.
+
+        Parameters
+        ----------
+        ids              : (B, S) token IDs — int64.
+        key_padding_mask : (B, S) bool — True = PAD (يُحسب تلقائياً إن لم يُمرَّر).
+
+        Returns
+        -------
+        logits: (B, S, vocab_size) — float32.
+        """
+        B, S = ids.shape
+        device = ids.device
+
+        # Embedding + Positional
+        x = self.embed(ids)                             # (B, S, d_model)
+        x = self.embed_drop(x + self.pos_enc[:S])       # (B, S, d_model)
+
+        # Causal mask (ديناميكي)
+        causal = self._causal_mask(S, device)           # (S, S)
+
+        # PAD mask (تلقائي إن لم يُمرَّر)
+        if key_padding_mask is None:
+            key_padding_mask = self._pad_mask(ids)
+
+        # Decoder blocks
+        for layer in self.layers:
+            x = layer(x, causal_mask=causal, key_padding_mask=key_padding_mask)
+
+        # Output
+        x = self.norm_out(x)                            # (B, S, d_model)
+        return self.lm_head(x)                          # (B, S, vocab_size)
+
+    # ── Training step ─────────────────────────────────────────────────────
+
+    def train_step(
+        self,
+        ids:    "torch.Tensor",   # (B, S) int64
+        lr:     float = 1e-4,
+        optimizer: Optional[object] = None,
+    ) -> float:
+        """
+        خطوة تدريب language-model واحدة (next-token prediction).
+
+        إن لم يُمرَّر optimizer، يُستخدم AdamW داخلي مؤقت (مفيد للاختبار
+        السريع؛ للتدريب الجاد استخدم optimizer خارجي).
+
+        Parameters
+        ----------
+        ids       : (B, S) — النموذج يتنبأ بـ ids[1:] من ids[:-1].
+        lr        : معدل التعلم (يُستخدم فقط إن لم يُمرَّر optimizer).
+        optimizer : torch.optim.Optimizer اختياري.
+
+        Returns
+        -------
+        float — قيمة الخسارة.
+        """
+        self.train()
+        inp = ids[:, :-1]     # (B, S-1)
+        tgt = ids[:, 1:]      # (B, S-1)
+
+        logits = self.forward(inp)               # (B, S-1, vocab)
+        loss   = F.cross_entropy(
+            logits.reshape(-1, self.vocab_size),
+            tgt.reshape(-1),
+            ignore_index=self.pad_id,
+        )
+
+        if optimizer is not None:
+            optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.parameters(), 1.0)
+            optimizer.step()
+        else:
+            # AdamW مؤقت للاختبار السريع
+            _opt = torch.optim.AdamW(self.parameters(), lr=lr)
+            _opt.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.parameters(), 1.0)
+            _opt.step()
+
+        loss_val = float(loss.item())
+        self._steps += 1
+        self._loss_history.append(loss_val)
+        if len(self._loss_history) > 500:
+            self._loss_history = self._loss_history[-250:]
+        return loss_val
+
+    # ── Generation ────────────────────────────────────────────────────────
+
+    @torch.no_grad()
+    def generate(
+        self,
+        prompt_ids:         "torch.Tensor",    # (1, S_prompt) int64
+        max_new_tokens:     int   = 50,
+        temperature:        float = 0.8,
+        top_k:              int   = 50,
+        top_p:              float = 0.95,
+        eos_id:             int   = 3,
+        grounding_ids:      Optional["torch.Tensor"] = None,  # (1, S_ctx) prefix
+    ) -> "torch.Tensor":
+        """
+        توليد autoregressive مع Top-K/Top-P sampling.
+
+        Parameters
+        ----------
+        prompt_ids      : (1, S) token IDs — بداية التوليد.
+        max_new_tokens  : أقصى عدد من الرموز الجديدة.
+        temperature     : حرارة التوزيع (أعلى = أكثر إبداعاً).
+        top_k           : يُبقي أعلى K احتمالاً فقط.
+        top_p           : Nucleus sampling — أبقِ الرموز التي مجموعها ≤ p.
+        eos_id          : ID رمز النهاية (EOS).
+        grounding_ids   : سياق تأسيسي (من CKG/SQLite) يُضاف كـ prefix قبل prompt.
+
+        Returns
+        -------
+        torch.Tensor int64 (1, S_total) — التسلسل الكامل (prompt + مولَّد).
+        """
+        self.eval()
+        device = prompt_ids.device
+
+        # دمج grounding context مع prompt إن وُجد
+        if grounding_ids is not None:
+            ids = torch.cat([grounding_ids, prompt_ids], dim=1)
+        else:
+            ids = prompt_ids.clone()
+
+        for _ in range(max_new_tokens):
+            # اقتطع إن تجاوز max_seq_len
+            ids_in = ids[:, -self.max_seq_len:]
+            logits = self.forward(ids_in)[:, -1, :]   # (1, vocab)
+
+            # Temperature
+            if temperature != 1.0:
+                logits = logits / temperature
+
+            # Top-K
+            if top_k > 0:
+                top_vals, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                logits = logits.masked_fill(logits < top_vals[:, -1:], float("-inf"))
+
+            # Top-P (Nucleus)
+            if top_p < 1.0:
+                sorted_logits, sorted_idx = torch.sort(logits, descending=True)
+                cum_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+                remove    = cum_probs - F.softmax(sorted_logits, dim=-1) > top_p
+                sorted_logits[remove] = float("-inf")
+                logits = torch.zeros_like(logits).scatter_(1, sorted_idx, sorted_logits)
+
+            probs  = F.softmax(logits, dim=-1)
+            next_id = torch.multinomial(probs, num_samples=1)   # (1, 1)
+            ids = torch.cat([ids, next_id], dim=1)
+
+            if int(next_id.item()) == eos_id:
+                break
+
+        return ids
+
+    # ── Stats ─────────────────────────────────────────────────────────────
+
+    def stats(self) -> dict:
+        avg = float(np.mean(self._loss_history)) if self._loss_history else 0.0
+        rec = float(np.mean(self._loss_history[-100:])) if len(self._loss_history) >= 100 else avg
+        n   = sum(p.numel() for p in self.parameters())
+        return {
+            "version":      self.VERSION,
+            "train_steps":  self._steps,
+            "avg_loss":     round(avg, 5),
+            "recent_loss":  round(rec, 5),
+            "total_params": n,
+            "architecture": {
+                "vocab_size":  self.vocab_size,
+                "d_model":     self.d_model,
+                "n_heads":     self.n_heads,
+                "n_kv_heads":  self.n_kv_heads,
+                "gqa_groups":  self.n_heads // self.n_kv_heads,
+                "n_layers":    self.n_layers,
+                "max_seq_len": self.max_seq_len,
+            },
+        }
+
+    # ── Save / Load ───────────────────────────────────────────────────────
+
+    def save(self, directory: Optional[str] = None) -> str:
+        """يحفظ الأوزان + meta إلى directory."""
+        if not _TORCH_AVAILABLE:
+            raise ImportError("PyTorch مطلوب للحفظ.")
+        d = Path(directory or self.weights_dir)
+        d.mkdir(parents=True, exist_ok=True)
+        ckpt = d / "yemeni_decoder.pt"
+        torch.save({
+            "model_state_dict": self.state_dict(),
+            "train_steps":      self._steps,
+            "loss_history":     self._loss_history[-100:],
+            "version":          self.VERSION,
+            "arch": {
+                "vocab_size":  self.vocab_size,
+                "d_model":     self.d_model,
+                "n_heads":     self.n_heads,
+                "n_kv_heads":  self.n_kv_heads,
+                "n_layers":    self.n_layers,
+                "max_seq_len": self.max_seq_len,
+                "pad_id":      self.pad_id,
+            },
+        }, ckpt)
+        logger.info(f"[YemeniDecoder] ✓ حُفِظ → {ckpt}")
+        return str(ckpt)
+
+    def load(self, directory: Optional[str] = None) -> "YemeniDecoder":
+        """يُحمِّل الأوزان من directory (يُتجاهل إن لم يوجد الملف)."""
+        if not _TORCH_AVAILABLE:
+            return self
+        d    = Path(directory or self.weights_dir)
+        ckpt = d / "yemeni_decoder.pt"
+        if not ckpt.exists():
+            logger.info(f"[YemeniDecoder] لا يوجد checkpoint في {d} — يعمل بأوزان عشوائية")
+            return self
+        data = torch.load(ckpt, map_location="cpu", weights_only=True)
+        self.load_state_dict(data["model_state_dict"])
+        self._steps        = data.get("train_steps", 0)
+        self._loss_history = data.get("loss_history", [])
+        logger.info(f"[YemeniDecoder] ✓ محمَّل ← {ckpt} (steps={self._steps})")
+        return self
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Factory — YemeniDecoder
+# ══════════════════════════════════════════════════════════════════════════════
+
+@_require_torch
+def get_yemeni_decoder(
+    vocab_size:   int  = 32000,
+    d_model:      int  = D_MODEL,
+    n_heads:      int  = N_HEADS,
+    n_kv_heads:   int  = 4,
+    n_layers:     int  = N_LAYERS,
+    weights_dir:  str  = "models/yemeni_decoder",
+    load_if_exists: bool = True,
+) -> "YemeniDecoder":
+    """
+    يُعيد مثيل YemeniDecoder:
+    • يُحمِّل الأوزان المحفوظة إن وُجدت.
+    • يبدأ بأوزان عشوائية إن لم توجد.
+    """
+    model = YemeniDecoder(
+        vocab_size=vocab_size,
+        d_model=d_model,
+        n_heads=n_heads,
+        n_kv_heads=n_kv_heads,
+        n_layers=n_layers,
+        weights_dir=weights_dir,
+    )
+    if load_if_exists:
+        model.load(weights_dir)
+    return model
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Quick Test
 # ══════════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
