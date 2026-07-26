@@ -5791,9 +5791,14 @@ def render_fable():
                 _story_skel_ph = st.empty()
                 with _story_skel_ph.container():
                     _skeleton(lines=6)
-                chapter = engine.start_story(mode=mode, character=character, seed_idea=seed)
-                st.session_state.fable_chapter = chapter
-                st.rerun()
+                try:
+                    chapter = engine.start_story(mode=mode, character=character, seed_idea=seed)
+                except Exception as e:  # noqa: BLE001
+                    _story_skel_ph.empty()
+                    st.error(f"⚠️ تعذّر بدء القصة، حاول مرة أخرى. (تفصيل تقني: {e})")
+                else:
+                    st.session_state.fable_chapter = chapter
+                    st.rerun()
         else:
             # ── عرض الفصل الحالي ──
             mode_info = STORY_MODES.get(cur.mode, {})
@@ -5830,8 +5835,15 @@ def render_fable():
                 _story_cont_skel_ph = st.empty()
                 with _story_cont_skel_ph.container():
                     _skeleton(lines=6)
-                st.session_state.fable_chapter = engine.continue_story(cur.session_id, chosen)
-                st.rerun()
+                try:
+                    next_chapter = engine.continue_story(cur.session_id, chosen)
+                except Exception as e:  # noqa: BLE001
+                    _story_cont_skel_ph.empty()
+                    st.error(f"⚠️ تعذّر متابعة القصة، حاول مرة أخرى. (تفصيل تقني: {e})")
+                else:
+                    st.session_state.fable_chapter = next_chapter
+                    st.session_state.fable_qc_result = None
+                    st.rerun()
 
             st.markdown("---")
             st.markdown("**أوامر سريعة:**")
@@ -5841,15 +5853,33 @@ def render_fable():
                 with qc_cols[i]:
                     if st.button(f"⚡ {label}", key=f"fable_qc_{i}", use_container_width=True):
                         with st.spinner("..."):
-                            result = engine.quick_command(cur.session_id, label)
-                        st.markdown(f"""
-                        <div class="root-item" style="text-align:right; direction:rtl">
-                            {result.text}
-                        </div>
-                        """, unsafe_allow_html=True)
+                            try:
+                                qc_result = engine.quick_command(cur.session_id, label)
+                                st.session_state.fable_qc_result = (label, qc_result.text, None)
+                            except Exception as e:  # noqa: BLE001
+                                st.session_state.fable_qc_result = (label, "", str(e))
+                        st.rerun()
+
+            _qc = st.session_state.get("fable_qc_result")
+            if _qc:
+                _qc_label, _qc_text, _qc_err = _qc
+                if _qc_err:
+                    st.error(f"⚠️ تعذّر تنفيذ «{_qc_label}»، حاول مرة أخرى. (تفصيل تقني: {_qc_err})")
+                else:
+                    st.markdown(
+                        f'<span class="badge badge-blue">⚡ {_qc_label}</span>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(f"""
+                    <div class="root-item" style="text-align:right; direction:rtl">
+                        {_qc_text}
+                    </div>
+                    """, unsafe_allow_html=True)
+                    _copy_button(_qc_text, key="fable_qc")
 
             if st.button("🔄 قصة جديدة"):
                 st.session_state.fable_chapter = None
+                st.session_state.fable_qc_result = None
                 st.rerun()
 
     # ══════════════════ توليد شعر ══════════════════
@@ -5861,12 +5891,35 @@ def render_fable():
             list(ARABIC_METERS.keys()),
             format_func=lambda m: f"{m} — {ARABIC_METERS[m]['وصف']}",
         )
-        if st.button("🪶 أنشئ القصيدة", type="primary") and topic.strip():
+        def _run_poem_generation(_topic: str, _meter: str):
             _poem_skel_ph = st.empty()
             with _poem_skel_ph.container():
                 _skeleton(lines=5)
-            poem = engine.generate_poem(topic.strip(), meter=meter)
-            _poem_skel_ph.empty()
+            try:
+                poem = engine.generate_poem(_topic, meter=_meter)
+            except Exception as e:  # noqa: BLE001
+                _poem_skel_ph.empty()
+                st.session_state.fable_poem_result = None
+                st.session_state.fable_poem_error = str(e)
+            else:
+                _poem_skel_ph.empty()
+                st.session_state.fable_poem_result = poem
+                st.session_state.fable_poem_error = None
+                st.session_state.fable_poem_topic = _topic
+                st.session_state.fable_poem_meter = _meter
+
+        if st.button("🪶 أنشئ القصيدة", type="primary"):
+            if not topic.strip():
+                st.warning("⚠️ الرجاء كتابة موضوع القصيدة أولاً.")
+            else:
+                _run_poem_generation(topic.strip(), meter)
+
+        _poem_err = st.session_state.get("fable_poem_error")
+        if _poem_err:
+            st.error(f"⚠️ تعذّر توليد القصيدة، حاول مرة أخرى. (تفصيل تقني: {_poem_err})")
+
+        poem = st.session_state.get("fable_poem_result")
+        if poem is not None:
             st.toast("✅ القصيدة جاهزة", icon="🪶")
             st.markdown(f"""
             <div class="root-item" style="font-size:1.1rem; line-height:2.1; text-align:center; direction:rtl">
@@ -5874,7 +5927,25 @@ def render_fable():
             </div>
             """, unsafe_allow_html=True)
             st.caption(f"المزوّد: {poem.provider}")
-            _copy_button(poem.text, key="fable_poem")
+            _pc1, _pc2, _pc3 = st.columns(3)
+            with _pc1:
+                _copy_button(poem.text, key="fable_poem")
+            with _pc2:
+                st.download_button(
+                    "⬇️ تحميل كملف نصي",
+                    data=poem.text,
+                    file_name="قصيدة.txt",
+                    mime="text/plain",
+                    key="fable_poem_download",
+                    use_container_width=True,
+                )
+            with _pc3:
+                if st.button("🔄 أعد التوليد", key="fable_poem_regenerate", use_container_width=True):
+                    _run_poem_generation(
+                        st.session_state.get("fable_poem_topic", topic.strip() or "موضوع حر"),
+                        st.session_state.get("fable_poem_meter", meter),
+                    )
+                    st.rerun()
 
     # ══════════════════ وثائقي (سيناريو Explainer) ══════════════════
     with explainer_tab:
@@ -5893,10 +5964,27 @@ def render_fable():
         )
         minutes = st.slider("المدة المستهدفة (دقائق)", min_value=1, max_value=10, value=5)
 
-        if st.button("🎬 أنشئ السيناريو", type="primary") and topic.strip():
-            with st.spinner("يُجري بحثاً ويكتب السيناريو..."):
-                script = engine.generate_explainer(topic.strip(), target_minutes=minutes)
+        if st.button("🎬 أنشئ السيناريو", type="primary"):
+            if not topic.strip():
+                st.warning("⚠️ الرجاء كتابة موضوع الوثائقي أولاً.")
+                st.session_state.explainer_script = None
+            else:
+                with st.spinner("يُجري بحثاً ويكتب السيناريو..."):
+                    try:
+                        st.session_state.explainer_script = engine.generate_explainer(
+                            topic.strip(), target_minutes=minutes
+                        )
+                        st.session_state.explainer_error = None
+                    except Exception as e:  # noqa: BLE001
+                        st.session_state.explainer_script = None
+                        st.session_state.explainer_error = str(e)
 
+        _explainer_err = st.session_state.get("explainer_error")
+        if _explainer_err:
+            st.error(f"⚠️ تعذّر إنشاء السيناريو، حاول مرة أخرى. (تفصيل تقني: {_explainer_err})")
+
+        script = st.session_state.get("explainer_script")
+        if script is not None:
             st.markdown(f"### {script.title}")
             st.caption(
                 f"عدد المشاهد: {len(script.segments)} · "
@@ -5936,10 +6024,23 @@ def render_fable():
         )
         target_sec = st.slider("المدة المستهدفة (ثانية)", min_value=20, max_value=90, value=60, step=5)
 
-        if st.button("⚡ أنشئ سيناريو Shorts", type="primary") and source_text.strip():
-            with st.spinner("يُلخّص ويكتب لقطات سريعة..."):
-                short = engine.generate_short(source_text.strip(), target_seconds=target_sec)
-            st.session_state.shorts_script = short  # نحفظه بالجلسة لاستخدامه بزر الفيديو تحت
+        if st.button("⚡ أنشئ سيناريو Shorts", type="primary"):
+            if not source_text.strip():
+                st.warning("⚠️ الرجاء لصق نص أو كتابة موضوع أولاً.")
+            else:
+                with st.spinner("يُلخّص ويكتب لقطات سريعة..."):
+                    try:
+                        st.session_state.shorts_script = engine.generate_short(
+                            source_text.strip(), target_seconds=target_sec
+                        )
+                        st.session_state.shorts_error = None
+                    except Exception as e:  # noqa: BLE001
+                        st.session_state.shorts_script = None
+                        st.session_state.shorts_error = str(e)
+
+        _shorts_err = st.session_state.get("shorts_error")
+        if _shorts_err:
+            st.error(f"⚠️ تعذّر إنشاء سيناريو Shorts، حاول مرة أخرى. (تفصيل تقني: {_shorts_err})")
 
         short = st.session_state.get("shorts_script")
         if short is not None:
