@@ -6258,16 +6258,21 @@ def render_fable():
                 except Exception:  # noqa: BLE001
                     created_label = ""
 
-                history_rows = engine.memory.get_history(session_id, limit=200)
-                narrations = [r["content"] for r in history_rows if r["role"] == "narration"]
-                preview = (narrations[0][:90] + "…") if narrations and len(narrations[0]) > 90 else (narrations[0] if narrations else "(لا يوجد نص بعد)")
+                try:
+                    preview_text, chapter_count = engine.memory.get_narration_preview(session_id)
+                except Exception:  # noqa: BLE001
+                    preview_text, chapter_count = "", 0
+                preview = (
+                    (preview_text[:90] + "…") if preview_text and len(preview_text) > 90
+                    else (preview_text or "(لا يوجد نص بعد)")
+                )
 
                 header = (
                     f"{mode_info.get('emoji', '📖')} {mode} · "
                     f"{char_info.get('emoji', '')} {character} — {created_label}"
                 )
                 with st.expander(header):
-                    st.caption(f"🆔 {session_id} · عدد الفصول: {len(narrations)}")
+                    st.caption(f"🆔 {session_id} · عدد الفصول: {chapter_count}")
                     st.markdown(
                         f"<p style='direction:rtl; text-align:right; color:var(--text-muted)'>{preview}</p>",
                         unsafe_allow_html=True,
@@ -6281,17 +6286,21 @@ def render_fable():
                             st.session_state[view_key] = not st.session_state.get(view_key, False)
                     with col_b:
                         if st.button("▶️ استأنف هذه القصة", key=f"lib_resume_btn_{session_id}", use_container_width=True):
-                            last_narration = narrations[-1] if narrations else ""
-                            st.session_state.fable_chapter = FableChapter(
-                                session_id=session_id,
-                                text=last_narration,
-                                choices=[],
-                                mode=mode,
-                                character=character,
-                                provider="محفوظ من المكتبة",
-                            )
-                            st.success("✅ تم تحميل القصة — افتح تبويب «📖 قصة تفاعلية» للمتابعة منها.")
-                            st.rerun()
+                            try:
+                                last_narration = engine.memory.get_last_narration(session_id)
+                            except Exception as e:  # noqa: BLE001
+                                st.error(f"⚠️ تعذّر تحميل القصة. (تفصيل تقني: {e})")
+                            else:
+                                st.session_state.fable_chapter = FableChapter(
+                                    session_id=session_id,
+                                    text=last_narration,
+                                    choices=[],
+                                    mode=mode,
+                                    character=character,
+                                    provider="محفوظ من المكتبة",
+                                )
+                                st.success("✅ تم تحميل القصة — افتح تبويب «📖 قصة تفاعلية» للمتابعة منها.")
+                                st.rerun()
                     with col_c:
                         if st.button("🗑️ حذف", key=f"lib_delete_btn_{session_id}", use_container_width=True):
                             st.session_state[confirm_key] = True
@@ -6315,7 +6324,12 @@ def render_fable():
                                 st.rerun()
 
                     if st.session_state.get(view_key):
-                        full_text = "\n\n".join(narrations) if narrations else "(لا يوجد نص محفوظ)"
+                        try:
+                            history_rows = engine.memory.get_history(session_id, limit=500)
+                            narrations = [r["content"] for r in history_rows if r["role"] == "narration"]
+                            full_text = "\n\n".join(narrations) if narrations else "(لا يوجد نص محفوظ)"
+                        except Exception as e:  # noqa: BLE001
+                            full_text = f"⚠️ تعذّر تحميل النص الكامل. (تفصيل تقني: {e})"
                         st.markdown(f"""
                         <div class="root-item" style="text-align:right; direction:rtl; line-height:2">
                             {full_text}

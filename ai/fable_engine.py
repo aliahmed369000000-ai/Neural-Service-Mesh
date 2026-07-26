@@ -237,6 +237,35 @@ class NarrativeMemory:
             conn.execute("DELETE FROM fable_sessions WHERE session_id = ?", (session_id,))
             conn.commit()
 
+    def get_narration_preview(self, session_id: str) -> tuple[str, int]:
+        """استعلام خفيف لمعاينة المكتبة: أول فصل + عدد الفصول فقط، بدل تحميل
+        كل نص القصة (قد يصل لمئات الفقرات) لكل قصة معروضة في القائمة —
+        هذا يُستدعى لكل قصة محفوظة على كل إعادة تحميل للتبويب، فتقليل حجم
+        البيانات المقروءة هنا مهم لأداء الصفحة ككل."""
+        with self._conn() as conn:
+            first_row = conn.execute(
+                "SELECT content FROM fable_chapters WHERE session_id = ? AND role = 'narration' "
+                "ORDER BY id ASC LIMIT 1",
+                (session_id,),
+            ).fetchone()
+            count_row = conn.execute(
+                "SELECT COUNT(*) AS n FROM fable_chapters WHERE session_id = ? AND role = 'narration'",
+                (session_id,),
+            ).fetchone()
+            first_text = first_row["content"] if first_row else ""
+            count = count_row["n"] if count_row else 0
+            return first_text, count
+
+    def get_last_narration(self, session_id: str) -> str:
+        """يجلب آخر فصل مسرود فقط (لاستئناف القصة) دون تحميل كل التاريخ."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT content FROM fable_chapters WHERE session_id = ? AND role = 'narration' "
+                "ORDER BY id DESC LIMIT 1",
+                (session_id,),
+            ).fetchone()
+            return row["content"] if row else ""
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # نتيجة الفصل — ما يُعاد للواجهة بعد كل استدعاء
