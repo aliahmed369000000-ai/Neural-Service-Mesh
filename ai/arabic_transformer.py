@@ -799,6 +799,22 @@ def _require_torch(fn):
     return wrapper
 
 
+def _no_grad_safe(fn):
+    """
+    بديل آمن لـ @torch.no_grad() على مستوى تعريف الكلاس/الدالة.
+
+    المشكلة الأصلية: استخدام @torch.no_grad() مباشرة كديكوراتور يُقيَّم
+    وقت *تعريف* الكلاس (import-time)، فيرفع NameError فوري لو torch غير
+    مثبّت — حتى لو الكلاس نفسه أصلاً ما راح يُستخدم بدون torch (بيرفع
+    ImportError واضحة في __init__ عند المحاولة الفعلية). هذا الديكوراتور
+    يؤجّل أي اعتماد على `torch` لحين *الاستدعاء* الفعلي للدالة، بنفس
+    منطق _require_torch أعلاه.
+    """
+    if _TORCH_AVAILABLE:
+        return torch.no_grad()(fn)
+    return _require_torch(fn)
+
+
 # ────────────────────────────────────────────────────────────────────────────
 # 12-A. RMSNorm
 # ────────────────────────────────────────────────────────────────────────────
@@ -1198,7 +1214,7 @@ class YemeniDecoder(nn.Module if _TORCH_AVAILABLE else object):
 
     # ── Generation ────────────────────────────────────────────────────────
 
-    @torch.no_grad()
+    @_no_grad_safe
     def generate(
         self,
         prompt_ids:         "torch.Tensor",    # (1, S_prompt) int64
