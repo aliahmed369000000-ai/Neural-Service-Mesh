@@ -6219,10 +6219,15 @@ def render_translate():
         key="tr_source_text",
     )
 
-    translate_clicked = st.button("🌐 ترجم الآن", type="primary", key="tr_translate_btn", use_container_width=True)
+    translate_clicked = st.button(
+        "🌐 ترجم الآن", type="primary", key="tr_translate_btn", use_container_width=True,
+        disabled=not bool(source_text and source_text.strip()),
+    )
     st.markdown('</div>', unsafe_allow_html=True)
 
-    if translate_clicked and source_text.strip():
+    if translate_clicked and not source_text.strip():
+        st.warning("أدخل نصاً للترجمة أولاً.")
+    elif translate_clicked and source_text.strip():
         src = _TRANSLATE_LANGS[src_label]
         tgt = _TRANSLATE_LANGS[tgt_label]
 
