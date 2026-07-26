@@ -230,6 +230,13 @@ class NarrativeMemory:
             ).fetchall()
             return rows
 
+    def delete_session(self, session_id: str) -> None:
+        """يحذف جلسة قصة وكل فصولها المحفوظة نهائياً."""
+        with self._conn() as conn:
+            conn.execute("DELETE FROM fable_chapters WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM fable_sessions WHERE session_id = ?", (session_id,))
+            conn.commit()
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # نتيجة الفصل — ما يُعاد للواجهة بعد كل استدعاء

@@ -5814,7 +5814,25 @@ def render_fable():
                 {cur.text}
             </div>
             """, unsafe_allow_html=True)
-            _copy_button(cur.text, key="fable_chapter")
+            _cc1, _cc2 = st.columns(2)
+            with _cc1:
+                _copy_button(cur.text, key="fable_chapter")
+            with _cc2:
+                try:
+                    _full_story_rows = engine.memory.get_history(cur.session_id, limit=500)
+                    _full_story_text = "\n\n".join(
+                        r["content"] for r in _full_story_rows if r["role"] == "narration"
+                    )
+                except Exception:  # noqa: BLE001
+                    _full_story_text = cur.text
+                st.download_button(
+                    "⬇️ تحميل القصة كاملة",
+                    data=_full_story_text,
+                    file_name="قصتي.txt",
+                    mime="text/plain",
+                    key="fable_story_download",
+                    use_container_width=True,
+                )
 
             if cur.error:
                 st.caption(f"⚠️ ملاحظة تقنية: {cur.error}")
@@ -6006,6 +6024,13 @@ def render_fable():
 
             with st.expander("📋 النص الكامل للسرد (لنسخه إلى أداة التعليق الصوتي)"):
                 st.text_area("النص الكامل:", value=script.full_narration, height=200)
+                st.download_button(
+                    "⬇️ تحميل السيناريو كملف نصي",
+                    data=script.full_narration,
+                    file_name=f"{(script.title or 'سيناريو')[:40]}.txt",
+                    mime="text/plain",
+                    key="explainer_download",
+                )
 
     # ══════════════════ ⚡ Shorts (فيديو قصير عمودي) ══════════════════
     with shorts_tab:
@@ -6065,6 +6090,13 @@ def render_fable():
 
             with st.expander("📋 النص الكامل للسرد"):
                 st.text_area("النص الكامل:", value=short.full_narration, height=150, key="shorts_full_text")
+                st.download_button(
+                    "⬇️ تحميل السيناريو كملف نصي",
+                    data=short.full_narration,
+                    file_name=f"{(short.title or 'shorts')[:40]}.txt",
+                    mime="text/plain",
+                    key="shorts_download",
+                )
 
             st.divider()
             st.markdown("#### 🎬 رندر الفيديو الفعلي (mp4)")
@@ -6242,7 +6274,8 @@ def render_fable():
                     )
 
                     view_key = f"lib_expand_{session_id}"
-                    col_a, col_b = st.columns(2)
+                    confirm_key = f"lib_confirm_delete_{session_id}"
+                    col_a, col_b, col_c = st.columns(3)
                     with col_a:
                         if st.button("📖 عرض القصة كاملة", key=f"lib_view_btn_{session_id}", use_container_width=True):
                             st.session_state[view_key] = not st.session_state.get(view_key, False)
@@ -6259,6 +6292,27 @@ def render_fable():
                             )
                             st.success("✅ تم تحميل القصة — افتح تبويب «📖 قصة تفاعلية» للمتابعة منها.")
                             st.rerun()
+                    with col_c:
+                        if st.button("🗑️ حذف", key=f"lib_delete_btn_{session_id}", use_container_width=True):
+                            st.session_state[confirm_key] = True
+
+                    if st.session_state.get(confirm_key):
+                        st.warning("⚠️ هل أنت متأكد من حذف هذه القصة نهائياً؟ لا يمكن التراجع عن هذا الإجراء.")
+                        _dc1, _dc2 = st.columns(2)
+                        with _dc1:
+                            if st.button("✅ نعم، احذفها نهائياً", key=f"lib_confirm_yes_{session_id}", use_container_width=True):
+                                try:
+                                    engine.memory.delete_session(session_id)
+                                except Exception as e:  # noqa: BLE001
+                                    st.error(f"⚠️ تعذّر حذف القصة. (تفصيل تقني: {e})")
+                                else:
+                                    st.session_state[confirm_key] = False
+                                    st.success("✅ تم حذف القصة.")
+                                    st.rerun()
+                        with _dc2:
+                            if st.button("إلغاء", key=f"lib_confirm_no_{session_id}", use_container_width=True):
+                                st.session_state[confirm_key] = False
+                                st.rerun()
 
                     if st.session_state.get(view_key):
                         full_text = "\n\n".join(narrations) if narrations else "(لا يوجد نص محفوظ)"
