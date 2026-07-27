@@ -116,6 +116,15 @@ def extract_root(token: str) -> str:
     """
     word = token
 
+    # حماية لفظ الجلالة وصيغه المشتقة (اللهم، تالله...) قبل أي تجريد:
+    # الحلقة العامة بالأسفل تتعامل مع سابقة "ال" كأداة تعريف ومع اللاحقة
+    # "ه" كضمير متصل، فتُفتّت "اللهم" إلى "لهم" و"تالله" إلى "تالل" —
+    # كلاهما بقايا بلا معنى بدل التعرّف على الاسم الأصلي.
+    if word.startswith("الله"):
+        return "الله"
+    if len(word) == 5 and word[0] in "وفبكتل" and word[1:] == "الله":
+        return "الله"
+
     # Strip prefixes
     for prefix in _PREFIXES:
         if word.startswith(prefix) and len(word) - len(prefix) >= 3:
