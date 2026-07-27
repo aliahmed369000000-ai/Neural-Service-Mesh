@@ -805,6 +805,19 @@ class SyntacticAnalyser:
         suffix = ""
         stripped = word
 
+        # حماية اسم الجلالة "الله" من التفتيت الصرفي العام: الخوارزمية
+        # القياسية (تجريد سابقة "ال" ثم لاحقة "ه") كانت تنتج بقايا بلا معنى
+        # ("لهم" من "اللهم"، "تالل" من "تالله") بدل الجذر الحقيقي. نلتقط
+        # هذه الصيغ صراحة قبل أي معالجة عامة: الاسم مجرداً أو بصيغة النداء
+        # (اللهم)، أو مسبوقاً بحرف عطف/قسم واحد (والله، بالله، فالله،
+        # كالله، تالله، لالله)، أو مقترناً بلام الجر المُدغَمة (لله).
+        if word == "الله" or word.startswith("الله"):
+            return "الله", "", word[4:]
+        if len(word) == 5 and word[0] in "وفبكتل" and word[1:] == "الله":
+            return "الله", word[0], ""
+        if word == "لله":
+            return "الله", "ل", ""
+
         # Try prefixes longest first
         # Require at least 3 chars remaining so single-letter prefixes
         # don't consume 3-letter roots (e.g. "ك" must not strip from "كتب")
@@ -969,7 +982,7 @@ class MorphologicalAnalyser:
         # النظام، لكن خوارزمية التجريد العامة (نزع لاحقة "ه" ثم إزالة
         # الألف كحرف علة بالخطوة التالية) تُنتج بقايا بلا معنى ("الل")
         # بدل الجذر الحقيقي "أله". نلتقطها هنا مباشرة قبل أي معالجة عامة.
-        if word in ("الل", "اله", "الاه"):
+        if word in ("الل", "اله", "الاه", "الله"):
             return _NORM_TO_ORIG_ROOT.get("اله", "أله"), 0.95
 
         # Remove remaining long vowel signs
