@@ -400,6 +400,7 @@ except Exception:
 try:
     from ai.godmode import (
         NSM_PERSONA_PROMPT, COORDINATOR_SYSTEM_PROMPT, route_query,
+        route_query_verbose,
     )
     _ORCHESTRATOR_OK = True
 except Exception:
@@ -8480,13 +8481,25 @@ def render_agent_orchestrator():
     )
 
     if st.button("🚀 نفّذ عبر الوكلاء", type="primary", key="orch_run") and task.strip():
-        selected = manual if manual else route_query(task.strip(), AGENT_CATEGORIES, max_agents=2)
+        if manual:
+            selected, route_method = manual, "manual"
+        else:
+            selected, route_method, _route_scores = route_query_verbose(
+                task.strip(), AGENT_CATEGORIES, max_agents=2
+            )
         if not selected:
             st.warning("لم يتم تحديد أي وكيل مناسب تلقائياً. اختر وكلاء يدوياً من القائمة أعلاه.")
         else:
             mode_label = "🔗 متسلسل" if exec_mode == "sequential" else "⚡ متوازٍ"
+            route_label = {
+                "manual":  "🖐️ اختيار يدوي",
+                "keyword": "🔤 مطابقة كلمات مفتاحية",
+                "llm":     "🧠 توجيه دلالي عبر LLM",
+                "default": "⚙️ افتراضي عام (لا تطابق واضح)",
+            }.get(route_method, route_method)
             st.caption(
-                f"نمط التنفيذ: {mode_label} — الوكلاء المُفعَّلون: " + "، ".join(
+                f"نمط التنفيذ: {mode_label} — التوجيه: {route_label} — الوكلاء المُفعَّلون: "
+                + "، ".join(
                     f"{AGENT_CATEGORIES[k].emoji} {AGENT_CATEGORIES[k].title}" for k in selected
                 )
             )
