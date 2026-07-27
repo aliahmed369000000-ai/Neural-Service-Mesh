@@ -148,6 +148,21 @@ class SwarmCoordinator:
         ],
     }
 
+    # 🆕 مرادفات عربية لكل مفتاح تفكيك — القواعد أعلاه (DECOMPOSITION_RULES)
+    # كانت تُطابَق بكلماتها الإنجليزية فقط (translate/research/review/...)
+    # رغم أن NSM تطبيق عربي بالكامل، فكانت هذه الخطة الاحتياطية عملياً
+    # غير قابلة للتفعيل من مستخدم يكتب هدفه بالعربية (المسار الوحيد الذي
+    # يعمل فعلياً هو _decompose_via_planner، وإن فشل — كان يسقط مباشرة
+    # للمهمة العامة الواحدة). الآن تُطابَق الكلمتان معاً.
+    DECOMPOSITION_KEYWORDS: Dict[str, List[str]] = {
+        "translate": ["translate", "ترجم", "ترجمة", "ترجمها"],
+        "research":  ["research", "ابحث", "بحث", "البحث", "استقص", "تقصّي"],
+        "review":    ["review", "راجع", "مراجعة", "دقق", "تدقيق", "تحقق"],
+        "plan":      ["plan", "خطط", "خطة", "تخطيط", "فكّك", "فكك", "جدول"],
+        "optimize":  ["optimize", "حسّن", "حسن", "تحسين", "سرّع", "تسريع"],
+        "monitor":   ["monitor", "راقب", "مراقبة", "رصد", "تتبع", "تتبّع"],
+    }
+
     def __init__(
         self,
         factory: AgentFactory,
@@ -282,8 +297,9 @@ class SwarmCoordinator:
                 return planned
 
         goal_lower = goal.lower()
-        for keyword, sub_specs in self.DECOMPOSITION_RULES.items():
-            if keyword in goal_lower:
+        for canonical_key, synonyms in self.DECOMPOSITION_KEYWORDS.items():
+            if any(kw in goal_lower for kw in synonyms):
+                sub_specs = self.DECOMPOSITION_RULES[canonical_key]
                 return [
                     SwarmTask(
                         task_id=f"task_{i}_{str(uuid.uuid4())[:6]}",
