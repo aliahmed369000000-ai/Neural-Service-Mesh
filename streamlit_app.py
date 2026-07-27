@@ -5925,6 +5925,8 @@ def render_fable():
                 st.session_state.fable_poem_error = None
                 st.session_state.fable_poem_topic = _topic
                 st.session_state.fable_poem_meter = _meter
+                st.session_state.fable_poem_audio = None
+                st.session_state.fable_poem_audio_error = None
 
         if st.button("🪶 أنشئ القصيدة", type="primary"):
             if not topic.strip():
@@ -5945,7 +5947,7 @@ def render_fable():
             </div>
             """, unsafe_allow_html=True)
             st.caption(f"المزوّد: {poem.provider}")
-            _pc1, _pc2, _pc3 = st.columns(3)
+            _pc1, _pc2, _pc3, _pc4 = st.columns(4)
             with _pc1:
                 _copy_button(poem.text, key="fable_poem")
             with _pc2:
@@ -5964,6 +5966,38 @@ def render_fable():
                         st.session_state.get("fable_poem_meter", meter),
                     )
                     st.rerun()
+            with _pc4:
+                if st.button("🔊 استمع", key="fable_poem_listen", use_container_width=True, disabled=not _TTS_OK):
+                    with st.spinner("⟳ جارٍ تحويل القصيدة لصوت..."):
+                        try:
+                            _poem_tts = _TTSEngineCls().synthesize(poem.text)
+                        except Exception as e:  # noqa: BLE001
+                            st.session_state.fable_poem_audio = None
+                            st.session_state.fable_poem_audio_error = str(e)
+                        else:
+                            if _poem_tts.ok:
+                                import base64 as _b64_poem
+                                st.session_state.fable_poem_audio = (
+                                    _b64_poem.b64encode(_poem_tts.audio_bytes).decode("ascii"),
+                                    _poem_tts.format,
+                                )
+                                st.session_state.fable_poem_audio_error = None
+                            else:
+                                st.session_state.fable_poem_audio = None
+                                st.session_state.fable_poem_audio_error = _poem_tts.error or "تعذّر توليد الصوت"
+
+            _poem_audio_err = st.session_state.get("fable_poem_audio_error")
+            if _poem_audio_err:
+                st.error(f"⚠️ تعذّر توليد الصوت. (تفصيل تقني: {_poem_audio_err})")
+
+            _poem_audio = st.session_state.get("fable_poem_audio")
+            if _poem_audio:
+                _a_b64, _a_fmt = _poem_audio
+                st.markdown(
+                    f'<audio controls style="width:100%;margin-top:0.5rem" '
+                    f'src="data:audio/{_a_fmt};base64,{_a_b64}"></audio>',
+                    unsafe_allow_html=True,
+                )
 
     # ══════════════════ وثائقي (سيناريو Explainer) ══════════════════
     with explainer_tab:
