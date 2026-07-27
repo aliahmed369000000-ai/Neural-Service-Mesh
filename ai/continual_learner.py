@@ -974,7 +974,10 @@ class ConversationLearner:
         return None
 
     def feedback(self, question: str, is_positive: bool) -> bool:
-        """تطبيق تقييم 👍/👎"""
+        """تطبيق تقييم 👍/👎 — يُحدَّث learned_qa وresponse_cache معاً (كانتا
+        منفصلتين: feedback() سابقاً لا تلمس response_cache، فلا يصل أثر
+        التقييم لمسار recall() الآمن source='cache' الذي تستخدمه الدردشة
+        الحية — أي أن 👎 لم تكن تمنع تكرار نفس الإجابة من الكاش)."""
         qh = _qhash(question)
         col   = "positive_fb" if is_positive else "negative_fb"
         delta = 0.05 if is_positive else -0.05
@@ -983,6 +986,11 @@ class ConversationLearner:
                 c.execute(
                     f"UPDATE learned_qa SET {col}={col}+1, "
                     f"quality=MAX(0.1,MIN(1.0,quality+?)) WHERE q_hash=?",
+                    (delta, qh)
+                )
+                c.execute(
+                    "UPDATE response_cache SET quality=MAX(0.1,MIN(1.0,quality+?)) "
+                    "WHERE q_hash=?",
                     (delta, qh)
                 )
             self._session["feedback"] += 1
