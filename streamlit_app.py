@@ -5806,7 +5806,7 @@ def render_fable():
             st.markdown(
                 f'<span class="badge badge-purple">{mode_info.get("emoji","")} {cur.mode}</span> '
                 f'<span class="badge badge-blue">{char_info.get("emoji","")} {cur.character}</span> '
-                f'<span class="badge badge-amber">المزوّد: {cur.provider}</span>',
+                f'<span class="badge badge-green">المزوّد: {cur.provider}</span>',
                 unsafe_allow_html=True,
             )
             st.markdown(f"""
