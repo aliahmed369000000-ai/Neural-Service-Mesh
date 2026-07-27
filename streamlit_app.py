@@ -2286,6 +2286,15 @@ def _record_chat_episode(query: str, response: str, source: str = "chat") -> Non
     except Exception:
         pass
 
+    # ── توحيد الاستدعاء: يصل ConversationLearner (كان يتيماً بالكامل) ──
+    # بنفس نقطة تسجيل الحلقة الحقيقية أعلاه. best-effort — لا يكسر الرد
+    # عند الفشل (انظر ai/learning_orchestrator.py لتفاصيل التوحيد).
+    try:
+        from ai.learning_orchestrator import get_orchestrator
+        get_orchestrator().record_turn(query, response, source=source)
+    except Exception:
+        pass
+
 
 def get_episodic_stats() -> Dict:
     db_path = MEMORY_DIR / "episodic.db"
