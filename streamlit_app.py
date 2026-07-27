@@ -7137,6 +7137,25 @@ def render_chat():
             st.rerun()
             return
 
+        # ── كاش الردود المتعلَّمة (ConversationLearner عبر LearningOrchestrator) ──
+        # يوفّر زمن استجابة وحصة LLM المجانية (Groq/Gemini/Cloudflare) عند
+        # تكرار نفس السؤال حرفياً فقط. نتجاهل عمداً المطابقة التقريبية
+        # بالكلمات المفتاحية الموجودة داخل recall() الأصلية (source="learned")
+        # لأنها قد تُرجع إجابة سؤال مختلف بثقة زائفة — نقبل فقط
+        # source="cache" (تطابق كامل لنص السؤال).
+        try:
+            from ai.learning_orchestrator import get_orchestrator
+            _cached = get_orchestrator().recall(text.strip(), min_quality=0.75)
+        except Exception:
+            _cached = None
+        if _cached and _cached.get("source") == "cache" and (_cached.get("answer") or "").strip():
+            st.session_state.nsm_messages.append((
+                "nsm", _cached["answer"], "", "⚡ كاش متعلَّم", datetime.now().strftime("%H:%M")
+            ))
+            st.session_state.nsm_count += 1
+            st.rerun()
+            return
+
         # ════════════════════════════════════════════════════════════════════
         # [1] بناء قائمة العقد المتاحة فعلاً
         # ════════════════════════════════════════════════════════════════════
