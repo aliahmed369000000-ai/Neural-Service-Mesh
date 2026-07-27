@@ -6929,6 +6929,11 @@ def render_chat():
                         rating=1,
                         heuristics=vars(_heur),
                     ))
+                    try:
+                        from ai.learning_orchestrator import get_orchestrator
+                        get_orchestrator().feedback(_af_turn.get("query", ""), is_positive=True)
+                    except Exception:
+                        pass
                     _af_turn["rated"] = True
                     st.toast("✅ شكراً — تم تسجيل التقييم")
                     st.rerun()
@@ -6945,6 +6950,11 @@ def render_chat():
                         rating=-1,
                         heuristics=vars(_heur),
                     ))
+                    try:
+                        from ai.learning_orchestrator import get_orchestrator
+                        get_orchestrator().feedback(_af_turn.get("query", ""), is_positive=False)
+                    except Exception:
+                        pass
                     _af_turn["rated"] = True
                     st.toast("✅ شكراً — تم تسجيل التقييم")
                     st.rerun()
@@ -7399,6 +7409,7 @@ def render_chat():
                 "context_type": _af_ctx_last,
                 "model": _or_model_last if "openrouter" in _final_node else _src_badge,
                 "persona": "nsm", "rated": False,
+                "query": text.strip(),
             }
         st.session_state.nsm_count += 1
         st.rerun()
