@@ -8635,6 +8635,19 @@ def render_swarm_studio():
         value=True,
         key="swarm_use_planner",
     )
+    col_opt1, col_opt2 = st.columns(2)
+    with col_opt1:
+        retry_failed = st.toggle(
+            "🔁 إعادة محاولة المهام الفاشلة تلقائياً (مرة واحدة، بوكيل جديد)",
+            value=True,
+            key="swarm_retry_failed",
+        )
+    with col_opt2:
+        synthesize = st.toggle(
+            "🧩 وَلِّف نتائج المهام في إجابة نهائية واحدة موحّدة",
+            value=True,
+            key="swarm_synthesize",
+        )
 
     if st.button("🚀 نفّذ عبر السرب", type="primary", key="swarm_run") and goal.strip():
         data = {"content": extra_context.strip()} if extra_context.strip() else {}
@@ -8643,7 +8656,13 @@ def render_swarm_studio():
             st.caption("⟳ السرب يعمل — تفكيك الهدف وتنفيذ المهام الفرعية...")
             _skeleton(kind="cards")
             _skeleton(lines=4)
-        result = coordinator.execute(goal.strip(), data=data, use_planner=use_planner)
+        result = coordinator.execute(
+            goal.strip(),
+            data=data,
+            use_planner=use_planner,
+            retry_failed=retry_failed,
+            synthesize=synthesize,
+        )
         _swarm_skeleton_ph.empty()
 
         status_emoji = {"done": "✅", "partial": "🟡", "failed": "❌"}.get(result.status, "❔")
@@ -8672,6 +8691,14 @@ def render_swarm_studio():
                     st.warning(task.error)
                 else:
                     st.caption("لا توجد نتيجة (لم يُسنَد وكيل لهذه المهمة).")
+
+        _synthesis = (result.merged_output or {}).get("synthesis")
+        if _synthesis:
+            st.markdown('<div class="section-header">✅ الإجابة الموحّدة</div>', unsafe_allow_html=True)
+            st.markdown(_synthesis)
+            _copy_button(_synthesis, key="swarm_synthesis")
+        elif synthesize:
+            st.info("⚠️ لم يتم توليف إجابة موحّدة (لا توجد مهام ناجحة، أو تعذّر استدعاء LLM).")
 
     st.markdown("---")
     col_a, col_b = st.columns(2)

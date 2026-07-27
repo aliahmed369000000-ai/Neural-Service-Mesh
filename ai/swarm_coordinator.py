@@ -184,6 +184,8 @@ class SwarmCoordinator:
         data: dict,
         custom_tasks: Optional[List[dict]] = None,
         use_planner: bool = True,
+        retry_failed: bool = True,
+        synthesize: bool = False,
     ) -> SwarmResult:
         """
         Execute a goal using the swarm.
@@ -196,6 +198,16 @@ class SwarmCoordinator:
             use_planner:  🆕 إذا True (الافتراضي)، يُستخدم PlanningAgent حقيقي
                           لتفكيك الهدف ديناميكياً قبل اللجوء لقواعد الكلمات
                           المفتاحية الثابتة (DECOMPOSITION_RULES) كخطة احتياطية.
+            retry_failed: 🆕 إذا True (الافتراضي)، تُعاد محاولة كل مهمة فرعية
+                          فشلت مرة واحدة إضافية عبر وكيل جديد يُنشأ خصيصاً لنفس
+                          القدرة المطلوبة (بدل الاكتفاء بفشل الوكيل الأول الذي
+                          قد يكون تعطّل لسبب عابر — مزوّد LLM بطيء، تحميل أول
+                          مرة، إلخ). لا تُعاد محاولة مهمة نجحت من أول مرة.
+            synthesize:   🆕 إذا True، يُولَّف كل نتائج المهام الناجحة في
+                          إجابة نهائية واحدة موحّدة عبر LLM (بنفس أسلوب
+                          "🤝 منسّق الوكلاء")، وتُخزَّن في
+                          result.merged_output["synthesis"]. False افتراضياً
+                          حفاظاً على التوافق الخلفي (سلوك سابق دون توليف).
         """
         swarm_id = f"swarm_{str(uuid.uuid4())[:8]}"
         result = SwarmResult(swarm_id, goal)
@@ -252,8 +264,19 @@ class SwarmCoordinator:
                     task.error = str(exc)
                     logger.error(f"Task {task.task_id} failed: {exc}")
 
-        # 4. Merge results
+        # 4. 🆕 إعادة محاولة المهام الفاشلة مرة واحدة عبر وكيل جديد لنفس
+        #    القدرة، قبل التوليف والإنهاء (فشل عابر لا يعني أن المهمة غير
+        #    قابلة للتنفيذ إطلاقاً).
+        if retry_failed:
+            self._retry_failed_tasks(tasks, task_outputs)
+
+        # 5. Merge results (بعد إعادة المحاولة، حتى تعكس الحالة النهائية)
         merged = self._merge_results(goal, tasks, task_outputs)
+
+        # 6. 🆕 توليف اختياري لكل النتائج الناجحة في إجابة واحدة موحّدة
+        if synthesize:
+            merged["synthesis"] = self._synthesize(goal, tasks, task_outputs)
+
         result.complete(merged)
 
         with self._lock:
@@ -449,6 +472,61 @@ class SwarmCoordinator:
                 except Exception:
                     pass
         return None
+
+    def _retry_failed_tasks(self, tasks: List[SwarmTask], task_outputs: Dict[str, dict]) -> None:
+        """🆕 يعيد محاولة كل مهمة بحالة 'failed' مرة واحدة فقط، عبر وكيل
+        جديد يُنشأ خصيصاً لنفس القدرة المطلوبة (وليس نفس الوكيل الذي فشل).
+        لا يرفع أي استثناء للخارج — أي فشل في إعادة المحاولة نفسها يُسجَّل
+        في task.error ويُترَك status = 'failed' كما هو."""
+        for task in tasks:
+            if task.status != "failed":
+                continue
+            agent = self._auto_spawn_for_capability(task.required_capability)
+            if agent is None:
+                continue
+            task.assigned_agent_id = agent.agent_id
+            try:
+                output = self._run_task(task, agent)
+                task.result = output
+                task_outputs[task.task_id] = output
+                if output.get("success", True):
+                    task.status = "done"
+                    task.error = None
+                else:
+                    task.status = "failed"
+                    task.error = (
+                        output.get("result_text") or "فشلت المهمة بعد إعادة المحاولة أيضاً"
+                    )
+            except Exception as exc:
+                task.status = "failed"
+                task.error = f"فشلت إعادة المحاولة أيضاً: {exc}"
+                logger.error(f"Retry for task {task.task_id} failed: {exc}")
+
+    def _synthesize(
+        self, goal: str, tasks: List[SwarmTask], task_outputs: Dict[str, dict]
+    ) -> Optional[str]:
+        """🆕 يولّف نتائج المهام الناجحة في إجابة نهائية واحدة موحّدة، بنفس
+        أسلوب توليف "🤝 منسّق الوكلاء" (COORDINATOR_SYSTEM_PROMPT من
+        ai.godmode). يعيد None بأمان عند عدم وجود نتائج ناجحة أو عند فشل
+        استدعاء LLM — لا يُسقِط تنفيذ السرب بالكامل."""
+        successful = [o for o in task_outputs.values() if o.get("success")]
+        if not successful:
+            return None
+        combined = "\n\n".join(
+            f"[{o.get('sub_goal', '')}]\n{o.get('result_text', '')}" for o in successful
+        )
+        try:
+            from ai.llm_fallback import LLMFallback
+            from ai.godmode import COORDINATOR_SYSTEM_PROMPT
+            llm = LLMFallback()
+            res = llm.generate(
+                query=f"الهدف الأصلي: {goal}\n\nنتائج المهام الفرعية:\n{combined}",
+                system_prompt=COORDINATOR_SYSTEM_PROMPT,
+            )
+            return res.text
+        except Exception as exc:
+            logger.warning(f"تعذّر توليف نتائج السرب: {exc}")
+            return None
 
     def _merge_results(
         self,
