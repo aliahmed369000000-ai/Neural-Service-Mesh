@@ -284,6 +284,146 @@ def _rephrase_in_yemeni_dialect(
         return None
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# طبقة الأمان (ai/nova_system.py) — كانت غير متصلة إطلاقاً بالمسار الحي
+# ═══════════════════════════════════════════════════════════════════════════
+_SAFETY_CHECK_FN = None
+_SAFETY_CHECK_TRIED = False
+
+
+def _get_safety_checker():
+    """يُحمِّل run_safety_checks مرة واحدة. يُرجع None عند أي فشل (لا يعطّل النظام)."""
+    global _SAFETY_CHECK_FN, _SAFETY_CHECK_TRIED
+    if _SAFETY_CHECK_TRIED:
+        return _SAFETY_CHECK_FN
+    _SAFETY_CHECK_TRIED = True
+    try:
+        from ai.nova_system import run_safety_checks
+        _SAFETY_CHECK_FN = run_safety_checks
+        logger.info("[qa_engine] طبقة أمان nova_system.py محمَّلة ومتصلة")
+    except Exception as e:
+        _SAFETY_CHECK_FN = None
+        logger.warning(f"[qa_engine] تعذّر تحميل طبقة الأمان — سيستمر النظام بدونها: {e}")
+    return _SAFETY_CHECK_FN
+
+
+def _blocked_response(question: str, domain: str, hint: str) -> Dict[str, Any]:
+    """رد موحَّد الشكل عند رفض فحص الأمان — بنفس بنية نتيجة answer_question العادية تماماً."""
+    return {
+        "question": question,
+        "summary": hint or "عذراً، لا يمكنني المساعدة في هذا الطلب.",
+        "primary_concepts": [],
+        "related_concepts": [],
+        "verses": [],
+        "confidence": 0.0,
+        "safety_blocked": True,
+        "safety_domain": domain,
+        "reasoning_trace": None,
+        "images": [],
+        "generation_used": False,
+        "generated_text": None,
+        "generation_backend": None,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# أثر التفكير (ai/chain_of_thought.py) — "لماذا هذه الإجابة؟"
+# ═══════════════════════════════════════════════════════════════════════════
+_COT_BUILDER = None
+_COT_BUILDER_TRIED = False
+
+
+def _get_cot_builder(ckg: Dict[str, Any]):
+    global _COT_BUILDER, _COT_BUILDER_TRIED
+    if _COT_BUILDER_TRIED:
+        return _COT_BUILDER if _COT_BUILDER is not False else None
+    _COT_BUILDER_TRIED = True
+    try:
+        from ai.chain_of_thought import ChainOfThoughtBuilder
+        _COT_BUILDER = ChainOfThoughtBuilder(ckg=ckg)
+        logger.info("[qa_engine] ChainOfThoughtBuilder محمَّل")
+    except Exception as e:
+        _COT_BUILDER = False
+        logger.warning(f"[qa_engine] تعذّر تحميل chain_of_thought — سيُتجاهل reasoning_trace: {e}")
+    return _COT_BUILDER if _COT_BUILDER is not False else None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# صور توضيحية (ai/image_sources.py) — للواجهة الجديدة
+# ═══════════════════════════════════════════════════════════════════════════
+def _try_fetch_illustration(concept_name: str) -> list:
+    if not concept_name:
+        return []
+    try:
+        from ai.image_sources import search_stock_images
+        results = search_stock_images(concept_name, per_page=2)
+        return [
+            {
+                "url": r.url,
+                "source": r.source.value if hasattr(r.source, "value") else str(r.source),
+            }
+            for r in results
+        ]
+    except Exception as e:
+        logger.warning(f"[qa_engine] فشل جلب الصور التوضيحية لـ '{concept_name}': {e}")
+        return []
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# درجة ثقة معزَّزة (ai/self_awareness_deep.py) — تكامل جزئي صريح
+# ⚠️ DeepSelfAwareness مصمَّم أصلاً لمعايرة قرارات توجيه رقمية (feature_vec +
+# predicted_target ضمن NeuralCore)، وليس لتقييم إجابات نصية. التكامل هنا
+# "محوَّل" (adapter): نبني feature_vec تقريبياً من إشارات qa_engine المتاحة
+# فعلاً، ونستخدم before_decision() فقط كرأي ثانٍ يُمزَج مع الثقة الرمزية
+# الأصلية — لا يستبدلها. لا توجد حلقة تغذية راجعة (after_decision) لأن
+# answer_question لا يملك "الإجابة الصحيحة الفعلية" ليقارن بها، لذلك وحدة
+# WeaknessDetector/التعلّم بمرور الوقت في الملف الأصلي غير مُستخدَمة هنا —
+# فقط طبقة ConfidenceEstimator الآنية.
+# ═══════════════════════════════════════════════════════════════════════════
+_DEEP_AWARENESS = None
+_DEEP_AWARENESS_TRIED = False
+
+
+def _get_deep_awareness():
+    global _DEEP_AWARENESS, _DEEP_AWARENESS_TRIED
+    if _DEEP_AWARENESS_TRIED:
+        return _DEEP_AWARENESS if _DEEP_AWARENESS is not False else None
+    _DEEP_AWARENESS_TRIED = True
+    try:
+        from ai.self_awareness_deep import DeepSelfAwareness
+        _DEEP_AWARENESS = DeepSelfAwareness()
+        logger.info("[qa_engine] DeepSelfAwareness محمَّل (adapter جزئي لدرجة الثقة)")
+    except Exception as e:
+        _DEEP_AWARENESS = False
+        logger.warning(f"[qa_engine] تعذّر تحميل self_awareness_deep — الثقة تبقى كما هي: {e}")
+    return _DEEP_AWARENESS if _DEEP_AWARENESS is not False else None
+
+
+def _refine_confidence(result: Dict[str, Any]) -> float:
+    """يمزج الثقة الرمزية الأصلية مع رأي ConfidenceEstimator (متوسط بسيط)."""
+    base_confidence = float(result.get("confidence", 0.0))
+    awareness = _get_deep_awareness()
+    if awareness is None:
+        return base_confidence
+    try:
+        n_concepts = len(result.get("primary_concepts", []))
+        n_related  = len(result.get("related_concepts", []))
+        n_verses   = len(result.get("verses", []))
+        top_match  = (result.get("primary_concepts") or [{}])[0].get("match", 0.0)
+
+        feature_vec = [
+            min(n_concepts / 5.0, 1.0),
+            min(n_related / 8.0, 1.0),
+            min(n_verses / 5.0, 1.0),
+            min(float(top_match), 1.0),
+        ]
+        conf, _details = awareness.confidence.estimate(feature_vec, base_confidence)
+        return round((base_confidence + conf) / 2.0, 4)
+    except Exception as e:
+        logger.warning(f"[qa_engine] فشل تحسين درجة الثقة عبر self_awareness_deep: {e}")
+        return base_confidence
+
+
 def _build_grounding_text(
     concept_matches: List[Tuple[str, float]],
     verses: List[Dict[str, Any]],
@@ -1023,6 +1163,8 @@ def answer_question(
     temperature: float = 0.8,
     top_p: float = 0.95,
     top_k: int = 50,
+    include_reasoning_trace: bool = False,
+    include_images: bool = False,
 ) -> Dict[str, Any]:
     """
     نقطة الدخول الرئيسية لمحرك الأسئلة والأجوبة.
@@ -1044,6 +1186,21 @@ def answer_question(
     concepts_db  = ckg.get("concepts", {})
     relations_db = ckg.get("relations", {})
     entities_db  = entities or {}
+
+    # 0. فحص الأمان أولاً — قبل أي معالجة أخرى. عند فشل تحميل الطبقة (لا
+    # استيراد، إلخ) يستمر النظام بدون حظر (fallback آمن)، لكن عند نجاح
+    # التحميل وثبوت أن السؤال غير آمن، يُرجَع رد محظور فوراً دون المرور
+    # على CKG أو LLMFallback إطلاقاً.
+    safety_checker = _get_safety_checker()
+    if safety_checker is not None:
+        try:
+            safety_result = safety_checker(question)
+            if not safety_result.is_safe:
+                return _blocked_response(
+                    question, safety_result.domain, safety_result.response_hint,
+                )
+        except Exception as e:
+            logger.warning(f"[qa_engine] فشل فحص الأمان نفسه — سيستمر النظام دون حظر: {e}")
 
     # فهرسة الآيات بحسب (سورة، آية) لتسريع البحث
     ayat_by_ref = {(a.get("surah"), a.get("ayah")): a for a in ayat}
@@ -1078,6 +1235,35 @@ def answer_question(
     # على كيان مطابق أعلاه
     if result is None:
         result = generate_answer(question, concept_matches, related_concepts, verses, concepts_db)
+
+    result["safety_blocked"] = False
+    result["safety_domain"] = "benign"
+
+    # 4.5 أثر التفكير — اختياري (يبني "لماذا هذه الإجابة؟" لواجهة المستخدم)
+    if include_reasoning_trace:
+        cot = _get_cot_builder(ckg)
+        if cot is not None:
+            try:
+                trace = cot.build_trace(question)
+                result["reasoning_trace"] = trace.to_display()
+            except Exception as e:
+                logger.warning(f"[qa_engine] فشل بناء أثر التفكير: {e}")
+                result["reasoning_trace"] = None
+        else:
+            result["reasoning_trace"] = None
+    else:
+        result["reasoning_trace"] = None
+
+    # 4.6 صور توضيحية — اختياري
+    if include_images:
+        top_concept = (result.get("primary_concepts") or [{}])[0].get("name", "")
+        result["images"] = _try_fetch_illustration(top_concept)
+    else:
+        result["images"] = []
+
+    # 4.7 تحسين درجة الثقة عبر self_awareness_deep (adapter جزئي — انظر
+    # التعليق التوثيقي أعلى _refine_confidence لحدود هذا التكامل)
+    result["confidence"] = _refine_confidence(result)
 
     # 5. توليد حر اختياري (Yemeni LLM) — إضافي فقط، لا يمسّ أي من المسارين أعلاه
     result["generation_used"] = False
