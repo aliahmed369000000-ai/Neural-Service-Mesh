@@ -8705,6 +8705,23 @@ def render_swarm_studio():
     with col_a:
         st.markdown("**📊 ملخص الوكلاء (AgentFactory)**")
         st.json(factory.summary())
+        with st.popover("🧹 تقليم الوكلاء ضعيفي الأداء"):
+            st.caption(
+                "يُقاعِد (retire) أي وكيل نفّذ 5 مهام على الأقل وكان "
+                "متوسط أدائه أقل من الحد المحدَّد — لتفادي تكدّس وكلاء "
+                "فاشلين تُختار من بينهم مهام مستقبلية عن طريق الخطأ."
+            )
+            prune_min_score = st.slider(
+                "حد الأداء الأدنى", min_value=0.1, max_value=0.9, value=0.5,
+                step=0.05, key="swarm_prune_min_score",
+            )
+            if st.button("🧹 نفّذ التقليم الآن", key="swarm_prune_btn"):
+                retired_ids = factory.prune_underperformers(min_score=prune_min_score)
+                if retired_ids:
+                    st.success(f"تمت مقاعدة {len(retired_ids)} وكيل ضعيف الأداء.")
+                else:
+                    st.info("لا يوجد وكلاء تنطبق عليهم شروط التقليم حالياً.")
+                st.rerun()
     with col_b:
         st.markdown("**📊 ملخص السرب (SwarmCoordinator)**")
         st.json(coordinator.summary())
