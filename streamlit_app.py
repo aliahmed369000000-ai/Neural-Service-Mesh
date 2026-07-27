@@ -8504,6 +8504,7 @@ def render_agent_orchestrator():
                 )
             )
             responses: Dict[str, str] = {}
+            failed_keys: set = set()
             for key in selected:
                 cat = AGENT_CATEGORIES[key]
                 bot_key = f"agent_bot_{cat.key}"
@@ -8517,7 +8518,8 @@ def render_agent_orchestrator():
                 # المهمة الأصلية فقط لكل وكيل، بدون أي تعديل. ──
                 if exec_mode == "sequential" and responses:
                     prior = "\n\n".join(
-                        f"[{AGENT_CATEGORIES[k].title}]\n{v}" for k, v in responses.items()
+                        f"[{AGENT_CATEGORIES[k].title}]\n{v}"
+                        for k, v in responses.items() if k not in failed_keys
                     )
                     agent_input = (
                         f"{task.strip()}\n\n"
@@ -8531,39 +8533,57 @@ def render_agent_orchestrator():
                 with _orch_skel_ph.container():
                     st.caption(f"⟳ {cat.title} يعمل على المهمة...")
                     _skeleton(lines=3)
-                try:
-                    resp = bot.chat(agent_input, source="orchestrator")
-                except Exception as _orch_err:
-                    resp = f"⚠️ خطأ: {_orch_err}"
+                # 🆕 إعادة محاولة واحدة عند فشل الاستدعاء الأول (فشل عابر:
+                # مزوّد LLM بطيء، تحميل أول مرة، إلخ) — بنفس روح إعادة
+                # المحاولة المضافة أصلاً للسرب الذكي (SwarmCoordinator).
+                resp, _ok = None, False
+                for _attempt in range(2):
+                    try:
+                        resp = bot.chat(agent_input, source="orchestrator")
+                        _ok = True
+                        break
+                    except Exception as _orch_err:
+                        resp = f"⚠️ خطأ: {_orch_err}"
+                if not _ok:
+                    failed_keys.add(key)
                 _orch_skel_ph.empty()
                 responses[key] = resp
                 with st.expander(f"{cat.emoji} {cat.title}", expanded=not synth):
                     st.markdown(resp)
                     _copy_button(resp, key=f"orch_{key}")
 
+            valid_responses = {k: v for k, v in responses.items() if k not in failed_keys}
             if synth and responses:
-                combined_input = "\n\n".join(
-                    f"[{AGENT_CATEGORIES[k].title}]\n{v}" for k, v in responses.items()
-                )
-                _synth_skel_ph = st.empty()
-                with _synth_skel_ph.container():
-                    st.caption("⟳ يجري توليف الإجابة النهائية...")
-                    _skeleton(lines=4)
-                try:
-                    from ai.llm_fallback import LLMFallback
-                    _llm = LLMFallback()
-                    _synth_result = _llm.generate(
-                        query=f"السؤال الأصلي: {task.strip()}\n\nردود الوكلاء:\n{combined_input}",
-                        system_prompt=COORDINATOR_SYSTEM_PROMPT,
+                if not valid_responses:
+                    st.warning("⚠️ فشل كل الوكلاء المُفعَّلين — لا يوجد ما يُولَّف.")
+                else:
+                    combined_input = "\n\n".join(
+                        f"[{AGENT_CATEGORIES[k].title}]\n{v}" for k, v in valid_responses.items()
                     )
-                    final = _synth_result.text
-                except Exception as _synth_err:
-                    final = f"⚠️ تعذّر التوليف: {_synth_err}"
-                _synth_skel_ph.empty()
-                st.toast("✅ تم توليف الإجابة الموحّدة", icon="✅")
-                st.markdown('<div class="section-header">✅ الإجابة الموحّدة</div>', unsafe_allow_html=True)
-                st.markdown(final)
-                _copy_button(final, key="orch_final")
+                    _synth_skel_ph = st.empty()
+                    with _synth_skel_ph.container():
+                        st.caption("⟳ يجري توليف الإجابة النهائية...")
+                        _skeleton(lines=4)
+                    try:
+                        from ai.llm_fallback import LLMFallback
+                        _llm = LLMFallback()
+                        _synth_result = _llm.generate(
+                            query=f"السؤال الأصلي: {task.strip()}\n\nردود الوكلاء:\n{combined_input}",
+                            system_prompt=COORDINATOR_SYSTEM_PROMPT,
+                        )
+                        final = _synth_result.text
+                    except Exception as _synth_err:
+                        final = f"⚠️ تعذّر التوليف: {_synth_err}"
+                    _synth_skel_ph.empty()
+                    if failed_keys:
+                        st.caption(
+                            "⚠️ استُبعِد من التوليف: "
+                            + "، ".join(AGENT_CATEGORIES[k].title for k in failed_keys)
+                        )
+                    st.toast("✅ تم توليف الإجابة الموحّدة", icon="✅")
+                    st.markdown('<div class="section-header">✅ الإجابة الموحّدة</div>', unsafe_allow_html=True)
+                    st.markdown(final)
+                    _copy_button(final, key="orch_final")
 
 
 
