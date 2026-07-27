@@ -327,6 +327,7 @@ try:
     from ai.llm_fallback import LLMFallback as _FableLLMFallback
     from ai.fable_engine import (
         FableEngine, FableChapter, STORY_MODES, CHARACTERS, ARABIC_METERS,
+        ISLAMIC_VALUES,
         DEFAULT_MODE as FABLE_DEFAULT_MODE,
         DEFAULT_CHARACTER as FABLE_DEFAULT_CHARACTER,
     )
@@ -5783,16 +5784,32 @@ def render_fable():
                     index=list(CHARACTERS.keys()).index(FABLE_DEFAULT_CHARACTER),
                     format_func=lambda c: f"{CHARACTERS[c]['emoji']} {c} — {CHARACTERS[c]['style']}",
                 )
+            target_value = None
+            if mode == "قصص إسلامية تربوية":
+                target_value = st.selectbox(
+                    "🕌 القيمة المستهدفة",
+                    ISLAMIC_VALUES,
+                    help="اختر القيمة أو الخُلق الذي تريد أن تتعلّمه القصة للطفل — "
+                         "يمكنك أيضاً إضافة تفاصيل حرة في الحقل أدناه.",
+                )
             seed = st.text_input(
-                "فكرة مبدئية (اختياري):",
-                placeholder="مثال: قصة عن تاجر يبحث عن كنز مفقود في الصحراء",
+                "فكرة مبدئية (اختياري):" if target_value is None
+                else "تفاصيل إضافية عن القصة (اختياري):",
+                placeholder="مثال: قصة عن تاجر يبحث عن كنز مفقود في الصحراء" if target_value is None
+                else "مثال: طفل يجد محفظة نقود في الحديقة",
             )
             if st.button("✨ ابدأ القصة", type="primary"):
                 _story_skel_ph = st.empty()
                 with _story_skel_ph.container():
                     _skeleton(lines=6)
+                effective_seed = seed
+                if target_value is not None:
+                    effective_seed = (
+                        f"اكتب قصة تُعلّم الطفل قيمة «{target_value}»."
+                        + (f" تفاصيل إضافية: {seed.strip()}" if seed.strip() else "")
+                    )
                 try:
-                    chapter = engine.start_story(mode=mode, character=character, seed_idea=seed)
+                    chapter = engine.start_story(mode=mode, character=character, seed_idea=effective_seed)
                 except Exception as e:  # noqa: BLE001
                     _story_skel_ph.empty()
                     st.error(f"⚠️ تعذّر بدء القصة، حاول مرة أخرى. (تفصيل تقني: {e})")
@@ -5866,7 +5883,10 @@ def render_fable():
             st.markdown("---")
             st.markdown("**أوامر سريعة:**")
             qc_cols = st.columns(4)
-            quick_labels = ["أنشد بيتاً", "صف المكان", "أضف حواراً", "لخّص"]
+            if cur.mode == "قصص إسلامية تربوية":
+                quick_labels = ["أضف عبرة", "صف المكان", "أضف حواراً", "لخّص"]
+            else:
+                quick_labels = ["أنشد بيتاً", "صف المكان", "أضف حواراً", "لخّص"]
             for i, label in enumerate(quick_labels):
                 with qc_cols[i]:
                     if st.button(f"⚡ {label}", key=f"fable_qc_{i}", use_container_width=True):
