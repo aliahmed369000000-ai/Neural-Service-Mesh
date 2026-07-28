@@ -3393,26 +3393,38 @@ def render_qa():
 def render_higgsfield():
     """
     تبويب 🎬 Higgsfield Explainer — وثائقي AI حتى 10 دقائق.
-    Pipeline: Gemini Omni Flash (بحث) → NSM Agent Fable 5 (سرد) → Higgsfield API (فيديو).
+    Pipeline (محرك مجاني بالكامل — بدون أي اعتماد على مزوّد مدفوع):
+    LLMFallback الداخلي لـNSM (بحث + سرد) → FableEngine.generate_explainer
+    (سيناريو مُقسّم مشاهد) → TTSEngine (صوت مجاني: Edge TTS/gTTS، أو Gemini
+    TTS إن توفّر مفتاح) → VideoEngine (رندر mp4 فعلي بخلفيات متحركة
+    وترجمات Kinetic Captions). خلفيات سينمائية حقيقية عبر Higgsfield تبقى
+    متاحة فقط كخيار اختياري (opt-in) معطَّل افتراضياً، تماماً كما في
+    تبويب ⚡ Shorts.
     """
-    # ── استيراد المحرك ────────────────────────────────────────────────
+    # ── استيراد المحرك (نفس محرك السرد/الفيديو المجاني المستخدم في
+    #    تبويب 🎭 إبداع، بدل ai.higgsfield_engine المدفوع) ──────────────
     try:
-        from ai.higgsfield_engine import (
-            HiggsfieldEngine, build_gemini_llm, build_fable_llm
-        )
+        from ai.llm_fallback import LLMFallback as _HFLLMFallback
+        from ai.fable_engine import FableEngine
     except Exception as _hf_err:
-        st.error(f"⚠️ تعذّر تحميل محرك Higgsfield: {_hf_err}")
+        st.error(f"⚠️ تعذّر تحميل محرك السيناريو/الفيديو: {_hf_err}")
         return
+
+    if "hf_fable_engine" not in st.session_state:
+        _hf_fb = _HFLLMFallback(model_key="fable")
+        st.session_state.hf_fable_engine = FableEngine(
+            llm_fallback=_hf_fb, db_path=str(MEMORY_DIR / "fable.db")
+        )
+    engine = st.session_state.hf_fable_engine
 
     # ── رأس الصفحة ────────────────────────────────────────────────────
     st.markdown("""
     <div style="direction:rtl; text-align:right">
         <h2 style="margin-bottom:0.25rem">🎬 Higgsfield Explainer</h2>
         <p style="color:var(--text-muted); font-size:0.95rem; margin-top:0">
-            أنشئ فيديو وثائقياً من أي موضوع — حتى 10 دقائق —
-            بالاستعانة بـ <strong>Gemini Omni Flash</strong> للبحث
-            و<strong>NSM Agent Fable 5</strong> للسرد
-            و<strong>Higgsfield API</strong> لتوليد الفيديو.
+            أنشئ فيديو وثائقياً من أي موضوع — حتى 10 دقائق — سيناريو
+            وصوت وفيديو mp4 فعلي، <strong>مجاناً بالكامل</strong> (بدون
+            أي مفتاح API مدفوع مطلوب).
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -3427,198 +3439,79 @@ def render_higgsfield():
             key="hf_topic",
         )
     with col_r:
-        style = st.selectbox(
-            "🎨 نوع الوثائقي:",
-            ["وثائقي عام", "تاريخي", "علمي", "ثقافي", "طبيعي", "تقني"],
-            key="hf_style",
-        )
-
-    col_dur, col_vid = st.columns(2)
-    with col_dur:
         minutes = st.slider(
             "⏱️ المدة المستهدفة (دقائق):",
             min_value=1, max_value=10, value=5,
             key="hf_minutes",
         )
-    with col_vid:
-        hf_key_input = st.text_input(
-            "🔑 Higgsfield API Key (اختياري):",
-            type="password",
-            placeholder="اتركه فارغاً لتوليد السيناريو فقط",
-            key="hf_api_key_input",
-            help=(
-                "⚠️ يجب أن يكون بصيغة KEY_ID:KEY_SECRET (المفتاح والسر معاً "
-                "مفصولين بنقطتين رأسيتين ':') — كما بلوحة تحكم Higgsfield. "
-                "مفتاح واحد بدون السر لن يعمل ويُرجع خطأ مصادقة 403."
-            ),
-        )
-        hf_key = hf_key_input.strip() or os.getenv("HIGGSFIELD_API_KEY", "").strip()
 
     # ── معلومات Pipeline ───────────────────────────────────────────────
     with st.expander("ℹ️ كيف يعمل الـ Pipeline؟", expanded=False):
         st.markdown("""
         <div style="direction:rtl; text-align:right; font-size:0.9rem">
         <ol>
-            <li><strong>🔍 Gemini Omni Flash</strong> — يبحث في المعلومات
-                ويبني هيكل مشاهد الوثائقي (outline + حقائق موثّقة)</li>
-            <li><strong>✍️ NSM Agent Fable 5</strong> — يصيغ نص السرد الصوتي
-                بالعربية الفصحى + video prompt سينمائي بالإنجليزية لكل مشهد</li>
-            <li><strong>🎬 Higgsfield API</strong> — يُولّد مقطع فيديو قصير
-                (3-8 ثوانٍ) لكل مشهد. <em>يتطلب HIGGSFIELD_API_KEY</em></li>
+            <li><strong>🔍 محرك البحث/السرد الداخلي لـNSM</strong> — يبحث
+                في المعلومات ويكتب سيناريو المشاهد (نص السرد + توجيه مرئي
+                مقترح لكل مشهد)</li>
+            <li><strong>🔊 TTSEngine</strong> — يحوّل السرد لصوت فعلي
+                (Edge TTS مجاني بدون مفتاح، أو gTTS احتياطياً، أو
+                Gemini TTS إن توفّر مفتاح)</li>
+            <li><strong>🎬 VideoEngine</strong> — يركّب فيديو mp4 فعلي
+                (خلفية متحركة + ترجمات متحركة كلمة-بكلمة) — كل ذلك
+                محلياً بدون أي مزوّد خارجي مدفوع</li>
         </ol>
-        <p style="color:var(--text-muted)">بدون مفتاح Higgsfield تحصل على السيناريو الكامل
-        جاهزاً للنسخ إلى أي أداة توليد فيديو خارجية.</p>
         </div>
         """, unsafe_allow_html=True)
 
     st.markdown("---")
 
-    # ── قسم منفصل: توليد صورة UGC تسويقية للمنتج ────────────────────────
-    with st.expander("📸 توليد صورة UGC احترافية للمنتج", expanded=False):
-        st.markdown(
-            '<p style="direction:rtl; text-align:right; '
-            'color:var(--text-muted); font-size:0.9rem">'
-            "صورة واحدة (نص → صورة عبر Higgsfield Soul) بأسلوب UGC احترافي "
-            "— منفصلة عن pipeline الوثائقي أعلاه.</p>",
-            unsafe_allow_html=True,
-        )
-        ugc_desc = st.text_input(
-            "🎯 صف المشهد/المنتج:",
-            placeholder="مثال: شاب يستخدم تطبيق NSM على جواله في مقهى بإضاءة طبيعية",
-            key="hf_ugc_desc",
-        )
-        ugc_ratio = st.selectbox(
-            "📐 نسبة العرض:",
-            ["9:16", "1:1", "16:9"],
-            key="hf_ugc_ratio",
-        )
-        ugc_btn = st.button(
-            "📸 أنشئ صورة UGC",
-            use_container_width=True,
-            disabled=not bool(ugc_desc and ugc_desc.strip()),
-            key="hf_ugc_btn",
-        )
-        if ugc_btn:
-            if not hf_key:
-                st.warning(
-                    "أدخل HIGGSFIELD_API_KEY أعلاه أولاً "
-                    "(بصيغة KEY_ID:KEY_SECRET)."
-                )
-            else:
-                try:
-                    from ai.higgsfield_engine import (
-                        HiggsfieldClient, build_ugc_prompt,
-                    )
-                    with st.spinner("⟳ يُولّد صورة UGC..."):
-                        client = HiggsfieldClient(hf_key)
-                        prompt = build_ugc_prompt(ugc_desc.strip())
-                        image_url = client.text_to_image(
-                            prompt, aspect_ratio=ugc_ratio,
-                        )
-                    st.session_state["hf_ugc_image_url"] = image_url
-                    st.toast("✅ تم توليد صورة UGC", icon="📸")
-                except Exception as ugc_exc:
-                    st.error(f"❌ فشل توليد الصورة: {ugc_exc}")
-
-        if st.session_state.get("hf_ugc_image_url"):
-            st.image(
-                st.session_state["hf_ugc_image_url"],
-                caption="صورة UGC الناتجة",
-                use_container_width=True,
-            )
-
-    st.markdown("---")
-
-    # ── زر الإنشاء ────────────────────────────────────────────────────
+    # ── زر الإنشاء (السيناريو) ────────────────────────────────────────
     generate_btn = st.button(
-        "🎬 أنشئ الوثائقي",
+        "🎬 أنشئ السيناريو",
         type="primary",
         use_container_width=True,
         disabled=not bool(topic and topic.strip()),
         key="hf_generate_btn",
     )
 
-    if not generate_btn:
-        # عرض نتيجة سابقة إن وُجدت
-        if "hf_result" in st.session_state:
-            _render_hf_result(st.session_state["hf_result"])
-        return
+    if generate_btn:
+        if not topic.strip():
+            st.warning("أدخل موضوع الوثائقي أولاً.")
+        else:
+            with st.spinner("⟳ يُجري بحثاً ويكتب السيناريو..."):
+                try:
+                    st.session_state.hf_script = engine.generate_explainer(
+                        topic.strip(), target_minutes=minutes
+                    )
+                    st.session_state.hf_error = None
+                    st.session_state.hf_mp4 = None
+                except Exception as e:  # noqa: BLE001
+                    st.session_state.hf_script = None
+                    st.session_state.hf_error = str(e)
 
-    if not topic.strip():
-        st.warning("أدخل موضوع الوثائقي أولاً.")
-        return
+    _hf_err = st.session_state.get("hf_error")
+    if _hf_err:
+        st.error(f"⚠️ تعذّر إنشاء السيناريو، حاول مرة أخرى. (تفصيل تقني: {_hf_err})")
 
-    # ── تنفيذ Pipeline ────────────────────────────────────────────────
-    progress_bar  = st.progress(0, text="⟳ يبدأ الـ Pipeline...")
-    status_text   = st.empty()
-
-    def _prog(msg: str, pct: float):
-        progress_bar.progress(int(min(pct, 100)), text=msg)
-        status_text.markdown(
-            f'<p style="color:var(--text-muted); direction:rtl">{msg}</p>',
-            unsafe_allow_html=True,
-        )
-
-    try:
-        engine = HiggsfieldEngine(
-            gemini_llm      = build_gemini_llm(),
-            fable_llm       = build_fable_llm(),
-            higgsfield_key  = hf_key,
-        )
-        result = engine.create_documentary(
-            topic           = topic.strip(),
-            target_minutes  = minutes,
-            style           = style,
-            generate_video  = bool(hf_key),
-            progress_cb     = _prog,
-        )
-        st.session_state["hf_result"] = result
-        progress_bar.progress(100, text="✅ اكتمل الوثائقي!")
-        status_text.empty()
-        st.toast("✅ اكتمل السيناريو الوثائقي", icon="🎬")
-
-    except Exception as exc:
-        progress_bar.empty()
-        status_text.empty()
-        st.error(f"❌ فشل إنشاء الوثائقي: {exc}")
-        return
-
-    _render_hf_result(result)
+    script = st.session_state.get("hf_script")
+    if script is not None:
+        _render_hf_result(script)
 
 
-def _render_hf_result(result):
-    """يعرض نتائج Higgsfield Explainer."""
-    script  = result.script
-    scenes  = script.scenes
-    has_vid = result.api_used
+def _render_hf_result(script):
+    """يعرض نتائج Higgsfield Explainer (سيناريو + رندر فيديو مجاني)."""
+    segments = script.segments
 
     # ── ملخص ──────────────────────────────────────────────────────────
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("📽️ عدد المشاهد", len(scenes))
+    c1, c2, c3 = st.columns(3)
+    c1.metric("📽️ عدد المشاهد", len(segments))
     total_min = script.total_seconds // 60
     total_sec = script.total_seconds % 60
     c2.metric("⏱️ المدة الإجمالية", f"~{total_min}د {total_sec}ث")
-    c3.metric("🔍 مزوّد البحث",
-              script.research_provider or "—",
-              delta=None)
-    c4.metric("✍️ مزوّد السرد",
-              script.narrative_provider or "—",
-              delta=None)
+    c3.metric("✍️ مزوّد السرد", script.provider or "—")
 
-    if has_vid:
-        done  = sum(1 for s in scenes if s.video_status == "completed")
-        fails = sum(1 for s in scenes if s.video_status in ("failed", "timeout"))
-        st.caption(
-            f"🎬 مقاطع الفيديو: {done} مكتملة · {fails} فاشلة "
-            f"· {len(scenes)-done-fails} معلّقة"
-        )
-    else:
-        st.info(
-            "💡 لتوليد الفيديو الفعلي أضف **HIGGSFIELD_API_KEY** "
-            "في الأسرار أو أدخله في الحقل أعلاه. "
-            "السيناريو أدناه جاهز للنسخ إلى Higgsfield.ai يدوياً.",
-            icon="ℹ️",
-        )
+    if script.error:
+        st.caption(f"⚠️ ملاحظة تقنية: {script.error}")
 
     st.markdown("---")
 
@@ -3628,182 +3521,176 @@ def _render_hf_result(result):
         unsafe_allow_html=True,
     )
     _full_script_text = "\n\n".join(
-        f"[المشهد {s.index} — {s.title}]\n{s.narration}" for s in scenes
+        f"[المشهد {s.index}]\n{s.narration}" for s in segments
     )
     _copy_button(_full_script_text, key="hf_full_script", label="📋 نسخ السيناريو كاملاً")
 
-    for scene in scenes:
-        # لون البادج بحسب حالة الفيديو
-        vid_badge = {
-            "completed":  '<span style="background:#22c55e;color:#fff;border-radius:4px;padding:2px 8px;font-size:0.75rem">✅ فيديو جاهز</span>',
-            "processing": '<span style="background:#f59e0b;color:#fff;border-radius:4px;padding:2px 8px;font-size:0.75rem">⏳ يُعالَج</span>',
-            "failed":     '<span style="background:#ef4444;color:#fff;border-radius:4px;padding:2px 8px;font-size:0.75rem">❌ فشل</span>',
-            "timeout":    '<span style="background:#ef4444;color:#fff;border-radius:4px;padding:2px 8px;font-size:0.75rem">⏰ انتهت المهلة</span>',
-            "no_api":     '<span style="background:#6b7280;color:#fff;border-radius:4px;padding:2px 8px;font-size:0.75rem">🔑 بدون API</span>',
-            "skipped":    '<span style="background:#6b7280;color:#fff;border-radius:4px;padding:2px 8px;font-size:0.75rem">⏭️ متخطّى</span>',
-            "pending":    '<span style="background:#6b7280;color:#fff;border-radius:4px;padding:2px 8px;font-size:0.75rem">⏳ معلّق</span>',
-        }.get(scene.video_status, "")
-
+    for seg in segments:
         with st.expander(
-            f"🎬 المشهد {scene.index} — {scene.title}  (~{scene.est_seconds}ث)",
-            expanded=(scene.index == 1),
+            f"🎬 المشهد {seg.index}  (~{seg.est_seconds}ث)",
+            expanded=(seg.index == 1),
         ):
-            # عرض الفيديو إن كان متاحاً
-            if scene.video_url:
-                st.video(scene.video_url)
-            elif scene.video_error:
-                st.caption(f"⚠️ {scene.video_error}")
-
             st.markdown(
                 f"""
                 <div style="direction:rtl; text-align:right; line-height:1.8">
-                {vid_badge}
-                <p style="margin-top:0.75rem">
-                    <strong>🔊 السرد الصوتي:</strong><br>{scene.narration}
+                <p style="margin-top:0.25rem">
+                    <strong>🔊 السرد الصوتي:</strong><br>{seg.narration}
                 </p>
                 <p style="color:var(--text-muted); font-size:0.9rem">
-                    <strong>🎥 التوجيه المرئي:</strong> {scene.visual_notes or "—"}
+                    <strong>🎥 التوجيه المرئي:</strong> {seg.visual_notes or "—"}
                 </p>
-                <details>
-                    <summary style="color:var(--text-muted); cursor:pointer; font-size:0.85rem">
-                        🎬 Higgsfield Video Prompt (إنجليزي)
-                    </summary>
-                    <pre style="background:#1e1e1e; padding:0.5rem; border-radius:6px;
-                                font-size:0.8rem; color:#d4d4d4; white-space:pre-wrap">{scene.video_prompt}</pre>
-                </details>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
-    # ── تصدير السيناريو الكامل ────────────────────────────────────────
+    # ── تصدير النص الكامل للسرد ──────────────────────────────────────
     st.markdown("---")
-    col_exp, col_dl = st.columns(2)
+    with st.expander("📋 النص الكامل للسرد (للتعليق الصوتي)"):
+        st.text_area(
+            "نص السرد:",
+            value=script.full_narration,
+            height=300,
+            key="hf_full_narration",
+        )
+        st.download_button(
+            "⬇️ تحميل السيناريو كملف نصي",
+            data=script.full_narration,
+            file_name=f"{(script.title or 'وثائقي')[:40]}.txt",
+            mime="text/plain",
+            key="hf_script_download",
+        )
 
-    with col_exp:
-        with st.expander("📋 النص الكامل للسرد (للتعليق الصوتي)"):
-            st.text_area(
-                "نص السرد:",
-                value=script.full_narration,
-                height=300,
-                key="hf_full_narration",
-            )
-
-    with col_dl:
-        with st.expander("🎬 Prompts لـ Higgsfield (للنسخ اليدوي)"):
-            prompts_text = "\n\n".join(
-                f"=== المشهد {s.index}: {s.title} ===\n{s.video_prompt}"
-                for s in scenes
-            )
-            st.text_area(
-                "Video Prompts:",
-                value=prompts_text,
-                height=300,
-                key="hf_video_prompts",
-            )
-
-    # ── تجميع ومشاركة الوثائقي على مواقع التواصل ────────────────────────
+    # ── رندر الفيديو الفعلي (mp4) — مجاني بالكامل ─────────────────────
     st.markdown("---")
-    st.markdown(
-        '<div style="direction:rtl; text-align:right">'
-        '<h4 style="margin-bottom:0.3rem">📤 تصدير ومشاركة الوثائقي</h4>'
-        '<p style="color:var(--text-muted); font-size:0.85rem; margin-top:0">'
-        'يجمّع مقاطع كل المشاهد المكتملة (من Higgsfield API) في فيديو واحد متسلسل، '
-        'ثم يتيح رفعه مباشرة على يوتيوب أو تيك توك.'
-        '</p></div>',
-        unsafe_allow_html=True,
+    st.markdown("#### 🎬 رندر الفيديو الفعلي (mp4) — مجاني")
+
+    _HF_VOICE_OPTIONS = {
+        "🎙️ افتراضي (تلقائي حسب المزوّد المتاح)": "",
+        "👨 حامد — سعودي (Edge, مجاني)": "ar-SA-HamedNeural",
+        "👩 زارية — سعودية (Edge, مجاني)": "ar-SA-ZariyahNeural",
+        "👨 شاكر — مصري (Edge, مجاني)": "ar-EG-ShakirNeural",
+        "👩 سلمى — مصرية (Edge, مجاني)": "ar-EG-SalmaNeural",
+        "👨 حمدان — إماراتي (Edge, مجاني)": "ar-AE-HamdanNeural",
+        "👩 فاطمة — إماراتية (Edge, مجاني)": "ar-AE-FatimaNeural",
+        "✨ Kore — Gemini TTS (يتطلب GOOGLE_API_KEY)": "Kore",
+    }
+    _hf_voice_label = st.selectbox(
+        "🗣️ اختر الصوت",
+        options=list(_HF_VOICE_OPTIONS.keys()),
+        key="hf_voice_select",
+        help="الأصوات المجانية (Edge) لا تحتاج أي مفتاح API.",
+    )
+    _hf_voice = _HF_VOICE_OPTIONS[_hf_voice_label]
+
+    _hf_key_present = bool(os.getenv("HIGGSFIELD_API_KEY", "").strip())
+    _hf_use_cinematic_bg = st.checkbox(
+        "🎥 خلفيات سينمائية حقيقية (Higgsfield — اختياري، مدفوع)",
+        value=False,
+        key="hf_cinematic_bg_toggle",
+        help=(
+            "بدل الخلفية المتدرّجة المجانية الافتراضية، يولّد خلفية فيديو "
+            "حقيقية لكل مشهد عبر Higgsfield. ⚠️ مزوّد مدفوع (بعكس بقية "
+            "الـPipeline المجاني هنا) — يستهلك رصيدك في Higgsfield. "
+            "يتطلب HIGGSFIELD_API_KEY."
+            + ("" if _hf_key_present else " — غير مُفعَّل حالياً: المفتاح غير موجود بالبيئة.")
+        ),
+        disabled=not _hf_key_present,
     )
 
-    _completed_scenes = [s for s in scenes if s.video_status == "completed" and s.video_url]
-    if not _completed_scenes:
-        st.info(
-            "ℹ️ لا توجد مشاهد مكتملة التوليد بعد. فعّل **Higgsfield API Key** أعلاه "
-            "وانتظر اكتمال توليد المشاهد (🎬) حتى يظهر خيار التجميع والمشاركة هنا."
-        )
-    else:
-        st.caption(f"🎬 عدد المشاهد الجاهزة للتجميع: {len(_completed_scenes)} / {len(scenes)}")
-
-        if st.button("🎬 جمّع الفيديو الوثائقي الكامل", key="hf_assemble_btn", type="primary"):
-            try:
-                from ai.higgsfield_engine import assemble_documentary, DocumentaryAssemblyError
-                with st.spinner("⏳ يُنزّل مقاطع المشاهد ويجمّعها بفيديو واحد... قد يستغرق دقائق"):
-                    st.session_state.hf_assembled_mp4 = assemble_documentary(scenes)
-                st.success("✅ تم تجميع الفيديو الوثائقي الكامل")
-            except DocumentaryAssemblyError as e:
-                st.error(f"⚠️ {e}")
-            except Exception as e:  # noqa: BLE001
-                st.error(f"⚠️ فشل التجميع: {e}")
-
-        _assembled = st.session_state.get("hf_assembled_mp4")
-        if _assembled:
-            st.video(_assembled)
-            st.download_button(
-                "⬇️ تحميل الوثائقي الكامل (mp4)",
-                data=_assembled,
-                file_name=f"{script.title[:40] or 'documentary'}.mp4",
-                mime="video/mp4",
-                key="hf_download_assembled",
+    if st.button("🎬 أنشئ الفيديو الآن", type="primary", key="hf_render_video_btn"):
+        try:
+            _hf_spinner_msg = (
+                "⏳ يولّد السرد الصوتي والخلفيات السينمائية ثم يركّب الفيديو... "
+                "قد يستغرق عدة دقائق"
+                if _hf_use_cinematic_bg else
+                "⏳ يولّد السرد الصوتي ثم يركّب الفيديو... قد يستغرق دقيقة"
             )
+            with st.spinner(_hf_spinner_msg):
+                engine = st.session_state.hf_fable_engine
+                mp4_bytes = engine.render_video(
+                    script, voice=_hf_voice,
+                    use_cinematic_backgrounds=_hf_use_cinematic_bg,
+                )
+            st.session_state.hf_mp4 = mp4_bytes
+            st.success("✅ تم إنتاج الفيديو")
+        except Exception as e:  # noqa: BLE001
+            st.error(f"⚠️ فشل رندر الفيديو: {e}")
 
-            try:
-                from ai.social_platforms import YouTubeAdapter, TikTokAdapter
-            except ImportError as e:  # noqa: BLE001
-                st.caption(f"⚠️ تعذّر تحميل محولات المشاركة: {e}")
-            else:
-                yt = YouTubeAdapter()
-                tk = TikTokAdapter()
-                share_cols = st.columns(2)
+    mp4_bytes = st.session_state.get("hf_mp4")
+    if mp4_bytes:
+        st.video(mp4_bytes)
+        st.download_button(
+            "⬇️ تحميل الفيديو (mp4)",
+            data=mp4_bytes,
+            file_name=f"{(script.title or 'documentary')[:40]}.mp4",
+            mime="video/mp4",
+            key="hf_download_mp4",
+        )
 
-                with share_cols[0]:
-                    st.markdown("**▶️ YouTube**")
-                    yt_ready = yt.is_configured() and yt._can_write()
-                    if not yt_ready:
-                        missing = yt.missing_env() or yt.write_env
-                        st.caption("⚙️ غير مُهيّأ — أضِف بالبيئة (Secrets): " + "، ".join(missing))
-                    else:
-                        yt_title = st.text_input(
-                            "العنوان:", value=script.title[:100], key="hf_yt_upload_title"
-                        )
-                        yt_privacy = st.selectbox(
-                            "الخصوصية:", ["private", "unlisted", "public"],
-                            key="hf_yt_upload_privacy",
-                        )
-                        if st.button("▶️ ارفع على يوتيوب", key="hf_yt_upload_btn", use_container_width=True):
-                            try:
-                                with st.spinner("⏳ يرفع الفيديو على يوتيوب (Resumable Upload)..."):
-                                    video_id = yt.upload_video(
-                                        _assembled,
-                                        title=yt_title,
-                                        description=script.synopsis or script.full_narration[:4500],
-                                        privacy_status=yt_privacy,
-                                    )
-                                st.success(f"✅ تم الرفع! الرابط: https://youtu.be/{video_id}")
-                            except Exception as e:  # noqa: BLE001
-                                st.error(f"⚠️ فشل الرفع على يوتيوب: {e}")
+        # ── مشاركة اجتماعية فعلية (رفع الفيديو) ─────────────────────
+        st.markdown("---")
+        st.markdown("#### 📤 مشاركة اجتماعية فعلية (رفع الفيديو)")
+        try:
+            from ai.social_platforms import YouTubeAdapter, TikTokAdapter
+        except ImportError as e:  # noqa: BLE001
+            st.caption(f"⚠️ تعذّر تحميل محولات المشاركة: {e}")
+        else:
+            yt = YouTubeAdapter()
+            tk = TikTokAdapter()
+            share_cols = st.columns(2)
 
-                with share_cols[1]:
-                    st.markdown("**🎵 TikTok**")
-                    tk_ready = tk.is_configured()
-                    if not tk_ready:
-                        st.caption("⚙️ غير مُهيّأ — أضِف بالبيئة (Secrets): " + "، ".join(tk.missing_env()))
-                    else:
-                        st.caption(
-                            "ℹ️ التطبيقات غير المدقَّقة من TikTok تنشر كـ«خاص بحسابك فقط» "
-                            "(مسودة للمراجعة) حتى يجتاز التطبيق مراجعة TikTok الرسمية."
-                        )
-                        tk_title = st.text_input(
-                            "العنوان:", value=script.title[:150], key="hf_tk_upload_title"
-                        )
-                        if st.button("🎵 ارفع على تيك توك", key="hf_tk_upload_btn", use_container_width=True):
-                            try:
-                                with st.spinner("⏳ يرفع الفيديو على تيك توك..."):
-                                    publish_id = tk.upload_video(_assembled, title=tk_title)
-                                st.success(
-                                    f"✅ تم إرسال الفيديو (publish_id: {publish_id}) — "
-                                    "افتح تطبيق TikTok للتأكد من ظهوره ضمن المسودات/المنشورات."
+            with share_cols[0]:
+                st.markdown("**▶️ YouTube**")
+                yt_ready = yt.is_configured() and yt._can_write()
+                if not yt_ready:
+                    missing = yt.missing_env() or yt.write_env
+                    st.caption("⚙️ غير مُهيّأ — أضِف بالبيئة (Secrets): " + "، ".join(missing))
+                else:
+                    yt_title = st.text_input(
+                        "العنوان:", value=script.title[:100], key="hf_yt_upload_title"
+                    )
+                    yt_privacy = st.selectbox(
+                        "الخصوصية:", ["private", "unlisted", "public"],
+                        key="hf_yt_upload_privacy",
+                    )
+                    if st.button("▶️ ارفع على يوتيوب", key="hf_yt_upload_btn", use_container_width=True):
+                        try:
+                            with st.spinner("⏳ يرفع الفيديو على يوتيوب (Resumable Upload)..."):
+                                video_id = yt.upload_video(
+                                    mp4_bytes,
+                                    title=yt_title,
+                                    description=script.full_narration[:4500],
+                                    privacy_status=yt_privacy,
                                 )
-                            except Exception as e:  # noqa: BLE001
-                                st.error(f"⚠️ فشل الرفع على تيك توك: {e}")
+                            st.success(f"✅ تم الرفع! الرابط: https://youtu.be/{video_id}")
+                        except Exception as e:  # noqa: BLE001
+                            st.error(f"⚠️ فشل الرفع على يوتيوب: {e}")
+
+            with share_cols[1]:
+                st.markdown("**🎵 TikTok**")
+                tk_ready = tk.is_configured()
+                if not tk_ready:
+                    st.caption("⚙️ غير مُهيّأ — أضِف بالبيئة (Secrets): " + "، ".join(tk.missing_env()))
+                else:
+                    st.caption(
+                        "ℹ️ التطبيقات غير المدقَّقة من TikTok تنشر كـ«خاص بحسابك فقط» "
+                        "(مسودة للمراجعة) حتى يجتاز التطبيق مراجعة TikTok الرسمية."
+                    )
+                    tk_title = st.text_input(
+                        "العنوان:", value=script.title[:150], key="hf_tk_upload_title"
+                    )
+                    if st.button("🎵 ارفع على تيك توك", key="hf_tk_upload_btn", use_container_width=True):
+                        try:
+                            with st.spinner("⏳ يرفع الفيديو على تيك توك..."):
+                                publish_id = tk.upload_video(mp4_bytes, title=tk_title)
+                            st.success(
+                                f"✅ تم إرسال الفيديو (publish_id: {publish_id}) — "
+                                "افتح تطبيق TikTok للتأكد من ظهوره ضمن المسودات/المنشورات."
+                            )
+                        except Exception as e:  # noqa: BLE001
+                            st.error(f"⚠️ فشل الرفع على تيك توك: {e}")
+
 
 
 def render_training():
