@@ -3253,17 +3253,25 @@ def render_qa():
         with st.expander("🧠 لماذا هذه الإجابة؟"):
             st.markdown(result["reasoning_trace"])
 
-    # ── صور توضيحية (اختياري — ai/image_sources.py) ──
+    # ── صور توضيحية (اختياري — ai/image_sources.py) — بهوية زجاجية موحَّدة ──
     images = result.get("images") or []
     if images:
+        st.markdown('<div class="section-header">🖼️ صور توضيحية</div>', unsafe_allow_html=True)
         img_cols = st.columns(len(images))
         for col, img in zip(img_cols, images):
             with col:
-                try:
-                    st.image(img["url"], use_container_width=True,
-                              caption=f"المصدر: {img.get('source', '')}")
-                except Exception:
-                    pass  # فشل تحميل صورة واحدة لا يكسر باقي الصفحة
+                url = img.get("url", "")
+                source_label = img.get("source", "")
+                if url.startswith("https://"):  # فحص أمان بسيط قبل الحقن في HTML
+                    st.markdown(f"""
+                    <div class="glass-card" style="padding:0.6rem; text-align:center;">
+                        <img src="{url}" style="width:100%; border-radius:12px; display:block;"
+                             loading="lazy" />
+                        <div style="margin-top:0.5rem;">
+                            <span class="badge badge-green">المصدر: {source_label}</span>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
     # ── تغذية راجعة: تدريب LoRA خفيف من ملاحظة المستخدم (لا يمسّ الأوزان الأساسية) ──
     _fb_key = f"qa_feedback_{hash(question)}"
