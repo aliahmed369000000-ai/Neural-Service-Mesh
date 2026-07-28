@@ -831,7 +831,35 @@ def extract_concepts_from_question(question: str, concepts_db: Dict[str, Any]) -
             if c in META_CONCEPTS:
                 matches[c] *= 0.3
 
-    sorted_matches = sorted(matches.items(), key=lambda x: (-x[1], -concepts_db.get(x[0], {}).get("frequency", 0)))
+    # ── ترتيب أفضل قبل إرسال المفاهيم للـLLM/العلاقات ───────────────────
+    # تعزيز تماسك موضوعي (cluster coherence): عند تعادل درجات المطابقة
+    # النصية (شائع هنا لأن score قيم منفصلة: 1.0/0.85/0.8/0.7/0.4)، نفضّل
+    # مفهوماً يشارك cluster أعلى مطابقة — يقلّل ضجيج مطابقات حرفية عرضية
+    # (مثل تشابه أول 3 حروف بشرط تقارب الطول) لا علاقة موضوعية حقيقية
+    # لها بمحور السؤال.
+    #
+    # ملاحظة: جُرِّب أيضاً استبدال frequency الخام بـ strength (log-
+    # normalized) كعامل ترجيح ثانٍ، لكن اختبار حقيقي على بيانات CKG كشف
+    # أن strength تتشبّع قرب 1.0 لمعظم المفاهيم متوسطة-عالية التكرار (لأنها
+    # مُطبَّعة نسبةً لأعلى تكرار في كامل الـCKG، وهو ضخم جداً) — فتفقد
+    # الدقة بالضبط حيث نحتاجها، وأنتجت ترتيباً أسوأ فعلياً في حالة حقيقية
+    # (سؤال عن "الإيمان": رفعت "بالله"/"إلآ" فوق "إيمان" نفسها). لذا أُبقي
+    # frequency الخام كعامل الترجيح الثاني كما كان — مُثبَت الصحة.
+    if matches:
+        top_name = max(matches, key=lambda c: matches[c])
+        top_cluster = concepts_db.get(top_name, {}).get("cluster")
+    else:
+        top_cluster = None
+
+    def _rank_key(name: str):
+        info = concepts_db.get(name, {})
+        coherence_bonus = (
+            0.05 if top_cluster and info.get("cluster") == top_cluster else 0.0
+        )
+        return (-(matches[name] + coherence_bonus), -info.get("frequency", 0))
+
+    sorted_names = sorted(matches.keys(), key=_rank_key)
+    sorted_matches = [(name, matches[name]) for name in sorted_names]
     return sorted_matches
 
 
