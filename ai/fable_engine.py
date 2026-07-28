@@ -214,6 +214,17 @@ class NarrativeMemory:
                     FOREIGN KEY (session_id) REFERENCES fable_sessions(session_id)
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS shorts_history (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title         TEXT NOT NULL,
+                    format        TEXT NOT NULL DEFAULT 'شورت',
+                    segments_json TEXT NOT NULL,
+                    total_seconds INTEGER NOT NULL DEFAULT 0,
+                    source_excerpt TEXT DEFAULT '',
+                    created_at    REAL NOT NULL
+                )
+            """)
             conn.commit()
 
     def create_session(self, session_id: str, mode: str, character: str) -> None:
@@ -293,6 +304,36 @@ class NarrativeMemory:
                 (session_id,),
             ).fetchone()
             return row["content"] if row else ""
+
+    def save_short(
+        self, title: str, format_: str, segments: List[dict],
+        total_seconds: int, source_excerpt: str = "",
+    ) -> int:
+        """يحفظ سيناريو Shorts/وثائقي مولَّد (بدون الصوت/الفيديو — تلك عابرة
+        وتُعاد عند الطلب) ليمكن استرجاعه لاحقاً من المكتبة بدون تكلفة LLM
+        إضافية. يعيد المعرّف الداخلي للسجل المحفوظ."""
+        with self._conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO shorts_history "
+                "(title, format, segments_json, total_seconds, source_excerpt, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (title, format_, json.dumps(segments, ensure_ascii=False),
+                 total_seconds, (source_excerpt or "")[:300], time.time()),
+            )
+            conn.commit()
+            return cur.lastrowid
+
+    def list_recent_shorts(self, limit: int = 20) -> List[sqlite3.Row]:
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT * FROM shorts_history ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+
+    def delete_short(self, short_id: int) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM shorts_history WHERE id = ?", (short_id,))
+            conn.commit()
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -665,7 +706,7 @@ class FableEngine:
         segments = self._parse_explainer_segments(result.text)
         title = topic.strip()
 
-        return ExplainerScript(
+        script = ExplainerScript(
             topic=topic,
             title=title,
             segments=segments,
@@ -673,6 +714,8 @@ class FableEngine:
             error=result.error,
             format="وثائقي",
         )
+        self._save_script_to_history(script, source_excerpt=topic)
+        return script
 
     # ── ⚡ Shorts — فيديو قصير عمودي (~دقيقة واحدة) بسرد صوتي ────────────
     # مستوحى من فكرة NotebookLM: Shorts (تحويل مصدر/موضوع إلى فيديو رأسي
@@ -726,7 +769,7 @@ class FableEngine:
         else:
             title = _raw_title or "فيديو قصير"
 
-        return ExplainerScript(
+        script = ExplainerScript(
             topic=source_text,
             title=title,
             segments=segments,
@@ -734,6 +777,24 @@ class FableEngine:
             error=result.error,
             format="شورت",
         )
+        self._save_script_to_history(script, source_excerpt=source_text)
+        return script
+
+    def _save_script_to_history(self, script: "ExplainerScript", source_excerpt: str = "") -> None:
+        """يحفظ سيناريو Shorts/وثائقي في shorts_history — best-effort، لا
+        يرفع استثناءً أبداً (فشل الحفظ لا يجوز أن يُفشل التوليد نفسه)."""
+        try:
+            segs = [
+                {"index": s.index, "narration": s.narration,
+                 "visual_notes": s.visual_notes, "est_seconds": s.est_seconds}
+                for s in script.segments
+            ]
+            self.memory.save_short(
+                title=script.title, format_=script.format, segments=segs,
+                total_seconds=script.total_seconds, source_excerpt=source_excerpt,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"FableEngine: فشل حفظ السيناريو بالمكتبة: {e}")
 
     @staticmethod
     def _parse_explainer_segments(raw_text: str) -> List[ExplainerSegment]:
