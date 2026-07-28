@@ -335,6 +335,13 @@ try:
 except Exception:
     _FABLE_OK = False
 
+# ── تصدير PDF (معزول: فشله لا يعطّل بقية تبويب 🎭 إبداع) ──────────────────
+try:
+    from ai.pdf_export import story_to_pdf as _story_to_pdf, poem_to_pdf as _poem_to_pdf
+    _PDF_EXPORT_OK = True
+except Exception:
+    _PDF_EXPORT_OK = False
+
 # ── وحدات الترابط الجديدة ────────────────────────────────────────────────
 try:
     from ai.web_search_tool import web_search as _web_search
@@ -5888,7 +5895,7 @@ def render_fable():
                 {cur.text}
             </div>
             """, unsafe_allow_html=True)
-            _cc1, _cc2 = st.columns(2)
+            _cc1, _cc2, _cc3 = st.columns(3)
             with _cc1:
                 _copy_button(cur.text, key="fable_chapter")
             with _cc2:
@@ -5907,6 +5914,25 @@ def render_fable():
                     key="fable_story_download",
                     use_container_width=True,
                 )
+            with _cc3:
+                if _PDF_EXPORT_OK:
+                    try:
+                        _story_pdf_bytes = _story_to_pdf(
+                            title="قصتي", mode=cur.mode, character=cur.character,
+                            full_text=_full_story_text,
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        _story_pdf_bytes = None
+                        st.caption(f"⚠️ تعذّر تجهيز PDF: {e}")
+                    if _story_pdf_bytes:
+                        st.download_button(
+                            "📄 تحميل PDF",
+                            data=_story_pdf_bytes,
+                            file_name="قصتي.pdf",
+                            mime="application/pdf",
+                            key="fable_story_pdf_download",
+                            use_container_width=True,
+                        )
 
             if cur.error:
                 st.caption(f"⚠️ ملاحظة تقنية: {cur.error}")
@@ -6024,7 +6050,7 @@ def render_fable():
             </div>
             """, unsafe_allow_html=True)
             st.caption(f"المزوّد: {poem.provider}")
-            _pc1, _pc2, _pc3, _pc4 = st.columns(4)
+            _pc1, _pc2, _pc3, _pc4, _pc5 = st.columns(5)
             with _pc1:
                 _copy_button(poem.text, key="fable_poem")
             with _pc2:
@@ -6036,6 +6062,24 @@ def render_fable():
                     key="fable_poem_download",
                     use_container_width=True,
                 )
+            with _pc5:
+                if _PDF_EXPORT_OK:
+                    try:
+                        _poem_pdf_bytes = _poem_to_pdf(
+                            title="قصيدتي", topic=topic, meter=meter, poem_text=poem.text,
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        _poem_pdf_bytes = None
+                        st.caption(f"⚠️ تعذّر تجهيز PDF: {e}")
+                    if _poem_pdf_bytes:
+                        st.download_button(
+                            "📄 تحميل PDF",
+                            data=_poem_pdf_bytes,
+                            file_name="قصيدتي.pdf",
+                            mime="application/pdf",
+                            key="fable_poem_pdf_download",
+                            use_container_width=True,
+                        )
             with _pc3:
                 if st.button("🔄 أعد التوليد", key="fable_poem_regenerate", use_container_width=True):
                     _run_poem_generation(

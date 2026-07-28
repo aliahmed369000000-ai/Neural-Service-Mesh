@@ -17,6 +17,7 @@ pypdf
 pytesseract
 python-bidi
 qdrant-client
+reportlab
 requests>=2.31.0
 requests_oauthlib
 scikit-learn
