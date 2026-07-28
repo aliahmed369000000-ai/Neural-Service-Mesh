@@ -148,3 +148,62 @@ def poem_to_pdf(title: str, topic: str, meter: str, poem_text: str) -> bytes:
 
     doc.build(story)
     return buf.getvalue()
+
+
+def script_to_pdf(
+    title: str, format_label: str, segments: List[dict], total_seconds: int = 0,
+) -> bytes:
+    """يحوّل سيناريو Shorts/وثائقي (قائمة لقطات) إلى PDF مرجعي — كل لقطة
+    برقمها، نص سردها، وصف مشهدها البصري، ومدتها التقديرية. segments هي
+    قائمة قواميس {"index", "narration", "visual_notes", "est_seconds"}
+    (نفس بنية shorts_history.segments_json)."""
+    font = _ensure_font()
+    buf = io.BytesIO()
+    doc = _base_doc(buf)
+
+    title_style = ParagraphStyle(
+        "ArabicTitle", fontName=font, fontSize=18, leading=26,
+        alignment=TA_CENTER, spaceAfter=6,
+    )
+    subtitle_style = ParagraphStyle(
+        "ArabicSubtitle", fontName=font, fontSize=11, leading=16,
+        alignment=TA_CENTER, textColor=HexColor("#666666"), spaceAfter=18,
+    )
+    seg_label_style = ParagraphStyle(
+        "ArabicSegLabel", fontName=font, fontSize=11, leading=16,
+        alignment=TA_RIGHT, textColor=HexColor("#8a6d1f"), spaceAfter=2,
+    )
+    narration_style = ParagraphStyle(
+        "ArabicNarration", fontName=font, fontSize=13, leading=22,
+        alignment=TA_RIGHT, spaceAfter=2,
+    )
+    visual_style = ParagraphStyle(
+        "ArabicVisual", fontName=font, fontSize=10.5, leading=17,
+        alignment=TA_RIGHT, textColor=HexColor("#555555"), spaceAfter=14,
+    )
+
+    story = [Paragraph(_shape(title or "سيناريو"), title_style)]
+    subtitle_parts = [format_label or ""]
+    if total_seconds:
+        subtitle_parts.append(f"~{total_seconds} ثانية")
+    subtitle = " · ".join(p for p in subtitle_parts if p)
+    if subtitle:
+        story.append(Paragraph(_shape(subtitle), subtitle_style))
+    story.append(Spacer(1, 8))
+
+    for seg in segments:
+        idx = seg.get("index", "")
+        secs = seg.get("est_seconds", "")
+        narration = (seg.get("narration") or "").strip()
+        visual = (seg.get("visual_notes") or "").strip()
+        story.append(Paragraph(_shape(f"لقطة {idx} — ~{secs} ثانية"), seg_label_style))
+        if narration:
+            story.append(Paragraph(_shape(f"السرد: {narration}"), narration_style))
+        if visual:
+            story.append(Paragraph(_shape(f"🎞️ اللقطة: {visual}"), visual_style))
+
+    if not segments:
+        story.append(Paragraph(_shape("(لا يوجد سيناريو)"), narration_style))
+
+    doc.build(story)
+    return buf.getvalue()

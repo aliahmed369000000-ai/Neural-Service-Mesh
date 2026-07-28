@@ -337,7 +337,11 @@ except Exception:
 
 # ── تصدير PDF (معزول: فشله لا يعطّل بقية تبويب 🎭 إبداع) ──────────────────
 try:
-    from ai.pdf_export import story_to_pdf as _story_to_pdf, poem_to_pdf as _poem_to_pdf
+    from ai.pdf_export import (
+        story_to_pdf as _story_to_pdf,
+        poem_to_pdf as _poem_to_pdf,
+        script_to_pdf as _script_to_pdf,
+    )
     _PDF_EXPORT_OK = True
 except Exception:
     _PDF_EXPORT_OK = False
@@ -6245,13 +6249,40 @@ def render_fable():
 
             with st.expander("📋 النص الكامل للسرد"):
                 st.text_area("النص الكامل:", value=short.full_narration, height=150, key="shorts_full_text")
-                st.download_button(
-                    "⬇️ تحميل السيناريو كملف نصي",
-                    data=short.full_narration,
-                    file_name=f"{(short.title or 'shorts')[:40]}.txt",
-                    mime="text/plain",
-                    key="shorts_download",
-                )
+                _sc1, _sc2 = st.columns(2)
+                with _sc1:
+                    st.download_button(
+                        "⬇️ تحميل السيناريو كملف نصي",
+                        data=short.full_narration,
+                        file_name=f"{(short.title or 'shorts')[:40]}.txt",
+                        mime="text/plain",
+                        key="shorts_download",
+                        use_container_width=True,
+                    )
+                with _sc2:
+                    if _PDF_EXPORT_OK:
+                        try:
+                            _shorts_pdf_bytes = _script_to_pdf(
+                                title=short.title, format_label=short.format,
+                                segments=[
+                                    {"index": s.index, "narration": s.narration,
+                                     "visual_notes": s.visual_notes, "est_seconds": s.est_seconds}
+                                    for s in short.segments
+                                ],
+                                total_seconds=short.total_seconds,
+                            )
+                        except Exception as e:  # noqa: BLE001
+                            _shorts_pdf_bytes = None
+                            st.caption(f"⚠️ تعذّر تجهيز PDF: {e}")
+                        if _shorts_pdf_bytes:
+                            st.download_button(
+                                "📄 تحميل السيناريو PDF",
+                                data=_shorts_pdf_bytes,
+                                file_name=f"{(short.title or 'shorts')[:40]}.pdf",
+                                mime="application/pdf",
+                                key="shorts_pdf_download",
+                                use_container_width=True,
+                            )
 
             st.divider()
             st.markdown("#### 🎬 رندر الفيديو الفعلي (mp4)")
