@@ -372,6 +372,12 @@ except Exception:
     _CHECKPOINT_OK = False
 
 try:
+    from ai import github_sync as _github_sync
+    _GITHUB_SYNC_OK = True
+except Exception:
+    _GITHUB_SYNC_OK = False
+
+try:
     from ai.autotune_feedback import (
         FeedbackRecord as _AFFeedbackRecord,
         NEUTRAL_PARAMS as _AF_NEUTRAL_PARAMS,
@@ -2363,6 +2369,14 @@ def save_real_checkpoint() -> Optional[str]:
         mesh   = _RealMeshSnapshot(episodic_engine=engine, ckg=ckg)
         bc     = BrainCheckpoint(checkpoint_dir=str(CHECKPOINTS_DIR))
         path   = bc.save(mesh)
+        # دفع تلقائي بالخلفية لـ GitHub — لا يرفع استثناء ولا يوقف الحفظ
+        # المحلي إن كانت متغيرات GITHUB_TOKEN/GITHUB_REMOTE غير معرَّفة
+        # (github_sync.push_now يتحقق من ذلك داخلياً ويتجاوز بهدوء).
+        if path and _GITHUB_SYNC_OK:
+            try:
+                _github_sync.push_background(tag=Path(path).stem)
+            except Exception:
+                pass
         return path
     except Exception:
         return None
@@ -3933,6 +3947,17 @@ def render_training():
                 st.rerun()
             else:
                 st.toast("⚠️ تعذّر الحفظ — راجع السجلّات", icon="⚠️")
+
+    if _GITHUB_SYNC_OK:
+        _gh_status = _github_sync.status()
+        if _gh_status.get("token_set"):
+            if _gh_status.get("push_count", 0) > 0:
+                if _gh_status.get("last_push_ok"):
+                    st.caption(f"🔗 GitHub sync: آخر رفع ناجح ({_gh_status.get('last_push_ts', '')})")
+                else:
+                    st.caption(f"🔗 GitHub sync: آخر محاولة فشلت — {_gh_status.get('last_push_msg', '')}")
+            else:
+                st.caption("🔗 GitHub sync: جاهز (لم يُنفَّذ أي رفع بعد)")
 
     if not _is_active:
         st.markdown("""
