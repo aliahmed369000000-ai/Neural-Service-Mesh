@@ -876,6 +876,19 @@ class NSMAgent:
                 pass
         return self._llm_fallback
 
+    def _get_autonomous_core(self):
+        """يربط طبقات الحوكمة/المناعة/الأخلاقيات (ai/autonomous_core.py) بشكل كسول وآمن."""
+        core = getattr(self, "_autonomous_core", None)
+        if core is None:
+            try:
+                from ai.autonomous_core import get_autonomous_core
+                core = get_autonomous_core()
+                self._autonomous_core = core
+            except Exception:
+                self._autonomous_core = None
+                return None
+        return core
+
     # ══════════════════════════════════════════════════════════════
     # 🆕 v3: run_stream — Streaming Generator
     # ══════════════════════════════════════════════════════════════
@@ -903,6 +916,22 @@ class NSMAgent:
                 yield format_status_report()
             except Exception:
                 yield "⚠️ نظام المهام المتعددة غير متاح حالياً."
+            return
+
+        # 🆕 طبقة الحوكمة/المناعة/الأخلاقيات — استعلام مباشر عن حالتها
+        _gov_triggers = ("حالة الحوكمة", "حالة النظام الذاتي", "حالة الأمان الذاتي")
+        if any(user_input.strip().startswith(t) or user_input.strip() == t for t in _gov_triggers):
+            core = self._get_autonomous_core()
+            if core is None:
+                yield "⚠️ طبقة الحوكمة/المناعة/الأخلاقيات غير متاحة حالياً."
+            else:
+                status = core.get_status()
+                yield (
+                    "**حالة طبقة الأمان الذاتي:**\n"
+                    f"- الحوكمة (Governance): {'✅ مفعّلة' if status['governance_active'] else '❌ غير مفعّلة'}\n"
+                    f"- المناعة (Immune System): {'✅ مفعّلة' if status['immune_active'] else '❌ غير مفعّلة'}\n"
+                    f"- الأخلاقيات التطورية (Evolution Ethics): {'✅ مفعّلة' if status['ethics_active'] else '❌ غير مفعّلة'}"
+                )
             return
 
         # 🆕 Planning Engine — يكشف طلبات بناء التطبيقات
