@@ -60,6 +60,63 @@ _LORA_FEEDBACK_COUNT = 0
 LORA_SAVE_DIR = "models/lora_feedback_v1"
 LORA_SAVE_EVERY = 10  # حفظ الـadapter كل 10 ملاحظات إيجابية
 
+_LORA_LOSS_WINDOW: List[float] = []  # آخر قيم loss لتقدير الجودة عند الحفظ
+
+_ROLLBACK_GUARD = None
+_ROLLBACK_GUARD_TRIED = False
+
+
+def _get_lora_rollback_guard():
+    """
+    يُحمِّل CheckpointGuard (ai/rollback_guard.py) مرة واحدة. يُرجع None عند
+    أي فشل — عندها يعود الحفظ لسلوكه القديم بلا حماية (fallback آمن، لا كسر).
+    """
+    global _ROLLBACK_GUARD, _ROLLBACK_GUARD_TRIED
+    if _ROLLBACK_GUARD_TRIED:
+        return _ROLLBACK_GUARD if _ROLLBACK_GUARD is not False else None
+    _ROLLBACK_GUARD_TRIED = True
+    try:
+        from ai.rollback_guard import CheckpointGuard
+        _ROLLBACK_GUARD = CheckpointGuard(asset="lora_feedback_v1")
+        logger.info("[qa_engine] CheckpointGuard محمَّل — حفظ LoRA محميّ من التراجع الآن")
+    except Exception as e:
+        _ROLLBACK_GUARD = False
+        logger.warning(f"[qa_engine] تعذّر تحميل rollback_guard — الحفظ سيتم بلا حماية: {e}")
+    return _ROLLBACK_GUARD if _ROLLBACK_GUARD is not False else None
+
+
+def _save_lora_with_guard(lora) -> None:
+    """
+    يحفظ LoRA adapter عبر CheckpointGuard إن تحمَّل بنجاح: لقطة احتياطية قبل
+    الحفظ، وتقييم متوسط الخسارة الأخيرة بعده — لو تدهورت الجودة عن آخر نسخة
+    مقبولة يُستعاد الملف القديم تلقائياً بدل الكتابة فوقه (هذا بالضبط ما كان
+    مفقوداً سابقاً حسب توثيق rollback_guard.py الأصلي). عند فشل تحميل الحارس
+    نفسه، يحفظ مباشرة كما كان يحدث دائماً — لا يتوقف شيء بسبب هذه الإضافة.
+    """
+    guard = _get_lora_rollback_guard()
+    if guard is None:
+        lora.save(LORA_SAVE_DIR)
+        return
+
+    import glob as _glob
+    files = sorted(_glob.glob(f"{LORA_SAVE_DIR}_*"))
+
+    def _eval_fn() -> float:
+        if not _LORA_LOSS_WINDOW:
+            return 0.0
+        import statistics
+        # الأعلى = أفضل حسب واجهة CheckpointGuard → نعكس إشارة الخسارة
+        return -statistics.mean(_LORA_LOSS_WINDOW[-LORA_SAVE_EVERY:])
+
+    decision = guard.guarded_update(
+        files=files,
+        update_fn=lambda: lora.save(LORA_SAVE_DIR),
+        eval_fn=_eval_fn,
+        tolerance=-0.1,  # يسمح بتذبذب طبيعي في الخسارة قبل اعتباره تراجعاً حقيقياً
+        label=f"lora_feedback_step_{_LORA_FEEDBACK_COUNT}",
+    )
+    logger.info(f"[qa_engine] {decision.summary()}")
+
 
 def _get_lora_adapter():
     """
@@ -108,11 +165,15 @@ def record_positive_feedback(question: str, answer_summary: str = "", lr: float 
         ids, targets = lora.prepare_lm_sample(text)
         if ids is None:
             return False
-        lora.train_step(ids, targets, lr=lr)
+        loss = lora.train_step(ids, targets, lr=lr)
+        _LORA_LOSS_WINDOW.append(float(loss))
+        if len(_LORA_LOSS_WINDOW) > LORA_SAVE_EVERY * 3:
+            del _LORA_LOSS_WINDOW[: -LORA_SAVE_EVERY * 3]
+
         _LORA_FEEDBACK_COUNT += 1
         if _LORA_FEEDBACK_COUNT % LORA_SAVE_EVERY == 0:
-            lora.save(LORA_SAVE_DIR)
-            logger.info(f"[qa_engine] LoRA adapter محفوظ بعد {_LORA_FEEDBACK_COUNT} ملاحظة")
+            _save_lora_with_guard(lora)
+            logger.info(f"[qa_engine] LoRA adapter محفوظ (محمي) بعد {_LORA_FEEDBACK_COUNT} ملاحظة")
         return True
     except Exception as e:
         logger.warning(f"[qa_engine] فشل تسجيل ملاحظة LoRA: {e}")
