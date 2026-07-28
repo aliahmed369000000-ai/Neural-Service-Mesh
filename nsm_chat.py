@@ -59,6 +59,19 @@ except Exception as _llm_err:
     print(f"⚠ LLM Fallback غير متاح: {_llm_err}")
 
 # ══════════════════════════════════════════════════════════════════
+# Quran Grounding — تثبيت الاستشهادات القرآنية على النص الموثوق
+# (يمنع اقتباس آيات من ذاكرة الـLLM بدل النص الأصلي المُتحقَّق منه)
+# ══════════════════════════════════════════════════════════════════
+try:
+    from ai.quran_grounding import build_grounding_context as _build_quran_context
+    _HAS_QURAN_GROUNDING = True
+    print("✓ تثبيت القرآن (Quran Grounding) مُفعَّل")
+except Exception as _qg_err:
+    _HAS_QURAN_GROUNDING = False
+    _build_quran_context = None
+    print(f"⚠ تثبيت القرآن غير متاح: {_qg_err}")
+
+# ══════════════════════════════════════════════════════════════════
 # Code Agent — أوامر التحكم في المشروع
 # ══════════════════════════════════════════════════════════════════
 try:
@@ -293,12 +306,24 @@ class NSMChat:
                 self.history.append((t, agent_response))
                 return agent_response
 
+        # ── تثبيت قرآني: إن كان السؤال يتعلق بآية معيّنة أو بمصطلح قرآني،
+        # نُرفق النص الأصلي الموثوق (من quran.json) مع السؤال — يبقى `t`
+        # الأصلي هو ما يُحفظ في السجل، والنسخة المُثبَّتة تذهب للـLLM فقط.
+        t_for_llm = t
+        if _HAS_QURAN_GROUNDING and _build_quran_context is not None:
+            try:
+                _quran_ctx = _build_quran_context(t)
+            except Exception:
+                _quran_ctx = None
+            if _quran_ctx:
+                t_for_llm = f"{_quran_ctx}\n\n[سؤال المستخدم]\n{t}"
+
         # ── NSM Agent / LLM — كل شيء آخر يذهب هنا ──
         if _HAS_NSM_AGENT and _nsm_agent:
             _nsm_agent.available = _nsm_agent._check_available()
 
         if _HAS_NSM_AGENT and _nsm_agent and _nsm_agent.available:
-            response = _nsm_agent.run(t)
+            response = _nsm_agent.run(t_for_llm)
             self._last_source = "nsm_agent"
             self.history.append((t, response))
             return response
@@ -312,7 +337,7 @@ class NSMChat:
                     for i, (u, a) in enumerate(self.history[-4:])
                 ]
                 llm_result = _llm_instance.generate(
-                    t, history=history_for_llm, system_prompt=system_prompt
+                    t_for_llm, history=history_for_llm, system_prompt=system_prompt
                 )
                 answer = llm_result.text
                 self._last_source = f"llm:{llm_result.provider.value}"
