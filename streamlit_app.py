@@ -6183,13 +6183,40 @@ def render_fable():
 
             with st.expander("📋 النص الكامل للسرد (لنسخه إلى أداة التعليق الصوتي)"):
                 st.text_area("النص الكامل:", value=script.full_narration, height=200)
-                st.download_button(
-                    "⬇️ تحميل السيناريو كملف نصي",
-                    data=script.full_narration,
-                    file_name=f"{(script.title or 'سيناريو')[:40]}.txt",
-                    mime="text/plain",
-                    key="explainer_download",
-                )
+                _ec1, _ec2 = st.columns(2)
+                with _ec1:
+                    st.download_button(
+                        "⬇️ تحميل السيناريو كملف نصي",
+                        data=script.full_narration,
+                        file_name=f"{(script.title or 'سيناريو')[:40]}.txt",
+                        mime="text/plain",
+                        key="explainer_download",
+                        use_container_width=True,
+                    )
+                with _ec2:
+                    if _PDF_EXPORT_OK:
+                        try:
+                            _explainer_pdf_bytes = _script_to_pdf(
+                                title=script.title, format_label=script.format,
+                                segments=[
+                                    {"index": s.index, "narration": s.narration,
+                                     "visual_notes": s.visual_notes, "est_seconds": s.est_seconds}
+                                    for s in script.segments
+                                ],
+                                total_seconds=script.total_seconds,
+                            )
+                        except Exception as e:  # noqa: BLE001
+                            _explainer_pdf_bytes = None
+                            st.caption(f"⚠️ تعذّر تجهيز PDF: {e}")
+                        if _explainer_pdf_bytes:
+                            st.download_button(
+                                "📄 تحميل السيناريو PDF",
+                                data=_explainer_pdf_bytes,
+                                file_name=f"{(script.title or 'سيناريو')[:40]}.pdf",
+                                mime="application/pdf",
+                                key="explainer_pdf_download",
+                                use_container_width=True,
+                            )
 
     # ══════════════════ ⚡ Shorts (فيديو قصير عمودي) ══════════════════
     with shorts_tab:
