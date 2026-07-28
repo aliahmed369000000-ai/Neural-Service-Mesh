@@ -7968,7 +7968,14 @@ def _render_agent_page(category):
 
         with st.spinner(f"⟳ {category.title} يفكّر..."):
             response = bot.chat(_query, force_web=web_toggle, source="hub")
-        st.session_state[msg_key].append(("bot", response, bot.last_provider_badge(), datetime.now().strftime("%H:%M")))
+        badge = bot.last_provider_badge()
+        try:
+            from ai.response_quality import score_response
+            _q = score_response(response, query=text.strip())
+            badge = f"{badge} · 🔎 {_q.as_percent()}٪ {_q.label}" if badge else f"🔎 {_q.as_percent()}٪ {_q.label}"
+        except Exception:
+            pass  # تقييم الجودة إضافي وغير حرج — أي فشل فيه لا يجب أن يُسقِط الرد نفسه
+        st.session_state[msg_key].append(("bot", response, badge, datetime.now().strftime("%H:%M")))
         st.session_state[cnt_key] += 1
         st.rerun()
 
