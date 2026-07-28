@@ -327,7 +327,7 @@ try:
     from ai.llm_fallback import LLMFallback as _FableLLMFallback
     from ai.fable_engine import (
         FableEngine, FableChapter, STORY_MODES, CHARACTERS, ARABIC_METERS,
-        ISLAMIC_VALUES,
+        ISLAMIC_VALUES, ExplainerScript, ExplainerSegment,
         DEFAULT_MODE as FABLE_DEFAULT_MODE,
         DEFAULT_CHARACTER as FABLE_DEFAULT_CHARACTER,
     )
@@ -6501,6 +6501,67 @@ def render_fable():
                             {full_text}
                         </div>
                         """, unsafe_allow_html=True)
+
+        st.divider()
+        st.markdown('<div class="section-header">🎬 سيناريوهات Shorts/الوثائقي المحفوظة</div>',
+                    unsafe_allow_html=True)
+        st.markdown(
+            '<p style="color:var(--text-muted)">كل سيناريو مولَّد من تبويبَي 🎤 وثائقي و🎬 Shorts '
+            'يُحفظ تلقائياً هنا (بدون الصوت/الفيديو) — يمكنك إعادة استخدامه لرندر فيديو جديد '
+            'دون توليد سيناريو جديد (يوفّر استدعاء LLM).</p>',
+            unsafe_allow_html=True,
+        )
+        try:
+            shorts_history = engine.memory.list_recent_shorts(limit=30)
+        except Exception as e:  # noqa: BLE001
+            shorts_history = []
+            st.error(f"⚠️ تعذّر قراءة سيناريوهات Shorts المحفوظة: {e}")
+
+        if not shorts_history:
+            st.info("📭 لا توجد سيناريوهات محفوظة بعد. أنشئ واحداً من تبويب «🎤 وثائقي» أو «🎬 Shorts».")
+        else:
+            for sh_row in shorts_history:
+                sh_id = sh_row["id"]
+                sh_emoji = "🎬" if sh_row["format"] == "شورت" else "🎤"
+                try:
+                    sh_created = datetime.fromtimestamp(sh_row["created_at"]).strftime("%Y-%m-%d %H:%M")
+                except Exception:  # noqa: BLE001
+                    sh_created = ""
+                sh_header = f"{sh_emoji} {sh_row['title']} · ~{sh_row['total_seconds']} ثانية — {sh_created}"
+                with st.expander(sh_header):
+                    if sh_row["source_excerpt"]:
+                        st.caption(f"المصدر: {sh_row['source_excerpt'][:150]}")
+                    sh_col_a, sh_col_b = st.columns(2)
+                    with sh_col_a:
+                        if st.button("📂 استخدم هذا السيناريو", key=f"lib_shorts_use_{sh_id}", use_container_width=True):
+                            try:
+                                _segs_data = json.loads(sh_row["segments_json"])
+                                _rebuilt_segments = [
+                                    ExplainerSegment(
+                                        index=s["index"], narration=s["narration"],
+                                        visual_notes=s["visual_notes"], est_seconds=s["est_seconds"],
+                                    ) for s in _segs_data
+                                ]
+                                st.session_state.shorts_script = ExplainerScript(
+                                    topic=sh_row["source_excerpt"], title=sh_row["title"],
+                                    segments=_rebuilt_segments, provider="محفوظ من المكتبة",
+                                    format=sh_row["format"],
+                                )
+                                st.session_state.shorts_mp4 = None  # فيديو جديد يحتاج رندر من جديد
+                            except Exception as e:  # noqa: BLE001
+                                st.error(f"⚠️ تعذّر تحميل السيناريو. (تفصيل تقني: {e})")
+                            else:
+                                st.success("✅ تم تحميل السيناريو — افتح تبويب «🎬 Shorts» لرندر الفيديو.")
+                                st.rerun()
+                    with sh_col_b:
+                        if st.button("🗑️ حذف", key=f"lib_shorts_delete_{sh_id}", use_container_width=True):
+                            try:
+                                engine.memory.delete_short(sh_id)
+                            except Exception as e:  # noqa: BLE001
+                                st.error(f"⚠️ تعذّر الحذف. (تفصيل تقني: {e})")
+                            else:
+                                st.success("✅ تم الحذف.")
+                                st.rerun()
 
 
 # ══════════════════════════════════════════════════════════════════════════
