@@ -6346,7 +6346,7 @@ def render_fable():
         )
 
         try:
-            sessions = engine.memory.list_recent_sessions(limit=30)
+            sessions = engine.memory.list_recent_sessions(limit=100)
         except Exception as e:  # noqa: BLE001
             sessions = []
             st.error(f"⚠️ تعذّر قراءة مكتبة القصص: {e}")
@@ -6357,7 +6357,18 @@ def render_fable():
                 "وستظهر هنا تلقائياً بمجرد إنشاء الفصل الأول."
             )
         else:
-            st.caption(f"📚 عدد القصص المحفوظة: {len(sessions)}")
+            _lib_modes_present = sorted({s["mode"] for s in sessions if s["mode"]})
+            _lib_filter = st.multiselect(
+                "🔎 فلترة حسب النمط:",
+                options=_lib_modes_present,
+                format_func=lambda m: f"{STORY_MODES.get(m, {}).get('emoji', '📖')} {m}",
+                key="lib_mode_filter",
+                placeholder="كل الأنماط",
+            )
+            if _lib_filter:
+                sessions = [s for s in sessions if s["mode"] in _lib_filter]
+
+            st.caption(f"📚 عدد القصص المعروضة: {len(sessions)}")
             for sess in sessions:
                 session_id = sess["session_id"]
                 mode = sess["mode"]
