@@ -3147,6 +3147,20 @@ def render_qa():
     )
     st.session_state["qa_question"] = question
 
+    opt_col1, opt_col2, opt_col3 = st.columns([1, 1, 3])
+    with opt_col1:
+        show_reasoning = st.checkbox(
+            "🧠 اعرض لماذا هذه الإجابة",
+            value=st.session_state.get("qa_show_reasoning", False),
+            key="qa_show_reasoning",
+        )
+    with opt_col2:
+        show_images = st.checkbox(
+            "🖼️ صور توضيحية",
+            value=st.session_state.get("qa_show_images", False),
+            key="qa_show_images",
+        )
+
     ask = st.button("🔍 اسأل", type="primary")
 
     if not (ask or chosen_example) or not question.strip():
@@ -3167,7 +3181,15 @@ def render_qa():
             temperature=st.session_state.get("yemeni_temperature", 0.8),
             top_p=st.session_state.get("yemeni_top_p", 0.95),
             top_k=st.session_state.get("yemeni_top_k", 50),
+            include_reasoning_trace=show_reasoning,
+            include_images=show_images,
         )
+
+    # ── حظر أمان (nova_system.py) — أولوية على أي عرض آخر، لا LoRA ولا حلقة ──
+    if result.get("safety_blocked"):
+        st.markdown("---")
+        st.warning(f"🛡️ {result['summary']}")
+        return
 
     if result.get("generation_used") and result.get("generated_text"):
         st.markdown("---")
@@ -3225,6 +3247,23 @@ def render_qa():
     st.markdown("")
     st.markdown(f"**درجة الثقة:** {confidence:.0%}")
     st.progress(confidence)
+
+    # ── أثر التفكير (اختياري — ai/chain_of_thought.py) ──
+    if result.get("reasoning_trace"):
+        with st.expander("🧠 لماذا هذه الإجابة؟"):
+            st.markdown(result["reasoning_trace"])
+
+    # ── صور توضيحية (اختياري — ai/image_sources.py) ──
+    images = result.get("images") or []
+    if images:
+        img_cols = st.columns(len(images))
+        for col, img in zip(img_cols, images):
+            with col:
+                try:
+                    st.image(img["url"], use_container_width=True,
+                              caption=f"المصدر: {img.get('source', '')}")
+                except Exception:
+                    pass  # فشل تحميل صورة واحدة لا يكسر باقي الصفحة
 
     # ── تغذية راجعة: تدريب LoRA خفيف من ملاحظة المستخدم (لا يمسّ الأوزان الأساسية) ──
     _fb_key = f"qa_feedback_{hash(question)}"
