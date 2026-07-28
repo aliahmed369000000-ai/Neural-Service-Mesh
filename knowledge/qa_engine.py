@@ -32,12 +32,57 @@ _NEURAL_BOOSTER = None       # ArabicTransformer المحمَّل، أو False �
 _NEURAL_BOOST_TRIED = False  # نحاول التحميل مرة واحدة فقط (لا نعيد المحاولة كل سؤال)
 
 
+def _neural_booster_checkpoint_ready(weights_dir: str = "models/transformer_ckg_v1") -> bool:
+    """
+    فحص خفيف جداً (لا يبني الشبكة، لا يحمّل الأوزان كاملة في الذاكرة) قبل
+    استنشاء ArabicTransformer — الذي يخصّص فعلياً ~4-5GB بالمعمارية
+    الحالية (D_MODEL×N_LAYERS الكبيرين، ~1 مليار معامل) حتى بلا أي
+    checkpoint فعلي، لأن __init__ يبني كل الطبقات بأوزان عشوائية أولاً
+    ثم يحاول load() لاحقاً.
+
+    اكتُشف فعلياً (تشغيل حقيقي): weights_dir الافتراضي غير موجود إطلاقاً
+    (نُقل مؤرشَفاً بمعمارية 40M قديمة مختلفة تماماً بعد تكبير النموذج
+    لمليار معامل)، وأقرب checkpoint حقيقي موجود بالمشروع
+    (models/pilot_general_ar_v1) مدرَّب بـ d_model=192 لا يطابق معمارية
+    ArabicTransformer الحالية — وLoad() الحالية لا تتحقق من توافق الأبعاد
+    إطلاقاً (بعكس الإصلاح المطبَّق على DeepRoutingNetwork)، فكانت ستحمّل
+    بصمت أوزاناً غير متوافقة أو تفشل لاحقاً بشكل غامض أثناء الاستدلال.
+
+    بدون هذا الفحص: أي استدعاء answer_question() في بيئة محدودة الذاكرة
+    يتعرّض لخطر OOM حقيقي لبناء نموذج لن يُحمَّل منه شيء أصلاً، وحتى في
+    بيئة بذاكرة كافية كان سيُستخدَم بأوزان عشوائية غير مدرَّبة بصمت
+    لإعادة ترتيب المفاهيم (_apply_neural_boost) — تشويش على دقة الإجابات
+    لا مجرد مشكلة أداء.
+    """
+    try:
+        import numpy as np
+        from pathlib import Path
+        from ai.arabic_transformer import VOCAB_SIZE, D_MODEL
+
+        emb_path = Path(weights_dir) / "embedding.npy"
+        if not emb_path.exists():
+            return False
+        # mmap_mode='r': يقرأ header الشكل فقط بدون تحميل المصفوفة كاملة
+        arr = np.load(str(emb_path), mmap_mode="r")
+        return tuple(arr.shape) == (VOCAB_SIZE, D_MODEL)
+    except Exception:
+        return False
+
+
 def _get_neural_booster():
     """يُحمِّل ArabicTransformer مرة واحدة (lazy singleton). يُرجع None عند أي فشل."""
     global _NEURAL_BOOSTER, _NEURAL_BOOST_TRIED
     if _NEURAL_BOOST_TRIED:
         return _NEURAL_BOOSTER if _NEURAL_BOOSTER is not False else None
     _NEURAL_BOOST_TRIED = True
+    if not _neural_booster_checkpoint_ready():
+        _NEURAL_BOOSTER = False
+        logger.info(
+            "[qa_engine] لا يوجد checkpoint متوافق لـArabicTransformer "
+            "(models/transformer_ckg_v1) — تخطّي التعزيز العصبي بأمان "
+            "(الترتيب الأساسي يبقى كما هو، بلا استنشاء نموذج بلا فائدة)."
+        )
+        return None
     try:
         from ai.arabic_transformer import ArabicTransformer
         t = ArabicTransformer()
