@@ -302,12 +302,18 @@ def _rephrase_in_yemeni_dialect(
     question: str,
     result: Dict[str, Any],
     dialect: str = "عام",
+    arabic_roots: Optional[Dict[str, Any]] = None,
+    surah_profiles: Optional[Dict[str, Any]] = None,
 ) -> Optional[str]:
     """
     يمرّر الإجابة الرمزية المؤسَّسة (result['summary'] + الآيات + المفاهيم)
     عبر LLMFallback لإعادة صياغتها بلهجة يمنية طبيعية، دون تحريف الحقائق.
     يُرجع None عند أي فشل (fallback آمن كامل — answer_question يتجاهل
     النتيجة ويُبقي result['summary'] الرمزي كما هو دون أي تغيير).
+
+    arabic_roots/surah_profiles اختياريان: إثراء إضافي صادق (جذور لغوية
+    لأسماء المفاهيم المطابقة + محاور السور الموضوعية) يُضاف لحقائق
+    السياق المرسلة للـLLM — نفس مصدر الحقيقة (CKG)، فقط سياق أعمق.
     """
     llm = _get_llm_fallback()
     if llm is None:
@@ -322,13 +328,22 @@ def _rephrase_in_yemeni_dialect(
                     f"آية — سورة {v.get('surah', '')} آية {v.get('ayah', '')}: {text}"
                 )
         related = result.get("related_concepts") or []
-        if related:
-            names = "، ".join(
-                c.get("name", "") if isinstance(c, dict) else str(c)
-                for c in related[:5]
-            )
-            facts_lines.append(f"مفاهيم مرتبطة: {names}")
+        related_names = [
+            c.get("name", "") if isinstance(c, dict) else str(c)
+            for c in related[:5]
+        ]
+        if related_names:
+            facts_lines.append(f"مفاهيم مرتبطة: {'، '.join(related_names)}")
         facts_lines.append(f"درجة الثقة: {result.get('confidence', 0.0)}")
+
+        primary_names = [
+            c.get("name", "") if isinstance(c, dict) else str(c)
+            for c in (result.get("primary_concepts") or [])
+        ]
+        facts_lines.extend(
+            _enrich_with_arabic_roots(primary_names + related_names, arabic_roots or {})
+        )
+        facts_lines.extend(_enrich_with_surah_context(verses, surah_profiles or {}))
 
         query = (
             f"السؤال الأصلي: {question}\n\n"
@@ -485,26 +500,102 @@ def _refine_confidence(result: Dict[str, Any]) -> float:
         return base_confidence
 
 
+def _enrich_with_arabic_roots(
+    names: List[str],
+    arabic_roots: Dict[str, Any],
+    max_roots: int = 3,
+) -> List[str]:
+    """
+    يربط أسماء مفاهيم مطابقة بجذورها العربية المحفوظة في CKG
+    (knowledge/cognitive_graph.json → arabic_roots: {root: {frequency,
+    top_token}}). الربط يتم عبر top_token (الصيغة الأشهر لكل جذر) لأن
+    أسماء المفاهيم غالباً صيغ مشتقة كاملة وليست جذوراً مجرَّدة — التقاطع
+    المباشر بالجذر نفسه ضعيف (70 من 7,338)، بينما عبر top_token أغنى
+    بكثير (335) وصادق (لا نخترع جذوراً، فقط نستخدم ما هو محفوظ فعلياً).
+    """
+    if not arabic_roots or not names:
+        return []
+    # فهرس عكسي: top_token → (root, frequency) — يُبنى مرة لكل استدعاء
+    # (839 عنصر فقط، رخيص، لا يستحق تخزيناً مؤقتاً عبر الاستدعاءات)
+    by_top_token: Dict[str, Any] = {}
+    for root, info in arabic_roots.items():
+        tt = info.get("top_token") if isinstance(info, dict) else None
+        if tt:
+            by_top_token[tt] = (root, info.get("frequency", 0))
+
+    lines: List[str] = []
+    for name in names:
+        hit = by_top_token.get(name)
+        if hit:
+            root, freq = hit
+            lines.append(f"الجذر اللغوي لـ«{name}»: «{root}» (يتكرر {freq} مرة في القرآن)")
+        if len(lines) >= max_roots:
+            break
+    return lines
+
+
+def _enrich_with_surah_context(
+    verses: List[Dict[str, Any]],
+    surah_profiles: Dict[str, Any],
+    max_surahs: int = 2,
+    max_concepts_per_surah: int = 3,
+) -> List[str]:
+    """
+    يضيف السياق الموضوعي لكل سورة ظهرت في الآيات المسترجَعة، من
+    surah_profiles المحفوظة في CKG (رقم السورة → أهم مفاهيمها بالوزن).
+    يساعد الـLLM يفهم الإطار الموضوعي العام للسورة، لا فقط نص الآية
+    المفردة.
+    """
+    if not surah_profiles or not verses:
+        return []
+    seen_surahs: List[str] = []
+    for v in verses:
+        s = str(v.get("surah", "")).strip()
+        if s and s not in seen_surahs:
+            seen_surahs.append(s)
+        if len(seen_surahs) >= max_surahs:
+            break
+
+    lines: List[str] = []
+    for s in seen_surahs:
+        profile = surah_profiles.get(s)
+        if not profile:
+            continue
+        top = sorted(profile, key=lambda p: p.get("weight", 0), reverse=True)[:max_concepts_per_surah]
+        names = "، ".join(p.get("concept", "") for p in top if p.get("concept"))
+        if names:
+            lines.append(f"المحاور الموضوعية الرئيسية لسورة رقم {s}: {names}")
+    return lines
+
+
 def _build_grounding_text(
     concept_matches: List[Tuple[str, float]],
     verses: List[Dict[str, Any]],
     max_concepts: int = 5,
     max_verses: int = 3,
+    arabic_roots: Optional[Dict[str, Any]] = None,
+    surah_profiles: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     يبني نص سياق تأسيسي (grounding) من نفس المعطيات الرمزية التي يحسبها
     answer_question أصلاً (مفاهيم مطابقة + آيات داعمة) — لا يستدعي أي
     مصدر خارجي جديد، فقط يعيد صياغتها كنص متصل يُغذّى للـ decoder.
+
+    arabic_roots/surah_profiles اختياريان: لو مُمرَّران (من ckg الخام)
+    يُضاف إثراء إضافي صادق (جذور لغوية + محاور موضوعية للسور) — عند
+    غيابهما يبقى السلوك مطابقاً تماماً للسابق.
     """
     parts: List[str] = []
-    if concept_matches:
-        names = "، ".join(c for c, _ in concept_matches[:max_concepts])
-        parts.append(f"المفاهيم ذات الصلة: {names}.")
+    top_names = [c for c, _ in concept_matches[:max_concepts]]
+    if top_names:
+        parts.append(f"المفاهيم ذات الصلة: {'، '.join(top_names)}.")
     if verses:
         for v in verses[:max_verses]:
             text = v.get("text", "")
             if text:
                 parts.append(f"سورة {v.get('surah', '')} آية {v.get('ayah', '')}: {text}")
+    parts.extend(_enrich_with_arabic_roots(top_names, arabic_roots or {}))
+    parts.extend(_enrich_with_surah_context(verses, surah_profiles or {}))
     return " ".join(parts)
 
 
@@ -515,6 +606,8 @@ def _try_generate_free_text(
     temperature: float,
     top_p: float,
     top_k: int,
+    arabic_roots: Optional[Dict[str, Any]] = None,
+    surah_profiles: Optional[Dict[str, Any]] = None,
 ) -> Optional[str]:
     """
     يحاول توليد نص حر عبر YemeniDecoder، مؤسَّس (grounded) على المفاهيم
@@ -527,7 +620,10 @@ def _try_generate_free_text(
     try:
         import torch
 
-        grounding_text = _build_grounding_text(concept_matches, verses)
+        grounding_text = _build_grounding_text(
+            concept_matches, verses,
+            arabic_roots=arabic_roots, surah_profiles=surah_profiles,
+        )
         grounding_ids = tokenizer.encode(grounding_text, add_bos=False, add_eos=False) \
             if grounding_text else None
         prompt_ids = tokenizer.encode(question, add_bos=True, add_eos=False)
@@ -1247,6 +1343,11 @@ def answer_question(
     concepts_db  = ckg.get("concepts", {})
     relations_db = ckg.get("relations", {})
     entities_db  = entities or {}
+    # إثراء إضافي محفوظ فعلياً في CKG (فُقد سابقاً بباغ save() الآن مُصلَح
+    # — انظر knowledge/cognitive_graph.py). اختياري تماماً، يبقى {} بأمان
+    # لو الملف لا يحتويهما (توافق خلفي كامل).
+    arabic_roots   = ckg.get("arabic_roots", {})
+    surah_profiles = ckg.get("surah_profiles", {})
 
     # 0. فحص الأمان أولاً — قبل أي معالجة أخرى. عند فشل تحميل الطبقة (لا
     # استيراد، إلخ) يستمر النظام بدون حظر (fallback آمن)، لكن عند نجاح
@@ -1333,16 +1434,21 @@ def answer_question(
     if generation_mode:
         generated: Optional[str] = None
         if generation_backend == "llm_fallback":
-            generated = _rephrase_in_yemeni_dialect(question, result, dialect)
+            generated = _rephrase_in_yemeni_dialect(
+                question, result, dialect,
+                arabic_roots=arabic_roots, surah_profiles=surah_profiles,
+            )
             backend_used = "llm_fallback"
             if generated is None:
                 generated = _try_generate_free_text(
                     question, concept_matches, verses, temperature, top_p, top_k,
+                    arabic_roots=arabic_roots, surah_profiles=surah_profiles,
                 )
                 backend_used = "yemeni_decoder" if generated else None
         else:
             generated = _try_generate_free_text(
                 question, concept_matches, verses, temperature, top_p, top_k,
+                arabic_roots=arabic_roots, surah_profiles=surah_profiles,
             )
             backend_used = "yemeni_decoder" if generated else None
 
