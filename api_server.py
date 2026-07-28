@@ -19,8 +19,8 @@ from fastapi.responses import JSONResponse
 
 # محاولة استيراد المكونات الداخلية
 try:
-    from core.engine import Engine
-    from core.registry import Registry
+    from core.engine import ExecutionEngine as Engine
+    from core.registry import NodeRegistry as Registry
     _CORE_OK = True
 except Exception as _e:
     _CORE_OK = False
