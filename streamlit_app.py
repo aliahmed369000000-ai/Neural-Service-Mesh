@@ -8777,8 +8777,37 @@ def render_swarm_studio():
     st.markdown("---")
     col_a, col_b = st.columns(2)
     with col_a:
-        st.markdown("**📊 ملخص الوكلاء (AgentFactory)**")
-        st.json(factory.summary())
+        st.markdown('<div class="section-header">📊 ملخص الوكلاء (AgentFactory)</div>',
+                    unsafe_allow_html=True)
+        _fs = factory.summary()
+        st.markdown(f"""
+        <div class="bento-grid">
+            <div class="metric-card">
+                <div class="metric-value">{_fs['total_agents']:,}</div>
+                <div class="metric-label">إجمالي الوكلاء</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">{_fs['active_agents']:,}</div>
+                <div class="metric-label">نشط الآن</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">{_fs['retired_agents']:,}</div>
+                <div class="metric-label">متقاعد</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">{_fs['total_spawned']:,}</div>
+                <div class="metric-label">إجمالي المُولَّد</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        if _fs.get("role_distribution"):
+            st.markdown(
+                " ".join(
+                    f'<span class="badge badge-blue">{role}: {count}</span>'
+                    for role, count in _fs["role_distribution"].items()
+                ),
+                unsafe_allow_html=True,
+            )
         with st.popover("🧹 تقليم الوكلاء ضعيفي الأداء"):
             st.caption(
                 "يُقاعِد (retire) أي وكيل نفّذ 5 مهام على الأقل وكان "
@@ -8797,8 +8826,37 @@ def render_swarm_studio():
                     st.info("لا يوجد وكلاء تنطبق عليهم شروط التقليم حالياً.")
                 st.rerun()
     with col_b:
-        st.markdown("**📊 ملخص السرب (SwarmCoordinator)**")
-        st.json(coordinator.summary())
+        st.markdown('<div class="section-header">📊 ملخص السرب (SwarmCoordinator)</div>',
+                    unsafe_allow_html=True)
+        _cs = coordinator.summary()
+        st.markdown(f"""
+        <div class="bento-grid">
+            <div class="metric-card">
+                <div class="metric-value">{_cs['total_swarms']:,}</div>
+                <div class="metric-label">إجمالي عمليات السرب</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">{_cs['done']:,}</div>
+                <div class="metric-label">✅ ناجحة بالكامل</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">{_cs['partial']:,}</div>
+                <div class="metric-label">🟡 نجاح جزئي</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">{_cs['failed']:,}</div>
+                <div class="metric-label">❌ فاشلة</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">{_cs['active_agents']:,}</div>
+                <div class="metric-label">وكلاء نشطون الآن</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">{_cs['max_agents']:,}</div>
+                <div class="metric-label">الحد الأقصى المسموح</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
     hist = coordinator.history(limit=5)
     if hist:
