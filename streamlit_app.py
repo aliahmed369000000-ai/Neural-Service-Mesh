@@ -2382,6 +2382,87 @@ def save_real_checkpoint() -> Optional[str]:
         return None
 
 
+# ── MetaReasoner: adapters حقيقية فوق سجل التوجيه الفعلي ───────────────────
+# MetaReasoner (ai/meta_reasoner.py) كانت مستوردة فقط بلا أي استخدام: تتوقع
+# memory_engine بدالة all_routes() و scoring_engine بدالة list_scores()،
+# بينما البيانات الفعلية الوحيدة المتاحة هي صفوف مسطّحة من route_log_store
+# (كل صف = طلب واحد: category, node, latency_ms, success...). الـ adapters
+# التالية تجمّع هذه الصفوف الحقيقية إلى الشكل الذي تتوقعه MetaReasoner —
+# بلا أي بيانات مُختلَقة؛ مسار بلا تشغيلات فعلية ببساطة لا يظهر.
+
+class _RouteLogMemoryAdapter:
+    """يحاكي واجهة memory_engine.all_routes() المتوقَّعة من MetaReasoner،
+    مبنية من تجميع حقيقي لسجل التوجيه حسب (الفئة الدلالية → العقدة)."""
+
+    def all_routes(self) -> List[Dict[str, Any]]:
+        if not _ROUTE_LOG_DB_OK:
+            return []
+        rows = _rlog_get_recent(limit=5000)
+        agg: Dict[str, Dict[str, Any]] = {}
+        for r in rows:
+            key = f"{r.get('category', '?')}→{r.get('node', '?')}"
+            a = agg.setdefault(key, {"path_key": key, "runs": 0, "successes": 0})
+            a["runs"] += 1
+            if r.get("success"):
+                a["successes"] += 1
+        result = []
+        for a in agg.values():
+            sr = a["successes"] / a["runs"] if a["runs"] else 0.0
+            health = "healthy" if sr >= 0.8 else ("degraded" if sr >= 0.5 else "failing")
+            result.append({
+                "path_key": a["path_key"], "runs": a["runs"],
+                "success_rate": sr, "health": health,
+            })
+        return result
+
+
+class _RouteLogScoringAdapter:
+    """يحاكي واجهة scoring_engine.list_scores() المتوقَّعة من MetaReasoner،
+    مبنية من نفس سجل التوجيه الحقيقي (الفئة كـ source_id، العقدة كـ
+    target_id) بدل بيانات مُختلَقة."""
+
+    def list_scores(self) -> List[Dict[str, Any]]:
+        if not _ROUTE_LOG_DB_OK:
+            return []
+        rows = _rlog_get_recent(limit=5000)
+        agg: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        for r in rows:
+            key = (r.get("category", "?"), r.get("node", "?"))
+            a = agg.setdefault(key, {
+                "source_id": key[0], "target_id": key[1],
+                "runs": 0, "successes": 0, "latency_sum": 0.0,
+            })
+            a["runs"] += 1
+            a["latency_sum"] += r.get("latency_ms", 0) or 0
+            if r.get("success"):
+                a["successes"] += 1
+        result = []
+        for a in agg.values():
+            runs = a["runs"]
+            result.append({
+                "source_id": a["source_id"], "target_id": a["target_id"],
+                "success_rate": (a["successes"] / runs) if runs else 0.0,
+                "avg_latency_ms": (a["latency_sum"] / runs) if runs else 0.0,
+                "total_runs": runs,
+            })
+        return result
+
+
+@st.cache_resource(show_spinner=False)
+def _get_meta_reasoner():
+    """singleton واحد لعملية Streamlit كاملة. يعيد None إن كانت MetaReasoner
+    غير قابلة للاستيراد أصلاً، بدل رفع استثناء يكسر الواجهة."""
+    if not _META_REASONER_OK:
+        return None
+    try:
+        return MetaReasoner(
+            memory_engine=_RouteLogMemoryAdapter(),
+            scoring_engine=_RouteLogScoringAdapter(),
+        )
+    except Exception:
+        return None
+
+
 # ── تطبيع النص العربي ────────────────────────────────────────────────────
 def normalize_arabic(text: str) -> str:
     text = re.sub(r'[\u064B-\u065F\u0670\u0640]', '', text)
@@ -4097,6 +4178,33 @@ def render_nsm_routing():
             if _ROUTE_LOG_DB_OK:
                 _rlog_clear_all()
             st.rerun()
+
+        # ────────────────────────────────────────────────────────────────
+        # [B.1] رؤى Meta-Reasoner — تحليل تأملي حقيقي فوق سجل التوجيه
+        # ────────────────────────────────────────────────────────────────
+        if _META_REASONER_OK and _ROUTE_LOG_DB_OK:
+            with st.expander("🧠 رؤى Meta-Reasoner (تحليل تأملي لسجل التوجيه)"):
+                _reasoner = _get_meta_reasoner()
+                if _reasoner is None:
+                    st.caption("⚠️ تعذّر تهيئة MetaReasoner.")
+                else:
+                    _insights = _reasoner.reflect()
+                    if not _insights:
+                        st.caption("لا توجد أنماط تستحق التنبيه بعد — يحتاج المزيد من طلبات التوجيه المسجَّلة.")
+                    else:
+                        _badge_by_type = {
+                            "warning": "badge-purple", "opportunity": "badge-amber",
+                            "pattern": "badge-blue", "lesson": "badge-green",
+                        }
+                        for _ins in _insights[:8]:
+                            _cls = _badge_by_type.get(_ins.insight_type, "badge-blue")
+                            st.markdown(f"""
+                            <div class="root-item" style="direction:rtl;padding:0.6rem 0.8rem;margin-bottom:0.4rem">
+                                <span class="badge {_cls}">{_ins.insight_type}</span>
+                                <strong style="margin-right:0.4rem">{_ins.title}</strong>
+                                <div style="font-size:0.82rem;color:var(--text-muted);margin-top:0.3rem">{_ins.body}</div>
+                            </div>
+                            """, unsafe_allow_html=True)
 
     # ════════════════════════════════════════════════════════════════════════
     # [C] إثبات التعلم — prove_learning + learning_curve
