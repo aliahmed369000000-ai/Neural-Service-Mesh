@@ -32,7 +32,7 @@ import sqlite3
 import threading
 from collections import deque
 from pathlib import Path
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 DB_PATH = Path("memory/task_manager.db")
 _LOCK = threading.Lock()
@@ -63,7 +63,18 @@ CREATE TABLE IF NOT EXISTS plan_tasks (
     updated_at  TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_plan_tasks_plan ON plan_tasks(plan_id);
+CREATE TABLE IF NOT EXISTS checkpoints (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id     INTEGER,
+    task_id     INTEGER,
+    commit_hash TEXT NOT NULL,
+    message     TEXT,
+    created_at  TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_checkpoints_created ON checkpoints(id DESC);
 """
+
+MAX_CHECKPOINTS = 200  # سقف الاحتفاظ لمنع نمو الجدول بلا حدود
 
 MAX_PLANS = 500  # سقف الاحتفاظ لمنع نمو الملف بلا حدود
 
@@ -200,6 +211,91 @@ def mark_plan_status(plan_id: int, status: str) -> None:
             conn.close()
         except Exception:
             pass
+
+
+# ══════════════════════════════════════════════════════════════════
+# 🆕 المرحلة 6 — Checkpoints/Rollback
+# ══════════════════════════════════════════════════════════════════
+# سابقاً: الرفع لـ GitHub (git_push) يحدث فقط عند اكتمال خطة كاملة بنجاح
+# (المرحلة 3)، ولا يوجد أي "نقطة استرجاع" محلية أثناء تنفيذ خطة طويلة —
+# لو نجحت 3 مهام وفشلت الرابعة، لا وسيلة للرجوع لآخر حالة عملت فعلاً
+# سوى تعديل يدوي. هذه الدوال تسجّل commit محلي (hash حقيقي من git، ليس
+# افتراضياً) بعد كل مهمة تنجح فعلياً، بحيث يمكن لاحقاً تنفيذ أمر تراجع
+# حقيقي (git reset/revert) إلى آخر commit "يعمل" مسجَّل هنا.
+
+def record_checkpoint(
+    plan_id: Optional[int], task_id: Optional[int],
+    commit_hash: str, message: str = "",
+) -> None:
+    """يسجّل commit محلي كنقطة استرجاع بعد نجاح مهمة فعلياً. لا يرمي استثناءً."""
+    if not commit_hash:
+        return
+    with _LOCK:
+        try:
+            conn = _connect()
+            with conn:
+                conn.execute(
+                    """INSERT INTO checkpoints (plan_id, task_id, commit_hash, message)
+                       VALUES (?, ?, ?, ?)""",
+                    (plan_id, task_id, commit_hash, (message or "")[:300]),
+                )
+                conn.execute(
+                    """DELETE FROM checkpoints WHERE id NOT IN (
+                           SELECT id FROM checkpoints ORDER BY id DESC LIMIT ?
+                       )""",
+                    (MAX_CHECKPOINTS,),
+                )
+            conn.close()
+        except Exception:
+            pass
+
+
+def get_last_checkpoint(plan_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    """يُعيد آخر نقطة استرجاع مسجَّلة (الأحدث)، أو لخطة محدَّدة إن طُلب.
+    يُعيد None إن لم توجد أي نقطة استرجاع بعد (لا يرمي استثناءً)."""
+    with _LOCK:
+        try:
+            conn = _connect()
+            if plan_id is not None:
+                row = conn.execute(
+                    """SELECT commit_hash, message, plan_id, task_id, created_at
+                       FROM checkpoints WHERE plan_id = ? ORDER BY id DESC LIMIT 1""",
+                    (plan_id,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """SELECT commit_hash, message, plan_id, task_id, created_at
+                       FROM checkpoints ORDER BY id DESC LIMIT 1""",
+                ).fetchone()
+            conn.close()
+            if not row:
+                return None
+            return {
+                "commit_hash": row[0], "message": row[1],
+                "plan_id": row[2], "task_id": row[3], "created_at": row[4],
+            }
+        except Exception:
+            return None
+
+
+def list_checkpoints(limit: int = 10) -> List[Dict[str, Any]]:
+    """آخر N نقطة استرجاع — لعرضها للمستخدم قبل اختيار نقطة تراجع محدَّدة."""
+    with _LOCK:
+        try:
+            conn = _connect()
+            rows = conn.execute(
+                """SELECT commit_hash, message, plan_id, task_id, created_at
+                   FROM checkpoints ORDER BY id DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+            conn.close()
+            return [
+                {"commit_hash": r[0], "message": r[1], "plan_id": r[2],
+                 "task_id": r[3], "created_at": r[4]}
+                for r in rows
+            ]
+        except Exception:
+            return []
 
 
 def get_active_plans(limit: int = 20) -> List[Dict[str, Any]]:

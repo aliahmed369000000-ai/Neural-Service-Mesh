@@ -455,6 +455,28 @@ class NSMPlanner:
                 task.status = "failed"
             if _TASK_MGR_OK and plan_id > 0:
                 _tm_update_task(plan_id, task.id, task.status, task_output)
+
+            # ── 🆕 المرحلة 6: Checkpoints/Rollback ──────────────────────
+            # سابقاً: الكوميت الوحيد يحدث عند اكتمال الخطة كاملة (git_push
+            # في المرحلة 3) — لو فشلت مهمة لاحقة، لا نقطة استرجاع محلية
+            # لآخر مهمة نجحت فعلياً. الآن: كوميت محلي (بلا push) بعد كل
+            # مهمة تنجح فعلياً، ويُسجَّل commit hash الحقيقي في
+            # ai/task_manager.py ليُستخدم لاحقاً في أمر "rollback" حقيقي.
+            if task.status == "done":
+                try:
+                    from ai.nsm_agent_core import _local_checkpoint_commit
+                    from ai.task_manager import record_checkpoint
+                    _ckpt_msg = f"نقطة استرجاع تلقائية — المهمة {task.id}: {task.title}"[:200]
+                    _ckpt_hash = _local_checkpoint_commit(_ckpt_msg)
+                    if _ckpt_hash:
+                        record_checkpoint(
+                            plan_id if plan_id > 0 else None, task.id,
+                            _ckpt_hash, _ckpt_msg,
+                        )
+                        yield f"💾 *نقطة استرجاع محلية محفوظة (commit `{_ckpt_hash[:10]}`)*\n"
+                except Exception:
+                    pass  # فشل الكوميت المحلي لا يجب أن يوقف تنفيذ باقي المهام
+
             all_files.extend(task.files)
             completed.append(task)
             yield "\n"
