@@ -6571,6 +6571,12 @@ def render_translate():
         unsafe_allow_html=True,
     )
 
+    # يجب تطبيق أي "إعادة استخدام" من التاريخ *قبل* إنشاء ودجت text_area
+    # مباشرة — تعيين session_state[key] بعد إنشاء الودجت بنفس الجولة يرفع
+    # StreamlitAPIException.
+    if "_tr_pending_reuse" in st.session_state:
+        st.session_state["tr_source_text"] = st.session_state.pop("_tr_pending_reuse")
+
     st.markdown('<div class="glass-card">', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     with c1:
@@ -6616,6 +6622,16 @@ def render_translate():
                 st.session_state.tr_result = result
                 _tr_skeleton_ph.empty()
                 st.toast("✅ تمت الترجمة بنجاح", icon="✅")
+                if result and (result.text or "").strip() and not getattr(result, "error", None):
+                    try:
+                        from ai.translation_history import get_history
+                        get_history().save(
+                            src_lang=src_label, tgt_lang=tgt_label,
+                            source_text=source_text.strip(), translated_text=result.text,
+                            provider=getattr(result.provider, "value", str(result.provider)),
+                        )
+                    except Exception:
+                        pass
             except Exception as e:  # noqa: BLE001
                 _tr_skeleton_ph.empty()
                 st.toast(f"⚠️ فشلت الترجمة: {e}", icon="⚠️")
@@ -6642,6 +6658,39 @@ def render_translate():
                 mime="text/plain",
                 key="tr_download_btn",
             )
+
+    st.markdown("")
+    st.markdown('<div class="section-header">🕘 آخر الترجمات</div>', unsafe_allow_html=True)
+    try:
+        from ai.translation_history import get_history
+        _tr_history = get_history().list_recent(limit=15)
+    except Exception as e:  # noqa: BLE001
+        _tr_history = []
+        st.caption(f"⚠️ تعذّر تحميل السجل: {e}")
+
+    if not _tr_history:
+        st.caption("📭 لا توجد ترجمات محفوظة بعد — أول ترجمة ناجحة ستظهر هنا تلقائياً.")
+    else:
+        for _tr_row in _tr_history:
+            _tr_id = _tr_row["id"]
+            _tr_excerpt = (_tr_row["source_text"] or "")[:60]
+            _tr_header = f"{_tr_row['src_lang']} ← {_tr_row['tgt_lang']} — {_tr_excerpt}…"
+            with st.expander(_tr_header):
+                st.markdown(f"**النص الأصلي:**\n\n{_tr_row['source_text']}")
+                st.markdown(f"**الترجمة:**\n\n{_tr_row['translated_text']}")
+                _tr_reuse_col, _tr_del_col = st.columns(2)
+                with _tr_reuse_col:
+                    if st.button("↩️ استخدم هذا النص مجدداً", key=f"tr_reuse_{_tr_id}", use_container_width=True):
+                        st.session_state["_tr_pending_reuse"] = _tr_row["source_text"]
+                        st.rerun()
+                with _tr_del_col:
+                    if st.button("🗑️ حذف", key=f"tr_delete_{_tr_id}", use_container_width=True):
+                        try:
+                            from ai.translation_history import get_history as _gh2
+                            _gh2().delete(_tr_id)
+                        except Exception:
+                            pass
+                        st.rerun()
 
 
 # ══════════════════════════════════════════════════════════════════════════
