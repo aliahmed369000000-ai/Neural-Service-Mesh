@@ -366,6 +366,12 @@ except Exception:
     _EPISODIC_OK = False
 
 try:
+    from ai.memory_consolidator import MemoryConsolidator
+    _CONSOLIDATOR_OK = True
+except Exception:
+    _CONSOLIDATOR_OK = False
+
+try:
     from ai.brain_checkpoint import BrainCheckpoint
     _CHECKPOINT_OK = True
 except Exception:
@@ -2261,6 +2267,26 @@ def _get_episodic_engine():
         engine = EpisodicMemoryEngine(db_path=str(MEMORY_DIR / "episodic.db"))
         engine.start()  # يوحّد working_memory → قاعدة البيانات كل 60 ثانية تلقائياً
         return engine
+    except Exception:
+        return None
+
+
+@st.cache_resource(show_spinner=False)
+def _get_memory_consolidator():
+    """singleton لعملية Streamlit كاملة. MemoryConsolidator (ai/memory_consolidator.py)
+    كانت مستوردة بلا استخدام إطلاقاً — تحوّل أنماطاً متكررة في الذاكرة
+    الإيبيسودية الحقيقية (get_strongest_memories) إلى "قوانين مكتسبة"
+    عبر دورات دمج دورية بالخلفية. طبقة مكمّلة لتوحيد episodic_memory
+    الداخلي (تجميع حسب المصدر/الهدف الرقمي)، لا بديل له."""
+    if not _CONSOLIDATOR_OK:
+        return None
+    engine = _get_episodic_engine()
+    if engine is None:
+        return None
+    try:
+        mc = MemoryConsolidator(episodic_memory=engine, pattern_threshold=5)
+        mc.start(interval_minutes=15)
+        return mc
     except Exception:
         return None
 
@@ -4490,6 +4516,47 @@ def render_memory():
                 """, unsafe_allow_html=True)
     else:
         st.info("لا توجد أسئلة محفوظة بعد. استخدم تبويب «الأسئلة والأجوبة» لبدء بناء الذاكرة التجريبية.")
+
+    # ── القوانين المكتسبة تلقائياً (MemoryConsolidator) ──────────────────
+    # طبقة منفصلة عن قسم "توحيد الذاكرة" أعلاه: تلك يدوية وتُنتج علاقات CKG
+    # من أسئلة المستخدم، بينما هذه تعمل تلقائياً بالخلفية كل 15 دقيقة فوق
+    # EpisodicMemoryEngine الحقيقية (get_strongest_memories) وتحوّل الأنماط
+    # المتكررة (مصدر الحلقة، نطاق قيمة الهدف الرقمي) إلى "قوانين مكتسبة".
+    if _CONSOLIDATOR_OK and _EPISODIC_OK:
+        st.markdown("")
+        st.markdown('<div class="section-header">⚖️ قوانين الذاكرة المكتسبة تلقائياً</div>', unsafe_allow_html=True)
+        _consolidator = _get_memory_consolidator()
+        if _consolidator is None:
+            st.caption("⚠️ تعذّر تشغيل MemoryConsolidator.")
+        else:
+            _mc_summary = _consolidator.summary()
+            _mcol1, _mcol2, _mcol3 = st.columns(3)
+            with _mcol1: metric_card(_mc_summary["total_laws"], "قوانين مكتسبة")
+            with _mcol2: metric_card(_mc_summary["total_episodes_freed"], "حلقات مُحرَّرة")
+            with _mcol3: metric_card(_mc_summary["local_patterns_tracked"], "أنماط قيد الرصد")
+
+            if st.button("⚖️ تشغيل دورة دمج الآن", key="consolidate_laws_btn"):
+                with st.spinner("يفحص الذاكرة الإيبيسودية عن أنماط متكررة..."):
+                    _mc_report = _consolidator.consolidate()
+                st.success(
+                    f"فُحصت {_mc_report['episodes_scanned']} حلقة، "
+                    f"{_mc_report['new_laws']} قانون جديد، "
+                    f"{_mc_report['updated_laws']} قانون محدَّث."
+                )
+
+            _laws = _consolidator.get_consolidated_laws()
+            if _laws:
+                st.markdown("**القوانين المكتسبة (مرتبة بالثقة):**")
+                for _law in _laws[:8]:
+                    st.markdown(f"""
+                    <div class="root-item">
+                        {_law['description']}
+                        <span class="badge badge-green">ثقة: {_law['confidence']:.0%}</span>
+                        <span class="badge badge-blue">×{_law['occurrence_count']}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.caption(f"لا توجد قوانين بعد — يحتاج نمط للتكرار {_consolidator._threshold} مرات على الأقل.")
 
     # ── سجل المحادثات المحفوظة (nsm_memory.py — SQLite) ──────────────────
     st.markdown("")
