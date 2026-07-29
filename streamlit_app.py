@@ -3893,13 +3893,32 @@ def _render_hf_result(script):
     mp4_bytes = st.session_state.get("hf_mp4")
     if mp4_bytes:
         st.video(mp4_bytes)
-        st.download_button(
-            "⬇️ تحميل الفيديو (mp4)",
-            data=mp4_bytes,
-            file_name=f"{(script.title or 'documentary')[:40]}.mp4",
-            mime="video/mp4",
-            key="hf_download_mp4",
-        )
+        _hf_dl_cols = st.columns(2)
+        with _hf_dl_cols[0]:
+            st.download_button(
+                "⬇️ تحميل الفيديو (mp4)",
+                data=mp4_bytes,
+                file_name=f"{(script.title or 'documentary')[:40]}.mp4",
+                mime="video/mp4",
+                key="hf_download_mp4",
+            )
+        with _hf_dl_cols[1]:
+            # ── ملف ترجمة SRT منفصل — مبني من نفس بيانات توقيت الترجمات
+            #    المستخدمة أصلاً بالفيديو (راجع ai.video_engine.build_srt)،
+            #    مفيد لمنصات تتطلب ترجمة منفصلة أو لإتاحة المحتوى لضعاف
+            #    السمع. أي فشل بالبناء لا يُسقِط الصفحة — فقط يُخفي الزر.
+            try:
+                from ai.video_engine import build_srt as _hf_build_srt
+                _hf_srt_text = _hf_build_srt(script)
+                st.download_button(
+                    "📝 تحميل الترجمة (SRT)",
+                    data=_hf_srt_text.encode("utf-8"),
+                    file_name=f"{(script.title or 'documentary')[:40]}.srt",
+                    mime="text/srt",
+                    key="hf_download_srt",
+                )
+            except Exception as _srt_err:  # noqa: BLE001
+                logger.debug("تعذّر بناء ملف SRT لـHiggsfield Explainer: %s", _srt_err)
 
         # ── مشاركة اجتماعية فعلية (رفع الفيديو) ─────────────────────
         st.markdown("---")
@@ -6661,12 +6680,30 @@ def render_fable():
             mp4_bytes = st.session_state.get("shorts_mp4")
             if mp4_bytes:
                 st.video(mp4_bytes)
-                st.download_button(
-                    "⬇️ تحميل الفيديو (mp4)",
-                    data=mp4_bytes,
-                    file_name=f"{short.title[:40] or 'short'}.mp4",
-                    mime="video/mp4",
-                )
+                _shorts_dl_cols = st.columns(2)
+                with _shorts_dl_cols[0]:
+                    st.download_button(
+                        "⬇️ تحميل الفيديو (mp4)",
+                        data=mp4_bytes,
+                        file_name=f"{short.title[:40] or 'short'}.mp4",
+                        mime="video/mp4",
+                        key="shorts_download_mp4",
+                    )
+                with _shorts_dl_cols[1]:
+                    # ── ملف ترجمة SRT — راجع نفس الشرح بتبويب Higgsfield
+                    #    Explainer أعلاه (ai.video_engine.build_srt).
+                    try:
+                        from ai.video_engine import build_srt as _shorts_build_srt
+                        _shorts_srt_text = _shorts_build_srt(short)
+                        st.download_button(
+                            "📝 تحميل الترجمة (SRT)",
+                            data=_shorts_srt_text.encode("utf-8"),
+                            file_name=f"{short.title[:40] or 'short'}.srt",
+                            mime="text/srt",
+                            key="shorts_download_srt",
+                        )
+                    except Exception as _srt_err:  # noqa: BLE001
+                        logger.debug("تعذّر بناء ملف SRT لـShorts: %s", _srt_err)
 
                 st.markdown("---")
                 st.markdown("#### 📤 مشاركة اجتماعية فعلية (رفع الفيديو)")
