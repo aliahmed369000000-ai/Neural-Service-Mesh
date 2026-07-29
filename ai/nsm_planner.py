@@ -453,6 +453,29 @@ class NSMPlanner:
             # رمي استثناء Python. لا نعتبرها "منجزة" فعلياً في هذه الحالة.
             if _task_output_has_real_failure(task_output):
                 task.status = "failed"
+
+            # ── 🆕 المرحلة 8: فصل أدوار Planner/Editor/Verifier حقيقي ──
+            # التحقّقات أعلاه كلها حتمية (استثناء Python / علامات فشل نصية
+            # واضحة). هنا نضيف "رأياً ثانياً" من دور مستقل تماماً (Verifier)
+            # يحكم دلالياً: هل الناتج يحقق فعلاً وصف المهمة، لا فقط أنه
+            # "لم يفشل تقنياً". هذا استدعاء LLM منفصل بـ prompt خاص به
+            # (ai/nsm_verifier.py) لا علاقة له بـ prompt التخطيط أو التنفيذ.
+            verifier_note = ""
+            if task.status == "done":
+                try:
+                    from ai.nsm_verifier import verify_task_completion
+                    v_result = verify_task_completion(
+                        task.title, task.description, task_output,
+                        self._call_api_bound(),
+                    )
+                    if not v_result.get("passed", True):
+                        task.status = "failed"
+                        verifier_note = v_result.get("reason", "")
+                        yield (f"🧑‍⚖️ **Verifier مستقل رفض المهمة دلالياً:** "
+                               f"{verifier_note}\n\n")
+                except Exception:
+                    pass  # فشل الوصول لـ Verifier لا يوقف التسليم — رأي إضافي لا حارس أساسي
+
             if _TASK_MGR_OK and plan_id > 0:
                 _tm_update_task(plan_id, task.id, task.status, task_output)
 
