@@ -63,6 +63,9 @@ _FAILURE_COOLDOWN_SEC = 300  # 5 دقائق قبل إعادة تجربة مزو�
 # جمل)، فـ45 ثانية سخية بما يكفي لأي مقطع طبيعي دون تعليق طويل عند العطل.
 _EDGE_TTS_TIMEOUT_SEC = 45
 
+# نفس المنطق لـgTTS — آخر حلقة بالسلسلة، فتعليقها أخطر (لا تراجع بعدها).
+_GTTS_TIMEOUT_SEC = 45
+
 # أصوات عربية افتراضية جيدة لكل مزوّد (fallback إن لم يُحدَّد صوت)
 _DEFAULT_VOICE = {
     TTSProvider.GEMINI: "Kore",              # صوت Gemini TTS متعدد اللغات
@@ -242,9 +245,35 @@ def _synthesize_gtts(text: str, lang: str) -> TTSResult:
     except ImportError as exc:
         raise RuntimeError("حزمة gTTS غير مثبّتة. أضِف 'gTTS>=2.5.0' لـ requirements.txt") from exc
 
-    buf = io.BytesIO()
-    gTTS(text=text, lang=lang or _DEFAULT_VOICE[TTSProvider.GTTS]).write_to_fp(buf)
-    return TTSResult(audio_bytes=buf.getvalue(), provider=TTSProvider.GTTS, format="mp3", voice=lang)
+    # gTTS لا تقبل معامل timeout مباشرة (تستخدم requests داخلياً بلا مهلة
+    # افتراضية). هذا المزوّد هو آخر حلقة بالسلسلة (لا تراجع بعده)، فتعليقه
+    # يعني تعليق العملية بالكامل بلا أي مخرج نهائي إطلاقاً — أخطر من تعليق
+    # أي مزوّد آخر له بديل تالٍ. نُنفّذه بخيط منفصل وننتظره بمهلة محدودة؛
+    # عند تجاوزها نرفع خطأً واضحاً بدل الانتظار للأبد (الخيط المُعلَّق نفسه
+    # قد يبقى حياً بالخلفية، لكن العملية المستدعية تستمر ولا تتعلّق).
+    import concurrent.futures
+
+    def _run() -> bytes:
+        buf = io.BytesIO()
+        gTTS(text=text, lang=lang or _DEFAULT_VOICE[TTSProvider.GTTS]).write_to_fp(buf)
+        return buf.getvalue()
+
+    # ملاحظة مهمة: لا نستخدم "with ThreadPoolExecutor()" هنا عمداً — الخروج
+    # من with يستدعي shutdown(wait=True) افتراضياً، أي يظل ينتظر انتهاء
+    # الخيط حتى لو ضربت مهلة future.result() فعلاً، فيتعلّق الاستدعاء هنا
+    # تماماً كما لو لم تكن هناك مهلة أصلاً. نستخدم shutdown(wait=False)
+    # صراحة بعد اللقطة الزمنية بدل ذلك.
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(_run)
+    try:
+        audio_bytes = future.result(timeout=_GTTS_TIMEOUT_SEC)
+    except concurrent.futures.TimeoutError as exc:
+        pool.shutdown(wait=False)
+        raise RuntimeError(
+            f"انتهت مهلة gTTS ({_GTTS_TIMEOUT_SEC}ث) دون استجابة"
+        ) from exc
+    pool.shutdown(wait=False)
+    return TTSResult(audio_bytes=audio_bytes, provider=TTSProvider.GTTS, format="mp3", voice=lang)
 
 
 # ════════════════════════════════════════════════════════════════════════════
