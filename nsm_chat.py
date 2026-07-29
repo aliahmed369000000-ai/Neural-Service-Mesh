@@ -241,35 +241,6 @@ def normalize_ar(text: str) -> str:
     t = re.sub(r'\s+', ' ', t).strip()
     return t
 
-# ── كلمات وظيفية شائعة نستبعدها قبل البحث في domain_lookup لتفادي
-# تطابقات زائفة (مثل "ما"، "لا"، "في") لا تعكس محتوى فعلياً ذا صلة. ──
-_AR_STOPWORDS = {
-    "ما", "لا", "لم", "لن", "هل", "هو", "هي", "قد", "في", "من", "الى",
-    "إلى", "على", "عن", "أن", "ان", "إن", "كل", "أو", "او", "ثم", "لك",
-    "بل", "كان", "كانت", "هذا", "هذه", "ذلك", "تلك", "كيف", "متى", "أين",
-    "اين", "لماذا", "ايضا", "أيضاً", "مع", "بين", "عند", "بعد", "قبل",
-}
-
-
-def _strip_stopwords_ar(text: str) -> str:
-    words = re.findall(r"[^\W\d_]+|[\d:]+", text, re.UNICODE)
-    kept = [w for w in words if w not in _AR_STOPWORDS]
-    return " ".join(kept)
-
-
-_WORD_RE_AR = re.compile(r"[^\W\d_]+", re.UNICODE)
-
-
-def _domain_match_is_meaningful(query_clean: str, match: dict, min_shared: int = 2) -> bool:
-    """يُبقي فقط على تطابقات domain_lookup ذات صلة حقيقية — يشترط تشاركاً
-    في كلمتين مميزتين على الأقل (لا كلمة وحيدة قد تكون مصادفة لفظية)."""
-    q_words = {w for w in _WORD_RE_AR.findall(query_clean) if w not in _AR_STOPWORDS}
-    m_words = {
-        w for w in _WORD_RE_AR.findall(match.get("concept", "") + " " + match.get("text", ""))
-        if w not in _AR_STOPWORDS
-    }
-    return len(q_words & m_words) >= min_shared
-
 # ══════════════════════════════════════════════════════════════════
 # القاموس الثابت (_KB) أُزيل نهائياً بطلب المستخدم — 2026-07-02.
 # كل الردود الآن تمر حصراً عبر LLM/NSM Agent (انظر chat() بالأسفل).
@@ -367,11 +338,7 @@ class NSMChat:
         # حضارات/كيمياء/نحو/إنجليزي/جغرافيا/حاسوب) نُرفقها كمرجع دقيق.
         if _HAS_DOMAIN_GROUNDING and _search_domain is not None:
             try:
-                _clean_q = _strip_stopwords_ar(t)
-                _raw_matches = _search_domain(_clean_q, limit=3) if _clean_q else []
-                _domain_matches = [
-                    m for m in _raw_matches if _domain_match_is_meaningful(_clean_q, m)
-                ]
+                _domain_matches = _search_domain(t, limit=3)
             except Exception:
                 _domain_matches = []
             if _domain_matches:

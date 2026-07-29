@@ -20,12 +20,25 @@ from typing import Any, Dict, List, Optional
 _DATA_PATH = Path(__file__).resolve().parent.parent / "knowledge" / "domains.json"
 _WORD_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
 
+# كلمات وظيفية شائعة تُستبعد من المطابقة — مطابق لـ
+# knowledge_sources/domain_lookup.py بالمستودع الرئيسي.
+_STOPWORDS_AR = {
+    "ما", "لا", "لم", "لن", "هل", "هو", "هي", "قد", "في", "من", "الى",
+    "إلى", "على", "عن", "أن", "ان", "إن", "كل", "أو", "او", "ثم", "لك",
+    "بل", "كان", "كانت", "هذا", "هذه", "ذلك", "تلك", "كيف", "متى", "أين",
+    "اين", "لماذا", "ايضا", "أيضاً", "مع", "بين", "عند", "بعد", "قبل",
+    "معنى", "معني", "اشرح", "شرح", "وضح",
+}
+
 _RAW_CACHE: Optional[Dict[str, Any]] = None
 _INDEX_CACHE: Optional[List[Dict[str, Any]]] = None
 
 
 def _tokenize(text: str) -> set:
-    return {w.lower() for w in _WORD_RE.findall(text or "") if len(w) > 1}
+    return {
+        w.lower() for w in _WORD_RE.findall(text or "")
+        if len(w) > 1 and w.lower() not in _STOPWORDS_AR
+    }
 
 
 def _load_raw() -> Dict[str, Any]:
@@ -66,9 +79,11 @@ def list_domains() -> Dict[str, str]:
 
 
 def search_domain_concepts(
-    query: str, limit: int = 3, domain: Optional[str] = None
+    query: str, limit: int = 3, domain: Optional[str] = None, min_overlap: int = 2
 ) -> List[Dict[str, str]]:
-    """بحث بتطابق الكلمات، مطابق منطقياً لـknowledge_sources/domain_lookup.py."""
+    """بحث بتطابق الكلمات، مطابق منطقياً لـknowledge_sources/domain_lookup.py.
+
+    min_overlap: أقل عدد كلمات مميزة يجب أن تتشارك بين السؤال والمفهوم."""
     q_tokens = _tokenize(query)
     if not q_tokens:
         return []
@@ -77,7 +92,7 @@ def search_domain_concepts(
         if domain and entry["domain"] != domain:
             continue
         overlap = q_tokens & entry["tokens"]
-        if not overlap:
+        if len(overlap) < min_overlap:
             continue
         score = len(overlap) + entry["importance"] * 0.1
         scored.append({**entry, "score": score})
