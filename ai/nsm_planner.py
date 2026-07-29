@@ -317,6 +317,32 @@ def _extract_json(raw: str) -> Optional[Dict]:
 # 2) بناء prompt تنفيذ كل مهمة
 # ══════════════════════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════════════════════
+# 🆕 المرحلة 3 — تحقّق فعلي من نجاح المهمة (لا الاكتفاء بغياب استثناء)
+# ══════════════════════════════════════════════════════════════════
+# task.status = "done" سابقاً كان يعني فقط "لم يُرمَ استثناء Python" أثناء
+# التنفيذ — حتى لو فشل التحقق الذاتي (المرحلة 1) وانتهى self-healing بلا
+# إصلاح، أو انسدّ الإكمال التلقائي (المرحلة 2) عند حدّه الأقصى، أو كان
+# الإجراء مرفوضاً بسبب قفل وضع المالك. هذه العلامات تظهر كنص عادي داخل
+# stream الوكيل دون رفع استثناء، فكانت "المهمة نجحت" رغم ذلك. نفحص هنا
+# نص كل مهمة فعلياً عن علامات فشل حقيقية قبل اعتبارها منجزة.
+_TASK_FAILURE_MARKERS = (
+    "❌ **فشل الإصلاح",                 # المرحلة 1: استُنفدت محاولات self-healing
+    "🔒 هذا الإجراء",                    # لم يُنفَّذ فعلياً (قفل وضع المالك)
+    "⚠️ **وصلت لحد الإكمال التلقائي**",  # المرحلة 2: انتهت الجولات بلا اكتمال
+    "⚠️ استُنفدت ميزانية الخطوات",
+    "⚠️ تعذّر تحليل رد النموذج",
+    "⚠️ تعذّر إكمال الجولة التالية تلقائياً",
+    "⚠️ لا يمكن الوصول لأي مزوّد LLM",
+    "⚠️ تعذّر تحليل رد الإصلاح",
+)
+
+
+def _task_output_has_real_failure(task_output: str) -> bool:
+    """يفحص نص المهمة كاملاً عن أي علامة فشل حقيقية لم تُحلّ فعلياً."""
+    return any(marker in task_output for marker in _TASK_FAILURE_MARKERS)
+
+
 def _build_task_prompt(plan: AppPlan, task: PlanTask, completed: List[PlanTask]) -> str:
     """يبني prompt تنفيذ مهمة واحدة مع السياق الكامل"""
     completed_summary = ""
@@ -422,20 +448,54 @@ class NSMPlanner:
 
             task.status = "done"
             task.result = task_output
+            # 🆕 المرحلة 3: تحقّق فعلي — نص المهمة قد يحتوي فشلاً حقيقياً
+            # (تحقّق ذاتي فشل / إكمال تلقائي انسدّ / قفل صلاحيات) رغم عدم
+            # رمي استثناء Python. لا نعتبرها "منجزة" فعلياً في هذه الحالة.
+            if _task_output_has_real_failure(task_output):
+                task.status = "failed"
             if _TASK_MGR_OK and plan_id > 0:
-                _tm_update_task(plan_id, task.id, "done", task_output)
+                _tm_update_task(plan_id, task.id, task.status, task_output)
             all_files.extend(task.files)
             completed.append(task)
             yield "\n"
 
         # ── تحديث حالة الخطة النهائية في نظام المهام المتعددة ──────────
+        _has_failed = any(t.status == "failed" for t in plan.tasks)
         if _TASK_MGR_OK and plan_id > 0:
-            _has_failed = any(t.status == "failed" for t in plan.tasks)
             _tm_mark_plan(plan_id, "failed" if _has_failed else "done")
+
+        # ── 🆕 المرحلة 3: تسليم نهاية-لنهاية ──────────────────────────
+        # كل المهام done فعلياً (بعد التحقق الحقيقي أعلاه، وليس فقط غياب
+        # استثناء) → رفع تلقائي لـ GitHub برسالة عربية واضحة، بدل انتظار
+        # طلب "ارفع" منفصل من المستخدم. شرط أمان صارم: أي مهمة فاشلة أو
+        # لم تجتز التحقق الذاتي (المرحلة 1) توقف الرفع تماماً.
+        pushed = False
+        push_result = ""
+        if not plan.tasks:
+            pass
+        elif _has_failed:
+            yield "\n---\n\n"
+            yield ("🚫 **لن أرفع تلقائياً لـ GitHub** — توجد مهمة واحدة على الأقل "
+                   "فشلت أو لم تجتز التحقق الذاتي بعد الكتابة. أصلح الأخطاء أعلاه "
+                   "ثم اطلب الرفع يدوياً (\"ارفع\") بعد التأكد.\n\n")
+        else:
+            yield "\n---\n\n"
+            yield "📦 **المرحلة 3: كل المهام نجحت واجتازت التحقق — رفع تلقائي لـ GitHub...**\n\n"
+            commit_msg = (
+                f"{plan.app_name}: {plan.description}".strip(": ")
+                or f"إضافة {plan.app_name}"
+            )[:200]
+            try:
+                from ai.nsm_agent_core import _run_step
+                push_result = _run_step({"action": "git_push", "message": commit_msg})
+            except Exception as e:
+                push_result = f"❌ خطأ في الرفع التلقائي: {e}"
+            yield f"{push_result}\n\n"
+            pushed = push_result.startswith("📤")
 
         # ── ملخص نهائي ──
         yield "\n---\n\n"
-        yield self._format_summary(plan, completed, all_files)
+        yield self._format_summary(plan, completed, all_files, pushed=pushed, push_result=push_result)
 
     def _call_api_bound(self):
         """يُعيد دالة _call_api من الـ agent لاستخدامها في الـ planner"""
@@ -459,7 +519,14 @@ class NSMPlanner:
             lines.append(f"   {t.description}")
         return "\n".join(lines) + "\n"
 
-    def _format_summary(self, plan: AppPlan, completed: List[PlanTask], files: List[str]) -> str:
+    def _format_summary(
+        self,
+        plan: AppPlan,
+        completed: List[PlanTask],
+        files: List[str],
+        pushed: bool = False,
+        push_result: str = "",
+    ) -> str:
         done = [t for t in completed if t.status == "done"]
         failed = [t for t in plan.tasks if t.status == "failed"]
 
@@ -478,11 +545,21 @@ class NSMPlanner:
             for t in failed:
                 lines.append(f"  ❌ {t.title}: {t.result[:100]}")
 
+        # 🆕 المرحلة 3: حالة الرفع الفعلية بدل اقتراح "ارفع" الثابت
+        lines.append("")
+        if pushed:
+            lines.append("**الرفع لـ GitHub:** ✅ تم تلقائياً بعد نجاح كل المهام والتحقق.")
+        elif failed:
+            lines.append("**الرفع لـ GitHub:** 🚫 لم يُنفَّذ — أصلح المهام الفاشلة أولاً ثم اطلب \"ارفع\".")
+        elif push_result:
+            lines.append(f"**الرفع لـ GitHub:** ⚠️ حاولت تلقائياً لكن لم ينجح: {push_result[:150]}")
+        elif files:
+            lines.append("**الرفع لـ GitHub:** ℹ️ لم يُحاول (لا ملفات جديدة نتيجة الخطة).")
+
         lines += [
             "",
             "**الخطوة التالية:**",
             f"- افحص الملفات: `افحص {files[0]}`" if files else "",
             "- شغّل التطبيق: `run_file`",
-            "- ارفع لـ GitHub: `ارفع`",
         ]
         return "\n".join(l for l in lines if l is not None) + "\n"
