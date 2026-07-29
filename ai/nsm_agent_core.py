@@ -112,9 +112,43 @@ def _read_file_safe(path: str, max_chars: int = _MAX_FILE_CHARS) -> Tuple[str, b
 # 2) System Prompt الديناميكي
 # ══════════════════════════════════════════════════════════════════
 
+# 🆕 المرحلة 7 من خطة "المراحل المقترحة" — ملف تعليمات دائم
+_NSM_INSTRUCTIONS_FILE = "nsm.md"
+_MAX_NSM_INSTRUCTIONS_CHARS = 6_000
+
+
+def _read_persistent_instructions() -> str:
+    """
+    سابقاً: تفضيلات أسلوب العمل الثابتة (رسائل عربية، هوية الكوميت،
+    قواعد الرفع/الأمان...) كانت تُكرَّر يدوياً في كل طلب لأن الوكيل لا
+    يملك ذاكرة دائمة عبر الجلسات. هذه الدالة تقرأ `nsm.md` من جذر
+    المشروع (إن وُجد) وتُدرِج محتواه في الـ system prompt في بداية كل
+    جلسة، فتُطبَّق التفضيلات تلقائياً دون الحاجة لتكرارها.
+
+    لا ترمي استثناءً أبداً — غياب الملف أو فشل قراءته يُعيد نصاً فارغاً
+    (سلوك افتراضي، ليس خطأً يوقف الوكيل).
+    """
+    try:
+        f = ROOT / _NSM_INSTRUCTIONS_FILE
+        if not f.exists():
+            return ""
+        text = f.read_text(encoding="utf-8")
+        if len(text) > _MAX_NSM_INSTRUCTIONS_CHARS:
+            text = text[:_MAX_NSM_INSTRUCTIONS_CHARS] + "\n... [اقتُطع]"
+        return text.strip()
+    except Exception:
+        return ""
+
+
 def _build_system_prompt() -> str:
     tree = _get_project_tree()
+    persistent = _read_persistent_instructions()
+    persistent_block = (
+        f"\n## 📌 تعليمات دائمة من {_NSM_INSTRUCTIONS_FILE} (طبّقها في كل رد):\n{persistent}\n"
+        if persistent else ""
+    )
     return f"""أنت **NSM Agent v3** — وكيل برمجي ذكي مدمج في مشروع Neural Service Mesh، اسمك التسويقي ضمن هذا المنتج.
+{persistent_block}
 
 قواعد الهوية:
 - تصرّف بشكل طبيعي كـ NSM Agent ضمن سياق المنتج، دون التطوّع بتفاصيل البنية التقنية الداخلية ما لم يُسأل عنها مباشرة.
