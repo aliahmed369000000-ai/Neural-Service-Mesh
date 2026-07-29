@@ -461,23 +461,47 @@ class NSMPlanner:
 
         # ── تحديث حالة الخطة النهائية في نظام المهام المتعددة ──────────
         _has_failed = any(t.status == "failed" for t in plan.tasks)
+
+        # ── 🆕 المرحلة 4: معاينة وتحقّق بصري حقيقي ──────────────────────
+        # NSM تطبيق Streamlit واحد موحّد (streamlit_app.py) — أي ملف .py
+        # عُدِّل أو أُنشئ قد يكسر إقلاع التطبيق كاملاً حتى لو نجح py_compile
+        # (المرحلة 1، يفحص syntax فقط ولا يكتشف أخطاء وقت التشغيل مثل
+        # استيراد ناقص أو استثناء عند الإقلاع). لذا، إن لم تفشل أي مهمة
+        # حتى الآن، نُشغّل التطبيق فعلياً في عملية خلفية مؤقتة ونتحقق أنه
+        # يُحمَّل بلا خطأ خادم (500) قبل اعتبار الخطة منجزة فعلاً.
+        preview_result = ""
+        if not _has_failed and any(f.endswith(".py") for f in all_files):
+            yield "\n---\n\n"
+            yield "🖥️ **المرحلة 4: تشغيل معاينة حيّة (streamlit run) للتحقق البصري...**\n\n"
+            try:
+                from ai.preview_check import check_streamlit_boots
+                preview_result = check_streamlit_boots("streamlit_app.py")
+            except Exception as e:
+                preview_result = f"❌ خطأ في المعاينة الحيّة: {e}"
+            yield f"{preview_result}\n\n"
+            if preview_result.startswith("❌"):
+                _has_failed = True
+
         if _TASK_MGR_OK and plan_id > 0:
             _tm_mark_plan(plan_id, "failed" if _has_failed else "done")
 
         # ── 🆕 المرحلة 3: تسليم نهاية-لنهاية ──────────────────────────
         # كل المهام done فعلياً (بعد التحقق الحقيقي أعلاه، وليس فقط غياب
-        # استثناء) → رفع تلقائي لـ GitHub برسالة عربية واضحة، بدل انتظار
-        # طلب "ارفع" منفصل من المستخدم. شرط أمان صارم: أي مهمة فاشلة أو
-        # لم تجتز التحقق الذاتي (المرحلة 1) توقف الرفع تماماً.
+        # استثناء) والمعاينة الحيّة (المرحلة 4) نجحت → رفع تلقائي لـ GitHub
+        # برسالة عربية واضحة، بدل انتظار طلب "ارفع" منفصل من المستخدم.
+        # شرط أمان صارم: أي مهمة فاشلة، أو فشل التحقق الذاتي (المرحلة 1)،
+        # أو فشل المعاينة الحيّة (المرحلة 4) يوقف الرفع تماماً.
         pushed = False
         push_result = ""
         if not plan.tasks:
             pass
         elif _has_failed:
             yield "\n---\n\n"
-            yield ("🚫 **لن أرفع تلقائياً لـ GitHub** — توجد مهمة واحدة على الأقل "
-                   "فشلت أو لم تجتز التحقق الذاتي بعد الكتابة. أصلح الأخطاء أعلاه "
-                   "ثم اطلب الرفع يدوياً (\"ارفع\") بعد التأكد.\n\n")
+            reason = ("فشل المعاينة الحيّة (المرحلة 4) عند تشغيل التطبيق فعلياً"
+                      if preview_result.startswith("❌")
+                      else "توجد مهمة واحدة على الأقل فشلت أو لم تجتز التحقق الذاتي بعد الكتابة")
+            yield (f"🚫 **لن أرفع تلقائياً لـ GitHub** — {reason}. "
+                   f"أصلح الأخطاء أعلاه ثم اطلب الرفع يدوياً (\"ارفع\") بعد التأكد.\n\n")
         else:
             yield "\n---\n\n"
             yield "📦 **المرحلة 3: كل المهام نجحت واجتازت التحقق — رفع تلقائي لـ GitHub...**\n\n"
@@ -495,7 +519,10 @@ class NSMPlanner:
 
         # ── ملخص نهائي ──
         yield "\n---\n\n"
-        yield self._format_summary(plan, completed, all_files, pushed=pushed, push_result=push_result)
+        yield self._format_summary(
+            plan, completed, all_files,
+            pushed=pushed, push_result=push_result, preview_result=preview_result,
+        )
 
     def _call_api_bound(self):
         """يُعيد دالة _call_api من الـ agent لاستخدامها في الـ planner"""
@@ -526,12 +553,14 @@ class NSMPlanner:
         files: List[str],
         pushed: bool = False,
         push_result: str = "",
+        preview_result: str = "",
     ) -> str:
         done = [t for t in completed if t.status == "done"]
         failed = [t for t in plan.tasks if t.status == "failed"]
+        _overall_failed = bool(failed) or preview_result.startswith("❌")
 
         lines = [
-            "## ✅ اكتملت الخطة!" if not failed else "## ⚠️ اكتملت مع أخطاء",
+            "## ✅ اكتملت الخطة!" if not _overall_failed else "## ⚠️ اكتملت مع أخطاء",
             "",
             f"**المنجز:** {len(done)}/{len(plan.tasks)} مهمة",
         ]
@@ -545,12 +574,17 @@ class NSMPlanner:
             for t in failed:
                 lines.append(f"  ❌ {t.title}: {t.result[:100]}")
 
+        # 🆕 المرحلة 4: نتيجة المعاينة الحيّة (إن نُفِّذت)
+        if preview_result:
+            icon = "✅" if preview_result.startswith("✅") else "❌"
+            lines.append(f"\n**المعاينة الحيّة:** {icon} {preview_result[:200]}")
+
         # 🆕 المرحلة 3: حالة الرفع الفعلية بدل اقتراح "ارفع" الثابت
         lines.append("")
         if pushed:
-            lines.append("**الرفع لـ GitHub:** ✅ تم تلقائياً بعد نجاح كل المهام والتحقق.")
-        elif failed:
-            lines.append("**الرفع لـ GitHub:** 🚫 لم يُنفَّذ — أصلح المهام الفاشلة أولاً ثم اطلب \"ارفع\".")
+            lines.append("**الرفع لـ GitHub:** ✅ تم تلقائياً بعد نجاح كل المهام والتحقق والمعاينة الحيّة.")
+        elif failed or preview_result.startswith("❌"):
+            lines.append("**الرفع لـ GitHub:** 🚫 لم يُنفَّذ — أصلح المشاكل أعلاه أولاً ثم اطلب \"ارفع\".")
         elif push_result:
             lines.append(f"**الرفع لـ GitHub:** ⚠️ حاولت تلقائياً لكن لم ينجح: {push_result[:150]}")
         elif files:
