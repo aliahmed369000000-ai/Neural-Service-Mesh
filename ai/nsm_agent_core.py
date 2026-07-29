@@ -158,6 +158,7 @@ def _build_system_prompt() -> str:
       "method": "GET|POST|PUT|PATCH|DELETE (لـ api_call، افتراضي GET)",
       "headers": "كائن JSON بالترويسات (لـ api_call، اختياري)",
       "body": "كائن JSON لجسم الطلب (لـ api_call، اختياري)",
+      "test_code": "🆕 اختياري لـ create_file/edit_file: سكربت python صغير يستدعي الدالة/المسار المكتوب فعلياً ببيانات وهمية واقعية ويتحقق من النتيجة (assert)، ليُنفَّذ فعلياً كتحقق وظيفي حقيقي بعد نجاح py_compile",
       "reply": "رد للمستخدم بالعربية (لـ answer)"
     }}
   ]
@@ -203,6 +204,14 @@ def _build_system_prompt() -> str:
     ثم answer تُخبر المستخدم أنها حُفظت وتظهر في تبويب "🧩 الواجهات التفاعلية".
 17. 🆕 إذا طلب المستخدم استدعاء API خارجي أو جلب بيانات من رابط: استخدم
     خطوة "api_call" بحقول "url" و"method" و"headers"/"body" عند الحاجة.
+18. 🆕 عند create_file/edit_file لدالة أو منطق له سلوك متوقّع واضح (وليس
+    مجرد نص/توثيق): أضف حقل "test_code" — سكربت python صغير يستورد
+    الدالة فعلياً من مسارها (مثال: `import importlib.util as _u; ...`
+    أو `from ai.module import func`) ويستدعيها ببيانات وهمية واقعية، مع
+    `assert` على النتيجة المتوقعة. هذا يُنفَّذ فعلياً كتحقق وظيفي حقيقي
+    (وليس فقط py_compile) — إن فشل (استثناء أو assert)، ستُصلِحه أنت
+    تلقائياً عبر حلقة self-healing. لا تكتب test_code لملفات لا سلوك
+    قابل للاختبار فيها (توثيق، ثوابت، إعدادات بحتة).
 
 ## مثال حقيقي لرد صحيح (وليس نصاً تنسخه — فقط توضيح للصيغة):
 {{
@@ -722,6 +731,7 @@ def _is_failure(result: str) -> bool:
             "خطأ في استدعاء API", "تعذّر البحث عن الصور",
             "خطأ في التحقق التلقائي",  # 🆕 المرحلة 1: تحقّق ذاتي بعد الكتابة
             "خطأ في المعاينة الحيّة",   # 🆕 المرحلة 4: معاينة streamlit حيّة
+            "خطأ في التحقق الوظيفي",   # 🆕 المرحلة 5: تحقّق وظيفي حقيقي
         ]
     )
 
@@ -765,6 +775,61 @@ def _verify_python_file(path: str) -> Optional[str]:
     return (
         f"❌ خطأ في التحقق التلقائي بعد الكتابة — الكود لا يُجمَّع (py_compile):\n"
         f"```\n{err}\n```"
+    )
+
+
+# ══════════════════════════════════════════════════════════════════
+# 🆕 المرحلة 5 من خطة "المراحل المقترحة (٥ فما فوق)" — تحقّق وظيفي حقيقي
+# ══════════════════════════════════════════════════════════════════
+
+_MAX_FUNCTIONAL_TEST_SECONDS = 20
+
+
+def _run_functional_test(path: str, test_code: str) -> Optional[str]:
+    """
+    فحص `py_compile` (المرحلة 1) يتأكد فقط أن الكود يُجمَّع نحوياً — لا يكتشف
+    أخطاء منطقية أو استثناءات وقت التشغيل عند استدعاء الدالة/المسار فعلياً
+    ببيانات حقيقية (مثال: دالة تفترض مفتاح موجود دائماً في قاموس فيرمي
+    KeyError عند بيانات وهمية واقعية، رغم أنها py_compile بنجاح).
+
+    هذه الدالة تُشغّل `test_code` (سكربت بايثون صغير يكتبه LLM نفسه: يستورد
+    الدالة/الوحدة المعدَّلة من `path` ويستدعيها ببيانات اختبار وهمية حقيقية)
+    كعملية `python3` منفصلة فعلياً — تنفيذ حقيقي، وليس تخميناً نظرياً بأن
+    "الصفحة ستُحمَّل". أي استثناء (KeyError/AttributeError/ValueError/...)
+    أو `assert` فاشل يُعاد كخطأ حقيقي يُشعِل حلقة self-healing الموجودة.
+
+    تعيد None إذا لم يزوّد LLM حقل test_code أصلاً (لا تحقق وظيفي مطلوب)،
+    أو إذا نجح التشغيل فعلياً بلا استثناء (exit code 0).
+    """
+    if not test_code or not test_code.strip():
+        return None
+
+    f = ROOT / path
+    if not f.exists():
+        return None
+
+    try:
+        r = subprocess.run(
+            ["python3", "-c", test_code],
+            capture_output=True, text=True,
+            timeout=_MAX_FUNCTIONAL_TEST_SECONDS, cwd=str(ROOT),
+        )
+    except subprocess.TimeoutExpired:
+        return (f"❌ خطأ في التحقق الوظيفي: انتهت المهلة "
+                f"({_MAX_FUNCTIONAL_TEST_SECONDS}ث) أثناء تنفيذ اختبار حقيقي "
+                f"لـ `{path}` — قد تكون حلقة لا نهائية أو استدعاء متعلّق.")
+    except Exception as e:
+        return f"❌ خطأ في التحقق الوظيفي: {e}"
+
+    if r.returncode == 0:
+        return None
+
+    err = (r.stderr or r.stdout or "").strip()
+    if len(err) > _MAX_RUN_OUTPUT:
+        err = err[:_MAX_RUN_OUTPUT] + "\n... [اقتُطع]"
+    return (
+        f"❌ خطأ في التحقق الوظيفي — تنفيذ فعلي لـ `{path}` ببيانات اختبار "
+        f"حقيقية فشل (وليس فقط فحص syntax):\n```\n{err}\n```"
     )
 
 
@@ -931,6 +996,17 @@ def _stream_steps(
                 result = _verify_result
             else:
                 yield f"✅ *تحقّق تلقائي: `{_step_path}` يُجمَّع بلا أخطاء syntax*\n\n"
+                # 🆕 المرحلة 5: تحقّق وظيفي حقيقي — إن زوّد LLM حقل "test_code"
+                # (استدعاء فعلي للدالة/المسار المعدَّل ببيانات وهمية حقيقية)،
+                # نُنفّذه الآن. نجاح py_compile لا يعني أن الدالة تعمل فعلياً.
+                _step_test_code = step.get("test_code", "")
+                if _step_test_code:
+                    _func_result = _run_functional_test(_step_path, _step_test_code)
+                    if _func_result is not None:
+                        yield f"🧪 *تحقّق وظيفي حقيقي من `{_step_path}`...*\n{_func_result}\n\n"
+                        result = _func_result
+                    else:
+                        yield f"✅ *تحقّق وظيفي: تنفيذ فعلي لـ `{_step_path}` ببيانات اختبار نجح*\n\n"
 
         # ── Self-Healing Loop 🆕 ──
         # 🆕 وسّعنا الشرط: أي فشل حقيقي يستحق إصلاحاً، وليس فقط
@@ -984,6 +1060,14 @@ def _stream_steps(
                             if _hs_verify is not None:
                                 yield f"  ↳ {_hs_verify}\n"
                                 hr = _hs_verify
+                            else:
+                                # 🆕 المرحلة 5: نفس التحقق الوظيفي، لخطوة الإصلاح
+                                _hs_test_code = hs.get("test_code", "")
+                                if _hs_test_code:
+                                    _hs_func = _run_functional_test(_hs_path, _hs_test_code)
+                                    if _hs_func is not None:
+                                        yield f"  ↳ {_hs_func}\n"
+                                        hr = _hs_func
 
                         if _is_failure(hr):
                             all_ok = False
