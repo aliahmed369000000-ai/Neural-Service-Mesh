@@ -2638,15 +2638,22 @@ def metric_card(value, label: str, wrap: bool = False, count_target: int | None 
 def _copy_button(text: str, key: str, label: str = "📋 نسخ") -> None:
     """زر نسخ حديث بلمسة SaaS — ينسخ أي نص للحافظة عبر Clipboard API،
     قابل لإعادة الاستخدام بأي تبويب (نتيجة ترجمة، رد شات، سيناريو...)."""
-    safe_text = json.dumps(text or "")
+    # json.dumps يُخرج علامات اقتباس مزدوجة، وهي نفس محرف الإحاطة المستخدم
+    # لسمة onclick="..." أدناه؛ لولا ترميزها كـ&quot; لقطع المتصفح السمة
+    # عند أول علامة اقتباس داخل النص المنسوخ.
+    safe_text = json.dumps(text or "").replace('"', "&quot;")
     btn_id = f"nsm_copy_{key}"
-    st.markdown(f"""
-    <button id="{btn_id}" class="nsm-copy-btn" onclick="
-        navigator.clipboard.writeText({safe_text});
-        this.innerText='✅ تم النسخ';
-        setTimeout(()=>{{ this.innerText='{label}'; }}, 1500);
-    ">{label}</button>
-    """, unsafe_allow_html=True)
+    # ملاحظة: لا مسافات بادئة قبل وسوم الـHTML هنا عمداً. Markdown يعتبر أي
+    # سطر يبدأ بـ4 مسافات فأكثر "code block" فيعرضه كنص خام بدل تنفيذه
+    # كـHTML — وهذا كان يكسر الزر (يظهر كود الزر والسكربت كنص عادي).
+    _html = (
+        f'<button id="{btn_id}" class="nsm-copy-btn" onclick="'
+        f"navigator.clipboard.writeText({safe_text});"
+        f"this.innerText='✅ تم النسخ';"
+        f"setTimeout(()=&gt;{{ this.innerText='{label}'; }}, 1500);"
+        f'">{label}</button>'
+    )
+    st.markdown(_html, unsafe_allow_html=True)
 
 
 def _skeleton(kind: str = "text", lines: int = 3) -> None:
