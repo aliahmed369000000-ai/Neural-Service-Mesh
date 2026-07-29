@@ -765,27 +765,46 @@ class VideoEngine:
             final = final.with_fps(FPS)
 
             out_path = os.path.join(tmp_dir, "output.mp4")
-            # جودة إنتاج احترافية: كان الرندر سابقاً بـ preset="veryfast" بدون
-            # ضبط CRF (يعتمد على القيمة الافتراضية لـ libx264 وهي 23، مع فقدان
-            # وضوح ملحوظ بالتفاصيل الدقيقة/الحركة السريعة) — الآن نستخدم
-            # preset أبطأ (ضغط أفضل لكل بت) + CRF منخفض (جودة أعلى، شبه
-            # بلا فقد بصري) + معدل بت صوت أعلى، بما يطابق مخرجات أدوات مثل
-            # CapCut/Submagic الاحترافية. المدة قصيرة (Shorts) فتحمل وقت
-            # رندر أطول قليلاً دون مشكلة.
+            total_duration = float(getattr(final, "duration", 0.0) or 0.0)
+
+            # جودة/سرعة متكيّفة مع مدة الفيديو الكلية: preset="slow"+crf=16
+            # (شبه بلا فقد بصري) كان ثابتاً لكل الحالات على افتراض أن
+            # الفيديو دائماً قصير (Shorts <~60ث) فيتحمّل وقت رندر أطول
+            # قليلاً — لكن هذا الافتراض خاطئ الآن مع Higgsfield Explainer
+            # الذي ينتج وثائقيات حتى 10 دقائق (600ث): نفس الـpreset البطيء
+            # على مدة أطول بـ10× يعني وقت رندر أطول بأضعاف مضاعفة، وهو ما
+            # يسبّب بطء الرندر الملحوظ. الحل: نُبقي أعلى جودة للمقاطع
+            # القصيرة (Shorts)، ونتدرّج لـpreset أسرع كلما طالت المدة، حتى
+            # يبقى وقت الرندر معقولاً لمستخدم ينتظر أمام الواجهة بغض النظر
+            # عن طول الوثائقي المطلوب.
+            if total_duration <= 90:
+                preset, crf = "slow", "16"
+            elif total_duration <= 240:
+                preset, crf = "medium", "19"
+            else:
+                preset, crf = "faster", "21"
+
+            # عدد خيوط ffmpeg: كان مثبَّتاً على 4 بغض النظر عن البيئة —
+            # على حاويات محدودة (مثال: Streamlit Community Cloud غالباً
+            # نواة واحدة أو اثنتان) هذا لا يُسرِّع شيئاً وقد يُبطئ فعلياً
+            # بسبب تنافس الخيوط على معالج واحد. نستخدم عدد الأنوية الفعلي
+            # المتاح (بحد أدنى 1 وأقصى 4) بدل رقم ثابت.
+            cpu_threads = max(1, min(4, os.cpu_count() or 2))
+
             final.write_videofile(
                 out_path,
                 fps=FPS,
                 codec="libx264",
                 audio_codec="aac",
                 audio_bitrate="192k",
-                preset="slow",
+                preset=preset,
                 ffmpeg_params=[
-                    "-crf", "16",
+                    "-crf", crf,
                     "-profile:v", "high",
                     "-pix_fmt", "yuv420p",
                     "-movflags", "+faststart",
                 ],
-                threads=4,
+                threads=cpu_threads,
                 logger=None,
             )
 
