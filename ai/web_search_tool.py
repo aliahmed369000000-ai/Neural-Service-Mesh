@@ -8,12 +8,15 @@ NSM Web Search Tool — ai/web_search_tool.py
 
 الإستراتيجية (بالترتيب، بدون مفتاح API لأي منها):
   1) DuckDuckGo HTML Lite            → نتائج ويب حقيقية (عنوان + رابط + مقتطف)
-  2) DuckDuckGo Instant Answer API   → احتياطي JSON رسمي لو فشل (1)
+  2) Wikipedia (عربي ثم إنجليزي)     → 🆕 موثوق جداً من سيرفرات الاستضافة
+     السحابية (DuckDuckGo أحياناً يحظر/يبطئ IPs الاستضافة السحابية) —
+     ممتاز لأسئلة الحقائق المباشرة (أشخاص، دول، مفاهيم، تواريخ)
+  3) DuckDuckGo Instant Answer API   → احتياطي أخير JSON رسمي
 
 ⚠️ ملاحظة صادقة: الخيار (1) يعتمد على هيكل صفحة DuckDuckGo الحالية.
 لو غيّروا تصميم الصفحة مستقبلاً، _parse_lite_html() قد تحتاج تحديث بسيط
 (هذا حال أي scraping بدون مفتاح API — لا يوجد طريقة مجانية مضمونة للأبد).
-الدالة لا تُرجع أبداً "نجاح" وهمي: لو فشل المصدران تُرجع رسالة خطأ صريحة.
+الدالة لا تُرجع أبداً "نجاح" وهمي: لو فشلت كل المصادر تُرجع رسالة خطأ صريحة.
 """
 from __future__ import annotations
 
@@ -97,6 +100,44 @@ def _search_instant_answer(query: str) -> List[Dict[str, str]]:
     return results
 
 
+def _search_wikipedia(query: str, max_results: int, lang: str = "ar") -> List[Dict[str, str]]:
+    """
+    🆕 بحث عبر Wikipedia REST API (opensearch + summary).
+    موثوق جداً من سيرفرات الاستضافة السحابية (غالباً لا يحظر IPs
+    بعكس DuckDuckGo HTML scraping) — ممتاز لأسئلة الحقائق المباشرة
+    (أشخاص، دول، مفاهيم). يُجرَّب العربي أولاً، ثم الإنجليزي احتياطياً.
+    """
+    q = urllib.parse.quote(query)
+    search_url = (
+        f"https://{lang}.wikipedia.org/w/api.php"
+        f"?action=opensearch&search={q}&limit={max_results}&format=json"
+    )
+    raw = _fetch(search_url)
+    data = json.loads(raw)
+    titles: List[str] = data[1] if len(data) > 1 else []
+    urls:   List[str] = data[3] if len(data) > 3 else []
+
+    results: List[Dict[str, str]] = []
+    for i, title in enumerate(titles[:max_results]):
+        snippet = ""
+        try:
+            summary_url = (
+                f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/"
+                f"{urllib.parse.quote(title)}"
+            )
+            summary_raw = _fetch(summary_url)
+            summary = json.loads(summary_raw)
+            snippet = (summary.get("extract") or "").strip()
+        except Exception:
+            pass
+        results.append({
+            "title": title,
+            "url": urls[i] if i < len(urls) else "",
+            "snippet": snippet,
+        })
+    return results
+
+
 def _format_results(query: str, results: List[Dict[str, str]], source: str) -> str:
     lines = [f"🔍 نتائج البحث عن: **{query}** (المصدر: {source})\n"]
     for i, r in enumerate(results, 1):
@@ -131,6 +172,17 @@ def web_search(query: str, max_results: int = 5) -> str:
             return _format_results(query, results, source="DuckDuckGo")
     except Exception as e:
         errors.append(f"DuckDuckGo HTML: {e}")
+
+    # 🆕 Wikipedia (عربي ثم إنجليزي) — بديل موثوق قبل الاستسلام،
+    # خصوصاً لأسئلة الحقائق المباشرة (أشخاص/دول/مفاهيم) التي غالباً
+    # ما تُطلَب هنا، وأقل عرضة لحظر IPs الاستضافة السحابية.
+    for lang in ("ar", "en"):
+        try:
+            results = _search_wikipedia(query, max_results, lang=lang)
+            if results:
+                return _format_results(query, results, source=f"Wikipedia ({lang})")
+        except Exception as e:
+            errors.append(f"Wikipedia ({lang}): {e}")
 
     try:
         results = _search_instant_answer(query)
