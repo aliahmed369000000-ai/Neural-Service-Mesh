@@ -349,6 +349,7 @@ def _rephrase_in_yemeni_dialect(
     dialect: str = "عام",
     arabic_roots: Optional[Dict[str, Any]] = None,
     surah_profiles: Optional[Dict[str, Any]] = None,
+    conversation_history: Optional[List[Dict[str, str]]] = None,
 ) -> Optional[str]:
     """
     يمرّر الإجابة الرمزية المؤسَّسة (result['summary'] + الآيات + المفاهيم)
@@ -389,6 +390,16 @@ def _rephrase_in_yemeni_dialect(
             _enrich_with_arabic_roots(primary_names + related_names, arabic_roots or {})
         )
         facts_lines.extend(_enrich_with_surah_context(verses, surah_profiles or {}))
+
+        if conversation_history:
+            prev = conversation_history[-1]
+            prev_q = prev.get("question", "")
+            prev_s = prev.get("summary", "")
+            if prev_q and prev_s:
+                facts_lines.append(
+                    f"سياق من سؤال سابق في نفس المحادثة — السؤال: {prev_q} "
+                    f"| ملخص الإجابة عليه: {prev_s[:200]}"
+                )
 
         query = (
             f"السؤال الأصلي: {question}\n\n"
@@ -1395,6 +1406,7 @@ def answer_question(
     top_k: int = 50,
     include_reasoning_trace: bool = False,
     include_images: bool = False,
+    conversation_history: Optional[List[Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
     """
     نقطة الدخول الرئيسية لمحرك الأسئلة والأجوبة.
@@ -1442,6 +1454,22 @@ def answer_question(
 
     # 1. استخراج المفاهيم
     concept_matches = extract_concepts_from_question(question, concepts_db)
+
+    # دعم أسئلة المتابعة: لو السؤال الحالي لم يستخرج مفاهيم كافية (أو حتى
+    # لو استخرج)، نضيف مفاهيم السؤال السابق كمرشّحين إضافيين بوزن مخفَّض
+    # (0.5×) — لا يستبدلون مفاهيم السؤال الحالي أبداً، فقط يسدّون الفجوة
+    # لأسئلة قصيرة مثل "ليش؟"/"وماذا عن الزكاة؟" التي لا تحمل سياقاً كافياً
+    # بذاتها. لا تأثير إطلاقاً لو conversation_history=None (الافتراضي).
+    if conversation_history:
+        prev_question = conversation_history[-1].get("question", "")
+        if prev_question:
+            prev_matches = extract_concepts_from_question(prev_question, concepts_db)
+            existing_names = {c for c, _ in concept_matches}
+            for name, score in prev_matches:
+                if name not in existing_names:
+                    concept_matches.append((name, round(score * 0.5, 4)))
+                    existing_names.add(name)
+            concept_matches.sort(key=lambda x: -x[1])
 
     # 2. المفاهيم المرتبطة — نستثني المفاهيم "الإطارية" (مثل: قرآن، كتاب) من
     # بذور البحث عن العلاقات، لأنها تملك علاقات قوية عامة (مثل قرآن↔كتاب)
@@ -1504,12 +1532,16 @@ def answer_question(
     result["generation_used"] = False
     result["generated_text"] = None
     result["generation_backend"] = None
+    result["conversation_context_used"] = bool(
+        conversation_history and conversation_history[-1].get("question")
+    )
     if generation_mode:
         generated: Optional[str] = None
         if generation_backend == "llm_fallback":
             generated = _rephrase_in_yemeni_dialect(
                 question, result, dialect,
                 arabic_roots=arabic_roots, surah_profiles=surah_profiles,
+                conversation_history=conversation_history,
             )
             backend_used = "llm_fallback"
             if generated is None:
