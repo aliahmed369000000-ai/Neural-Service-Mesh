@@ -8742,6 +8742,7 @@ def render_agent_orchestrator():
             )
             responses: Dict[str, str] = {}
             failed_keys: set = set()
+            final_answer: Optional[str] = None
             for key in selected:
                 cat = AGENT_CATEGORIES[key]
                 bot_key = f"agent_bot_{cat.key}"
@@ -8811,6 +8812,7 @@ def render_agent_orchestrator():
                         final = _synth_result.text
                     except Exception as _synth_err:
                         final = f"⚠️ تعذّر التوليف: {_synth_err}"
+                    final_answer = final
                     _synth_skel_ph.empty()
                     if failed_keys:
                         st.caption(
@@ -8821,6 +8823,26 @@ def render_agent_orchestrator():
                     st.markdown('<div class="section-header">✅ الإجابة الموحّدة</div>', unsafe_allow_html=True)
                     st.markdown(final)
                     _copy_button(final, key="orch_final")
+
+            # ── تصدير النتيجة الكاملة (ردود كل الوكلاء + التوليف إن وُجد) ──
+            # كان لا يوجد سوى زر نسخ لكل رد على حدة — أي فقدان للنتيجة عند
+            # تحديث الصفحة، رغم أنها قد تكون نتاج عدة استدعاءات LLM.
+            if responses:
+                _orch_export_lines = [f"# نتيجة منسّق الوكلاء\n\n**المهمة:** {task.strip()}\n"]
+                _orch_export_lines.append(f"**نمط التنفيذ:** {mode_label} · **التوجيه:** {route_label}\n")
+                for _ek, _ev in responses.items():
+                    _ecat = AGENT_CATEGORIES[_ek]
+                    _estatus = " ⚠️ (فشل)" if _ek in failed_keys else ""
+                    _orch_export_lines.append(f"## {_ecat.emoji} {_ecat.title}{_estatus}\n\n{_ev}\n")
+                if final_answer:
+                    _orch_export_lines.append(f"## ✅ الإجابة الموحّدة\n\n{final_answer}\n")
+                st.download_button(
+                    "⬇️ تصدير النتيجة الكاملة",
+                    data="\n".join(_orch_export_lines).encode("utf-8"),
+                    file_name="نتيجة_منسق_الوكلاء.md",
+                    mime="text/markdown",
+                    key="orch_export_full",
+                )
 
 
 
