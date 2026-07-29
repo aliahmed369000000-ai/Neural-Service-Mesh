@@ -3745,6 +3745,27 @@ def _render_hf_result(script):
          "تطابق كل مشهد، بدون أي تكلفة.")
     )
 
+    _hf_use_music = st.checkbox(
+        "🎵 موسيقى خلفية هادئة (مجانية، مولَّدة تلقائياً — اختياري)",
+        value=False,
+        key="hf_bg_music_toggle",
+        help=(
+            "سجادة صوتية محيطية هادئة بلا لحن أو إيقاع واضح، تُولَّد "
+            "داخلياً بدون أي ملف موسيقى خارجي أو مزوّد مدفوع — منخفضة "
+            "جداً تحت السرد الصوتي فقط. مُعطَّلة افتراضياً لأن بعض "
+            "الجمهور بالمحتوى المعرفي الإسلامي يُفضّل عدم وجود موسيقى "
+            "إطلاقاً — فعّلها فقط إن كانت مناسبة لجمهورك."
+        ),
+    )
+    _hf_music_volume = 0.10
+    if _hf_use_music:
+        _hf_music_volume = st.slider(
+            "🔊 حجم الموسيقى النسبي",
+            min_value=0.03, max_value=0.25, value=0.10, step=0.01,
+            key="hf_bg_music_volume",
+            help="منخفض = بالكاد يُلاحَظ تحت السرد. مرتفع = أوضح لكن قد يزاحم الصوت.",
+        )
+
     if st.button("🎬 أنشئ الفيديو الآن", type="primary", key="hf_render_video_btn"):
         try:
             _hf_spinner_msg = (
@@ -3758,6 +3779,8 @@ def _render_hf_result(script):
                 mp4_bytes = engine.render_video(
                     script, voice=_hf_voice,
                     use_cinematic_backgrounds=_hf_use_cinematic_bg,
+                    use_background_music=_hf_use_music,
+                    music_volume=_hf_music_volume,
                 )
             st.session_state.hf_mp4 = mp4_bytes
             st.success("✅ تم إنتاج الفيديو")
