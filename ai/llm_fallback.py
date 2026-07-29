@@ -11,7 +11,13 @@ LLM Generative Fallback Engine — NSM v18.3
   5. Groq            (GROQ_API_KEY)     — قد يُحجب من بعض الشبكات
   6. OpenAI API      (OPENAI_API_KEY)   — GPT-4o-mini
   7. Together.xyz    (TOGETHER_API_KEY) — Llama-3/Mixtral
-  8. CKG Synthesis   (بدون مفتاح)      — يولّد من الرسم المعرفي دائماً
+  8. Hugging Face    (HUGGINGFACE_API_KEY أو HF_TOKEN) — Falcon-Arabic-7B-Instruct (مجاني)
+  9. CKG Synthesis   (بدون مفتاح)      — يولّد من الرسم المعرفي دائماً
+
+🆕 RAG على الـ CKG: قبل استدعاء أي مزوّد حيّ، يبحث generate() في الرسم
+المعرفي (self.ckg) عن مفاهيم ذات صلة بالسؤال ويُرفقها كسياق إضافي ضمن
+الـ system prompt (انظر _build_ckg_context) — هذا يفيد كل المزوّدين
+وليس فقط Falcon، بدون أي تدريب إضافي.
 
 الاستخدام:
     from ai.llm_fallback import LLMFallback
@@ -49,6 +55,7 @@ class Provider(Enum):
     OPENAI    = "openai"
     TOGETHER  = "together"
     GROQ      = "groq"
+    HUGGINGFACE = "huggingface"  # Falcon-Arabic-7B-Instruct — مجاني (HF Inference API)
     CKG_SYNTH = "ckg_synthesis"
 
 
@@ -100,6 +107,10 @@ _OPENAI_MODEL     = "gpt-4o-mini"
 _TOGETHER_MODEL   = "meta-llama/Llama-3-8b-chat-hf"
 _GEMINI_MODEL     = "gemini-2.5-flash"  # gemini-1.5-flash أُطفئ نهائياً ويرجع 404
 _GROQ_MODELS          = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "openai/gpt-oss-20b"]
+# Falcon-Arabic-7B-Instruct — نموذج لغوي عربي عام (وليس متخصصاً دينياً فقط)
+# مبني على Falcon3-7B من TII، مجاني بالكامل عبر HF Inference API.
+_HF_MODEL             = "tiiuae/Falcon-Arabic-7B-Instruct"
+_HF_INFERENCE_URL     = f"https://api-inference.huggingface.co/models/{_HF_MODEL}"
 _FAILURE_COOLDOWN_SEC = 300   # 5 دقائق قبل إعادة تجربة مزوّد فاشل
 
 # ── اكتشاف نماذج OpenRouter المجانية تلقائياً ────────────────────────────
@@ -297,6 +308,60 @@ def _ckg_synthesize(query: str, ckg) -> str:
         return _generic_fallback()
 
 
+def _build_ckg_context(query: str, ckg, max_concepts: int = 6) -> str:
+    """
+    🆕 RAG حقيقي: يبحث في الرسم المعرفي (CKG) عن مفاهيم ذات صلة بالسؤال،
+    ويُعيدها كسطر سياق قصير يُرفَق مع الـ system prompt قبل استدعاء أي
+    مزوّد LLM حيّ (Anthropic, Falcon-Arabic عبر HF, Gemini, ...).
+
+    بخلاف _ckg_synthesize (اللي يبني إجابة نهائية جاهزة بدون LLM)، هذه
+    الدالة تُعيد فقط "سياق مساعد" يُترك للنموذج نفسه صياغة الإجابة منه —
+    يفيد أي سؤال (عام أو ديني) طالما له مفاهيم مطابقة في الـ CKG، ولا
+    يفرض أي توجّه ديني إن لم يكن السؤال كذلك.
+
+    تُعيد سلسلة فارغة "" إن لم يوجد ckg أو لم تُطابَق أي مفاهيم.
+    """
+    if ckg is None:
+        return ""
+    try:
+        stop_words = {
+            "هل", "ما", "من", "في", "عن", "على", "إلى", "هو", "هي",
+            "كيف", "لماذا", "متى", "أين", "ماذا", "التي", "الذي",
+        }
+        words = [
+            w.strip("؟.,!:;") for w in query.split()
+            if len(w) > 2 and w not in stop_words
+        ]
+
+        candidates: Dict[str, float] = {}
+        for word in words[:6]:
+            variants = [word]
+            if word.startswith("ال") and len(word) > 3:
+                variants.append(word[2:])
+            for variant in variants:
+                try:
+                    related = ckg.query_related(variant, top_k=5)
+                except Exception:
+                    related = []
+                if related:
+                    for name, weight in related:
+                        candidates[name] = max(candidates.get(name, 0.0), weight)
+                    break
+
+        if not candidates:
+            return ""
+
+        ranked = sorted(candidates.items(), key=lambda x: -x[1])[:max_concepts]
+        top    = [n for n, _ in ranked]
+        return (
+            "سياق إضافي من قاعدة المعرفة الخاصة بالمشروع (استخدمها إن كانت "
+            f"ذات صلة، وتجاهلها إن لم تكن): {'، '.join(top)}."
+        )
+    except Exception as exc:
+        logger.warning(f"[CKGContext] {exc}")
+        return ""
+
+
 def _generic_fallback() -> str:
     return (
         "سؤالك خارج نطاق معرفتي المباشرة حالياً. "
@@ -417,6 +482,11 @@ class LLMFallback:
         if k:
             chain.append((Provider.TOGETHER, k, _TOGETHER_MODEL))
 
+        # 8) Hugging Face — Falcon-Arabic-7B-Instruct (مجاني بالكامل)
+        k = os.getenv("HUGGINGFACE_API_KEY", "").strip() or os.getenv("HF_TOKEN", "").strip()
+        if k:
+            chain.append((Provider.HUGGINGFACE, k, _HF_MODEL))
+
         return chain
 
     # ── التبديل بين المزوّدين حسب النوع ─────────────────────────────────
@@ -449,6 +519,8 @@ class LLMFallback:
                 return self._call_gemini(query, history, sp)
             elif provider == Provider.GROQ:
                 return self._call_groq(query, history, sp)
+            elif provider == Provider.HUGGINGFACE:
+                return self._call_huggingface(query, history, sp)
             else:
                 raise ValueError(f"مزوّد غير معروف: {provider}")
         finally:
@@ -477,6 +549,14 @@ class LLMFallback:
         sp      = system_prompt or _SYSTEM_PROMPT
         now     = time.time()
         tried:  List[str] = []
+
+        # 🆕 RAG: أرفق سياق الـ CKG (إن وُجد) قبل استدعاء أي مزوّد حيّ.
+        # يفيد كل المزوّدين (Anthropic, Falcon-Arabic, Gemini, ...) بنفس
+        # الطريقة، دون تدريب إضافي ودون التأثير على مسار CKG Synthesis
+        # الحالي (الذي يبقى كما هو كـ fallback أخير بلا LLM).
+        ckg_context = _build_ckg_context(query, self.ckg)
+        if ckg_context:
+            sp = f"{sp}\n\n{ckg_context}"
 
         chain = self._build_provider_chain()
 
@@ -838,3 +918,56 @@ class LLMFallback:
                 continue
 
         raise Exception(f"فشلت كل نماذج Groq: {last_err}")
+
+    # ── Hugging Face — Falcon-Arabic-7B-Instruct (مجاني) ─────────────────
+
+    def _call_huggingface(
+        self, query: str, history: List[Tuple[str, str]],
+        system_prompt: str = _SYSTEM_PROMPT,
+    ) -> FallbackResult:
+        """
+        يستدعي Falcon-Arabic-7B-Instruct عبر HF Inference API (المجانية).
+        النموذج نفسه نموذج لغوي عربي عام (غير متخصص دينياً)، مبني على
+        Falcon3-7B من TII. نبني الـ prompt يدوياً بصيغة نصية بسيطة لأن
+        الـ Inference API القديمة (serverless) تستخدم "text-generation"
+        وليس "chat/completions".
+        """
+        # بناء prompt نصي واحد يضمّ التعليمات + آخر جولات المحادثة + السؤال
+        parts = [system_prompt.strip()]
+        for u, a in history[-4:]:
+            parts.append(f"المستخدم: {u}\nالمساعد: {a}")
+        parts.append(f"المستخدم: {query}\nالمساعد:")
+        prompt = "\n\n".join(parts)
+
+        data = _post_json(
+            _HF_INFERENCE_URL,
+            {
+                "inputs": prompt,
+                "parameters": {
+                    "max_new_tokens": self.max_tokens,
+                    "temperature":    max(self.temperature, 0.01),
+                    "return_full_text": False,
+                },
+                "options": {"wait_for_model": True},
+            },
+            {
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type":  "application/json",
+            },
+            self.timeout,
+        )
+
+        # صيغة الاستجابة المعتادة: [{"generated_text": "..."}]
+        if isinstance(data, list) and data and "generated_text" in data[0]:
+            text = data[0]["generated_text"].strip()
+        elif isinstance(data, dict) and "generated_text" in data:
+            text = data["generated_text"].strip()
+        else:
+            raise Exception(f"صيغة استجابة غير متوقعة من HF: {str(data)[:150]}")
+
+        if not text:
+            raise Exception("HF أعاد نصاً فارغاً")
+
+        return FallbackResult(
+            text=text, provider=Provider.HUGGINGFACE, model=self._model,
+        )
