@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import textwrap
 import time
@@ -980,6 +981,84 @@ def _run_functional_test(path: str, test_code: str) -> Optional[str]:
     )
 
 
+# ══════════════════════════════════════════════════════════════════
+# 🆕 المرحلة 9 من خطة "المراحل المقترحة (٥ فما فوق)" — إدارة أسرار شبه تلقائية
+# ══════════════════════════════════════════════════════════════════
+
+_ENV_VAR_PATTERN = re.compile(
+    r"""os\.(?:getenv|environ\.get)\(\s*["']([A-Za-z_][A-Za-z0-9_]*)["']"""
+    r"""|os\.environ\[\s*["']([A-Za-z_][A-Za-z0-9_]*)["']\s*\]"""
+)
+
+# 🆕 متغيرات مزوّدي LLM: غيابها مُدار أصلاً عبر fallback متعدد المزوّدين
+# (انظر NSMAgent._check_available) — تنبيه إضافي عنها هنا سيكون تكراراً
+# مزعجاً بلا فائدة، فهي مستثناة من هذا الفحص تحديداً.
+_ENV_VAR_KNOWN_OPTIONAL = {
+    "CF_API_TOKEN", "CF_ACCOUNT_ID", "GOOGLE_API_KEY",
+    "GROQ_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY",
+}
+
+
+def _extract_env_var_names(content: str) -> set:
+    """يستخرج كل أسماء متغيرات البيئة التي يقرأها الكود عبر os.getenv/os.environ."""
+    names: set = set()
+    if not content:
+        return names
+    try:
+        for m in _ENV_VAR_PATTERN.finditer(content):
+            name = m.group(1) or m.group(2)
+            if name:
+                names.add(name)
+    except Exception:
+        pass
+    return names
+
+
+def _detect_missing_env_vars(path: str, before_content: str, after_content: str) -> Optional[str]:
+    """
+    كشف تلقائي شبه فوري لمتغيرات بيئة (أسرار) جديدة يعتمد عليها الكود
+    المكتوب/المعدَّل للتو، لكنها غير مضبوطة فعلياً في البيئة الحالية.
+
+    السابقة التي دفعت لهذه المرحلة: كود يعتمد على متغير بيئة مفقود (مثال
+    سابق: Unsplash) كان يمكن أن يجتاز py_compile والتحقق الوظيفي (إن لم
+    يُمرَّر test_code يستدعي بالضبط المسار المحتاج للمتغير)، ثم يُرفع
+    ويُنشر، فتفشل الميزة بصمت وقت التشغيل الفعلي في الإنتاج بدل أن يُكتشف
+    الخلل الآن أثناء الكتابة.
+
+    المقارنة تكون بين أسماء المتغيرات في المحتوى الجديد والقديم لنفس
+    الملف — فقط متغير "جديد" أُدخل بهذا التعديل تحديداً يستحق تنبيهاً؛
+    متغيرات كانت موجودة أصلاً في الملف قبل هذا التعديل ليست مسؤولية هذه
+    الخطوة (لتفادي تكرار نفس التنبيه في كل تعديل لاحق غير متعلق بها).
+
+    تعيد نص تنبيه صريح بالاسم المطلوب فعلاً إن وُجد، أو None إن لم يوجد
+    ما يستحق التنبيه. هذا التنبيه *لا* يبدأ بـ"❌" عمداً — فهو ليس فشلاً
+    يُشعِل حلقة self-healing (إعادة تعديل الكود لن يُضيف السرّ الناقص
+    من تلقاء نفسه)؛ فقط رسالة واضحة تصل المستخدم بالاسم المطلوب بدل أن
+    يفشل النشر بصمت لاحقاً.
+    """
+    try:
+        new_vars = _extract_env_var_names(after_content) - _extract_env_var_names(before_content)
+    except Exception:
+        return None
+
+    new_vars -= _ENV_VAR_KNOWN_OPTIONAL
+    if not new_vars:
+        return None
+
+    missing = sorted(v for v in new_vars if not os.getenv(v, "").strip())
+    if not missing:
+        return None
+
+    names = "، ".join(f"`{v}`" for v in missing)
+    return (
+        f"🔑 **تنبيه أسرار — متغيّر بيئة جديد غير مضبوط (`{path}`):**\n"
+        f"الكود الجديد يعتمد على {names} لكنه غير موجود حالياً في البيئة "
+        f"(Streamlit Secrets). هذا لن يظهر كخطأ syntax أو تشغيل الآن — "
+        f"الميزة ستفشل بصمت وقت الاستخدام الفعلي بعد النشر. أضِف {names} "
+        f"فعلياً في Streamlit Secrets قبل اعتبار هذه الميزة جاهزة للإنتاج."
+    )
+
+
 def _build_heal_prompt(
     original_request: str,
     failed_step: Dict,
@@ -1121,6 +1200,18 @@ def _stream_steps(
         if step.get("_auto"):
             yield f"{prefix}🔍 *قراءة تلقائية قبل التعديل...*\n"
 
+        # 🆕 المرحلة 9: نلتقط محتوى الملف *قبل* التنفيذ (فارغ إن كان create_file
+        # لملف جديد) لمقارنته لاحقاً واكتشاف متغيرات بيئة جديدة أُدخلت بهذا
+        # التعديل تحديداً، بعد نجاح الكتابة والتحقق.
+        _env_before_content = ""
+        if step.get("action", "") in ("create_file", "edit_file") and step.get("path", "").endswith(".py"):
+            try:
+                _f = ROOT / step["path"]
+                if _f.exists():
+                    _env_before_content = _f.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                _env_before_content = ""
+
         # ── تنفيذ الخطوة ──
         result = _run_step(step)
         yield f"{prefix}{result}\n\n"
@@ -1154,6 +1245,24 @@ def _stream_steps(
                         result = _func_result
                     else:
                         yield f"✅ *تحقّق وظيفي: تنفيذ فعلي لـ `{_step_path}` ببيانات اختبار نجح*\n\n"
+
+                # 🆕 المرحلة 9: إدارة أسرار شبه تلقائية — فحص واحد فقط هنا
+                # (وليس أيضاً في حلقة self-healing أدناه) لتفادي التكرار،
+                # ولأنه يعمل فقط بعد نجاح التحقّق الوظيفي/py_compile أصلاً.
+                # هذا التنبيه لا يُسند إلى result عمداً كي لا يُشعِل
+                # self-healing (تعديل الكود لن يُضيف السرّ الناقص).
+                if not _is_failure(result):
+                    try:
+                        _env_after_content = (ROOT / _step_path).read_text(
+                            encoding="utf-8", errors="replace"
+                        )
+                    except Exception:
+                        _env_after_content = ""
+                    _env_warning = _detect_missing_env_vars(
+                        _step_path, _env_before_content, _env_after_content
+                    )
+                    if _env_warning:
+                        yield f"{_env_warning}\n\n"
 
         # ── Self-Healing Loop 🆕 ──
         # 🆕 وسّعنا الشرط: أي فشل حقيقي يستحق إصلاحاً، وليس فقط
