@@ -50,3 +50,4 @@ Thumbs.db
 __pycache__/
 *.pyc
 memory/core_history.db
+.pytest_cache/
