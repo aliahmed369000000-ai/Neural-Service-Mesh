@@ -2259,6 +2259,47 @@ def load_entities() -> Dict:
         return {}
 
 
+@st.cache_data(ttl=30, show_spinner=False)
+def _load_wan_free_space_status() -> list:
+    """يفحص حالة مساحات Wan المجانية (Running on Zero) عبر
+    ai.video_engine.check_wan_free_space_status — مُخزَّن مؤقتاً 30
+    ثانية فقط (بعكس بقية دوال load_* هنا بـttl=60/300) حتى لا يعرض
+    زر «تحقّق من التوفّر» حالة قديمة لدقائق طويلة، مع تفادي إغراق REST
+    API الخاص بـHugging Face بطلب جديد كل ضغطة زر. يُرجِع [] بصمت إن
+    تعذّر استيراد ai.video_engine (مثلاً moviepy غير مثبَّتة)."""
+    try:
+        from ai.video_engine import check_wan_free_space_status
+    except Exception:
+        return []
+    return check_wan_free_space_status()
+
+
+def _render_wan_free_status_widget(key_prefix: str) -> None:
+    """زر + عرض حالة حيّة لمساحات Wan2.1 المجانية (Running on Zero)،
+    مشترك بين تبويبي 🎬 Explainer و⚡ Shorts لتفادي ازدواج الكود.
+    key_prefix يمنع تصادم مفاتيح session_state بين التبويبين."""
+    if st.button(
+        "🔍 تحقّق من توفّر GPU المجاني الآن",
+        key=f"{key_prefix}_wan_status_btn",
+        help="فحص خفيف وفوري لحالة مساحات Hugging Face (Running on Zero) قبل بدء الرندر — لا يستهلك أي رصيد.",
+    ):
+        _load_wan_free_space_status.clear()  # مسح ذاكرة هذه الدالة فقط (لا كل cache_data بالتطبيق)
+        st.session_state[f"{key_prefix}_wan_status_checked"] = True
+
+    if st.session_state.get(f"{key_prefix}_wan_status_checked"):
+        _statuses = _load_wan_free_space_status()
+        if not _statuses:
+            st.caption("❔ تعذّر تشغيل الفحص بهذه البيئة حالياً — سيُحاول الرندر مباشرة على أي حال.")
+        else:
+            for _s in _statuses:
+                st.caption(f"**{_s['space']}** — {_s['label']}")
+            if not any(_s["ok"] for _s in _statuses):
+                st.caption(
+                    "⚠️ كل المساحات المجانية تبدو غير متاحة الآن — الرندر سيتراجع "
+                    "تلقائياً للخلفية المتدرّجة الافتراضية إن فشلت جميعها."
+                )
+
+
 @st.cache_resource(show_spinner=False)
 def _get_episodic_engine():
     """singleton واحد لعملية Streamlit كاملة (وليس لكل جلسة) — يبدأ خيط
@@ -3758,6 +3799,7 @@ def _render_hf_result(script):
                 "GPU A100 مجاني حقيقي — Hugging Face ZeroGPU</span></div>",
                 unsafe_allow_html=True,
             )
+            _render_wan_free_status_widget("hf_explainer")
 
     _pexels_key_present = bool(os.getenv("PEXELS_API_KEY", "").strip())
     st.caption(
@@ -6574,6 +6616,7 @@ def render_fable():
                         "GPU A100 مجاني حقيقي — Hugging Face ZeroGPU</span></div>",
                         unsafe_allow_html=True,
                     )
+                    _render_wan_free_status_widget("shorts")
                 elif not _hf_key_present:
                     st.warning(
                         "⚠️ HIGGSFIELD_API_KEY غير موجود بالبيئة حالياً — أضِفه "

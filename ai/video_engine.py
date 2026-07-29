@@ -192,6 +192,63 @@ _WAN_FREE_CANDIDATES = [
     },
 ]
 
+# حالات "stage" الممكنة من Hugging Face Spaces Runtime API، مُصنَّفة
+# لعرض مبسّط للمستخدم (راجع check_wan_free_space_status أدناه). أي
+# قيمة غير مذكورة هنا تُعرَض كما هي مع علامة "❔".
+_WAN_STAGE_LABELS = {
+    "RUNNING": ("🟢 يعمل الآن — جاهزة فوراً", True),
+    "SLEEPING": ("🟡 نائمة (تستيقظ تلقائياً عند أول طلب، قد يستغرق قليلاً)", True),
+    "PAUSED": ("🟡 موقوفة مؤقتاً (تستيقظ تلقائياً عند أول طلب)", True),
+    "BUILDING": ("🟡 قيد الإقلاع الآن", True),
+    "RUNNING_BUILDING": ("🟡 تعمل ويُبنى إصدار جديد بالخلفية", True),
+    "STARTING": ("🟡 قيد الإقلاع الآن", True),
+    "RUNTIME_ERROR": ("🔴 بها عطل حالياً — سيُستبعَد تلقائياً لهذا الرندر", False),
+    "BUILD_ERROR": ("🔴 فشل البناء — سيُستبعَد تلقائياً لهذا الرندر", False),
+    "DELETED": ("🔴 المساحة محذوفة", False),
+    "STOPPED": ("🔴 متوقفة", False),
+    "CONFIG_ERROR": ("🔴 خطأ إعداد بالمساحة", False),
+}
+
+
+def check_wan_free_space_status(timeout: float = 6.0) -> List[dict]:
+    """يتحقّق من الحالة الحيّة الفعلية لكل مساحة Hugging Face مجانية
+    (Running on Zero) مُستخدَمة لتوليد الخلفيات السينمائية، عبر REST
+    API الرسمي لـ Hugging Face (huggingface.co/api/spaces/{id}/runtime)
+    — طلب HTTP خفيف بدون الحاجة لتحميل gradio_client كاملاً، فقط لغرض
+    الفحص السريع قبل إطلاق رندر قد يستغرق دقائق.
+
+    يُستخدَم بالواجهة (زر "🔍 تحقّق من توفّر GPU المجاني الآن") ليُطلِع
+    المستخدم مسبقاً إن كانت المساحة نائمة/بها عطل، بدل اكتشاف ذلك بعد
+    انتظار طويل أثناء الرندر الفعلي.
+
+    يُرجِع قائمة (بترتيب _WAN_FREE_CANDIDATES) من قواميس:
+        {"space": "KingNish/wan2-2-fast", "stage": "RUNNING",
+         "label": "🟢 يعمل الآن — جاهزة فوراً", "ok": True}
+
+    لا يرفع أي استثناء أبداً مهما حدث (فشل شبكة/مهلة/JSON غير صالح) —
+    أي خلل يُترجَم لحالة "❔ تعذّر الفحص" مع ok=False، لأن هذا فحص
+    تقديري بحت ولا يجب أن يُسقط الواجهة أو يمنع محاولة الرندر الفعلي
+    (الذي له تراجعه التلقائي المستقل عبر _WanFreeProvider.fetch).
+    """
+    results: List[dict] = []
+    for candidate in _WAN_FREE_CANDIDATES:
+        space = candidate["space"]
+        entry = {"space": space, "stage": "UNKNOWN", "label": "❔ تعذّر الفحص (شبكة)", "ok": False}
+        try:
+            req = urllib.request.Request(
+                f"https://huggingface.co/api/spaces/{space}/runtime",
+                headers={"User-Agent": "NSM-VideoEngine/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            stage = str(data.get("stage") or "UNKNOWN").upper()
+            label, ok = _WAN_STAGE_LABELS.get(stage, (f"❔ حالة غير معروفة ({stage})", False))
+            entry.update(stage=stage, label=label, ok=ok)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("تعذّر فحص حالة مساحة Wan المجانية '%s': %s", space, exc)
+        results.append(entry)
+    return results
+
 
 class _WanFreeProvider:
     """يدير الاتصال بمزوّدي Wan2.1/2.2 المجانيين (مساحات Hugging Face
