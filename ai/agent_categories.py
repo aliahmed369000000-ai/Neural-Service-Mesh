@@ -83,6 +83,22 @@ except Exception:
     get_ckg = None
     _COT_OK = False
 
+# 🆕 تقييم جودة استكشافي (heuristic) لكل رد — نفس ai/response_quality.py
+# المُستخدَم أصلاً في تبويب "🤖 وكلاء AI" لعرض شارة الجودة، لكنه هنا يُستخدَم
+# فعلياً داخل حلقة المحادثة نفسها لإعادة توليد رد ضعيف الجودة تلقائياً
+# (مرة واحدة فقط)، بدل الاكتفاء بعرض الجودة الضعيفة للمستخدم بدون فعل شيء
+# حيالها. أي فشل في التقييم نفسه يُبتلَع بأمان ولا يمنع إرجاع الرد الأصلي.
+try:
+    from ai.response_quality import score_response as _score_quality
+    _QUALITY_OK = True
+except Exception:
+    _score_quality = None
+    _QUALITY_OK = False
+
+# حد الجودة الذي تحته تُعتبر الإجابة "ضعيفة" وتستحق إعادة توليد واحدة —
+# نفس عتبة تصنيف "ضعيف" في response_quality.py (overall < 0.40).
+_LOW_QUALITY_THRESHOLD = 0.40
+
 
 # ══════════════════════════════════════════════════════════════════
 # تعريف الفئات
@@ -428,6 +444,12 @@ class CategoryAgentChat:
 
         self.history: List[Tuple[str, str]] = []
         self._last_provider = ""
+        # 🆕 آخر تقييم جودة (نسبة% وتصنيف)، وهل أُعيد توليد الرد الأخير
+        # بسبب جودة ضعيفة — تُقرَأ من الواجهة (Unified/Hub/Orchestrator)
+        # لعرض شارة جودة موحّدة بدل إعادة حساب score_response في كل مكان.
+        self._last_quality_percent: Optional[int] = None
+        self._last_quality_label: str = ""
+        self._last_regenerated: bool = False
 
     def chat(
         self,
@@ -499,6 +521,38 @@ class CategoryAgentChat:
             history=self.history[-4:],
             system_prompt=sp,
         )
+
+        # 🆕 إعادة توليد تلقائية مرة واحدة إذا كانت الإجابة ضعيفة الجودة
+        # (قصيرة جداً/فارغة/رفض عام/مؤشر خطأ صريح...) وكانت من مزوّد LLM
+        # حي فعلاً — إعادة توليد رد "رسم معرفي" (CKG synthesis) الاحتياطي
+        # لا فائدة منها لأنه نفس المسار الحتمي في كل مرة. أي فشل في تقييم
+        # الجودة نفسه أو في محاولة الإعادة يُبتلَع بأمان ويُستخدَم الرد
+        # الأصلي كما كان يحدث قبل هذه الميزة.
+        self._last_quality_percent = None
+        self._last_quality_label = ""
+        self._last_regenerated = False
+        if _QUALITY_OK and result.provider in LIVE_LLM_PROVIDERS:
+            try:
+                _q = _score_quality(result.text, query=user_input)
+                if _q.overall < _LOW_QUALITY_THRESHOLD:
+                    retry_sp = (
+                        sp + "\n\nملاحظة: إجابتك السابقة على سؤال مشابه كانت غير "
+                        "كافية أو غير واضحة. قدّم إجابة أوضح وأكثر تفصيلاً والتزم "
+                        "بقواعد الفئة أعلاه."
+                    )
+                    retry_result = self.fallback.generate(
+                        query=llm_query, history=self.history[-4:], system_prompt=retry_sp,
+                    )
+                    _q_retry = _score_quality(retry_result.text, query=user_input)
+                    if _q_retry.overall > _q.overall:
+                        result = retry_result
+                        _q = _q_retry
+                        self._last_regenerated = True
+                self._last_quality_percent = _q.as_percent()
+                self._last_quality_label = _q.label
+            except Exception:
+                pass  # التقييم/الإعادة إضافيان وغير حرجَين — لا يُسقطان الرد الأصلي
+
         provider_label = (
             result.model if result.provider in LIVE_LLM_PROVIDERS else "رسم معرفي"
         )
@@ -506,6 +560,18 @@ class CategoryAgentChat:
         self.history.append((user_input, result.text))
         self._log_audit(user_input, result.text, source, provider_label, searched)
         return result.text
+
+    def last_quality_badge(self) -> str:
+        """🆕 شارة جودة جاهزة للعرض (نسبة% + تصنيف)، وإشارة إعادة توليد إن
+        حدثت — لاستخدام موحّد عبر Unified Agent / Orchestrator بدل إعادة
+        استيراد وحساب response_quality في كل واجهة على حدة. تعيد نصاً فارغاً
+        إذا لم يُحسَب تقييم لأي سبب (وحدة غير متاحة، مزوّد CKG احتياطي...)."""
+        if self._last_quality_percent is None:
+            return ""
+        badge = f"🔎 {self._last_quality_percent}٪ {self._last_quality_label}"
+        if self._last_regenerated:
+            badge += " · 🔁 أُعيد التوليد"
+        return badge
 
     def _log_audit(
         self, question: str, response: str, source: str,
@@ -587,6 +653,10 @@ class UnifiedAgentChat:
             "category_emoji": cat.emoji,
             "route_method": route_method,
             "provider_badge": bot.last_provider_badge(),
+            # 🆕 شارة جودة موحّدة (نسبة% + تصنيف + إشارة إعادة توليد إن حدثت)
+            # — نفس الميزة المضافة لـ CategoryAgentChat، معروضة الآن أيضاً
+            # في الوكيل الموحّد وليس فقط في تبويب "🤖 وكلاء AI".
+            "quality_badge": bot.last_quality_badge(),
         }
         self.shared_history.append((user_input, response))
         self.turns_meta.append(meta)

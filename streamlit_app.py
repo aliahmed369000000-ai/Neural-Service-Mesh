@@ -8454,6 +8454,11 @@ def render_unified_agent():
         with st.spinner("⟳ يُوجَّه للمتخصص الأنسب ويولّد الرد..."):
             response, meta = bot.chat(user_input.strip(), force_web=web_toggle)
         badge = f"{meta.get('category_emoji', '🤖')} {meta.get('category_title', '')}"
+        # 🆕 شارة جودة موحّدة (نفس ميزة تبويب "🤖 وكلاء AI")، معروضة الآن
+        # أيضاً في الوكيل الموحّد — تُضاف فقط إن توفّر تقييم فعلاً.
+        _qb = meta.get("quality_badge", "")
+        if _qb:
+            badge = f"{badge} · {_qb}"
         ts2 = datetime.now().strftime("%H:%M")
         st.session_state.unified_agent_msgs.append(("bot", response, badge, ts2))
         st.session_state.unified_agent_count += 1
@@ -9363,7 +9368,16 @@ def render_agent_orchestrator():
                     failed_keys.add(key)
                 _orch_skel_ph.empty()
                 responses[key] = resp
-                with st.expander(f"{cat.emoji} {cat.title}", expanded=not synth):
+                # 🆕 شارة جودة موحّدة لكل رد وكيل (نفس ميزة تبويب "🤖 وكلاء AI"
+                # ووحدة إعادة التوليد التلقائي المدمجة الآن في CategoryAgentChat).
+                _q_label = ""
+                if _ok and hasattr(bot, "last_quality_badge"):
+                    try:
+                        _qb = bot.last_quality_badge()
+                        _q_label = f" — {_qb}" if _qb else ""
+                    except Exception:
+                        _q_label = ""
+                with st.expander(f"{cat.emoji} {cat.title}{_q_label}", expanded=not synth):
                     st.markdown(resp)
                     _copy_button(resp, key=f"orch_{key}")
 
@@ -9397,7 +9411,17 @@ def render_agent_orchestrator():
                             + "، ".join(AGENT_CATEGORIES[k].title for k in failed_keys)
                         )
                     st.toast("✅ تم توليف الإجابة الموحّدة", icon="✅")
-                    st.markdown('<div class="section-header">✅ الإجابة الموحّدة</div>', unsafe_allow_html=True)
+                    _final_q_label = ""
+                    try:
+                        from ai.response_quality import score_response as _score_final
+                        _fq = _score_final(final, query=task.strip())
+                        _final_q_label = f" — 🔎 {_fq.as_percent()}٪ {_fq.label}"
+                    except Exception:
+                        pass  # تقييم إضافي وغير حرج — لا يمنع عرض الإجابة نفسها
+                    st.markdown(
+                        f'<div class="section-header">✅ الإجابة الموحّدة{_final_q_label}</div>',
+                        unsafe_allow_html=True,
+                    )
                     st.markdown(final)
                     _copy_button(final, key="orch_final")
 
@@ -9534,15 +9558,26 @@ def render_swarm_studio():
 
         for _ti, task in enumerate(result.tasks):
             icon = "✅" if task.status == "done" else ("❌" if task.status == "failed" else "⏳")
+            _task_result_text = (task.result or {}).get("result_text", "")
+            # 🆕 شارة جودة موحّدة لكل نتيجة مهمة (نفس ميزة تبويب "🤖 وكلاء AI"
+            # ومنسّق الوكلاء) — تُحسب فقط للمهام الناجحة ذات نص نتيجة فعلي.
+            _task_q_label = ""
+            if task.status == "done" and _task_result_text:
+                try:
+                    from ai.response_quality import score_response as _score_task
+                    _tq = _score_task(_task_result_text, query=task.sub_goal)
+                    _task_q_label = f" — 🔎 {_tq.as_percent()}٪ {_tq.label}"
+                except Exception:
+                    pass  # تقييم إضافي وغير حرج — لا يمنع عرض نتيجة المهمة نفسها
             with st.expander(
                 f"{icon} {task.sub_goal} — [{task.required_capability}] "
-                f"({task.duration_ms or 0:.0f} ms)",
+                f"({task.duration_ms or 0:.0f} ms){_task_q_label}",
                 expanded=(task.status == "failed"),
             ):
                 st.caption(f"الوكيل: {task.assigned_agent_id or '—'}")
-                if task.result and task.result.get("result_text"):
-                    st.markdown(task.result["result_text"])
-                    _copy_button(task.result["result_text"], key=f"swarm_task_{_ti}")
+                if _task_result_text:
+                    st.markdown(_task_result_text)
+                    _copy_button(_task_result_text, key=f"swarm_task_{_ti}")
                 elif task.error:
                     st.warning(task.error)
                 else:
@@ -9550,7 +9585,17 @@ def render_swarm_studio():
 
         _synthesis = (result.merged_output or {}).get("synthesis")
         if _synthesis:
-            st.markdown('<div class="section-header">✅ الإجابة الموحّدة</div>', unsafe_allow_html=True)
+            _synth_q_label = ""
+            try:
+                from ai.response_quality import score_response as _score_synth
+                _sq = _score_synth(_synthesis, query=goal.strip())
+                _synth_q_label = f" — 🔎 {_sq.as_percent()}٪ {_sq.label}"
+            except Exception:
+                pass  # تقييم إضافي وغير حرج — لا يمنع عرض التوليف نفسه
+            st.markdown(
+                f'<div class="section-header">✅ الإجابة الموحّدة{_synth_q_label}</div>',
+                unsafe_allow_html=True,
+            )
             st.markdown(_synthesis)
             _copy_button(_synthesis, key="swarm_synthesis")
         elif synthesize:
