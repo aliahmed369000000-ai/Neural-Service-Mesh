@@ -682,7 +682,8 @@ class SocialAgentManager:
 
     # ── نشر يدوي/برمجي فوري إلى منصة أو أكثر ────────────────────────────
     def publish_to(self, platforms: List[str], text: str,
-                    resume_key: Optional[int] = None) -> Dict[str, str]:
+                    resume_key: Optional[int] = None,
+                    per_platform_text: Optional[Dict[str, str]] = None) -> Dict[str, str]:
         """ينشر النص على كل منصة مطلوبة بالتوازي (خيط لكل منصة). يعيد
         {platform: post_id | 'ERROR: ...'}.
 
@@ -691,9 +692,15 @@ class SocialAgentManager:
         resume_key تُتخطَّى ولا تُعاد (يُستخدم نتيجتها المحفوظة)، ونتيجة
         كل منصة جديدة تُحفَظ فور اكتمالها بدل انتظار انتهاء كل المنصات —
         بحيث لو تعطّلت العملية (تعطّل الخادم مثلاً) منتصف النشر، لا تُكرَّر
-        المنشورات على منصات نجحت فعلاً عند إعادة المحاولة."""
+        المنشورات على منصات نجحت فعلاً عند إعادة المحاولة.
+
+        per_platform_text: قاموس اختياري {platform: نص مخصّص} — لو وُجدت
+        منصة فيه يُستخدم نصها بدل text الموحّد (راجع ai/platform_profiles.py
+        لتوليد هذا القاموس تلقائياً بحدود أحرف وهاشتاقات مناسبة لكل منصة).
+        المنصات غير الموجودة في القاموس تستخدم text كما هو — لا كسر توافق."""
         results: Dict[str, str] = {}
         lock = threading.Lock()
+        per_platform_text = per_platform_text or {}
 
         already_done = _get_checkpoint_results(resume_key) if resume_key is not None else {}
         pending_platforms = []
@@ -705,6 +712,7 @@ class SocialAgentManager:
                 pending_platforms.append(pid)
 
         def _one(pid: str):
+            pid_text = per_platform_text.get(pid, text)
             adapter = self.adapters.get(pid)
             if not adapter:
                 res, ok = "ERROR: منصة غير معروفة", False
@@ -713,11 +721,11 @@ class SocialAgentManager:
                 ok = False
             else:
                 try:
-                    post_id = adapter.publish(text)
-                    log_event(pid, "publish", "agent", text, ok=True)
+                    post_id = adapter.publish(pid_text)
+                    log_event(pid, "publish", "agent", pid_text, ok=True)
                     res, ok = post_id, True
                 except Exception as e:  # noqa: BLE001
-                    log_event(pid, "publish", "agent", text, reply_content=str(e), ok=False)
+                    log_event(pid, "publish", "agent", pid_text, reply_content=str(e), ok=False)
                     res, ok = f"ERROR: {e}", False
             if resume_key is not None:
                 _save_checkpoint(resume_key, pid, ok, res)
@@ -738,7 +746,7 @@ class SocialAgentManager:
                     if pid not in results:
                         err = f"ERROR: انتهت مهلة {TIMEOUT}s قبل اكتمال النشر"
                         results[pid] = err
-                        log_event(pid, "publish", "agent", text,
+                        log_event(pid, "publish", "agent", per_platform_text.get(pid, text),
                                   reply_content=err, ok=False)
         return results
 
