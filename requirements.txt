@@ -4,6 +4,7 @@ arabic-reshaper
 edge-tts>=6.1.0
 fastapi
 gTTS>=2.5.0
+gradio_client
 imageio-ffmpeg>=0.4.9
 librosa
 llvmlite>=0.43.0

@@ -3723,18 +3723,32 @@ def _render_hf_result(script):
 
     _hf_key_present = bool(os.getenv("HIGGSFIELD_API_KEY", "").strip())
     _hf_use_cinematic_bg = st.checkbox(
-        "🎥 خلفيات سينمائية حقيقية (Higgsfield — اختياري، مدفوع)",
+        "🎥 خلفيات سينمائية حقيقية (اختياري)",
         value=False,
         key="hf_cinematic_bg_toggle",
-        help=(
-            "بدل الخلفية المتدرّجة المجانية الافتراضية، يولّد خلفية فيديو "
-            "حقيقية لكل مشهد عبر Higgsfield. ⚠️ مزوّد مدفوع (بعكس بقية "
-            "الـPipeline المجاني هنا) — يستهلك رصيدك في Higgsfield. "
-            "يتطلب HIGGSFIELD_API_KEY."
-            + ("" if _hf_key_present else " — غير مُفعَّل حالياً: المفتاح غير موجود بالبيئة.")
-        ),
-        disabled=not _hf_key_present,
+        help="بدل الخلفية المتدرّجة المجانية الافتراضية، يولّد خلفية فيديو حقيقية لكل مشهد.",
     )
+    _hf_cinematic_provider = "higgsfield"
+    if _hf_use_cinematic_bg:
+        _hf_provider_label = st.radio(
+            "المزوّد",
+            options=[
+                "💳 Higgsfield (مدفوع — أسرع وأدق)",
+                "🆓 Wan2.1 مجاني (تجريبي — عبر Hugging Face)",
+            ],
+            key="hf_cinematic_provider_radio",
+            horizontal=True,
+            help=(
+                "Higgsfield: يستهلك رصيدك بالمزوّد، يتطلب HIGGSFIELD_API_KEY."
+                + ("" if _hf_key_present else " (المفتاح غير موجود بالبيئة حالياً)")
+                + "\n\nWan2.1 مجاني: نموذج مفتوح المصدر يشتغل على مساحة "
+                "Hugging Face مجتمعية (بدون أي تكلفة) — أبطأ بكثير (طابور "
+                "GPU مشترك) وقد يتعطّل أحياناً؛ عند فشله يتراجع تلقائياً "
+                "للخلفية المتدرّجة لنفس المشهد فقط. HF_TOKEN اختياري لتحسين "
+                "حد الاستخدام."
+            ),
+        )
+        _hf_cinematic_provider = "wan_free" if "Wan2.1" in _hf_provider_label else "higgsfield"
 
     _pexels_key_present = bool(os.getenv("PEXELS_API_KEY", "").strip())
     st.caption(
@@ -3779,6 +3793,7 @@ def _render_hf_result(script):
                 mp4_bytes = engine.render_video(
                     script, voice=_hf_voice,
                     use_cinematic_backgrounds=_hf_use_cinematic_bg,
+                    cinematic_provider=_hf_cinematic_provider,
                     use_background_music=_hf_use_music,
                     music_volume=_hf_music_volume,
                 )
