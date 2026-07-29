@@ -232,22 +232,42 @@ def _ckg_synthesize(query: str, ckg) -> str:
     if ckg is None:
         return _generic_fallback()
     try:
+        # 🆕 عند تمرير prompt مُعزَّز (مثلاً من ChainOfThoughtBuilder، يحتوي
+        # أمثلة few-shot + مفاهيم مرتبطة قبل السؤال نفسه)، السؤال الفعلي
+        # يكون بعد آخر سطر يبدأ بـ"السؤال:" — نستخرج الكلمات المفتاحية
+        # منه حصراً بدل أول 6 كلمات من كامل الـ prompt (غالباً نص الأمثلة
+        # لا السؤال الحقيقي).
+        _marker = "السؤال:"
+        effective = query
+        if _marker in query:
+            effective = query.rsplit(_marker, 1)[-1]
+
         stop_words = {
             "هل", "ما", "من", "في", "عن", "على", "إلى", "هو", "هي",
             "كيف", "لماذا", "متى", "أين", "ماذا", "التي", "الذي",
         }
         words = [
-            w.strip("؟.,!:;") for w in query.split()
+            w.strip("؟.,!:;") for w in effective.split()
             if len(w) > 2 and w not in stop_words
         ]
 
         candidates: Dict[str, float] = {}
         for word in words[:6]:
-            try:
-                for name, weight in ckg.query_related(word, top_k=5):
-                    candidates[name] = max(candidates.get(name, 0.0), weight)
-            except Exception:
-                pass
+            # المطابقة في CKG تامة بالاسم المخزَّن؛ المفاهيم غالباً مجرَّدة
+            # ("صبر") بينما كلمات السؤال مُعرَّفة بـ"ال" ("الصبر") فلا
+            # تُطابِق إطلاقاً — نجرّب الكلمة كما هي ثم بعد إزالة "ال".
+            variants = [word]
+            if word.startswith("ال") and len(word) > 3:
+                variants.append(word[2:])
+            for variant in variants:
+                try:
+                    related = ckg.query_related(variant, top_k=5)
+                except Exception:
+                    related = []
+                if related:
+                    for name, weight in related:
+                        candidates[name] = max(candidates.get(name, 0.0), weight)
+                    break
 
         if not candidates:
             return _generic_fallback()

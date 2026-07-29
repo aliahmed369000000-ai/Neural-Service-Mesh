@@ -8273,8 +8273,56 @@ def render_system_core():
                 st.markdown("")
                 if st.button("💾 حفظ الأوزان فقط (بدون بيانات خام)", key="nc_save_ckpt"):
                     try:
-                        _saved_path = _nc.save(_nc_path, include_memory=False)
-                        st.success(f"✅ تم حفظ الأوزان والحالة الهيكلية فقط → `{_saved_path}`")
+                        _saved_path = None
+                        try:
+                            from ai.rollback_guard import CheckpointGuard
+                            _guard = CheckpointGuard(asset="neural_core_weights")
+                            _last_loss = _nc.get_info().get("last_loss")
+                            _guard_files = [
+                                f"{_nc_path}/network.json",
+                                f"{_nc_path}/core_state.json",
+                            ]
+
+                            def _do_nc_save():
+                                nonlocal _saved_path
+                                _saved_path = _nc.save(_nc_path, include_memory=False)
+                                return _saved_path
+
+                            if _last_loss is not None:
+                                _decision = _guard.guarded_update(
+                                    files=_guard_files,
+                                    update_fn=_do_nc_save,
+                                    eval_fn=lambda: -float(_last_loss),
+                                    tolerance=-0.05,
+                                    label=f"حفظ يدوي (last_loss={_last_loss:.6f})",
+                                )
+                                if _decision.rolled_back:
+                                    st.error(
+                                        f"⚠️ رُفض الحفظ تلقائياً وأُعيدت الأوزان السابقة "
+                                        f"(محمي بـ RollbackGuard) — جودة الحفظ الجديد "
+                                        f"({-_decision.new_score:.6f} خسارة) أسوأ من "
+                                        f"المحفوظة سابقاً ({-_decision.old_score:.6f} خسارة)."
+                                    )
+                                else:
+                                    st.success(
+                                        f"✅ تم حفظ الأوزان بأمان (محمي من التراجع) → "
+                                        f"`{_saved_path}`"
+                                    )
+                            else:
+                                # لا يوجد last_loss بعد (لم يُدرَّب النموذج في هذه
+                                # الجلسة) — لا أساس مقارنة، فنأخذ لقطة احتياطية
+                                # يدوية فقط قبل الحفظ العادي تحسباً لأي مشكلة.
+                                _guard.snapshot(_guard_files, label="حفظ يدوي (بدون last_loss)")
+                                _do_nc_save()
+                                st.success(
+                                    f"✅ تم حفظ الأوزان والحالة الهيكلية فقط → "
+                                    f"`{_saved_path}` (أُخذت لقطة احتياطية أولاً)"
+                                )
+                        except ImportError:
+                            # rollback_guard غير متاح لأي سبب — احفظ عادياً كما
+                            # كان يحدث قبل هذا الربط، بدون حماية.
+                            _saved_path = _nc.save(_nc_path, include_memory=False)
+                            st.success(f"✅ تم حفظ الأوزان والحالة الهيكلية فقط → `{_saved_path}`")
                     except Exception as _save_err:
                         st.error(f"فشل الحفظ: {_save_err}")
 
