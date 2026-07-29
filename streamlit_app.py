@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -19,6 +20,8 @@ from typing import Any, Dict, Generator, List, Optional, Tuple
 from urllib.parse import quote
 
 import streamlit as st
+
+logger = logging.getLogger("NSM.streamlit_app")
 
 # ── OpenRouter — مزوّد موازٍ اختياري ─────────────────────────────────────
 try:
@@ -3617,7 +3620,11 @@ def render_higgsfield():
                     st.session_state.hf_error = None
                     st.session_state.hf_mp4 = None
                 except Exception as e:  # noqa: BLE001
-                    st.session_state.hf_script = None
+                    # لا نمسح hf_script السابق هنا عمداً: لو كان لدى
+                    # المستخدم سيناريو ناجح سابقاً وحاول توليد موضوع جديد
+                    # ففشلت المحاولة (شبكة/مزوّد LLM مؤقتاً)، يبقى السيناريو
+                    # القديم ظاهراً بدل أن يفقده بلا داعٍ.
+                    logger.exception("فشل توليد سيناريو Higgsfield Explainer: %s", e)
                     st.session_state.hf_error = str(e)
 
     _hf_err = st.session_state.get("hf_error")
@@ -3754,8 +3761,31 @@ def _render_hf_result(script):
                 )
             st.session_state.hf_mp4 = mp4_bytes
             st.success("✅ تم إنتاج الفيديو")
+        except MemoryError:
+            # لا نسجّل traceback هنا عمداً — العملية غالباً تكون بالفعل
+            # بذاكرة شبه ممتلئة، وتسجيل traceback ثقيل إضافي قد يزيد
+            # الضغط سوءاً في هذه اللحظة تحديداً.
+            st.error(
+                "⚠️ نفدت الذاكرة أثناء الرندر — جرّب مدة أقصر (دقيقتين-3 "
+                "بدل 10) أو عطّل «الخلفيات السينمائية الحقيقية» إن كانت مفعّلة."
+            )
         except Exception as e:  # noqa: BLE001
-            st.error(f"⚠️ فشل رندر الفيديو: {e}")
+            # نسجّل التتبّع الكامل بسجلات السيرفر (يظهر بلوحة Streamlit
+            # Cloud logs) — سابقاً كان يُعرَض str(e) فقط للمستخدم وتُفقَد
+            # بقية تفاصيل الخطأ نهائياً، ما يصعّب تشخيص أعطال الإنتاج.
+            logger.exception("فشل رندر فيديو Higgsfield Explainer: %s", e)
+            _err_name = type(e).__name__
+            if "Timeout" in _err_name or "timed out" in str(e).lower():
+                st.error(
+                    "⚠️ انتهت مهلة الانتظار أثناء الرندر (غالباً بسبب جلب "
+                    "خلفية سينمائية/صورة خارجية بطيئة الاستجابة) — جرّب "
+                    "مرة أخرى، أو عطّل «الخلفيات السينمائية الحقيقية»."
+                )
+            else:
+                st.error(
+                    f"⚠️ فشل رندر الفيديو ({_err_name}) — تم تسجيل تفاصيل "
+                    f"الخطأ. جرّب مرة أخرى أو بمدة أقصر. (رسالة تقنية: {e})"
+                )
 
     mp4_bytes = st.session_state.get("hf_mp4")
     if mp4_bytes:
