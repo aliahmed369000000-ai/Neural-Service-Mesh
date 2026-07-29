@@ -708,7 +708,50 @@ def _is_failure(result: str) -> bool:
             "فعل غير صالح", "فشل البحث", "خطأ في أداة البحث", "مطلوب",
             "خطأ في أداة بحث الصور", "خطأ في إنشاء الواجهة التفاعلية",
             "خطأ في استدعاء API", "تعذّر البحث عن الصور",
+            "خطأ في التحقق التلقائي",  # 🆕 المرحلة 1: تحقّق ذاتي بعد الكتابة
         ]
+    )
+
+
+# ══════════════════════════════════════════════════════════════════
+# 🆕 المرحلة 1 من خطة "Replit Agent Level" — التحقق الذاتي التلقائي
+# ══════════════════════════════════════════════════════════════════
+
+def _verify_python_file(path: str) -> Optional[str]:
+    """
+    بعد أي create_file/edit_file على ملف بايثون، كان الوكيل يكتفي بالتحقق
+    من نجاح الحفظ على القرص (لا استثناء = "✅ عُدِّل")، دون أي تأكّد فعلي
+    أن الكود المكتوب صحيح نحوياً. هذه الدالة تُشغّل `py_compile` حقيقياً
+    (فحص syntax سريع وآمن، بدون تنفيذ الكود الفعلي وآثاره الجانبية) وتعيد
+    رسالة فشل بصيغة تُفعِّل حلقة self-healing الموجودة تلقائياً (نفس آلية
+    _is_failure/_build_heal_prompt)، مع نص الخطأ الحقيقي (SyntaxError/
+    IndentationError/...) بدل الاكتفاء بنجاح الحفظ الشكلي.
+
+    تعيد None إذا نجح التحقق (لا حاجة لأي إصلاح) أو إذا لم يوجد الملف أصلاً
+    (فشل الإنشاء نفسه سبق واكتُشف داخل _run_step).
+    """
+    f = ROOT / path
+    if not f.exists():
+        return None
+    try:
+        r = subprocess.run(
+            ["python3", "-m", "py_compile", str(f)],
+            capture_output=True, text=True, timeout=15, cwd=str(ROOT),
+        )
+    except subprocess.TimeoutExpired:
+        return "❌ خطأ في التحقق التلقائي: انتهت المهلة أثناء فحص syntax"
+    except Exception as e:
+        return f"❌ خطأ في التحقق التلقائي: {e}"
+
+    if r.returncode == 0:
+        return None
+
+    err = (r.stderr or r.stdout or "").strip()
+    if len(err) > _MAX_RUN_OUTPUT:
+        err = err[:_MAX_RUN_OUTPUT] + "\n... [اقتُطع]"
+    return (
+        f"❌ خطأ في التحقق التلقائي بعد الكتابة — الكود لا يُجمَّع (py_compile):\n"
+        f"```\n{err}\n```"
     )
 
 
@@ -769,6 +812,25 @@ def _stream_steps(
         result = _run_step(step)
         yield f"{prefix}{result}\n\n"
 
+        # ── 🆕 المرحلة 1: تحقق ذاتي تلقائي بعد كتابة/تعديل ملف بايثون ──
+        # لا ننتظر طلباً صريحاً من المستخدم (run_file/run_tests يدوياً)؛
+        # أي create_file/edit_file ناجح ظاهرياً على ملف .py يُفحَص فوراً
+        # بـ py_compile حقيقي. فشل هذا الفحص يُعامَل كفشل الخطوة نفسها،
+        # فيُشعِل حلقة self-healing أدناه بنص الخطأ الحقيقي (لا نص عام).
+        _step_action = step.get("action", "")
+        _step_path   = step.get("path", "")
+        if (
+            _step_action in ("create_file", "edit_file")
+            and not _is_failure(result)
+            and _step_path.endswith(".py")
+        ):
+            _verify_result = _verify_python_file(_step_path)
+            if _verify_result is not None:
+                yield f"🔍 *تحقّق تلقائي من `{_step_path}` بعد الكتابة...*\n{_verify_result}\n\n"
+                result = _verify_result
+            else:
+                yield f"✅ *تحقّق تلقائي: `{_step_path}` يُجمَّع بلا أخطاء syntax*\n\n"
+
         # ── Self-Healing Loop 🆕 ──
         # 🆕 وسّعنا الشرط: أي فشل حقيقي يستحق إصلاحاً، وليس فقط
         # run_file/create_file/edit_file (كان يفوت حالات مثل "فعل غير صالح").
@@ -806,6 +868,22 @@ def _stream_steps(
                     for hs in heal_steps:
                         hr = _run_step(hs)
                         yield f"  ↳ {hr}\n"
+
+                        # 🆕 نفس التحقق الذاتي التلقائي، لكن لخطوة الإصلاح نفسها
+                        # — بدون هذا، قد يُصلِح النموذج خطأً ويُنتِج خطأ آخر
+                        # (syntax مختلف) يُعامَل زوراً كـ"تم الإصلاح".
+                        _hs_action = hs.get("action", "")
+                        _hs_path   = hs.get("path", "")
+                        if (
+                            _hs_action in ("create_file", "edit_file")
+                            and not _is_failure(hr)
+                            and _hs_path.endswith(".py")
+                        ):
+                            _hs_verify = _verify_python_file(_hs_path)
+                            if _hs_verify is not None:
+                                yield f"  ↳ {_hs_verify}\n"
+                                hr = _hs_verify
+
                         if _is_failure(hr):
                             all_ok = False
                             result = hr  # للمحاولة التالية
