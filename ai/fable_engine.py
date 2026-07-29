@@ -449,6 +449,7 @@ class FableEngine:
     def render_video(
         self, script: "ExplainerScript", voice: str = "",
         use_cinematic_backgrounds: bool = False,
+        cinematic_provider: str = "higgsfield",
         use_background_music: bool = False,
         music_volume: float = 0.10,
     ) -> bytes:
@@ -461,7 +462,13 @@ class FableEngine:
         ai/higgsfield_engine.py) لكل مشهد. يتطلب HIGGSFIELD_API_KEY، وهو
         مزوّد مدفوع بعكس بقية مسار NSM المجاني — لذا مُعطَّل افتراضياً
         ولا يُفعَّل إلا بطلب صريح. عند غياب المفتاح أو فشل مشهد معيّن،
-        يتراجع تلقائياً للخلفية المتدرّجة لذلك المشهد فقط دون كسر الفيديو.
+        use_cinematic_backgrounds: اختياري (opt-in)، يستبدل الخلفية
+        المتدرّجة بخلفية فيديو سينمائية حقيقية لكل مشهد. cinematic_provider
+        يحدّد المصدر: "higgsfield" (يتطلب HIGGSFIELD_API_KEY مدفوع، أسرع
+        وأدق) أو "wan_free" (نموذج Wan2.1 مفتوح المصدر عبر مساحة Hugging
+        Face مجتمعية مجانية بالكامل — أبطأ وأقل ثباتاً، HF_TOKEN اختياري).
+        عند غياب المفتاح/فشل مشهد معيّن بأي من المزوّدين، يتراجع تلقائياً
+        للخلفية المتدرّجة لذلك المشهد فقط دون كسر الفيديو.
 
         use_background_music: اختياري (opt-in)، مُعطَّل افتراضياً — يضيف
         سجادة صوتية محيطية هادئة (مولَّدة داخلياً، بدون ملف/مزوّد خارجي
@@ -487,6 +494,7 @@ class FableEngine:
         try:
             return VideoEngine(
                 use_cinematic_backgrounds=use_cinematic_backgrounds,
+                cinematic_provider=cinematic_provider,
                 use_background_music=use_background_music,
                 music_volume=music_volume,
             ).render(script)

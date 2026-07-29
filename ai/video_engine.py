@@ -63,6 +63,15 @@ logger = logging.getLogger("VideoEngine")
 # فقط دون فشل الفيديو بالكامل.
 _HF_SHORT_MAX_WAIT = 90
 
+# مهلة أطول لمزوّد Wan2.1 المجاني (Hugging Face Space مجتمعي، طابور GPU
+# مشترك بين كل زوّار المساحة — أبطأ بطبيعته من Higgsfield المدفوع، فيحتاج
+# صبراً أكبر قبل التراجع للخلفية المتدرّجة لهذا المشهد فقط.
+_WAN_FREE_MAX_WAIT = 180
+# معرّف مساحة Hugging Face المجتمعية (fffiloni/Wan2.1) — تشغّل نموذج
+# Wan2.1 T2V-1.3B الفعلي (مفتوح المصدر بالكامل) على GPU مجاني للمساحة،
+# وليست وسيطاً لأي API مدفوع. بديل مجاني اختياري لـ Higgsfield.
+_WAN_FREE_SPACE_ID = "fffiloni/Wan2.1"
+
 # أبعاد فيديو رأسي قياسي (9:16) — نفس نسبة NotebookLM Shorts
 FRAME_W, FRAME_H = 1080, 1920
 FPS = 30
@@ -152,6 +161,55 @@ def _fetch_cinematic_clip(narration: str, visual_notes: str, tmp_dir: str, seg_i
         logger.warning(
             "تعذّر جلب خلفية Higgsfield للمشهد %d (%s) — استخدام الخلفية "
             "المتدرّجة كبديل لهذا المشهد فقط.", seg_index, exc,
+        )
+        return None
+
+
+def _fetch_wan_free_clip(narration: str, visual_notes: str, tmp_dir: str, seg_index: int) -> Optional[str]:
+    """يطلب مقطع فيديو من مساحة Hugging Face المجتمعية fffiloni/Wan2.1 —
+    تشغّل نموذج Wan2.1 (T2V-1.3B) الفعلي المفتوح المصدر مجاناً بالكامل
+    (بدون أي مفتاح API مدفوع)، كبديل مجاني لـ Higgsfield.
+
+    ⚠️ هذا مزوّد "أفضل جهد" (best-effort) يعتمد على مساحة مجتمعية خارج
+    سيطرة NSM — قد تكون بطيئة (طابور GPU مشترك بين كل الزوّار)، معطَّلة
+    مؤقتاً، أو تتغيّر واجهتها البرمجية دون إشعار. أي فشل من أي نوع
+    (مهلة/تغيّر واجهة/تعطّل) يتراجع بصمت للخلفية المتدرّجة لهذا المشهد
+    فقط — تماماً كباقي مزوّدي الخلفيات هنا — ولا يُسقط الفيديو كاملاً
+    أبداً. HF_TOKEN اختياري (حساب Hugging Face مجاني) ويُحسِّن فقط حد
+    الاستخدام المشترك دون أن يكون شرطاً للعمل.
+    """
+    try:
+        from gradio_client import Client
+
+        prompt = _build_cinematic_prompt(narration, visual_notes)
+        hf_token = os.getenv("HF_TOKEN", "").strip() or None
+
+        import concurrent.futures
+
+        def _call():
+            client = Client(_WAN_FREE_SPACE_ID, token=hf_token, verbose=False)
+            return client.predict(prompt, api_name="/infer")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_call)
+            result_path = future.result(timeout=_WAN_FREE_MAX_WAIT)
+
+        if not result_path or not os.path.isfile(str(result_path)):
+            logger.info(
+                "مساحة Wan2.1 المجانية لم تُرجِع فيديو صالحاً للمشهد %d — "
+                "استخدام الخلفية المتدرّجة كبديل لهذا المشهد فقط.", seg_index,
+            )
+            return None
+
+        clip_path = os.path.join(tmp_dir, f"wan_bg_{seg_index}.mp4")
+        import shutil
+        shutil.copyfile(str(result_path), clip_path)
+        return clip_path
+
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "تعذّر جلب خلفية Wan2.1 المجانية للمشهد %d (%s) — استخدام "
+            "الخلفية المتدرّجة كبديل لهذا المشهد فقط.", seg_index, exc,
         )
         return None
 
@@ -439,6 +497,7 @@ class VideoEngine:
     def __init__(
         self,
         use_cinematic_backgrounds: bool = False,
+        cinematic_provider: str = "higgsfield",
         use_stock_backgrounds: bool = True,
         use_background_music: bool = False,
         music_volume: float = 0.10,
@@ -447,6 +506,12 @@ class VideoEngine:
         # اختياري (opt-in) — راجع شرح الميزة في رأس الملف. لا يُفعَّل أبداً
         # ضمنياً حتى لا يستهلك رصيد Higgsfield المدفوع دون طلب صريح.
         self._use_cinematic_backgrounds = use_cinematic_backgrounds
+        # المزوّد عند تفعيل الخلفيات السينمائية: "higgsfield" (مدفوع،
+        # أسرع وأدق) أو "wan_free" (Wan2.1 مفتوح المصدر عبر مساحة Hugging
+        # Face مجتمعية مجانية — أبطأ وأقل ثباتاً، لكن بدون أي تكلفة).
+        self._cinematic_provider = (
+            cinematic_provider if cinematic_provider in ("higgsfield", "wan_free") else "higgsfield"
+        )
         # صور stock مجانية (Pexels) بديلة للتدرّج اللوني الفارغ — مفعَّلة
         # افتراضياً (بعكس Higgsfield) لأنها مجانية بالكامل ولا خطر تكلفة؛
         # تتراجع تلقائياً وبصمت للتدرّج اللوني القديم عند غياب PEXELS_API_KEY
@@ -692,7 +757,8 @@ class VideoEngine:
         # دون أي تأثير على بقية الفيديو.
         cinematic_bg = None
         if self._use_cinematic_backgrounds:
-            clip_path = _fetch_cinematic_clip(
+            fetch_fn = _fetch_wan_free_clip if self._cinematic_provider == "wan_free" else _fetch_cinematic_clip
+            clip_path = fetch_fn(
                 segment.narration, segment.visual_notes, tmp_dir, index,
             )
             if clip_path:
