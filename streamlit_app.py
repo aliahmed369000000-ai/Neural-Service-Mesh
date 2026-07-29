@@ -2277,7 +2277,12 @@ def _load_wan_free_space_status() -> list:
 def _render_wan_free_status_widget(key_prefix: str) -> None:
     """زر + عرض حالة حيّة لمساحات Wan2.1 المجانية (Running on Zero)،
     مشترك بين تبويبي 🎬 Explainer و⚡ Shorts لتفادي ازدواج الكود.
-    key_prefix يمنع تصادم مفاتيح session_state بين التبويبين."""
+    key_prefix يمنع تصادم مفاتيح session_state بين التبويبين.
+
+    يُخزّن أيضاً مجموعة أسماء المساحات المعطوبة (ok=False) بمفتاح
+    session_state['{key_prefix}_wan_dead_spaces'] — يقرأها استدعاء
+    engine.render_video(wan_skip_spaces=...) لاحقاً ليتجاوزها فوراً
+    بدل انتظار فشلها الفعلي أثناء الرندر."""
     if st.button(
         "🔍 تحقّق من توفّر GPU المجاني الآن",
         key=f"{key_prefix}_wan_status_btn",
@@ -2290,10 +2295,18 @@ def _render_wan_free_status_widget(key_prefix: str) -> None:
         _statuses = _load_wan_free_space_status()
         if not _statuses:
             st.caption("❔ تعذّر تشغيل الفحص بهذه البيئة حالياً — سيُحاول الرندر مباشرة على أي حال.")
+            st.session_state[f"{key_prefix}_wan_dead_spaces"] = set()
         else:
             for _s in _statuses:
                 st.caption(f"**{_s['space']}** — {_s['label']}")
-            if not any(_s["ok"] for _s in _statuses):
+            _dead = {_s["space"] for _s in _statuses if not _s["ok"]}
+            st.session_state[f"{key_prefix}_wan_dead_spaces"] = _dead
+            if _dead and len(_dead) < len(_statuses):
+                st.caption(
+                    f"↪️ سيتم تجاوز {len(_dead)} مساحة غير متاحة تلقائياً عند الرندر، "
+                    "والمحاولة مباشرة مع المساحات السليمة."
+                )
+            elif not any(_s["ok"] for _s in _statuses):
                 st.caption(
                     "⚠️ كل المساحات المجانية تبدو غير متاحة الآن — الرندر سيتراجع "
                     "تلقائياً للخلفية المتدرّجة الافتراضية إن فشلت جميعها."
@@ -3847,6 +3860,7 @@ def _render_hf_result(script):
                     cinematic_provider=_hf_cinematic_provider,
                     use_background_music=_hf_use_music,
                     music_volume=_hf_music_volume,
+                    wan_skip_spaces=st.session_state.get("hf_explainer_wan_dead_spaces"),
                 )
             st.session_state.hf_mp4 = mp4_bytes
             st.success("✅ تم إنتاج الفيديو")
@@ -6637,6 +6651,7 @@ def render_fable():
                             short, voice=selected_voice,
                             use_cinematic_backgrounds=use_cinematic_bg,
                             cinematic_provider=cinematic_provider,
+                            wan_skip_spaces=st.session_state.get("shorts_wan_dead_spaces"),
                         )
                     st.session_state.shorts_mp4 = mp4_bytes
                     st.success("✅ تم إنتاج الفيديو")

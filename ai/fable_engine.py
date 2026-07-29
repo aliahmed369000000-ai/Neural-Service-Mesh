@@ -452,6 +452,7 @@ class FableEngine:
         cinematic_provider: str = "higgsfield",
         use_background_music: bool = False,
         music_volume: float = 0.10,
+        wan_skip_spaces: Optional[set] = None,
     ) -> bytes:
         """يبني mp4 فعلي (نص متحرك + صوت سرد) من ExplainerScript. يستدعي
         render_audio() تلقائياً إن لم يكن الصوت مولَّداً بعد. يرجع bytes
@@ -475,6 +476,13 @@ class FableEngine:
         وبلا أي إشكال حقوق ملكية) تحت السرد الصوتي. music_volume يضبط
         حجمها النسبي (افتراضياً 0.10 — منخفض جداً حتى لا يطغى على السرد).
 
+        wan_skip_spaces: اختياري — مجموعة أسماء مساحات Wan المجانية
+        (مثل {"KingNish/wan2-2-fast"}) معروف عطلها مسبقاً (عادة من
+        ai.video_engine.check_wan_free_space_status عبر زر «تحقّق من
+        التوفّر» بالواجهة) — تُستبعَد فوراً من أول مشهد بدل انتظار فشلها
+        الفعلي (مهلة قد تصل 70-110 ثانية للاكتشاف). لا تأثير له إن
+        cinematic_provider != "wan_free".
+
         الاستيراد هنا داخلي (lazy) عمداً: لو moviepy/imageio-ffmpeg غير
         مثبَّتة بعد، باقي NSM (الشات، الوكلاء، إلخ) يستمر يشتغل طبيعياً
         بدون أي كسر — فقط توليد الفيديو نفسه يفشل برسالة واضحة."""
@@ -497,6 +505,7 @@ class FableEngine:
                 cinematic_provider=cinematic_provider,
                 use_background_music=use_background_music,
                 music_volume=music_volume,
+                wan_skip_spaces=wan_skip_spaces,
             ).render(script)
         except ImportError as exc:
             raise RuntimeError(
