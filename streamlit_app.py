@@ -3734,21 +3734,30 @@ def _render_hf_result(script):
             "المزوّد",
             options=[
                 "💳 Higgsfield (مدفوع — أسرع وأدق)",
-                "🆓 Wan2.1 مجاني (تجريبي — عبر Hugging Face)",
+                "🆓 Wan2.1 مجاني ⚡ Running on Zero (GPU حقيقي مجاني)",
             ],
             key="hf_cinematic_provider_radio",
             horizontal=True,
             help=(
                 "Higgsfield: يستهلك رصيدك بالمزوّد، يتطلب HIGGSFIELD_API_KEY."
                 + ("" if _hf_key_present else " (المفتاح غير موجود بالبيئة حالياً)")
-                + "\n\nWan2.1 مجاني: نموذج مفتوح المصدر يشتغل على مساحة "
-                "Hugging Face مجتمعية (بدون أي تكلفة) — أبطأ بكثير (طابور "
-                "GPU مشترك) وقد يتعطّل أحياناً؛ عند فشله يتراجع تلقائياً "
-                "للخلفية المتدرّجة لنفس المشهد فقط. HF_TOKEN اختياري لتحسين "
-                "حد الاستخدام."
+                + "\n\nWan2.1 مجاني: نموذج مفتوح المصدر يشتغل فعلياً على "
+                "GPU A100 مجاني عبر Hugging Face ZeroGPU (مساحات مُوسومة "
+                "رسمياً \"Running on Zero\" على Hugging Face — ليست محاكاة) "
+                "— أبطأ بكثير (طابور GPU مشترك) وقد يتعطّل أحياناً؛ عند "
+                "فشله يتراجع تلقائياً للخلفية المتدرّجة لنفس المشهد فقط. "
+                "HF_TOKEN اختياري لتحسين حد الاستخدام."
             ),
         )
         _hf_cinematic_provider = "wan_free" if "Wan2.1" in _hf_provider_label else "higgsfield"
+        if _hf_cinematic_provider == "wan_free":
+            st.markdown(
+                '<div style="margin:0.3rem 0 0.6rem;">'
+                '<span class="badge badge-green">🟢 Running on Zero</span> '
+                '<span class="badge badge-blue" style="margin-right:6px;">'
+                "GPU A100 مجاني حقيقي — Hugging Face ZeroGPU</span></div>",
+                unsafe_allow_html=True,
+            )
 
     _pexels_key_present = bool(os.getenv("PEXELS_API_KEY", "").strip())
     st.caption(
