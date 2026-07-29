@@ -3164,6 +3164,7 @@ def render_qa():
                 chosen_example = ex
 
     default_q = chosen_example or st.session_state.get("qa_question", "")
+    st.session_state.setdefault("qa_conversation_history", [])
     question = st.text_input(
         "اكتب سؤالك هنا:",
         value=default_q,
@@ -3185,6 +3186,12 @@ def render_qa():
             value=st.session_state.get("qa_show_images", False),
             key="qa_show_images",
         )
+    with opt_col3:
+        if st.session_state["qa_conversation_history"]:
+            st.caption(f"💬 سياق محادثة نشط ({len(st.session_state['qa_conversation_history'])} سؤال سابق)")
+            if st.button("🗑️ مسح سياق المحادثة", key="qa_clear_context"):
+                st.session_state["qa_conversation_history"] = []
+                st.rerun()
 
     ask = st.button("🔍 اسأل", type="primary")
 
@@ -3208,6 +3215,7 @@ def render_qa():
             top_k=st.session_state.get("yemeni_top_k", 50),
             include_reasoning_trace=show_reasoning,
             include_images=show_images,
+            conversation_history=st.session_state["qa_conversation_history"],
         )
 
     # ── حظر أمان (nova_system.py) — أولوية على أي عرض آخر، لا LoRA ولا حلقة ──
@@ -3221,6 +3229,15 @@ def render_qa():
         st.markdown('<div class="section-header">🗣️ توليد حر (تجريبي)</div>', unsafe_allow_html=True)
         st.caption("نص مولَّد بواسطة YemeniDecoder — تجريبي وغير مضمون الدقة، منفصل عن الإجابة الرمزية أدناه.")
         st.info(result["generated_text"])
+
+    # ── حفظ الدور الحالي في سياق المحادثة (لأسئلة المتابعة القادمة) ──
+    # يُستبعد عمداً أي رد محظور أمنياً (return أعلاه) حتى لا يتلوّث سياق
+    # الأسئلة اللاحقة بمحتوى مرفوض. سقف 5 أدوار لتفادي تضخّم prompt الـLLM
+    # بلا حدود مع طول الجلسة.
+    st.session_state["qa_conversation_history"].append(
+        {"question": question, "summary": result.get("summary", "")}
+    )
+    st.session_state["qa_conversation_history"] = st.session_state["qa_conversation_history"][-5:]
 
     # ── حفظ الحلقة في الذاكرة التجريبية ──
     db_path = MEMORY_DIR / "episodic.db"
