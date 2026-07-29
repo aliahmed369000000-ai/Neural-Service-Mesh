@@ -56,6 +56,13 @@ LIVE_TTS_PROVIDERS = frozenset(TTSProvider)
 
 _FAILURE_COOLDOWN_SEC = 300  # 5 دقائق قبل إعادة تجربة مزوّد فاشل
 
+# مهلة قصوى (ثوانٍ) لطلب Edge TTS الواحد — كان بلا أي مهلة إطلاقاً رغم
+# كونه المزوّد الافتراضي المستخدم في كل مقطع (لا يحتاج مفتاح API)؛ عند
+# تعليق/بطء خدمة Microsoft يُعلَّق رندر الوثائقي بالكامل بلا نهاية بدل
+# التراجع التلقائي لـgTTS. مقاطع Higgsfield Explainer قصيرة عادة (بضع
+# جمل)، فـ45 ثانية سخية بما يكفي لأي مقطع طبيعي دون تعليق طويل عند العطل.
+_EDGE_TTS_TIMEOUT_SEC = 45
+
 # أصوات عربية افتراضية جيدة لكل مزوّد (fallback إن لم يُحدَّد صوت)
 _DEFAULT_VOICE = {
     TTSProvider.GEMINI: "Kore",              # صوت Gemini TTS متعدد اللغات
@@ -215,7 +222,9 @@ def _synthesize_edge(text: str, voice: str) -> TTSResult:
                 timings.append((chunk["text"], start_sec, dur_sec))
         return bytes(chunks), timings
 
-    audio_bytes, word_timings = asyncio.run(_run())
+    audio_bytes, word_timings = asyncio.run(
+        asyncio.wait_for(_run(), timeout=_EDGE_TTS_TIMEOUT_SEC)
+    )
     return TTSResult(
         audio_bytes=audio_bytes, provider=TTSProvider.EDGE, format="mp3", voice=voice,
         word_timings=word_timings,
