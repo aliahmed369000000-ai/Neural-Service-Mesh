@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ai.web_search_tool import get_trending_topics
 from ai.content_writer import SEOArticle, generate_seo_article
+from ai.platform_profiles import adapt_text_for_platforms
 
 logger = logging.getLogger("ContentAgent")
 
@@ -56,7 +57,8 @@ class ContentPipelineResult:
     geo:            str
     article:        Optional[SEOArticle]
     teaser:         str
-    platforms:      List[str]
+    per_platform_text: Dict[str, str] = field(default_factory=dict)
+    platforms:      List[str] = field(default_factory=list)
     publish_mode:   str = "skipped"          # "scheduled" | "published" | "skipped"
     publish_result: Dict[str, str] = field(default_factory=dict)
     schedule_id:    Optional[int] = None
@@ -127,12 +129,24 @@ def run_content_pipeline(
     schedule_id: Optional[int] = None
     errors: List[str] = []
 
+    # تكييف المحتوى لكل منصة (المرحلة 5): بدل نشر التشويقة الموحّدة حرفياً
+    # في كل مكان، نبني نصاً مقتطعاً بحد أحرف وعدد هاشتاقات مناسب لكل
+    # منصة على حدة (twitter قصير جداً، instagram/tiktok أطول وبهاشتاقات
+    # أكثر، ...). التشويقة الموحّدة (teaser) تبقى القيمة المُرجعة
+    # للمراجعة، لكن ما يُنشر فعلياً هو النسخة المكيّفة لكل منصة.
+    per_platform_text: Dict[str, str] = (
+        adapt_text_for_platforms(f"{article.title}\n\n{article.meta_description}".strip(),
+                                  platforms, article.keywords)
+        if platforms else {}
+    )
+
     if platforms:
         if not _SOCIAL_OK:
             errors.append("وحدة social_agent غير متاحة — تعذّر النشر/الجدولة")
         elif auto_publish:
             try:
-                publish_result = get_manager().publish_to(platforms, teaser)
+                publish_result = get_manager().publish_to(
+                    platforms, teaser, per_platform_text=per_platform_text)
                 publish_mode = "published"
             except Exception as e:
                 errors.append(f"فشل النشر الفوري: {e}")
@@ -151,6 +165,7 @@ def run_content_pipeline(
         geo=geo,
         article=article,
         teaser=teaser,
+        per_platform_text=per_platform_text,
         platforms=platforms,
         publish_mode=publish_mode,
         publish_result=publish_result,
