@@ -72,6 +72,21 @@ except Exception as _qg_err:
     print(f"⚠ تثبيت القرآن غير متاح: {_qg_err}")
 
 # ══════════════════════════════════════════════════════════════════
+# Domain Knowledge Grounding — نفس الآلية المستخدمة فعلاً في
+# ai/social_agent.py (رد المنصات الاجتماعية) لكنها لم تكن مربوطة
+# بتبويب المحادثة الرئيسي رغم كونه الأهم للمستخدم. نعيد استخدام
+# knowledge_sources/domain_lookup.py كما هو دون أي تعديل عليه.
+# ══════════════════════════════════════════════════════════════════
+try:
+    from knowledge_sources.domain_lookup import search_domain_concepts as _search_domain
+    _HAS_DOMAIN_GROUNDING = True
+    print("✓ تثبيت المعرفة العامة (Domain Grounding) مُفعَّل")
+except Exception as _dg_err:
+    _HAS_DOMAIN_GROUNDING = False
+    _search_domain = None
+    print(f"⚠ تثبيت المعرفة العامة غير متاح: {_dg_err}")
+
+# ══════════════════════════════════════════════════════════════════
 # Code Agent — أوامر التحكم في المشروع
 # ══════════════════════════════════════════════════════════════════
 try:
@@ -226,6 +241,35 @@ def normalize_ar(text: str) -> str:
     t = re.sub(r'\s+', ' ', t).strip()
     return t
 
+# ── كلمات وظيفية شائعة نستبعدها قبل البحث في domain_lookup لتفادي
+# تطابقات زائفة (مثل "ما"، "لا"، "في") لا تعكس محتوى فعلياً ذا صلة. ──
+_AR_STOPWORDS = {
+    "ما", "لا", "لم", "لن", "هل", "هو", "هي", "قد", "في", "من", "الى",
+    "إلى", "على", "عن", "أن", "ان", "إن", "كل", "أو", "او", "ثم", "لك",
+    "بل", "كان", "كانت", "هذا", "هذه", "ذلك", "تلك", "كيف", "متى", "أين",
+    "اين", "لماذا", "ايضا", "أيضاً", "مع", "بين", "عند", "بعد", "قبل",
+}
+
+
+def _strip_stopwords_ar(text: str) -> str:
+    words = re.findall(r"[^\W\d_]+|[\d:]+", text, re.UNICODE)
+    kept = [w for w in words if w not in _AR_STOPWORDS]
+    return " ".join(kept)
+
+
+_WORD_RE_AR = re.compile(r"[^\W\d_]+", re.UNICODE)
+
+
+def _domain_match_is_meaningful(query_clean: str, match: dict, min_shared: int = 2) -> bool:
+    """يُبقي فقط على تطابقات domain_lookup ذات صلة حقيقية — يشترط تشاركاً
+    في كلمتين مميزتين على الأقل (لا كلمة وحيدة قد تكون مصادفة لفظية)."""
+    q_words = {w for w in _WORD_RE_AR.findall(query_clean) if w not in _AR_STOPWORDS}
+    m_words = {
+        w for w in _WORD_RE_AR.findall(match.get("concept", "") + " " + match.get("text", ""))
+        if w not in _AR_STOPWORDS
+    }
+    return len(q_words & m_words) >= min_shared
+
 # ══════════════════════════════════════════════════════════════════
 # القاموس الثابت (_KB) أُزيل نهائياً بطلب المستخدم — 2026-07-02.
 # كل الردود الآن تمر حصراً عبر LLM/NSM Agent (انظر chat() بالأسفل).
@@ -309,14 +353,40 @@ class NSMChat:
         # ── تثبيت قرآني: إن كان السؤال يتعلق بآية معيّنة أو بمصطلح قرآني،
         # نُرفق النص الأصلي الموثوق (من quran.json) مع السؤال — يبقى `t`
         # الأصلي هو ما يُحفظ في السجل، والنسخة المُثبَّتة تذهب للـLLM فقط.
-        t_for_llm = t
+        _context_blocks: list[str] = []
         if _HAS_QURAN_GROUNDING and _build_quran_context is not None:
             try:
                 _quran_ctx = _build_quran_context(t)
             except Exception:
                 _quran_ctx = None
             if _quran_ctx:
-                t_for_llm = f"{_quran_ctx}\n\n[سؤال المستخدم]\n{t}"
+                _context_blocks.append(_quran_ctx)
+
+        # ── تثبيت معرفي عام: نفس آلية ai/social_agent.py — إن طابق
+        # السؤال مفاهيم من مصادر التخصصات (فيزياء/رياضيات/تاريخ/أحياء/
+        # حضارات/كيمياء/نحو/إنجليزي/جغرافيا/حاسوب) نُرفقها كمرجع دقيق.
+        if _HAS_DOMAIN_GROUNDING and _search_domain is not None:
+            try:
+                _clean_q = _strip_stopwords_ar(t)
+                _raw_matches = _search_domain(_clean_q, limit=3) if _clean_q else []
+                _domain_matches = [
+                    m for m in _raw_matches if _domain_match_is_meaningful(_clean_q, m)
+                ]
+            except Exception:
+                _domain_matches = []
+            if _domain_matches:
+                _refs = "\n".join(
+                    f"- [{m['domain_ar']}] {m['concept']}: {m['text']}"
+                    for m in _domain_matches
+                )
+                _context_blocks.append(
+                    "[معلومات مرجعية دقيقة من قاعدة معرفة NSM التعليمية — "
+                    "استخدمها إن كانت ذات صلة]\n" + _refs
+                )
+
+        t_for_llm = t
+        if _context_blocks:
+            t_for_llm = "\n\n".join(_context_blocks) + f"\n\n[سؤال المستخدم]\n{t}"
 
         # ── NSM Agent / LLM — كل شيء آخر يذهب هنا ──
         if _HAS_NSM_AGENT and _nsm_agent:
