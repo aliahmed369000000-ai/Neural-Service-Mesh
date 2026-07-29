@@ -63,15 +63,6 @@ logger = logging.getLogger("VideoEngine")
 # فقط دون فشل الفيديو بالكامل.
 _HF_SHORT_MAX_WAIT = 90
 
-# مهلة أطول لمزوّد Wan2.1 المجاني (Hugging Face Space مجتمعي، طابور GPU
-# مشترك بين كل زوّار المساحة — أبطأ بطبيعته من Higgsfield المدفوع، فيحتاج
-# صبراً أكبر قبل التراجع للخلفية المتدرّجة لهذا المشهد فقط.
-_WAN_FREE_MAX_WAIT = 180
-# معرّف مساحة Hugging Face المجتمعية (fffiloni/Wan2.1) — تشغّل نموذج
-# Wan2.1 T2V-1.3B الفعلي (مفتوح المصدر بالكامل) على GPU مجاني للمساحة،
-# وليست وسيطاً لأي API مدفوع. بديل مجاني اختياري لـ Higgsfield.
-_WAN_FREE_SPACE_ID = "fffiloni/Wan2.1"
-
 # أبعاد فيديو رأسي قياسي (9:16) — نفس نسبة NotebookLM Shorts
 FRAME_W, FRAME_H = 1080, 1920
 FPS = 30
@@ -165,53 +156,111 @@ def _fetch_cinematic_clip(narration: str, visual_notes: str, tmp_dir: str, seg_i
         return None
 
 
-def _fetch_wan_free_clip(narration: str, visual_notes: str, tmp_dir: str, seg_index: int) -> Optional[str]:
-    """يطلب مقطع فيديو من مساحة Hugging Face المجتمعية fffiloni/Wan2.1 —
-    تشغّل نموذج Wan2.1 (T2V-1.3B) الفعلي المفتوح المصدر مجاناً بالكامل
-    (بدون أي مفتاح API مدفوع)، كبديل مجاني لـ Higgsfield.
+def _wan_free_negative_prompt() -> str:
+    """برومبت سلبي عام (إنجليزي) يقلّل عيوب توليد الفيديو الشائعة — نفس
+    الأسلوب المستخدم بمساحات Wan المجتمعية نفسها."""
+    return (
+        "blurry, low quality, watermark, text, subtitles, distorted, "
+        "extra limbs, deformed, static image, worst quality"
+    )
 
-    ⚠️ هذا مزوّد "أفضل جهد" (best-effort) يعتمد على مساحة مجتمعية خارج
-    سيطرة NSM — قد تكون بطيئة (طابور GPU مشترك بين كل الزوّار)، معطَّلة
-    مؤقتاً، أو تتغيّر واجهتها البرمجية دون إشعار. أي فشل من أي نوع
-    (مهلة/تغيّر واجهة/تعطّل) يتراجع بصمت للخلفية المتدرّجة لهذا المشهد
-    فقط — تماماً كباقي مزوّدي الخلفيات هنا — ولا يُسقط الفيديو كاملاً
-    أبداً. HF_TOKEN اختياري (حساب Hugging Face مجاني) ويُحسِّن فقط حد
-    الاستخدام المشترك دون أن يكون شرطاً للعمل.
+
+# قائمة مساحات Hugging Face المجتمعية المجانية لـ Wan2.1/2.2 — بترتيب
+# الأولوية (الأسرع أولاً). كل عنصر يحمل توقيع الاستدعاء الخاص بمساحته
+# (كل مساحة مبنية بواجهة مختلفة قليلاً)، فلا يوجد شكل موحّد واحد.
+# fffiloni/Wan2.1 يُستدعى بعد KingNish لأنه يُشغّل generate.py كعملية
+# فرعية كاملة (أبطأ بكثير من نموذج KingNish المُقطَّر ذي 4 خطوات فقط).
+_WAN_FREE_CANDIDATES = [
+    {
+        "space": "KingNish/wan2-2-fast",
+        "api_name": "/generate_video",
+        "timeout": 70,
+        # ترتيب المدخلات يطابق app.py الفعلي للمساحة (تحقّقنا منه):
+        # image, prompt, height, width, negative_prompt, duration_seconds,
+        # guidance_scale, steps, seed, randomize_seed
+        "build_args": lambda prompt: (
+            None, prompt, 832, 480, _wan_free_negative_prompt(), 3.0, 0.0, 4, 0, True,
+        ),
+        "extract": lambda result: result[0] if isinstance(result, (list, tuple)) else result,
+    },
+    {
+        "space": "fffiloni/Wan2.1",
+        "api_name": "/infer",
+        "timeout": 110,
+        "build_args": lambda prompt: (prompt,),
+        "extract": lambda result: result,
+    },
+]
+
+
+class _WanFreeProvider:
+    """يدير الاتصال بمزوّدي Wan2.1/2.2 المجانيين (مساحات Hugging Face
+    مجتمعية، راجع _WAN_FREE_CANDIDATES) لكل رندر فيديو واحد. نسخة واحدة
+    لكل VideoEngine.render() (يُنشئها fable_engine محرّكاً جديداً بكل
+    استدعاء رندر، فلا تتراكم الحالة بين فيديوهات مختلفة):
+
+    - يعيد استخدام نفس اتصال Client لكل المشاهد بدل إعادة الاتصال من
+      الصفر بكل مشهد (كل اتصال جديد يستهلك جولة شبكة إضافية لجلب
+      إعدادات الواجهة) — تحسين سرعة مباشر.
+    - إن فشلت مساحة معيّنة لأي سبب بمشهد واحد (تعطّل/مهلة/تغيّر واجهة)،
+      تُستبعَد تلقائياً لبقية مشاهد نفس الفيديو بدل إعادة تجربتها ودفع
+      نفس مهلة الانتظار الطويلة مجدداً لكل مشهد لاحق — تحسين استقرار
+      وسرعة معاً، خصوصاً بالوثائقيات الطويلة (حتى 10 مشاهد أو أكثر).
     """
-    try:
+
+    def __init__(self) -> None:
+        self._clients: dict = {}
+        self._dead: set = set()
+
+    def fetch(self, narration: str, visual_notes: str, tmp_dir: str, seg_index: int) -> Optional[str]:
+        prompt = _build_cinematic_prompt(narration, visual_notes)
+        for candidate in _WAN_FREE_CANDIDATES:
+            space = candidate["space"]
+            if space in self._dead:
+                continue
+            try:
+                result_path = self._call(candidate, prompt)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "مساحة Wan المجانية '%s' فشلت (%s) — تُستبعَد لبقية "
+                    "مشاهد هذا الفيديو، وتُجرَّب المساحة التالية إن وُجدت.",
+                    space, exc,
+                )
+                self._dead.add(space)
+                continue
+
+            if result_path and os.path.isfile(str(result_path)):
+                clip_path = os.path.join(tmp_dir, f"wan_bg_{seg_index}.mp4")
+                import shutil
+                shutil.copyfile(str(result_path), clip_path)
+                return clip_path
+            # لا استثناء لكن لا ملف صالح (مثلاً خرج فارغ) — لا نستبعد
+            # المساحة نهائياً (قد ينجح مشهد آخر)، فقط نجرّب المساحة
+            # التالية لهذا المشهد تحديداً.
+
+        return None
+
+    def _call(self, candidate: dict, prompt: str):
+        import concurrent.futures
         from gradio_client import Client
 
-        prompt = _build_cinematic_prompt(narration, visual_notes)
-        hf_token = os.getenv("HF_TOKEN", "").strip() or None
+        space = candidate["space"]
+        client = self._clients.get(space)
+        if client is None:
+            hf_token = os.getenv("HF_TOKEN", "").strip() or None
+            client = Client(space, token=hf_token, verbose=False)
+            self._clients[space] = client
 
-        import concurrent.futures
+        args = candidate["build_args"](prompt)
 
-        def _call():
-            client = Client(_WAN_FREE_SPACE_ID, token=hf_token, verbose=False)
-            return client.predict(prompt, api_name="/infer")
+        def _predict():
+            return client.predict(*args, api_name=candidate["api_name"])
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(_call)
-            result_path = future.result(timeout=_WAN_FREE_MAX_WAIT)
+            future = pool.submit(_predict)
+            result = future.result(timeout=candidate["timeout"])
 
-        if not result_path or not os.path.isfile(str(result_path)):
-            logger.info(
-                "مساحة Wan2.1 المجانية لم تُرجِع فيديو صالحاً للمشهد %d — "
-                "استخدام الخلفية المتدرّجة كبديل لهذا المشهد فقط.", seg_index,
-            )
-            return None
-
-        clip_path = os.path.join(tmp_dir, f"wan_bg_{seg_index}.mp4")
-        import shutil
-        shutil.copyfile(str(result_path), clip_path)
-        return clip_path
-
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "تعذّر جلب خلفية Wan2.1 المجانية للمشهد %d (%s) — استخدام "
-            "الخلفية المتدرّجة كبديل لهذا المشهد فقط.", seg_index, exc,
-        )
-        return None
+        return candidate["extract"](result)
 
 
 def _fetch_stock_background_image(
@@ -512,6 +561,9 @@ class VideoEngine:
         self._cinematic_provider = (
             cinematic_provider if cinematic_provider in ("higgsfield", "wan_free") else "higgsfield"
         )
+        # مثيل _WanFreeProvider واحد يُنشأ عند الحاجة فقط (lazy) ويُعاد
+        # استخدامه لكل مشاهد نفس الفيديو — راجع شرح الكلاس أعلاه.
+        self._wan_free_provider: Optional["_WanFreeProvider"] = None
         # صور stock مجانية (Pexels) بديلة للتدرّج اللوني الفارغ — مفعَّلة
         # افتراضياً (بعكس Higgsfield) لأنها مجانية بالكامل ولا خطر تكلفة؛
         # تتراجع تلقائياً وبصمت للتدرّج اللوني القديم عند غياب PEXELS_API_KEY
@@ -757,10 +809,16 @@ class VideoEngine:
         # دون أي تأثير على بقية الفيديو.
         cinematic_bg = None
         if self._use_cinematic_backgrounds:
-            fetch_fn = _fetch_wan_free_clip if self._cinematic_provider == "wan_free" else _fetch_cinematic_clip
-            clip_path = fetch_fn(
-                segment.narration, segment.visual_notes, tmp_dir, index,
-            )
+            if self._cinematic_provider == "wan_free":
+                if self._wan_free_provider is None:
+                    self._wan_free_provider = _WanFreeProvider()
+                clip_path = self._wan_free_provider.fetch(
+                    segment.narration, segment.visual_notes, tmp_dir, index,
+                )
+            else:
+                clip_path = _fetch_cinematic_clip(
+                    segment.narration, segment.visual_notes, tmp_dir, index,
+                )
             if clip_path:
                 try:
                     cinematic_bg = self._prepare_cinematic_bg_clip(clip_path, duration)
