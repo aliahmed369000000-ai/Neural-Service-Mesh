@@ -265,9 +265,14 @@ class _WanFreeProvider:
       وسرعة معاً، خصوصاً بالوثائقيات الطويلة (حتى 10 مشاهد أو أكثر).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, initial_dead: Optional[set] = None) -> None:
         self._clients: dict = {}
-        self._dead: set = set()
+        # مساحات معروف تعطّلها مسبقاً (مثلاً من check_wan_free_space_status
+        # عبر زر «تحقّق من التوفّر» بالواجهة) — تُستبعَد فوراً من أول مشهد
+        # بدل انتظار فشلها الفعلي (مهلة قد تصل 70-110 ثانية) لاكتشاف ما
+        # كان معروفاً مسبقاً. لا يمنع هذا أي مساحة لم تُفحَص أو فُحصت
+        # ووُجدت سليمة من العمل بشكل طبيعي.
+        self._dead: set = set(initial_dead or ())
 
     def fetch(self, narration: str, visual_notes: str, tmp_dir: str, seg_index: int) -> Optional[str]:
         prompt = _build_cinematic_prompt(narration, visual_notes)
@@ -607,6 +612,7 @@ class VideoEngine:
         use_stock_backgrounds: bool = True,
         use_background_music: bool = False,
         music_volume: float = 0.10,
+        wan_skip_spaces: Optional[set] = None,
     ) -> None:
         self._font_path = _resolve_arabic_font()
         # اختياري (opt-in) — راجع شرح الميزة في رأس الملف. لا يُفعَّل أبداً
@@ -621,6 +627,9 @@ class VideoEngine:
         # مثيل _WanFreeProvider واحد يُنشأ عند الحاجة فقط (lazy) ويُعاد
         # استخدامه لكل مشاهد نفس الفيديو — راجع شرح الكلاس أعلاه.
         self._wan_free_provider: Optional["_WanFreeProvider"] = None
+        # مساحات معروف تعطّلها مسبقاً (من فحص حيّ سابق بالواجهة) — تُمرَّر
+        # لـ_WanFreeProvider عند إنشائه لتُستبعَد فوراً بدل انتظار فشلها.
+        self._wan_skip_spaces = set(wan_skip_spaces or ())
         # صور stock مجانية (Pexels) بديلة للتدرّج اللوني الفارغ — مفعَّلة
         # افتراضياً (بعكس Higgsfield) لأنها مجانية بالكامل ولا خطر تكلفة؛
         # تتراجع تلقائياً وبصمت للتدرّج اللوني القديم عند غياب PEXELS_API_KEY
@@ -868,7 +877,7 @@ class VideoEngine:
         if self._use_cinematic_backgrounds:
             if self._cinematic_provider == "wan_free":
                 if self._wan_free_provider is None:
-                    self._wan_free_provider = _WanFreeProvider()
+                    self._wan_free_provider = _WanFreeProvider(initial_dead=self._wan_skip_spaces)
                 clip_path = self._wan_free_provider.fetch(
                     segment.narration, segment.visual_notes, tmp_dir, index,
                 )
