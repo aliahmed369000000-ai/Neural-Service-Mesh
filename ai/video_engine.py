@@ -1095,3 +1095,99 @@ class VideoEngine:
 
             with open(out_path, "rb") as f:
                 return f.read()
+
+
+# ── تصدير ملف ترجمة SRT قياسي ────────────────────────────────────────────
+# تحسين على المسار الموجود: الترجمات كانت تُحرَق داخل الفيديو فقط (بلا
+# ملف .srt منفصل)، رغم أن كل بيانات التوقيت اللازمة (word_timings الحقيقي
+# من Edge TTS، أو التقدير التناسبي للمزوّدين الآخرين) موجودة أصلاً في
+# VideoEngine._group_word_timings/_split_into_chunks — نفس المصدر
+# المستخدم لرسم الترجمات على الشاشة، فيُطابق ملف SRT ما يظهر بالفيديو
+# تماماً بلا ازدواج منطق. فائدة عملية: رفع الفيديو على منصات تتطلب ملف
+# ترجمة منفصل (بدل الترجمة المحروقة فقط)، إتاحة المحتوى لضعاف السمع،
+# وإتاحة ترجمة السيناريو لاحقاً للغة أخرى بالاعتماد على توقيت جاهز.
+# دالة إضافية بحتة — لا تُعدّل أي سلوك بمسار render() الحالي إطلاقاً.
+_SRT_CONCAT_PADDING = 0.15  # يطابق padding=-0.15 في concatenate_videoclips بـ render()
+
+
+def _format_srt_timestamp(seconds: float) -> str:
+    """00:00:00,000 — تنسيق SRT القياسي."""
+    seconds = max(0.0, seconds)
+    total_ms = int(round(seconds * 1000))
+    hours, rem_ms = divmod(total_ms, 3_600_000)
+    minutes, rem_ms = divmod(rem_ms, 60_000)
+    secs, ms = divmod(rem_ms, 1_000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{ms:03d}"
+
+
+def build_srt(script) -> str:
+    """يبني نص ملف ترجمة SRT كامل من ExplainerScript بعد render_audio()
+    (يتطلب audio_bytes لكل مقطع؛ يستخدم word_timings الحقيقي إن توفّر
+    وإلا يتراجع للتقدير التناسبي — بالضبط كما يفعل render() بصرياً).
+
+    الاستخدام:
+        engine.render_audio(script)
+        srt_text = build_srt(script)
+        with open("captions.srt", "w", encoding="utf-8") as f:
+            f.write(srt_text)
+    """
+    if not script.segments:
+        raise VideoEngineError("السيناريو لا يحتوي أي مشاهد.")
+    if not script.has_audio:
+        raise VideoEngineError(
+            "السيناريو بدون صوت مُولَّد — نفّذ render_audio(script) قبل build_srt()."
+        )
+
+    from moviepy import AudioFileClip
+
+    entries: List[Tuple[float, float, str]] = []
+    cursor = 0.0
+    last_index = len(script.segments) - 1
+
+    with tempfile.TemporaryDirectory(prefix="nsm_srt_") as tmp_dir:
+        for index, segment in enumerate(script.segments):
+            audio_path = os.path.join(
+                tmp_dir, f"srt_seg_{index}.{segment.audio_format or 'mp3'}"
+            )
+            with open(audio_path, "wb") as f:
+                f.write(segment.audio_bytes)
+            audio_clip = AudioFileClip(audio_path)
+            duration = max(1.2, audio_clip.duration)
+            audio_clip.close()
+
+            groups = VideoEngine._group_word_timings(
+                getattr(segment, "word_timings", None) or [], duration, max_words=3,
+            )
+            if groups:
+                chunk_items = list(groups)  # (نص, بداية-ضمن-المشهد, مدة)
+            else:
+                chunks = VideoEngine._split_into_chunks(segment.narration, max_words=3)
+                total_chars = sum(len(c) for c in chunks) or 1
+                min_chunk_dur = 0.42
+                raw_durations = [
+                    max(min_chunk_dur, duration * (len(c) / total_chars)) for c in chunks
+                ]
+                scale = duration / sum(raw_durations) if sum(raw_durations) else 1.0
+                chunk_items = []
+                elapsed = 0.0
+                for text, raw_dur in zip(chunks, raw_durations):
+                    chunk_dur = raw_dur * scale
+                    chunk_items.append((text, elapsed, chunk_dur))
+                    elapsed += chunk_dur
+
+            for text, start_in_seg, chunk_dur in chunk_items:
+                start = cursor + start_in_seg
+                end = start + chunk_dur
+                entries.append((start, end, text))
+
+            cursor += duration
+            if index < last_index:
+                cursor = max(0.0, cursor - _SRT_CONCAT_PADDING)
+
+    lines: List[str] = []
+    for i, (start, end, text) in enumerate(entries, start=1):
+        lines.append(str(i))
+        lines.append(f"{_format_srt_timestamp(start)} --> {_format_srt_timestamp(end)}")
+        lines.append(text)
+        lines.append("")
+    return "\n".join(lines)
