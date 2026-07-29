@@ -131,6 +131,8 @@ def _build_system_prompt() -> str:
 - كتابة وتعديل الملفات مباشرة على القرص
 - تشغيل كود Python وعرض النتيجة
 - رفع التغييرات لـ GitHub تلقائياً
+- 🆕 تشغيل التطبيق فعلياً (streamlit run) في عملية خلفية مؤقتة والتأكد
+  أنه يُحمَّل بلا خطأ خادم (preview_check) قبل اعتبار أي تعديل منجزاً
 - 🆕 بحث حقيقي في الإنترنت (بدون مفتاح API) لمعلومات حديثة أو خارجية
 - 🆕 بحث حقيقي عن الصور (عبر Unsplash) لإرفاق صور فعلية في الرد
 - 🆕 إنشاء "واجهات تفاعلية" (HTML/SVG) تُحفظ وتُعرض للمستخدم في تبويب الواجهات التفاعلية
@@ -143,7 +145,7 @@ def _build_system_prompt() -> str:
   "thinking": "تحليلك للطلب خطوة بخطوة",
   "steps": [
     {{
-      "action": "read_file | create_file | edit_file | run_file | run_tests | git_push | web_search | image_search | create_artifact | api_call | answer",
+      "action": "read_file | create_file | edit_file | run_file | run_tests | git_push | web_search | image_search | create_artifact | api_call | preview_check | answer",
       "path": "المسار النسبي من جذر المشروع",
       "content": "محتوى الملف الكامل (لـ create_file) أو كود HTML/SVG كامل (لـ create_artifact)",
       "old": "النص القديم المراد استبداله (لـ edit_file) — يجب أن يكون موجوداً حرفياً",
@@ -373,6 +375,7 @@ def _run_step(step: Dict[str, Any]) -> str:
         "read_file", "create_file", "edit_file",
         "run_file", "run_tests", "git_push", "web_search",
         "image_search", "create_artifact", "api_call", "answer",
+        "preview_check",
     }
     if action not in _VALID_ACTIONS:
         return (f"❌ فعل غير صالح من النموذج: '{action}'\n"
@@ -465,6 +468,15 @@ def _run_step(step: Dict[str, Any]) -> str:
             return f"{status} الاختبارات:\n```\n{out}\n```"
         except Exception as e:
             return f"❌ خطأ في الاختبارات: {e}"
+
+    # ── preview_check ── 🆕 المرحلة 4: معاينة وتحقّق بصري حقيقي
+    if action == "preview_check":
+        try:
+            from ai.preview_check import check_streamlit_boots
+            entry = path or "streamlit_app.py"
+            return check_streamlit_boots(entry)
+        except Exception as e:
+            return f"❌ خطأ في المعاينة الحيّة: {e}"
 
     # ── git_push ──
     if action == "git_push":
@@ -709,6 +721,7 @@ def _is_failure(result: str) -> bool:
             "خطأ في أداة بحث الصور", "خطأ في إنشاء الواجهة التفاعلية",
             "خطأ في استدعاء API", "تعذّر البحث عن الصور",
             "خطأ في التحقق التلقائي",  # 🆕 المرحلة 1: تحقّق ذاتي بعد الكتابة
+            "خطأ في المعاينة الحيّة",   # 🆕 المرحلة 4: معاينة streamlit حيّة
         ]
     )
 
