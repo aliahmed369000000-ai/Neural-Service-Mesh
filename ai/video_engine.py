@@ -380,6 +380,47 @@ def _make_particles_layer(duration: float, seed: int, size=(FRAME_W, FRAME_H), c
     return rgb_clip.with_mask(mask_clip)
 
 
+def _synthesize_ambient_bed(duration: float, seed: int = 0):
+    """يولّد "سجادة" صوتية محيطية (ambient pad) داخلياً عبر numpy — بدون أي
+    ملف موسيقى خارجي أو استدعاء API — لتفادي أي إشكال حقوق ملكية أو
+    اعتماد على مزوّد صوتي مدفوع (بنفس فلسفة الخلفية المتدرّجة اللونية:
+    حل مضمون ومجاني دائماً). النتيجة نغمة/طبقات هادئة بلا إيقاع أو لحن
+    واضح (drone/pad) — أقرب لضجيج محيطي منظّم من "موسيقى" بمعناها
+    التقليدي، وتُبقى منخفضة جداً عبر music_volume قبل مزجها مع السرد.
+
+    يعيد moviepy AudioClip (ستيريو) بطول duration بالضبط."""
+    import numpy as np
+    from moviepy.audio.AudioClip import AudioClip
+
+    rng = np.random.default_rng(seed)
+    sr = 44100
+    # طبقتان/ثلاث نغمات متجاورة (chord) بترددات منخفضة هادئة — بلا
+    # نغمة "لحنية" متحركة، فقط طبقة ثابتة تتنفّس ببطء عبر LFO خفيف.
+    base_freq = float(rng.uniform(110, 146))  # نطاق A2-D3 تقريباً
+    partials = [1.0, 1.5, 2.0]  # أساس + خامسة + أوكتاف — تناغم بسيط محايد
+    partial_gains = [0.55, 0.28, 0.17]
+    lfo_freq = float(rng.uniform(0.06, 0.11))  # تنفّس بطيء جداً (~10-16 ثانية)
+    lfo_phase = float(rng.uniform(0, 2 * np.pi))
+    # اهتزاز طفيف جداً بالتردد (Detune) لإحساس "حي" بدل نغمة رقمية جامدة
+    detune = float(rng.uniform(0.997, 1.003))
+
+    def make_frame(t):
+        t_arr = np.atleast_1d(np.asarray(t, dtype=np.float64))
+        signal = np.zeros_like(t_arr)
+        for mult, gain in zip(partials, partial_gains):
+            freq = base_freq * mult * detune
+            signal += gain * np.sin(2 * np.pi * freq * t_arr)
+        # مغلّف سعة بطيء (breathing envelope) — يمنع إحساس "طنين" ثابت مزعج
+        envelope = 0.75 + 0.25 * np.sin(2 * np.pi * lfo_freq * t_arr + lfo_phase)
+        signal *= envelope
+        # تطبيع لطيف لحماية من أي تجاوز قبل تخفيض الحجم النهائي بالمزج
+        signal = np.clip(signal * 0.28, -1.0, 1.0)
+        stereo = np.stack([signal, signal], axis=-1)
+        return stereo if stereo.shape[0] > 1 else stereo[0]
+
+    return AudioClip(make_frame, duration=duration, fps=sr)
+
+
 def _shape_arabic(text: str) -> str:
     """يهيّئ النص العربي للعرض الصحيح (اتصال الحروف + اتجاه RTL)."""
     try:
@@ -399,6 +440,8 @@ class VideoEngine:
         self,
         use_cinematic_backgrounds: bool = False,
         use_stock_backgrounds: bool = True,
+        use_background_music: bool = False,
+        music_volume: float = 0.10,
     ) -> None:
         self._font_path = _resolve_arabic_font()
         # اختياري (opt-in) — راجع شرح الميزة في رأس الملف. لا يُفعَّل أبداً
@@ -409,6 +452,16 @@ class VideoEngine:
         # تتراجع تلقائياً وبصمت للتدرّج اللوني القديم عند غياب PEXELS_API_KEY
         # أو أي فشل شبكي/نتائج فارغة — لا تأثير على المسار القديم إطلاقاً.
         self._use_stock_backgrounds = use_stock_backgrounds
+        # موسيقى خلفية — اختياري (opt-in)، مُعطَّلة افتراضياً عمداً: محتوى
+        # المشروع معرفي إسلامي وبعض المستخدمين/الجمهور يُفضّل عدم وجود
+        # موسيقى آلية إطلاقاً، فلا يجب تفعيلها ضمنياً أبداً. عند التفعيل،
+        # تُولَّد "سجادة" صوتية محيطية (ambient bed) داخلياً عبر numpy —
+        # وليست مقطوعة موسيقية جاهزة مُحمَّلة من الإنترنت — لتفادي أي
+        # إشكال حقوق ملكية أو اعتماد على مزوّد خارجي.
+        self._use_background_music = use_background_music
+        # نطاق آمن: منخفضة بما يكفي حتى لا تطغى على السرد الصوتي أبداً
+        # (نمط "الدَك" duck تحت الصوت الرئيسي بالإنتاج الاحترافي).
+        self._music_volume = max(0.0, min(0.35, music_volume))
 
     # ── بناء صورة خلفية متدرّجة للمشهد رقم N ─────────────────────────
     def _build_background(self, seg_index: int) -> "Image.Image":
@@ -621,6 +674,17 @@ class VideoEngine:
             f.write(segment.audio_bytes)
 
         audio_clip = AudioFileClip(audio_path)
+        # تطبيع مستوى الصوت (loudness normalize) لكل مشهد — مزوّدو TTS
+        # المختلفين (Edge/gTTS/Gemini/ElevenLabs) قد يُنتِجون مستويات صوت
+        # متفاوتة بين مقطع وآخر بنفس السيناريو، فيُحسّ المستخدم بقفزات
+        # حجم مزعجة عند التنقّل بين المشاهد. AudioNormalize يوحّد الذروة
+        # لكل مقطع على حدة قبل الدمج. اختياري وآمن تماماً: أي فشل (مثلاً
+        # مقطع صامت بالكامل) يتراجع بصمت للصوت الأصلي دون كسر الفيديو.
+        try:
+            from moviepy import afx
+            audio_clip = audio_clip.with_effects([afx.AudioNormalize()])
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("تعذّر تطبيع صوت المشهد %d (%s) — استخدام الصوت الأصلي.", index, exc)
         duration = max(1.2, audio_clip.duration)
 
         # خلفية سينمائية حقيقية (Higgsfield، اختياري) إن كانت مفعّلة ومتاحة
@@ -766,6 +830,33 @@ class VideoEngine:
 
             out_path = os.path.join(tmp_dir, "output.mp4")
             total_duration = float(getattr(final, "duration", 0.0) or 0.0)
+
+            # موسيقى خلفية — اختياري (opt-in)، راجع شرح __init__. تُمزَج
+            # تحت السرد الصوتي (وليس بدلاً عنه) بحجم منخفض ثابت + fade
+            # in/out ناعم بالبداية/النهاية، بنفس منطق "الدَك" (ducking)
+            # بالإنتاج الصوتي الاحترافي — أي فشل بالتوليد/المزج يتراجع
+            # بصمت لصوت السرد وحده دون كسر الفيديو كاملاً.
+            if self._use_background_music and total_duration > 0 and final.audio is not None:
+                try:
+                    from moviepy import afx
+                    from moviepy.audio.AudioClip import CompositeAudioClip
+
+                    fade_out_dur = min(2.5, total_duration / 4)
+                    fade_in_dur = min(1.5, total_duration / 4)
+                    music_clip = _synthesize_ambient_bed(
+                        total_duration, seed=len(script.segments)
+                    ).with_effects([
+                        afx.MultiplyVolume(self._music_volume),
+                        afx.AudioFadeIn(fade_in_dur),
+                        afx.AudioFadeOut(fade_out_dur),
+                    ])
+                    mixed_audio = CompositeAudioClip([final.audio, music_clip])
+                    final = final.with_audio(mixed_audio)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "تعذّر إضافة الموسيقى الخلفية (%s) — الفيديو يُكمَل بالسرد "
+                        "الصوتي وحده دون موسيقى.", exc,
+                    )
 
             # جودة/سرعة متكيّفة مع مدة الفيديو الكلية: preset="slow"+crf=16
             # (شبه بلا فقد بصري) كان ثابتاً لكل الحالات على افتراض أن

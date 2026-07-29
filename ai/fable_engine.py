@@ -449,6 +449,8 @@ class FableEngine:
     def render_video(
         self, script: "ExplainerScript", voice: str = "",
         use_cinematic_backgrounds: bool = False,
+        use_background_music: bool = False,
+        music_volume: float = 0.10,
     ) -> bytes:
         """يبني mp4 فعلي (نص متحرك + صوت سرد) من ExplainerScript. يستدعي
         render_audio() تلقائياً إن لم يكن الصوت مولَّداً بعد. يرجع bytes
@@ -460,6 +462,11 @@ class FableEngine:
         مزوّد مدفوع بعكس بقية مسار NSM المجاني — لذا مُعطَّل افتراضياً
         ولا يُفعَّل إلا بطلب صريح. عند غياب المفتاح أو فشل مشهد معيّن،
         يتراجع تلقائياً للخلفية المتدرّجة لذلك المشهد فقط دون كسر الفيديو.
+
+        use_background_music: اختياري (opt-in)، مُعطَّل افتراضياً — يضيف
+        سجادة صوتية محيطية هادئة (مولَّدة داخلياً، بدون ملف/مزوّد خارجي
+        وبلا أي إشكال حقوق ملكية) تحت السرد الصوتي. music_volume يضبط
+        حجمها النسبي (افتراضياً 0.10 — منخفض جداً حتى لا يطغى على السرد).
 
         الاستيراد هنا داخلي (lazy) عمداً: لو moviepy/imageio-ffmpeg غير
         مثبَّتة بعد، باقي NSM (الشات، الوكلاء، إلخ) يستمر يشتغل طبيعياً
@@ -478,7 +485,11 @@ class FableEngine:
             raise VideoEngineError("تعذّر توليد الصوت لكل المقاطع — لا يمكن رندر الفيديو.")
 
         try:
-            return VideoEngine(use_cinematic_backgrounds=use_cinematic_backgrounds).render(script)
+            return VideoEngine(
+                use_cinematic_backgrounds=use_cinematic_backgrounds,
+                use_background_music=use_background_music,
+                music_volume=music_volume,
+            ).render(script)
         except ImportError as exc:
             raise RuntimeError(
                 "توليد الفيديو يحتاج حزمتي moviepy و imageio-ffmpeg. "
