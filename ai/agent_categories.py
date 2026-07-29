@@ -18,6 +18,17 @@ from typing import Dict, List, Optional, Tuple
 
 from ai.llm_fallback import LLMFallback, LIVE_LLM_PROVIDERS
 
+# توجيه تلقائي لكل رسالة (UnifiedAgentChat) — نفس منطق التوجيه المستخدَم
+# أصلاً في تبويب "🤝 منسّق الوكلاء"، بدون أي استيراد دائري (godmode.py
+# لا يستورد من هذا الملف إطلاقاً).
+try:
+    from ai.godmode import route_query_verbose
+    _ROUTING_OK = True
+except Exception:
+    route_query_verbose = None
+    _ROUTING_OK = False
+
+
 # سجل تدقيق تفاعلات الوكلاء (Observability) — تسجيل صامت، لا يُعطّل
 # المحادثة أبداً عند الفشل.
 try:
@@ -526,3 +537,64 @@ class CategoryAgentChat:
 
     def clear_history(self):
         self.history.clear()
+
+
+class UnifiedAgentChat:
+    """وكيل واحد موحّد: واجهة محادثة مستمرة وذاكرة مشتركة عبر كل الرسائل،
+    مع توجيه تلقائي لكل رسالة على حدة إلى أنسب متخصص من AGENT_CATEGORIES
+    خلف الكواليس (نفس route_query_verbose المستخدَمة في 🤝 منسّق الوكلاء)
+    — بدل خلط كل الـ System Prompts في وكيل عام واحد (يُضعف الدقة)، أو
+    عزل كل فئة بذاكرتها الخاصة (يكسر استمرارية المحادثة عبر المواضيع).
+
+    يعيد استخدام كائنات CategoryAgentChat نفسها (بلا تعديل عليها) —
+    فقط "يستعير" ذاكرتها المؤقتة لكل استدعاء لتمرير السياق المشترك بدل
+    ذاكرة الفئة المعزولة، ثم يتتبّع السجل الموحّد في self.shared_history.
+    """
+
+    def __init__(self) -> None:
+        self._bots: Dict[str, CategoryAgentChat] = {}
+        self.shared_history: List[Tuple[str, str]] = []
+        self.turns_meta: List[dict] = []
+
+    def _get_bot(self, key: str) -> CategoryAgentChat:
+        if key not in self._bots:
+            self._bots[key] = CategoryAgentChat(key)
+        return self._bots[key]
+
+    def chat(self, user_input: str, force_web: "bool | None" = None) -> "Tuple[str, dict]":
+        """يوجّه الرسالة تلقائياً لأنسب متخصص، يمرّر له الذاكرة المشتركة
+        كسياق، ويعيد (الرد، بيانات وصفية عن المتخصص الذي أجاب)."""
+        if not user_input.strip():
+            return "الرجاء كتابة سؤالك.", {}
+
+        if _ROUTING_OK and route_query_verbose is not None:
+            selected, route_method, _scores = route_query_verbose(
+                user_input, AGENT_CATEGORIES, max_agents=1
+            )
+        else:
+            selected, route_method = [], "default"
+        key = selected[0] if selected else ("assistant" if "assistant" in AGENT_CATEGORIES else next(iter(AGENT_CATEGORIES)))
+        bot = self._get_bot(key)
+
+        # حقن الذاكرة المشتركة كسياق بدل ذاكرة الفئة المعزولة الخاصة بالبوت
+        bot.history = list(self.shared_history[-4:])
+        response = bot.chat(user_input, force_web=force_web, source="unified")
+
+        cat = AGENT_CATEGORIES[key]
+        meta = {
+            "category_key": key,
+            "category_title": cat.title,
+            "category_emoji": cat.emoji,
+            "route_method": route_method,
+            "provider_badge": bot.last_provider_badge(),
+        }
+        self.shared_history.append((user_input, response))
+        self.turns_meta.append(meta)
+        return response, meta
+
+    def clear_history(self) -> None:
+        self.shared_history.clear()
+        self.turns_meta.clear()
+        for bot in self._bots.values():
+            bot.clear_history()
+
