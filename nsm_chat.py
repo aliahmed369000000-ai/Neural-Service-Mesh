@@ -87,6 +87,61 @@ except Exception as _dg_err:
     print(f"⚠ تثبيت المعرفة العامة غير متاح: {_dg_err}")
 
 # ══════════════════════════════════════════════════════════════════
+# Reasoning Pipeline — تسجيل حلقات تدريب حقيقية (Experience Learning)
+# ══════════════════════════════════════════════════════════════════
+# كانت ReasoningPipeline (Question → CKG → NeuralCore → Decision) غير
+# مستدعاة إطلاقاً بمسار الدردشة الحي (الدردشة تمر مباشرة عبر LLM)، ما
+# يجعل EpisodeStore (اللي يقرأ منه زر "🎓 ابدأ التدريب الآن") فارغاً
+# دائماً تقريباً. الوصل هنا "fire-and-forget" بحت — لا يُستخدم أي من
+# مخرجاتها (answer_text/ranked_concepts) في رد المستخدم إطلاقاً، فقط
+# لتسجيل حلقة تدريب حقيقية في الخلفية بعد إرسال الرد الفعلي.
+#
+# احتياطان صريحان لتفادي مخاطر معروفة:
+#  1) transformer_weights_path=None — تعطيل ArabicTransformer الافتراضي
+#     صراحة؛ نفس خطر OOM المُصلَح مسبقاً في knowledge/qa_engine.py
+#     (_neural_booster_checkpoint_ready) غير موجود هنا كفحص مماثل.
+#  2) autosave_every=0 — تعطيل حفظ أوزان NeuralCore على القرص تلقائياً
+#     كل رسالة؛ في تطبيق Streamlit بعملية واحدة مشتركة بين عدة جلسات
+#     مستخدمين، الكتابة المتزامنة لنفس ملف models/neural_core لكل رسالة
+#     خطر تضارب حقيقي لا داعي له. حفظ الأوزان يبقى حصراً عبر الزر اليدوي
+#     الموجود أصلاً — هذا الوصل يُغذّي فقط EpisodeStore (سجل منفصل).
+_REASONING_PIPELINE = None
+_REASONING_PIPELINE_TRIED = False
+
+
+def _get_reasoning_pipeline():
+    global _REASONING_PIPELINE, _REASONING_PIPELINE_TRIED
+    if _REASONING_PIPELINE_TRIED:
+        return _REASONING_PIPELINE
+    _REASONING_PIPELINE_TRIED = True
+    try:
+        from ai.reasoning_pipeline import ReasoningPipeline
+        _REASONING_PIPELINE = ReasoningPipeline(
+            transformer_weights_path=None,
+            autosave_every=0,
+            train_on_query=True,
+            record_episodes=True,
+        )
+        print("✓ Reasoning Pipeline (تسجيل حلقات تدريب) مُفعَّل")
+    except Exception as _rp_err:
+        _REASONING_PIPELINE = None
+        print(f"⚠ Reasoning Pipeline غير متاح: {_rp_err}")
+    return _REASONING_PIPELINE
+
+
+def _record_reasoning_episode(question: str) -> None:
+    """استدعاء fire-and-forget بحت — يُسجّل حلقة تدريب حقيقية بالخلفية
+    (EpisodeStore) بعد إرسال الرد الفعلي للمستخدم. أي فشل هنا (بما فيه
+    فشل تحميل ReasoningPipeline نفسها) يُبتلَع بصمت تماماً — هذا المسار
+    لا يجوز أن يؤثر على رد المستخدم بأي شكل إطلاقاً."""
+    try:
+        pipeline = _get_reasoning_pipeline()
+        if pipeline is not None:
+            pipeline.answer(question)
+    except Exception:
+        pass
+
+# ══════════════════════════════════════════════════════════════════
 # Code Agent — أوامر التحكم في المشروع
 # ══════════════════════════════════════════════════════════════════
 try:
@@ -363,6 +418,7 @@ class NSMChat:
             response = _nsm_agent.run(t_for_llm)
             self._last_source = "nsm_agent"
             self.history.append((t, response))
+            _record_reasoning_episode(t)
             return response
 
         # ── LLM مباشر إذا لم يكن NSM Agent متاحاً ──
@@ -379,6 +435,7 @@ class NSMChat:
                 answer = llm_result.text
                 self._last_source = f"llm:{llm_result.provider.value}"
                 self.history.append((t, answer))
+                _record_reasoning_episode(t)
                 return answer
             except Exception:
                 pass
