@@ -3615,6 +3615,15 @@ def _render_hf_result(script):
         disabled=not _hf_key_present,
     )
 
+    _pexels_key_present = bool(os.getenv("PEXELS_API_KEY", "").strip())
+    st.caption(
+        ("🖼️ صور خلفية حقيقية مجانية (Pexels) مفعَّلة تلقائياً بدل التدرّج اللوني الفارغ."
+         if _pexels_key_present else
+         "💡 تلميح: أضِف PEXELS_API_KEY (مجاني بالكامل — تسجيل فوري عبر "
+         "pexels.com/api) لاستبدال التدرّج اللوني الفارغ بصور خلفية حقيقية "
+         "تطابق كل مشهد، بدون أي تكلفة.")
+    )
+
     if st.button("🎬 أنشئ الفيديو الآن", type="primary", key="hf_render_video_btn"):
         try:
             _hf_spinner_msg = (

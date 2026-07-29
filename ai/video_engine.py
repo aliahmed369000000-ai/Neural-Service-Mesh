@@ -42,11 +42,14 @@ ImageMagick (كل النص يُرسم عبر Pillow مباشرة).
 
 from __future__ import annotations
 
+import io
+import json
 import logging
 import os
 import tempfile
 import textwrap
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -149,6 +152,94 @@ def _fetch_cinematic_clip(narration: str, visual_notes: str, tmp_dir: str, seg_i
         logger.warning(
             "تعذّر جلب خلفية Higgsfield للمشهد %d (%s) — استخدام الخلفية "
             "المتدرّجة كبديل لهذا المشهد فقط.", seg_index, exc,
+        )
+        return None
+
+
+def _fetch_stock_background_image(
+    narration: str, visual_notes: str, seg_index: int,
+) -> Optional["Image.Image"]:
+    """يجلب صورة خلفية مجانية من Pexels تطابق مضمون المشهد، وتُرجَع كصورة
+    PIL جاهزة (بعد قصّ/تكبير 'cover' لملء الإطار 9:16 + نفس تأثير
+    Vignette السينمائي المُطبَّق على التدرّج اللوني الافتراضي، لاتساق
+    بصري كامل بين المشاهد بغض النظر عن مصدر الخلفية).
+
+    يُرجِع None عند أي فشل/غياب مفتاح (تراجع صامت تماماً كـ
+    _fetch_cinematic_clip — لا يرفع استثناء أبداً حتى لا يُسقط الفيديو
+    بالكامل؛ في هذه الحالة النتيجة النهائية تبقى التدرّج اللوني القديم).
+
+    Pexels API مجاني بالكامل (200 طلب/ساعة، 20,000/شهر) — يتطلب فقط
+    التسجيل المجاني على https://www.pexels.com/api/ للحصول على مفتاح.
+    """
+    api_key = os.getenv("PEXELS_API_KEY", "").strip()
+    if not api_key:
+        return None
+
+    try:
+        import numpy as np
+        from PIL import Image
+
+        # استعلام بحث: visual_notes (وصف اللقطة المقترح لهذا المشهد تحديداً)
+        # أدق من narration الكاملة؛ Pexels يدعم بحثاً متعدد اللغات معقولاً،
+        # لكن نوفّر احتياطاً عاماً لو جاءت النتائج فارغة (استعلام غامض/نادر).
+        query = (visual_notes or narration or "").strip()[:80] or "cinematic abstract light"
+
+        req = urllib.request.Request(
+            f"https://api.pexels.com/v1/search?query={urllib.parse.quote(query)}"
+            f"&per_page=1&orientation=portrait",
+            headers={"Authorization": api_key, "User-Agent": "NSM-VideoEngine/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+
+        photos = data.get("photos") or []
+        if not photos:
+            # احتياط: استعلام عام لضمان خلفية بدل الفشل الكامل لهذا المشهد
+            req = urllib.request.Request(
+                "https://api.pexels.com/v1/search?query=cinematic+abstract+light"
+                "&per_page=1&orientation=portrait",
+                headers={"Authorization": api_key, "User-Agent": "NSM-VideoEngine/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            photos = data.get("photos") or []
+            if not photos:
+                return None
+
+        img_url = (
+            photos[0].get("src", {}).get("portrait")
+            or photos[0].get("src", {}).get("large2x")
+            or photos[0].get("src", {}).get("original")
+        )
+        if not img_url:
+            return None
+
+        img_req = urllib.request.Request(img_url, headers={"User-Agent": "NSM-VideoEngine/1.0"})
+        with urllib.request.urlopen(img_req, timeout=20) as resp:
+            raw = Image.open(io.BytesIO(resp.read())).convert("RGB")
+
+        # قصّ/تكبير "cover" لملء 9:16 كاملاً (نفس أسلوب _prepare_cinematic_bg_clip)
+        scale = max(FRAME_W / raw.width, FRAME_H / raw.height)
+        resized = raw.resize((int(raw.width * scale) + 1, int(raw.height * scale) + 1))
+        left = (resized.width - FRAME_W) // 2
+        top = (resized.height - FRAME_H) // 2
+        cropped = resized.crop((left, top, left + FRAME_W, top + FRAME_H))
+
+        # نفس تظليل الحواف (Vignette) المُطبَّق على التدرّج اللوني الافتراضي
+        # — اتساق بصري كامل بين المشاهد بغض النظر عن مصدر الخلفية.
+        arr = np.array(cropped, dtype=np.float32)
+        yy, xx = np.mgrid[0:FRAME_H, 0:FRAME_W]
+        cx, cy = FRAME_W / 2.0, FRAME_H / 2.0
+        dist = np.sqrt(((xx - cx) / cx) ** 2 + ((yy - cy) / cy) ** 2).astype(np.float32)
+        vignette = np.clip(1.0 - 0.30 * np.clip(dist - 0.55, 0, None), 0.62, 1.0)
+        arr *= vignette[:, :, None]
+        arr = np.clip(arr, 0, 255).astype(np.uint8)
+        return Image.fromarray(arr, mode="RGB")
+
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "تعذّر جلب صورة Pexels للمشهد %d (%s) — استخدام التدرّج "
+            "اللوني كبديل لهذا المشهد فقط.", seg_index, exc,
         )
         return None
 
@@ -304,11 +395,20 @@ def _shape_arabic(text: str) -> str:
 class VideoEngine:
     """يحوّل ExplainerScript (مع صوت مُولَّد مسبقاً) إلى فيديو mp4 فعلي."""
 
-    def __init__(self, use_cinematic_backgrounds: bool = False) -> None:
+    def __init__(
+        self,
+        use_cinematic_backgrounds: bool = False,
+        use_stock_backgrounds: bool = True,
+    ) -> None:
         self._font_path = _resolve_arabic_font()
         # اختياري (opt-in) — راجع شرح الميزة في رأس الملف. لا يُفعَّل أبداً
         # ضمنياً حتى لا يستهلك رصيد Higgsfield المدفوع دون طلب صريح.
         self._use_cinematic_backgrounds = use_cinematic_backgrounds
+        # صور stock مجانية (Pexels) بديلة للتدرّج اللوني الفارغ — مفعَّلة
+        # افتراضياً (بعكس Higgsfield) لأنها مجانية بالكامل ولا خطر تكلفة؛
+        # تتراجع تلقائياً وبصمت للتدرّج اللوني القديم عند غياب PEXELS_API_KEY
+        # أو أي فشل شبكي/نتائج فارغة — لا تأثير على المسار القديم إطلاقاً.
+        self._use_stock_backgrounds = use_stock_backgrounds
 
     # ── بناء صورة خلفية متدرّجة للمشهد رقم N ─────────────────────────
     def _build_background(self, seg_index: int) -> "Image.Image":
@@ -543,7 +643,18 @@ class VideoEngine:
 
         # عند وجود خلفية سينمائية: الترجمات تُرسم على طبقة شفافة منفصلة
         # (بدل الدمج بالخلفية مباشرة) ثم تُركَّب فوق الفيديو الحقيقي.
-        bg_base = None if cinematic_bg is not None else self._build_background(index)
+        # الأولوية: Higgsfield (فيديو حقيقي متحرك، إن فُعِّل ونجح) → صورة
+        # Pexels مجانية (أفضل من التدرّج الفارغ، مفعَّلة افتراضياً) →
+        # التدرّج اللوني كحل أخير مضمون دائماً.
+        stock_bg_image = None
+        if cinematic_bg is None and self._use_stock_backgrounds:
+            stock_bg_image = _fetch_stock_background_image(
+                segment.narration, segment.visual_notes, index,
+            )
+        bg_base = (
+            stock_bg_image if stock_bg_image is not None
+            else (None if cinematic_bg is not None else self._build_background(index))
+        )
 
         # نقسّم سرد المشهد إلى عبارات قصيرة (2-3 كلمات) تظهر تباعاً —
         # نفس منطق CapCut/Submagic لترجمات كلمة-بكلمة أكثر جاذبية من فقرة
