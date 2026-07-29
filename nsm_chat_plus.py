@@ -21,6 +21,14 @@ from nsm_chat import (
 )
 from ai.llm_fallback import LLMFallback, Provider, LIVE_LLM_PROVIDERS
 
+try:
+    from ai.nova_search_copyright import is_song_lyrics_request, SONG_LYRICS_REFUSAL
+    _HAS_COPYRIGHT_CHECK = True
+except Exception:
+    _HAS_COPYRIGHT_CHECK = False
+    is_song_lyrics_request = None
+    SONG_LYRICS_REFUSAL = ""
+
 logger = logging.getLogger("NSMChatPlus")
 
 # ⚠️ غير مُستخدَم في هذا الملف بعد حذف القاموس — أُبقي عليه فقط لأن
@@ -32,6 +40,7 @@ _SOURCE_BADGES: Dict[str, str] = {
     "ckg":       "🕸️ رسم معرفي",
     "nsm_agent": "🧠 NSM Agent",
     "code_agent":"🛠️ Code Agent",
+    "copyright_guard": "©️ حقوق نشر",
 }
 
 
@@ -71,6 +80,15 @@ class NSMChatPlus(NSMChat):
     def chat(self, user_input: str, system_prompt: str = None) -> str:
         if not user_input.strip():
             return "الرجاء كتابة سؤالك."
+
+        # ⓪ حقوق النشر — رفض استباقي لطلبات كلمات أغاني/قصائد كاملة (nova_search_copyright.py
+        # كانت وحدة يتيمة غير مستوردة إطلاقاً؛ الوظيفة البرمجية الحقيقية الوحيدة منها
+        # المُوصولة هنا: is_song_lyrics_request(). تُستبعد عمداً check_response_copyright()
+        # لأنها تتعارض مع تثبيت القرآن أعلاه — آيات طويلة موثوقة ليست انتهاكاً.
+        if _HAS_COPYRIGHT_CHECK and is_song_lyrics_request(user_input):
+            self._last_source = "copyright_guard"
+            self.history.append((user_input, SONG_LYRICS_REFUSAL))
+            return SONG_LYRICS_REFUSAL
 
         # ❶ NSM Agent الذكي — أولوية 1 للطلبات البرمجية
         if _nsm_chat_module._HAS_NSM_AGENT and _nsm_chat_module._nsm_agent and any(
