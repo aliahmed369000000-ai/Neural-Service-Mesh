@@ -165,12 +165,34 @@ def _wan_free_negative_prompt() -> str:
     )
 
 
-# قائمة مساحات Hugging Face المجتمعية المجانية لـ Wan2.1/2.2 — بترتيب
-# الأولوية (الأسرع أولاً). كل عنصر يحمل توقيع الاستدعاء الخاص بمساحته
-# (كل مساحة مبنية بواجهة مختلفة قليلاً)، فلا يوجد شكل موحّد واحد.
-# fffiloni/Wan2.1 يُستدعى بعد KingNish لأنه يُشغّل generate.py كعملية
-# فرعية كاملة (أبطأ بكثير من نموذج KingNish المُقطَّر ذي 4 خطوات فقط).
+# قائمة مساحات Hugging Face المجتمعية المجانية — بترتيب الأولوية (الأسرع
+# أولاً). كل عنصر يحمل توقيع الاستدعاء الخاص بمساحته (كل مساحة مبنية
+# بواجهة مختلفة قليلاً)، فلا يوجد شكل موحّد واحد. fffiloni/Wan2.1 آخر
+# القائمة لأنه يُشغّل generate.py كعملية فرعية كاملة (أبطأ بكثير من
+# النموذجين المُقطَّرين قبله).
 _WAN_FREE_CANDIDATES = [
+    {
+        # LTX-Video 13B المُقطَّر (Lightricks) — تحقّقنا من app.py الفعلي
+        # للمساحة (Running on Zero — GPU مجاني حقيقي، ليس وسيطاً مدفوعاً).
+        # ⚠️ اسم نقطة النهاية "/generate" أفضل تخمين ممكن دون اتصال حي
+        # بالمساحة (لها 3 أزرار توليد بنفس الدالة لأوضاع نص/صورة/فيديو
+        # مختلفة) — لو تبيّن أنه خطأ، هذه المساحة تُستبعَد بصمت تلقائياً
+        # (fetch يمسكها كاستثناء عادي) وتُجرَّب المساحة التالية بالقائمة،
+        # دون أي كسر. يُفضَّل التأكد من الاسم الدقيق عبر لوحة "Use via
+        # API" بصفحة المساحة نفسها بعد أول رندر حي من Streamlit Cloud.
+        "space": "Lightricks/ltx-video-distilled",
+        "api_name": "/generate",
+        "timeout": 70,
+        # ترتيب المدخلات يطابق دالة generate() الفعلية: prompt,
+        # negative_prompt, input_image_filepath, input_video_filepath,
+        # height_ui, width_ui, mode, duration_ui, ui_frames_to_use,
+        # seed_ui, randomize_seed, ui_guidance_scale, improve_texture_flag
+        "build_args": lambda prompt: (
+            prompt, _wan_free_negative_prompt(), None, None,
+            768, 448, "text-to-video", 3.0, 9, 0, True, 3.0, False,
+        ),
+        "extract": lambda result: result[0] if isinstance(result, (list, tuple)) else result,
+    },
     {
         "space": "KingNish/wan2-2-fast",
         "api_name": "/generate_video",
