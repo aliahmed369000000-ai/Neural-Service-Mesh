@@ -56,6 +56,22 @@ except Exception:
     run_content_pipeline = None
     _CONTENT_OK = False
 
+# 🆕 Chain-of-Thought + Few-shot Prompting (ai/chain_of_thought.py +
+# ai/prompt_engine.py) — كانتا موجودتين بالمشروع منذ فترة وموثَّقتين
+# كـ"أولوية #2" في تقرير تحليل سابق، لكن غير مربوطتين بأي مكان إطلاقاً
+# (orphan modules). تُبنى الأمثلة المشابهة (few-shot) والمفاهيم المرتبطة
+# من CKG وتُدمَج في نص السؤال قبل إرساله لـ LLMFallback؛ أي فشل هنا
+# (قاعدة بيانات فارغة، CKG غير محمَّل...) يُبتلَع بأمان ويُستخدَم السؤال
+# الخام كما كان يحدث سابقاً.
+try:
+    from ai.chain_of_thought import ChainOfThoughtBuilder
+    from knowledge.cognitive_graph import get_ckg
+    _COT_OK = True
+except Exception:
+    ChainOfThoughtBuilder = None
+    get_ckg = None
+    _COT_OK = False
+
 
 # ══════════════════════════════════════════════════════════════════
 # تعريف الفئات
@@ -380,7 +396,25 @@ class CategoryAgentChat:
         if category_key not in AGENT_CATEGORIES:
             raise ValueError(f"فئة غير معروفة: {category_key}")
         self.category: AgentCategory = AGENT_CATEGORIES[category_key]
-        self.fallback = LLMFallback()
+
+        # 🆕 CKG (إن توفّر) يُمرَّر لكل من LLMFallback (يُحسّن مسار الرجوع
+        # الاحتياطي ckg_synthesis عند غياب كل مزوّدي LLM) وChainOfThoughtBuilder
+        # (مفاهيم مرتبطة ضمن التفكير التسلسلي). فشل تحميله لا يمنع عمل الوكيل.
+        _ckg = None
+        if _COT_OK:
+            try:
+                _ckg = get_ckg()
+            except Exception:
+                _ckg = None
+
+        self.fallback = LLMFallback(ckg=_ckg)
+        self.cot = None
+        if _COT_OK:
+            try:
+                self.cot = ChainOfThoughtBuilder(ckg=_ckg)
+            except Exception:
+                self.cot = None
+
         self.history: List[Tuple[str, str]] = []
         self._last_provider = ""
 
@@ -438,8 +472,19 @@ class CategoryAgentChat:
                 sp = sp + "\n\nنتائج بحث ويب ذات صلة بسؤال المستخدم:\n" + web_results
                 searched = True
 
+        # 🆕 تعزيز السؤال بأمثلة مشابهة (few-shot) ومفاهيم مرتبطة من CKG عبر
+        # ChainOfThoughtBuilder (خطوة "تفكير" شفافة قبل الإرسال للنموذج).
+        # أي فشل (ذاكرة فارغة، CKG غير محمَّل...) يُبتلَع ويُستخدَم السؤال
+        # الخام كما كان يحدث قبل هذا الربط.
+        llm_query = user_input
+        if self.cot is not None:
+            try:
+                llm_query = self.cot.build_llm_query(user_input, history=self.history[-4:])
+            except Exception:
+                llm_query = user_input
+
         result = self.fallback.generate(
-            query=user_input,
+            query=llm_query,
             history=self.history[-4:],
             system_prompt=sp,
         )

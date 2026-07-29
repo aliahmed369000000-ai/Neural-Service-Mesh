@@ -196,12 +196,24 @@ class ChainOfThoughtBuilder:
             return []
         candidates = {}
         for word in concepts:
-            try:
-                related = self.ckg.query_related(word, top_k=self.k_concepts)
-                for name, weight in related:
-                    candidates[name] = max(candidates.get(name, 0.0), weight)
-            except Exception as exc:
-                logger.debug(f"[CoT] query_related فشل لـ '{word}': {exc}")
+            # المطابقة في CKG تامة (exact) بالاسم المخزَّن؛ المفاهيم عادة
+            # مخزَّنة بصيغتها المجرَّدة ("صبر") بينما الكلمة المُستخرَجة من
+            # السؤال غالباً مُعرَّفة بـ"ال" ("الصبر") فلا تُطابِق إطلاقاً.
+            # نجرّب الكلمة كما هي أولاً، ثم بعد إزالة "ال" إن فشلت.
+            variants = [word]
+            if word.startswith("ال") and len(word) > 3:
+                variants.append(word[2:])
+            related: List[Tuple[str, float]] = []
+            for variant in variants:
+                try:
+                    related = self.ckg.query_related(variant, top_k=self.k_concepts)
+                except Exception as exc:
+                    logger.debug(f"[CoT] query_related فشل لـ '{variant}': {exc}")
+                    related = []
+                if related:
+                    break
+            for name, weight in related:
+                candidates[name] = max(candidates.get(name, 0.0), weight)
         ranked = sorted(candidates.items(), key=lambda x: -x[1])
         return ranked[: self.k_concepts]
 
