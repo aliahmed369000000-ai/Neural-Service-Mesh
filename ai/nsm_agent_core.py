@@ -145,13 +145,14 @@ def _build_system_prompt() -> str:
   "thinking": "تحليلك للطلب خطوة بخطوة",
   "steps": [
     {{
-      "action": "read_file | create_file | edit_file | run_file | run_tests | git_push | web_search | image_search | create_artifact | api_call | preview_check | answer",
+      "action": "read_file | create_file | edit_file | run_file | run_tests | git_push | rollback | web_search | image_search | create_artifact | api_call | preview_check | answer",
       "path": "المسار النسبي من جذر المشروع",
       "content": "محتوى الملف الكامل (لـ create_file) أو كود HTML/SVG كامل (لـ create_artifact)",
       "old": "النص القديم المراد استبداله (لـ edit_file) — يجب أن يكون موجوداً حرفياً",
       "new": "النص الجديد البديل (لـ edit_file)",
       "cmd": "أمر bash للتشغيل (لـ run_file)",
       "message": "رسالة commit (لـ git_push)",
+      "commit": "commit hash محدَّد للتراجع إليه (لـ rollback، اختياري — بدونه يُستخدم آخر checkpoint مسجَّل تلقائياً)",
       "query": "نص البحث (لـ web_search أو image_search)",
       "title": "عنوان الواجهة التفاعلية (لـ create_artifact)",
       "url": "رابط الـ API (لـ api_call)",
@@ -204,7 +205,11 @@ def _build_system_prompt() -> str:
     ثم answer تُخبر المستخدم أنها حُفظت وتظهر في تبويب "🧩 الواجهات التفاعلية".
 17. 🆕 إذا طلب المستخدم استدعاء API خارجي أو جلب بيانات من رابط: استخدم
     خطوة "api_call" بحقول "url" و"method" و"headers"/"body" عند الحاجة.
-18. 🆕 عند create_file/edit_file لدالة أو منطق له سلوك متوقّع واضح (وليس
+18. 🆕 إذا طلب المستخدم "تراجع/ارجع لآخر نسخة تعمل/رجّع التعديل الأخير"
+    أو ما شابه: استخدم خطوة واحدة "rollback" (بلا حقل "commit" إن لم
+    يحدّد المستخدم commit معيناً — سيُستخدم آخر checkpoint حقيقي مسجَّل
+    تلقائياً بعد آخر مهمة نجحت)، ثم answer تخبره بما حدث فعلياً.
+19. 🆕 عند create_file/edit_file لدالة أو منطق له سلوك متوقّع واضح (وليس
     مجرد نص/توثيق): أضف حقل "test_code" — سكربت python صغير يستورد
     الدالة فعلياً من مسارها (مثال: `import importlib.util as _u; ...`
     أو `from ai.module import func`) ويستدعيها ببيانات وهمية واقعية، مع
@@ -384,7 +389,7 @@ def _run_step(step: Dict[str, Any]) -> str:
         "read_file", "create_file", "edit_file",
         "run_file", "run_tests", "git_push", "web_search",
         "image_search", "create_artifact", "api_call", "answer",
-        "preview_check",
+        "preview_check", "rollback",
     }
     if action not in _VALID_ACTIONS:
         return (f"❌ فعل غير صالح من النموذج: '{action}'\n"
@@ -491,6 +496,10 @@ def _run_step(step: Dict[str, Any]) -> str:
     if action == "git_push":
         return _git_push(message)
 
+    # ── rollback ── 🆕 المرحلة 6: Checkpoints/Rollback
+    if action == "rollback":
+        return _rollback_to_checkpoint(step.get("commit", ""))
+
     # ── web_search ── 🆕
     if action == "web_search":
         if not query:
@@ -567,6 +576,110 @@ def _run_step(step: Dict[str, Any]) -> str:
         return f"💬 {reply}"
 
     return "✅ تم"
+
+
+# ══════════════════════════════════════════════════════════════════
+# 🆕 المرحلة 6 من خطة "المراحل المقترحة" — Checkpoints/Rollback
+# ══════════════════════════════════════════════════════════════════
+
+def _local_checkpoint_commit(message: str) -> Optional[str]:
+    """
+    كوميت محلي فقط (بلا push) — نقطة استرجاع بعد نجاح مهمة واحدة فعلياً،
+    وليس فقط عند اكتمال خطة كاملة (المرحلة 3 تتكفّل بالرفع النهائي).
+    تُعيد commit hash الفعلي (لتسجيله في ai/task_manager.py عبر
+    record_checkpoint) أو None إن لم توجد تغييرات فعلية أو فشل الكوميت.
+    """
+    try:
+        for cfg in [
+            ["git", "-C", str(ROOT), "config", "--local",
+             "user.email", "nsm-bot@users.noreply.github.com"],
+            ["git", "-C", str(ROOT), "config", "--local",
+             "user.name", "NSM Bot"],
+        ]:
+            subprocess.run(cfg, capture_output=True)
+
+        r_add = subprocess.run(
+            ["git", "-C", str(ROOT), "add", "-A"], capture_output=True, text=True,
+        )
+        if r_add.returncode != 0:
+            return None
+
+        r_commit = subprocess.run(
+            ["git", "-C", str(ROOT), "commit", "-m", message],
+            capture_output=True, text=True,
+        )
+        if r_commit.returncode != 0:
+            return None  # على الأغلب "nothing to commit" — طبيعي وليس خطأً
+
+        r_hash = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+            capture_output=True, text=True,
+        )
+        if r_hash.returncode != 0:
+            return None
+        return r_hash.stdout.strip()
+    except Exception:
+        return None
+
+
+def _rollback_to_checkpoint(target: str = "") -> str:
+    """
+    🆕 المرحلة 6: تراجع فعلي لآخر نسخة "تعمل" — بدل حل يدوي.
+    - إذا لم يُحدَّد target صراحة، تُجلَب آخر نقطة استرجاع مسجَّلة فعلياً
+      في ai/task_manager.py (commit حقيقي بعد آخر مهمة نجحت).
+    - ينفّذ `git reset --hard <hash>` (استرجاع فعلي وليس محاكاة)، ثم يتحقق
+      أن HEAD أصبح فعلاً عند ذلك الـ hash عبر git rev-parse (لا افتراض).
+    """
+    commit_hash = (target or "").strip()
+    source_note = "المحدَّد صراحة"
+
+    if not commit_hash:
+        try:
+            from ai.task_manager import get_last_checkpoint
+            cp = get_last_checkpoint()
+        except Exception:
+            cp = None
+        if not cp or not cp.get("commit_hash"):
+            return ("❌ لا توجد أي نقطة استرجاع مسجَّلة بعد في ai/task_manager.py "
+                    "(لم تُنجَز أي مهمة بعد آلية الكوميت التلقائي). "
+                    "حدّد commit صراحة إن أردت التراجع إليه.")
+        commit_hash = cp["commit_hash"]
+        source_note = f"آخر نقطة استرجاع مسجَّلة ({cp.get('created_at', '')})"
+
+    try:
+        r_verify = subprocess.run(
+            ["git", "-C", str(ROOT), "cat-file", "-e", commit_hash],
+            capture_output=True, text=True,
+        )
+        if r_verify.returncode != 0:
+            return f"❌ التراجع: commit غير موجود في السجل: {commit_hash}"
+
+        r_reset = subprocess.run(
+            ["git", "-C", str(ROOT), "reset", "--hard", commit_hash],
+            capture_output=True, text=True,
+        )
+        if r_reset.returncode != 0:
+            out = (r_reset.stdout + r_reset.stderr).strip()
+            return f"❌ فشل التراجع (git reset --hard): {out}"
+
+        # ── تحقق فعلي أن HEAD أصبح فعلاً عند الـ commit المطلوب ──
+        r_head = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+            capture_output=True, text=True,
+        )
+        new_head = r_head.stdout.strip()
+        if not new_head.startswith(commit_hash[:12]) and commit_hash[:12] not in new_head:
+            # مقارنة متسامحة (hash كامل مقابل مختصر) — تحقق أدق أدناه
+            if new_head != commit_hash:
+                return (f"❌ التراجع نُفِّذ لكن HEAD الفعلي ({new_head[:10]}) لا "
+                        f"يطابق المطلوب ({commit_hash[:10]}) — تحقّق يدوياً.")
+
+        return (f"⏪ تم التراجع فعلياً إلى {source_note} "
+                f"(commit `{new_head[:10]}`). ملاحظة: هذا يعيد كتابة ملفات "
+                f"المشروع محلياً — إن كنت تريد رفع هذا التراجع لـ GitHub "
+                f"أيضاً، اطلب git_push صراحة بعده.")
+    except Exception as e:
+        return f"❌ خطأ في التراجع: {e}"
 
 
 def _git_push(message: str) -> str:
