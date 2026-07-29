@@ -6532,18 +6532,54 @@ def render_fable():
 
             _hf_key_present = bool(os.getenv("HIGGSFIELD_API_KEY", "").strip())
             use_cinematic_bg = st.checkbox(
-                "🎥 خلفيات سينمائية حقيقية (Higgsfield — بجودة National Geographic)",
+                "🎥 خلفيات سينمائية حقيقية (بدل التدرّج اللوني الافتراضي)",
                 value=False,
                 key="shorts_cinematic_bg_toggle",
-                help=(
-                    "بدل الخلفية المتدرّجة الافتراضية، يولّد خلفية فيديو حقيقية "
-                    "لكل مشهد عبر Higgsfield. ⚠️ مزوّد مدفوع (بعكس بقية NSM "
-                    "المجاني) — يستهلك رصيدك في Higgsfield لكل مشهد. "
-                    "يتطلب HIGGSFIELD_API_KEY."
-                    + ("" if _hf_key_present else " — غير مُفعَّل حالياً: المفتاح غير موجود بالبيئة.")
-                ),
-                disabled=not _hf_key_present,
+                help="يستبدل الخلفية المتدرّجة الافتراضية بخلفية فيديو حقيقية لكل مشهد.",
             )
+            cinematic_provider = "higgsfield"
+            if use_cinematic_bg:
+                _shorts_provider_options = [
+                    "🆓 Wan2.1 مجاني ⚡ Running on Zero (GPU حقيقي مجاني)",
+                    "💳 Higgsfield (مدفوع — أسرع وأدق، بجودة National Geographic)"
+                    + ("" if _hf_key_present else " 🔒"),
+                ]
+                _shorts_provider_label = st.radio(
+                    "المزوّد",
+                    options=_shorts_provider_options,
+                    index=0,
+                    key="shorts_cinematic_provider_radio",
+                    horizontal=True,
+                    help=(
+                        "🆓 Wan2.1 مجاني: يشتغل فعلياً على GPU A100 مجاني عبر "
+                        "Hugging Face ZeroGPU (مساحات مُوسومة رسمياً \"Running "
+                        "on Zero\" على Hugging Face — ليست محاكاة)، بدون أي "
+                        "تكلفة وبدون أي مفتاح إلزامي. أبطأ بكثير (طابور GPU "
+                        "مشترك) وقد يتعطّل أحياناً؛ عند فشله يتراجع تلقائياً "
+                        "للخلفية المتدرّجة لنفس المشهد فقط. HF_TOKEN اختياري "
+                        "لتحسين حد الاستخدام."
+                        "\n\n💳 Higgsfield: مزوّد مدفوع، يستهلك رصيدك لكل "
+                        "مشهد، أسرع وأدق. يتطلب HIGGSFIELD_API_KEY."
+                        + ("" if _hf_key_present else " (🔒 المفتاح غير موجود بالبيئة حالياً)")
+                    ),
+                )
+                cinematic_provider = (
+                    "wan_free" if "Wan2.1" in _shorts_provider_label else "higgsfield"
+                )
+                if cinematic_provider == "wan_free":
+                    st.markdown(
+                        '<div style="margin:0.3rem 0 0.6rem;">'
+                        '<span class="badge badge-green">🟢 Running on Zero</span> '
+                        '<span class="badge badge-blue" style="margin-right:6px;">'
+                        "GPU A100 مجاني حقيقي — Hugging Face ZeroGPU</span></div>",
+                        unsafe_allow_html=True,
+                    )
+                elif not _hf_key_present:
+                    st.warning(
+                        "⚠️ HIGGSFIELD_API_KEY غير موجود بالبيئة حالياً — أضِفه "
+                        "بإعدادات Secrets، أو اختر «🆓 Wan2.1 مجاني» بالأعلى "
+                        "لمتابعة العمل بدون أي مفتاح."
+                    )
 
             if st.button("🎬 أنشئ الفيديو الآن", type="primary", key="shorts_render_video_btn"):
                 try:
@@ -6557,6 +6593,7 @@ def render_fable():
                         mp4_bytes = engine.render_video(
                             short, voice=selected_voice,
                             use_cinematic_backgrounds=use_cinematic_bg,
+                            cinematic_provider=cinematic_provider,
                         )
                     st.session_state.shorts_mp4 = mp4_bytes
                     st.success("✅ تم إنتاج الفيديو")
