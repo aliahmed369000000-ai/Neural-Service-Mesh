@@ -103,6 +103,39 @@ class NSMChatPlus(NSMChat):
             except Exception as _mem_err:
                 logger.debug(f"memory context injection skipped: {_mem_err}")
 
+        # ❸.6 تثبيت قرآني/معرفي — نفس الآلية الموجودة أصلاً في nsm_chat.py
+        # (الفئة الأساسية) لكنها لم تكن مطبَّقة هنا: NSMChatPlus.chat()
+        # يُعيد كتابة chat() بالكامل (override) دون استدعاء super().chat()،
+        # وهي الفئة الفعلية المستخدمة بالواجهة الحية (`from nsm_chat_plus
+        # import NSMChatPlus as NSMChat`) — أما NSMChat الأصلية بتثبيتها
+        # فتُستخدَم فقط كـ fallback نادر عند فشل استيراد nsm_chat_plus.
+        # النتيجة العملية قبل هذا الإصلاح: التثبيت موجود بالكود لكن لا
+        # يعمل أبداً على المسار الحقيقي الذي يمر به كل سؤال مستخدم.
+        _context_blocks: List[str] = []
+        if _nsm_chat_module._HAS_QURAN_GROUNDING and _nsm_chat_module._build_quran_context is not None:
+            try:
+                _qctx = _nsm_chat_module._build_quran_context(user_input)
+            except Exception:
+                _qctx = None
+            if _qctx:
+                _context_blocks.append(_qctx)
+        if _nsm_chat_module._HAS_DOMAIN_GROUNDING and _nsm_chat_module._search_domain is not None:
+            try:
+                _dmatches = _nsm_chat_module._search_domain(user_input, limit=3)
+            except Exception:
+                _dmatches = []
+            if _dmatches:
+                _refs = "\n".join(
+                    f"- [{m['domain_ar']}] {m['concept']}: {m['text']}"
+                    for m in _dmatches
+                )
+                _context_blocks.append(
+                    "[معلومات مرجعية دقيقة من قاعدة معرفة NSM التعليمية — "
+                    "استخدمها إن كانت ذات صلة]\n" + _refs
+                )
+        if _context_blocks:
+            query = "\n\n".join(_context_blocks) + f"\n\n[سؤال المستخدم]\n{query}"
+
         # ❹ LLM مباشرة — القاموس محذوف من مسار الردود
         # الأولوية: system_prompt الممرَّر في الاستدعاء → self._system_prompt → الافتراضي
         _sp = system_prompt or self._system_prompt
