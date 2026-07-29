@@ -777,17 +777,104 @@ def _build_heal_prompt(
 
 _MAX_STEPS_PER_RESPONSE = 12  # 🆕 حماية من استجابة تقرأ عشرات الملفات دفعة واحدة بلا خلاصة
 
+# 🆕 المرحلة 2 من خطة "Replit Agent Level" — إكمال تلقائي بدل التوقف
+_MAX_AUTO_CONTINUE_ROUNDS = 4   # أقصى عدد "جولات" استدعاء LLM إضافية لإكمال العمل تلقائياً
+_MAX_TOTAL_STEPS_BUDGET   = 30  # أقصى إجمالي خطوات منفَّذة عبر كل الجولات مجتمعة
+
+
+# ══════════════════════════════════════════════════════════════════
+# 🆕 المرحلة 2 — تتبّع جولات الإكمال التلقائي عبر ai/task_manager.py
+# ══════════════════════════════════════════════════════════════════
+# لا نستخدم NSMPlanner/AppPlan الكامل (مخصص لبناء تطبيقات من الصفر)، لكن
+# نُعيد استخدام نفس مخزن SQLite (memory/task_manager.db) عبر هياكل
+# AppPlan/PlanTask الموجودة أصلاً، حتى تظهر جولات الإكمال التلقائي في
+# تقرير "حالة المهام" (format_status_report) تماماً كأي خطة أخرى.
+
+def _register_adhoc_plan(original_request: str, thinking: str) -> Optional[int]:
+    """يسجّل خطة مؤقتة بعدد جولات = _MAX_AUTO_CONTINUE_ROUNDS، الجولة الأولى
+    'running' والباقي 'pending'. يعيد None بصمت إذا تعذّر التسجيل (لا يجوز
+    أن يُعطّل الإكمال التلقائي نفسه)."""
+    try:
+        from ai.nsm_planner import AppPlan, PlanTask
+        from ai.task_manager import create_plan, update_task_status
+        tasks = [
+            PlanTask(
+                id=i,
+                title=f"جولة إكمال تلقائي {i}",
+                description=((thinking or original_request)[:200] if i == 1
+                              else "إكمال تلقائي بناءً على نتائج الجولة السابقة"),
+                task_type="verify",
+                depends_on=[i - 1] if i > 1 else [],
+            )
+            for i in range(1, _MAX_AUTO_CONTINUE_ROUNDS + 1)
+        ]
+        plan = AppPlan(
+            idea=original_request[:300],
+            app_type="agent_auto_continue",
+            app_name="إكمال تلقائي (بدون توقف)",
+            description=(thinking or "")[:300],
+            tech_stack=[],
+            tasks=tasks,
+            estimated_files=0,
+        )
+        plan_id = create_plan(plan)
+        if plan_id and plan_id > 0:
+            update_task_status(plan_id, 1, "running", "بدء الجولة الأولى")
+            return plan_id
+        return None
+    except Exception:
+        return None
+
+
+def _advance_adhoc_plan(plan_id: Optional[int], finished_round: int, status: str) -> None:
+    """يُعلِّم جولة كمنتهية (done/failed) ويبدأ الجولة التالية كـ running."""
+    if not plan_id:
+        return
+    try:
+        from ai.task_manager import update_task_status
+        update_task_status(plan_id, finished_round, status)
+        if status == "done":
+            update_task_status(plan_id, finished_round + 1, "running")
+    except Exception:
+        pass
+
+
+def _finalize_adhoc_plan(plan_id: Optional[int], last_round: int, status: str) -> None:
+    """يُغلق الخطة المؤقتة كاملة (done/failed) عند نهاية الإكمال التلقائي."""
+    if not plan_id:
+        return
+    try:
+        from ai.task_manager import update_task_status, mark_plan_status
+        update_task_status(plan_id, last_round, status)
+        mark_plan_status(plan_id, status)
+    except Exception:
+        pass
+
 
 def _stream_steps(
     steps: List[Dict],
     thinking: str,
     messages: List[Dict],
     original_request: str,
+    *,
+    round_num: int = 1,
+    steps_used: Optional[List[int]] = None,
+    task_plan_id: Optional[int] = None,
 ) -> Generator[str, None, None]:
     """
     Generator يُرسل النتائج فور اكتمال كل خطوة (Streaming).
     يدعم Self-Healing: إذا فشلت خطوة، يطلب الإصلاح ويعيد المحاولة.
+
+    🆕 المرحلة 2: إذا انتهت جولة خطوات بلا "answer" (مثلاً كانت كلها قراءة/
+    تشخيص)، لا يتوقف الوكيل منتظراً سؤالاً من المستخدم — يستدعي LLM تلقائياً
+    مرة أخرى ليكمل هو نفسه بخطوات الإصلاح الفعلية، ضمن حدّ أقصى من الجولات
+    (_MAX_AUTO_CONTINUE_ROUNDS) وميزانية إجمالية للخطوات
+    (_MAX_TOTAL_STEPS_BUDGET) لمنع حلقات لا نهائية أو استهلاك مفرط للـ API.
+    التقدّم عبر الجولات يُسجَّل في ai/task_manager.py.
     """
+    if steps_used is None:
+        steps_used = [0]
+
     if thinking:
         yield f"🤔 **{thinking}**\n\n"
 
@@ -803,6 +890,7 @@ def _stream_steps(
     for i, step in enumerate(steps, 1):
         action = step.get("action", "answer")
         prefix = f"**الخطوة {i}/{total}** " if total > 1 else ""
+        steps_used[0] += 1  # 🆕 المرحلة 2: عدّاد الميزانية الإجمالية عبر كل الجولات
 
         # علامة القراءة التلقائية
         if step.get("_auto"):
@@ -901,19 +989,104 @@ def _stream_steps(
             if not healed:
                 yield f"❌ **فشل الإصلاح بعد {_MAX_HEAL_ATTEMPTS} محاولات**\n\n"
 
-    # ── 🆕 إذا قُصّت الخطوات، أخبر المستخدم صراحة ──
+    # ── 🆕 إذا قُصّت الخطوات، أخبر المستخدم صراحة (لا إكمال تلقائي هنا:
+    #    المشكلة عدد خطوات جولة واحدة كبير جداً، وليست حاجة لجولة تالية) ──
     if truncated:
         yield (f"⚠️ **الطلب احتاج أكثر من {_MAX_STEPS_PER_RESPONSE} خطوة "
                f"(قراءة ملفات كثيرة جداً دفعة واحدة).**\n"
                f"نفّذت أول {_MAX_STEPS_PER_RESPONSE} فقط لتجنّب استهلاك مفرط للـ API. "
                f"حدّد الملفات المهمة تحديداً (مثال: \"افحص ai/goal_planner.py و"
                f"ai/agent_factory.py و ai/github_sync.py فقط\") لتحليل أدق وأسرع.\n\n")
+        if task_plan_id is not None:
+            _finalize_adhoc_plan(task_plan_id, round_num, "failed")
 
-    # ── 🆕 ضمان وجود خلاصة نهائية دائماً (خصوصاً لطلبات القراءة/التحليل) ──
+    # ── 🆕 المرحلة 2: إكمال تلقائي بدل التوقف ──
+    # سابقاً: إذا انتهت جولة قراءة/تشخيص بلا "answer"، كان الوكيل يتوقف
+    # ويطلب من المستخدم أن يسأل مباشرة. الآن: يكمل هو نفسه تلقائياً لخطوة
+    # الإصلاح ضمن نفس الاستدعاء، محدوداً بعدد جولات وميزانية خطوات معقولة.
     elif not has_answer and total > 1:
-        yield ("💬 **انتهت القراءة.** لخّص لي الآن بناءً على ما رأيته أعلاه: "
-               "ماذا ينقص بالضبط، وما هي الخطوات العملية التالية؟ اسأل مباشرة "
-               "وسأجاوب بناءً على الملفات التي قرأتها للتو.")
+        if round_num >= _MAX_AUTO_CONTINUE_ROUNDS or steps_used[0] >= _MAX_TOTAL_STEPS_BUDGET:
+            yield (f"⚠️ **وصلت لحد الإكمال التلقائي** ({round_num} جولة، "
+                   f"{steps_used[0]} خطوة إجمالاً) دون إنهاء المهمة بالكامل — "
+                   f"توقفت لتفادي استهلاك مفرط. لخّص لي بدقة أكبر ما تبقّى "
+                   f"وسأكمل من حيث توقفت.")
+            if task_plan_id is not None:
+                _finalize_adhoc_plan(task_plan_id, round_num, "failed")
+        else:
+            if task_plan_id is None:
+                task_plan_id = _register_adhoc_plan(original_request, thinking)
+
+            yield (f"🔄 **انتهت القراءة/التشخيص — أكمل تلقائياً "
+                   f"(جولة {round_num + 1}/{_MAX_AUTO_CONTINUE_ROUNDS})...**\n\n")
+
+            continue_messages = list(messages) + [
+                {
+                    "role": "assistant",
+                    "content": json.dumps(
+                        {"thinking": thinking, "steps": steps}, ensure_ascii=False
+                    )[:3000],
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "بناءً على نتائج القراءة/التشخيص أعلاه، أكمل الآن تلقائياً "
+                        "بنفسك دون انتظار سؤال إضافي مني: نفّذ خطوات الإصلاح أو "
+                        "التعديل الفعلية اللازمة (create_file/edit_file/run_file/"
+                        "git_push حسب الحاجة)، ثم أنهِ دائماً بخطوة \"answer\" تلخّص "
+                        "ما فعلته فعلياً. رد بصيغة JSON فقط بنفس الصيغة المعتادة."
+                    ),
+                },
+            ]
+
+            try:
+                raw_cont = _call_api(continue_messages)
+            except Exception as e:
+                yield f"⚠️ تعذّر إكمال الجولة التالية تلقائياً: {e}\n"
+                if task_plan_id is not None:
+                    _finalize_adhoc_plan(task_plan_id, round_num, "failed")
+                return
+
+            parsed_cont = _parse_llm_response(raw_cont)
+            if not parsed_cont:
+                yield "⚠️ لم أتمكن من تحليل رد الإكمال التلقائي.\n"
+                if task_plan_id is not None:
+                    _finalize_adhoc_plan(task_plan_id, round_num, "failed")
+                return
+
+            cont_steps = parsed_cont.get("steps", [])
+            if not cont_steps and parsed_cont.get("action"):
+                cont_steps = [parsed_cont]
+
+            if not cont_steps:
+                reply = parsed_cont.get("reply", "")
+                if reply:
+                    yield f"💬 {reply}"
+                if task_plan_id is not None:
+                    _finalize_adhoc_plan(task_plan_id, round_num, "done")
+                return
+
+            remaining_budget = _MAX_TOTAL_STEPS_BUDGET - steps_used[0]
+            if remaining_budget <= 0:
+                yield "⚠️ استُنفدت ميزانية الخطوات المسموحة لهذا الطلب.\n"
+                if task_plan_id is not None:
+                    _finalize_adhoc_plan(task_plan_id, round_num, "failed")
+                return
+            if len(cont_steps) > remaining_budget:
+                cont_steps = cont_steps[:remaining_budget]
+
+            cont_steps     = _inject_read_before_edit(cont_steps)
+            cont_thinking  = parsed_cont.get("thinking", "")
+            _advance_adhoc_plan(task_plan_id, round_num, "done")
+
+            yield from _stream_steps(
+                cont_steps, cont_thinking, continue_messages, original_request,
+                round_num=round_num + 1, steps_used=steps_used,
+                task_plan_id=task_plan_id,
+            )
+
+    # ── 🆕 انتهت المهمة فعلياً بخلاصة — أغلق الخطة المؤقتة إن وُجدت ──
+    elif has_answer and task_plan_id is not None:
+        _finalize_adhoc_plan(task_plan_id, round_num, "done")
 
 
 # ══════════════════════════════════════════════════════════════════
