@@ -92,8 +92,44 @@ def _db() -> sqlite3.Connection:
         "CREATE INDEX IF NOT EXISTS idx_conv_platform_author "
         "ON social_conversations(platform, author, id)"
     )
+    # نقاط استرجاع (checkpoints) لكل منصة ضمن عملية نشر واحدة — تسمح
+    # باستئناف نشر مُجدوَل توقّف عمليته منتصف الطريق (تعطّل الخادم مثلاً)
+    # دون إعادة النشر على منصات نجحت فعلاً (راجع publish_to/_process_due_scheduled).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS publish_checkpoints (
+            post_id INTEGER, platform TEXT, ok INTEGER,
+            result TEXT, updated_at TEXT,
+            PRIMARY KEY (post_id, platform)
+        )""")
     conn.commit()
     return conn
+
+
+def _get_checkpoint_results(post_id: int) -> Dict[str, tuple]:
+    """يعيد {platform: (ok, result)} لكل منصة سُجِّلت سابقاً ضمن هذا post_id."""
+    with _db() as c:
+        rows = c.execute(
+            "SELECT platform, ok, result FROM publish_checkpoints WHERE post_id=?",
+            (post_id,),
+        ).fetchall()
+    return {p: (bool(ok), result) for p, ok, result in rows}
+
+
+def _save_checkpoint(post_id: int, platform: str, ok: bool, result: str) -> None:
+    """يحفظ نتيجة منصة واحدة فور اكتمالها — نقطة استرجاع (checkpoint) لكل
+    خطوة بدل الانتظار حتى تنتهي كل المنصات، بحيث لو تعطّلت العملية بعد
+    هذه النقطة، لا يُعاد تنفيذ ما سبق حفظه بنجاح."""
+    with _db() as c:
+        c.execute(
+            "INSERT OR REPLACE INTO publish_checkpoints (post_id,platform,ok,result,updated_at) "
+            "VALUES (?,?,?,?,?)",
+            (post_id, platform, 1 if ok else 0, result, datetime.now(timezone.utc).isoformat()),
+        )
+
+
+def _clear_checkpoints(post_id: int) -> None:
+    with _db() as c:
+        c.execute("DELETE FROM publish_checkpoints WHERE post_id=?", (post_id,))
 
 
 def get_config(key: str, default=None):
@@ -630,44 +666,73 @@ class SocialAgentManager:
     def _process_due_scheduled(self):
         for post_id, platforms, text in _due_scheduled_posts():
             try:
-                results = self.publish_to(platforms, text)
+                results = self.publish_to(platforms, text, resume_key=post_id)
                 failed = {p: r for p, r in results.items() if str(r).startswith("ERROR")}
                 status = "failed" if failed else "published"
                 _mark_scheduled_result(post_id, status, json.dumps(results, ensure_ascii=False))
+                # العملية اكتملت نهائياً (نجاحاً أو فشلاً) — لم تعد هناك حاجة
+                # لنقاط الاسترجاع الخاصة بهذا post_id، والحالة لم تعد 'pending'
+                # فلن يُعاد التقاطه في _due_scheduled_posts لاحقاً على أي حال.
+                _clear_checkpoints(post_id)
             except Exception as e:  # noqa: BLE001
+                # خطأ غير متوقع قبل تجميع النتائج: أبقِ الحالة 'pending' لو
+                # كانت هذه محاولة لم تُكمَل بعد أي منصة، وإلا سجّلها فاشلة —
+                # لكن أبقِ نقاط الاسترجاع كي لا تُعاد المنصات الناجحة سابقاً.
                 _mark_scheduled_result(post_id, "failed", f"ERROR: {e}")
 
     # ── نشر يدوي/برمجي فوري إلى منصة أو أكثر ────────────────────────────
-    def publish_to(self, platforms: List[str], text: str) -> Dict[str, str]:
+    def publish_to(self, platforms: List[str], text: str,
+                    resume_key: Optional[int] = None) -> Dict[str, str]:
         """ينشر النص على كل منصة مطلوبة بالتوازي (خيط لكل منصة). يعيد
-        {platform: post_id | 'ERROR: ...'}."""
+        {platform: post_id | 'ERROR: ...'}.
+
+        resume_key: مُعرّف اختياري (عادةً post_id من scheduled_posts) يفعّل
+        الاسترجاع (checkpointing): أي منصة سبق أن نجح نشرها تحت نفس
+        resume_key تُتخطَّى ولا تُعاد (يُستخدم نتيجتها المحفوظة)، ونتيجة
+        كل منصة جديدة تُحفَظ فور اكتمالها بدل انتظار انتهاء كل المنصات —
+        بحيث لو تعطّلت العملية (تعطّل الخادم مثلاً) منتصف النشر، لا تُكرَّر
+        المنشورات على منصات نجحت فعلاً عند إعادة المحاولة."""
         results: Dict[str, str] = {}
         lock = threading.Lock()
+
+        already_done = _get_checkpoint_results(resume_key) if resume_key is not None else {}
+        pending_platforms = []
+        for pid in platforms:
+            cached = already_done.get(pid)
+            if cached is not None and cached[0]:  # نجح سابقاً — لا تُعِد النشر
+                results[pid] = cached[1]
+            else:
+                pending_platforms.append(pid)
 
         def _one(pid: str):
             adapter = self.adapters.get(pid)
             if not adapter:
-                res = "ERROR: منصة غير معروفة"
+                res, ok = "ERROR: منصة غير معروفة", False
             elif not adapter.is_configured():
                 res = f"ERROR: غير مُهيّأة — يلزم {', '.join(adapter.missing_env())}"
+                ok = False
             else:
                 try:
                     post_id = adapter.publish(text)
                     log_event(pid, "publish", "agent", text, ok=True)
-                    res = post_id
+                    res, ok = post_id, True
                 except Exception as e:  # noqa: BLE001
                     log_event(pid, "publish", "agent", text, reply_content=str(e), ok=False)
-                    res = f"ERROR: {e}"
+                    res, ok = f"ERROR: {e}", False
+            if resume_key is not None:
+                _save_checkpoint(resume_key, pid, ok, res)
             with lock:
                 results[pid] = res
 
         TIMEOUT = 45
-        threads = [(pid, threading.Thread(target=_one, args=(pid,))) for pid in platforms]
+        threads = [(pid, threading.Thread(target=_one, args=(pid,))) for pid in pending_platforms]
         for _, t in threads:
             t.start()
         for pid, t in threads:
             t.join(timeout=TIMEOUT)
-            # إذا انتهت المهلة قبل انتهاء الخيط — سجّل خطأ صريح
+            # إذا انتهت المهلة قبل انتهاء الخيط — سجّل خطأ صريح (تبقى
+            # المنصة قابلة لإعادة المحاولة في الدورة القادمة لأنها لم
+            # تُحفَظ كـ ok=True في checkpoint)
             if t.is_alive():
                 with lock:
                     if pid not in results:
