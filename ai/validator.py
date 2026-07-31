@@ -347,7 +347,13 @@ class Phase6Validator:
     def _dead_code_detection(self, reachable: Set[str]) -> Dict[str, Any]:
         """Find .py files that are never imported from entry points."""
         all_files = {str(f.relative_to(self.project_root)) for f in self._all_py_files}
-        dead = sorted(all_files - reachable - set(self._entry_points))
+        # conftest.py: يكتشفها pytest تلقائياً (auto-discovery)، ولا يُفترض
+        # أن تُستورد بشكل مباشر من أي كود آخر — تصنيفها "كود ميت" false
+        # positive بنيوي في أي مشروع يستخدم pytest.
+        pytest_auto_discovered = {
+            f for f in all_files if f == "conftest.py" or f.endswith("/conftest.py")
+        }
+        dead = sorted(all_files - reachable - set(self._entry_points) - pytest_auto_discovered)
 
         # Categorise dead files
         dead_by_layer: Dict[str, List[str]] = {}
