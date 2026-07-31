@@ -17,7 +17,7 @@ PyTorch/TensorFlow — numpy فقط للمكوّن المعرفي الأساسي
 | **الاعتماد على خدمات خارجية** | اختياري بالكامل — يعمل بدون أي مفتاح API عبر احتياطي محلي (`NSM/LLMFallback` + CKG synthesis) |
 | **قاعدة بيانات** | SQLite محلية (بدون خادم قاعدة بيانات خارجي) |
 | **حالة النشر** | منشور فعلياً على Streamlit Community Cloud |
-| **حالة الاختبارات الآلية** | جزئية — ملفات `test_*.py` متفرقة، بدون CI محدّد بعد |
+| **حالة الاختبارات الآلية** | جزئية — ملفات `test_*.py` متفرقة بدون تغطية كاملة، لكن CI فعّال فعلياً (`.github/workflows/tests.yml` يشغّل pytest + py_compile على كل push/PR، بالإضافة لـ`contrast-check.yml`) |
 
 ## نظرة عامة على المعمارية
 
@@ -195,7 +195,8 @@ python api_server.py   # FastAPI، لمحرك core.engine
   محدودة) — الفهم الدلالي محدود، مش مقصود يكون مصدر حقائق.
 - بدون test suite آلي شامل — ملفات `test_*.py` موجودة بمكوّنات متفرقة
   (`ai/test_neural_core.py`، `knowledge/test_qa_engine.py`، إلخ) بدون تغطية
-  كاملة ولا CI مُفعّل.
+  كاملة، رغم إن CI مُفعّل فعلياً (`.github/workflows/tests.yml`) ويشغّل
+  pytest + فحص py_compile على كل push/PR.
 - `streamlit_app.py` لا يزال ملفاً واحداً (~9,800 سطر) — التقسيم لوحدات
   أصغر مؤجَّل حالياً (خطر التعديل الجذري > الفائدة الفورية).
 - بعض الميزات (WhatsApp integration، نظام حسابات المستخدمين) تحت التطوير.
