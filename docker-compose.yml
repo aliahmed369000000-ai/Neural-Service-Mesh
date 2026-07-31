@@ -1,0 +1,67 @@
+# Neural Service Mesh (NSM) — تشغيل بضغطة واحدة للنشر المغلق (بدون إنترنت خارجي)
+#
+# الاستخدام:
+#   docker compose up -d
+#
+# ماذا يحدث:
+#   1) خدمة ollama       — تشغّل خادم Ollama (النموذج المحلي بدل أي API سحابي)
+#   2) خدمة ollama-pull  — تنتظر جاهزية الخادم ثم تسحب النموذج تلقائياً
+#                           (مرة واحدة فقط؛ يُحفظ في volume دائم، لا يُعاد
+#                           تنزيله عند إعادة التشغيل)
+#   3) خدمة nsm-app       — تطبيق NSM نفسه، لا يبدأ إلا بعد نجاح سحب النموذج
+#
+# المتغيرات قابلة للتعديل عبر ملف .env بجانب هذا الملف (اختياري):
+#   NSM_LOCAL_MODEL=qwen2.5:7b-instruct-q4_K_M
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: nsm-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+
+  ollama-pull:
+    image: ollama/ollama:latest
+    container_name: nsm-ollama-pull
+    depends_on:
+      - ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    # يعتمد على أمر ollama نفسه فقط للتحقق من الجاهزية (متوفر دائماً داخل
+    # هذه الصورة)، بدل افتراض وجود curl/wget في صورة ollama الرسمية.
+    command:
+      - |
+        echo "⏳ بانتظار جاهزية خادم Ollama...";
+        until ollama list >/dev/null 2>&1; do sleep 2; done;
+        echo "✅ الخادم جاهز — جارٍ سحب النموذج ${NSM_LOCAL_MODEL:-qwen2.5:7b-instruct-q4_K_M} (مرة واحدة، محفوظ في volume)...";
+        ollama pull ${NSM_LOCAL_MODEL:-qwen2.5:7b-instruct-q4_K_M};
+        echo "✅ النموذج المحلي جاهز.";
+    restart: "no"
+
+  nsm-app:
+    build: .
+    container_name: nsm-app
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_started
+      ollama-pull:
+        condition: service_completed_successfully
+    ports:
+      - "8501:8501"
+    environment:
+      - NSM_OFFLINE_MODE=1
+      - NSM_LOCAL_LLM_URL=http://ollama:11434
+      - NSM_LOCAL_MODEL=${NSM_LOCAL_MODEL:-qwen2.5:7b-instruct-q4_K_M}
+    volumes:
+      - nsm_memory:/app/memory
+
+volumes:
+  ollama_data:
+  nsm_memory:
