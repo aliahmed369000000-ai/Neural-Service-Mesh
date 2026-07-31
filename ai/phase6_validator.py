@@ -3,6 +3,13 @@
 ⚠️ STUB — نتائج ثابتة وهمية، ليست فحصًا حقيقيًا.
    score=85.0 و verdict="Phase 7 ready" مُبرمَجتان مسبقًا بشكل ثابت
    ولا تعكسان أي فحص فعلي لمكونات النظام.
+
+⚠️ مهجور (deprecated) — لا يستورده أي كود فعلي بالمشروع حالياً. الفاحص
+   الحقيقي المستخدَم فعلياً هو ai/validator.py (نفس اسم الكلاس
+   Phase6Validator، لكن بتحليل كود ثابت حقيقي + إحصاءات mesh حية).
+   هذا الملف أُبقي فقط لتفادي كسر أي استيراد خارجي قديم قد يشير له؛
+   لا يُستخدَم داخلياً، ولا ينبغي ربطه بأي أداة أو تقرير — استخدم
+   `from ai.validator import Phase6Validator` دائماً.
 """
 from __future__ import annotations
 from datetime import datetime, timezone

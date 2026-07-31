@@ -15,7 +15,7 @@ Report includes:
   • Phase 7 readiness score
 
 Usage:
-  from ai.phase6_validator import Phase6Validator
+  from ai.validator import Phase6Validator
   report = Phase6Validator(mesh).generate()
 """
 from __future__ import annotations
