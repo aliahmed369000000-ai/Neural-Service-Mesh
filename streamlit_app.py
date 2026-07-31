@@ -58,6 +58,14 @@ OPENROUTER_MODEL_OPTIONS = {
     for mid, name, prov, ctx in OPENROUTER_MODELS
 }
 
+# أداء/سلامة: سقف طول محادثة الدردشة الرئيسية (تبويب 💬 المحادثة).
+# يُستخدم في مكانين: (1) عدد الرسائل المعروضة في الواجهة (يمنع تضخّم
+# HTML المُعاد بناؤه كل rerun مع طول المحادثة)، (2) عدد الرسائل المُرسَلة
+# كسياق لمزوّد OpenRouter (يمنع نمو تكلفة/حجم التوكنز بلا حدود، ويتجنّب
+# تجاوز حد نافذة السياق للنموذج في المحادثات الطويلة جداً). السجل الكامل
+# يبقى محفوظاً في nsm_messages بلا حذف — هذا سقف عرض/سياق فقط، وليس حذفاً.
+NSM_CHAT_DISPLAY_LIMIT = 40
+
 NSM_SYSTEM_PROMPT = """أنت NSM Agent، المساعد الذكي لمنصة Neural Service Mesh (NSM) — نظام عربي متخصص في الذكاء الاصطناعي والمعرفة الإسلامية.
 
 ## الهوية والصدق
@@ -7480,7 +7488,22 @@ def render_chat():
             </div>
         </div>'''
     else:
-        for _i, msg in enumerate(st.session_state.nsm_messages):
+        # أداء: نعرض آخر NSM_CHAT_DISPLAY_LIMIT رسالة فقط بدل كل السجل —
+        # بدون هذا السقف، HTML المُعاد بناؤه بالكامل في كل rerun (كل رسالة
+        # جديدة/تقييم/تفاعل) يتضخم مع طول المحادثة ويُبطئ الواجهة تدريجياً.
+        # نحافظ على الفهرس الحقيقي _i (وليس فهرس القائمة المقصوصة) كي تبقى
+        # مطابقة _nsm_audio_cache (المُخزَّن بفهرس الرسالة الأصلي) صحيحة.
+        _all_msgs = st.session_state.nsm_messages
+        _hidden_count = max(0, len(_all_msgs) - NSM_CHAT_DISPLAY_LIMIT)
+        if _hidden_count:
+            html += (
+                f'<div style="text-align:center;color:var(--text-muted);'
+                f'font-size:0.78rem;padding:0.4rem 0 0.7rem">'
+                f'— تُعرض آخر {NSM_CHAT_DISPLAY_LIMIT} رسالة فقط '
+                f'({_hidden_count} رسالة أقدم مخفية من العرض، لكنها لا تزال محفوظة) —'
+                f'</div>'
+            )
+        for _i, msg in list(enumerate(_all_msgs))[-NSM_CHAT_DISPLAY_LIMIT:]:
             role, text = msg[0], msg[1]
             ctx_tag    = msg[2] if len(msg) > 2 else ""
             src_badge  = msg[3] if len(msg) > 3 else ""
@@ -7925,7 +7948,12 @@ def render_chat():
                 image_files = [f for f in files if f["is_image"]] if can_vision else []
                 user_content = _build_user_content(text.strip(), doc_files, image_files)
                 history_msgs = []
-                for m in st.session_state.nsm_messages[:-1]:
+                # سقف: نُرسل آخر NSM_CHAT_DISPLAY_LIMIT رسالة فقط كسياق بدل
+                # السجل الكامل — بلا هذا، كل رسالة جديدة في محادثة طويلة
+                # تُرسل توكنزاً متزايدة بلا حدود لمزوّد OpenRouter (تكلفة
+                # متصاعدة + خطر تجاوز نافذة السياق فعلياً في المحادثات
+                # الطويلة جداً). السجل الكامل يبقى محفوظاً في nsm_messages.
+                for m in st.session_state.nsm_messages[:-1][-NSM_CHAT_DISPLAY_LIMIT:]:
                     role = "user" if m[0] == "user" else "assistant"
                     history_msgs.append({"role": role, "content": m[1]})
                 api_messages = history_msgs + [{"role": "user", "content": user_content}]
