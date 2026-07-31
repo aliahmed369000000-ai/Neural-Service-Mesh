@@ -1953,8 +1953,27 @@ h3 { font-size: clamp(1.05rem, 3.2vw, 1.3rem); font-weight: 700; }
     color: var(--text);
     font-size: 0.92rem;
     font-family: 'Tajawal', sans-serif;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
 }
 .nsm-cmdk-item:hover, .nsm-cmdk-item.active { background: var(--gold-soft); }
+.nsm-cmdk-item-parent { color: var(--text-muted); font-size: 0.85rem; }
+.nsm-cmdk-item-sep { color: var(--text-muted); opacity: 0.6; }
+.nsm-cmdk-empty {
+    padding: 1.4rem 1.2rem;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.88rem;
+    font-family: 'Tajawal', sans-serif;
+}
+.nsm-cmdk-hint {
+    padding: 0.5rem 1.2rem 0.85rem;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-family: 'Tajawal', sans-serif;
+    border-top: 1px solid var(--border);
+}
 .nsm-cmdk-fab {
     position: fixed; bottom: 20px; left: 20px;
     z-index: 9998;
@@ -2103,8 +2122,9 @@ if not st.session_state.get(_nsm_chrome_key):
             overlay.className = 'nsm-cmdk-overlay';
             overlay.innerHTML =
                 '<div class="nsm-cmdk-box">' +
-                    '<input id="nsm-cmdk-input" class="nsm-cmdk-input" placeholder="ابحث عن قسم... (Esc للإغلاق)" />' +
+                    '<input id="nsm-cmdk-input" class="nsm-cmdk-input" placeholder="ابحث عن قسم أو قسم فرعي... (Esc للإغلاق)" />' +
                     '<div id="nsm-cmdk-list" class="nsm-cmdk-list"></div>' +
+                    '<div class="nsm-cmdk-hint">↑↓ للتنقّل · Enter للفتح · Esc للإغلاق</div>' +
                 '</div>';
             doc.body.appendChild(overlay);
 
@@ -2116,23 +2136,91 @@ if not st.session_state.get(_nsm_chrome_key):
             fab.textContent = '⌘K';
             doc.body.appendChild(fab);
 
-            function getTabs() {{
-                return Array.from(doc.querySelectorAll('[data-baseweb="tab-list"] [data-baseweb="tab"]'));
+            // ── فهرسة كل الأقسام: التبويبات الرئيسية + التبويبات الفرعية
+            // المتداخلة داخلها (مثل «المعرفة ‹ القرآن الكريم»)، حتى يقدر
+            // المستخدم يقفز مباشرة لأي قسم فرعي بدل الاقتصار على الرئيسية.
+            // الربط بين كل تبويب فرعي وأصله الرئيسي يتم عبر aria-labelledby
+            // (نمط ARIA القياسي لِـ tabpanel ← id تبويبه الأصل)، وهو أثبت
+            // من محاولة حساب الفهرس يدوياً لأن كل التبويبات (حتى غير
+            // النشطة) موجودة بالـDOM دوماً وقد تتشابه تسمياتها.
+            function buildIndex() {{
+                const groups = Array.from(doc.querySelectorAll('.stTabs'));
+                if (!groups.length) return [];
+                const rootGroup = groups[0];
+                const items = [];
+
+                function ownTabs(group) {{
+                    return Array.from(group.querySelectorAll('[data-baseweb="tab-list"] [role="tab"]'))
+                        .filter(function(t) {{ return t.closest('.stTabs') === group; }});
+                }}
+
+                ownTabs(rootGroup).forEach(function(t) {{
+                    items.push({{
+                        label: (t.textContent || '').trim(),
+                        parent: null,
+                        run: function() {{ t.click(); }},
+                    }});
+                }});
+
+                for (let i = 1; i < groups.length; i++) {{
+                    const g = groups[i];
+                    // نبحث عن حاوية اللوحة الأصل بأكثر من محدد احتياطاً لاختلاف
+                    // إصدار BaseWeb — data-baseweb هو الأساسي، role=tabpanel احتياط ARIA قياسي.
+                    const parentPanel = g.closest('[data-baseweb="tab-panel"], [role="tabpanel"]');
+                    if (!parentPanel) continue;
+                    const parentId = parentPanel.getAttribute('aria-labelledby');
+                    const parentTab = parentId ? doc.getElementById(parentId) : null;
+                    if (!parentTab) continue;
+                    const parentLabel = (parentTab.textContent || '').trim();
+                    ownTabs(g).forEach(function(st) {{
+                        items.push({{
+                            label: (st.textContent || '').trim(),
+                            parent: parentLabel,
+                            run: function() {{
+                                parentTab.click();
+                                setTimeout(function() {{ st.click(); }}, 60);
+                            }},
+                        }});
+                    }});
+                }}
+                return items;
             }}
+
             function renderList(filterText) {{
                 const list = doc.getElementById('nsm-cmdk-list');
                 list.innerHTML = '';
                 const f = (filterText || '').trim();
-                let first = true;
-                getTabs().forEach(function(t) {{
-                    const label = (t.textContent || '').trim();
-                    if (f && label.indexOf(f) === -1) return;
+                const all = buildIndex();
+                const matches = all.filter(function(it) {{
+                    if (!f) return true;
+                    const hay = (it.parent ? it.parent + ' ' : '') + it.label;
+                    return hay.indexOf(f) !== -1;
+                }});
+                if (!matches.length) {{
+                    const empty = doc.createElement('div');
+                    empty.className = 'nsm-cmdk-empty';
+                    empty.textContent = 'لا توجد أقسام مطابقة';
+                    list.appendChild(empty);
+                    return;
+                }}
+                matches.forEach(function(it, i) {{
                     const item = doc.createElement('div');
-                    item.className = 'nsm-cmdk-item' + (first ? ' active' : '');
-                    first = false;
-                    item.textContent = label;
+                    item.className = 'nsm-cmdk-item' + (i === 0 ? ' active' : '');
+                    if (it.parent) {{
+                        const parentSpan = doc.createElement('span');
+                        parentSpan.className = 'nsm-cmdk-item-parent';
+                        parentSpan.textContent = it.parent;
+                        const sepSpan = doc.createElement('span');
+                        sepSpan.className = 'nsm-cmdk-item-sep';
+                        sepSpan.textContent = '‹';
+                        item.appendChild(parentSpan);
+                        item.appendChild(sepSpan);
+                    }}
+                    const labelSpan = doc.createElement('span');
+                    labelSpan.textContent = it.label;
+                    item.appendChild(labelSpan);
                     item.addEventListener('click', function() {{
-                        t.click();
+                        it.run();
                         closePalette();
                     }});
                     list.appendChild(item);
