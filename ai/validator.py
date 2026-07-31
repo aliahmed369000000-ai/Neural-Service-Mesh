@@ -96,7 +96,7 @@ class Phase6Validator:
         self.project_root = Path(project_root or self._detect_root()).resolve()
         self._import_map: Dict[str, Set[str]] = {}   # file → set of modules it imports
         self._all_py_files: List[Path] = []
-        self._entry_points: List[str] = ["main.py", "api/app.py"]
+        self._entry_points: List[str] = ["main.py", "api/app.py", "streamlit_app.py", "api_server.py"]
 
     # ── Root detection ─────────────────────────────────────────────────────
 
