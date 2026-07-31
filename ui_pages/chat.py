@@ -602,12 +602,48 @@ def render_chat():
                     if st.button(q, key=f"chat_q_{i}", use_container_width=True):
                         st.session_state._chat_pending = q
 
-    # مسح المحادثة — بجانب أدوات المحادثة العادية (لا بعد أدوات المالك)
-    if st.button("🗑 مسح المحادثة", key="nsm_clear"):
-        st.session_state.nsm_messages = []
-        st.session_state.nsm_count = 0
-        bot.clear_history()
-        st.rerun()
+    # أدوات المحادثة: مسح / إعادة توليد آخر رد / تصدير — بجانب بعضها
+    # (لا بعد أدوات المالك)
+    _has_msgs = bool(st.session_state.nsm_messages)
+    _last_is_nsm = _has_msgs and st.session_state.nsm_messages[-1][0] == "nsm"
+    _tool_col1, _tool_col2, _tool_col3 = st.columns(3)
+    with _tool_col1:
+        if st.button("🗑 مسح المحادثة", key="nsm_clear", use_container_width=True, disabled=not _has_msgs):
+            st.session_state.nsm_messages = []
+            st.session_state.nsm_count = 0
+            bot.clear_history()
+            st.rerun()
+    with _tool_col2:
+        if st.button("🔄 إعادة توليد آخر رد", key="nsm_regenerate",
+                      use_container_width=True, disabled=not _last_is_nsm):
+            # ابحث عن آخر رسالة مستخدم قبل آخر رد NSM، احذف الرد القديم
+            # (وكاش صوته إن وُجد)، ثم أعد إرسال نفس السؤال بدون تكرار
+            # فقاعة المستخدم (add_user_msg=False بمعالج _process بالأسفل).
+            _last_user_text = None
+            for _m in reversed(st.session_state.nsm_messages[:-1]):
+                if _m[0] == "user":
+                    _last_user_text = _m[1]
+                    break
+            if _last_user_text:
+                _popped_idx = len(st.session_state.nsm_messages) - 1
+                st.session_state.nsm_messages.pop()
+                st.session_state.get("_nsm_audio_cache", {}).pop(_popped_idx, None)
+                st.session_state["_chat_regenerate_pending"] = _last_user_text
+                st.rerun()
+    with _tool_col3:
+        if _has_msgs:
+            _export_lines = []
+            for _m in st.session_state.nsm_messages:
+                _role_label = "أنت" if _m[0] == "user" else "NSM"
+                _export_lines.append(f"[{_m[4]}] {_role_label}: {_m[1]}")
+            st.download_button(
+                "⬇️ تصدير المحادثة", data="\n\n".join(_export_lines),
+                file_name=f"nsm_chat_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+                mime="text/plain", key="nsm_export", use_container_width=True,
+            )
+        else:
+            st.button("⬇️ تصدير المحادثة", key="nsm_export_disabled",
+                       use_container_width=True, disabled=True)
 
     # ── أزرار تحليل المشروع (NSM Agent) — للمالك فقط ─────────────
     # الأوامر خلف هذه الأزرار (افحص/عدل/أنشئ/ارفع) تقرأ/تكتب ملفات فعلية
@@ -649,7 +685,7 @@ def render_chat():
                     st.session_state._chat_pending = f"افحص {file_path_input.strip()}"
 
     # معالجة الإدخال
-    def _process(text: str):
+    def _process(text: str, add_user_msg: bool = True):
         files = list(st.session_state["chat_pending_files"])
         if not text.strip() and not files:
             return
@@ -664,8 +700,10 @@ def render_chat():
 
         _ts = datetime.now().strftime("%H:%M")
 
-        # ── أضف رسالة المستخدم فوراً ──
-        st.session_state.nsm_messages.append(("user", display_text, "", "", _ts))
+        # ── أضف رسالة المستخدم فوراً (يُتخطّى عند إعادة توليد رد سابق،
+        # لأن رسالة المستخدم موجودة أصلاً بالسجل ولا يجب تكرارها) ──
+        if add_user_msg:
+            st.session_state.nsm_messages.append(("user", display_text, "", "", _ts))
 
         # ── فحص أمان أولي (regex محلي، بدون تكلفة API) ──
         _safety_msg = _nsm_safety_gate(text.strip())
@@ -957,3 +995,8 @@ def render_chat():
         q = st.session_state._chat_pending
         del st.session_state._chat_pending
         _process(q)
+
+    if hasattr(st.session_state, "_chat_regenerate_pending"):
+        q = st.session_state._chat_regenerate_pending
+        del st.session_state._chat_regenerate_pending
+        _process(q, add_user_msg=False)
