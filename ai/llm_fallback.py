@@ -12,7 +12,16 @@ LLM Generative Fallback Engine — NSM v18.3
   6. OpenAI API      (OPENAI_API_KEY)   — GPT-4o-mini
   7. Together.xyz    (TOGETHER_API_KEY) — Llama-3/Mixtral
   8. Hugging Face    (HUGGINGFACE_API_KEY أو HF_TOKEN) — Falcon-Arabic-7B-Instruct (مجاني)
-  9. CKG Synthesis   (بدون مفتاح)      — يولّد من الرسم المعرفي دائماً
+  9. نموذج محلي (Ollama) — فقط إذا حُدِّد NSM_LOCAL_LLM_URL صراحة
+ 10. CKG Synthesis   (بدون مفتاح)      — يولّد من الرسم المعرفي دائماً
+
+🔒 وضع النشر المغلق (بدون إنترنت خارجي — سيرفرات الجهة المشترية):
+   NSM_OFFLINE_MODE=1 يجعل النموذج المحلي (Ollama) المزوّد الوحيد في
+   السلسلة تماماً — لا تُجرَّب أي مزوّدات سحابية إطلاقاً مهما كانت مفاتيح
+   الـAPI موجودة في env. متغيرات التهيئة:
+     NSM_OFFLINE_MODE=1                       (تفعيل الوضع المغلق)
+     NSM_LOCAL_LLM_URL=http://localhost:11434 (عنوان خادم Ollama، اختياري)
+     NSM_LOCAL_MODEL=qwen2.5:7b-instruct-q4_K_M (اختياري)
 
 🆕 RAG على الـ CKG: قبل استدعاء أي مزوّد حيّ، يبحث generate() في الرسم
 المعرفي (self.ckg) عن مفاهيم ذات صلة بالسؤال ويُرفقها كسياق إضافي ضمن
@@ -56,6 +65,7 @@ class Provider(Enum):
     TOGETHER  = "together"
     GROQ      = "groq"
     HUGGINGFACE = "huggingface"  # Falcon-Arabic-7B-Instruct — مجاني (HF Inference API)
+    LOCAL     = "local"  # نموذج محلي عبر Ollama — للنشر المغلق بدون إنترنت (NSM_OFFLINE_MODE)
     CKG_SYNTH = "ckg_synthesis"
 
 
@@ -112,6 +122,19 @@ _GROQ_MODELS          = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "ope
 _HF_MODEL             = "tiiuae/Falcon-Arabic-7B-Instruct"
 _HF_INFERENCE_URL     = f"https://api-inference.huggingface.co/models/{_HF_MODEL}"
 _FAILURE_COOLDOWN_SEC = 300   # 5 دقائق قبل إعادة تجربة مزوّد فاشل
+
+# ── النموذج المحلي (Ollama) — للنشر داخل شبكة الجهة المغلقة ──────────────
+# سيرفر عادي CPU فقط أو GPU صغير → نموذج مصغّر مكمَّم (quantized) بصيغة
+# GGUF عبر Ollama. Qwen2.5-7B-Instruct له دعم عربي جيد ونسخة مكمَّمة q4_K_M
+# تعمل على CPU بذاكرة معقولة (~5GB RAM). يمكن استبداله بأي tag آخر مثبَّت
+# على خادم Ollama (مثال: نسخة Yemeni LoRA المدرَّبة مسبقاً إن حُوِّلت لـGGUF).
+_LOCAL_MODEL          = "qwen2.5:7b-instruct-q4_K_M"
+_LOCAL_BASE_URL       = "http://localhost:11434"   # عنوان خادم Ollama الافتراضي
+_LOCAL_TIMEOUT_SEC    = 90   # الاستدلال على CPU أبطأ بكثير من الـAPI السحابية
+
+# NSM_OFFLINE_MODE=1 → يجعل النموذج المحلي المزوّد الوحيد في السلسلة، ولا
+# تُجرَّب أي مزوّدات سحابية إطلاقاً (لا توجد محاولات اتصال بالإنترنت الخارجي
+# حتى لو كانت مفاتيح API موجودة بالخطأ في env — مهم لبيئة الجهة المغلقة).
 
 # ── اكتشاف نماذج OpenRouter المجانية تلقائياً ────────────────────────────
 _OPENROUTER_MODELS_URL   = "https://openrouter.ai/api/v1/models"
@@ -440,6 +463,22 @@ class LLMFallback:
         """
         chain: List[Tuple[Provider, str, str]] = []
 
+        # 0) وضع النشر المغلق (بدون إنترنت خارجي): النموذج المحلي فقط —
+        #    نتوقف هنا فوراً ولا نضيف أي مزوّد سحابي للسلسلة إطلاقاً.
+        offline_mode = os.getenv("NSM_OFFLINE_MODE", "").strip().lower() in (
+            "1", "true", "yes", "on",
+        )
+        local_model = os.getenv("NSM_LOCAL_MODEL", _LOCAL_MODEL).strip() or _LOCAL_MODEL
+        if offline_mode:
+            chain.append((Provider.LOCAL, "", local_model))
+            return chain
+
+        # 0.5) في الوضع المتصل: النموذج المحلي يبقى خياراً اختيارياً إضافياً
+        #      فقط إذا حُدِّد عنوان خادم صراحة (لا نفترض وجود Ollama افتراضياً
+        #      على بيئات سحابية مثل Streamlit Cloud لتفادي تأخير/أخطاء غير
+        #      ضرورية)، ويُضاف كخيار قبل CKG synthesis النهائي.
+        local_url = os.getenv("NSM_LOCAL_LLM_URL", "").strip()
+
         # 1) Anthropic Claude
         k = os.getenv("ANTHROPIC_API_KEY", "").strip()
         if k:
@@ -487,6 +526,11 @@ class LLMFallback:
         if k:
             chain.append((Provider.HUGGINGFACE, k, _HF_MODEL))
 
+        # 9) نموذج محلي (Ollama) — فقط إذا حُدِّد عنوان الخادم صراحة عبر
+        #    NSM_LOCAL_LLM_URL. يُضاف كآخر خيار حي قبل CKG synthesis.
+        if local_url:
+            chain.append((Provider.LOCAL, "", local_model))
+
         return chain
 
     # ── التبديل بين المزوّدين حسب النوع ─────────────────────────────────
@@ -521,6 +565,8 @@ class LLMFallback:
                 return self._call_groq(query, history, sp)
             elif provider == Provider.HUGGINGFACE:
                 return self._call_huggingface(query, history, sp)
+            elif provider == Provider.LOCAL:
+                return self._call_local(query, history, sp)
             else:
                 raise ValueError(f"مزوّد غير معروف: {provider}")
         finally:
@@ -619,7 +665,10 @@ class LLMFallback:
     @property
     def available(self) -> bool:
         """هل يوجد مزوّد LLM حقيقي متاح؟ (يُستخدم من nsm_chat.py)"""
-        return self._provider != Provider.CKG_SYNTH and bool(self._api_key)
+        if self._provider == Provider.CKG_SYNTH:
+            return False
+        # المزوّد المحلي (Ollama) لا يحتاج مفتاح API — لا نطلب api_key له
+        return self._provider == Provider.LOCAL or bool(self._api_key)
 
     def has_live_llm(self) -> bool:
         """هل يوجد LLM حقيقي يعمل (وليس CKG synthesis فقط)؟"""
@@ -970,4 +1019,49 @@ class LLMFallback:
 
         return FallbackResult(
             text=text, provider=Provider.HUGGINGFACE, model=self._model,
+        )
+
+    # ── نموذج محلي عبر Ollama (نشر مغلق بدون إنترنت) ────────────────────
+
+    def _call_local(
+        self, query: str, history: List[Tuple[str, str]],
+        system_prompt: str = _SYSTEM_PROMPT,
+    ) -> FallbackResult:
+        """
+        يستدعي نموذجاً محلياً عبر خادم Ollama (أو أي خادم متوافق مع
+        /api/chat بنفس الصيغة) — لا يخرج أي اتصال خارج شبكة الجهة المضيفة.
+        عنوان الخادم قابل للتهيئة عبر NSM_LOCAL_LLM_URL (افتراضي:
+        http://localhost:11434)، والنموذج عبر NSM_LOCAL_MODEL.
+        """
+        base_url = os.getenv("NSM_LOCAL_LLM_URL", _LOCAL_BASE_URL).strip().rstrip("/") or _LOCAL_BASE_URL
+        messages = [{"role": "system", "content": system_prompt}]
+        for u, a in history[-4:]:
+            messages += [
+                {"role": "user",      "content": u},
+                {"role": "assistant", "content": a},
+            ]
+        messages.append({"role": "user", "content": query})
+
+        timeout = max(self.timeout, _LOCAL_TIMEOUT_SEC)
+        data = _post_json(
+            f"{base_url}/api/chat",
+            {
+                "model":    self._model,
+                "messages": messages,
+                "stream":   False,
+                "options": {
+                    "temperature": self.temperature,
+                    "num_predict": self.max_tokens,
+                },
+            },
+            {"Content-Type": "application/json"},
+            timeout,
+        )
+
+        text = (data.get("message") or {}).get("content", "").strip()
+        if not text:
+            raise Exception(f"النموذج المحلي أعاد استجابة فارغة/غير متوقعة: {str(data)[:150]}")
+
+        return FallbackResult(
+            text=text, provider=Provider.LOCAL, model=self._model,
         )
