@@ -7185,7 +7185,13 @@ def render_chat():
     bot = st.session_state.nsm_bot
 
     # CSS خاص بالمحادثة
-    st.markdown("""
+    # أداء: نص ثابت لا يعتمد على أي متغيّر، لكنه كان يُحقن من جديد عبر
+    # st.markdown في *كل* rerun لهذا التبويب (كل رسالة تُرسَل، كل تقييم
+    # 👍/👎، إلخ)، فيتراكم <style> مكرر في DOM ويُبطئ الصفحة تدريجياً مع
+    # طول المحادثة. الحقن الآن يحدث مرة واحدة فقط لكل جلسة.
+    if not st.session_state.get("_nsm_chat_css_injected"):
+        st.session_state["_nsm_chat_css_injected"] = True
+        st.markdown("""
     <style>
     @keyframes bubbleIn {
         from {opacity:0;transform:translateY(8px) scale(0.985);}
@@ -7612,7 +7618,9 @@ def render_chat():
                     st.rerun()
 
     # صندوق الإدخال
-    st.markdown("""
+    if not st.session_state.get("_nsm_input_css_injected"):
+        st.session_state["_nsm_input_css_injected"] = True
+        st.markdown("""
     <style>
     div[data-testid="stTextArea"] textarea {
         min-height:96px !important;
@@ -8400,7 +8408,9 @@ def render_unified_agent():
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown("""
+    if not st.session_state.get("_nsm_ua_css_injected"):
+        st.session_state["_nsm_ua_css_injected"] = True
+        st.markdown("""
     <style>
     @keyframes uaBubbleIn { from{opacity:0;transform:translateY(6px);} to{opacity:1;transform:translateY(0);} }
     .ua-user {display:flex;justify-content:flex-end;margin:0.5rem 0;animation:uaBubbleIn .25s ease-out;}
@@ -8552,7 +8562,9 @@ def render_agents_hub():
     st.caption("كل فئة لها وكيلها الخاص، بذاكرة محادثة مستقلة، ومزوّد LLM نفسه المُستخدَم في المشروع.")
 
     # CSS مشترك لكل فقاعات المحادثة داخل هذا التبويب (نفس أسلوب تبويب المحادثة)
-    st.markdown("""
+    if not st.session_state.get("_nsm_agents_hub_css_injected"):
+        st.session_state["_nsm_agents_hub_css_injected"] = True
+        st.markdown("""
     <style>
     @keyframes agentBubbleIn {
         from {opacity:0;transform:translateY(6px);}
