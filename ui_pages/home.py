@@ -11,6 +11,32 @@ from app_core import *  # noqa: F401,F403 — إعادة تصدير كل الا�
 def render_home():
     """الصفحة الرئيسية — نظرة سريعة واستكشاف أقسام NSM."""
 
+    # ══════════════════════════════════════════════════════════════════
+    # 📊 الشبكة المعرفية بالأرقام — أعداد حقيقية من CKG المحمَّل فعلياً
+    # (لا بيانات وهمية). تُخفى الفقرة كاملة تلقائياً إن تعذّر تحميل
+    # الشبكة (مثلاً أول تشغيل قبل أي تدريب) بدل إظهار أصفار مضلِّلة.
+    # ══════════════════════════════════════════════════════════════════
+    _ckg_stats = load_ckg_stats()
+    if _ckg_stats:
+        st.markdown('<div class="section-header">📊 الشبكة المعرفية بالأرقام</div>',
+                    unsafe_allow_html=True)
+        _stat_defs = [
+            ("concepts",  "مفهوم معرفي مترابط",      True),
+            ("relations", "علاقة مستنتجة بين المفاهيم", False),
+            ("roots",     "جذر عربي مكتشَف",           False),
+            ("clusters",  "عنقود موضوعي",              False),
+        ]
+        _bento_html = "".join(
+            f'''<div class="metric-card{' bento-featured' if _featured else ''}">
+                <div class="metric-value{'' if _featured else ' metric-value--wrap'}"
+                     data-count-target="{_ckg_stats.get(_key, 0)}">0</div>
+                <div class="metric-label">{_label}</div>
+            </div>'''
+            for _key, _label, _featured in _stat_defs
+        )
+        st.markdown(f'<div class="bento-grid">{_bento_html}</div>', unsafe_allow_html=True)
+        st.markdown("")
+
     # ── 🎬 كيف يعمل NSM؟ — دليل تفاعلي بخط أنابيب متحرك يشرح رحلة السؤال ──
     st.markdown('<div class="section-header">🎬 كيف يعمل NSM؟ <span class="live-dot"></span></div>',
                 unsafe_allow_html=True)
@@ -124,7 +150,7 @@ def render_home():
     </script>
     """, height=0)
 
-    st.markdown("")
+    st.markdown("---")
     st.markdown('<div class="section-header">🚀 استكشف NSM</div>', unsafe_allow_html=True)
 
     _features = [
