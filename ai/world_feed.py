@@ -364,39 +364,42 @@ class WorldFeed:
         if not content:
             return
 
+        _ingested_at = _now_iso()
         item = {
             "content":     content,
             "title":       raw.get("title", ""),
             "url":         raw.get("url", ""),
-            "date":        raw.get("date", _now_iso()),
+            "date":        raw.get("date", _ingested_at),
+            # QualityEngine._score_recency تقرأ "timestamp" لا "date"؛ نستخدم
+            # وقت السحب الفعلي (لا يمكن تحليل صيغة RSS pubDate بـ fromisoformat).
+            "timestamp":   _ingested_at,
             "source":      src.name,
             "source_url":  src.url,
             "source_type": src.source_type,
-            "ingested_at": _now_iso(),
+            "ingested_at": _ingested_at,
         }
 
         # ── Immune check ──────────────────────────────────────────────────
+        # ImmuneSystem.inspect(data) الفعلية تقرأ المصدر من data["source"]
+        # نفسه (موجود أصلاً في item) ولا تقبل kwarg باسم source، وتُرجع
+        # dict بمفتاح "allowed" (bool) وليس "status".
         if self._immune is not None:
             try:
-                verdict = self._immune.inspect(item, source=src.name)
-                status  = getattr(verdict, "status", None) or (
-                    verdict.get("status") if isinstance(verdict, dict) else "allowed"
-                )
-                if status not in (None, "allowed", "Trusted", "Unknown"):
+                verdict = self._immune.inspect(item)
+                allowed = verdict.get("allowed", True) if isinstance(verdict, dict) else True
+                if not allowed:
                     self._total_blocked += 1
                     return
             except Exception as exc:
                 logger.debug(f"[WorldFeed] Immune check error: {exc}")
 
         # ── Quality check ─────────────────────────────────────────────────
+        # QualityEngine الفعلية اسم دالتها evaluate(data) وتُرجع float مباشرة.
         quality_score = 70.0  # default when no engine
         if self._quality is not None:
             try:
-                result = self._quality.rate(item, source=src.name)
-                if isinstance(result, dict):
-                    quality_score = result.get("score", 70.0)
-                elif isinstance(result, (int, float)):
-                    quality_score = float(result)
+                result = self._quality.evaluate(item)
+                quality_score = float(result)
             except Exception as exc:
                 logger.debug(f"[WorldFeed] Quality check error: {exc}")
 
