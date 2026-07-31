@@ -234,71 +234,11 @@ def render_chat():
             st.markdown(f'<div class="ctx-tag">📎 {ctx}</div>', unsafe_allow_html=True)
         st.metric("رسائل الجلسة", st.session_state.nsm_count)
 
-    # ── إرفاق ملف أو صورة (multimodal عبر OpenRouter) ─────────────────────
+    # ── تهيئة حالة الملفات المرفَقة (تُستخدم لاحقاً في قسم الكتابة) ───────
     if "chat_pending_files" not in st.session_state:
         st.session_state["chat_pending_files"] = []
     if "chat_uploader_version" not in st.session_state:
         st.session_state["chat_uploader_version"] = 0
-
-    _or_key_chat = st.session_state.get("_or_api_key", "").strip()
-    _or_model_chat = st.session_state.get("_or_model", "google/gemini-2.5-flash")
-    _is_vision_chat = _or_model_chat in VISION_MODELS
-
-    with st.expander("📎 إرفاق ملف أو صورة (يتطلب OpenRouter API Key)",
-                      expanded=bool(st.session_state["chat_pending_files"])):
-        if not _or_key_chat:
-            st.info("🔑 أدخل OpenRouter API Key في الشريط الجانبي لتفعيل رفع الملفات والصور.")
-        else:
-            col_up, col_info = st.columns([3, 2])
-            with col_up:
-                # مفتاح ديناميكي — يُعاد ضبط عنصر الرفع بعد كل إرسال/مسح
-                # حتى لا تُعاد إضافة نفس الملفات القديمة من الـ widget state
-                uploaded = st.file_uploader(
-                    "اسحب ملفاً هنا أو انقر للاختيار",
-                    type=["png", "jpg", "jpeg", "webp", "gif",
-                          "pdf", "txt", "md", "csv", "json",
-                          "py", "js", "ts", "html", "yaml", "yml"],
-                    accept_multiple_files=True,
-                    label_visibility="collapsed",
-                    key=f"chat_file_uploader_{st.session_state['chat_uploader_version']}",
-                )
-                if uploaded:
-                    existing_names = {f["name"] for f in st.session_state["chat_pending_files"]}
-                    for uf in uploaded:
-                        if uf.name not in existing_names:
-                            extracted = _extract_file(uf)
-                            if extracted:
-                                st.session_state["chat_pending_files"].append(extracted)
-                                existing_names.add(uf.name)
-                            else:
-                                st.warning(f"⚠ {uf.name} أكبر من {MAX_FILE_MB} MB")
-            with col_info:
-                if not _is_vision_chat and any(f["is_image"] for f in st.session_state["chat_pending_files"]):
-                    st.warning("⚠ النموذج الحالي لا يدعم الصور. اختر نموذج رؤية في الشريط الجانبي.")
-                elif _is_vision_chat:
-                    st.markdown('<span class="ctx-tag">👁 رؤية مُفعَّلة</span>', unsafe_allow_html=True)
-                st.caption(f"الحد الأقصى: {MAX_FILE_MB} MB للملف الواحد")
-
-        if st.session_state["chat_pending_files"]:
-            pf_cols = st.columns(min(len(st.session_state["chat_pending_files"]), 4))
-            to_remove = []
-            for i, f in enumerate(st.session_state["chat_pending_files"]):
-                with pf_cols[i % 4]:
-                    if f["is_image"] and f.get("raw_bytes"):
-                        st.image(f["raw_bytes"], caption=f["name"], use_container_width=True)
-                    else:
-                        icon = "📄" if f["text_content"] else "📎"
-                        st.caption(f"{icon} {f['name']} ({f['size_kb']} KB)")
-                    if st.button("✕", key=f"chat_rm_file_{i}", help="حذف"):
-                        to_remove.append(i)
-            for idx in sorted(to_remove, reverse=True):
-                st.session_state["chat_pending_files"].pop(idx)
-            if to_remove:
-                st.rerun()
-            if st.button("🗑 مسح كل الملفات", key="chat_clear_all_files"):
-                st.session_state["chat_pending_files"].clear()
-                st.session_state["chat_uploader_version"] += 1
-                st.rerun()
 
     # عرض المحادثة
     html = '<div class="chat-box-wrap"><div class="chat-box" id="nsm-chat-box">'
@@ -478,6 +418,73 @@ def render_chat():
                     st.toast("✅ شكراً — تم تسجيل التقييم")
                     st.rerun()
 
+    # ══════════════════════════════════════════════════════════════════
+    # ✍️ قسم تأليف الرسالة — يجمع كل أدوات الإدخال (إرفاق + كتابة + صوت)
+    # في مكان واحد متتابع بدل تفرّقها بين أعلى وأسفل سجل المحادثة
+    # ══════════════════════════════════════════════════════════════════
+    st.markdown("---")
+
+    # ── إرفاق ملف أو صورة (multimodal عبر OpenRouter) ─────────────────────
+    _or_key_chat = st.session_state.get("_or_api_key", "").strip()
+    _or_model_chat = st.session_state.get("_or_model", "google/gemini-2.5-flash")
+    _is_vision_chat = _or_model_chat in VISION_MODELS
+
+    with st.expander("📎 إرفاق ملف أو صورة (يتطلب OpenRouter API Key)",
+                      expanded=bool(st.session_state["chat_pending_files"])):
+        if not _or_key_chat:
+            st.info("🔑 أدخل OpenRouter API Key في الشريط الجانبي لتفعيل رفع الملفات والصور.")
+        else:
+            col_up, col_info = st.columns([3, 2])
+            with col_up:
+                # مفتاح ديناميكي — يُعاد ضبط عنصر الرفع بعد كل إرسال/مسح
+                # حتى لا تُعاد إضافة نفس الملفات القديمة من الـ widget state
+                uploaded = st.file_uploader(
+                    "اسحب ملفاً هنا أو انقر للاختيار",
+                    type=["png", "jpg", "jpeg", "webp", "gif",
+                          "pdf", "txt", "md", "csv", "json",
+                          "py", "js", "ts", "html", "yaml", "yml"],
+                    accept_multiple_files=True,
+                    label_visibility="collapsed",
+                    key=f"chat_file_uploader_{st.session_state['chat_uploader_version']}",
+                )
+                if uploaded:
+                    existing_names = {f["name"] for f in st.session_state["chat_pending_files"]}
+                    for uf in uploaded:
+                        if uf.name not in existing_names:
+                            extracted = _extract_file(uf)
+                            if extracted:
+                                st.session_state["chat_pending_files"].append(extracted)
+                                existing_names.add(uf.name)
+                            else:
+                                st.warning(f"⚠ {uf.name} أكبر من {MAX_FILE_MB} MB")
+            with col_info:
+                if not _is_vision_chat and any(f["is_image"] for f in st.session_state["chat_pending_files"]):
+                    st.warning("⚠ النموذج الحالي لا يدعم الصور. اختر نموذج رؤية في الشريط الجانبي.")
+                elif _is_vision_chat:
+                    st.markdown('<span class="ctx-tag">👁 رؤية مُفعَّلة</span>', unsafe_allow_html=True)
+                st.caption(f"الحد الأقصى: {MAX_FILE_MB} MB للملف الواحد")
+
+        if st.session_state["chat_pending_files"]:
+            pf_cols = st.columns(min(len(st.session_state["chat_pending_files"]), 4))
+            to_remove = []
+            for i, f in enumerate(st.session_state["chat_pending_files"]):
+                with pf_cols[i % 4]:
+                    if f["is_image"] and f.get("raw_bytes"):
+                        st.image(f["raw_bytes"], caption=f["name"], use_container_width=True)
+                    else:
+                        icon = "📄" if f["text_content"] else "📎"
+                        st.caption(f"{icon} {f['name']} ({f['size_kb']} KB)")
+                    if st.button("✕", key=f"chat_rm_file_{i}", help="حذف"):
+                        to_remove.append(i)
+            for idx in sorted(to_remove, reverse=True):
+                st.session_state["chat_pending_files"].pop(idx)
+            if to_remove:
+                st.rerun()
+            if st.button("🗑 مسح كل الملفات", key="chat_clear_all_files"):
+                st.session_state["chat_pending_files"].clear()
+                st.session_state["chat_uploader_version"] += 1
+                st.rerun()
+
     # صندوق الإدخال
     if not st.session_state.get("_nsm_input_css_injected"):
         st.session_state["_nsm_input_css_injected"] = True
@@ -595,13 +602,20 @@ def render_chat():
                     if st.button(q, key=f"chat_q_{i}", use_container_width=True):
                         st.session_state._chat_pending = q
 
+    # مسح المحادثة — بجانب أدوات المحادثة العادية (لا بعد أدوات المالك)
+    if st.button("🗑 مسح المحادثة", key="nsm_clear"):
+        st.session_state.nsm_messages = []
+        st.session_state.nsm_count = 0
+        bot.clear_history()
+        st.rerun()
+
     # ── أزرار تحليل المشروع (NSM Agent) — للمالك فقط ─────────────
     # الأوامر خلف هذه الأزرار (افحص/عدل/أنشئ/ارفع) تقرأ/تكتب ملفات فعلية
     # على الخادم وتنفّذ git push — عُطِّلت من nsm_chat.py لغير المالك،
     # ونخفي الواجهة نفسها هنا حتى لا تظهر أزرار بلا فائدة للزائر العادي.
     if st.session_state.get("_dev_console_unlocked", False):
         st.markdown("---")
-        st.markdown("**🤖 تحليل المشروع:**")
+        st.markdown("**🤖 تحليل المشروع (وضع المالك):**")
         agent_cols = st.columns(6)
         agent_btns = [
             ("📋 اقترح (كل)",      "اقترح"),
@@ -633,13 +647,6 @@ def render_chat():
             with fc3:
                 if st.button("👁 افحص", key="btn_inspect", use_container_width=True):
                     st.session_state._chat_pending = f"افحص {file_path_input.strip()}"
-
-    # مسح المحادثة
-    if st.button("🗑 مسح المحادثة", key="nsm_clear"):
-        st.session_state.nsm_messages = []
-        st.session_state.nsm_count = 0
-        bot.clear_history()
-        st.rerun()
 
     # معالجة الإدخال
     def _process(text: str):

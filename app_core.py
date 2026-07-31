@@ -771,6 +771,23 @@ html, body { overflow-x: hidden; }
 [data-testid="stSidebar"] * { color: var(--text) !important; }
 [data-testid="stAppViewContainer"] { color: var(--text); }
 
+/* ── نقل الشريط الجانبي (تسجيل الدخول والإعدادات) إلى يمين الشاشة ──
+   Streamlit يضع الشريط الجانبي دائماً في بداية حاوية flex الرئيسية
+   بصرياً على اليسار، بصرف النظر عن اتجاه RTL للنصوص. نعكس ترتيبهما
+   البصري فقط بخاصية order دون المساس بترتيبهما الفعلي في DOM. */
+[data-testid="stAppViewContainer"] { display: flex; flex-direction: row; }
+[data-testid="stSidebar"] { order: 2; }
+[data-testid="stAppViewContainer"] > .main,
+[data-testid="stAppViewContainer"] [data-testid="stMain"] { order: 1; flex: 1 1 auto; min-width: 0; }
+@media (max-width: 768px) {
+    /* على الجوال يعرض Streamlit الشريط الجانبي كطبقة منزلقة فوق المحتوى
+       لا كعمود flex — عكس order هنا قد يقلب اتجاه الانزلاق، فنُلغي
+       التأثير ونُبقي سلوك الجوال الافتراضي كما هو. */
+    [data-testid="stSidebar"] { order: initial; }
+    [data-testid="stAppViewContainer"] > .main,
+    [data-testid="stAppViewContainer"] [data-testid="stMain"] { order: initial; }
+}
+
 h1, h2, h3, h4, h5, h6 {
     font-family: 'IBM Plex Sans Arabic', 'Tajawal', sans-serif;
     color: var(--text);
@@ -1004,15 +1021,7 @@ hr { border-color: var(--border) !important; }
     direction: rtl;
     letter-spacing: -0.01em;
     line-height: 1.15;
-    animation: nsmTitleShimmer 6s ease-in-out infinite;
-}
-@keyframes nsmTitleShimmer {
-    0%   { background-position: 0% 50%; }
-    50%  { background-position: 100% 50%; }
-    100% { background-position: 0% 50%; }
-}
-@media (prefers-reduced-motion: reduce) {
-    .main-title { animation: none !important; }
+    background-position: 30% 50%;
 }
 
 .subtitle {
@@ -1067,14 +1076,9 @@ hr { border-color: var(--border) !important; }
 }
 
 
-/* ── دخول متدرّج للبطاقات (يعكس فكرة "شبكة معرفية حيّة" تتيقّظ) ── */
-@keyframes nsmRise {
-    from { opacity: 0; transform: translateY(14px) scale(0.98); }
-    to   { opacity: 1; transform: translateY(0) scale(1); }
-}
-@media (prefers-reduced-motion: reduce) {
-    .metric-card, .feature-card { animation: none !important; opacity: 1 !important; }
-}
+/* ملاحظة: أُلغي سابقاً تأثير دخول متدرّج (fade/rise) للبطاقات عند كل
+   تحميل صفحة — كان يُنتج تأخيراً بصرياً متكرراً غير مرغوب. المحتوى
+   الآن يظهر فوراً (opacity: 1) بدون حركة، انظر .metric-card أدناه. */
 
 /* ── مؤشر "مباشر" نابض بجانب عناوين الأقسام الحيّة ── */
 .live-dot {
@@ -1180,13 +1184,7 @@ hr { border-color: var(--border) !important; }
     flex-direction: column;
     justify-content: center;
     overflow: hidden;
-    opacity: 0;
-    animation: nsmRise 0.55s cubic-bezier(.22,.9,.35,1) forwards;
 }
-.metric-card:nth-of-type(1) { animation-delay: .02s; }
-.metric-card:nth-of-type(2) { animation-delay: .08s; }
-.metric-card:nth-of-type(3) { animation-delay: .14s; }
-.metric-card:nth-of-type(4) { animation-delay: .20s; }
 .metric-card::before {
     content: "";
     position: absolute; top: 0; left: 0; right: 0; height: 2px;
@@ -1509,8 +1507,6 @@ hr { border-color: var(--border) !important; }
     transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
     overflow: hidden;
     cursor: pointer;
-    opacity: 0;
-    animation: nsmRise 0.55s cubic-bezier(.22,.9,.35,1) forwards;
 }
 /* ── شريط أفقي قابل للتمرير لبطاقات "استكشف NSM" — بدل شبكة أعمدة
    Streamlit التي تتكدّس عمودياً بالجوال. عرض ثابت لكل بطاقة + تمرير
@@ -1536,10 +1532,6 @@ hr { border-color: var(--border) !important; }
 .feature-scroll::-webkit-scrollbar { height: 6px; }
 .feature-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
 .feature-scroll::-webkit-scrollbar-thumb:hover { background: var(--gold); }
-.feature-card:nth-of-type(1) { animation-delay: .26s; }
-.feature-card:nth-of-type(2) { animation-delay: .32s; }
-.feature-card:nth-of-type(3) { animation-delay: .38s; }
-.feature-card:nth-of-type(4) { animation-delay: .44s; }
 .feature-card::before {
     content: "";
     position: absolute; top: 0; left: 0; right: 0; height: 3px;
