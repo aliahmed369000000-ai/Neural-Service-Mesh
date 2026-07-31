@@ -220,7 +220,11 @@ class NeuralWeightLayer:
         """
         Load a weight matrix from a .npy file.
 
-        Accepts any shape (N, 7) — not restricted to the original (9, 7).
+        Accepts any shape (N, 784) — not restricted to the original (9, 784).
+        Rejects shapes with a different column count (e.g. legacy pre-784
+        checkpoints saved as (N, 7) before the COLS migration) — the caller
+        (get_default_layer) already catches this and falls back safely to
+        a fresh default layer.
         """
         p = Path(path)
         if not p.exists():
