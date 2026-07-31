@@ -28,11 +28,14 @@ ai/task_manager.py
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
+
+logger = logging.getLogger(__name__)
 
 DB_PATH = Path("memory/task_manager.db")
 _LOCK = threading.Lock()
@@ -193,8 +196,13 @@ def update_task_status(plan_id: int, task_id: int, status: str, result: str = ""
                     (status, (result or "")[:2000], plan_id, task_id),
                 )
             conn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                f"update_task_status(plan_id={plan_id}, task_id={task_id}, "
+                f"status={status!r}) فشل ({type(e).__name__}: {e}) — الحالة "
+                "المسجَّلة في القاعدة قد لا تعكس التقدّم الفعلي. لا يُرفع "
+                "استثناء عمداً (تصميم best-effort)."
+            )
 
 
 def mark_plan_status(plan_id: int, status: str) -> None:
@@ -209,8 +217,12 @@ def mark_plan_status(plan_id: int, status: str) -> None:
                     (status, plan_id),
                 )
             conn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                f"mark_plan_status(plan_id={plan_id}, status={status!r}) فشل "
+                f"({type(e).__name__}: {e}) — لا يُرفع استثناء عمداً "
+                "(تصميم best-effort)."
+            )
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -246,8 +258,13 @@ def record_checkpoint(
                     (MAX_CHECKPOINTS,),
                 )
             conn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                f"record_checkpoint(plan_id={plan_id}, task_id={task_id}, "
+                f"commit_hash={commit_hash!r}) فشل ({type(e).__name__}: {e}) — "
+                "نقطة الاسترجاع هذه لن تكون متاحة لاحقاً. لا يُرفع استثناء "
+                "عمداً (تصميم best-effort)."
+            )
 
 
 def get_last_checkpoint(plan_id: Optional[int] = None) -> Optional[Dict[str, Any]]:

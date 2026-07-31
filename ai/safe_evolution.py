@@ -280,8 +280,14 @@ class SnapshotManager:
         if self._index_path.exists():
             try:
                 return json.loads(self._index_path.read_text(encoding="utf-8"))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(
+                    f"SafeEvolution: فشل تحميل فهرس اللقطات {self._index_path} "
+                    f"({type(e).__name__}: {e}) — سيبدأ الفهرس فارغاً رغم احتمال "
+                    "وجود لقطات فعلية على القرص في snap_dir. هذا يفقد النظام "
+                    "القدرة على التراجع (rollback) لتلك اللقطات دون أي تحذير. "
+                    "راجع الملف يدوياً."
+                )
         return []
 
     def _save_index(self) -> None:
