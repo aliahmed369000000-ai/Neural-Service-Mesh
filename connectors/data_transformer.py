@@ -19,8 +19,10 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from connectors.base_connector import BaseConnector
 
-class DataTransformer:
+
+class DataTransformer(BaseConnector):
     """تمرير مباشر (passthrough) لبيانات العقدة — بدون تحويل أو حذف حقول."""
 
     def transform(self, data: Dict[str, Any], schema: Any = None) -> Dict[str, Any]:
