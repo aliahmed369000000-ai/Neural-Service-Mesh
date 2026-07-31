@@ -1938,7 +1938,13 @@ h3 { font-size: clamp(1.05rem, 3.2vw, 1.3rem); font-weight: 700; }
 """
 
 
+@st.cache_data(show_spinner=False)
 def render_css(theme_key: str) -> str:
+    # أداء: هذه دالة pure (نفس theme_key ⇒ نفس CSS دائماً)، لكنها كانت
+    # تُعاد معالجتها بالكامل (18 عملية .replace على قالب >1250 سطر) في
+    # كل rerun من التطبيق — أي عند كل ضغطة زر/تفاعل في كامل الواجهة،
+    # بلا أي استفادة لأن النتيجة نفسها دائماً لنفس الثيم. الكاش يقلّص
+    # هذا لمرة واحدة فعلياً لكل قيمة ثيم (قيمتان فقط: dark/light).
     t = THEMES.get(theme_key, THEMES["dark"])
     gold_alt = "#E4C87A" if theme_key == "dark" else "#7A5E20"
     pattern = _pattern_svg(t["pattern_stroke"], t["pattern_opacity"])
@@ -1989,7 +1995,21 @@ st.markdown(render_css(st.session_state.ui_theme), unsafe_allow_html=True)
 # JS فعلياً، ومن داخله نصل لمستند الصفحة الأم عبر window.parent.document.
 _tab_text_color = THEMES.get(st.session_state.ui_theme, THEMES["dark"])["gold"]
 _tab_selected_bg_color = THEMES.get(st.session_state.ui_theme, THEMES["dark"])["bg"]
-st.components.v1.html(f"""
+
+# أداء: هذا الحقن (iframe جديد + ~165 سطر JS + مسح فوري لكامل DOM 5 مرات
+# عبر setTimeout) كان يُنفَّذ بالكامل من جديد عند *كل* rerun — أي عند كل
+# نقرة/تفاعل في أي مكان بالتطبيق (9700+ سطر، عشرات التبويبات)، رغم أن
+# MutationObserver المُنشأ بداخله (مضمون doc.__nsmTabObserver) يبقى حياً
+# ويعيد تطبيق لون التبويبات وscroll-reveal تفاعلياً بنفسه عند أي تغيّر
+# DOM لاحق (بما فيها الضغط على تبويب آخر). لذلك: نعيد الحقن الكامل فقط
+# عند أول تحميل للجلسة، أو عند تغيّر الثيم فعلياً (لأن الألوان مُضمَّنة
+# كقيم ثابتة داخل الـJS وقت الحقن، لازم تتحدّث لو الثيم تغيّر). أي rerun
+# عادي (تنقّل بين التبويبات، إرسال رسالة دردشة، إلخ) يتخطّى هذا الحقن
+# بالكامل الآن ويعتمد على الـMutationObserver الحي أصلاً.
+_nsm_chrome_key = f"_nsm_chrome_theme::{st.session_state.ui_theme}"
+if not st.session_state.get(_nsm_chrome_key):
+    st.session_state[_nsm_chrome_key] = True
+    st.components.v1.html(f"""
 <script>
 (function() {{
     function nsmForceTabColor() {{
