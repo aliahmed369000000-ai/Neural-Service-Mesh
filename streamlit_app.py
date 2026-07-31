@@ -420,6 +420,14 @@ except Exception:
     _NEURAL_CORE_OK = False
 
 try:
+    from ai.world_feed import WorldFeed
+    from ai.quality_engine import QualityEngine
+    from ai.immune_system import ImmuneSystem
+    _WORLD_FEED_OK = True
+except Exception:
+    _WORLD_FEED_OK = False
+
+try:
     from ai.goal_planner import GoalPlanner
     _GOAL_PLANNER_OK = True
 except Exception:
@@ -2372,6 +2380,63 @@ def _get_memory_consolidator():
         mc = MemoryConsolidator(episodic_memory=engine, pattern_threshold=5)
         mc.start(interval_minutes=15)
         return mc
+    except Exception:
+        return None
+
+
+@st.cache_resource(show_spinner=False)
+def _get_world_feed():
+    """singleton لعملية Streamlit كاملة. ai/world_feed.py + ai/quality_engine.py +
+    ai/immune_system.py كانت الثلاثة مكتوبة ومختبرة لكن غير مستوردة من أي مكان
+    إطلاقاً في المشروع (Phase 15). هنا يُربط WorldFeed فعلياً بـImmuneSystem
+    الحقيقي وQualityEngine الحقيقي (بعد إصلاح توقيعي inspect()/evaluate() في
+    world_feed.py التي كانت لا تطابق الواجهة الفعلية لهذين الملفين) وبالذاكرة
+    الإيبيسودية الحقيقية عبر memory_callback — كل عنصر مقبول (quality_score >= 60
+    وسمح به الجهاز المناعي) يُسجَّل كـEpisode حقيقي وليس بيانات وهمية.
+    لا يبدأ الاستطلاع التلقائي بالخلفية هنا؛ ذلك قرار صريح من المستخدم بزر."""
+    if not _WORLD_FEED_OK:
+        return None
+    try:
+        immune  = ImmuneSystem()
+        quality = QualityEngine()
+        # المصادر الافتراضية المدمجة في WorldFeed (arXiv/HackerNews/TechCrunch)
+        # منافذ معروفة وموثوقة لكنها غير موجودة في قائمة الثقة الافتراضية لـ
+        # QualityEngine (التي تحوي فقط system/core/verified_feed/...) — بدون
+        # هذا السطر تسقط كل عناصرها الحقيقية دوماً تقريباً تحت عتبة الجودة 60.
+        for _src in WorldFeed.DEFAULT_SOURCES:
+            quality.trust(_src.name)
+        episodic = _get_episodic_engine()
+
+        def _on_accept(item: dict) -> None:
+            if episodic is None:
+                return
+            try:
+                content = item.get("content", "")
+                title   = item.get("title", "")
+                score   = float(item.get("quality_score", 0.0))
+                feature_vec = [
+                    min(len(content), 2000) / 2000.0,
+                    min(len(title), 200) / 200.0,
+                    score / 100.0,
+                ]
+                episodic.record(
+                    feature_vec=feature_vec,
+                    target=score / 100.0,
+                    outcome=score / 100.0,
+                    source=f"world_feed:{item.get('source', 'unknown')}",
+                    reward=0.0,
+                    context={
+                        "title": title,
+                        "content": content[:500],
+                        "url": item.get("url", ""),
+                    },
+                )
+            except Exception:
+                pass  # فشل التسجيل لا يجوز أن يكسر دورة الاستطلاع
+
+        wf = WorldFeed(immune_system=immune, quality_engine=quality, min_quality=60.0)
+        wf.set_memory_callback(_on_accept)
+        return wf
     except Exception:
         return None
 
@@ -8883,6 +8948,7 @@ def render_system_core():
         "🎯 مخطط الأهداف",
         "🔬 التحليل اللغوي",
         "🌐 بحث الويب المباشر",
+        "🌍 التغذية من العالم",
     ])
 
     # ══════════════════ 1. النواة العصبية ══════════════════
@@ -9343,6 +9409,87 @@ def render_system_core():
                     mime="text/plain",
                     key="ws_download",
                 )
+
+    # ══════════════════ 6. التغذية من العالم الخارجي ══════════════════
+    with core_tabs[5]:
+        st.markdown('<div class="section-header">🌍 التغذية من العالم (World Feed)</div>',
+                    unsafe_allow_html=True)
+        st.markdown(
+            '<p style="color:var(--text-muted);direction:rtl">يسحب بيانات حقيقية من مصادر '
+            'عامة بلا مفتاح API (arXiv، Hacker News، TechCrunch)، يمررها عبر الجهاز المناعي '
+            'وموتور الجودة، ولا يقبل إلا ما يجتاز الفحصين — العناصر المقبولة تُسجَّل كذاكرة '
+            'إيبيسودية حقيقية.</p>',
+            unsafe_allow_html=True,
+        )
+
+        if not _WORLD_FEED_OK:
+            st.error("⚠️ تعذّر تحميل WorldFeed/QualityEngine/ImmuneSystem.")
+        else:
+            _wf = _get_world_feed()
+            if _wf is None:
+                st.error("⚠️ تعذّر تهيئة WorldFeed.")
+            else:
+                _wf_stats = _wf.get_feed_stats()
+
+                col_wf1, col_wf2, col_wf3, col_wf4 = st.columns(4)
+                with col_wf1:
+                    metric_card(_wf_stats["total_fetched"], "إجمالي المسحوب")
+                with col_wf2:
+                    metric_card(_wf_stats["total_accepted"], "مقبول (جودة+مناعة)")
+                with col_wf3:
+                    metric_card(_wf_stats["total_rejected"], "مرفوض (جودة منخفضة)")
+                with col_wf4:
+                    metric_card(_wf_stats["total_blocked"], "محجوب (مناعة)")
+
+                st.markdown("")
+                _wf_running = _wf_stats["running"]
+                _wf_status_badge = "🟢 يعمل بالخلفية" if _wf_running else "⚪ متوقف"
+                st.markdown(f"**الحالة:** {_wf_status_badge}  ·  **الدورات:** {_wf_stats['cycles']}")
+
+                col_wfb1, col_wfb2, col_wfb3 = st.columns(3)
+                with col_wfb1:
+                    if not _wf_running:
+                        if st.button("▶️ ابدأ الاستطلاع التلقائي", key="wf_start",
+                                      use_container_width=True):
+                            _wf.start(interval_s=300.0)
+                            st.rerun()
+                    else:
+                        if st.button("⏹️ أوقف", key="wf_stop", use_container_width=True):
+                            _wf.stop()
+                            st.rerun()
+                with col_wfb2:
+                    if st.button("🔄 اسحب الآن يدوياً", key="wf_poll_once",
+                                  use_container_width=True):
+                        with st.spinner("⟳ يسحب من المصادر الحقيقية..."):
+                            _wf.poll_once()
+                        st.rerun()
+                with col_wfb3:
+                    st.caption(f"المصادر النشطة: {len(_wf_stats['sources'])}")
+
+                st.markdown('<div class="section-header">📡 المصادر</div>', unsafe_allow_html=True)
+                for _src in _wf_stats["sources"]:
+                    _src_icon = "✅" if _src["enabled"] else "⛔"
+                    st.markdown(
+                        f"{_src_icon} **{_src['name']}** — "
+                        f"نجح: {_src['fetch_count']} · فشل: {_src['error_count']}"
+                    )
+
+                _wf_recent = _wf.get_recent(10)
+                if _wf_recent:
+                    st.markdown('<div class="section-header">📥 آخر العناصر المقبولة</div>',
+                                unsafe_allow_html=True)
+                    for _item in reversed(_wf_recent):
+                        st.markdown(
+                            f"""<div class="root-item">
+                            <b>{_item.get('title') or '(بلا عنوان)'}</b><br/>
+                            <span style="color:var(--text-muted);font-size:0.85rem">
+                            المصدر: {_item.get('source','')} · الجودة: {_item.get('quality_score',0):.1f}
+                            </span>
+                            </div>""",
+                            unsafe_allow_html=True,
+                        )
+                else:
+                    st.info("لا عناصر مقبولة بعد — اضغط «اسحب الآن يدوياً» لتجربة السحب الحقيقي.")
 
 
 # ══════════════════════════════════════════════════════════════════════════
