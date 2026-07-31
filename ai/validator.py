@@ -96,7 +96,17 @@ class Phase6Validator:
         self.project_root = Path(project_root or self._detect_root()).resolve()
         self._import_map: Dict[str, Set[str]] = {}   # file → set of modules it imports
         self._all_py_files: List[Path] = []
-        self._entry_points: List[str] = ["main.py", "api/app.py", "streamlit_app.py", "api_server.py"]
+        self._entry_points: List[str] = [
+            "main.py", "api/app.py", "streamlit_app.py", "api_server.py",
+            # نقطة دخول MCP مستقلة (تُشغَّل عبر `python mcp_server/server.py`
+            # من عملاء MCP خارجيين مثل Claude Desktop، لا يستوردها
+            # streamlit_app.py أبداً بشكل مباشر).
+            "mcp_server/server.py",
+            # نقطة دخول Vercel serverless مستقلة تماماً (Root Directory
+            # منفصل + requirements.txt خاص بها) — ليست كوداً ميتاً، بل
+            # مشروع فرعي مستقل غير مستورد أبداً من مشروع Streamlit الرئيسي.
+            "whatsapp_gateway/api/webhook.py",
+        ]
 
     # ── Root detection ─────────────────────────────────────────────────────
 

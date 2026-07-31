@@ -56,6 +56,15 @@ class SensorHub:
     # ── Sensor registration ────────────────────────────────────────────────
 
     def register(self, sensor: BaseSensor):
+        if not isinstance(sensor, BaseSensor):
+            raise TypeError(
+                f"[SensorHub] register() يتطلب نسخة من BaseSensor، وُرد: {type(sensor).__name__}"
+            )
+        if sensor.sensor_id in self._sensors:
+            logger.warning(
+                f"[SensorHub] sensor_id مكرر '{sensor.sensor_id}' — استبدال الحساس القديم "
+                f"'{self._sensors[sensor.sensor_id].name}' بـ'{sensor.name}'"
+            )
         self._sensors[sensor.sensor_id] = sensor
         logger.info(f"[SensorHub] registered sensor '{sensor.name}' ({sensor.sensor_type})")
 

@@ -42,14 +42,14 @@ class FilesystemSensor(BaseSensor):
                         current[fpath] = md5
                         if fpath not in self._snapshots:
                             events.append(SensorEvent(
-                                sensor_name=self.name,
+                                sensor_id=self.sensor_id,
                                 event_type="file_created",
                                 payload={"path": fpath},
                                 severity="info",
                             ))
                         elif self._snapshots[fpath] != md5:
                             events.append(SensorEvent(
-                                sensor_name=self.name,
+                                sensor_id=self.sensor_id,
                                 event_type="file_modified",
                                 payload={"path": fpath},
                                 severity="info",
@@ -58,7 +58,7 @@ class FilesystemSensor(BaseSensor):
         for fpath in list(self._snapshots):
             if fpath not in current:
                 events.append(SensorEvent(
-                    sensor_name=self.name,
+                    sensor_id=self.sensor_id,
                     event_type="file_deleted",
                     payload={"path": fpath},
                     severity="warning",

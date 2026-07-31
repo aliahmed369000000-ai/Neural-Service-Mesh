@@ -258,6 +258,40 @@ def search_ckg(query: str, limit: int = 5) -> str:
 
 
 @mcp.tool()
+def sensor_hub_status() -> str:
+    """يشغّل استطلاعاً حياً (single poll) لطبقة الحساسات (Phase 7 Sensory
+    Layer): FilesystemSensor (تغيّرات في ai/ وservices/) وLogSensor (أنماط
+    ERROR/CRITICAL/Exception في logs/). كل حدث يُغذّى فعلياً إلى
+    EnvironmentModel عبر ingest_sensor_event، ثم يُعاد ملخّص الحالة.
+
+    لا يحتاج مفاتيح API ولا اتصال شبكة — قراءة قرص محلية فقط.
+    """
+    try:
+        from sensors import SensorHub, FilesystemSensor, LogSensor
+        from world_model import EnvironmentModel
+    except Exception as e:
+        return json.dumps({"error": f"تعذّر تحميل طبقة الحساسات: {e}"}, ensure_ascii=False)
+
+    try:
+        env_model = EnvironmentModel(model_dir=str(_ROOT / "world_model"))
+        hub = SensorHub()
+        hub.register(FilesystemSensor(config={
+            "watch_paths": [str(_ROOT / "ai"), str(_ROOT / "services")],
+        }))
+        hub.register(LogSensor(config={"log_paths": [str(_ROOT / "logs")]}))
+        hub.on_event(lambda e: env_model.ingest_sensor_event(e.to_dict()))
+
+        events = hub.poll_now()
+
+        summary = hub.summary()
+        summary["latest_events"] = [e.to_dict() for e in events[-10:]]
+        summary["environment_alerts_after_ingest"] = len(env_model.get_sensor_alerts(limit=10))
+        return json.dumps(summary, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": f"فشل تشغيل استطلاع الحساسات: {e}"}, ensure_ascii=False)
+
+
+@mcp.tool()
 def check_project_health() -> str:
     """تقرير جاهزية سريع عن حالة كود مشروع NSM: عدد الملفات، نسبة تغطية
     المراحل (Phase coverage)، نسبة الكود الميت (وحدات غير مستوردة من أي

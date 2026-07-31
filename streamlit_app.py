@@ -630,6 +630,17 @@ KNOWLEDGE_DIR  = BASE / "knowledge"
 CHECKPOINTS_DIR = BASE / "checkpoints"
 MEMORY_DIR     = BASE / "memory"
 
+# ── تفعيل MeshLogger (Phase 2 structured logging) ─────────────────────────
+# Streamlit يعيد تشغيل السكربت كاملاً عند كل تفاعل، لذا نحمي من إعادة
+# التهيئة المتكررة (وبالتالي تكرار الـ handlers) عبر session_state.
+if not st.session_state.get("_mesh_logger_ready"):
+    try:
+        from logs.mesh_logger import MeshLogger
+        MeshLogger(log_dir=str(BASE / "logs"))
+        st.session_state["_mesh_logger_ready"] = True
+    except Exception as _mesh_logger_exc:  # لا نفشل تحميل الواجهة بسبب اللوغر
+        logger.warning(f"تعذّر تفعيل MeshLogger: {_mesh_logger_exc}")
+
 # ── نظام السمتين (داكن / فاتح) ────────────────────────────────────────────
 # ── لوحتا الألوان ────────────────────────────────────────────────────────
 # هوية SaaS تقنية حديثة: تدرّج بنفسجي→فيروزي (#7C5CFC → #2DD4BF) يعكس اسم
