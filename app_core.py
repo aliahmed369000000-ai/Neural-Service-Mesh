@@ -2285,6 +2285,35 @@ def load_ckg() -> Dict:
 
 
 @st.cache_data(ttl=60)
+def load_ckg_stats() -> Dict[str, int]:
+    """أعداد سريعة عن الشبكة المعرفية (مفاهيم/علاقات/جذور/عناقيد) لعرضها
+    كبطاقات إحصاء بالصفحة الرئيسية. تُشتق من load_ckg() المخزَّن مسبقاً
+    بالكاش — لا نحمّل أو نحتفظ بنسخة إضافية من الملف (~40MB) بالذاكرة."""
+    data = load_ckg()
+    concepts_map = (data or {}).get("concepts") or {}
+    if not concepts_map:
+        return {}
+    relations_map = (data or {}).get("relations") or {}
+    meta  = (data or {}).get("meta") or {}
+    _meta = (data or {}).get("_meta") or {}
+    clusters = meta.get("clusters")
+    if not clusters:
+        clusters = {
+            c.get("cluster") for c in concepts_map.values()
+            if isinstance(c, dict) and c.get("cluster")
+        }
+    try:
+        return {
+            "concepts":  int(_meta.get("total_concepts") or meta.get("total_concepts") or len(concepts_map)),
+            "relations": int(_meta.get("total_relations") or meta.get("total_relations") or len(relations_map)),
+            "roots":     int(meta.get("arabic_roots") or len((data or {}).get("arabic_roots") or {})),
+            "clusters":  int(len(clusters)),
+        }
+    except Exception:
+        return {}
+
+
+@st.cache_data(ttl=60)
 def load_entities() -> Dict:
     """تحميل طبقة الكيانات المعرفية (entities.json) — يعود بـ {} إن لم تكن موجودة."""
     path = KNOWLEDGE_DIR / "entities.json"
