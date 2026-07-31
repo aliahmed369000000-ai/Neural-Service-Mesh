@@ -244,13 +244,18 @@ class Phase6Validator:
 
         try:
             swarm = self.mesh.swarm.summary()
-            stats["swarm_tasks_run"] = swarm.get("total_executions", 0)
+            # SwarmCoordinator.summary() يعيد المفتاح "total_swarms" وليس
+            # "total_executions" — نفس مشكلة المفتاح الخاطئ أعلاه.
+            stats["swarm_tasks_run"] = swarm.get("total_swarms", 0)
         except Exception:
             stats["swarm_tasks_run"] = 0
 
         try:
             rep = self.mesh.reputation.summary()
-            stats["reputation_nodes_tracked"] = rep.get("nodes_tracked", 0)
+            # NodeReputationEngine.summary() يعيد المفتاح "total_nodes" وليس
+            # "nodes_tracked" — كان هذا يُرجع 0 دائماً بصمت حتى لو كانت
+            # السمعة مسجَّلة فعلياً.
+            stats["reputation_nodes_tracked"] = rep.get("total_nodes", 0)
         except Exception:
             stats["reputation_nodes_tracked"] = 0
 

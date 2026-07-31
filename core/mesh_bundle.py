@@ -87,6 +87,37 @@ class AgentRoleNode(BaseNode):
         return {"result": ""}
 
 
+class MCPToolNode(BaseNode):
+    """
+    عقدة (BaseNode) تمثّل أداة MCP حقيقية موجودة فعلاً في
+    mcp_server/server.py (quran_lookup، classify_harm، ask_nsm، ...).
+    process() تستدعي الدالة الحقيقية مباشرة (نفس الدالة التي يستخدمها أي
+    عميل MCP خارجي) — وليس محاكاة أو بيانات وهمية.
+    """
+
+    def __init__(self, tool_name: str, fn, description: str):
+        super().__init__(
+            name=tool_name,
+            description=description.strip().splitlines()[0] if description else "",
+            tags=["mcp_tool"],
+        )
+        self._fn = fn
+
+    @property
+    def input_schema(self) -> NodeSchema:
+        return NodeSchema(fields={"kwargs": "dict"}, required=[],
+                           description="وسائط الأداة (تُمرَّر كما هي للدالة الحقيقية)")
+
+    @property
+    def output_schema(self) -> NodeSchema:
+        return NodeSchema(fields={"result": "str"}, required=[],
+                           description="نص JSON من نفس دالة أداة MCP")
+
+    def process(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        kwargs = data.get("kwargs", {}) if isinstance(data, dict) else {}
+        return {"result": self._fn(**kwargs)}
+
+
 class MeshBundle:
     """الحزمة الحيّة الواحدة التي تربط كل مكوّنات الـmesh ببعضها فعلياً."""
 
@@ -107,12 +138,37 @@ class MeshBundle:
 
         self._lock = threading.Lock()
         self.role_node_ids: Dict[str, str] = {}
+        self.mcp_tool_node_ids: Dict[str, str] = {}
         self._root_node_id = self._register_roles()
+        self._register_mcp_tools()
 
         logger.info(
             "MeshBundle initialised: %d nodes registered, db=%s",
             self.registry.count(), db_path,
         )
+
+    # ── أسماء بديلة (aliases) تطابق ما يتوقعه ai/validator.py::Phase6Validator
+    # (self.mesh.registry / .memory / .agent_factory / .scoring / .system_dna /
+    # .swarm / .reputation) — بدل تعديل الفاليديتور لأسماء صفاتنا الداخلية ──
+    @property
+    def memory(self):
+        return self.memory_engine
+
+    @property
+    def scoring(self):
+        return self.scoring_engine
+
+    @property
+    def system_dna(self):
+        return self.dna
+
+    @property
+    def swarm(self):
+        return self.coordinator
+
+    @property
+    def reputation(self):
+        return self.reputation_engine
 
     # ── تسجيل كل الأدوار الموجودة في الكتالوج كعُقد حقيقية داخل الـregistry ──
     def _register_roles(self) -> str:
@@ -130,6 +186,37 @@ class MeshBundle:
         # عقدة جذر رمزية يُبنى منها "المسار" (path) عند تغذية الـScoringEngine/
         # MemoryEngine — تمثّل SwarmCoordinator نفسه كنقطة انطلاق كل المهام.
         return root_id or "swarm_coordinator_root"
+
+    # ── تسجيل أدوات MCP الحقيقية (mcp_server/server.py) كعُقد داخل الـregistry ──
+    def _register_mcp_tools(self) -> None:
+        """
+        يستورد mcp_server/server.py (نفس السيرفر الذي يستخدمه أي عميل MCP
+        خارجي فعلياً) ويسجّل كل أداة موجودة فيه كعقدة MCPToolNode حقيقية —
+        بذلك يظهر عدد نودات الـregistry فعلاً في check_project_health بدل
+        أن يبقى 0 دائماً. الاستيراد داخل الدالة (lazy) لتفادي أي دورة
+        استيراد مع mcp_server/server.py الذي يستورد get_mesh_bundle بدوره.
+        """
+        try:
+            import mcp_server.server as _mcp_srv
+        except Exception as e:
+            logger.warning("MeshBundle: تعذّر تحميل mcp_server.server: %s", e)
+            return
+
+        tool_names = [
+            "quran_lookup", "quran_search", "classify_harm", "ask_nsm",
+            "search_ckg", "sensor_hub_status", "check_project_health",
+        ]
+        for tool_name in tool_names:
+            fn = getattr(_mcp_srv, tool_name, None)
+            if fn is None or not callable(fn):
+                continue
+            existing = self.registry.get_by_name(tool_name)
+            if existing:
+                self.mcp_tool_node_ids[tool_name] = existing.node_id
+                continue
+            node = MCPToolNode(tool_name, fn, fn.__doc__ or "")
+            node_id = self.registry.register(node)
+            self.mcp_tool_node_ids[tool_name] = node_id
 
     # ── تغذية نتيجة تنفيذ سرب حقيقية إلى Scoring + Memory + Reputation ──────
     def record_swarm_result(self, swarm_result) -> None:

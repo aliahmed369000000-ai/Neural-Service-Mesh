@@ -302,7 +302,17 @@ def check_project_health() -> str:
     except Exception as e:
         return json.dumps({"error": f"تعذّر تحميل المُدقّق: {e}"}, ensure_ascii=False)
 
-    validator = Phase6Validator(mesh=None, project_root=str(_ROOT))
+    # 🆕 تمرير mesh bundle الحي الفعلي (registry/memory/scoring/reputation/
+    # agent_factory/swarm/DNA المشترَكة مع واجهة Streamlit) بدل mesh=None —
+    # كان هذا يجعل قسم "Live system" في التقرير يُظهر أصفاراً دائماً حتى لو
+    # كانت هناك عُقد ووكلاء مسجَّلون فعلياً.
+    try:
+        from core.mesh_bundle import get_mesh_bundle
+        _mesh = get_mesh_bundle()
+    except Exception:
+        _mesh = None
+
+    validator = Phase6Validator(mesh=_mesh, project_root=str(_ROOT))
     report = validator.generate()
 
     summary = {
