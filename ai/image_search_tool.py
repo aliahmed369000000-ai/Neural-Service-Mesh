@@ -23,6 +23,8 @@ import urllib.parse
 import urllib.request
 from typing import Dict, List, Optional
 
+from ai.offline_mode import is_offline, offline_message
+
 _TIMEOUT = 10
 _API_URL = "https://api.unsplash.com/search/photos"
 _UA = (
@@ -53,6 +55,9 @@ def image_search(query: str, max_results: int = 9) -> List[Dict[str, str]]:
     query = (query or "").strip()
     if not query:
         raise ImageSearchError("استعلام البحث فارغ.")
+
+    if is_offline():
+        raise ImageSearchError(offline_message("بحث الصور (Unsplash)"))
 
     access_key = _get_access_key()
     max_results = max(1, min(int(max_results or 9), 30))

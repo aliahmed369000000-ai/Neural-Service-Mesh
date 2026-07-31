@@ -38,6 +38,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional
 
+from ai.offline_mode import is_offline, offline_message
+
 logger = logging.getLogger("TTSEngine")
 
 
@@ -314,6 +316,15 @@ class TTSEngine:
         text = (text or "").strip()
         if not text:
             return TTSResult(audio_bytes=b"", provider=TTSProvider.EDGE, error="نص فارغ")
+
+        if is_offline():
+            # كل مزوّدي TTS الحاليين (حتى Edge وgTTS بلا مفتاح) يتصلون
+            # فعلياً بخدمات سحابية خارجية — لا يوجد بديل محلي بعد، لذا
+            # نتوقف فوراً برسالة واضحة بدل محاولة الاتصال والفشل ببطء.
+            return TTSResult(
+                audio_bytes=b"", provider=TTSProvider.EDGE,
+                error=offline_message("تحويل النص إلى صوت (TTS)"),
+            )
 
         tried: List[str] = []
         for provider in self._build_chain():
