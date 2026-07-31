@@ -5563,16 +5563,26 @@ def main():
             if "_or_api_key" not in st.session_state:
                 st.session_state["_or_api_key"] = os.getenv("OPENROUTER_API_KEY", "")
 
+            # ⚠️ أمان: لا نمرر value=_or_key_stored لحقل type="password" —
+            # Streamlit يضع القيمة داخل خاصية value لعنصر <input> بصفحة HTML
+            # المُرسلة للمتصفح بنص صريح (غير مشفّرة)، حتى لو ظهرت مقنّعة
+            # بالواجهة. أي شخص يفتح "Inspect Element" يقدر يقرأ المفتاح كاملاً.
+            # الحل: الحقل يبدأ فاضياً دائماً؛ نعرض فقط إشارة لوجود مفتاح
+            # محفوظ، ونحدّثه فقط إذا المستخدم كتب قيمة جديدة فعلياً.
             _or_key_stored = st.session_state.get("_or_api_key", "")
+            _or_placeholder = (
+                "•••••••• مفتاح محفوظ — اكتب مفتاحاً جديداً لتغييره ••••••••"
+                if _or_key_stored else "sk-or-v1-..."
+            )
             _or_key_input = st.text_input(
                 "OpenRouter API Key",
-                value=_or_key_stored,
+                value="",
                 type="password",
-                placeholder="sk-or-v1-...",
+                placeholder=_or_placeholder,
                 label_visibility="collapsed",
                 key="or_key_input_widget",
             )
-            if _or_key_input != _or_key_stored:
+            if _or_key_input:
                 st.session_state["_or_api_key"] = _or_key_input
 
             _or_key = st.session_state.get("_or_api_key", "").strip()
