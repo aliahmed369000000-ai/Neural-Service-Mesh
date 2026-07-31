@@ -312,8 +312,13 @@ class CKGManager:
                     tmp.replace(self.path)
                     return empty
                 return json.loads(raw)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(
+                    f"CKGManager: فشل تحميل {self.path} ({type(e).__name__}: {e}) — "
+                    "سيبدأ النظام بقاعدة معرفة فارغة! هذا على الأرجح تلف في "
+                    "الملف أو كتابة جزئية، وليس سلوكاً طبيعياً. راجع الملف يدوياً "
+                    "قبل الاعتماد على النتائج."
+                )
         return {
             "_meta": {
                 "schema_version": "1.0.0",
