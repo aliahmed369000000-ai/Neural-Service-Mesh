@@ -14,10 +14,13 @@ ai/route_log_store.py
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 from pathlib import Path
 from typing import Any, Dict, List
+
+logger = logging.getLogger(__name__)
 
 DB_PATH = Path("memory/route_log.db")
 _LOCK = threading.Lock()
@@ -70,8 +73,12 @@ def _connect() -> sqlite3.Connection:
             cols = [row[1] for row in conn.execute("PRAGMA table_info(route_log)")]
             if "quality_score" not in cols:
                 conn.execute("ALTER TABLE route_log ADD COLUMN quality_score REAL")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                f"route_log_store: فشل ترحيل عمود quality_score "
+                f"({type(e).__name__}: {e}) — القراءة/الكتابة لهذا العمود قد "
+                "تفشل لاحقاً بصمت إن لم يكن موجوداً فعلياً."
+            )
         _SCHEMA_READY = True
     return conn
 
@@ -162,8 +169,11 @@ def clear_all() -> None:
             with conn:
                 conn.execute("DELETE FROM route_log")
             conn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                f"route_log_store.clear_all() فشل ({type(e).__name__}: {e}) — "
+                "المستخدم سيظن أن السجل مُسح (زر الواجهة) بينما هو لا يزال موجوداً."
+            )
 
 
 def count_total() -> int:
