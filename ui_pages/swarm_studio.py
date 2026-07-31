@@ -1,5 +1,5 @@
 """
-pages/swarm_studio.py
+ui_pages/swarm_studio.py
 تم تفكيكه تلقائياً من streamlit_app.py الأصلي (تقسيم الكود لتحسين القابلية للصيانة والأداء).
 """
 from __future__ import annotations

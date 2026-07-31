@@ -4,7 +4,7 @@ Neural Service Mesh — واجهة المستخدم المعرفية
 Streamlit front-end لمشروع النظام المعرفي العربي.
 
 هذا الملف هو نقطة الدخول الرئيسية فقط: يستورد البنية المشتركة من app_core،
-ويستورد كل صفحة render_* من حزمة pages/ (كل صفحة في ملفها الخاص)، ثم يجمعها
+ويستورد كل صفحة render_* من حزمة ui_pages/ (كل صفحة في ملفها الخاص)، ثم يجمعها
 في main(). التقسيم يهدف لتحسين قابلية الصيانة والأداء (تحميل/فحص أسرع لكل
 وحدة على حدة) بعد أن كان الملف الأصلي يتجاوز 9900 سطر في ملف واحد.
 """
@@ -12,28 +12,28 @@ from __future__ import annotations
 
 from app_core import *  # noqa: F401,F403 — كل الثوابت والدوال المساعدة المشتركة
 
-from pages.home import render_home
-from pages.search import render_search
-from pages.quran import render_quran
-from pages.qa import render_qa
-from pages.higgsfield import render_higgsfield, _render_hf_result
-from pages.training import render_training, render_nsm_routing
-from pages.memory import render_memory
-from pages.health import render_health
-from pages.advanced_api import render_advanced_api
-from pages.artifacts_studio import render_artifacts_studio
-from pages.dev_console import render_dev_console
-from pages.product_info import render_product_info
-from pages.ultraplinian import render_ultraplinian
-from pages.fable import render_fable
-from pages.translate import render_translate
-from pages.chat import render_chat
-from pages.social_agent import render_social_agent
-from pages.unified_agent import render_unified_agent
-from pages.agents_hub import render_agents_hub, _render_agent_page
-from pages.system_core import render_system_core
-from pages.agent_orchestrator import render_agent_orchestrator
-from pages.swarm_studio import render_swarm_studio
+from ui_pages.home import render_home
+from ui_pages.search import render_search
+from ui_pages.quran import render_quran
+from ui_pages.qa import render_qa
+from ui_pages.higgsfield import render_higgsfield, _render_hf_result
+from ui_pages.training import render_training, render_nsm_routing
+from ui_pages.memory import render_memory
+from ui_pages.health import render_health
+from ui_pages.advanced_api import render_advanced_api
+from ui_pages.artifacts_studio import render_artifacts_studio
+from ui_pages.dev_console import render_dev_console
+from ui_pages.product_info import render_product_info
+from ui_pages.ultraplinian import render_ultraplinian
+from ui_pages.fable import render_fable
+from ui_pages.translate import render_translate
+from ui_pages.chat import render_chat
+from ui_pages.social_agent import render_social_agent
+from ui_pages.unified_agent import render_unified_agent
+from ui_pages.agents_hub import render_agents_hub, _render_agent_page
+from ui_pages.system_core import render_system_core
+from ui_pages.agent_orchestrator import render_agent_orchestrator
+from ui_pages.swarm_studio import render_swarm_studio
 
 
 
