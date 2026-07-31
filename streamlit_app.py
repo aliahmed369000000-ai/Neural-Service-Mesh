@@ -5870,17 +5870,23 @@ def render_dev_console():
             st.session_state["_dev_console_unlocked"] = False
             st.rerun()
 
+    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
     st.markdown("#### تنفيذ أمر")
     cmd_kind = st.radio("النوع", ["Bash", "Python"], horizontal=True, key="dev_console_kind")
     cmd_text = st.text_area("الأمر", height=120, key="dev_console_cmd",
                              placeholder="مثال: ls -la" if cmd_kind == "Bash" else "print(1 + 1)")
     cmd_timeout = st.slider("مهلة التنفيذ (ثوانٍ)", 5, 60, 20, 5, key="dev_console_timeout")
+    run_clicked = st.button("▶️ نفّذ", key="dev_console_run", type="primary")
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    if st.button("▶️ نفّذ", key="dev_console_run", type="primary"):
+    if run_clicked:
         if not cmd_text.strip():
             st.warning("أدخل أمراً أولاً.")
         else:
             import subprocess as _sp
+            _dc_ph = st.empty()
+            with _dc_ph.container():
+                _skeleton(lines=4)
             try:
                 if cmd_kind == "Bash":
                     result = _sp.run(
@@ -5890,19 +5896,32 @@ def render_dev_console():
                     result = _sp.run(
                         ["python3", "-c", cmd_text], capture_output=True, text=True, timeout=cmd_timeout,
                     )
+                _dc_ph.empty()
+                st.markdown('<div class="glass-card">', unsafe_allow_html=True)
                 st.markdown(f"**رمز الخروج:** `{result.returncode}`")
                 if result.stdout:
                     st.markdown("**stdout:**")
                     st.code(result.stdout[-5000:])
+                    _copy_button(result.stdout[-5000:], key="dev_console_stdout", label="📋 نسخ stdout")
                 if result.stderr:
                     st.markdown("**stderr:**")
                     st.code(result.stderr[-5000:])
+                    _copy_button(result.stderr[-5000:], key="dev_console_stderr", label="📋 نسخ stderr")
                 if not result.stdout and not result.stderr:
                     st.caption("لا يوجد ناتج.")
+                st.markdown("</div>", unsafe_allow_html=True)
+                if result.returncode == 0:
+                    st.toast("✅ تم تنفيذ الأمر بنجاح", icon="✅")
+                else:
+                    st.toast(f"⚠️ انتهى الأمر برمز خروج {result.returncode}", icon="⚠️")
             except _sp.TimeoutExpired:
+                _dc_ph.empty()
                 st.error(f"⏱️ انتهت المهلة ({cmd_timeout}s) قبل اكتمال التنفيذ.")
+                st.toast("⏱️ انتهت مهلة التنفيذ", icon="⏱️")
             except Exception as _exec_err:
+                _dc_ph.empty()
                 st.error(f"❌ خطأ أثناء التنفيذ: {_exec_err}")
+                st.toast("❌ فشل تنفيذ الأمر", icon="❌")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -5911,14 +5930,14 @@ def render_dev_console():
 def render_product_info():
     st.markdown('<div class="section-header">ℹ️ عن Neural Service Mesh (NSM)</div>', unsafe_allow_html=True)
     st.markdown("""
-    <div style="direction:rtl;line-height:2;font-size:1.02rem">
-    <p><strong>Neural Service Mesh (NSM)</strong> — النظام المعرفي العربي — هو منصة ذكاء اصطناعي
+    <div class="glass-card" style="direction:rtl;line-height:2;font-size:1.02rem">
+    <p style="margin:0"><strong>Neural Service Mesh (NSM)</strong> — النظام المعرفي العربي — هو منصة ذكاء اصطناعي
     عربية متخصصة تجمع بين محرك معرفي ذاتي التعلّم (Cognitive Knowledge Graph) ونماذج لغوية كبيرة،
     لتقديم تجربة بحث ومحادثة ومعرفة عربية أصيلة، مع تخصص خاص بالمعرفة الإسلامية والقرآن الكريم.</p>
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown("#### 🧭 ماذا يقدّم NSM؟")
+    st.markdown('<div class="section-header" style="font-size:1.05rem">🧭 ماذا يقدّم NSM؟</div>', unsafe_allow_html=True)
     features = [
         ("🌐", "بحث ويب حقيقي", "بحث فعلي في الإنترنت عبر DuckDuckGo بدون الحاجة لمفتاح API."),
         ("🖼️", "بحث عن الصور", "بحث عن صور حقيقية عبر Unsplash مع الوصف واسم المصوّر."),
@@ -5929,22 +5948,31 @@ def render_product_info():
         ("🧠", "ذاكرة متقدمة", "ذاكرة دلالية (CKG) + ذاكرة حقائق + سجل محادثات قابل للاستعراض والبحث."),
         ("🖥️", "لوحة مطوّر", "تنفيذ أوامر Bash/Python محمي بمفتاح خاص بالمالك فقط."),
     ]
-    fcols = st.columns(2)
-    for i, (icon, title, desc) in enumerate(features):
-        with fcols[i % 2]:
-            st.markdown(f"""
-            <div class="root-item">
-                <strong>{icon} {title}</strong>
-                <br><small style="color:var(--text-muted)">{desc}</small>
-            </div>
-            """, unsafe_allow_html=True)
+    _pi_cards_html = "".join(f"""
+            <div class="feature-card" style="cursor:default;">
+                <div class="feature-icon">{_icon}</div>
+                <div class="feature-title">{_title}</div>
+                <div class="feature-desc">{_desc}</div>
+            </div>""" for _icon, _title, _desc in features)
+    st.markdown(
+        f'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));'
+        f'gap:1rem;direction:rtl;">{_pi_cards_html}</div>',
+        unsafe_allow_html=True,
+    )
 
     st.markdown("")
-    st.markdown("#### 🔗 روابط")
+    st.markdown('<div class="section-header" style="font-size:1.05rem">🔗 روابط</div>', unsafe_allow_html=True)
     st.markdown(
-        "- المستودع: [Neural-Service-Mesh على GitHub]"
-        "(https://github.com/aliahmed369000000-ai/Neural-Service-Mesh)\n"
-        "- بُني بـ Python · Streamlit · SQLite · نماذج لغوية عبر OpenRouter/Anthropic"
+        """
+        <div class="glass-card" style="direction:rtl">
+        <p style="margin:0 0 0.4rem 0">📦 المستودع:
+        <a href="https://github.com/aliahmed369000000-ai/Neural-Service-Mesh" target="_blank">
+        Neural-Service-Mesh على GitHub</a></p>
+        <p style="margin:0;color:var(--text-muted)">🛠️ بُني بـ Python · Streamlit · SQLite ·
+        نماذج لغوية عبر OpenRouter/Anthropic</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
 
