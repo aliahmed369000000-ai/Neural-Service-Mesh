@@ -29,6 +29,8 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from typing import Dict, List
 
+from ai.offline_mode import is_offline, offline_message
+
 _TIMEOUT = 10
 _UA = (
     "Mozilla/5.0 (compatible; NSMAgent/1.0; "
@@ -163,6 +165,9 @@ def web_search(query: str, max_results: int = 5) -> str:
     if not query:
         return "❌ web_search: مطلوب query (نص البحث)"
 
+    if is_offline():
+        return offline_message("بحث الويب")
+
     max_results = max(1, min(int(max_results or 5), 10))
     errors: List[str] = []
 
@@ -248,6 +253,8 @@ def get_trending_topics(geo: str = "SA", max_results: int = 10) -> List[Dict[str
     """
     geo = (geo or "SA").strip().upper() or "SA"
     max_results = max(1, min(int(max_results or 10), 20))
+    if is_offline():
+        raise Exception(offline_message("المواضيع الرائجة"))
     results = _fetch_google_trends_rss(geo)
     return results[:max_results]
 

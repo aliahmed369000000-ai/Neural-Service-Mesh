@@ -24,6 +24,8 @@ import urllib.error
 import urllib.request
 from typing import Optional, Tuple
 
+from ai.offline_mode import is_offline, offline_message
+
 _STT_MODEL = "gemini-2.5-flash"
 _TRANSCRIBE_PROMPT = (
     "انسخ (فرّغ) هذا المقطع الصوتي حرفياً إلى نص عربي فصيح دون أي إضافة "
@@ -46,6 +48,9 @@ def transcribe_audio(audio_bytes: bytes, mime_type: str = "audio/wav") -> Tuple[
 
     if len(audio_bytes) > MAX_AUDIO_BYTES:
         return "", "المقطع الصوتي أطول من الحد المسموح (15MB)."
+
+    if is_offline():
+        return "", offline_message("تفريغ الصوت لنص (Gemini STT)")
 
     api_key = os.getenv("GOOGLE_API_KEY", "").strip()
     if not api_key:

@@ -37,6 +37,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional
 
+from ai.offline_mode import is_offline, offline_message
+
 logger = logging.getLogger("ImageSources")
 
 _TIMEOUT = 15
@@ -147,6 +149,9 @@ def search_stock_images(query: str, per_page: int = 5) -> List[ImageResult]:
     أعلى عادة)، وإن لم يوجد مفتاح أو فشل البحث ينتقل تلقائياً لـ Openverse
     (لا يحتاج مفتاح API إطلاقاً).
     """
+    if is_offline():
+        logger.info(offline_message("بحث الصور (Pixabay/Openverse)"))
+        return []
     results = _search_pixabay(query, per_page)
     if results:
         return results
@@ -175,6 +180,12 @@ def analyze_style_from_url(image_url: str) -> ImageResult:
     أسلوب) ويعيد وصفاً نصياً للأسلوب البصري عبر Gemini Vision — لا يُنزّل
     أو يُخزّن أو يعيد استخدام بكسلات الصورة نفسها في أي ناتج نهائي.
     """
+    if is_offline():
+        return ImageResult(
+            source=ImageSource.STYLE_INSPIRED,
+            error=offline_message("تحليل الأسلوب البصري (Gemini Vision)"),
+        )
+
     key = os.getenv("GOOGLE_API_KEY", "").strip()
     if not key:
         return ImageResult(
