@@ -89,6 +89,9 @@ streamlit run streamlit_app.py --server.port 5000
 python api_server.py   # FastAPI، لمحرك core.engine
 ```
 
+**نشر داخل شبكة مغلقة بدون إنترنت خارجي (نموذج محلي عبر Ollama):** انظر
+[`OFFLINE_DEPLOYMENT.md`](OFFLINE_DEPLOYMENT.md).
+
 ## المتغيرات البيئية (Secrets)
 
 | المتغير | مطلوب لـ | إجباري؟ |
