@@ -12,6 +12,8 @@ ai/reputation_engine.py و ai/scoring_engine.py موجودة ومكتوبة لك
   - NodeReputationEngine مربوط بـ MemoryEngine
   - AgentFactory + SwarmCoordinator
   - SystemDNA يلتقط صوراً دورية من الحالة الفعلية (registry + scoring + memory)
+  - SQLiteStorage (storage/db.py) كسجلّ تدقيق حقيقي (execution_logs +
+    connections) — كان مكتوباً بالكامل ولم يُستخدم في أي مكان بالمشروع
 
 الـ singleton محفوظ على مستوى العملية (process-level, عبر @lru_cache) وليس
 فقط session_state — بذلك يبقى حياً ومشتركاً بين كل جلسات Streamlit التي
@@ -27,6 +29,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -34,6 +37,7 @@ from typing import Any, Dict, Optional
 from core.node import BaseNode, NodeSchema
 from core.registry import NodeRegistry
 from storage.file_storage import FileStorage
+from storage.db import SQLiteStorage
 
 from ai.memory_engine import MemoryEngine
 from ai.scoring_engine import ScoringEngine
@@ -46,6 +50,10 @@ logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def datetime_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 class AgentRoleNode(BaseNode):
@@ -133,6 +141,13 @@ class MeshBundle:
         self.reputation_engine = NodeReputationEngine(memory_engine=self.memory_engine)
         self.dna = SystemDNA()
 
+        # storage/db.py::SQLiteStorage كان مكتوباً بالكامل (جداول nodes/
+        # connections/execution_logs) لكن لم يُبنَ (instantiate) في أي مكان
+        # بالمشروع — يُستخدم هنا كسجلّ تدقيق (audit log) حقيقي لتنفيذات
+        # السرب، بنفس ملف data/mesh.db المشترك (لا تضارب أسماء جداول مع
+        # MemoryEngine/ScoringEngine — تحقّقت من ذلك).
+        self.exec_log = SQLiteStorage(db_path=db_path)
+
         self.agent_factory = AgentFactory()
         self.coordinator = SwarmCoordinator(self.agent_factory, max_agents=20)
 
@@ -141,6 +156,7 @@ class MeshBundle:
         self.mcp_tool_node_ids: Dict[str, str] = {}
         self._root_node_id = self._register_roles()
         self._register_mcp_tools()
+        self._sync_nodes_to_exec_log()
 
         logger.info(
             "MeshBundle initialised: %d nodes registered, db=%s",
@@ -169,6 +185,11 @@ class MeshBundle:
     @property
     def reputation(self):
         return self.reputation_engine
+
+    # ── مزامنة عُقد الـregistry إلى SQLiteStorage (storage/db.py) ────────────
+    def _sync_nodes_to_exec_log(self) -> None:
+        for node in self.registry.list_all():
+            self.exec_log.upsert_node(node.to_dict())
 
     # ── تسجيل كل الأدوار الموجودة في الكتالوج كعُقد حقيقية داخل الـregistry ──
     def _register_roles(self) -> str:
@@ -245,6 +266,26 @@ class MeshBundle:
                     node_id, role, success, latency
                 )
 
+                started = getattr(task, "started_at", None) or datetime_now_iso()
+                finished = getattr(task, "finished_at", None) or started
+                self.exec_log.upsert_connection(
+                    self._root_node_id, node_id, weight=1.0, label=role or ""
+                )
+                self.exec_log.save_run({
+                    "run_id": getattr(task, "task_id", "") or f"task_{id(task)}",
+                    "status": "success" if success else "failed",
+                    "path": [self._root_node_id, node_id],
+                    "started_at": started,
+                    "finished_at": finished,
+                    "total_duration_ms": latency,
+                    "final_output": (task.result or {}).get("result_text") if task.result else None,
+                    "steps": [{
+                        "node_id": node_id, "node_name": role,
+                        "duration_ms": latency,
+                        "status": "success" if success else "failed",
+                    }],
+                })
+
                 run_result = {
                     "run_id": getattr(task, "task_id", ""),
                     "status": "success" if success else "failed",
@@ -277,6 +318,7 @@ class MeshBundle:
             "memory": self.memory_engine.summary(),
             "reputation": self.reputation_engine.summary(),
             "dna_versions": len(self.dna.history(limit=1000)),
+            "exec_log": self.exec_log.db_stats(),
         }
 
 
