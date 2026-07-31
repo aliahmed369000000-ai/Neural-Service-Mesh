@@ -202,6 +202,13 @@ python api_server.py   # FastAPI، لمحرك core.engine
 - بعض الميزات (WhatsApp integration، نظام حسابات المستخدمين) تحت التطوير.
 - ✅ **مُصلَح:** ثغرة تسريب مفتاح OpenRouter API عبر HTML (كان يُحقَن
   بنص صريح داخل خاصية `value` لحقل `type="password"`).
+- ℹ️ **ليس خطأً:** بيانات القرآن (`quran_index.json` + `quran_chunk_*.json`)
+  موجودة مرتين — بـ`knowledge/` وبـ`whatsapp_gateway/knowledge/`. هذا مقصود:
+  `whatsapp_gateway/` مشروع Vercel معزول بجذر مستقل (لا رؤية له خارج مجلده،
+  راجع `whatsapp_gateway/README.md`)، فالبيانات منسوخة عمداً وليست مستوردة.
+  ✅ **محمي آلياً:** `.github/workflows/whatsapp-gateway-sync-check.yml`
+  يشغّل `scripts/check_whatsapp_gateway_sync.py` على كل push/PR يلمس أي من
+  المجلدين، ويفشل فوراً لو انحرفت النسختان عن بعض.
 
 ## الترخيص والملكية
 

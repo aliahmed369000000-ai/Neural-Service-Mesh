@@ -1,0 +1,31 @@
+name: تحقق تزامن بيانات القرآن (WhatsApp Gateway Sync)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "knowledge/quran_index.json"
+      - "knowledge/quran_chunk_*.json"
+      - "whatsapp_gateway/knowledge/**"
+      - "scripts/check_whatsapp_gateway_sync.py"
+  pull_request:
+    branches: [main]
+    paths:
+      - "knowledge/quran_index.json"
+      - "knowledge/quran_chunk_*.json"
+      - "whatsapp_gateway/knowledge/**"
+      - "scripts/check_whatsapp_gateway_sync.py"
+  workflow_dispatch:
+
+jobs:
+  sync-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: تشغيل فحص التزامن
+        run: python3 scripts/check_whatsapp_gateway_sync.py
