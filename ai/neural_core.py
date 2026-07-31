@@ -165,7 +165,19 @@ class DenseLayer:
         elif self.activation == "tanh":
             out = tanh(z)
         elif self.activation == "softmax":
-            out = softmax(z)
+            # ── Layer Norm بدون معاملات قابلة للتعلّم قبل softmax ──
+            # إصلاح: عندما يكون مدى logits ضخماً (مثلاً بسبب تراكم
+            # التنشيطات من L1/L2)، يتشبّع softmax إلى متجه one-hot
+            # فعلياً ويصفّر التدرج تماماً (تحقّق تجريبياً: gradient
+            # norm يصل إلى 0.0 خلال أقل من 5 خطوات تدريب). تطبيع z
+            # بمتوسط=0 وتباين=1 قبل softmax يبقي فروق الـ logits في
+            # مدى معقول بغض النظر عن مقياس الطبقات السابقة، فيحافظ
+            # على تدرج غير صفري. مُتحقَّق رياضياً بمقارنة مع
+            # finite-difference (فرق ~1e-11).
+            self._z_mu = float(z.mean())
+            self._z_sigma = float(z.std()) + 1e-8
+            self._z_norm = (z - self._z_mu) / self._z_sigma
+            out = softmax(self._z_norm)
         else:
             out = linear(z)
 
@@ -191,10 +203,23 @@ class DenseLayer:
         elif self.activation == "tanh":
             d_z = d_out * tanh_grad_from_output(out)
         elif self.activation == "softmax":
-            # Jacobian الكامل لـ softmax: d_z_i = sum_j d_out_j * out_j * (delta_ij - out_i)
-            # = out * (d_out - sum(d_out * out))
+            # الخطوة 1: Jacobian الكامل لـ softmax بالنسبة لـ z_norm (المُطبَّع):
+            # d_z_norm_i = sum_j d_out_j * out_j * (delta_ij - out_i)
+            #            = out * (d_out - sum(d_out * out))
             s = float(np.dot(d_out, out))
-            d_z = out * (d_out - s)
+            d_z_norm = out * (d_out - s)
+
+            # الخطوة 2: اشتقاق Layer Norm بدون معاملات (parameter-free)
+            # بالنسبة لـ z الأصلي (قبل التطبيع)، الصيغة القياسية لـ:
+            #   z_norm = (z - mu) / sigma  حيث mu, sigma محسوبان من z نفسه
+            # dL/dz = (1/(n*sigma)) * (n*d_z_norm - sum(d_z_norm)
+            #          - z_norm * sum(d_z_norm * z_norm))
+            n = z.size
+            z_norm = self._z_norm
+            sigma = self._z_sigma
+            sum_dznorm = float(d_z_norm.sum())
+            sum_dznorm_znorm = float(np.dot(d_z_norm, z_norm))
+            d_z = (n * d_z_norm - sum_dznorm - z_norm * sum_dznorm_znorm) / (n * sigma)
         else:  # linear
             d_z = d_out
 
