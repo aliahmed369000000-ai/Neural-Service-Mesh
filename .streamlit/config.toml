@@ -1,8 +1,10 @@
 [server]
 headless = true
 address = "0.0.0.0"
-enableCORS = false
-enableXsrfProtection = false
+# CORS وXSRF protection متروكة على الإعداد الافتراضي الآمن (مفعّلة) —
+# تعطيلهما معاً على تطبيق عام منشور فعلياً على الإنترنت يفتح ثغرة CSRF
+# (Streamlit توصي رسمياً بعدم فعل هذا). لو ظهرت مشكلة اتصال حقيقية مرتبطة
+# بـCORS مستقبلاً، عالجها بإعداد origin محدد بدل تعطيل الحماية بالكامل.
 
 [browser]
 gatherUsageStats = false
