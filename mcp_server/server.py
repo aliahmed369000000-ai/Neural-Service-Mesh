@@ -6,10 +6,18 @@ NSM MCP Server
 مباشرة بدون المرور عبر واجهة Streamlit.
 
 الأدوات المعروضة حالياً:
-  - quran_lookup   : جلب نص آية بعينها عبر رقم السورة ورقم الآية.
-  - quran_search    : بحث نصّي عن آيات تحتوي كلمة/عبارة معيّنة.
-  - classify_harm   : تصنيف نص عربي/إنجليزي حسب نطاق الأذى (مبني على
-                       ai/harm_classifier.py الموجود بالفعل في المشروع).
+  - quran_lookup        : جلب نص آية بعينها عبر رقم السورة ورقم الآية.
+  - quran_search         : بحث نصّي عن آيات تحتوي كلمة/عبارة معيّنة.
+  - classify_harm        : تصنيف نص عربي/إنجليزي حسب نطاق الأذى (مبني على
+                            ai/harm_classifier.py الموجود بالفعل في المشروع).
+  - ask_nsm               : إرسال سؤال لوكيل NSM الكامل (ai/nsm_agent_core.py)
+                            والحصول على رد — نفس الوكيل المستخدم في واجهة
+                            Streamlit، بدون المرور عبرها.
+  - search_ckg            : بحث دلالي في قاعدة المعرفة المعرفية (CKG) الخاصة
+                            بالمشروع (7000+ مفهوم)، بمطابقة كلمة كاملة
+                            (ai/ckg_text_encoder_v2.py) بدل الاحتواء الجزئي.
+  - check_project_health  : تقرير جاهزية سريع عن حالة الكود (Phase6Validator):
+                            نسبة تغطية المراحل، الكود الميت، عدد الملفات.
 
 التشغيل محلياً (stdio transport):
     python mcp_server/server.py
@@ -161,6 +169,119 @@ def classify_harm(text: str) -> str:
         },
         ensure_ascii=False,
     )
+
+
+@mcp.tool()
+def ask_nsm(query: str) -> str:
+    """إرسال سؤال إلى وكيل NSM الكامل (نفس الوكيل المستخدم في واجهة Streamlit)
+    والحصول على رده الكامل دفعة واحدة.
+
+    ملاحظة: يحتاج الوكيل مفتاح API واحداً على الأقل مُعرَّفاً كمتغيّر بيئة
+    (مثلاً GROQ_API_KEY أو GOOGLE_API_KEY) ليعمل فعلياً؛ بدون ذلك يرجع رسالة
+    توضّح عدم التوفر بدل الفشل الصامت.
+
+    Args:
+        query: السؤال أو الطلب المراد إرساله للوكيل.
+    """
+    if not query.strip():
+        return json.dumps({"error": "السؤال فارغ"}, ensure_ascii=False)
+
+    try:
+        from ai.nsm_agent_core import NSMAgent
+    except Exception as e:
+        return json.dumps({"error": f"تعذّر تحميل وكيل NSM: {e}"}, ensure_ascii=False)
+
+    agent = NSMAgent()
+    if not agent.available:
+        return json.dumps(
+            {
+                "error": "لا يوجد مفتاح API مُعرَّف كمتغيّر بيئة "
+                         "(GROQ_API_KEY / GOOGLE_API_KEY / OPENROUTER_API_KEY / "
+                         "OPENAI_API_KEY / CF_API_TOKEN+CF_ACCOUNT_ID)",
+                "available": False,
+            },
+            ensure_ascii=False,
+        )
+
+    try:
+        answer = agent.run(query)
+    except Exception as e:
+        return json.dumps({"error": f"فشل الوكيل أثناء التنفيذ: {e}"}, ensure_ascii=False)
+
+    return json.dumps({"query": query, "answer": answer}, ensure_ascii=False)
+
+
+@mcp.tool()
+def search_ckg(query: str, limit: int = 5) -> str:
+    """بحث دلالي في قاعدة المعرفة المعرفية الخاصة بـ NSM (الجراف المعرفي CKG،
+    آلاف المفاهيم المستخرجة من القرآن ومصادر عامة)، بمطابقة كلمة كاملة
+    (لا احتواء جزئي — مثلاً البحث عن "علم" لا يطابق "يعلمون" خطأً).
+
+    Args:
+        query: كلمة أو عبارة عربية للبحث عن مفاهيم مرتبطة بها.
+        limit: أقصى عدد نتائج تُرجَع (افتراضي 5).
+    """
+    if not query.strip():
+        return json.dumps({"error": "نص البحث فارغ"}, ensure_ascii=False)
+
+    try:
+        from knowledge.cognitive_graph import get_ckg
+        from ai.ckg_text_encoder_v2 import _tokenize, _word_level_score
+    except Exception as e:
+        return json.dumps({"error": f"تعذّر تحميل قاعدة المعرفة: {e}"}, ensure_ascii=False)
+
+    ckg = get_ckg()
+    q_words = _tokenize(query)
+
+    scored = []
+    for c in ckg.all_concepts():
+        score = _word_level_score(q_words, c["name"])
+        if score > 0:
+            scored.append((score, c))
+
+    scored.sort(key=lambda t: (t[0], t[1].get("strength", 0)), reverse=True)
+    results = [
+        {
+            "concept": c["name"],
+            "cluster": c.get("cluster"),
+            "strength": c.get("strength"),
+            "frequency": c.get("frequency"),
+            "match_score": round(score, 3),
+        }
+        for score, c in scored[:limit]
+    ]
+
+    return json.dumps(
+        {"query": query, "total_concepts": ckg.concept_count(), "count": len(results), "results": results},
+        ensure_ascii=False,
+    )
+
+
+@mcp.tool()
+def check_project_health() -> str:
+    """تقرير جاهزية سريع عن حالة كود مشروع NSM: عدد الملفات، نسبة تغطية
+    المراحل (Phase coverage)، نسبة الكود الميت (وحدات غير مستوردة من أي
+    مكان)، وتوصيات. لا يحتاج أي بيانات تشغيل حيّة (mesh) — تحليل كود ثابت.
+    """
+    try:
+        from ai.validator import Phase6Validator
+    except Exception as e:
+        return json.dumps({"error": f"تعذّر تحميل المُدقّق: {e}"}, ensure_ascii=False)
+
+    validator = Phase6Validator(mesh=None, project_root=str(_ROOT))
+    report = validator.generate()
+
+    summary = {
+        "files_total": report.get("files", {}).get("total_py_files"),
+        "lines_of_code": report.get("files", {}).get("total_lines_of_code"),
+        "phase_coverage_pct": report.get("phase_coverage", {}).get("overall_coverage_pct"),
+        "dead_code_pct": report.get("dead_code", {}).get("dead_pct"),
+        "dead_files_count": report.get("dead_code", {}).get("dead_count"),
+        "phase7_readiness_score": report.get("phase7_readiness", {}).get("score"),
+        "verdict": report.get("phase7_readiness", {}).get("verdict"),
+        "recommendations": report.get("phase7_readiness", {}).get("recommendations", []),
+    }
+    return json.dumps(summary, ensure_ascii=False)
 
 
 if __name__ == "__main__":
