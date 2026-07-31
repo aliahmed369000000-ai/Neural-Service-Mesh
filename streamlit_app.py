@@ -9750,15 +9750,13 @@ def render_swarm_studio():
         unsafe_allow_html=True,
     )
 
-    # ── singleton بمستوى الجلسة حتى تتراكم إحصائيات الوكلاء بين التشغيلات ──
-    if "_swarm_factory" not in st.session_state:
-        st.session_state["_swarm_factory"] = AgentFactory()
-    if "_swarm_coordinator" not in st.session_state:
-        st.session_state["_swarm_coordinator"] = SwarmCoordinator(
-            st.session_state["_swarm_factory"], max_agents=6
-        )
-    factory = st.session_state["_swarm_factory"]
-    coordinator = st.session_state["_swarm_coordinator"]
+    # ── mesh bundle حقيقي بمستوى العملية (وليس session_state فقط) — يربط
+    # AgentFactory + SwarmCoordinator بنفس NodeRegistry/ScoringEngine/
+    # MemoryEngine/NodeReputationEngine/SystemDNA المشتركة لكل الـmesh ──
+    from core.mesh_bundle import get_mesh_bundle
+    _mesh = get_mesh_bundle()
+    factory = _mesh.agent_factory
+    coordinator = _mesh.coordinator
 
     with st.expander("📋 الأدوار المتاحة في الكتالوج"):
         for role in AgentFactory.available_roles():
@@ -9813,6 +9811,14 @@ def render_swarm_studio():
             synthesize=synthesize,
         )
         _swarm_skeleton_ph.empty()
+
+        # 🆕 تغذية النتيجة الحقيقية إلى ScoringEngine + MemoryEngine +
+        # NodeReputationEngine + SystemDNA (كانت هذه المحركات موجودة
+        # ومكتوبة لكن غير مربوطة بأي نتيجة تنفيذ فعلية من قبل).
+        try:
+            _mesh.record_swarm_result(result)
+        except Exception as _mesh_err:
+            logger.warning(f"mesh_bundle.record_swarm_result failed: {_mesh_err}")
 
         status_emoji = {"done": "✅", "partial": "🟡", "failed": "❌"}.get(result.status, "❔")
         st.toast(
@@ -9925,6 +9931,13 @@ def render_swarm_studio():
         st.markdown('<div class="section-header">📊 ملخص السرب (SwarmCoordinator)</div>',
                     unsafe_allow_html=True)
         _cs = coordinator.summary()
+        with st.popover("🕸️ حالة الـmesh الكاملة (Registry + Scoring + Memory + Reputation + DNA)"):
+            st.caption(
+                "هذه بيانات حقيقية من core.registry + ai.scoring_engine + "
+                "ai.memory_engine + ai.reputation_engine + ai.system_dna، "
+                "مبنية من نتائج تنفيذ السرب الفعلية أعلاه (وليست عرضاً منفصلاً)."
+            )
+            st.json(_mesh.summary())
         st.markdown(f"""
         <div class="bento-grid">
             <div class="metric-card">
