@@ -138,8 +138,10 @@ class TextEncoder:
     @staticmethod
     def encode(query: str, ckg_concepts: dict, dim: int = TEXT_DIM) -> np.ndarray:
         try:
-            from ai.deep_routing_network import encode_query_to_ckg_vector
-            return encode_query_to_ckg_vector(query, ckg_concepts, dim=dim)
+            # v2: يستخدم مطابقة كلمة كاملة بدل الاحتواء الجزئي المعطوب
+            # في encode_query_to_ckg_vector الأصلية (كانت "علم" تطابق "يعلمون" خطأً)
+            from ai.ckg_text_encoder_v2 import encode_query_v2
+            return encode_query_v2(query, ckg_concepts, dim=dim)
         except Exception:
             return TextEncoder._encode_local(query, ckg_concepts, dim)
 

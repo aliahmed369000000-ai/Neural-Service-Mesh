@@ -59,6 +59,33 @@ from ai.self_narrative import NarrativeEntry, DailySummary, SelfNarrative
 # Phase 8 — Real Neural Weights
 from ai.neural_weights import NeuralWeightLayer, extract_routing_weights, get_default_layer
 
+# Phase 4 (cont.) — Simulation
+from ai.simulation_engine import SimulationResult, SimulationEngine
+
+# Phase 5 (cont.) — Capability Marketplace, Code Generation, Sandbox Testing
+from ai.capability_marketplace import CapabilityAdvertisement, CapabilityMarketplace
+from ai.code_generator import GeneratedModule, CodeGenerationEngine
+from ai.sandbox_lab import SandboxTestResult, SandboxTestingLab
+
+# Phase 7 (cont.) — Autonomous Evolution Pipeline
+from ai.evolution_pipeline import PipelineStepResult, EvolutionCycleP7, EvolutionPipeline
+
+# Phase 10 — Multimodal Unified Network
+from ai.multimodal_network import TextEncoder, ImageEncoder, AudioEncoder, MultimodalRoutingCore
+
+# Phase 13 — Structural Self-Redesign
+from ai.structural_redesign import ArchSnapshot, ArchitectureMutator, StructuralBenchmark, StructuralEvolutionEngine
+
+# Phase 14 — Complete Digital Being
+from ai.digital_being import LifecycleClock, BeingStatus, DigitalBeingCore
+
+# Phase 15 — Drive Engine + Self-Replication
+from ai.drive_engine import Drive, DriveEngine
+from ai.self_replication import SelfReplicationEngine
+
+# CKG Text Encoder v2 — إصلاح مطابقة الكلمات العربية (يحل محل الاحتواء الجزئي المعطوب)
+from ai.ckg_text_encoder_v2 import encode_query_v2, encode_query_hashing, classify_query_cluster
+
 __all__ += [
     # Phase 6
     "AgentFactory", "AgentInstance",
@@ -75,4 +102,22 @@ __all__ += [
     "NarrativeEntry", "DailySummary", "SelfNarrative",
     # Phase 8
     "NeuralWeightLayer", "extract_routing_weights", "get_default_layer",
+    # Phase 4 (cont.)
+    "SimulationResult", "SimulationEngine",
+    # Phase 5 (cont.)
+    "CapabilityAdvertisement", "CapabilityMarketplace",
+    "GeneratedModule", "CodeGenerationEngine",
+    "SandboxTestResult", "SandboxTestingLab",
+    # Phase 7 (cont.)
+    "PipelineStepResult", "EvolutionCycleP7", "EvolutionPipeline",
+    # Phase 10
+    "TextEncoder", "ImageEncoder", "AudioEncoder", "MultimodalRoutingCore",
+    # Phase 13
+    "ArchSnapshot", "ArchitectureMutator", "StructuralBenchmark", "StructuralEvolutionEngine",
+    # Phase 14
+    "LifecycleClock", "BeingStatus", "DigitalBeingCore",
+    # Phase 15
+    "Drive", "DriveEngine", "SelfReplicationEngine",
+    # CKG Text Encoder v2
+    "encode_query_v2", "encode_query_hashing", "classify_query_cluster",
 ]
