@@ -1,0 +1,952 @@
+"""
+pages/chat.py
+تم تفكيكه تلقائياً من streamlit_app.py الأصلي (تقسيم الكود لتحسين القابلية للصيانة والأداء).
+"""
+from __future__ import annotations
+
+from app_core import *  # noqa: F401,F403 — إعادة تصدير كل الاستيرادات والدوال المساعدة المشتركة
+
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# تبويب المحادثة الذكية
+# ══════════════════════════════════════════════════════════════════════════
+def render_chat():
+    """تبويب المحادثة الذكية مع ذاكرة السياق"""
+
+    if not _NSM_CHAT_OK:
+        st.error(
+            "⚠️ تعذّر تحميل NSM Chat. تأكد من وجود nsm_chat.py أو nsm_chat_plus.py "
+            "و nsm_memory.py في جذر المشروع (nsm_embedding.npz اختياري — يعمل النظام بدونه)."
+        )
+        return
+
+    # تهيئة النموذج مرة واحدة
+    if "nsm_bot" not in st.session_state:
+        with st.spinner("⟳ تحميل محرك المحادثة..."):
+            st.session_state.nsm_bot = NSMChat(system_prompt=NSM_SYSTEM_PROMPT)
+        st.session_state.nsm_messages = []
+        st.session_state.nsm_count    = 0
+
+    bot = st.session_state.nsm_bot
+
+    # CSS خاص بالمحادثة
+    # أداء: نص ثابت لا يعتمد على أي متغيّر، لكنه كان يُحقن من جديد عبر
+    # st.markdown في *كل* rerun لهذا التبويب (كل رسالة تُرسَل، كل تقييم
+    # 👍/👎، إلخ)، فيتراكم <style> مكرر في DOM ويُبطئ الصفحة تدريجياً مع
+    # طول المحادثة. الحقن الآن يحدث مرة واحدة فقط لكل جلسة.
+    if not st.session_state.get("_nsm_chat_css_injected"):
+        st.session_state["_nsm_chat_css_injected"] = True
+        st.markdown("""
+    <style>
+    @keyframes bubbleIn {
+        from {opacity:0;transform:translateY(8px) scale(0.985);}
+        to   {opacity:1;transform:translateY(0) scale(1);}
+    }
+    .chat-user {display:flex;justify-content:flex-end;margin:0.55rem 0;animation:bubbleIn .32s cubic-bezier(.22,.9,.35,1);}
+    .chat-user .bbl {
+        background:linear-gradient(135deg,var(--gold),var(--emerald));
+        color:var(--bg);padding:0.75rem 1.15rem;
+        border-radius:18px 18px 4px 18px;max-width:85%;
+        font-size:0.98rem;line-height:1.75;text-align:right;direction:rtl;
+        box-shadow:0 3px 12px var(--shadow);
+        white-space:pre-wrap;word-break:break-word;
+        font-weight:600;
+    }
+    .chat-nsm {display:flex;justify-content:flex-start;margin:0.55rem 0;gap:0.55rem;align-items:flex-start;animation:bubbleIn .32s cubic-bezier(.22,.9,.35,1);}
+    .chat-nsm .bbl {
+        background:var(--surface2);
+        color:var(--text);padding:0.75rem 1.15rem;
+        border-radius:18px 18px 18px 4px;max-width:85%;
+        font-size:0.98rem;line-height:1.85;text-align:right;direction:rtl;
+        border:1px solid var(--border);
+        box-shadow:0 2px 8px var(--shadow);
+        white-space:pre-wrap;word-break:break-word;
+    }
+    .chat-nsm .bbl code {
+        background:var(--surface);color:var(--emerald);padding:0.15rem 0.4rem;
+        border-radius:4px;font-size:0.88rem;font-family:monospace;
+        white-space:pre-wrap;
+    }
+    .chat-nsm .bbl pre {
+        background:var(--surface);border:1px solid var(--border);border-radius:8px;
+        padding:0.8rem;overflow-x:auto;margin:0.5rem 0;
+        font-size:0.85rem;color:var(--text-muted);
+        white-space:pre;
+    }
+    .copy-btn {
+        display:inline-block;margin-top:0.55rem;padding:0.28rem 0.7rem;
+        font-size:0.74rem;font-weight:600;color:var(--text-muted);
+        background:var(--surface);border:1px solid var(--border);
+        border-radius:10px;cursor:pointer;transition:all .15s ease;
+        direction:rtl;font-family:inherit;
+    }
+    .copy-btn:hover { color:var(--gold);border-color:var(--gold);}
+    .copy-btn:active { transform:scale(0.96); }
+    .ctx-tag {
+        display:inline-block;background:var(--surface);border:1px solid var(--border);
+        border-radius:20px;padding:0.18rem 0.7rem;font-size:0.72rem;
+        color:var(--gold);margin-bottom:0.45rem;direction:rtl;
+    }
+    .chat-box {
+        height:62vh;min-height:420px;max-height:680px;
+        overflow-y:auto;padding:1.1rem;
+        background:var(--bg);border-radius:18px;
+        border:1px solid var(--border);margin-bottom:0.9rem;
+        scroll-behavior:smooth;
+        -webkit-overflow-scrolling:touch;
+        overscroll-behavior:contain;
+        box-shadow:inset 0 0 24px var(--shadow);
+    }
+    .chat-box::-webkit-scrollbar{width:5px;}
+    .chat-box::-webkit-scrollbar-track{background:var(--bg);}
+    .chat-box::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px;}
+    .chat-box::-webkit-scrollbar-thumb:hover{background:var(--gold);}
+    .typing-indicator {
+        display:inline-block;color:var(--gold);font-size:0.85rem;
+        animation:pulse 1.2s infinite;
+    }
+    @keyframes pulse{0%,100%{opacity:.4;}50%{opacity:1;}}
+
+    /* ── مؤشر "يكتب الآن" بنقاط متتابعة + توهّج حول أيقونة NSM ── */
+    .typing-wrap { display:flex; align-items:center; gap:0.6rem; }
+    .thinking-ring {
+        width:34px; height:34px; border-radius:50%;
+        display:flex; align-items:center; justify-content:center;
+        font-size:1.15rem;
+        background:var(--surface2); border:1px solid var(--border);
+        box-shadow:0 0 0 0 var(--gold-soft);
+        animation:nsmThinkRing 1.6s ease-out infinite;
+        flex-shrink:0;
+    }
+    @keyframes nsmThinkRing {
+        0%   { box-shadow:0 0 0 0 var(--gold-soft); }
+        70%  { box-shadow:0 0 0 9px rgba(0,0,0,0); }
+        100% { box-shadow:0 0 0 0 rgba(0,0,0,0); }
+    }
+    .typing-dots { display:inline-flex; gap:4px; align-items:center; padding:0.55rem 0.9rem;
+        background:var(--surface2); border:1px solid var(--border); border-radius:18px 18px 18px 4px; }
+    .typing-dots span {
+        width:7px; height:7px; border-radius:50%;
+        background:var(--gold); display:inline-block;
+        animation:nsmDotBounce 1.1s ease-in-out infinite;
+    }
+    .typing-dots span:nth-child(2) { animation-delay:.15s; background:var(--emerald); }
+    .typing-dots span:nth-child(3) { animation-delay:.3s; }
+    @keyframes nsmDotBounce {
+        0%, 60%, 100% { transform:translateY(0); opacity:.55; }
+        30% { transform:translateY(-5px); opacity:1; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .thinking-ring, .typing-dots span { animation:none !important; }
+    }
+
+    /* ── توقيت الرسائل (يظهر بأسفل كل فقاعة) ── */
+    .bbl-ts {
+        font-size: 0.68rem;
+        color: var(--text-muted);
+        opacity: 0.75;
+        margin-top: 0.3rem;
+        direction: ltr;
+        text-align: left;
+    }
+    .chat-user .bbl-ts { color: rgba(0,0,0,0.55); text-align: right; }
+    .bbl-footer { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-top: 0.2rem; }
+    .bbl-footer .bbl-ts { margin-top: 0; }
+
+    /* ── زر عائم "النزول لآخر رسالة" — يظهر فقط عند التمرير لأعلى بعيداً
+       عن نهاية المحادثة (يُتحكّم بإظهاره/إخفائه عبر JS بالأسفل) ── */
+    .chat-box-wrap { position: relative; }
+    .scroll-bottom-btn {
+        position: absolute;
+        bottom: 1.1rem;
+        left: 50%;
+        transform: translateX(-50%) translateY(8px);
+        width: 38px; height: 38px;
+        border-radius: 50%;
+        border: 1px solid var(--border);
+        background: var(--surface2);
+        color: var(--gold);
+        font-size: 1.1rem;
+        box-shadow: 0 6px 18px var(--shadow);
+        cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity .2s ease, transform .2s ease;
+        z-index: 5;
+    }
+    .scroll-bottom-btn.visible { opacity: 1; pointer-events: auto; transform: translateX(-50%) translateY(0); }
+    .scroll-bottom-btn:hover { border-color: var(--gold); }
+
+    /* ── تنسيق st.chat_message الأصلي (يُستخدم فقط أثناء بث الرد حرفاً
+       بحرف قبل أن يُطوى داخل .chat-box المخصص بعد rerun) — بدون هذا
+       التنسيق يظهر بمظهر Streamlit الافتراضي غير المرتبط بصرياً بهوية
+       الشات، ما يسبب "قفزة" بصرية واضحة لحظة انتهاء البث. ────────────── */
+    [data-testid="stChatMessage"] {
+        background: var(--surface2) !important;
+        border: 1px solid var(--border) !important;
+        border-radius: 18px 18px 18px 4px !important;
+        padding: 0.75rem 1.15rem !important;
+        margin: 0.55rem 0 0.9rem !important;
+        box-shadow: 0 2px 8px var(--shadow);
+        direction: rtl !important;
+        max-width: 85%;
+    }
+    [data-testid="stChatMessage"] [data-testid="stChatMessageContent"],
+    [data-testid="stChatMessage"] p {
+        color: var(--text) !important;
+        text-align: right !important;
+        direction: rtl !important;
+        font-size: 0.98rem !important;
+        line-height: 1.85 !important;
+    }
+    [data-testid="stChatMessage"] [data-testid="stChatMessageAvatarAssistant"],
+    [data-testid="stChatMessage"] [class*="Avatar"] {
+        background: var(--accent-grad) !important;
+        border-radius: 10px !important;
+    }
+
+    /* ── استجابة الجوال ── */
+    @media (max-width: 640px) {
+        .chat-box {
+            height:56vh;min-height:320px;max-height:520px;
+            padding:0.8rem;border-radius:14px;
+        }
+        .chat-user .bbl, .chat-nsm .bbl {
+            max-width:92%;font-size:0.92rem;padding:0.65rem 0.9rem;
+        }
+        .chat-nsm .bbl { line-height:1.7; }
+        [data-testid="stChatMessage"] { max-width: 92%; }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # رأس التبويب
+    col_t, col_s = st.columns([3,1])
+    with col_t:
+        st.markdown("### 💬 المحادثة الذكية")
+        _mode = "🤖 LLM · Cloudflare / Gemini / Groq"
+        st.caption(f"يتذكر السياق · {_mode} · الذكاء في الأوزان")
+    with col_s:
+        ctx = bot.context_info()
+        if ctx:
+            st.markdown(f'<div class="ctx-tag">📎 {ctx}</div>', unsafe_allow_html=True)
+        st.metric("رسائل الجلسة", st.session_state.nsm_count)
+
+    # ── إرفاق ملف أو صورة (multimodal عبر OpenRouter) ─────────────────────
+    if "chat_pending_files" not in st.session_state:
+        st.session_state["chat_pending_files"] = []
+    if "chat_uploader_version" not in st.session_state:
+        st.session_state["chat_uploader_version"] = 0
+
+    _or_key_chat = st.session_state.get("_or_api_key", "").strip()
+    _or_model_chat = st.session_state.get("_or_model", "google/gemini-2.5-flash")
+    _is_vision_chat = _or_model_chat in VISION_MODELS
+
+    with st.expander("📎 إرفاق ملف أو صورة (يتطلب OpenRouter API Key)",
+                      expanded=bool(st.session_state["chat_pending_files"])):
+        if not _or_key_chat:
+            st.info("🔑 أدخل OpenRouter API Key في الشريط الجانبي لتفعيل رفع الملفات والصور.")
+        else:
+            col_up, col_info = st.columns([3, 2])
+            with col_up:
+                # مفتاح ديناميكي — يُعاد ضبط عنصر الرفع بعد كل إرسال/مسح
+                # حتى لا تُعاد إضافة نفس الملفات القديمة من الـ widget state
+                uploaded = st.file_uploader(
+                    "اسحب ملفاً هنا أو انقر للاختيار",
+                    type=["png", "jpg", "jpeg", "webp", "gif",
+                          "pdf", "txt", "md", "csv", "json",
+                          "py", "js", "ts", "html", "yaml", "yml"],
+                    accept_multiple_files=True,
+                    label_visibility="collapsed",
+                    key=f"chat_file_uploader_{st.session_state['chat_uploader_version']}",
+                )
+                if uploaded:
+                    existing_names = {f["name"] for f in st.session_state["chat_pending_files"]}
+                    for uf in uploaded:
+                        if uf.name not in existing_names:
+                            extracted = _extract_file(uf)
+                            if extracted:
+                                st.session_state["chat_pending_files"].append(extracted)
+                                existing_names.add(uf.name)
+                            else:
+                                st.warning(f"⚠ {uf.name} أكبر من {MAX_FILE_MB} MB")
+            with col_info:
+                if not _is_vision_chat and any(f["is_image"] for f in st.session_state["chat_pending_files"]):
+                    st.warning("⚠ النموذج الحالي لا يدعم الصور. اختر نموذج رؤية في الشريط الجانبي.")
+                elif _is_vision_chat:
+                    st.markdown('<span class="ctx-tag">👁 رؤية مُفعَّلة</span>', unsafe_allow_html=True)
+                st.caption(f"الحد الأقصى: {MAX_FILE_MB} MB للملف الواحد")
+
+        if st.session_state["chat_pending_files"]:
+            pf_cols = st.columns(min(len(st.session_state["chat_pending_files"]), 4))
+            to_remove = []
+            for i, f in enumerate(st.session_state["chat_pending_files"]):
+                with pf_cols[i % 4]:
+                    if f["is_image"] and f.get("raw_bytes"):
+                        st.image(f["raw_bytes"], caption=f["name"], use_container_width=True)
+                    else:
+                        icon = "📄" if f["text_content"] else "📎"
+                        st.caption(f"{icon} {f['name']} ({f['size_kb']} KB)")
+                    if st.button("✕", key=f"chat_rm_file_{i}", help="حذف"):
+                        to_remove.append(i)
+            for idx in sorted(to_remove, reverse=True):
+                st.session_state["chat_pending_files"].pop(idx)
+            if to_remove:
+                st.rerun()
+            if st.button("🗑 مسح كل الملفات", key="chat_clear_all_files"):
+                st.session_state["chat_pending_files"].clear()
+                st.session_state["chat_uploader_version"] += 1
+                st.rerun()
+
+    # عرض المحادثة
+    html = '<div class="chat-box-wrap"><div class="chat-box" id="nsm-chat-box">'
+    if not st.session_state.nsm_messages:
+        html += '''<div style="text-align:center;color:var(--text-muted);padding:3rem 1rem;
+                    display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%">
+            <div style="width:56px;height:56px;border-radius:16px;display:flex;align-items:center;
+                        justify-content:center;font-size:1.8rem;background:var(--accent-grad);
+                        box-shadow:0 6px 20px var(--gold-soft);margin-bottom:1rem">🧠</div>
+            <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:0.3rem">
+                ابدأ محادثتك مع NSM
+            </div>
+            <div style="font-size:0.85rem;max-width:340px;line-height:1.8">
+                اسأل عن مفهوم إسلامي، آية قرآنية، أو أي موضوع آخر — أو جرّب أحد الأسئلة السريعة بالأسفل
+            </div>
+        </div>'''
+    else:
+        # أداء: نعرض آخر NSM_CHAT_DISPLAY_LIMIT رسالة فقط بدل كل السجل —
+        # بدون هذا السقف، HTML المُعاد بناؤه بالكامل في كل rerun (كل رسالة
+        # جديدة/تقييم/تفاعل) يتضخم مع طول المحادثة ويُبطئ الواجهة تدريجياً.
+        # نحافظ على الفهرس الحقيقي _i (وليس فهرس القائمة المقصوصة) كي تبقى
+        # مطابقة _nsm_audio_cache (المُخزَّن بفهرس الرسالة الأصلي) صحيحة.
+        _all_msgs = st.session_state.nsm_messages
+        _hidden_count = max(0, len(_all_msgs) - NSM_CHAT_DISPLAY_LIMIT)
+        if _hidden_count:
+            html += (
+                f'<div style="text-align:center;color:var(--text-muted);'
+                f'font-size:0.78rem;padding:0.4rem 0 0.7rem">'
+                f'— تُعرض آخر {NSM_CHAT_DISPLAY_LIMIT} رسالة فقط '
+                f'({_hidden_count} رسالة أقدم مخفية من العرض، لكنها لا تزال محفوظة) —'
+                f'</div>'
+            )
+        for _i, msg in list(enumerate(_all_msgs))[-NSM_CHAT_DISPLAY_LIMIT:]:
+            role, text = msg[0], msg[1]
+            ctx_tag    = msg[2] if len(msg) > 2 else ""
+            src_badge  = msg[3] if len(msg) > 3 else ""
+            ts         = msg[4] if len(msg) > 4 else ""
+            ts_html    = f'<div class="bbl-ts">{ts}</div>' if ts else ""
+            if role == "user":
+                import html as _html
+                safe_text = _html.escape(text).replace("\n", "<br>")
+                html += f'<div class="chat-user"><div class="bbl">{safe_text}{ts_html}</div></div>'
+            else:
+                ctx_html = f'<div class="ctx-tag">📎 {ctx_tag}</div>' if ctx_tag else ""
+                src_html = (
+                    f'<div class="ctx-tag" style="color:var(--emerald)">{src_badge}</div>'
+                    if src_badge else ""
+                )
+                _audio_html = ""
+                _audio_entry = st.session_state.get("_nsm_audio_cache", {}).get(_i)
+                if _audio_entry:
+                    _a_b64, _a_fmt = _audio_entry
+                    _audio_html = (
+                        f'<audio controls style="width:100%;margin-top:0.5rem;height:36px" '
+                        f'src="data:audio/{_a_fmt};base64,{_a_b64}"></audio>'
+                    )
+                import html as _html
+                if "<" not in text and ">" not in text:
+                    safe_reply = _html.escape(text).replace("\n", "<br>")
+                else:
+                    safe_reply = text
+                html += f'''<div class="chat-nsm">
+                    <span style="font-size:1.4rem;margin-top:3px">🧠</span>
+                    <div class="bbl">{ctx_html}{src_html}<div class="bbl-text" id="nsm-bbl-{_i}">{safe_reply}</div>{_audio_html}
+                        <div class="bbl-footer">
+                            <button class="copy-btn" title="نسخ الرد"
+                                onclick="var t=document.getElementById('nsm-bbl-{_i}').innerText;
+                                         navigator.clipboard.writeText(t).then(function(){{
+                                            var b=event.currentTarget; var old=b.textContent;
+                                            b.textContent='✓ تم النسخ';
+                                            setTimeout(function(){{b.textContent=old;}}, 1300);
+                                         }});">📋 نسخ</button>
+                            {ts_html}
+                        </div>
+                    </div>
+                </div>'''
+    html += '''</div>
+        <button class="scroll-bottom-btn" id="nsm-scroll-bottom" title="النزول لآخر رسالة" aria-label="النزول لآخر رسالة">↓</button>
+    </div>'''
+    st.markdown(html, unsafe_allow_html=True)
+    st.components.v1.html("""
+    <script>
+    (function() {
+        function scrollToBottom() {
+            const doc = window.parent ? window.parent.document : document;
+            const box = doc.getElementById('nsm-chat-box');
+            if (box) { box.scrollTop = box.scrollHeight; return true; }
+            return false;
+        }
+        // Streamlit يعيد رسم الـ DOM بشكل غير متزامن أحياناً — نحاول عدة مرات
+        // بدل الاعتماد على تنفيذ واحد فوري قد يسبق اكتمال العنصر.
+        let attempts = 0;
+        const tryScroll = () => {
+            attempts++;
+            if (!scrollToBottom() && attempts < 10) {
+                setTimeout(tryScroll, 60);
+            }
+        };
+        tryScroll();
+
+        // ── زر "النزول لآخر رسالة": يظهر فقط عندما يكون المستخدم بعيداً
+        // عن أسفل الصندوق (بأكثر من 80px)، ويختفي تلقائياً عند الوصول للأسفل ──
+        function bindScrollButton() {
+            const doc = window.parent ? window.parent.document : document;
+            const box = doc.getElementById('nsm-chat-box');
+            const btn = doc.getElementById('nsm-scroll-bottom');
+            if (!box || !btn) return false;
+            if (btn.dataset.nsmBound) { updateVisibility(); return true; }
+            btn.dataset.nsmBound = "1";
+
+            function updateVisibility() {
+                const distanceFromBottom = box.scrollHeight - box.scrollTop - box.clientHeight;
+                btn.classList.toggle('visible', distanceFromBottom > 80);
+            }
+            box.addEventListener('scroll', updateVisibility, { passive: true });
+            btn.addEventListener('click', function() {
+                box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
+            });
+            updateVisibility();
+            return true;
+        }
+        let btnAttempts = 0;
+        const tryBind = () => {
+            btnAttempts++;
+            if (!bindScrollButton() && btnAttempts < 10) { setTimeout(tryBind, 60); }
+        };
+        tryBind();
+    })();
+    </script>
+    """, height=0)
+
+    # ── تقييم آخر رد (👍/👎) لتغذية autotune_feedback ──
+    if _AUTOTUNE_OK:
+        _af_turn = st.session_state.get("_af_last_turn")
+        if _af_turn and not _af_turn.get("rated"):
+            _af_c1, _af_c2, _af_c3 = st.columns([1, 1, 6])
+            with _af_c1:
+                if st.button("👍", key="_af_up", help="رد جيد — ساعد النظام يتعلّم"):
+                    _heur = _af_compute_heuristics(_af_turn["response"])
+                    _af_process_feedback(_AFFeedbackRecord(
+                        message_id=str(st.session_state.nsm_count),
+                        timestamp=datetime.now().timestamp(),
+                        context_type=_af_turn["context_type"],
+                        model=_af_turn["model"],
+                        persona=_af_turn["persona"],
+                        params=_af_turn["params"],
+                        rating=1,
+                        heuristics=vars(_heur),
+                    ))
+                    try:
+                        from ai.learning_orchestrator import get_orchestrator
+                        get_orchestrator().feedback(_af_turn.get("query", ""), is_positive=True)
+                    except Exception:
+                        pass
+                    _af_turn["rated"] = True
+                    st.toast("✅ شكراً — تم تسجيل التقييم")
+                    st.rerun()
+            with _af_c2:
+                if st.button("👎", key="_af_down", help="رد غير جيد — ساعد النظام يتعلّم"):
+                    _heur = _af_compute_heuristics(_af_turn["response"])
+                    _af_process_feedback(_AFFeedbackRecord(
+                        message_id=str(st.session_state.nsm_count),
+                        timestamp=datetime.now().timestamp(),
+                        context_type=_af_turn["context_type"],
+                        model=_af_turn["model"],
+                        persona=_af_turn["persona"],
+                        params=_af_turn["params"],
+                        rating=-1,
+                        heuristics=vars(_heur),
+                    ))
+                    try:
+                        from ai.learning_orchestrator import get_orchestrator
+                        get_orchestrator().feedback(_af_turn.get("query", ""), is_positive=False)
+                    except Exception:
+                        pass
+                    _af_turn["rated"] = True
+                    st.toast("✅ شكراً — تم تسجيل التقييم")
+                    st.rerun()
+
+    # صندوق الإدخال
+    if not st.session_state.get("_nsm_input_css_injected"):
+        st.session_state["_nsm_input_css_injected"] = True
+        st.markdown("""
+    <style>
+    div[data-testid="stTextArea"] textarea {
+        min-height:96px !important;
+        max-height:220px !important;
+        font-size:1.05rem !important;
+        line-height:1.6 !important;
+        direction:rtl;
+        text-align:right;
+        resize:none !important;
+        background:var(--surface2) !important;
+        border:1.5px solid var(--border) !important;
+        border-radius:18px !important;
+        padding:0.9rem 1.1rem !important;
+        color:var(--text) !important;
+        transition:border-color .15s ease, box-shadow .15s ease;
+    }
+    div[data-testid="stTextArea"] textarea:focus {
+        border-color:var(--gold) !important;
+        box-shadow:0 0 0 3px var(--gold-soft) !important;
+    }
+    div[data-testid="stTextArea"] textarea::placeholder {
+        color:var(--text-muted);
+    }
+    .st-key-nsm_send_wrap button {
+        height:96px !important;
+        border-radius:18px !important;
+        background:linear-gradient(135deg,var(--gold),var(--emerald)) !important;
+        color:var(--bg) !important;
+        font-size:1.02rem !important;
+        font-weight:700 !important;
+        border:none !important;
+        box-shadow:0 3px 12px var(--shadow) !important;
+        transition:transform .12s ease, box-shadow .12s ease;
+    }
+    .st-key-nsm_send_wrap button:hover {
+        transform:translateY(-1px);
+        box-shadow:0 5px 16px var(--shadow) !important;
+    }
+    .st-key-nsm_send_wrap button:active {
+        transform:translateY(0);
+    }
+    @media (max-width: 640px) {
+        div[data-testid="stTextArea"] textarea {
+            min-height:76px !important;font-size:0.98rem !important;
+        }
+        .st-key-nsm_send_wrap button { height:52px !important; }
+    }
+    </style>""", unsafe_allow_html=True)
+    c1, c2 = st.columns([5, 1.2], gap="small")
+    with c1:
+        user_input = st.text_area(
+            label="سؤالك",
+            placeholder="اكتب سؤالك هنا… (Enter = سطر جديد)",
+            key="nsm_input",
+            label_visibility="collapsed",
+            height=96,
+        )
+    with c2:
+        with st.container(key="nsm_send_wrap"):
+            send = st.button("➤\nإرسال", key="nsm_send", use_container_width=True)
+
+    # ── الواجهة الصوتية: تسجيل سؤال بالصوت + قراءة الردود صوتياً ─────────
+    voice_col1, voice_col2 = st.columns([3, 2], gap="small")
+    _voice_query = None
+    with voice_col1:
+        if _STT_OK:
+            _mic_audio = st.audio_input("🎤 أو سجّل سؤالك صوتياً", key="nsm_mic_input")
+            if _mic_audio is not None:
+                _mic_bytes = _mic_audio.getvalue()
+                _mic_hash = hash(_mic_bytes)
+                if st.session_state.get("_nsm_last_mic_hash") != _mic_hash:
+                    st.session_state["_nsm_last_mic_hash"] = _mic_hash
+                    with st.spinner("⟳ جارٍ تفريغ الصوت..."):
+                        _transcribed, _stt_err = _stt_transcribe(_mic_bytes, mime_type="audio/wav")
+                    if _stt_err:
+                        st.warning(f"⚠️ {_stt_err}")
+                    elif _transcribed:
+                        _voice_query = _transcribed
+        else:
+            st.caption("🎤 الإدخال الصوتي غير متاح حالياً")
+    with voice_col2:
+        _voice_output_on = st.toggle(
+            "🔊 قراءة الردود صوتياً", key="_nsm_voice_output",
+            value=st.session_state.get("_nsm_voice_output", False),
+            disabled=not _TTS_OK,
+        )
+
+    # أسئلة سريعة — كاملة عند بداية المحادثة فقط، ثم مطوية لتقليل الازدحام البصري
+    quick_qs = [
+        "ما هي أركان الإسلام؟",
+        "ما هو الذكاء الاصطناعي؟",
+        "ما هي سورة الفاتحة؟",
+        "ما هو الجبر الخطي؟",
+        "من هم الخلفاء الراشدون؟",
+        "ما هي لغة Python؟",
+        "ما هي سورة الكهف؟",
+        "ما هي التغذية السليمة؟",
+    ]
+    if not st.session_state.nsm_messages:
+        st.markdown("**⚡ أسئلة سريعة:**")
+        quick_cols = st.columns(4)
+        for i, q in enumerate(quick_qs):
+            with quick_cols[i % 4]:
+                if st.button(q, key=f"chat_q_{i}", use_container_width=True):
+                    st.session_state._chat_pending = q
+    else:
+        with st.expander("⚡ أسئلة سريعة"):
+            quick_cols = st.columns(4)
+            for i, q in enumerate(quick_qs):
+                with quick_cols[i % 4]:
+                    if st.button(q, key=f"chat_q_{i}", use_container_width=True):
+                        st.session_state._chat_pending = q
+
+    # ── أزرار تحليل المشروع (NSM Agent) — للمالك فقط ─────────────
+    # الأوامر خلف هذه الأزرار (افحص/عدل/أنشئ/ارفع) تقرأ/تكتب ملفات فعلية
+    # على الخادم وتنفّذ git push — عُطِّلت من nsm_chat.py لغير المالك،
+    # ونخفي الواجهة نفسها هنا حتى لا تظهر أزرار بلا فائدة للزائر العادي.
+    if st.session_state.get("_dev_console_unlocked", False):
+        st.markdown("---")
+        st.markdown("**🤖 تحليل المشروع:**")
+        agent_cols = st.columns(6)
+        agent_btns = [
+            ("📋 اقترح (كل)",      "اقترح"),
+            ("🗂 غير مستخدم",      "اقترح غير مستخدم"),
+            ("⚠️ أخطاء",           "اقترح أخطاء"),
+            ("📦 ملفات كبيرة",     "اقترح كبير"),
+            ("📁 قائمة الملفات",   "قائمة"),
+            ("🔁 مكررة",           "اقترح مكررة"),
+        ]
+        for i, (label, cmd) in enumerate(agent_btns):
+            with agent_cols[i]:
+                if st.button(label, key=f"agent_btn_{i}", use_container_width=True):
+                    st.session_state._chat_pending = cmd
+
+        # أزرار تحليل ملف محدد
+        st.markdown("**🔍 تحليل ملف محدد** — اكتب المسار ثم اختر العملية:")
+        file_path_input = st.text_input(
+            "مسار الملف", placeholder="مثال: ai/code_agent.py",
+            key="agent_file_path", label_visibility="collapsed"
+        )
+        if file_path_input.strip():
+            fc1, fc2, fc3 = st.columns(3)
+            with fc1:
+                if st.button("📄 ملخص", key="btn_summary", use_container_width=True):
+                    st.session_state._chat_pending = f"ملخص {file_path_input.strip()}"
+            with fc2:
+                if st.button("🔧 صحح", key="btn_fix", use_container_width=True):
+                    st.session_state._chat_pending = f"صحح {file_path_input.strip()}"
+            with fc3:
+                if st.button("👁 افحص", key="btn_inspect", use_container_width=True):
+                    st.session_state._chat_pending = f"افحص {file_path_input.strip()}"
+
+    # مسح المحادثة
+    if st.button("🗑 مسح المحادثة", key="nsm_clear"):
+        st.session_state.nsm_messages = []
+        st.session_state.nsm_count = 0
+        bot.clear_history()
+        st.rerun()
+
+    # معالجة الإدخال
+    def _process(text: str):
+        files = list(st.session_state["chat_pending_files"])
+        if not text.strip() and not files:
+            return
+
+        st.session_state["chat_pending_files"] = []
+        st.session_state["chat_uploader_version"] += 1
+
+        display_text = text.strip()
+        if files:
+            names = ", ".join(f["name"] for f in files)
+            display_text += f"\n\n📎 {names}"
+
+        _ts = datetime.now().strftime("%H:%M")
+
+        # ── أضف رسالة المستخدم فوراً ──
+        st.session_state.nsm_messages.append(("user", display_text, "", "", _ts))
+
+        # ── فحص أمان أولي (regex محلي، بدون تكلفة API) ──
+        _safety_msg = _nsm_safety_gate(text.strip())
+        if _safety_msg:
+            st.session_state.nsm_messages.append(("nsm", _safety_msg, "", "🛡️ فحص أمان", datetime.now().strftime("%H:%M")))
+            st.session_state.nsm_count += 1
+            st.rerun()
+            return
+
+        # ── كاش الردود المتعلَّمة (ConversationLearner عبر LearningOrchestrator) ──
+        # يوفّر زمن استجابة وحصة LLM المجانية (Groq/Gemini/Cloudflare) عند
+        # تكرار نفس السؤال حرفياً فقط. نتجاهل عمداً المطابقة التقريبية
+        # بالكلمات المفتاحية الموجودة داخل recall() الأصلية (source="learned")
+        # لأنها قد تُرجع إجابة سؤال مختلف بثقة زائفة — نقبل فقط
+        # source="cache" (تطابق كامل لنص السؤال).
+        try:
+            from ai.learning_orchestrator import get_orchestrator
+            _cached = get_orchestrator().recall(text.strip(), min_quality=0.75)
+        except Exception:
+            _cached = None
+        if _cached and _cached.get("source") == "cache" and (_cached.get("answer") or "").strip():
+            st.session_state.nsm_messages.append((
+                "nsm", _cached["answer"], "", "⚡ كاش متعلَّم", datetime.now().strftime("%H:%M")
+            ))
+            st.session_state.nsm_count += 1
+            st.rerun()
+            return
+
+        # ════════════════════════════════════════════════════════════════════
+        # [1] بناء قائمة العقد المتاحة فعلاً
+        # ════════════════════════════════════════════════════════════════════
+        import time as _time_mod
+
+        _or_key_p = st.session_state.get("_or_api_key", "").strip()
+        _available_nodes: list = []
+        if _or_key_p:
+            _available_nodes.append("nsm:openrouter")
+
+        # فحص NSM Agent مبكراً قبل قرار التوجيه
+        _agent = None
+        try:
+            from ai.nsm_agent_core import NSMAgent as _AgentCls
+            _agent = getattr(st.session_state, "_nsm_agent_instance", None)
+            if _agent is None:
+                _agent = _AgentCls()
+                st.session_state._nsm_agent_instance = _agent
+            _agent.available = _agent._check_available()
+            if _agent.available:
+                _available_nodes.append("nsm:agent")
+        except Exception:
+            _agent = None
+        _available_nodes.append("nsm:free_router")   # دائماً متاح
+
+        # ════════════════════════════════════════════════════════════════════
+        # [2] التوجيه الدلالي — صنّف الاستعلام وانحَز للعقدة الأنسب
+        # ════════════════════════════════════════════════════════════════════
+        _sem_category   = "general"
+        _sem_confidence = 0.2
+        _sem_biased     = list(_available_nodes)
+        if _NSM_SEMANTIC_OK and _nsm_semantic:
+            try:
+                _sem_category, _sem_confidence = _nsm_semantic.classify(text.strip())
+                _sem_biased = _nsm_semantic.bias_order(
+                    _sem_category, _available_nodes, _sem_confidence
+                )
+            except Exception:
+                pass
+
+        # ════════════════════════════════════════════════════════════════════
+        # [3] اختَر العقدة (تاريخي 65% + دلالي 35%)
+        # ════════════════════════════════════════════════════════════════════
+        if _NSM_BRIDGE_OK and _nsm_bridge:
+            _selected_node = _nsm_bridge.select_node_with_semantic(
+                text.strip(), _sem_biased, _sem_category, _sem_confidence
+            )
+        else:
+            _selected_node = _sem_biased[0]
+
+        # ════════════════════════════════════════════════════════════════════
+        # [4] حلقة تنفيذ مع Failover تلقائي (حتى 2 إعادة توجيه)
+        # ════════════════════════════════════════════════════════════════════
+        _excluded_nodes: list = []
+        _response       = ""
+        _ctx_tag        = ""
+        _src_badge      = "🤖 NSM"
+        _af_params_last = dict(_AF_NEUTRAL_PARAMS) if _AUTOTUNE_OK else {"temperature": 0.7}
+        _af_ctx_last    = "conversational"
+        _or_model_last  = st.session_state.get("_or_model", "google/gemini-2.5-flash")
+        _final_node     = _selected_node
+        _total_latency  = 0.0
+
+        for _attempt in range(len(_available_nodes)):
+            # Failover: اختر التالية إذا فشلت السابقة
+            if _attempt > 0:
+                if _NSM_BRIDGE_OK and _nsm_bridge:
+                    _selected_node = _nsm_bridge.select_next_node(_available_nodes, _excluded_nodes)
+                else:
+                    _rem = [n for n in _available_nodes if n not in _excluded_nodes]
+                    _selected_node = _rem[0] if _rem else "nsm:free_router"
+                _final_node = _selected_node
+
+                # مؤشر إعادة التوجيه للمستخدم
+                st.toast(f"🔄 إعادة توجيه تلقائي → {_selected_node.replace('nsm:','')}", icon="⚡")
+
+            _t0_route = _time_mod.time()
+            _attempt_success = False
+
+            # ── تنفيذ العقدة المختارة ─────────────────────────────────────
+            if _selected_node == "nsm:openrouter" and _or_key_p:
+                # ── مسار OpenRouter ──────────────────────────────────────
+                _or_model_p = st.session_state.get("_or_model", "google/gemini-2.5-flash")
+                _or_model_last = _or_model_p
+                can_vision  = _or_model_p in VISION_MODELS
+                doc_files   = [f for f in files if not f["is_image"]]
+                image_files = [f for f in files if f["is_image"]] if can_vision else []
+                user_content = _build_user_content(text.strip(), doc_files, image_files)
+                history_msgs = []
+                # سقف: نُرسل آخر NSM_CHAT_DISPLAY_LIMIT رسالة فقط كسياق بدل
+                # السجل الكامل — بلا هذا، كل رسالة جديدة في محادثة طويلة
+                # تُرسل توكنزاً متزايدة بلا حدود لمزوّد OpenRouter (تكلفة
+                # متصاعدة + خطر تجاوز نافذة السياق فعلياً في المحادثات
+                # الطويلة جداً). السجل الكامل يبقى محفوظاً في nsm_messages.
+                for m in st.session_state.nsm_messages[:-1][-NSM_CHAT_DISPLAY_LIMIT:]:
+                    role = "user" if m[0] == "user" else "assistant"
+                    history_msgs.append({"role": role, "content": m[1]})
+                api_messages = history_msgs + [{"role": "user", "content": user_content}]
+
+                _af_params  = dict(_AF_NEUTRAL_PARAMS) if _AUTOTUNE_OK else {"temperature": 0.7, "top_p": 0.9}
+                _af_ctx     = "conversational"
+                _af_note    = ""
+                if _AUTOTUNE_OK:
+                    try:
+                        _af_params, _, _af_note = _af_apply_adjustments(_af_params, _af_ctx)
+                    except Exception:
+                        pass
+                _af_params_last = _af_params
+                _af_ctx_last    = _af_ctx
+
+                full_response = ""
+                with st.chat_message("assistant", avatar="🌐"):
+                    placeholder = st.empty()
+                    try:
+                        for chunk in _or_stream(
+                            api_messages, model=_or_model_p, api_key=_or_key_p,
+                            temperature=_af_params.get("temperature", 0.7),
+                            top_p=_af_params.get("top_p", 0.9),
+                        ):
+                            full_response += chunk
+                            placeholder.markdown(full_response + "▌")
+                        placeholder.markdown(full_response)
+                        _attempt_success = bool(full_response.strip())
+                    except Exception:
+                        placeholder.markdown(full_response or "⚠️ خطأ في OpenRouter — جاري الإعادة...")
+                    if _af_note:
+                        st.caption(_af_note)
+
+                _response  = full_response
+                _ctx_tag   = ""
+                _src_badge = f"🌐 OpenRouter · {_or_model_p.split('/')[-1]}"
+
+            elif _selected_node == "nsm:agent" and _agent and _agent.available:
+                # ── مسار NSM Agent — Streaming ──────────────────────────
+                full_response = ""
+                with st.chat_message("assistant", avatar="🧠"):
+                    placeholder = st.empty()
+                    try:
+                        for chunk in _agent.run_stream(text.strip()):
+                            full_response += chunk
+                            placeholder.markdown(full_response + "▌")
+                        placeholder.markdown(full_response)
+                        _attempt_success = bool(full_response.strip())
+                    except Exception:
+                        placeholder.markdown(full_response or "⚠️ خطأ في NSM Agent — جاري الإعادة...")
+                if hasattr(bot, "_last_source"):
+                    bot._last_source = "nsm_agent"
+                _response  = full_response.replace("⏳ *أفكر...*\n\n", "", 1)
+                _ctx_tag   = bot.context_info() if hasattr(bot, "context_info") else ""
+                _src_badge = bot.source_badge() if hasattr(bot, "source_badge") else "🧠 NSM Agent"
+
+            else:
+                # ── مسار free_router (الاحتياطي الأخير) ──────────────────
+                with st.chat_message("assistant", avatar="🧠"):
+                    _typing_ph = st.empty()
+                    _typing_ph.markdown(
+                        '''<div class="typing-wrap">
+                            <span class="thinking-ring">🧠</span>
+                            <span class="typing-dots"><span></span><span></span><span></span></span>
+                        </div>''',
+                        unsafe_allow_html=True,
+                    )
+                    try:
+                        _resp_raw = bot.chat(text.strip(), system_prompt=NSM_SYSTEM_PROMPT)
+                        _attempt_success = bool(_resp_raw and _resp_raw.strip())
+                    except Exception:
+                        _resp_raw = "⚠️ تعذّر الحصول على رد."
+                    _typing_ph.empty()
+                _response  = _resp_raw
+                _ctx_tag   = bot.context_info() if hasattr(bot, "context_info") else ""
+                _src_badge = bot.source_badge() if hasattr(bot, "source_badge") else "⚡ Free Router"
+
+            # ── قياس الزمن + تقييم الجودة + تسجيل النتيجة ────────────────
+            _latency_ms = (_time_mod.time() - _t0_route) * 1000
+            _total_latency += _latency_ms
+
+            # التقييم الثنائي القديم (فارغ/غير فارغ) يبقى كحد أدنى أولي،
+            # ثم نُدقّقه بتقييم الجودة الحقيقي إن كان متاحاً
+            _quality: dict = {}
+            if _attempt_success and _QUALITY_SCORER_OK:
+                try:
+                    _quality = _score_response(text.strip(), _response)
+                    _attempt_success = bool(_quality.get("is_quality", True))
+                except Exception:
+                    _quality = {}
+
+            if _NSM_BRIDGE_OK and _nsm_bridge:
+                _nsm_bridge.record_result(_selected_node, _attempt_success, _latency_ms)
+
+            # ── سجل التوجيه الحي (آخر 100 قرار) ──────────────────────────
+            _sem_icon = ""
+            if _NSM_SEMANTIC_OK and _nsm_semantic:
+                try:
+                    _sem_icon = _nsm_semantic.CATEGORY_LABELS.get(_sem_category, ("💬", ""))[0]
+                except Exception:
+                    _sem_icon = "💬"
+            _route_entry = {
+                "ts":         datetime.now().strftime("%H:%M:%S"),
+                "query":      text.strip()[:55] + ("…" if len(text.strip()) > 55 else ""),
+                "category":   _sem_category,
+                "cat_icon":   _sem_icon,
+                "confidence": round(_sem_confidence, 2),
+                "node":       _selected_node,
+                "latency_ms": round(_latency_ms),
+                "success":    _attempt_success,
+                "attempt":    _attempt + 1,
+                "failover":   _attempt > 0,
+                "quality_score": _quality.get("score"),
+            }
+            _rlog = st.session_state.setdefault("nsm_route_log", [])
+            _rlog.append(_route_entry)
+            if len(_rlog) > 100:
+                st.session_state["nsm_route_log"] = _rlog[-100:]
+            if _ROUTE_LOG_DB_OK:
+                _rlog_append(_route_entry)
+
+            if _attempt_success:
+                break   # نجاح — توقّف
+            _excluded_nodes.append(_selected_node)
+
+        # ════════════════════════════════════════════════════════════════════
+        # [5] حفظ + إظهار الرد النهائي
+        # ════════════════════════════════════════════════════════════════════
+        _source_key = "chat_openrouter" if "openrouter" in _final_node else "chat_nsm_agent"
+        _record_chat_episode(text.strip(), _response, source=_source_key)
+        st.session_state.nsm_messages.append((
+            "nsm", _response, _ctx_tag, _src_badge, datetime.now().strftime("%H:%M")
+        ))
+        _msg_idx = len(st.session_state.nsm_messages) - 1
+        if _TTS_OK and st.session_state.get("_nsm_voice_output") and _response.strip():
+            try:
+                with st.spinner("⟳ جارٍ تحويل الرد لصوت..."):
+                    _tts_result = _TTSEngineCls().synthesize(_response.strip())
+                if _tts_result.ok:
+                    import base64 as _b64
+                    _audio_cache = st.session_state.setdefault("_nsm_audio_cache", {})
+                    _audio_cache[_msg_idx] = (
+                        _b64.b64encode(_tts_result.audio_bytes).decode("ascii"),
+                        _tts_result.format,
+                    )
+            except Exception:
+                pass  # فشل TTS لا يجب أن يُعطّل عرض الرد النصي
+        if _AUTOTUNE_OK:
+            st.session_state["_af_last_turn"] = {
+                "response": _response, "params": _af_params_last,
+                "context_type": _af_ctx_last,
+                "model": _or_model_last if "openrouter" in _final_node else _src_badge,
+                "persona": "nsm", "rated": False,
+                "query": text.strip(),
+            }
+        st.session_state.nsm_count += 1
+        st.rerun()
+
+    if send and (user_input or st.session_state["chat_pending_files"]):
+        _process(user_input)
+
+    if _voice_query:
+        _process(_voice_query)
+
+    if hasattr(st.session_state, "_chat_pending"):
+        q = st.session_state._chat_pending
+        del st.session_state._chat_pending
+        _process(q)

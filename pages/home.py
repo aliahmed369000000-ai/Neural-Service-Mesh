@@ -1,0 +1,263 @@
+"""
+pages/home.py
+تم تفكيكه تلقائياً من streamlit_app.py الأصلي (تقسيم الكود لتحسين القابلية للصيانة والأداء).
+"""
+from __future__ import annotations
+
+from app_core import *  # noqa: F401,F403 — إعادة تصدير كل الاستيرادات والدوال المساعدة المشتركة
+
+
+
+def render_home():
+    """الصفحة الرئيسية — نظرة سريعة واستكشاف أقسام NSM."""
+
+    # ── 🎬 كيف يعمل NSM؟ — دليل تفاعلي بخط أنابيب متحرك يشرح رحلة السؤال ──
+    st.markdown('<div class="section-header">🎬 كيف يعمل NSM؟ <span class="live-dot"></span></div>',
+                unsafe_allow_html=True)
+
+    _pipeline_steps = [
+        ("📝", "إدخال عربي", "تكتب سؤالك", "تكتب سؤالك أو مفهومك بالعربية الفصحى — بدون أي قوالب أو صياغة خاصة، تماماً كما تتحدث."),
+        ("🌱", "تحليل الجذر", "استخراج الجذر اللغوي", "يحلّل النظام الجذر الثلاثي/الرباعي والبنية الصرفية للكلمة من قاعدة تضم آلاف الجذور العربية المكتشفة."),
+        ("🕸️", "ربط CKG", "شبكة المفاهيم المعرفية", "يربط المفهوم بشبكة المعرفة الحية (CKG) — آلاف المفاهيم وعشرات آلاف العلاقات المستنتجة بينها."),
+        ("📖", "مطابقة قرآنية", "بحث آية بآية", "يبحث آلياً عن الآيات القرآنية ذات الصلة الدلالية بالمفهوم، مربوطة بنفس شبكة الجذور والمعاني."),
+        ("💬", "رد ذكي", "إجابة مدعومة بالسياق", "يولّد رداً نهائياً مدعوماً بالمصادر والسياق المستخرج من كل الخطوات السابقة، بالعربية الفصحى."),
+    ]
+
+    _nodes_html = "".join(
+        f'''<div class="pipeline-node{' active' if i == 0 else ''}" data-step="{i}"
+                data-title="{title}" data-text="{text}" data-icon="{icon}">
+            <div class="pipeline-node-icon">{icon}</div>
+            <div class="pipeline-node-title">{label}</div>
+        </div>'''
+        for i, (icon, label, title, text) in enumerate(_pipeline_steps)
+    )
+    _dots_html = "".join(
+        f'<span class="{"active" if i == 0 else ""}" data-dot="{i}"></span>'
+        for i in range(len(_pipeline_steps))
+    )
+    _icon0, _label0, _title0, _text0 = _pipeline_steps[0]
+
+    st.markdown(f"""
+    <div class="nsm-pipeline-wrap">
+        <div class="nsm-pipeline" id="nsm-pipeline" tabindex="0"
+             role="group" aria-label="خطوات عمل NSM — استخدم الأسهم للتنقّل">
+            <div class="nsm-pipeline-track"><div class="nsm-pipeline-track-fill" id="nsm-pipeline-fill"></div></div>
+            {_nodes_html}
+        </div>
+        <div class="pipeline-detail">
+            <div class="pipeline-detail-inner" id="nsm-pipeline-detail">
+                <div class="pipeline-detail-title"><span id="nsm-pd-icon">{_icon0}</span>
+                    <span id="nsm-pd-title">{_title0}</span>
+                    <span class="pipeline-step-counter" id="nsm-pd-counter">1 / {len(_pipeline_steps)}</span>
+                </div>
+                <div class="pipeline-detail-text" id="nsm-pd-text">{_text0}</div>
+            </div>
+        </div>
+        <div class="pipeline-progress-hint">{_dots_html}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.components.v1.html("""
+    <script>
+    (function() {
+        const doc = window.parent.document;
+        const pipeline = doc.getElementById('nsm-pipeline');
+        if (!pipeline || pipeline.dataset.nsmBound) return;
+        pipeline.dataset.nsmBound = "1";
+
+        const nodes = Array.from(pipeline.querySelectorAll('.pipeline-node'));
+        const fill  = doc.getElementById('nsm-pipeline-fill');
+        const dInner= doc.getElementById('nsm-pipeline-detail');
+        const dIcon = doc.getElementById('nsm-pd-icon');
+        const dTitle= doc.getElementById('nsm-pd-title');
+        const dText = doc.getElementById('nsm-pd-text');
+        const dCounter = doc.getElementById('nsm-pd-counter');
+        const dots  = Array.from(doc.querySelectorAll('.pipeline-progress-hint span'));
+        const total = nodes.length;
+        let current = 0;
+        let timer = null;
+        let paused = false;
+
+        function setActive(idx, fromClick) {
+            current = ((idx % total) + total) % total;
+            nodes.forEach((n, i) => n.classList.toggle('active', i === current));
+            dots.forEach((d, i) => d.classList.toggle('active', i === current));
+            if (fill) fill.style.width = (current / (total - 1) * 100) + '%';
+            if (dInner) {
+                dInner.style.opacity = '0';
+                setTimeout(function() {
+                    const n = nodes[current];
+                    dIcon.textContent    = n.getAttribute('data-icon');
+                    dTitle.textContent   = n.getAttribute('data-title');
+                    dText.textContent    = n.getAttribute('data-text');
+                    if (dCounter) dCounter.textContent = (current + 1) + ' / ' + total;
+                    dInner.style.opacity = '1';
+                }, 180);
+            }
+            if (fromClick) restart();
+        }
+
+        function tick() { if (!paused) setActive(current + 1, false); }
+        function restart() {
+            if (timer) clearInterval(timer);
+            timer = setInterval(tick, 3400);
+        }
+
+        nodes.forEach((n, i) => {
+            n.addEventListener('click', function() { setActive(i, true); });
+        });
+
+        // إيقاف مؤقت أثناء التحويم/اللمس حتى لا يفوّت القارئ الوصف
+        pipeline.addEventListener('mouseenter', function() { paused = true; });
+        pipeline.addEventListener('mouseleave', function() { paused = false; });
+        pipeline.addEventListener('touchstart', function() { paused = true; }, { passive: true });
+
+        // تنقّل بالأسهم (يمين/يسار) عند تركيز العنصر — يدعم اتجاه RTL
+        pipeline.addEventListener('keydown', function(e) {
+            if (e.key === 'ArrowLeft') { setActive(current + 1, true); e.preventDefault(); }
+            else if (e.key === 'ArrowRight') { setActive(current - 1, true); e.preventDefault(); }
+        });
+
+        setActive(0, false);
+        restart();
+    })();
+    </script>
+    """, height=0)
+
+    st.markdown("")
+    st.markdown('<div class="section-header">🚀 استكشف NSM</div>', unsafe_allow_html=True)
+
+    _features = [
+        ("🔍", "البحث المعرفي", "ابحث عن أي مفهوم (الصبر، الجاذبية، الرحمة، العدل...) وشاهد الآيات المرتبطة والجذور والعلاقات المعرفية.", "📚 المعرفة"),
+        ("💬", "محادثة ذكية", "تحدّث مع النظام بالعربية الفصحى، مدعوماً بشبكة المفاهيم المعرفية.", "💬 المحادثة"),
+        ("📖", "القرآن الكريم", "بحث آية بآية، مرتبط تلقائياً بشبكة المفاهيم والجذور العربية.", "📚 المعرفة"),
+        ("🤖", "الوكلاء الأذكياء", "وكلاء مستقلون للتنفيذ والتنسيق ضمن سرب ذكي متكامل.", "🤖 الوكلاء"),
+        ("🎭", "المحتوى الإبداعي", "توليد نصوص ومحتوى إبداعي عربي بأسلوب متعدد الأنماط.", "🎭 إبداع"),
+    ]
+    _cards_html = "".join(f"""
+            <div class="feature-card" data-tab-target="{_target_tab}" tabindex="0" role="button">
+                <div class="feature-icon">{_icon}</div>
+                <div class="feature-title">{_title}</div>
+                <div class="feature-desc">{_desc}</div>
+                <div class="feature-nav-hint">← انتقل إلى هذا القسم</div>
+            </div>""" for _icon, _title, _desc, _target_tab in _features)
+    st.markdown(f'<div class="feature-scroll">{_cards_html}</div>', unsafe_allow_html=True)
+
+    # ── سكربت: عدّادات متحركة للمقاييس + نقر بطاقات الاستكشاف للتنقّل ──
+    # تنبيه: كان هذا مُحقناً سابقاً عبر st.markdown، وهو أسلوب لا يُنفَّذ
+    # فيه <script> أبداً (عنصر <script> المُدرَج عبر innerHTML لا يعمل،
+    # سلوك موثّق بالمتصفحات وليس مجرد "أحياناً" — لهذا كان النقر على
+    # البطاقات بلا أي أثر). الحل المضمون: st.components.v1.html الذي
+    # يُنشئ iframe حقيقياً يُنفَّذ فيه JS، ومنه نصل للصفحة الأم عبر
+    # window.parent.document (نفس الحل المطبَّق أعلاه لتلوين التبويبات).
+    #
+    # ملاحظة إضافية: فهرس كل تبويب هدف بترتيب قائمة _tab_defs الفعلية
+    # (بدالة main، أسفل الملف) — يُستخدم كخط دفاع ثانٍ بعد المطابقة
+    # النصية، لأن بنية DOM الداخلية لِـ st.tabs قد تختلف بين إصدارات
+    # Streamlit (data-baseweb مقابل role="tab" ...إلخ)، فالاعتماد على
+    # نص + فهرس معاً أكثر مقاومة لتغيّر الإصدار من نص فقط.
+    # الترتيب الحالي: 0=الرئيسية 1=المعرفة 2=المحادثة 3=الوكلاء 4=إبداع
+    _tab_index_map = {"📚 المعرفة": 1, "💬 المحادثة": 2, "🤖 الوكلاء": 3, "🎭 إبداع": 4}
+    # أداء: هذا السكربت (iframe جديد + مسح DOM) كان يُعاد حقنه بالكامل من
+    # جديد عند *كل* rerun لتبويب الرئيسية — أي عند كل تفاعل بأي مكان
+    # بالتطبيق، لأن render_home() يُنفَّذ دوماً بغض النظر عن التبويب
+    # النشط فعلياً (st.tabs تُخفي المحتوى بصرياً فقط ولا توقف تنفيذه).
+    # هذا آمن للتخطي بعد أول حقن لأن الـMutationObserver بداخله يبقى حياً
+    # ويعيد ربط العدّادات وبطاقات التنقل ذاتياً عند أي إعادة رسم لاحقة
+    # لها (كما يوثّق تعليق الكود بالأسفل)، تماماً كما هو مُثبَت ومُطبَّق
+    # مسبقاً على سكربت تلوين التبويبات (أعلاه في هذا الملف).
+    if not st.session_state.get("_nsm_home_cards_js_injected"):
+        st.session_state["_nsm_home_cards_js_injected"] = True
+        st.components.v1.html("""
+    <script>
+    (function() {
+        const doc = window.parent.document;
+        const TAB_INDEX = """ + str(_tab_index_map).replace("'", '"') + """;
+
+        function findTabElements() {
+            // عدّة استراتيجيات بترتيب الأولوية — أول واحدة تُعيد نتائج تُستخدم
+            const strategies = [
+                '.stTabs [role="tablist"] [role="tab"]',
+                '[role="tablist"] [role="tab"]',
+                '.stTabs [data-baseweb="tab-list"] [data-baseweb="tab"]',
+                '[data-baseweb="tab-list"] [data-baseweb="tab"]',
+                '[data-testid="stTab"]'
+            ];
+            for (const sel of strategies) {
+                const found = doc.querySelectorAll(sel);
+                if (found && found.length) return Array.from(found);
+            }
+            return [];
+        }
+
+        function fireFullClick(el) {
+            const opts = { bubbles: true, cancelable: true, view: doc.defaultView || window };
+            try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (e) {}
+            el.dispatchEvent(new MouseEvent('mousedown', opts));
+            el.dispatchEvent(new MouseEvent('mouseup', opts));
+            el.dispatchEvent(new MouseEvent('click', opts));
+            el.click();
+        }
+
+        function goToTab(label) {
+            const tabs = findTabElements();
+            if (!tabs.length) return false;
+            const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
+            // 1) مطابقة نصية دقيقة
+            let target = tabs.find(t => norm(t.textContent) === norm(label));
+            // 2) مطابقة نصية جزئية (احتياط لو أضيف نص إضافي مخفي بالعنصر)
+            if (!target) target = tabs.find(t => norm(t.textContent).includes(norm(label)));
+            // 3) مطابقة بالفهرس الرقمي كخط دفاع أخير
+            if (!target && TAB_INDEX.hasOwnProperty(label) && tabs[TAB_INDEX[label]]) {
+                target = tabs[TAB_INDEX[label]];
+            }
+            if (!target) return false;
+            fireFullClick(target);
+            return true;
+        }
+
+        function bindAll() {
+            // 1) عدّاد متحرك من 0 حتى القيمة الفعلية لكل بطاقة مقياس
+            const counters = doc.querySelectorAll('.metric-value[data-count-target]');
+            counters.forEach(function(el) {
+                if (el.dataset.nsmAnimated) return;
+                el.dataset.nsmAnimated = "1";
+                const target = parseInt(el.getAttribute('data-count-target'), 10) || 0;
+                const duration = 900;
+                const start = performance.now();
+                function tick(now) {
+                    const p = Math.min(1, (now - start) / duration);
+                    const eased = 1 - Math.pow(1 - p, 3);
+                    el.textContent = Math.round(eased * target).toLocaleString('en-US');
+                    if (p < 1) requestAnimationFrame(tick);
+                    else el.textContent = target.toLocaleString('en-US');
+                }
+                requestAnimationFrame(tick);
+            });
+
+            // 2) نقر بطاقة الاستكشاف ← تفعيل تبويب Streamlit المطابق بالاسم
+            const cards = doc.querySelectorAll('.feature-card[data-tab-target]');
+            cards.forEach(function(card) {
+                if (card.dataset.nsmBound) return;
+                card.dataset.nsmBound = "1";
+                card.addEventListener('click', function() {
+                    const label = card.getAttribute('data-tab-target');
+                    if (!goToTab(label)) {
+                        // إعادة محاولة واحدة بعد لحظة قصيرة احتياطاً لتأخر رسم التبويبات
+                        setTimeout(function() { goToTab(label); }, 200);
+                    }
+                });
+                // إتاحة: تفعيل بالضغط على Enter/مسافة أيضاً (tabindex="0" role="button")
+                card.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click(); }
+                });
+            });
+        }
+
+        bindAll();
+        // البطاقات تُعاد رسمتها بكل rerun من Streamlit، فنراقب DOM
+        // الصفحة الأم ونعيد الربط تلقائياً بدل الاكتفاء بمرة واحدة فقط.
+        new MutationObserver(bindAll).observe(doc.body, { childList: true, subtree: true });
+    })();
+    </script>
+    """, height=0)
