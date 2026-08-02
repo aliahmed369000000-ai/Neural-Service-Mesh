@@ -147,9 +147,14 @@ def _render_agent_page(category):
 
     c1, c2 = st.columns([5, 1.2], gap="small")
     with c1:
+        # مفتاح مُرقَّم (versioned key): نفس إصلاح ui_pages/chat.py — لا يمكن
+        # تعديل session_state لويدجت بعد إنشائه بنفس تشغيل السكربت، لذلك
+        # نغيّر الـkey نفسه بعد كل إرسال بدل محاولة مسح القيمة مباشرة.
+        st.session_state.setdefault(f"_agent_input_version_{category.key}", 0)
+        _input_key = f"agent_input_{category.key}_v{st.session_state[f'_agent_input_version_{category.key}']}"
         user_input = st.text_area(
             label="سؤالك", placeholder=f"اسأل وكيل {category.title}…",
-            key=f"agent_input_{category.key}", label_visibility="collapsed", height=88,
+            key=_input_key, label_visibility="collapsed", height=88,
         )
     with c2:
         send = st.button("➤ إرسال", key=f"agent_send_{category.key}", use_container_width=True)
@@ -195,13 +200,27 @@ def _render_agent_page(category):
                 if st.button(q, key=f"agent_q_{category.key}_{i}", use_container_width=True):
                     st.session_state[f"_agent_pending_{category.key}"] = q
 
-    col_clear, col_export = st.columns(2)
+    _has_msgs = bool(st.session_state[msg_key])
+    _last_is_bot = _has_msgs and st.session_state[msg_key][-1][0] == "bot"
+    col_clear, col_regen, col_export = st.columns(3)
     with col_clear:
-        if st.button("🗑 مسح المحادثة", key=f"agent_clear_{category.key}", use_container_width=True):
+        if st.button("🗑 مسح المحادثة", key=f"agent_clear_{category.key}", use_container_width=True, disabled=not _has_msgs):
             st.session_state[msg_key] = []
             st.session_state[cnt_key] = 0
             bot.clear_history()
             st.rerun()
+    with col_regen:
+        if st.button("🔄 إعادة توليد آخر رد", key=f"agent_regenerate_{category.key}",
+                      use_container_width=True, disabled=not _last_is_bot):
+            _last_user_text = None
+            for _m in reversed(st.session_state[msg_key][:-1]):
+                if _m[0] == "user":
+                    _last_user_text = _m[1]
+                    break
+            if _last_user_text:
+                st.session_state[msg_key].pop()
+                st.session_state[f"_agent_regen_pending_{category.key}"] = _last_user_text
+                st.rerun()
     with col_export:
         if st.session_state[msg_key]:
             _export_lines = [f"# محادثة مع وكيل {category.title}\n"]
@@ -228,14 +247,20 @@ def _render_agent_page(category):
                 _preview = _text if len(_text) <= 140 else _text[:140] + "…"
                 st.caption(f"{_tag} `{_ts}` — {_preview}")
 
-    def _process(text: str):
+    def _process(text: str, add_user_msg: bool = True):
         if not text.strip():
             return
+
+        # فرّغ مربع الإدخال فور الإرسال — انظر تعليق مفتاح الويدجت أعلاه.
+        _vkey = f"_agent_input_version_{category.key}"
+        st.session_state[_vkey] = st.session_state.get(_vkey, 0) + 1
+
         _ts_now = datetime.now().strftime("%H:%M")
-        _display_text = text.strip()
-        if file_label:
-            _display_text = f"{_display_text}\n\n{file_label}"
-        st.session_state[msg_key].append(("user", _display_text, "", _ts_now))
+        if add_user_msg:
+            _display_text = text.strip()
+            if file_label:
+                _display_text = f"{_display_text}\n\n{file_label}"
+            st.session_state[msg_key].append(("user", _display_text, "", _ts_now))
 
         _safety_msg = _nsm_safety_gate(text.strip())
         if _safety_msg:
@@ -272,3 +297,9 @@ def _render_agent_page(category):
         q = st.session_state[pending_key]
         del st.session_state[pending_key]
         _process(q)
+
+    regen_key = f"_agent_regen_pending_{category.key}"
+    if regen_key in st.session_state:
+        q = st.session_state[regen_key]
+        del st.session_state[regen_key]
+        _process(q, add_user_msg=False)
