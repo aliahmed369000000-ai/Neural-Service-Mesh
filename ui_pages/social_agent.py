@@ -296,6 +296,7 @@ def render_social_agent():
         if not events:
             st.caption("لا توجد أحداث بعد.")
         else:
+            _event_export_lines = []
             for platform, event_type, author, content, reply_content, created_at, ok, sentiment, sentiment_score in events:
                 label = PLATFORM_LABELS_AR.get(platform, platform)
                 ev_label = _EVENT_TYPE_AR.get(event_type, event_type)
@@ -303,3 +304,9 @@ def render_social_agent():
                 snippet = (content or "")[:80]
                 line = f"{status_icon} {label} · {ev_label} · {created_at} — {snippet}"
                 st.caption(line)
+                _event_export_lines.append(line)
+            st.download_button(
+                "⬇️ تصدير سجل الأحداث", data="\n".join(_event_export_lines),
+                file_name=f"nsm_social_events_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+                mime="text/plain", key="social_events_export",
+            )
