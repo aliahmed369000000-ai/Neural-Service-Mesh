@@ -371,52 +371,36 @@ def render_chat():
     """, height=0)
 
     # ── تقييم آخر رد (👍/👎) لتغذية autotune_feedback ──
+    # يستخدم مكوّن Streamlit الأصلي st.feedback("thumbs") بدل زرَّين
+    # منفصلين مكرَّرَين — نفس السلوك (اختيار مرة واحدة ثم يختفي) بكود
+    # أقصر وتناسق بصري أفضل مع بقية عناصر الإدخال في Streamlit.
+    # المؤشر المُعاد: 0 = 👎، 1 = 👍 (موثّق رسمياً بمرجع st.feedback).
     if _AUTOTUNE_OK:
         _af_turn = st.session_state.get("_af_last_turn")
         if _af_turn and not _af_turn.get("rated"):
-            _af_c1, _af_c2, _af_c3 = st.columns([1, 1, 6])
-            with _af_c1:
-                if st.button("👍", key="_af_up", help="رد جيد — ساعد النظام يتعلّم"):
-                    _heur = _af_compute_heuristics(_af_turn["response"])
-                    _af_process_feedback(_AFFeedbackRecord(
-                        message_id=str(st.session_state.nsm_count),
-                        timestamp=datetime.now().timestamp(),
-                        context_type=_af_turn["context_type"],
-                        model=_af_turn["model"],
-                        persona=_af_turn["persona"],
-                        params=_af_turn["params"],
-                        rating=1,
-                        heuristics=vars(_heur),
-                    ))
-                    try:
-                        from ai.learning_orchestrator import get_orchestrator
-                        get_orchestrator().feedback(_af_turn.get("query", ""), is_positive=True)
-                    except Exception:
-                        pass
-                    _af_turn["rated"] = True
-                    st.toast("✅ شكراً — تم تسجيل التقييم")
-                    st.rerun()
-            with _af_c2:
-                if st.button("👎", key="_af_down", help="رد غير جيد — ساعد النظام يتعلّم"):
-                    _heur = _af_compute_heuristics(_af_turn["response"])
-                    _af_process_feedback(_AFFeedbackRecord(
-                        message_id=str(st.session_state.nsm_count),
-                        timestamp=datetime.now().timestamp(),
-                        context_type=_af_turn["context_type"],
-                        model=_af_turn["model"],
-                        persona=_af_turn["persona"],
-                        params=_af_turn["params"],
-                        rating=-1,
-                        heuristics=vars(_heur),
-                    ))
-                    try:
-                        from ai.learning_orchestrator import get_orchestrator
-                        get_orchestrator().feedback(_af_turn.get("query", ""), is_positive=False)
-                    except Exception:
-                        pass
-                    _af_turn["rated"] = True
-                    st.toast("✅ شكراً — تم تسجيل التقييم")
-                    st.rerun()
+            _af_selected = st.feedback("thumbs", key="_af_feedback_widget")
+            if _af_selected is not None:
+                _af_is_positive = _af_selected == 1
+                _heur = _af_compute_heuristics(_af_turn["response"])
+                _af_process_feedback(_AFFeedbackRecord(
+                    message_id=str(st.session_state.nsm_count),
+                    timestamp=datetime.now().timestamp(),
+                    context_type=_af_turn["context_type"],
+                    model=_af_turn["model"],
+                    persona=_af_turn["persona"],
+                    params=_af_turn["params"],
+                    rating=1 if _af_is_positive else -1,
+                    heuristics=vars(_heur),
+                ))
+                try:
+                    from ai.learning_orchestrator import get_orchestrator
+                    get_orchestrator().feedback(_af_turn.get("query", ""), is_positive=_af_is_positive)
+                except Exception:
+                    pass
+                _af_turn["rated"] = True
+                st.toast("✅ شكراً — تم تسجيل التقييم")
+                st.rerun()
+
 
     # ══════════════════════════════════════════════════════════════════
     # ✍️ قسم تأليف الرسالة — يجمع كل أدوات الإدخال (إرفاق + كتابة + صوت)
