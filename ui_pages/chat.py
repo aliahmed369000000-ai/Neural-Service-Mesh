@@ -225,7 +225,7 @@ def render_chat():
     # رأس التبويب
     col_t, col_s = st.columns([3,1])
     with col_t:
-        st.markdown("### 💬 المحادثة الذكية")
+        st.markdown('<div class="section-header">💬 المحادثة الذكية</div>', unsafe_allow_html=True)
         _mode = "🤖 LLM · Cloudflare / Gemini / Groq"
         st.caption(f"يتذكر السياق · {_mode} · الذكاء في الأوزان")
     with col_s:
@@ -428,12 +428,11 @@ def render_chat():
                 st.toast("✅ شكراً — تم تسجيل التقييم")
                 st.rerun()
 
-
     # ══════════════════════════════════════════════════════════════════
     # ✍️ قسم تأليف الرسالة — يجمع كل أدوات الإدخال (إرفاق + كتابة + صوت)
     # في مكان واحد متتابع بدل تفرّقها بين أعلى وأسفل سجل المحادثة
     # ══════════════════════════════════════════════════════════════════
-    st.markdown("---")
+    st.markdown('<div class="section-header">✍️ رسالة جديدة</div>', unsafe_allow_html=True)
 
     # ── إرفاق ملف أو صورة (multimodal عبر OpenRouter) ─────────────────────
     _or_key_chat = st.session_state.get("_or_api_key", "").strip()
@@ -623,6 +622,7 @@ def render_chat():
 
     # أدوات المحادثة: مسح / إعادة توليد آخر رد / تصدير — بجانب بعضها
     # (لا بعد أدوات المالك)
+    st.caption("🛠️ أدوات المحادثة")
     _has_msgs = bool(st.session_state.nsm_messages)
     _last_is_nsm = _has_msgs and st.session_state.nsm_messages[-1][0] == "nsm"
     _tool_col1, _tool_col2, _tool_col3 = st.columns(3)
