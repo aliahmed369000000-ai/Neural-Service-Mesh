@@ -27,15 +27,30 @@ _last_push_ok: bool       = False
 _last_push_msg: str       = "never pushed"
 
 
+def _redact(text: str) -> str:
+    """يزيل أي توكن GitHub من نص مخرجات git قبل تخزينه/تسجيله — git أحياناً
+    يُدرج الـremote URL كاملاً (بالتوكن المضمَّن https://user:TOKEN@host/...)
+    داخل رسائل الخطأ عند فشل push، وهذه الرسائل تُعرض لاحقاً بواجهة التدريب
+    (ui_pages/training.py) — بدون هذا الفلتر يتسرّب التوكن لأي مستخدم يفتح
+    تلك الصفحة، وليس فقط للمالك."""
+    token = (
+        os.environ.get("GITHUB_TOKEN", "").strip()
+        or os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN", "").strip()
+    )
+    if token and token in text:
+        text = text.replace(token, "***")
+    return text
+
+
 def _run(cmd: list[str], cwd: str | None = None) -> tuple[int, str]:
     try:
         r = subprocess.run(
             cmd, capture_output=True, text=True,
             timeout=60, cwd=cwd or os.getcwd(),
         )
-        return r.returncode, (r.stdout + r.stderr).strip()
+        return r.returncode, _redact((r.stdout + r.stderr).strip())
     except Exception as exc:
-        return 1, str(exc)
+        return 1, _redact(str(exc))
 
 
 def _token_remote() -> str | None:

@@ -6,6 +6,7 @@ Neural Service Mesh — FastAPI Backend
 
 from __future__ import annotations
 
+import hmac
 import os
 import sys
 from pathlib import Path
@@ -83,8 +84,10 @@ async def telegram_webhook(secret: str, request: Request):
     البيانات — نفس مبدأ 'لا بيانات مزيّفة، لا معالجة غير موثّقة' المتّبع
     بكل محولات المنصة."""
     configured_secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
-    header_secret = request.headers.get("x-telegram-bot-api-secret-token")
-    if not configured_secret or secret != configured_secret or header_secret != configured_secret:
+    header_secret = request.headers.get("x-telegram-bot-api-secret-token") or ""
+    path_ok = bool(configured_secret) and hmac.compare_digest(secret, configured_secret)
+    header_ok = bool(configured_secret) and hmac.compare_digest(header_secret, configured_secret)
+    if not (path_ok and header_ok):
         return JSONResponse(status_code=403, content={"error": "secret غير مطابق"})
 
     try:

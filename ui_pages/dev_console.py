@@ -26,7 +26,7 @@ def render_dev_console():
     if not st.session_state.get("_dev_console_unlocked", False):
         entered = st.text_input("مفتاح المالك", type="password", key="dev_console_key_input")
         if st.button("🔓 فتح لوحة المطوّر", key="dev_console_unlock"):
-            if entered == _admin_key_env:
+            if hmac.compare_digest(entered, _admin_key_env):
                 st.session_state["_dev_console_unlocked"] = True
                 st.rerun()
             else:
