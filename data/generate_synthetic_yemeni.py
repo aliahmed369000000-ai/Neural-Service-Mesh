@@ -178,6 +178,19 @@ def _clean_and_parse_json_array(raw_text: str) -> List[Dict[str, Any]]:
         except json.JSONDecodeError:
             last_complete = text.rfind("},", 0, last_complete)
 
+    # حالة أضيق: عنصر واحد فقط مقطوع بدون أي "}," (لا يوجد عنصر ثانٍ يسبقه) —
+    # نبحث من النهاية للبداية عن أقرب "}" ينتج JSON صالحاً عند إغلاقه، بنفس
+    # منطق الحلقة أعلاه، بدل افتراض أول "}" (قد يكون داخل نص القيمة نفسه).
+    single_close = text.rfind("}")
+    while single_close != -1:
+        candidate = text[:single_close + 1] + "]"
+        try:
+            data = json.loads(candidate)
+            logger.warning("[synth] تم اقتطاع استجابة ناقصة (عنصر واحد) وإصلاحها")
+            return data if isinstance(data, list) else []
+        except json.JSONDecodeError:
+            single_close = text.rfind("}", 0, single_close)
+
     logger.warning(f"[synth] فشل تحليل JSON نهائياً — أول 200 حرف: {text[:200]!r}")
     return []
 
