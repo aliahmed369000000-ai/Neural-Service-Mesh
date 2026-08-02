@@ -5,6 +5,8 @@ whatsapp_client.py — طبقة رقيقة فوق WhatsApp Cloud API الرسم�
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
 from typing import Optional
 
@@ -25,6 +27,21 @@ def verify_webhook_challenge(
     if mode == "subscribe" and token == expected_token:
         return challenge
     return None
+
+
+def verify_signature(raw_body: bytes, signature_header: Optional[str]) -> bool:
+    """يتحقق من توقيع X-Hub-Signature-256 الذي ترسله Meta مع كل POST
+    (HMAC-SHA256 على الجسم الخام باستخدام WHATSAPP_APP_SECRET) — نسخة
+    طبق الأصل من ai/social_platforms/whatsapp_adapter.py. بدون هذا
+    التحقق كان أي طرف يعرف رابط الـwebhook يقدر يزوّر رسائل واتساب
+    واردة ويتلاعب بحالة المحادثة (state_store) ويُطلق ردوداً حقيقية
+    (send_text_message) بدون أي علاقة فعلية بـMeta."""
+    app_secret = os.getenv("WHATSAPP_APP_SECRET", "").strip()
+    if not app_secret or not signature_header or not signature_header.startswith("sha256="):
+        return False
+    sig = signature_header.split("=", 1)[1].strip()
+    expected = hmac.new(app_secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, sig)
 
 
 def send_text_message(to_phone: str, text: str) -> None:
