@@ -11,6 +11,85 @@ from app_core import *  # noqa: F401,F403 — إعادة تصدير كل الا�
 def render_home():
     """الصفحة الرئيسية — نظرة سريعة واستكشاف أقسام NSM."""
 
+    # فهرس التبويبات الرئيسية بترتيبها الفعلي في main() (streamlit_app.py):
+    # 0=الرئيسية 1=المعرفة 2=المحادثة 3=الوكلاء 4=إبداع. مُعرَّف هنا أول
+    # الدالة لأنه يُستخدم في أكثر من موضع أدناه (بطاقات الاستكشاف + التنقّل
+    # الآلي بعد البحث السريع/متابعة المحادثة) — نسخة واحدة بدل تكرارها.
+    _tab_index_map = {"📚 المعرفة": 1, "💬 المحادثة": 2, "🤖 الوكلاء": 3, "🎭 إبداع": 4}
+
+    # ── 🧭 تنقّل آلي معلَّق: بعد أي زر Python حقيقي (بحث سريع / متابعة
+    # محادثة أدناه) يطلب الانتقال لتبويب معيّن، نخزّن الهدف بـsession_state
+    # ثم st.rerun()، وهنا — أول ما تُعاد الصفحة — نحقن سكربت مرة واحدة
+    # يحاكي نفس نقرة التبويب المستخدمة أصلاً ببطاقات الاستكشاف (أسفل)،
+    # بدل تكرار منطق البحث عن عناصر التبويب من جديد في كل مكان.
+    _jump_target = st.session_state.pop("_nsm_home_jump_target", None)
+    if _jump_target:
+        st.components.v1.html("""
+        <script>
+        (function() {
+            const doc = window.parent.document;
+            const label = """ + json.dumps(_jump_target) + """;
+            function findTabElements() {
+                const strategies = [
+                    '.stTabs [role="tablist"] [role="tab"]',
+                    '[role="tablist"] [role="tab"]',
+                    '.stTabs [data-baseweb="tab-list"] [data-baseweb="tab"]',
+                    '[data-baseweb="tab-list"] [data-baseweb="tab"]',
+                    '[data-testid="stTab"]'
+                ];
+                for (const sel of strategies) {
+                    const found = doc.querySelectorAll(sel);
+                    if (found && found.length) return Array.from(found);
+                }
+                return [];
+            }
+            function fireFullClick(el) {
+                const opts = { bubbles: true, cancelable: true, view: doc.defaultView || window };
+                try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (e) {}
+                el.dispatchEvent(new MouseEvent('mousedown', opts));
+                el.dispatchEvent(new MouseEvent('mouseup', opts));
+                el.dispatchEvent(new MouseEvent('click', opts));
+                el.click();
+            }
+            function attempt(tries) {
+                const tabs = findTabElements();
+                const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
+                let target = tabs.find(t => norm(t.textContent) === norm(label));
+                if (!target) target = tabs.find(t => norm(t.textContent).includes(norm(label)));
+                if (target) { fireFullClick(target); return; }
+                if (tries > 0) setTimeout(function() { attempt(tries - 1); }, 150);
+            }
+            attempt(12);
+        })();
+        </script>
+        """, height=0)
+
+    # ── ↩️ أكمل من حيث توقفت — يظهر فقط لمن لديه محادثة سابقة بهذه
+    # الجلسة (nsm_messages تُعبَّأ من ui_pages/chat.py)؛ لا شيء يظهر لزائر
+    # جديد بلا سجل، تفادياً لعنصر واجهة فارغ أو مضلِّل ──
+    _prev_msgs = st.session_state.get("nsm_messages") or []
+    _last_user_msg = next((m[1] for m in reversed(_prev_msgs) if m and m[0] == "user"), "")
+    if _last_user_msg:
+        _preview = _last_user_msg.strip().replace("\n", " ")
+        if len(_preview) > 110:
+            _preview = _preview[:110].rstrip() + "…"
+        st.markdown('<div class="section-header">↩️ أكمل من حيث توقفت</div>', unsafe_allow_html=True)
+        _cont_cols = st.columns([5, 1])
+        with _cont_cols[0]:
+            st.markdown(f"""
+            <div class="concept-card" style="margin-bottom:0;">
+                <div style="color:var(--text-muted);font-size:0.82rem;margin-bottom:0.3rem;">
+                    آخر سؤال في المحادثة ({len(_prev_msgs)} رسالة)
+                </div>
+                <div style="font-size:0.98rem;">💬 {_preview}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with _cont_cols[1]:
+            if st.button("متابعة ←", key="home_continue_chat", use_container_width=True):
+                st.session_state["_nsm_home_jump_target"] = "💬 المحادثة"
+                st.rerun()
+        st.markdown("")
+
     # ══════════════════════════════════════════════════════════════════
     # 📊 الشبكة المعرفية بالأرقام — أعداد حقيقية من CKG المحمَّل فعلياً
     # (لا بيانات وهمية). تُخفى الفقرة كاملة تلقائياً إن تعذّر تحميل
@@ -151,6 +230,66 @@ def render_home():
     """, height=0)
 
     st.markdown("---")
+
+    # ── 🔎 جرّب البحث الآن — بحث معرفي فوري من الصفحة الرئيسية، بلا حاجة
+    # للانتقال لتبويب البحث أولاً. يستخدم نفس محرك search_knowledge
+    # المستخدم فعلياً بتبويب "🔍 البحث المعرفي" (ui_pages/search.py) —
+    # لا منطق بحث موازٍ أو مكرر، فقط عرض مصغَّر للنتيجة هنا ──
+    st.markdown('<div class="section-header">🔎 جرّب البحث الآن</div>', unsafe_allow_html=True)
+    with st.form("home_quick_search_form", clear_on_submit=False):
+        _qs_cols = st.columns([5, 1])
+        with _qs_cols[0]:
+            _qs_query = st.text_input(
+                "", placeholder="اكتب مفهوماً... مثل: الصبر، الجاذبية، التوبة، العلم",
+                key="home_quick_search_input", label_visibility="collapsed",
+            )
+        with _qs_cols[1]:
+            _qs_submitted = st.form_submit_button("🔎 ابحث", use_container_width=True)
+
+    if _qs_submitted and _qs_query.strip():
+        with st.spinner("🔍 جارٍ البحث..."):
+            _qs_result = search_knowledge(_qs_query.strip())
+        st.session_state["_nsm_home_last_quick_search"] = (_qs_query.strip(), _qs_result)
+
+    _qs_cached = st.session_state.get("_nsm_home_last_quick_search")
+    if _qs_cached:
+        _qs_q, _qs_result = _qs_cached
+        if not _qs_result["found"]:
+            st.warning(f"لم يُعثر على معلومات كافية عن «{_qs_q}» حتى الآن. يتعلم النظام بشكل مستمر!")
+        else:
+            _related = []
+            if _qs_result["ckg_related"]:
+                _related = _qs_result["ckg_related"]
+            elif _qs_result["root_matches"]:
+                _related = [m[0] for m in _qs_result["root_matches"] if m[0] != _qs_q]
+            _tags_html = "".join(f'<span class="related-tag">{c}</span>' for c in _related[:3])
+
+            _ayah_html = ""
+            if _qs_result["quran_matches"]:
+                _a = _qs_result["quran_matches"][0]
+                _ayah_html = f"""<div class="quran-verse" style="margin-top:0.6rem;">
+                    {_a.get('text', '')}
+                    <div class="verse-ref">سورة {_a.get('surah', '')}، الآية {_a.get('ayah', '')}</div>
+                </div>"""
+
+            st.markdown(f"""
+            <div class="concept-card">
+                <div class="concept-name">💡 {_qs_result['query']}</div>
+                <div style="color:var(--text-muted);font-size:0.85rem;margin-top:0.2rem;">
+                    درجة الثقة: {_qs_result['confidence']:.0%}
+                </div>
+                {f'<div style="margin-top:0.5rem;">{_tags_html}</div>' if _tags_html else ''}
+                {_ayah_html}
+            </div>
+            """, unsafe_allow_html=True)
+
+            if st.button("📖 عرض النتيجة الكاملة في تبويب البحث", key="home_quick_search_open_full"):
+                st.session_state["search_query"] = _qs_q
+                st.session_state["_nsm_home_jump_target"] = "📚 المعرفة"
+                st.toast("تم فتح البحث الكامل", icon="🔍")
+                st.rerun()
+
+    st.markdown("---")
     st.markdown('<div class="section-header">🚀 استكشف NSM</div>', unsafe_allow_html=True)
 
     _features = [
@@ -183,7 +322,8 @@ def render_home():
     # Streamlit (data-baseweb مقابل role="tab" ...إلخ)، فالاعتماد على
     # نص + فهرس معاً أكثر مقاومة لتغيّر الإصدار من نص فقط.
     # الترتيب الحالي: 0=الرئيسية 1=المعرفة 2=المحادثة 3=الوكلاء 4=إبداع
-    _tab_index_map = {"📚 المعرفة": 1, "💬 المحادثة": 2, "🤖 الوكلاء": 3, "🎭 إبداع": 4}
+    # (_tab_index_map مُعرَّف أول الدالة الآن — يُستخدم هنا وبقسم البحث
+    # السريع/متابعة المحادثة أعلاه بلا تكرار)
     # أداء: هذا السكربت (iframe جديد + مسح DOM) كان يُعاد حقنه بالكامل من
     # جديد عند *كل* rerun لتبويب الرئيسية — أي عند كل تفاعل بأي مكان
     # بالتطبيق، لأن render_home() يُنفَّذ دوماً بغض النظر عن التبويب
