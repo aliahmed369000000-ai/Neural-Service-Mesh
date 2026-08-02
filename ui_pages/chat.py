@@ -539,10 +539,18 @@ def render_chat():
     </style>""", unsafe_allow_html=True)
     c1, c2 = st.columns([5, 1.2], gap="small")
     with c1:
+        # مفتاح مُرقَّم (versioned key): لا يمكن تعديل session_state لويدجت
+        # بعد إنشائه بنفس تشغيل السكربت (يرمي StreamlitAPIException)، لذلك
+        # لا يمكن مسح المربع بتعيين st.session_state["nsm_input"] = "" من
+        # _process() لاحقاً بنفس الطريقة. الحل الآمن: تغيير الـkey نفسه بعد
+        # كل إرسال (_nsm_input_version += 1) — فيبدأ الويدجت الجديد فارغاً
+        # تلقائياً في الـrerun التالي دون لمس قيمة المفتاح القديم إطلاقاً.
+        st.session_state.setdefault("_nsm_input_version", 0)
+        _input_key = f"nsm_input_v{st.session_state['_nsm_input_version']}"
         user_input = st.text_area(
             label="سؤالك",
             placeholder="اكتب سؤالك هنا… (Enter = سطر جديد)",
-            key="nsm_input",
+            key=_input_key,
             label_visibility="collapsed",
             height=96,
         )
@@ -689,6 +697,13 @@ def render_chat():
         files = list(st.session_state["chat_pending_files"])
         if not text.strip() and not files:
             return
+
+        # فرّغ مربع الإدخال فور الإرسال — قبل أي rerun. نُغيّر رقم إصدار
+        # مفتاح الويدجت بدل تعديل session_state["nsm_input"] مباشرة، لأن
+        # Streamlit يمنع تعديل قيمة ويدجت بعد إنشائه بنفس تشغيل السكربت
+        # (والويدجت أُنشئ فعلاً أعلى هذه الدالة بنفس التشغيل). التغيير هنا
+        # يجعل الـrerun التالي يستخدم مفتاحاً جديداً بقيمة افتراضية فارغة.
+        st.session_state["_nsm_input_version"] = st.session_state.get("_nsm_input_version", 0) + 1
 
         st.session_state["chat_pending_files"] = []
         st.session_state["chat_uploader_version"] += 1
