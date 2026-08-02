@@ -50,10 +50,11 @@ GIT_USER_EMAIL="nsm-bot@users.noreply.github.com"
 log() { echo -e "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 die() { echo -e "[FATAL] $*" >&2; exit 1; }
 run() {
-  # يطبع الأمر دائماً؛ ينفّذه فقط لو DRY_RUN=0
+  # ينفّذ المعطيات مباشرة (بدون eval) — يحافظ على حدود كل معطى كما هي،
+  # بما فيها مسارات/قيم فيها مسافات، بدل إعادة تقطيعها بالغلط عبر eval.
   log "▶ $*"
   if [[ "$DRY_RUN" -eq 0 ]]; then
-    eval "$@"
+    "$@"
   fi
 }
 
@@ -149,9 +150,9 @@ log "── الخطوة 4/5: حذف البيانات الخام وكاش HF ─
 if [[ "$KEEP_RAW_DATA" -eq 1 ]]; then
   log "تم تفعيل --keep-raw-data — تخطي الحذف."
 else
-  run rm -rf "\"$CACHE_DIR\""
-  run rm -f "\"$DATASET_OUT\""
-  run rm -f "\"data/yemeni_production_instructions.chatml.jsonl\""
+  run rm -rf "$CACHE_DIR"
+  run rm -f "$DATASET_OUT"
+  run rm -f "data/yemeni_production_instructions.chatml.jsonl"
   log "✓ حُذفت البيانات الخام وكاش HF نهائياً"
 fi
 
@@ -162,14 +163,14 @@ log "── الخطوة 5/5: commit + push إلى $BASE_BRANCH ──"
 if [[ "$NO_PUSH" -eq 1 ]]; then
   log "تم تفعيل --no-push — الأوزان محفوظة محلياً في $OUTPUT_DIR فقط. لا commit ولا push."
 else
-  run git config user.name "\"$GIT_USER_NAME\""
-  run git config user.email "\"$GIT_USER_EMAIL\""
-  run git add "\"$OUTPUT_DIR\""
+  run git config user.name "$GIT_USER_NAME"
+  run git config user.email "$GIT_USER_EMAIL"
+  run git add "$OUTPUT_DIR"
   if [[ "$DRY_RUN" -eq 0 ]] && git diff --cached --quiet; then
     log "لا توجد تغييرات جديدة في $OUTPUT_DIR — لا شيء يُرفع."
   else
     COMMIT_MSG="تدريب إنتاجي جديد: أوزان LoRA محدّثة لـ YemeniDecoder (Qwen2.5-7B, $EPOCHS epochs)"
-    run git commit -m "\"$COMMIT_MSG\""
+    run git commit -m "$COMMIT_MSG"
     run git push origin "$BASE_BRANCH"
 
     log "التحقق الفعلي من نجاح الدفع عبر git ls-remote..."
