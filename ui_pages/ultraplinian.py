@@ -134,6 +134,7 @@ def render_ultraplinian():
                 unsafe_allow_html=True,
             )
             st.markdown(winner.content)
+            _copy_button(winner.content, key="ultraplinian_winner")
             st.markdown("---")
             st.markdown("**📊 جميع النتائج (مرتبة تنازلياً)**")
             for r in successes:
