@@ -190,23 +190,25 @@ def render_qa():
                     """, unsafe_allow_html=True)
 
     # ── تغذية راجعة: تدريب LoRA خفيف من ملاحظة المستخدم (لا يمسّ الأوزان الأساسية) ──
+    # يستخدم st.feedback("thumbs") الأصلي بدل زرَّين منفصلين (نفس نمط
+    # تبويب المحادثة) — الفارق الوظيفي بين 👍 و👎 (تدريب مقابل تسجيل فقط
+    # للمراجعة) موضَّح الآن بتعليق نصي بدل تسمية الزر نفسه.
     _fb_key = f"qa_feedback_{hash(question)}"
     if st.session_state.get(_fb_key) is None:
-        fb_col1, fb_col2, fb_col3 = st.columns([1, 1, 4])
-        with fb_col1:
-            if st.button("👍 إجابة جيدة", key=f"{_fb_key}_up"):
+        st.caption("قيّم هذه الإجابة:")
+        _fb_selected = st.feedback("thumbs", key=f"{_fb_key}_widget")
+        if _fb_selected is not None:
+            if _fb_selected == 1:
                 try:
                     record_positive_feedback(question, result.get("summary", ""))
                 except Exception:
                     pass
                 st.session_state[_fb_key] = "up"
-                st.rerun()
-        with fb_col2:
-            if st.button("👎 غير دقيقة", key=f"{_fb_key}_down"):
+            else:
                 # لا تدريب على الملاحظات السلبية حالياً (قد يزعزع الشبكة
                 # بدون آلية contrastive loss مناسبة) — فقط تسجيل للمراجعة.
                 st.session_state[_fb_key] = "down"
-                st.rerun()
+            st.rerun()
     else:
         _fb = st.session_state[_fb_key]
         if _fb == "up":
