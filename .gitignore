@@ -59,3 +59,14 @@ memory/nsm_context.db
 data/mesh.db
 data/artifacts.db
 .pytest_cache/
+
+# ── أسرار محلية — لا يجوز تتبّعها إطلاقاً ────────────────────────────────
+# .env.example فقط هو المقصود بالتتبّع (قالب توثيقي بلا قيم حقيقية).
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+*.pem
+*.key
+id_rsa
+id_ed25519
