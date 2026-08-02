@@ -102,7 +102,13 @@ def render_unified_agent():
                 bbl_id = f"{box_id}-msg-{_mi}"
                 html_out += (
                     f'<div class="ua-bot"><div class="bbl">{badge_html}'
-                    f'<div id="{bbl_id}">{safe}</div>{ts_html}</div></div>'
+                    f'<div id="{bbl_id}">{safe}</div>'
+                    f'<button class="copy-btn" title="نسخ الرد" style="margin-top:0.4rem"'
+                    f' onclick="var t=document.getElementById(\'{bbl_id}\').innerText;'
+                    f"navigator.clipboard.writeText(t).then(function(){{"
+                    f"var b=event.currentTarget;var old=b.textContent;b.textContent='✓ تم النسخ';"
+                    f"setTimeout(function(){{b.textContent=old;}},1300);}});\">📋 نسخ</button>"
+                    f'{ts_html}</div></div>'
                 )
     html_out += "</div>"
     st.markdown(html_out, unsafe_allow_html=True)
@@ -150,13 +156,35 @@ def render_unified_agent():
         st.session_state.unified_agent_count += 1
         st.rerun()
 
-    col_clear, col_export = st.columns(2)
+    _ua_msgs = st.session_state.unified_agent_msgs
+    _ua_last_is_bot = bool(_ua_msgs) and _ua_msgs[-1][0] == "bot"
+    col_clear, col_regen, col_export = st.columns(3)
     with col_clear:
         if st.button("🗑 مسح المحادثة", key="unified_agent_clear", use_container_width=True):
             st.session_state.unified_agent_msgs = []
             st.session_state.unified_agent_count = 0
             bot.clear_history()
             st.rerun()
+    with col_regen:
+        if st.button("🔄 إعادة توليد آخر رد", key="unified_agent_regenerate",
+                      use_container_width=True, disabled=not _ua_last_is_bot):
+            _last_user_text = None
+            for _m in reversed(_ua_msgs[:-1]):
+                if _m[0] == "user":
+                    _last_user_text = _m[1]
+                    break
+            if _last_user_text:
+                st.session_state.unified_agent_msgs.pop()  # إزالة الرد القديم فقط
+                with st.spinner("⟳ يُوجَّه للمتخصص الأنسب ويولّد الرد..."):
+                    _r_response, _r_meta = bot.chat(_last_user_text, force_web=web_toggle)
+                _r_badge = f"{_r_meta.get('category_emoji', '🤖')} {_r_meta.get('category_title', '')}"
+                _r_qb = _r_meta.get("quality_badge", "")
+                if _r_qb:
+                    _r_badge = f"{_r_badge} · {_r_qb}"
+                st.session_state.unified_agent_msgs.append(
+                    ("bot", _r_response, _r_badge, datetime.now().strftime("%H:%M"))
+                )
+                st.rerun()
     with col_export:
         if st.session_state.unified_agent_msgs:
             _export_lines = ["# محادثة مع الوكيل الموحّد\n"]
