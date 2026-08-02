@@ -7,6 +7,7 @@ Streamlit front-end لمشروع النظام المعرفي العربي.
 from __future__ import annotations
 
 import base64
+import hmac
 import io
 import json
 import logging

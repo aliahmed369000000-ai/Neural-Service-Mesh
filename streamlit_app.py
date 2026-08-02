@@ -272,7 +272,7 @@ def main():
                     "مفتاح المالك", type="password", key="sidebar_admin_key_input",
                 )
                 if st.button("🔓 فتح وضع المالك", key="sidebar_admin_unlock", use_container_width=True):
-                    if _sidebar_admin_key_input == _sidebar_admin_key_env:
+                    if hmac.compare_digest(_sidebar_admin_key_input, _sidebar_admin_key_env):
                         st.session_state["_dev_console_unlocked"] = True
                         st.rerun()
                     else:
