@@ -156,6 +156,7 @@ def render_qa():
         {result['summary']}
     </div>
     """, unsafe_allow_html=True)
+    _copy_button(result.get("summary", ""), key="qa_answer")
 
     # ── درجة الثقة ──
     confidence = result.get("confidence", 0.0)
