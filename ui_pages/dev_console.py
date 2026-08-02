@@ -107,3 +107,48 @@ def render_dev_console():
                 _dc_ph.empty()
                 st.error(f"❌ خطأ أثناء التنفيذ: {_exec_err}")
                 st.toast("❌ فشل تنفيذ الأمر", icon="❌")
+
+    # ── تقرير تدقيق المشروع (Phase6Validator) ────────────────────────────
+    st.markdown("---")
+    st.markdown("#### 🔍 تقرير تدقيق المشروع")
+    st.caption(
+        "يفحص كل ملفات المستودع فعلياً: أيها مستورد فعلاً من نقاط الدخول "
+        "(streamlit_app.py/app_core.py وغيرها) وأيها كود ميت غير مربوط، مع "
+        "نسبة تغطية مراحل 1-6 ودرجة جاهزية Phase 7."
+    )
+    if st.button("📊 شغّل التقرير", key="dc_validator_run"):
+        try:
+            from ai.validator import Phase6Validator
+            with st.spinner("⟳ يفحص كل ملفات المستودع..."):
+                import io as _io, contextlib as _cl
+                _buf = _io.StringIO()
+                with _cl.redirect_stdout(_buf):
+                    _report = Phase6Validator(mesh=None, project_root=str(BASE)).generate()
+            st.session_state["_dc_validator_report"] = _report
+            st.session_state["_dc_validator_text"] = _buf.getvalue()
+        except Exception as _val_err:
+            st.error(f"❌ تعذّر تشغيل المدقّق: {_val_err}")
+
+    _rep = st.session_state.get("_dc_validator_report")
+    if _rep:
+        _cv1, _cv2, _cv3, _cv4 = st.columns(4)
+        with _cv1:
+            metric_card(_rep["files"]["total_py_files"], "ملف بايثون")
+        with _cv2:
+            metric_card(f"{_rep['dead_code']['dead_pct']}%", "كود ميت")
+        with _cv3:
+            metric_card(f"{_rep['phase_coverage']['overall_coverage_pct']}%", "تغطية المراحل 1-6")
+        with _cv4:
+            metric_card(f"{_rep['phase7_readiness']['score']}/100", "جاهزية Phase 7")
+
+        st.info(_rep["phase7_readiness"]["verdict"])
+
+        if _rep["dead_code"]["dead_files"]:
+            with st.expander(f"📄 الملفات غير المربوطة ({_rep['dead_code']['dead_count']})"):
+                for _layer, _files in sorted(_rep["dead_code"]["dead_by_layer"].items()):
+                    st.markdown(f"**{_layer}**")
+                    for _df in _files:
+                        st.markdown(f"- `{_df}`")
+
+        with st.expander("📋 التقرير الكامل (نص)"):
+            st.code(st.session_state.get("_dc_validator_text", ""), language=None)

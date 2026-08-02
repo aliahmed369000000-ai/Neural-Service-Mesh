@@ -430,6 +430,12 @@ except Exception:
     _WORLD_FEED_OK = False
 
 try:
+    from ai.self_narrative import SelfNarrative
+    _SELF_NARRATIVE_OK = True
+except Exception:
+    _SELF_NARRATIVE_OK = False
+
+try:
     from ai.goal_planner import GoalPlanner
     _GOAL_PLANNER_OK = True
 except Exception:
@@ -2524,6 +2530,22 @@ def _get_memory_consolidator():
 
 
 @st.cache_resource(show_spinner=False)
+def _get_self_narrative():
+    """singleton لعملية Streamlit كاملة. ai/self_narrative.py كان مكتوباً
+    ومختبراً (يمنح الجهاز 'صوتاً ذاتياً': يومية، جملة هوية متطورة) لكن غير
+    مستورد من أي مكان إطلاقاً. مربوط هنا بالذاكرة الإيبيسودية الحقيقية بعد
+    إصلاح _link_to_episodic() (كانت تبني Episode(content=...) بمعامل غير
+    موجود في التوقيع الحقيقي فتسقط دوماً صامتاً)."""
+    if not _SELF_NARRATIVE_OK:
+        return None
+    try:
+        episodic = _get_episodic_engine()
+        return SelfNarrative(episodic_memory=episodic)
+    except Exception:
+        return None
+
+
+@st.cache_resource(show_spinner=False)
 def _get_world_feed():
     """singleton لعملية Streamlit كاملة. ai/world_feed.py + ai/quality_engine.py +
     ai/immune_system.py كانت الثلاثة مكتوبة ومختبرة لكن غير مستوردة من أي مكان
@@ -2573,6 +2595,18 @@ def _get_world_feed():
             except Exception:
                 pass  # فشل التسجيل لا يجوز أن يكسر دورة الاستطلاع
 
+            _sn = _get_self_narrative()
+            if _sn is not None:
+                try:
+                    _sn.record_event(
+                        "world_feed",
+                        {"source": item.get("source", ""), "message": title or content[:60]},
+                        surprise_score=0.0,
+                        importance=min(1.0, score / 100.0),
+                    )
+                except Exception:
+                    pass
+
         wf = WorldFeed(immune_system=immune, quality_engine=quality, min_quality=60.0)
         wf.set_memory_callback(_on_accept)
         return wf
@@ -2616,6 +2650,21 @@ def _record_chat_episode(query: str, response: str, source: str = "chat") -> Non
                 "response": (response or "")[:1000],
             },
         )
+    except Exception:
+        pass
+
+    # ── SelfNarrative (كان يتيماً بالكامل) — تسجيل الحدث بإشارة حقيقية
+    # محسوبة محلياً وبأمان (لا اعتماد على متغيرات نطاق try سابق).
+    try:
+        _sn = _get_self_narrative()
+        if _sn is not None:
+            _ok_signal = 1.0 if (response or "").strip() else 0.0
+            _sn.record_event(
+                "decision",
+                {"message": (query or "")[:80]},
+                surprise_score=0.0,
+                importance=0.5 if _ok_signal else 0.3,
+            )
     except Exception:
         pass
 

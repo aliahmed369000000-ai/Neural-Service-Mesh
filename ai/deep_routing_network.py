@@ -484,27 +484,15 @@ def encode_query_to_ckg_vector(
     """
     Encode an Arabic query into a 784-dim CKG concept vector (L2-normalised).
     Each position = one CKG concept, weighted by name-match × strength.
-    """
-    import re
-    def clean(t: str) -> str:
-        t = re.sub(r'[ٱ]', 'ا', t)
-        t = re.sub(r'[ًٌٍَُِّْٰ]', '', t)
-        t = re.sub(r'[^\u0600-\u06FF\s]', ' ', t)
-        return t.strip()
 
-    q_words = set(clean(query).split())
-    vec = np.zeros(dim, dtype=np.float64)
-    for i, (name, meta) in enumerate(list(ckg_concepts.items())[:dim]):
-        name_clean = clean(name)
-        strength   = meta.get("strength", 0.1)
-        freq_norm  = min(1.0, meta.get("frequency", 1) / 500)
-        match = 1.0 if (name_clean in q_words or
-                        any(w in name_clean for w in q_words if len(w) >= 3)) else 0.0
-        vec[i] = match * strength * (1.0 + freq_norm)
-    norm = np.linalg.norm(vec)
-    if norm > 0:
-        vec /= norm
-    return vec
+    يفوّض فعلياً لـ ai/ckg_text_encoder_v2.encode_query_v2 — الذي كُتب خصيصاً
+    لإصلاح هذه الدالة نفسها (كانت تستخدم احتواءً جزئياً `w in name_clean`
+    يعطي مطابقات خاطئة كثيرة في العربية بسبب غنى الاشتقاق، مثل "علم" تطابق
+    "يعلمون"/"العلمين") لكنه ظل غير مستورد من أي مكان في المشروع. مطابقة
+    كلمة كاملة الآن بدل الاحتواء الجزئي، بنفس التوقيع والمخرج الخارجي.
+    """
+    from ai.ckg_text_encoder_v2 import encode_query_v2
+    return encode_query_v2(query, ckg_concepts, dim=dim)
 
 
 # ── Routing weight extractor (Phase 8 API compatible) ────────────────────────
