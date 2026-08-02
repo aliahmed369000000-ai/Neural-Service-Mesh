@@ -58,8 +58,19 @@ async def health():
 
 
 @app.post("/process")
-async def process(payload: dict):
-    """معالجة النص عبر شبكة الخدمات"""
+async def process(payload: dict, request: Request):
+    """معالجة النص عبر شبكة الخدمات.
+    محمي بمفتاح NSM_API_KEY (هيدر X-API-Key) — fail-closed: لو المفتاح
+    غير مضبوط بالبيئة، الـendpoint يبقى معطّلاً بالكامل (403) بدل ما
+    يُترك مفتوحاً بلا مصادقة افتراضياً. هذا endpoint حالياً غير فعّال
+    عملياً (Engine() تحتاج registry/graph/storage غير مُمرَّرة هنا)،
+    لكن الحماية أُضيفت استباقياً حتى لا يصير باباً مفتوحاً بلا مصادقة
+    بمجرد ما يُكمَّل ربطه مستقبلاً."""
+    configured_key = os.environ.get("NSM_API_KEY", "").strip()
+    provided_key = request.headers.get("x-api-key", "")
+    if not configured_key or not hmac.compare_digest(provided_key, configured_key):
+        return JSONResponse(status_code=403, content={"error": "X-API-Key غير مطابق أو NSM_API_KEY غير مضبوط"})
+
     if not _CORE_OK:
         return JSONResponse(
             status_code=503,
