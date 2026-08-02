@@ -83,6 +83,7 @@ def render_qa():
         result = answer_question(
             question, ckg, ayat, entities=entities,
             generation_mode=st.session_state.get("yemeni_generation_mode", False),
+            generation_backend=st.session_state.get("yemeni_generation_backend", "llm_fallback"),
             temperature=st.session_state.get("yemeni_temperature", 0.8),
             top_p=st.session_state.get("yemeni_top_p", 0.95),
             top_k=st.session_state.get("yemeni_top_k", 50),

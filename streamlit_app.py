@@ -288,6 +288,32 @@ def main():
                 key="yemeni_generation_toggle",
             )
             if st.session_state["yemeni_generation_mode"]:
+                _remote_configured = bool(os.environ.get("NSM_REMOTE_INFERENCE_URL", "").strip())
+                _backend_options = ["llm_fallback"]
+                if _remote_configured:
+                    _backend_options.append("remote")
+                if len(_backend_options) > 1:
+                    _backend_label_map = {
+                        "llm_fallback": "محلي (llm_fallback)",
+                        "remote": "🚀 نموذج 7B مُدرَّب (بعيد)",
+                    }
+                    _chosen_backend = st.selectbox(
+                        "مسار التوليد",
+                        _backend_options,
+                        format_func=lambda k: _backend_label_map.get(k, k),
+                        index=_backend_options.index(
+                            st.session_state.get("yemeni_generation_backend", "llm_fallback")
+                        ) if st.session_state.get("yemeni_generation_backend", "llm_fallback") in _backend_options else 0,
+                        key="yemeni_backend_select",
+                    )
+                    st.session_state["yemeni_generation_backend"] = _chosen_backend
+                else:
+                    st.session_state["yemeni_generation_backend"] = "llm_fallback"
+                    st.caption(
+                        "💡 مسار النموذج الصناعي (7B المُدرَّب) غير متاح — اضبط "
+                        "NSM_REMOTE_INFERENCE_URL بـSecrets لتفعيله بعد نشر خادم "
+                        "الاستدلال (انظر production-7b-llm)."
+                    )
                 st.caption(
                     "⚠️ ميزة تجريبية: النموذج التوليدي (YemeniDecoder) لم يخضع "
                     "لتدريب فعلي بعد — النص المولَّد قد يكون غير مفهوم حالياً. "
