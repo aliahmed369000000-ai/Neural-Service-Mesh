@@ -240,6 +240,17 @@ def render_chat():
     if "chat_uploader_version" not in st.session_state:
         st.session_state["chat_uploader_version"] = 0
 
+    # ── 🔍 بحث ضمن المحادثة الحالية — يفلتر العرض فقط، لا يمسّ السجل
+    # المحفوظ (nsm_messages يبقى كاملاً؛ هذا يؤثر فقط على ما يُبنى في
+    # html أدناه). مفيد بالمحادثات الطويلة لإيجاد رسالة سابقة بسرعة. ──
+    _chat_search_query = ""
+    if st.session_state.get("nsm_messages"):
+        _chat_search_query = st.text_input(
+            "بحث في المحادثة", key="nsm_chat_search",
+            placeholder="🔍 ابحث ضمن هذه المحادثة...",
+            label_visibility="collapsed",
+        ).strip()
+
     # عرض المحادثة
     html = '<div class="chat-box-wrap"><div class="chat-box" id="nsm-chat-box">'
     if not st.session_state.nsm_messages:
@@ -261,17 +272,33 @@ def render_chat():
         # جديدة/تقييم/تفاعل) يتضخم مع طول المحادثة ويُبطئ الواجهة تدريجياً.
         # نحافظ على الفهرس الحقيقي _i (وليس فهرس القائمة المقصوصة) كي تبقى
         # مطابقة _nsm_audio_cache (المُخزَّن بفهرس الرسالة الأصلي) صحيحة.
-        _all_msgs = st.session_state.nsm_messages
-        _hidden_count = max(0, len(_all_msgs) - NSM_CHAT_DISPLAY_LIMIT)
+        _all_msgs_indexed = list(enumerate(st.session_state.nsm_messages))
+        if _chat_search_query:
+            _q_low = _chat_search_query.lower()
+            _all_msgs_indexed = [
+                (_i, _m) for _i, _m in _all_msgs_indexed
+                if _q_low in (_m[1] or "").lower()
+            ]
+        if _chat_search_query and not _all_msgs_indexed:
+            import html as _html_esc
+            html += (
+                f'<div style="text-align:center;color:var(--text-muted);padding:2rem 1rem">'
+                f'لا توجد رسائل مطابقة لـ«{_html_esc.escape(_chat_search_query)}»'
+                f'</div>'
+            )
+        _hidden_count = max(0, len(_all_msgs_indexed) - NSM_CHAT_DISPLAY_LIMIT)
         if _hidden_count:
+            _hidden_note = (
+                "نتيجة بحث أقدم مخفية" if _chat_search_query else "رسالة أقدم مخفية من العرض، لكنها لا تزال محفوظة"
+            )
             html += (
                 f'<div style="text-align:center;color:var(--text-muted);'
                 f'font-size:0.78rem;padding:0.4rem 0 0.7rem">'
                 f'— تُعرض آخر {NSM_CHAT_DISPLAY_LIMIT} رسالة فقط '
-                f'({_hidden_count} رسالة أقدم مخفية من العرض، لكنها لا تزال محفوظة) —'
+                f'({_hidden_count} {_hidden_note}) —'
                 f'</div>'
             )
-        for _i, msg in list(enumerate(_all_msgs))[-NSM_CHAT_DISPLAY_LIMIT:]:
+        for _i, msg in _all_msgs_indexed[-NSM_CHAT_DISPLAY_LIMIT:]:
             role, text = msg[0], msg[1]
             ctx_tag    = msg[2] if len(msg) > 2 else ""
             src_badge  = msg[3] if len(msg) > 3 else ""
