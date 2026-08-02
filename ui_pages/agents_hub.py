@@ -113,10 +113,18 @@ def _render_agent_page(category):
             else:
                 badge_html = f'<div class="agent-badge">{badge}</div>' if badge else ""
                 bbl_id = f"{box_id}-msg-{_mi}"
+                _audio_entry = st.session_state.get(f"_agent_audio_cache_{category.key}", {}).get(_mi)
+                _audio_html = ""
+                if _audio_entry:
+                    _a_b64, _a_fmt = _audio_entry
+                    _audio_html = (
+                        f'<audio controls style="width:100%;margin-top:0.5rem;height:36px" '
+                        f'src="data:audio/{_a_fmt};base64,{_a_b64}"></audio>'
+                    )
                 html_out += (
                     f'<div class="agent-bot"><span style="font-size:1.3rem;margin-top:3px">'
                     f'{category.emoji}</span><div class="bbl">{badge_html}'
-                    f'<div id="{bbl_id}">{safe}</div>'
+                    f'<div id="{bbl_id}">{safe}</div>{_audio_html}'
                     f'<button class="copy-btn" title="نسخ الرد" style="margin-top:0.4rem"'
                     f' onclick="var t=document.getElementById(\'{bbl_id}\').innerText;'
                     f"navigator.clipboard.writeText(t).then(function(){{"
@@ -158,6 +166,37 @@ def _render_agent_page(category):
         )
     with c2:
         send = st.button("➤ إرسال", key=f"agent_send_{category.key}", use_container_width=True)
+
+    # ── الواجهة الصوتية: تسجيل سؤال بالصوت + قراءة الردود صوتياً (نفس نمط
+    # ui_pages/chat.py، معزولة لكل فئة بمفاتيح خاصة بها) ──────────────────
+    voice_col1, voice_col2 = st.columns([3, 2], gap="small")
+    _voice_query = None
+    with voice_col1:
+        if _STT_OK:
+            _mic_audio = st.audio_input(
+                "🎤 أو سجّل سؤالك صوتياً", key=f"agent_mic_input_{category.key}",
+            )
+            if _mic_audio is not None:
+                _mic_bytes = _mic_audio.getvalue()
+                _mic_hash = hash(_mic_bytes)
+                _mic_hash_key = f"_agent_last_mic_hash_{category.key}"
+                if st.session_state.get(_mic_hash_key) != _mic_hash:
+                    st.session_state[_mic_hash_key] = _mic_hash
+                    with st.spinner("⟳ جارٍ تفريغ الصوت..."):
+                        _transcribed, _stt_err = _stt_transcribe(_mic_bytes, mime_type="audio/wav")
+                    if _stt_err:
+                        st.warning(f"⚠️ {_stt_err}")
+                    elif _transcribed:
+                        _voice_query = _transcribed
+        else:
+            st.caption("🎤 الإدخال الصوتي غير متاح حالياً")
+    with voice_col2:
+        _voice_output_key = f"_agent_voice_output_{category.key}"
+        _voice_output_on = st.toggle(
+            "🔊 قراءة الردود صوتياً", key=_voice_output_key,
+            value=st.session_state.get(_voice_output_key, False),
+            disabled=not _TTS_OK,
+        )
 
     # ── مشاركة ملف مع الوكيل (اختياري): نص، PDF، أو صورة (عبر OCR) ──
     _uploader_types = ["txt", "py", "md", "json", "csv", "log", "yaml", "yml", "pdf"]
@@ -218,7 +257,9 @@ def _render_agent_page(category):
                     _last_user_text = _m[1]
                     break
             if _last_user_text:
+                _popped_idx = len(st.session_state[msg_key]) - 1
                 st.session_state[msg_key].pop()
+                st.session_state.get(f"_agent_audio_cache_{category.key}", {}).pop(_popped_idx, None)
                 st.session_state[f"_agent_regen_pending_{category.key}"] = _last_user_text
                 st.rerun()
     with col_export:
@@ -286,11 +327,25 @@ def _render_agent_page(category):
         except Exception:
             pass  # تقييم الجودة إضافي وغير حرج — أي فشل فيه لا يجب أن يُسقِط الرد نفسه
         st.session_state[msg_key].append(("bot", response, badge, datetime.now().strftime("%H:%M")))
+        _msg_idx = len(st.session_state[msg_key]) - 1
+        if _TTS_OK and st.session_state.get(f"_agent_voice_output_{category.key}") and response.strip():
+            try:
+                with st.spinner("⟳ جارٍ تحويل الرد لصوت..."):
+                    _tts_result = _TTSEngineCls().synthesize(response.strip())
+                if _tts_result.ok:
+                    import base64 as _b64
+                    _audio_cache = st.session_state.setdefault(f"_agent_audio_cache_{category.key}", {})
+                    _audio_cache[_msg_idx] = (
+                        _b64.b64encode(_tts_result.audio_bytes).decode("ascii"),
+                        _tts_result.format,
+                    )
+            except Exception:
+                pass  # فشل TTS لا يجب أن يُعطّل عرض الرد النصي
         st.session_state[cnt_key] += 1
         st.rerun()
 
-    if send and user_input:
-        _process(user_input)
+    if (send and user_input) or _voice_query:
+        _process(user_input if send and user_input else _voice_query)
 
     pending_key = f"_agent_pending_{category.key}"
     if pending_key in st.session_state:
