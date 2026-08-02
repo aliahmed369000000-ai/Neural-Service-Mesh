@@ -27,6 +27,15 @@ def render_quran():
     # أكثر المفاهيم تكراراً
     st.markdown('<div class="section-header">🔝 أكثر المفاهيم تكراراً في القرآن</div>', unsafe_allow_html=True)
 
+    # حالة تحميل (shimmer) أثناء فلترة/ترتيب الجذور ورسم الرسم البياني —
+    # نفس منطق الحساب أدناه بالضبط، فقط غلاف بصري + مؤشر تحميل موحّد مع
+    # بقية النظام (glass-card + _skeleton) بدل ظهور الرسم فجأة بلا انتقال
+    _concepts_ph = st.empty()
+    with _concepts_ph.container():
+        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+        _skeleton(kind="cards")
+        st.markdown('</div>', unsafe_allow_html=True)
+
     # فلترة الجذور ذات المعنى
     filtered = {k: v for k, v in roots.items()
                 if len(normalize_arabic(k)) >= 3
@@ -38,6 +47,8 @@ def render_quran():
 
     top_concepts = sorted(filtered.items(), key=lambda x: x[1].get("frequency", 0), reverse=True)[:20]
 
+    _concepts_ph.empty()
+    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
     if top_concepts:
         # رسم بياني
         try:
@@ -73,6 +84,7 @@ def render_quran():
                 st.markdown(f"**{token}**: {freq:,} مرة")
     else:
         st.info("لم تُكتشف مفاهيم بعد. يحتاج النظام إلى تدريب إضافي.")
+    st.markdown('</div>', unsafe_allow_html=True)
 
     # بحث داخل القرآن
     st.markdown('<div class="section-header">🔍 البحث في آيات القرآن</div>', unsafe_allow_html=True)
@@ -82,6 +94,9 @@ def render_quran():
         matches = search_quran_for_concept(quran_q.strip(), ayat, max_results=20)
         if matches:
             st.success(f"وُجد {len(matches)} آية تحتوي على «{quran_q}»")
+            if not st.session_state.get(f"_quran_toast_{quran_q}"):
+                st.session_state[f"_quran_toast_{quran_q}"] = True
+                st.toast(f"وُجد {len(matches)} آية", icon="📖")
             for ayah in matches:
                 surah = ayah.get("surah", "")
                 verse = ayah.get("ayah", "")
@@ -92,5 +107,10 @@ def render_quran():
                     <div class="verse-ref">سورة {surah}، الآية {verse}</div>
                 </div>
                 """, unsafe_allow_html=True)
+            _all_matches_text = "\n\n".join(
+                f"{m.get('text', '')} — سورة {m.get('surah', '')}، الآية {m.get('ayah', '')}"
+                for m in matches
+            )
+            _copy_button(_all_matches_text, key="quran_search_results")
         else:
             st.warning(f"لم يُعثر على «{quran_q}» في الآيات المحملة.")
