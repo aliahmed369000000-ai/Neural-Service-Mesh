@@ -32,6 +32,7 @@ from lib.router import handle_incoming_message
 from lib.state_store import get_state_store
 from lib.whatsapp_client import (
     verify_webhook_challenge,
+    verify_signature,
     send_text_message,
     extract_incoming_message,
     WhatsAppSendError,
@@ -59,9 +60,17 @@ class handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         raw_body = self.rfile.read(length) if length else b"{}"
 
+        signature = self.headers.get("X-Hub-Signature-256")
+        if not verify_signature(raw_body, signature):
+            self.send_response(403)
+            self.end_headers()
+            return
+
         # نرد 200 لـMeta دائماً بأسرع وقت حتى لو تعذّرت المعالجة الداخلية
         # (Meta تُعيد المحاولة/تعطّل الـwebhook لو رأت أخطاء متكررة) —
         # أي خطأ داخلي يُسجَّل فقط، لا يُرجَع كـHTTP error لـMeta.
+        # (هذا الرد يأتي بعد التحقق من التوقيع أعلاه — طلب غير موقَّع
+        # بشكل صحيح يُرفض بـ403 ولا يصل لهذه النقطة إطلاقاً.)
         self.send_response(200)
         self.send_header("Content-type", "application/json")
         self.end_headers()
