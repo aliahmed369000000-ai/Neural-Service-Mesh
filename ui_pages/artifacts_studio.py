@@ -44,6 +44,15 @@ def render_artifacts_studio():
         )
         col_edit, col_preview = st.columns([1, 1])
         with col_edit:
+            # يجب تطبيق أي "تحميل من المحفوظات" *قبل* إنشاء ودجت
+            # art_title/art_code مباشرة — تعيين session_state[key] بعد
+            # إنشاء الودجت بنفس الجولة يرفع StreamlitAPIException (نفس
+            # النمط الآمن المستخدم في ui_pages/translate.py).
+            if "_art_pending_load" in st.session_state:
+                _pending = st.session_state.pop("_art_pending_load")
+                st.session_state["art_title"] = _pending["title"]
+                st.session_state["art_code"] = _pending["content"]
+
             art_title = st.text_input("عنوان الواجهة", value="واجهتي الجديدة", key="art_title")
             art_code = st.text_area(
                 "كود HTML/SVG", value=_default_html, height=320, key="art_code",
@@ -85,8 +94,9 @@ def render_artifacts_studio():
                         dcol1, dcol2 = st.columns(2)
                         with dcol1:
                             if st.button("📋 حمّل في المحرّر", key=f"art_load_{item['id']}"):
-                                st.session_state["art_code"] = full["content"]
-                                st.session_state["art_title"] = full["title"]
+                                st.session_state["_art_pending_load"] = {
+                                    "title": full["title"], "content": full["content"],
+                                }
                                 st.rerun()
                         with dcol2:
                             if st.button("🗑️ حذف", key=f"art_del_{item['id']}"):
