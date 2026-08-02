@@ -396,30 +396,33 @@ class SelfNarrative:
         )
 
     def _link_to_episodic(self, entry: NarrativeEntry):
-        """ربط الأحداث المهمة بالذاكرة الإيبيسودية."""
+        """ربط الأحداث المهمة بالذاكرة الإيبيسودية الحقيقية.
+
+        EpisodicMemoryEngine.record() تبني Episode داخلياً من معاملات خام
+        (feature_vec/target/outcome/source/reward/context) ولا تقبل كائن
+        Episode جاهزاً — الاستدعاء السابق هنا كان يبني Episode(content=...)
+        بمعامل غير موجود أصلاً في توقيع Episode، فيسقط دوماً صامتاً.
+        """
+        if self._episodic_memory is None or not hasattr(self._episodic_memory, "record"):
+            return
         try:
-            # نحاول استخدام واجهة EpisodicMemoryEngine
-            ep_data = {
-                "content": entry.summary,
-                "source":  f"self_narrative:{entry.event_type}",
-                "context": {
+            feature_vec = [
+                entry.surprise_score,
+                entry.importance,
+                min(len(entry.summary), 500) / 500.0,
+            ]
+            self._episodic_memory.record(
+                feature_vec=feature_vec,
+                target=entry.importance,
+                outcome=entry.importance,
+                source=f"self_narrative:{entry.event_type}",
+                reward=0.0,
+                context={
+                    "summary":        entry.summary,
                     "surprise_score": entry.surprise_score,
-                    "importance":     entry.importance,
                     "timestamp":      entry.timestamp,
                 },
-            }
-            # نحاول record() أو record_episode() حسب الواجهة المتاحة
-            if hasattr(self._episodic_memory, "record"):
-                try:
-                    from ai.episodic_memory import Episode
-                    ep = Episode(
-                        content = entry.summary,
-                        source  = f"self_narrative:{entry.event_type}",
-                        context = ep_data["context"],
-                    )
-                    self._episodic_memory.record(ep)
-                except Exception:
-                    pass
+            )
         except Exception as exc:
             logger.debug(f"[SelfNarrative] episodic link failed: {exc}")
 

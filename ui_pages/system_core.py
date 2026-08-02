@@ -292,6 +292,27 @@ def render_system_core():
             except Exception as _sa_err:
                 st.error(f"خطأ في Awareness Engine: {_sa_err}")
 
+            # ── اللغة الذاتية (SelfNarrative) ────────────────────────────
+            st.markdown("")
+            st.markdown('<div class="section-header">📖 اللغة الذاتية (Self-Narrative)</div>',
+                        unsafe_allow_html=True)
+            if not _SELF_NARRATIVE_OK:
+                st.caption("⚠️ تعذّر تحميل SelfNarrative.")
+            else:
+                _sn_engine = _get_self_narrative()
+                if _sn_engine is not None:
+                    st.markdown(f"*{_sn_engine.get_identity_statement()}*")
+                    _sn_log = _sn_engine.get_narrative_log(8)
+                    if _sn_log:
+                        for _ne in _sn_log:
+                            st.markdown(
+                                f"<div class='root-item' style='font-size:0.85rem'>"
+                                f"{_ne['summary']}"
+                                f"</div>", unsafe_allow_html=True,
+                            )
+                    else:
+                        st.caption("لا أحداث مسجلة بعد — تحدّث مع NSM أو شغّل التغذية من العالم.")
+
     # ══════════════════ 3. مخطط الأهداف ══════════════════
     with core_tabs[2]:
         st.markdown('<div class="section-header">🎯 مخطط الأهداف (Goal Planner)</div>',
