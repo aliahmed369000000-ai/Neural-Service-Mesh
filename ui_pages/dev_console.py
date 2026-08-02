@@ -24,13 +24,27 @@ def render_dev_console():
         return
 
     if not st.session_state.get("_dev_console_unlocked", False):
+        _fails = st.session_state.get("_dev_console_fails", 0)
+        _lock_until = st.session_state.get("_dev_console_lock_until", 0)
+        _now = time.time()
+        if _lock_until and _now < _lock_until:
+            st.error(f"⏳ محاولات كثيرة فاشلة — حاول بعد {int(_lock_until - _now)} ثانية.")
+            return
         entered = st.text_input("مفتاح المالك", type="password", key="dev_console_key_input")
         if st.button("🔓 فتح لوحة المطوّر", key="dev_console_unlock"):
             if hmac.compare_digest(entered, _admin_key_env):
                 st.session_state["_dev_console_unlocked"] = True
+                st.session_state["_dev_console_fails"] = 0
                 st.rerun()
             else:
-                st.error("❌ مفتاح غير صحيح.")
+                _fails += 1
+                st.session_state["_dev_console_fails"] = _fails
+                if _fails >= 5:
+                    st.session_state["_dev_console_lock_until"] = _now + 30
+                    st.session_state["_dev_console_fails"] = 0
+                    st.error("❌ مفتاح غير صحيح. محاولات كثيرة — قُفلت المحاولة 30 ثانية.")
+                else:
+                    st.error("❌ مفتاح غير صحيح.")
         return
 
     col_lock, _ = st.columns([1, 4])
@@ -66,17 +80,19 @@ def render_dev_console():
                         ["python3", "-c", cmd_text], capture_output=True, text=True, timeout=cmd_timeout,
                     )
                 _dc_ph.empty()
+                _stdout = _redact_secrets(result.stdout)
+                _stderr = _redact_secrets(result.stderr)
                 st.markdown('<div class="glass-card">', unsafe_allow_html=True)
                 st.markdown(f"**رمز الخروج:** `{result.returncode}`")
-                if result.stdout:
+                if _stdout:
                     st.markdown("**stdout:**")
-                    st.code(result.stdout[-5000:])
-                    _copy_button(result.stdout[-5000:], key="dev_console_stdout", label="📋 نسخ stdout")
-                if result.stderr:
+                    st.code(_stdout[-5000:])
+                    _copy_button(_stdout[-5000:], key="dev_console_stdout", label="📋 نسخ stdout")
+                if _stderr:
                     st.markdown("**stderr:**")
-                    st.code(result.stderr[-5000:])
-                    _copy_button(result.stderr[-5000:], key="dev_console_stderr", label="📋 نسخ stderr")
-                if not result.stdout and not result.stderr:
+                    st.code(_stderr[-5000:])
+                    _copy_button(_stderr[-5000:], key="dev_console_stderr", label="📋 نسخ stderr")
+                if not _stdout and not _stderr:
                     st.caption("لا يوجد ناتج.")
                 st.markdown("</div>", unsafe_allow_html=True)
                 if result.returncode == 0:

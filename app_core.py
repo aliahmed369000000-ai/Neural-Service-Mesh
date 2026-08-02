@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import sqlite3
+import time
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -2833,6 +2834,21 @@ def metric_card(value, label: str, wrap: bool = False, count_target: int | None 
         <div class="metric-label">{label}</div>
     </div>
     """, unsafe_allow_html=True)
+
+
+def _redact_secrets(text: str) -> str:
+    """يخفي قيم أي متغير بيئة اسمه يحتوي KEY/TOKEN/SECRET/PASSWORD من نص
+    مُعطى، قبل عرضه بالواجهة — يحمي من تسرّب أسرار عرضي عند تنفيذ أوامر
+    تكشفها بالخطأ (مثلاً env أو printenv بلوحة المطوّر), دون منع تنفيذ
+    الأمر نفسه أو حجب مخرجات غير حسّاسة."""
+    if not text:
+        return text
+    for _name, _val in os.environ.items():
+        if not _val or len(_val) < 6:
+            continue
+        if re.search(r"KEY|TOKEN|SECRET|PASSWORD", _name, re.IGNORECASE) and _val in text:
+            text = text.replace(_val, f"***[{_name}]***")
+    return text
 
 
 def _copy_button(text: str, key: str, label: str = "📋 نسخ") -> None:
