@@ -208,6 +208,7 @@ def render_search():
             {_ws_result}
             </div>
             """, unsafe_allow_html=True)
+            _copy_button(_ws_result, key="search_web_result")
 
     # ── بحث حقيقي عن الصور (Unsplash) ───────────────────────────────────
     st.markdown("")

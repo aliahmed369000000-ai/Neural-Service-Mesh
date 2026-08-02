@@ -264,6 +264,16 @@ def render_memory():
                 _turns = [t for t in _turns if _needle in t["user"].lower() or _needle in t["bot"].lower()]
 
             st.caption(f"عدد الأدوار المعروضة: {len(_turns)}")
+            if _turns:
+                _mem_export_lines = []
+                for _t in _turns:
+                    _ts_line = datetime.fromtimestamp(_t["ts"]).strftime("%Y-%m-%d %H:%M") if _t.get("ts") else ""
+                    _mem_export_lines.append(f"[{_ts_line}] أنت: {_t['user']}\nNSM: {_t['bot']}")
+                st.download_button(
+                    "⬇️ تصدير هذه الجلسة", data="\n\n".join(_mem_export_lines),
+                    file_name=f"nsm_session_{_chosen_session}.txt",
+                    mime="text/plain", key="mem_export_session",
+                )
             for _t in _turns[:50]:
                 _ts_str = datetime.fromtimestamp(_t["ts"]).strftime("%Y-%m-%d %H:%M") if _t.get("ts") else ""
                 st.markdown(f"""
