@@ -786,6 +786,23 @@ html, body { overflow-x: hidden; }
     [data-testid="stSidebar"] { order: initial; }
     [data-testid="stAppViewContainer"] > .main,
     [data-testid="stAppViewContainer"] [data-testid="stMain"] { order: initial; }
+
+    /* ── محاولة جعل انزلاق الشريط على الجوال من اليمين بدل اليسار ──
+       تجريبي: Streamlit لا يوثّق آلية الانزلاق الداخلية (transform أو
+       position) بدقة لكل نسخة، لذا نغطّي الاحتمالين معاً بـ!important
+       (يتجاوز حتى inline style غير !important حسب مواصفات CSS). لو
+       الآلية الفعلية مختلفة، هذا الجزء ببساطة لا يُطابق شيئاً ولا يُفسد
+       شيئاً — ولازم تأكيد بصري فعلي على جهاز حقيقي بعد النشر. */
+    [data-testid="stSidebar"] {
+        left: auto !important;
+        right: 0 !important;
+    }
+    [data-testid="stSidebar"][aria-expanded="false"] {
+        transform: translateX(100%) !important;
+    }
+    [data-testid="stSidebar"][aria-expanded="true"] {
+        transform: translateX(0) !important;
+    }
 }
 
 h1, h2, h3, h4, h5, h6 {
