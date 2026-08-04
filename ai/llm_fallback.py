@@ -131,7 +131,12 @@ OPENROUTER_MODELS = {
 _OPENAI_MODEL     = "gpt-4o-mini"
 _TOGETHER_MODEL   = "meta-llama/Llama-3-8b-chat-hf"
 _GEMINI_MODEL     = "gemini-2.5-flash"  # gemini-1.5-flash أُطفئ نهائياً ويرجع 404
-_GROQ_MODELS          = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "openai/gpt-oss-20b"]
+_GROQ_MODELS          = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-20b"]
+# gpt-oss-120b أولاً: أقوى نموذج مفتوح المصدر متاح مجاناً على Groq حالياً
+# (116B معامل، Apache 2.0) — نفس الاختيار المطبَّق في ai/ultraplinian.py
+# (FREE_DIRECT_MODELS و_GROQ_FALLBACK_MODELS)، تحقّق بتاريخ أغسطس 2026.
+# ملاحظة: _GROQ_MODELS[0] فقط هو المستخدم فعلياً في سلسلة LLMFallback
+# (انظر _build_provider_chain أدناه) — البقية للتوثيق فقط حالياً.
 # Falcon-Arabic-7B-Instruct — نموذج لغوي عربي عام (وليس متخصصاً دينياً فقط)
 # مبني على Falcon3-7B من TII، مجاني بالكامل عبر HF Inference API.
 _HF_MODEL             = "tiiuae/Falcon-Arabic-7B-Instruct"
