@@ -556,6 +556,25 @@ def _refine_confidence(result: Dict[str, Any]) -> float:
         return base_confidence
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# فحص تأسيس الإجابة على المصدر (ai/nsm_answer_verifier.py) — DeepEval
+# FaithfulnessMetric + Claude كحَكَم. استيراد كسول + تدهور آمن كامل، بنفس
+# نمط _get_deep_awareness أعلاه: أي فشل (لا deepeval، لا مفتاح API،
+# مشكلة شبكة) يُرجع {"available": False, ...} بدل رمي استثناء يوقف
+# answer_question() كاملة.
+# ═══════════════════════════════════════════════════════════════════════════
+def _check_answer_faithfulness(question: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        from ai.nsm_answer_verifier import verify_answer_faithfulness
+        return verify_answer_faithfulness(question, result)
+    except Exception as e:
+        logger.warning(f"[qa_engine] تعذّر تحميل ai.nsm_answer_verifier: {e}")
+        return {
+            "available": False, "faithful": None, "score": None,
+            "reason": f"تعذّر تحميل وحدة التحقق: {e}",
+        }
+
+
 def _enrich_with_arabic_roots(
     names: List[str],
     arabic_roots: Dict[str, Any],
@@ -1406,6 +1425,7 @@ def answer_question(
     top_k: int = 50,
     include_reasoning_trace: bool = False,
     include_images: bool = False,
+    include_faithfulness_check: bool = False,
     conversation_history: Optional[List[Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
     """
@@ -1424,6 +1444,12 @@ def answer_question(
          أبداً الإجابة الرمزية أعلاه — يُضاف كحقل إضافي فقط، وعند أي فشل
          (لا torch، لا checkpoint، إلخ) يُتجاهل بصمت والإجابة الرمزية تبقى
          كما هي دون أي تغيير في السلوك الافتراضي (generation_mode=False).
+      6. (اختياري) include_faithfulness_check=True: يتحقق عبر
+         ai/nsm_answer_verifier.py (DeepEval FaithfulnessMetric + Claude
+         كحَكَم) أن result["summary"] مؤسَّس فعلاً على result["verses"]
+         ولا يحتوي اختلاقاً. False افتراضياً (يستدعي LLM حَكَم بطيء
+         ومكلِف، لا يجب تشغيله في كل استعلام مستخدم عادي)، ويتدهور بأمان
+         كامل لو DeepEval غير مثبَّت أو لا مفتاح Anthropic متاح.
     """
     concepts_db  = ckg.get("concepts", {})
     relations_db = ckg.get("relations", {})
@@ -1561,6 +1587,12 @@ def answer_question(
             result["generated_text"] = generated
             result["generation_used"] = True
             result["generation_backend"] = backend_used
+
+    # 6. فحص تأسيس الإجابة على المصدر — اختياري تماماً (انظر توثيق
+    # include_faithfulness_check أعلاه). None افتراضياً لو لم يُطلَب.
+    result["faithfulness_check"] = (
+        _check_answer_faithfulness(question, result) if include_faithfulness_check else None
+    )
 
     return result
 
