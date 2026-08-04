@@ -27,6 +27,11 @@ def render_chat():
             st.session_state.nsm_bot = NSMChat(system_prompt=NSM_SYSTEM_PROMPT)
         st.session_state.nsm_messages = []
         st.session_state.nsm_count    = 0
+        # معرّف دائم لهذه الجلسة (uuid4، يُولَّد مرة واحدة فقط) — يُستخدم
+        # لربط رسائل هذه الجلسة ببعضها في memory/chat_history.db، عشان
+        # يمكن الرجوع للمحادثة (أو معرفة من ردّ أولاً) حتى بعد انتهاء
+        # الجلسة الحيّة. انظر ai/chat_history_store.py.
+        st.session_state.nsm_chat_session_id = str(_uuid.uuid4())
 
     bot = st.session_state.nsm_bot
 
@@ -730,11 +735,13 @@ def render_chat():
         # لأن رسالة المستخدم موجودة أصلاً بالسجل ولا يجب تكرارها) ──
         if add_user_msg:
             st.session_state.nsm_messages.append(("user", display_text, "", "", _ts))
+            _persist_chat_message(st.session_state.nsm_chat_session_id, "user", display_text)
 
         # ── فحص أمان أولي (regex محلي، بدون تكلفة API) ──
         _safety_msg = _nsm_safety_gate(text.strip())
         if _safety_msg:
             st.session_state.nsm_messages.append(("nsm", _safety_msg, "", "🛡️ فحص أمان", datetime.now().strftime("%H:%M")))
+            _persist_chat_message(st.session_state.nsm_chat_session_id, "nsm", _safety_msg, "🛡️ فحص أمان")
             st.session_state.nsm_count += 1
             st.rerun()
             return
@@ -754,6 +761,9 @@ def render_chat():
             st.session_state.nsm_messages.append((
                 "nsm", _cached["answer"], "", "⚡ كاش متعلَّم", datetime.now().strftime("%H:%M")
             ))
+            _persist_chat_message(
+                st.session_state.nsm_chat_session_id, "nsm", _cached["answer"], "⚡ كاش متعلَّم"
+            )
             st.session_state.nsm_count += 1
             st.rerun()
             return
@@ -986,6 +996,9 @@ def render_chat():
         st.session_state.nsm_messages.append((
             "nsm", _response, _ctx_tag, _src_badge, datetime.now().strftime("%H:%M")
         ))
+        _persist_chat_message(
+            st.session_state.nsm_chat_session_id, "nsm", _response, _src_badge
+        )
         _msg_idx = len(st.session_state.nsm_messages) - 1
         if _TTS_OK and st.session_state.get("_nsm_voice_output") and _response.strip():
             try:

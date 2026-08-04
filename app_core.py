@@ -15,6 +15,7 @@ import os
 import re
 import sqlite3
 import time
+import uuid as _uuid
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -2674,6 +2675,20 @@ def _record_chat_episode(query: str, response: str, source: str = "chat") -> Non
     try:
         from ai.learning_orchestrator import get_orchestrator
         get_orchestrator().record_turn(query, response, source=source)
+    except Exception:
+        pass
+
+
+def _persist_chat_message(session_id: str, role: str, content: str, source_badge: str = "") -> None:
+    """يخزّن رسالة واحدة من تبويب المحادثة بشكل دائم عبر
+    ai/chat_history_store.py (memory/chat_history.db) — يحل مشكلة فقدان
+    st.session_state.nsm_messages بالكامل بانتهاء الجلسة. استيراد كسول +
+    تدهور آمن كامل (نفس نمط _record_chat_episode أعلاه): أي فشل
+    (وحدة غير موجودة، قرص ممتلئ، ...) يُبتلَع صامتاً ولا يكسر تجربة
+    المحادثة الحيّة إطلاقاً."""
+    try:
+        from ai.chat_history_store import save_message
+        save_message(session_id, role, content, source_badge)
     except Exception:
         pass
 
