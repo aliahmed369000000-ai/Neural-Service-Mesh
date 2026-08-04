@@ -268,9 +268,13 @@ def _build_system_prompt() -> str:
 
 _GROQ_URL       = "https://api.groq.com/openai/v1/chat/completions"
 _OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+# gpt-oss-120b أولاً (أقوى نموذج مفتوح المصدر مجاني على Groq حالياً).
+# gemma2-9b-it وllama3-8b-8192 أُزيلا: لم يعودا ضمن قائمة Groq الرسمية
+# (نفس الملاحظة الموثّقة في ai/ultraplinian.py) — كانا يسببان فشلاً صامتاً
+# في كل محاولة قبل الوصول لنموذج فعلي يعمل.
 _GROQ_MODELS    = [
-    "llama-3.1-8b-instant", "gemma2-9b-it",
-    "llama-3.3-70b-versatile", "llama3-8b-8192",
+    "openai/gpt-oss-120b", "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant", "openai/gpt-oss-20b",
 ]
 _OPENROUTER_MODELS = [
     "meta-llama/llama-3.1-8b-instruct:free",
