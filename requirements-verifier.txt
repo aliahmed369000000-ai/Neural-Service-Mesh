@@ -1,0 +1,21 @@
+# requirements-verifier.txt
+# =========================
+# اعتماديات اختيارية لوحدة ai/nsm_answer_verifier.py (فحص تأسيس إجابات
+# knowledge/qa_engine.py على المصدر عبر DeepEval FaithfulnessMetric).
+#
+# لماذا ملف منفصل عن requirements.txt الأساسي:
+#   - غير مطلوب لتشغيل التطبيق نفسه على Streamlit Community Cloud —
+#     محدود الذاكرة أصلاً (انظر ملاحظات المشروع)، وDeepEval يجلب
+#     اعتماديات إضافية غير لازمة للمنتج في وقت التشغيل الفعلي.
+#   - يُستخدم فقط اختيارياً (include_faithfulness_check=True) أو مباشرة
+#     من ai/nsm_answer_verifier.py، عادة في اختبارات محلية/CI أو تدقيق
+#     يدوي لجودة الإجابات — وليس في مسار كل طلب مستخدم.
+#
+# التثبيت المحلي:
+#   pip install -r requirements-verifier.txt
+#   export ANTHROPIC_API_KEY=...   # الحَكَم (judge LLM) هو Claude نفسه
+#
+# بدون هذا الملف مثبَّتاً: ai/nsm_answer_verifier.py يتدهور بأمان كامل
+# (verify_answer_faithfulness يُرجع {"available": False, ...} بلا أي
+# استثناء أو كسر لبقية النظام).
+deepeval>=3.0.0
