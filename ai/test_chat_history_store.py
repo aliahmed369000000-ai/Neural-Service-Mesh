@@ -19,6 +19,15 @@ def _isolated_db(tmp_path, monkeypatch):
     yield
 
 
+@pytest.fixture()
+def _unwritable_db_path(tmp_path):
+    """مسار DB أبوه ملف عادي وليس مجلداً — يفشل mkdir دائماً، حتى بصلاحية
+    root (بخلاف /nonexistent-dir-xyz التي تنجح إن شُغِّل الاختبار كـroot)."""
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory")
+    return blocker / "db.sqlite"
+
+
 class TestSaveAndReadMessages:
     def test_save_then_get_session_messages_roundtrip(self):
         store.save_message("s1", "user", "ما حكم الصبر؟")
@@ -76,6 +85,64 @@ class TestListSessions:
         assert by_id["s2"]["message_count"] == 1
 
 
+class TestStorageStats:
+    def test_empty_db_gives_zero_stats(self):
+        stats = store.get_storage_stats()
+        assert stats["total_messages"] == 0
+        assert stats["total_sessions"] == 0
+
+    def test_stats_count_messages_and_distinct_sessions(self):
+        store.save_message("s1", "user", "١")
+        store.save_message("s1", "nsm", "٢")
+        store.save_message("s2", "user", "٣")
+        stats = store.get_storage_stats()
+        assert stats["total_messages"] == 3
+        assert stats["total_sessions"] == 2
+        assert stats["db_size_bytes"] > 0
+
+    def test_returns_zeroed_stats_on_bad_db_path(self, monkeypatch, _unwritable_db_path):
+        monkeypatch.setattr(store, "DB_PATH", _unwritable_db_path)
+        stats = store.get_storage_stats()
+        assert stats == {"total_messages": 0, "total_sessions": 0, "db_size_bytes": 0}
+
+
+class TestDeleteSessionsOlderThan:
+    def test_deletes_only_sessions_older_than_cutoff(self, monkeypatch):
+        import ai.chat_history_store as _store_mod
+
+        # جلسة قديمة (نزرعها يدوياً بتاريخ قديم عبر تعديل مباشر بقاعدة البيانات)
+        store.save_message("old-session", "user", "قديمة")
+        store.save_message("new-session", "user", "حديثة")
+
+        old_ts = (
+            _store_mod.datetime.now(_store_mod.timezone.utc)
+            - _store_mod.timedelta(days=100)
+        ).isoformat()
+        with _store_mod._db() as c:
+            c.execute(
+                "UPDATE chat_messages SET created_at = ? WHERE session_id = ?",
+                (old_ts, "old-session"),
+            )
+            c.commit()
+
+        deleted = store.delete_sessions_older_than(30)
+        assert deleted == 1
+        assert store.get_session_messages("old-session") == []
+        assert len(store.get_session_messages("new-session")) == 1
+
+    def test_zero_days_deletes_nothing(self):
+        store.save_message("s1", "user", "رسالة")
+        assert store.delete_sessions_older_than(0) == 0
+        assert len(store.get_session_messages("s1")) == 1
+
+    def test_returns_zero_on_empty_db(self):
+        assert store.delete_sessions_older_than(30) == 0
+
+    def test_returns_zero_on_bad_db_path(self, monkeypatch, _unwritable_db_path):
+        monkeypatch.setattr(store, "DB_PATH", _unwritable_db_path)
+        assert store.delete_sessions_older_than(30) == 0
+
+
 class TestGracefulDegradation:
     def test_save_message_never_raises_on_empty_session_id(self):
         store.save_message("", "user", "نص ما")  # لا استثناء
@@ -84,10 +151,10 @@ class TestGracefulDegradation:
         store.save_message("s1", "user", "   ")  # لا استثناء
         assert store.get_session_messages("s1") == []
 
-    def test_get_session_messages_returns_empty_list_on_bad_db_path(self, monkeypatch):
-        monkeypatch.setattr(store, "DB_PATH", Path("/nonexistent-dir-xyz/db.sqlite"))
+    def test_get_session_messages_returns_empty_list_on_bad_db_path(self, monkeypatch, _unwritable_db_path):
+        monkeypatch.setattr(store, "DB_PATH", _unwritable_db_path)
         assert store.get_session_messages("s1") == []
 
-    def test_list_sessions_returns_empty_list_on_bad_db_path(self, monkeypatch):
-        monkeypatch.setattr(store, "DB_PATH", Path("/nonexistent-dir-xyz/db.sqlite"))
+    def test_list_sessions_returns_empty_list_on_bad_db_path(self, monkeypatch, _unwritable_db_path):
+        monkeypatch.setattr(store, "DB_PATH", _unwritable_db_path)
         assert store.list_sessions() == []

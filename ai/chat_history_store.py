@@ -34,12 +34,15 @@ _record_chat_episode في app_core.py).
     save_message(session_id, "nsm", "...", source_badge="⚡ كاش متعلَّم")
 
     first = get_first_message(session_id)   # من ردّ/سأل أولاً في الجلسة
+
+    stats = get_storage_stats()             # مراقبة حجم التخزين
+    deleted = delete_sessions_older_than(30)  # تنظيف الجلسات الأقدم من 30 يوماً
 """
 from __future__ import annotations
 
 import logging
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -148,3 +151,48 @@ def list_sessions(limit: int = 50) -> List[Dict]:
     except Exception as e:
         logger.warning(f"[chat_history_store] فشل قراءة قائمة الجلسات: {e}")
         return []
+
+
+def get_storage_stats() -> Dict:
+    """إحصائيات سريعة عن حجم التخزين — مفيدة للمراقبة على قرص Streamlit
+    Community Cloud المحدود (نفس القيد المذكور أعلى الملف). تعيد
+    {"total_messages", "total_sessions", "db_size_bytes"} — أصفار عند
+    أي فشل، بلا استثناء أبداً."""
+    stats = {"total_messages": 0, "total_sessions": 0, "db_size_bytes": 0}
+    try:
+        with _db() as c:
+            row = c.execute(
+                "SELECT COUNT(*), COUNT(DISTINCT session_id) FROM chat_messages"
+            ).fetchone()
+        stats["total_messages"] = row[0] or 0
+        stats["total_sessions"] = row[1] or 0
+        if DB_PATH.exists():
+            stats["db_size_bytes"] = DB_PATH.stat().st_size
+    except Exception as e:
+        logger.warning(f"[chat_history_store] فشل قراءة إحصائيات التخزين: {e}")
+    return stats
+
+
+def delete_sessions_older_than(days: int) -> int:
+    """يحذف كل الجلسات (كل رسائلها) اللي آخر رسالة فيها أقدم من `days`
+    يوماً. يعيد عدد الرسائل المحذوفة فعلياً (0 عند أي فشل أو عدم وجود
+    شيء للحذف، بلا استثناء أبداً). عملية تدميرية — تُستدعى فقط من واجهة
+    محمية (لوحة المطوّر) مع تأكيد صريح من المستخدم قبل الاستدعاء، نفس
+    مبدأ إعادة التأكيد المطلوب لعمليات git التدميرية."""
+    if days <= 0:
+        return 0
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        with _db() as c:
+            cur = c.execute(
+                """DELETE FROM chat_messages WHERE session_id IN (
+                       SELECT session_id FROM chat_messages
+                       GROUP BY session_id HAVING MAX(created_at) < ?
+                   )""",
+                (cutoff,),
+            )
+            c.commit()
+            return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    except Exception as e:
+        logger.warning(f"[chat_history_store] فشل حذف الجلسات القديمة: {e}")
+        return 0

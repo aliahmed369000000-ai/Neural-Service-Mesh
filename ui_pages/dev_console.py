@@ -161,7 +161,41 @@ def render_dev_console():
         "memory/chat_history.db (يبقى طالما لم يُعَد نشر التطبيق من الصفر)."
     )
     try:
-        from ai.chat_history_store import list_sessions, get_session_messages
+        from ai.chat_history_store import (
+            list_sessions, get_session_messages, get_storage_stats,
+            delete_sessions_older_than,
+        )
+
+        # ── إحصائيات التخزين (قرص Streamlit Cloud محدود) ──────────────
+        _stats = get_storage_stats()
+        _sc1, _sc2, _sc3 = st.columns(3)
+        with _sc1:
+            metric_card(_stats["total_sessions"], "إجمالي الجلسات")
+        with _sc2:
+            metric_card(_stats["total_messages"], "إجمالي الرسائل")
+        with _sc3:
+            metric_card(f"{_stats['db_size_bytes'] / 1024:.1f} KB", "حجم قاعدة البيانات")
+
+        # ── تنظيف الجلسات القديمة (عملية تدميرية — تتطلب تأكيداً صريحاً) ──
+        with st.expander("🧹 تنظيف الجلسات القديمة"):
+            _dc_cleanup_days = st.number_input(
+                "احذف الجلسات الأقدم من (يوم)", min_value=1, max_value=3650,
+                value=30, step=1, key="dc_chat_cleanup_days",
+            )
+            _dc_confirm = st.text_input(
+                f"اكتب `تأكيد` هنا لحذف كل الجلسات الأقدم من {int(_dc_cleanup_days)} يوماً "
+                "(لا يمكن التراجع)",
+                key="dc_chat_cleanup_confirm",
+            )
+            if st.button("🗑️ احذف نهائياً", key="dc_chat_cleanup_run", type="primary"):
+                if _dc_confirm.strip() != "تأكيد":
+                    st.warning("اكتب كلمة `تأكيد` بالضبط في الحقل أعلاه قبل الحذف.")
+                else:
+                    _deleted = delete_sessions_older_than(int(_dc_cleanup_days))
+                    st.success(f"✅ تم حذف {_deleted} رسالة.")
+                    st.session_state.pop("_dc_chat_sessions", None)
+                    st.toast(f"🗑️ حُذفت {_deleted} رسالة", icon="🗑️")
+                    st.rerun()
 
         _dc_sessions_limit = st.slider(
             "عدد الجلسات المعروضة", 5, 100, 20, 5, key="dc_chat_sessions_limit"
