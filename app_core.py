@@ -15,6 +15,7 @@ import os
 import re
 import sqlite3
 import time
+import uuid as _uuid
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -428,6 +429,12 @@ try:
     _WORLD_FEED_OK = True
 except Exception:
     _WORLD_FEED_OK = False
+
+try:
+    from ai.self_narrative import SelfNarrative
+    _SELF_NARRATIVE_OK = True
+except Exception:
+    _SELF_NARRATIVE_OK = False
 
 try:
     from ai.goal_planner import GoalPlanner
@@ -1953,8 +1960,27 @@ h3 { font-size: clamp(1.05rem, 3.2vw, 1.3rem); font-weight: 700; }
     color: var(--text);
     font-size: 0.92rem;
     font-family: 'Tajawal', sans-serif;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
 }
 .nsm-cmdk-item:hover, .nsm-cmdk-item.active { background: var(--gold-soft); }
+.nsm-cmdk-item-parent { color: var(--text-muted); font-size: 0.85rem; }
+.nsm-cmdk-item-sep { color: var(--text-muted); opacity: 0.6; }
+.nsm-cmdk-empty {
+    padding: 1.4rem 1.2rem;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.88rem;
+    font-family: 'Tajawal', sans-serif;
+}
+.nsm-cmdk-hint {
+    padding: 0.5rem 1.2rem 0.85rem;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-family: 'Tajawal', sans-serif;
+    border-top: 1px solid var(--border);
+}
 .nsm-cmdk-fab {
     position: fixed; bottom: 20px; left: 20px;
     z-index: 9998;
@@ -2103,8 +2129,9 @@ if not st.session_state.get(_nsm_chrome_key):
             overlay.className = 'nsm-cmdk-overlay';
             overlay.innerHTML =
                 '<div class="nsm-cmdk-box">' +
-                    '<input id="nsm-cmdk-input" class="nsm-cmdk-input" placeholder="ابحث عن قسم... (Esc للإغلاق)" />' +
+                    '<input id="nsm-cmdk-input" class="nsm-cmdk-input" placeholder="ابحث عن قسم أو قسم فرعي... (Esc للإغلاق)" />' +
                     '<div id="nsm-cmdk-list" class="nsm-cmdk-list"></div>' +
+                    '<div class="nsm-cmdk-hint">↑↓ للتنقّل · Enter للفتح · Esc للإغلاق</div>' +
                 '</div>';
             doc.body.appendChild(overlay);
 
@@ -2116,23 +2143,91 @@ if not st.session_state.get(_nsm_chrome_key):
             fab.textContent = '⌘K';
             doc.body.appendChild(fab);
 
-            function getTabs() {{
-                return Array.from(doc.querySelectorAll('[data-baseweb="tab-list"] [data-baseweb="tab"]'));
+            // ── فهرسة كل الأقسام: التبويبات الرئيسية + التبويبات الفرعية
+            // المتداخلة داخلها (مثل «المعرفة ‹ القرآن الكريم»)، حتى يقدر
+            // المستخدم يقفز مباشرة لأي قسم فرعي بدل الاقتصار على الرئيسية.
+            // الربط بين كل تبويب فرعي وأصله الرئيسي يتم عبر aria-labelledby
+            // (نمط ARIA القياسي لِـ tabpanel ← id تبويبه الأصل)، وهو أثبت
+            // من محاولة حساب الفهرس يدوياً لأن كل التبويبات (حتى غير
+            // النشطة) موجودة بالـDOM دوماً وقد تتشابه تسمياتها.
+            function buildIndex() {{
+                const groups = Array.from(doc.querySelectorAll('.stTabs'));
+                if (!groups.length) return [];
+                const rootGroup = groups[0];
+                const items = [];
+
+                function ownTabs(group) {{
+                    return Array.from(group.querySelectorAll('[data-baseweb="tab-list"] [role="tab"]'))
+                        .filter(function(t) {{ return t.closest('.stTabs') === group; }});
+                }}
+
+                ownTabs(rootGroup).forEach(function(t) {{
+                    items.push({{
+                        label: (t.textContent || '').trim(),
+                        parent: null,
+                        run: function() {{ t.click(); }},
+                    }});
+                }});
+
+                for (let i = 1; i < groups.length; i++) {{
+                    const g = groups[i];
+                    // نبحث عن حاوية اللوحة الأصل بأكثر من محدد احتياطاً لاختلاف
+                    // إصدار BaseWeb — data-baseweb هو الأساسي، role=tabpanel احتياط ARIA قياسي.
+                    const parentPanel = g.closest('[data-baseweb="tab-panel"], [role="tabpanel"]');
+                    if (!parentPanel) continue;
+                    const parentId = parentPanel.getAttribute('aria-labelledby');
+                    const parentTab = parentId ? doc.getElementById(parentId) : null;
+                    if (!parentTab) continue;
+                    const parentLabel = (parentTab.textContent || '').trim();
+                    ownTabs(g).forEach(function(st) {{
+                        items.push({{
+                            label: (st.textContent || '').trim(),
+                            parent: parentLabel,
+                            run: function() {{
+                                parentTab.click();
+                                setTimeout(function() {{ st.click(); }}, 60);
+                            }},
+                        }});
+                    }});
+                }}
+                return items;
             }}
+
             function renderList(filterText) {{
                 const list = doc.getElementById('nsm-cmdk-list');
                 list.innerHTML = '';
                 const f = (filterText || '').trim();
-                let first = true;
-                getTabs().forEach(function(t) {{
-                    const label = (t.textContent || '').trim();
-                    if (f && label.indexOf(f) === -1) return;
+                const all = buildIndex();
+                const matches = all.filter(function(it) {{
+                    if (!f) return true;
+                    const hay = (it.parent ? it.parent + ' ' : '') + it.label;
+                    return hay.indexOf(f) !== -1;
+                }});
+                if (!matches.length) {{
+                    const empty = doc.createElement('div');
+                    empty.className = 'nsm-cmdk-empty';
+                    empty.textContent = 'لا توجد أقسام مطابقة';
+                    list.appendChild(empty);
+                    return;
+                }}
+                matches.forEach(function(it, i) {{
                     const item = doc.createElement('div');
-                    item.className = 'nsm-cmdk-item' + (first ? ' active' : '');
-                    first = false;
-                    item.textContent = label;
+                    item.className = 'nsm-cmdk-item' + (i === 0 ? ' active' : '');
+                    if (it.parent) {{
+                        const parentSpan = doc.createElement('span');
+                        parentSpan.className = 'nsm-cmdk-item-parent';
+                        parentSpan.textContent = it.parent;
+                        const sepSpan = doc.createElement('span');
+                        sepSpan.className = 'nsm-cmdk-item-sep';
+                        sepSpan.textContent = '‹';
+                        item.appendChild(parentSpan);
+                        item.appendChild(sepSpan);
+                    }}
+                    const labelSpan = doc.createElement('span');
+                    labelSpan.textContent = it.label;
+                    item.appendChild(labelSpan);
                     item.addEventListener('click', function() {{
-                        t.click();
+                        it.run();
                         closePalette();
                     }});
                     list.appendChild(item);
@@ -2436,6 +2531,22 @@ def _get_memory_consolidator():
 
 
 @st.cache_resource(show_spinner=False)
+def _get_self_narrative():
+    """singleton لعملية Streamlit كاملة. ai/self_narrative.py كان مكتوباً
+    ومختبراً (يمنح الجهاز 'صوتاً ذاتياً': يومية، جملة هوية متطورة) لكن غير
+    مستورد من أي مكان إطلاقاً. مربوط هنا بالذاكرة الإيبيسودية الحقيقية بعد
+    إصلاح _link_to_episodic() (كانت تبني Episode(content=...) بمعامل غير
+    موجود في التوقيع الحقيقي فتسقط دوماً صامتاً)."""
+    if not _SELF_NARRATIVE_OK:
+        return None
+    try:
+        episodic = _get_episodic_engine()
+        return SelfNarrative(episodic_memory=episodic)
+    except Exception:
+        return None
+
+
+@st.cache_resource(show_spinner=False)
 def _get_world_feed():
     """singleton لعملية Streamlit كاملة. ai/world_feed.py + ai/quality_engine.py +
     ai/immune_system.py كانت الثلاثة مكتوبة ومختبرة لكن غير مستوردة من أي مكان
@@ -2485,6 +2596,18 @@ def _get_world_feed():
             except Exception:
                 pass  # فشل التسجيل لا يجوز أن يكسر دورة الاستطلاع
 
+            _sn = _get_self_narrative()
+            if _sn is not None:
+                try:
+                    _sn.record_event(
+                        "world_feed",
+                        {"source": item.get("source", ""), "message": title or content[:60]},
+                        surprise_score=0.0,
+                        importance=min(1.0, score / 100.0),
+                    )
+                except Exception:
+                    pass
+
         wf = WorldFeed(immune_system=immune, quality_engine=quality, min_quality=60.0)
         wf.set_memory_callback(_on_accept)
         return wf
@@ -2531,12 +2654,41 @@ def _record_chat_episode(query: str, response: str, source: str = "chat") -> Non
     except Exception:
         pass
 
+    # ── SelfNarrative (كان يتيماً بالكامل) — تسجيل الحدث بإشارة حقيقية
+    # محسوبة محلياً وبأمان (لا اعتماد على متغيرات نطاق try سابق).
+    try:
+        _sn = _get_self_narrative()
+        if _sn is not None:
+            _ok_signal = 1.0 if (response or "").strip() else 0.0
+            _sn.record_event(
+                "decision",
+                {"message": (query or "")[:80]},
+                surprise_score=0.0,
+                importance=0.5 if _ok_signal else 0.3,
+            )
+    except Exception:
+        pass
+
     # ── توحيد الاستدعاء: يصل ConversationLearner (كان يتيماً بالكامل) ──
     # بنفس نقطة تسجيل الحلقة الحقيقية أعلاه. best-effort — لا يكسر الرد
     # عند الفشل (انظر ai/learning_orchestrator.py لتفاصيل التوحيد).
     try:
         from ai.learning_orchestrator import get_orchestrator
         get_orchestrator().record_turn(query, response, source=source)
+    except Exception:
+        pass
+
+
+def _persist_chat_message(session_id: str, role: str, content: str, source_badge: str = "") -> None:
+    """يخزّن رسالة واحدة من تبويب المحادثة بشكل دائم عبر
+    ai/chat_history_store.py (memory/chat_history.db) — يحل مشكلة فقدان
+    st.session_state.nsm_messages بالكامل بانتهاء الجلسة. استيراد كسول +
+    تدهور آمن كامل (نفس نمط _record_chat_episode أعلاه): أي فشل
+    (وحدة غير موجودة، قرص ممتلئ، ...) يُبتلَع صامتاً ولا يكسر تجربة
+    المحادثة الحيّة إطلاقاً."""
+    try:
+        from ai.chat_history_store import save_message
+        save_message(session_id, role, content, source_badge)
     except Exception:
         pass
 

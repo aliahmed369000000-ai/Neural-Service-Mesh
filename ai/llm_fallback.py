@@ -7,8 +7,11 @@ LLM Generative Fallback Engine — NSM v18.3
   1. Anthropic Claude (ANTHROPIC_API_KEY) — Claude Sonnet 5 ← الأولوية الأولى ✅
   2. Cloudflare Workers AI (CF_API_TOKEN + CF_ACCOUNT_ID) — مجاني 10k/يوم
   3. Google Gemini   (GOOGLE_API_KEY)   — Gemini 2.5 Flash
-  4. OpenRouter      (OPENROUTER_API_KEY)
+  4. OpenRouter      (OPENROUTER_API_KEY) — نماذج مجانية تلقائياً، أو Kimi K3
+                                             (moonshotai/kimi-k3) عبر model_key="kimi"
   5. Groq            (GROQ_API_KEY)     — قد يُحجب من بعض الشبكات
+  5.5. Cerebras      (CEREBRAS_API_KEY) — احتياطي فوري لـGroq، نفس أوزان
+                                           gpt-oss-120b على عتاد وحصة مستقلة
   6. OpenAI API      (OPENAI_API_KEY)   — GPT-4o-mini
   7. Together.xyz    (TOGETHER_API_KEY) — Llama-3/Mixtral
   8. Hugging Face    (HUGGINGFACE_API_KEY أو HF_TOKEN) — Falcon-Arabic-7B-Instruct (مجاني)
@@ -64,6 +67,8 @@ class Provider(Enum):
     OPENAI    = "openai"
     TOGETHER  = "together"
     GROQ      = "groq"
+    CEREBRAS  = "cerebras"      # احتياطي فوري لـGroq — نفس أوزان gpt-oss-120b
+                                 # على عتاد مختلف وحصة مجانية منفصلة (dual-homing)
     HUGGINGFACE = "huggingface"  # Falcon-Arabic-7B-Instruct — مجاني (HF Inference API)
     LOCAL     = "local"  # نموذج محلي عبر Ollama — للنشر المغلق بدون إنترنت (NSM_OFFLINE_MODE)
     CKG_SYNTH = "ckg_synthesis"
@@ -112,11 +117,36 @@ ANTHROPIC_MODELS = {
 _ANTHROPIC_MODEL  = ANTHROPIC_MODELS["sonnet"]    # الأولوية الأولى ✅
 _CF_MODEL         = "@cf/meta/llama-3.1-8b-instruct"  # مجاني 10k/يوم ✅
 _OPENROUTER_MODEL = "meta-llama/llama-3.1-8b-instruct:free"  # مجاني
+# Kimi K3 (Moonshot AI) — أحدث نموذج مفتوح المصدر (2.8T معامل، MoE، 896
+# خبيراً/16 نشِط لكل توكن)، أُطلق 16 يوليو 2026 وصدرت أوزانه الكاملة في
+# 27 يوليو 2026. أداء من فئة frontier (منافس لنماذج مغلقة) عبر OpenRouter.
+# مدفوع ($3/$15 لكل مليون توكن دخل/خرج) → لا يُختار تلقائياً ضمن الاكتشاف
+# المجاني، بل فقط عند تحديده صراحةً عبر model_key="kimi" (انظر OPENROUTER_MODELS).
+_OPENROUTER_KIMI_MODEL = "moonshotai/kimi-k3"
 _OPENROUTER_URL   = "https://openrouter.ai/api/v1/chat/completions"
+
+# نماذج OpenRouter القابلة للاختيار صراحةً (مثل ANTHROPIC_MODELS أدناه) —
+# استخدمها عبر LLMFallback(model_key="kimi") لتجاوز الاكتشاف التلقائي
+# للنماذج المجانية واستخدام Kimi K3 تحديداً.
+OPENROUTER_MODELS = {
+    "free": _OPENROUTER_MODEL,       # الافتراضي — نموذج مجاني (Llama 3.1 8B)
+    "kimi": _OPENROUTER_KIMI_MODEL,  # Kimi K3 — أقوى نموذج مفتوح المصدر متاح حالياً (مدفوع)
+}
 _OPENAI_MODEL     = "gpt-4o-mini"
 _TOGETHER_MODEL   = "meta-llama/Llama-3-8b-chat-hf"
 _GEMINI_MODEL     = "gemini-2.5-flash"  # gemini-1.5-flash أُطفئ نهائياً ويرجع 404
-_GROQ_MODELS          = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "openai/gpt-oss-20b"]
+_GROQ_MODELS          = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-20b"]
+# gpt-oss-120b أولاً: أقوى نموذج مفتوح المصدر متاح مجاناً على Groq حالياً
+# (116B معامل، Apache 2.0) — نفس الاختيار المطبَّق في ai/ultraplinian.py
+# (FREE_DIRECT_MODELS و_GROQ_FALLBACK_MODELS)، تحقّق بتاريخ أغسطس 2026.
+# ملاحظة: _GROQ_MODELS[0] فقط هو المستخدم فعلياً في سلسلة LLMFallback
+# (انظر _build_provider_chain أدناه) — البقية للتوثيق فقط حالياً.
+# Cerebras — نفس أوزان gpt-oss-120b بالضبط، لكن على عتاد Cerebras WSE
+# وبحصة مجانية منفصلة تماماً عن حصة Groq (1M توكن/يوم، بدون بطاقة).
+# يُستخدم كاحتياطي فوري إذا حُجب Groq أو استُنفدت حصته — بنفس النموذج
+# تماماً فلا يتغيّر شكل الردود عند التبديل (dual-homing، تحقّق أغسطس 2026).
+_CEREBRAS_MODEL       = "gpt-oss-120b"
+_CEREBRAS_URL         = "https://api.cerebras.ai/v1/chat/completions"
 # Falcon-Arabic-7B-Instruct — نموذج لغوي عربي عام (وليس متخصصاً دينياً فقط)
 # مبني على Falcon3-7B من TII، مجاني بالكامل عبر HF Inference API.
 _HF_MODEL             = "tiiuae/Falcon-Arabic-7B-Instruct"
@@ -143,6 +173,32 @@ _OPENROUTER_CACHE_PATH   = os.path.join(
 )
 _OPENROUTER_CACHE_TTL    = 6 * 3600   # 6 ساعات قبل إعادة الاكتشاف
 _OPENROUTER_MAX_MODELS   = 5          # أقصى عدد نماذج نجرّبها بالتتابع
+
+# ترتيب تفضيلي (الأفضل أولاً) لعائلات النماذج المجانية المعروفة بجودة عالية
+# على OpenRouter. قائمة ":free" على OpenRouter تتغيّر أسبوعياً (نماذج تُضاف
+# وتُحذف باستمرار — مثلاً DeepSeek وGLM كانا مجانيين ثم أصبحا مدفوعَين في
+# فترات مختلفة)، لذا تعمّدنا عدم تثبيت اسم نموذج واحد كما فعلنا سابقاً مع
+# Kimi K3 (مدفوع دائماً)، بل نُرتّب أي نموذج مجاني *متاح فعلياً الآن* حسب
+# عائلته، بحيث يُجرَّب الأقوى أولاً تلقائياً دون تدخّل يدوي مع كل دورة.
+_FREE_MODEL_QUALITY_FAMILIES = [
+    "glm-4.6", "glm-4.5", "glm-",                 # Zhipu GLM — قريب من Sonnet
+    "deepseek-v3", "deepseek-r1", "deepseek",     # DeepSeek — استدلال قوي
+    "qwen3-", "qwen-",                            # Qwen — دعم عربي/متعدد لغات جيد
+    "llama-4", "llama-3.3", "llama-3.1",          # Meta Llama
+    "gemini",                                     # Google Gemini (نسخ مجانية أحياناً)
+    "gpt-oss", "hermes", "gemma", "mistral",
+]
+
+
+def _free_model_rank(model_id: str) -> int:
+    """رتبة جودة تقديرية لنموذج مجاني (أصغر رقم = أفضل)؛ تُستخدم لترتيب
+    النماذج المكتشفة تلقائياً بدل الاعتماد على ترتيب استجابة الـAPI العشوائي.
+    نموذج غير معروف يحصل على أدنى أولوية (يُجرَّب أخيراً)."""
+    mid = model_id.lower()
+    for i, family in enumerate(_FREE_MODEL_QUALITY_FAMILIES):
+        if family in mid:
+            return i
+    return len(_FREE_MODEL_QUALITY_FAMILIES)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -193,8 +249,10 @@ def discover_openrouter_models(
     استدعاء. عند فشل الاكتشاف أو انتهاء الشبكة، يعود لآخر cache صالح، ثم
     أخيراً للنموذج الثابت الافتراضي _OPENROUTER_MODEL.
 
-    الترتيب: النماذج المجانية (":free" أو pricing.prompt == "0") أولاً،
-    مع إبقاء _OPENROUTER_MODEL دائماً كخيار أخير مضمون.
+    الترتيب: النماذج المجانية (":free" أو pricing.prompt == "0") تُرتَّب
+    حسب جودة العائلة المعروفة (_free_model_rank) بحيث تُجرَّب أقواها أولاً
+    (مثال: GLM/DeepSeek/Qwen إن كانت مجانية حالياً)، مع إبقاء
+    _OPENROUTER_MODEL دائماً كخيار أخير مضمون.
     """
     now = time.time()
 
@@ -217,6 +275,7 @@ def discover_openrouter_models(
             if mid and is_free:
                 free_models.append(mid)
         if free_models:
+            free_models.sort(key=_free_model_rank)
             _save_openrouter_cache(cache_path, free_models, now)
             return _ensure_default_last(free_models, max_models)
     except Exception as exc:
@@ -408,6 +467,7 @@ class LLMFallback:
       3. Gemini   (GOOGLE_API_KEY)   ← سريع ومجاني
       4. OpenRouter (OPENROUTER_API_KEY)
       5. Groq     (GROQ_API_KEY)     ← قد يُحجب من بعض الشبكات
+      5.5. Cerebras (CEREBRAS_API_KEY) ← احتياطي فوري لـGroq (نفس gpt-oss-120b)
       6. OpenAI   (OPENAI_API_KEY)
       7. Together (TOGETHER_API_KEY)
       8. CKG Synthesis               ← دائماً متاح (fallback أخير)
@@ -430,11 +490,16 @@ class LLMFallback:
         self.max_tokens  = max_tokens
         self.temperature = temperature
         self.timeout     = timeout
-        # model_key اختياري: يسمح باختيار نموذج Anthropic محدد من
-        # ANTHROPIC_MODELS (مثال: model_key="fable" لاستخدام claude-fable-5
-        # في محرك السرد الإبداعي ai/fable_engine.py). إن لم يُمرَّر، يُستخدم
-        # الافتراضي "sonnet" كما كان سابقاً — لا تغيير في السلوك القديم.
-        self._model_key  = model_key if model_key in ANTHROPIC_MODELS else None
+        # model_key اختياري: يسمح باختيار نموذج محدد من ANTHROPIC_MODELS
+        # (مثال: model_key="fable" لاستخدام claude-fable-5 في محرك السرد
+        # الإبداعي ai/fable_engine.py) أو من OPENROUTER_MODELS (مثال:
+        # model_key="kimi" لاستخدام Kimi K3 عبر OpenRouter بدل الاكتشاف
+        # التلقائي للنماذج المجانية). إن لم يُمرَّر أو لم يُطابق أياً منهما،
+        # يُستخدم السلوك الافتراضي القديم — لا تغيير في السلوك القديم.
+        self._model_key  = (
+            model_key if model_key in ANTHROPIC_MODELS or model_key in OPENROUTER_MODELS
+            else None
+        )
 
         self._openrouter_models: List[str] = [_OPENROUTER_MODEL]
         self._provider, self._api_key, self._model = self._detect_provider()
@@ -499,17 +564,31 @@ class LLMFallback:
         if k and k.startswith("AIzaSy"):
             chain.append((Provider.GEMINI, k, _GEMINI_MODEL))
 
-        # 4) OpenRouter — اكتشاف تلقائي للنماذج المجانية المتاحة
+        # 4) OpenRouter — نموذج مُختار صراحةً (مثال: "kimi" لـKimi K3) يتجاوز
+        #    الاكتشاف التلقائي، وإلا يُكتشف أفضل نموذج مجاني متاح تلقائياً.
         k = os.getenv("OPENROUTER_API_KEY", "").strip()
         if k:
-            models = discover_openrouter_models(k)
-            self._openrouter_models = models
-            chain.append((Provider.OPENROUTER, k, models[0]))
+            if self._model_key in OPENROUTER_MODELS:
+                chosen = OPENROUTER_MODELS[self._model_key]
+                self._openrouter_models = [chosen]
+                chain.append((Provider.OPENROUTER, k, chosen))
+            else:
+                models = discover_openrouter_models(k)
+                self._openrouter_models = models
+                chain.append((Provider.OPENROUTER, k, models[0]))
 
         # 5) Groq
         k = os.getenv("GROQ_API_KEY", "").strip()
         if k:
             chain.append((Provider.GROQ, k, _GROQ_MODELS[0]))
+
+        # 5.5) Cerebras — احتياطي فوري لنفس gpt-oss-120b (حصة مجانية مستقلة
+        #      عن Groq تماماً). يُضاف مباشرة بعد Groq حتى لو فشل الأخير
+        #      (حجب شبكي، انتهاء حصة)، يُجرَّب نفس النموذج على مزوّد آخر
+        #      قبل النزول لمزوّدين أضعف.
+        k = os.getenv("CEREBRAS_API_KEY", "").strip()
+        if k:
+            chain.append((Provider.CEREBRAS, k, _CEREBRAS_MODEL))
 
         # 6) OpenAI
         k = os.getenv("OPENAI_API_KEY", "").strip()
@@ -563,6 +642,8 @@ class LLMFallback:
                 return self._call_gemini(query, history, sp)
             elif provider == Provider.GROQ:
                 return self._call_groq(query, history, sp)
+            elif provider == Provider.CEREBRAS:
+                return self._call_cerebras(query, history, sp)
             elif provider == Provider.HUGGINGFACE:
                 return self._call_huggingface(query, history, sp)
             elif provider == Provider.LOCAL:
@@ -923,12 +1004,13 @@ class LLMFallback:
             ]
         messages.append({"role": "user", "content": query})
 
-        # نماذج بديلة عند 403
+        # نماذج بديلة عند 403 — gemma2-9b-it وllama3-8b-8192 أُزيلا لأنهما
+        # لم يعودا ضمن قائمة Groq الرسمية (يسببان فشلاً صامتاً بكل محاولة).
         groq_models = [
             self._model,
-            "llama3-8b-8192",
-            "gemma2-9b-it",
             "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+            "openai/gpt-oss-20b",
         ]
         # إزالة المكررات مع الحفاظ على الترتيب
         seen = set()
@@ -967,6 +1049,44 @@ class LLMFallback:
                 continue
 
         raise Exception(f"فشلت كل نماذج Groq: {last_err}")
+
+    # ── Cerebras — احتياطي فوري لـGroq بنفس أوزان gpt-oss-120b تماماً ────
+    # عتاد مختلف (Cerebras WSE بدل Groq LPU) وحصة مجانية مستقلة (1M
+    # توكن/يوم)، لكن نفس النموذج بالضبط — فلا يتغيّر شكل الردود عند
+    # التبديل التلقائي. واجهة OpenAI-compatible مطابقة لـGroq تقريباً.
+
+    def _call_cerebras(
+        self, query: str, history: List[Tuple[str, str]],
+        system_prompt: str = _SYSTEM_PROMPT,
+    ) -> FallbackResult:
+        messages = [{"role": "system", "content": system_prompt}]
+        for u, a in history[-4:]:
+            messages += [
+                {"role": "user",      "content": u},
+                {"role": "assistant", "content": a},
+            ]
+        messages.append({"role": "user", "content": query})
+
+        data = _post_json(
+            _CEREBRAS_URL,
+            {
+                "model":       self._model or _CEREBRAS_MODEL,
+                "messages":    messages,
+                "max_tokens":  self.max_tokens,
+                "temperature": self.temperature,
+                "stream":      False,
+            },
+            {
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type":  "application/json",
+            },
+            self.timeout,
+        )
+        return FallbackResult(
+            text=data["choices"][0]["message"]["content"].strip(),
+            provider=Provider.CEREBRAS,
+            model=self._model or _CEREBRAS_MODEL,
+        )
 
     # ── Hugging Face — Falcon-Arabic-7B-Instruct (مجاني) ─────────────────
 

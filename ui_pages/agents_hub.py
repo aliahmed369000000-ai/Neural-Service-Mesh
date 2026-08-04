@@ -113,10 +113,18 @@ def _render_agent_page(category):
             else:
                 badge_html = f'<div class="agent-badge">{badge}</div>' if badge else ""
                 bbl_id = f"{box_id}-msg-{_mi}"
+                _audio_entry = st.session_state.get(f"_agent_audio_cache_{category.key}", {}).get(_mi)
+                _audio_html = ""
+                if _audio_entry:
+                    _a_b64, _a_fmt = _audio_entry
+                    _audio_html = (
+                        f'<audio controls style="width:100%;margin-top:0.5rem;height:36px" '
+                        f'src="data:audio/{_a_fmt};base64,{_a_b64}"></audio>'
+                    )
                 html_out += (
                     f'<div class="agent-bot"><span style="font-size:1.3rem;margin-top:3px">'
                     f'{category.emoji}</span><div class="bbl">{badge_html}'
-                    f'<div id="{bbl_id}">{safe}</div>'
+                    f'<div id="{bbl_id}">{safe}</div>{_audio_html}'
                     f'<button class="copy-btn" title="نسخ الرد" style="margin-top:0.4rem"'
                     f' onclick="var t=document.getElementById(\'{bbl_id}\').innerText;'
                     f"navigator.clipboard.writeText(t).then(function(){{"
@@ -147,12 +155,48 @@ def _render_agent_page(category):
 
     c1, c2 = st.columns([5, 1.2], gap="small")
     with c1:
+        # مفتاح مُرقَّم (versioned key): نفس إصلاح ui_pages/chat.py — لا يمكن
+        # تعديل session_state لويدجت بعد إنشائه بنفس تشغيل السكربت، لذلك
+        # نغيّر الـkey نفسه بعد كل إرسال بدل محاولة مسح القيمة مباشرة.
+        st.session_state.setdefault(f"_agent_input_version_{category.key}", 0)
+        _input_key = f"agent_input_{category.key}_v{st.session_state[f'_agent_input_version_{category.key}']}"
         user_input = st.text_area(
             label="سؤالك", placeholder=f"اسأل وكيل {category.title}…",
-            key=f"agent_input_{category.key}", label_visibility="collapsed", height=88,
+            key=_input_key, label_visibility="collapsed", height=88,
         )
     with c2:
         send = st.button("➤ إرسال", key=f"agent_send_{category.key}", use_container_width=True)
+
+    # ── الواجهة الصوتية: تسجيل سؤال بالصوت + قراءة الردود صوتياً (نفس نمط
+    # ui_pages/chat.py، معزولة لكل فئة بمفاتيح خاصة بها) ──────────────────
+    voice_col1, voice_col2 = st.columns([3, 2], gap="small")
+    _voice_query = None
+    with voice_col1:
+        if _STT_OK:
+            _mic_audio = st.audio_input(
+                "🎤 أو سجّل سؤالك صوتياً", key=f"agent_mic_input_{category.key}",
+            )
+            if _mic_audio is not None:
+                _mic_bytes = _mic_audio.getvalue()
+                _mic_hash = hash(_mic_bytes)
+                _mic_hash_key = f"_agent_last_mic_hash_{category.key}"
+                if st.session_state.get(_mic_hash_key) != _mic_hash:
+                    st.session_state[_mic_hash_key] = _mic_hash
+                    with st.spinner("⟳ جارٍ تفريغ الصوت..."):
+                        _transcribed, _stt_err = _stt_transcribe(_mic_bytes, mime_type="audio/wav")
+                    if _stt_err:
+                        st.warning(f"⚠️ {_stt_err}")
+                    elif _transcribed:
+                        _voice_query = _transcribed
+        else:
+            st.caption("🎤 الإدخال الصوتي غير متاح حالياً")
+    with voice_col2:
+        _voice_output_key = f"_agent_voice_output_{category.key}"
+        _voice_output_on = st.toggle(
+            "🔊 قراءة الردود صوتياً", key=_voice_output_key,
+            value=st.session_state.get(_voice_output_key, False),
+            disabled=not _TTS_OK,
+        )
 
     # ── مشاركة ملف مع الوكيل (اختياري): نص، PDF، أو صورة (عبر OCR) ──
     _uploader_types = ["txt", "py", "md", "json", "csv", "log", "yaml", "yml", "pdf"]
@@ -195,13 +239,29 @@ def _render_agent_page(category):
                 if st.button(q, key=f"agent_q_{category.key}_{i}", use_container_width=True):
                     st.session_state[f"_agent_pending_{category.key}"] = q
 
-    col_clear, col_export = st.columns(2)
+    _has_msgs = bool(st.session_state[msg_key])
+    _last_is_bot = _has_msgs and st.session_state[msg_key][-1][0] == "bot"
+    col_clear, col_regen, col_export = st.columns(3)
     with col_clear:
-        if st.button("🗑 مسح المحادثة", key=f"agent_clear_{category.key}", use_container_width=True):
+        if st.button("🗑 مسح المحادثة", key=f"agent_clear_{category.key}", use_container_width=True, disabled=not _has_msgs):
             st.session_state[msg_key] = []
             st.session_state[cnt_key] = 0
             bot.clear_history()
             st.rerun()
+    with col_regen:
+        if st.button("🔄 إعادة توليد آخر رد", key=f"agent_regenerate_{category.key}",
+                      use_container_width=True, disabled=not _last_is_bot):
+            _last_user_text = None
+            for _m in reversed(st.session_state[msg_key][:-1]):
+                if _m[0] == "user":
+                    _last_user_text = _m[1]
+                    break
+            if _last_user_text:
+                _popped_idx = len(st.session_state[msg_key]) - 1
+                st.session_state[msg_key].pop()
+                st.session_state.get(f"_agent_audio_cache_{category.key}", {}).pop(_popped_idx, None)
+                st.session_state[f"_agent_regen_pending_{category.key}"] = _last_user_text
+                st.rerun()
     with col_export:
         if st.session_state[msg_key]:
             _export_lines = [f"# محادثة مع وكيل {category.title}\n"]
@@ -228,14 +288,20 @@ def _render_agent_page(category):
                 _preview = _text if len(_text) <= 140 else _text[:140] + "…"
                 st.caption(f"{_tag} `{_ts}` — {_preview}")
 
-    def _process(text: str):
+    def _process(text: str, add_user_msg: bool = True):
         if not text.strip():
             return
+
+        # فرّغ مربع الإدخال فور الإرسال — انظر تعليق مفتاح الويدجت أعلاه.
+        _vkey = f"_agent_input_version_{category.key}"
+        st.session_state[_vkey] = st.session_state.get(_vkey, 0) + 1
+
         _ts_now = datetime.now().strftime("%H:%M")
-        _display_text = text.strip()
-        if file_label:
-            _display_text = f"{_display_text}\n\n{file_label}"
-        st.session_state[msg_key].append(("user", _display_text, "", _ts_now))
+        if add_user_msg:
+            _display_text = text.strip()
+            if file_label:
+                _display_text = f"{_display_text}\n\n{file_label}"
+            st.session_state[msg_key].append(("user", _display_text, "", _ts_now))
 
         _safety_msg = _nsm_safety_gate(text.strip())
         if _safety_msg:
@@ -261,14 +327,34 @@ def _render_agent_page(category):
         except Exception:
             pass  # تقييم الجودة إضافي وغير حرج — أي فشل فيه لا يجب أن يُسقِط الرد نفسه
         st.session_state[msg_key].append(("bot", response, badge, datetime.now().strftime("%H:%M")))
+        _msg_idx = len(st.session_state[msg_key]) - 1
+        if _TTS_OK and st.session_state.get(f"_agent_voice_output_{category.key}") and response.strip():
+            try:
+                with st.spinner("⟳ جارٍ تحويل الرد لصوت..."):
+                    _tts_result = _TTSEngineCls().synthesize(response.strip())
+                if _tts_result.ok:
+                    import base64 as _b64
+                    _audio_cache = st.session_state.setdefault(f"_agent_audio_cache_{category.key}", {})
+                    _audio_cache[_msg_idx] = (
+                        _b64.b64encode(_tts_result.audio_bytes).decode("ascii"),
+                        _tts_result.format,
+                    )
+            except Exception:
+                pass  # فشل TTS لا يجب أن يُعطّل عرض الرد النصي
         st.session_state[cnt_key] += 1
         st.rerun()
 
-    if send and user_input:
-        _process(user_input)
+    if (send and user_input) or _voice_query:
+        _process(user_input if send and user_input else _voice_query)
 
     pending_key = f"_agent_pending_{category.key}"
     if pending_key in st.session_state:
         q = st.session_state[pending_key]
         del st.session_state[pending_key]
         _process(q)
+
+    regen_key = f"_agent_regen_pending_{category.key}"
+    if regen_key in st.session_state:
+        q = st.session_state[regen_key]
+        del st.session_state[regen_key]
+        _process(q, add_user_msg=False)

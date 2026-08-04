@@ -27,6 +27,11 @@ def render_chat():
             st.session_state.nsm_bot = NSMChat(system_prompt=NSM_SYSTEM_PROMPT)
         st.session_state.nsm_messages = []
         st.session_state.nsm_count    = 0
+        # معرّف دائم لهذه الجلسة (uuid4، يُولَّد مرة واحدة فقط) — يُستخدم
+        # لربط رسائل هذه الجلسة ببعضها في memory/chat_history.db، عشان
+        # يمكن الرجوع للمحادثة (أو معرفة من ردّ أولاً) حتى بعد انتهاء
+        # الجلسة الحيّة. انظر ai/chat_history_store.py.
+        st.session_state.nsm_chat_session_id = str(_uuid.uuid4())
 
     bot = st.session_state.nsm_bot
 
@@ -225,7 +230,7 @@ def render_chat():
     # رأس التبويب
     col_t, col_s = st.columns([3,1])
     with col_t:
-        st.markdown("### 💬 المحادثة الذكية")
+        st.markdown('<div class="section-header">💬 المحادثة الذكية</div>', unsafe_allow_html=True)
         _mode = "🤖 LLM · Cloudflare / Gemini / Groq"
         st.caption(f"يتذكر السياق · {_mode} · الذكاء في الأوزان")
     with col_s:
@@ -239,6 +244,17 @@ def render_chat():
         st.session_state["chat_pending_files"] = []
     if "chat_uploader_version" not in st.session_state:
         st.session_state["chat_uploader_version"] = 0
+
+    # ── 🔍 بحث ضمن المحادثة الحالية — يفلتر العرض فقط، لا يمسّ السجل
+    # المحفوظ (nsm_messages يبقى كاملاً؛ هذا يؤثر فقط على ما يُبنى في
+    # html أدناه). مفيد بالمحادثات الطويلة لإيجاد رسالة سابقة بسرعة. ──
+    _chat_search_query = ""
+    if st.session_state.get("nsm_messages"):
+        _chat_search_query = st.text_input(
+            "بحث في المحادثة", key="nsm_chat_search",
+            placeholder="🔍 ابحث ضمن هذه المحادثة...",
+            label_visibility="collapsed",
+        ).strip()
 
     # عرض المحادثة
     html = '<div class="chat-box-wrap"><div class="chat-box" id="nsm-chat-box">'
@@ -261,17 +277,33 @@ def render_chat():
         # جديدة/تقييم/تفاعل) يتضخم مع طول المحادثة ويُبطئ الواجهة تدريجياً.
         # نحافظ على الفهرس الحقيقي _i (وليس فهرس القائمة المقصوصة) كي تبقى
         # مطابقة _nsm_audio_cache (المُخزَّن بفهرس الرسالة الأصلي) صحيحة.
-        _all_msgs = st.session_state.nsm_messages
-        _hidden_count = max(0, len(_all_msgs) - NSM_CHAT_DISPLAY_LIMIT)
+        _all_msgs_indexed = list(enumerate(st.session_state.nsm_messages))
+        if _chat_search_query:
+            _q_low = _chat_search_query.lower()
+            _all_msgs_indexed = [
+                (_i, _m) for _i, _m in _all_msgs_indexed
+                if _q_low in (_m[1] or "").lower()
+            ]
+        if _chat_search_query and not _all_msgs_indexed:
+            import html as _html_esc
+            html += (
+                f'<div style="text-align:center;color:var(--text-muted);padding:2rem 1rem">'
+                f'لا توجد رسائل مطابقة لـ«{_html_esc.escape(_chat_search_query)}»'
+                f'</div>'
+            )
+        _hidden_count = max(0, len(_all_msgs_indexed) - NSM_CHAT_DISPLAY_LIMIT)
         if _hidden_count:
+            _hidden_note = (
+                "نتيجة بحث أقدم مخفية" if _chat_search_query else "رسالة أقدم مخفية من العرض، لكنها لا تزال محفوظة"
+            )
             html += (
                 f'<div style="text-align:center;color:var(--text-muted);'
                 f'font-size:0.78rem;padding:0.4rem 0 0.7rem">'
                 f'— تُعرض آخر {NSM_CHAT_DISPLAY_LIMIT} رسالة فقط '
-                f'({_hidden_count} رسالة أقدم مخفية من العرض، لكنها لا تزال محفوظة) —'
+                f'({_hidden_count} {_hidden_note}) —'
                 f'</div>'
             )
-        for _i, msg in list(enumerate(_all_msgs))[-NSM_CHAT_DISPLAY_LIMIT:]:
+        for _i, msg in _all_msgs_indexed[-NSM_CHAT_DISPLAY_LIMIT:]:
             role, text = msg[0], msg[1]
             ctx_tag    = msg[2] if len(msg) > 2 else ""
             src_badge  = msg[3] if len(msg) > 3 else ""
@@ -371,58 +403,41 @@ def render_chat():
     """, height=0)
 
     # ── تقييم آخر رد (👍/👎) لتغذية autotune_feedback ──
+    # يستخدم مكوّن Streamlit الأصلي st.feedback("thumbs") بدل زرَّين
+    # منفصلين مكرَّرَين — نفس السلوك (اختيار مرة واحدة ثم يختفي) بكود
+    # أقصر وتناسق بصري أفضل مع بقية عناصر الإدخال في Streamlit.
+    # المؤشر المُعاد: 0 = 👎، 1 = 👍 (موثّق رسمياً بمرجع st.feedback).
     if _AUTOTUNE_OK:
         _af_turn = st.session_state.get("_af_last_turn")
         if _af_turn and not _af_turn.get("rated"):
-            _af_c1, _af_c2, _af_c3 = st.columns([1, 1, 6])
-            with _af_c1:
-                if st.button("👍", key="_af_up", help="رد جيد — ساعد النظام يتعلّم"):
-                    _heur = _af_compute_heuristics(_af_turn["response"])
-                    _af_process_feedback(_AFFeedbackRecord(
-                        message_id=str(st.session_state.nsm_count),
-                        timestamp=datetime.now().timestamp(),
-                        context_type=_af_turn["context_type"],
-                        model=_af_turn["model"],
-                        persona=_af_turn["persona"],
-                        params=_af_turn["params"],
-                        rating=1,
-                        heuristics=vars(_heur),
-                    ))
-                    try:
-                        from ai.learning_orchestrator import get_orchestrator
-                        get_orchestrator().feedback(_af_turn.get("query", ""), is_positive=True)
-                    except Exception:
-                        pass
-                    _af_turn["rated"] = True
-                    st.toast("✅ شكراً — تم تسجيل التقييم")
-                    st.rerun()
-            with _af_c2:
-                if st.button("👎", key="_af_down", help="رد غير جيد — ساعد النظام يتعلّم"):
-                    _heur = _af_compute_heuristics(_af_turn["response"])
-                    _af_process_feedback(_AFFeedbackRecord(
-                        message_id=str(st.session_state.nsm_count),
-                        timestamp=datetime.now().timestamp(),
-                        context_type=_af_turn["context_type"],
-                        model=_af_turn["model"],
-                        persona=_af_turn["persona"],
-                        params=_af_turn["params"],
-                        rating=-1,
-                        heuristics=vars(_heur),
-                    ))
-                    try:
-                        from ai.learning_orchestrator import get_orchestrator
-                        get_orchestrator().feedback(_af_turn.get("query", ""), is_positive=False)
-                    except Exception:
-                        pass
-                    _af_turn["rated"] = True
-                    st.toast("✅ شكراً — تم تسجيل التقييم")
-                    st.rerun()
+            _af_selected = st.feedback("thumbs", key="_af_feedback_widget")
+            if _af_selected is not None:
+                _af_is_positive = _af_selected == 1
+                _heur = _af_compute_heuristics(_af_turn["response"])
+                _af_process_feedback(_AFFeedbackRecord(
+                    message_id=str(st.session_state.nsm_count),
+                    timestamp=datetime.now().timestamp(),
+                    context_type=_af_turn["context_type"],
+                    model=_af_turn["model"],
+                    persona=_af_turn["persona"],
+                    params=_af_turn["params"],
+                    rating=1 if _af_is_positive else -1,
+                    heuristics=vars(_heur),
+                ))
+                try:
+                    from ai.learning_orchestrator import get_orchestrator
+                    get_orchestrator().feedback(_af_turn.get("query", ""), is_positive=_af_is_positive)
+                except Exception:
+                    pass
+                _af_turn["rated"] = True
+                st.toast("✅ شكراً — تم تسجيل التقييم")
+                st.rerun()
 
     # ══════════════════════════════════════════════════════════════════
     # ✍️ قسم تأليف الرسالة — يجمع كل أدوات الإدخال (إرفاق + كتابة + صوت)
     # في مكان واحد متتابع بدل تفرّقها بين أعلى وأسفل سجل المحادثة
     # ══════════════════════════════════════════════════════════════════
-    st.markdown("---")
+    st.markdown('<div class="section-header">✍️ رسالة جديدة</div>', unsafe_allow_html=True)
 
     # ── إرفاق ملف أو صورة (multimodal عبر OpenRouter) ─────────────────────
     _or_key_chat = st.session_state.get("_or_api_key", "").strip()
@@ -612,6 +627,7 @@ def render_chat():
 
     # أدوات المحادثة: مسح / إعادة توليد آخر رد / تصدير — بجانب بعضها
     # (لا بعد أدوات المالك)
+    st.caption("🛠️ أدوات المحادثة")
     _has_msgs = bool(st.session_state.nsm_messages)
     _last_is_nsm = _has_msgs and st.session_state.nsm_messages[-1][0] == "nsm"
     _tool_col1, _tool_col2, _tool_col3 = st.columns(3)
@@ -719,11 +735,13 @@ def render_chat():
         # لأن رسالة المستخدم موجودة أصلاً بالسجل ولا يجب تكرارها) ──
         if add_user_msg:
             st.session_state.nsm_messages.append(("user", display_text, "", "", _ts))
+            _persist_chat_message(st.session_state.nsm_chat_session_id, "user", display_text)
 
         # ── فحص أمان أولي (regex محلي، بدون تكلفة API) ──
         _safety_msg = _nsm_safety_gate(text.strip())
         if _safety_msg:
             st.session_state.nsm_messages.append(("nsm", _safety_msg, "", "🛡️ فحص أمان", datetime.now().strftime("%H:%M")))
+            _persist_chat_message(st.session_state.nsm_chat_session_id, "nsm", _safety_msg, "🛡️ فحص أمان")
             st.session_state.nsm_count += 1
             st.rerun()
             return
@@ -743,6 +761,9 @@ def render_chat():
             st.session_state.nsm_messages.append((
                 "nsm", _cached["answer"], "", "⚡ كاش متعلَّم", datetime.now().strftime("%H:%M")
             ))
+            _persist_chat_message(
+                st.session_state.nsm_chat_session_id, "nsm", _cached["answer"], "⚡ كاش متعلَّم"
+            )
             st.session_state.nsm_count += 1
             st.rerun()
             return
@@ -975,6 +996,9 @@ def render_chat():
         st.session_state.nsm_messages.append((
             "nsm", _response, _ctx_tag, _src_badge, datetime.now().strftime("%H:%M")
         ))
+        _persist_chat_message(
+            st.session_state.nsm_chat_session_id, "nsm", _response, _src_badge
+        )
         _msg_idx = len(st.session_state.nsm_messages) - 1
         if _TTS_OK and st.session_state.get("_nsm_voice_output") and _response.strip():
             try:

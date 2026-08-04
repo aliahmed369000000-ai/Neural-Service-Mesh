@@ -91,6 +91,19 @@ PyTorch/TensorFlow — numpy فقط للمكوّن المعرفي الأساسي
 بصمت) لكن التوحيد الكامل لسه مؤجل (خطر أعلى من الفايدة حالياً لأنهم كود
 غير مستخدم).
 
+## التحقق من تأسيس الإجابات على المصدر (Faithfulness Verifier)
+
+`ai/nsm_answer_verifier.py` — يتحقق أن ملخص إجابة `qa_engine.answer_question()`
+مبني فعلاً على الآيات/المفاهيم المسترجَعة ولا يحتوي اختلاقاً، عبر مقياس
+`FaithfulnessMetric` من مكتبة [DeepEval](https://github.com/confident-ai/deepeval)
+مفتوحة المصدر (Apache 2.0)، مع **Claude نفسه كحَكَم** (لا اعتماد على مزوّد
+إضافي). اختياري بالكامل عبر `include_faithfulness_check=True` — `False`
+افتراضياً لأنه يستدعي LLM حَكَم بطيء ومكلِف. اعتمادياته في
+`requirements-verifier.txt` منفصلة عن `requirements.txt` الأساسي (لا تُثبَّت
+على Streamlit Cloud)، ويتدهور بأمان كامل (`available: False`) بدون مفتاح
+`ANTHROPIC_API_KEY` أو بدون تثبيت `deepeval`. مختلف عن `ai/nsm_verifier.py`
+(يحكم مطابقة كود الوكيل لوصف مهمة برمجية، لا محتوى معرفي).
+
 ## الميزات والتبويبات (الواجهة الحية)
 
 تبويبات `streamlit_app.py` الرئيسية (كل واحدة دالة `render_*` مستقلة):
