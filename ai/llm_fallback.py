@@ -159,6 +159,32 @@ _OPENROUTER_CACHE_PATH   = os.path.join(
 _OPENROUTER_CACHE_TTL    = 6 * 3600   # 6 ساعات قبل إعادة الاكتشاف
 _OPENROUTER_MAX_MODELS   = 5          # أقصى عدد نماذج نجرّبها بالتتابع
 
+# ترتيب تفضيلي (الأفضل أولاً) لعائلات النماذج المجانية المعروفة بجودة عالية
+# على OpenRouter. قائمة ":free" على OpenRouter تتغيّر أسبوعياً (نماذج تُضاف
+# وتُحذف باستمرار — مثلاً DeepSeek وGLM كانا مجانيين ثم أصبحا مدفوعَين في
+# فترات مختلفة)، لذا تعمّدنا عدم تثبيت اسم نموذج واحد كما فعلنا سابقاً مع
+# Kimi K3 (مدفوع دائماً)، بل نُرتّب أي نموذج مجاني *متاح فعلياً الآن* حسب
+# عائلته، بحيث يُجرَّب الأقوى أولاً تلقائياً دون تدخّل يدوي مع كل دورة.
+_FREE_MODEL_QUALITY_FAMILIES = [
+    "glm-4.6", "glm-4.5", "glm-",                 # Zhipu GLM — قريب من Sonnet
+    "deepseek-v3", "deepseek-r1", "deepseek",     # DeepSeek — استدلال قوي
+    "qwen3-", "qwen-",                            # Qwen — دعم عربي/متعدد لغات جيد
+    "llama-4", "llama-3.3", "llama-3.1",          # Meta Llama
+    "gemini",                                     # Google Gemini (نسخ مجانية أحياناً)
+    "gpt-oss", "hermes", "gemma", "mistral",
+]
+
+
+def _free_model_rank(model_id: str) -> int:
+    """رتبة جودة تقديرية لنموذج مجاني (أصغر رقم = أفضل)؛ تُستخدم لترتيب
+    النماذج المكتشفة تلقائياً بدل الاعتماد على ترتيب استجابة الـAPI العشوائي.
+    نموذج غير معروف يحصل على أدنى أولوية (يُجرَّب أخيراً)."""
+    mid = model_id.lower()
+    for i, family in enumerate(_FREE_MODEL_QUALITY_FAMILIES):
+        if family in mid:
+            return i
+    return len(_FREE_MODEL_QUALITY_FAMILIES)
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # Result Dataclass
@@ -208,8 +234,10 @@ def discover_openrouter_models(
     استدعاء. عند فشل الاكتشاف أو انتهاء الشبكة، يعود لآخر cache صالح، ثم
     أخيراً للنموذج الثابت الافتراضي _OPENROUTER_MODEL.
 
-    الترتيب: النماذج المجانية (":free" أو pricing.prompt == "0") أولاً،
-    مع إبقاء _OPENROUTER_MODEL دائماً كخيار أخير مضمون.
+    الترتيب: النماذج المجانية (":free" أو pricing.prompt == "0") تُرتَّب
+    حسب جودة العائلة المعروفة (_free_model_rank) بحيث تُجرَّب أقواها أولاً
+    (مثال: GLM/DeepSeek/Qwen إن كانت مجانية حالياً)، مع إبقاء
+    _OPENROUTER_MODEL دائماً كخيار أخير مضمون.
     """
     now = time.time()
 
@@ -232,6 +260,7 @@ def discover_openrouter_models(
             if mid and is_free:
                 free_models.append(mid)
         if free_models:
+            free_models.sort(key=_free_model_rank)
             _save_openrouter_cache(cache_path, free_models, now)
             return _ensure_default_last(free_models, max_models)
     except Exception as exc:
