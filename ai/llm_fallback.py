@@ -7,7 +7,8 @@ LLM Generative Fallback Engine — NSM v18.3
   1. Anthropic Claude (ANTHROPIC_API_KEY) — Claude Sonnet 5 ← الأولوية الأولى ✅
   2. Cloudflare Workers AI (CF_API_TOKEN + CF_ACCOUNT_ID) — مجاني 10k/يوم
   3. Google Gemini   (GOOGLE_API_KEY)   — Gemini 2.5 Flash
-  4. OpenRouter      (OPENROUTER_API_KEY)
+  4. OpenRouter      (OPENROUTER_API_KEY) — نماذج مجانية تلقائياً، أو Kimi K3
+                                             (moonshotai/kimi-k3) عبر model_key="kimi"
   5. Groq            (GROQ_API_KEY)     — قد يُحجب من بعض الشبكات
   6. OpenAI API      (OPENAI_API_KEY)   — GPT-4o-mini
   7. Together.xyz    (TOGETHER_API_KEY) — Llama-3/Mixtral
@@ -112,7 +113,21 @@ ANTHROPIC_MODELS = {
 _ANTHROPIC_MODEL  = ANTHROPIC_MODELS["sonnet"]    # الأولوية الأولى ✅
 _CF_MODEL         = "@cf/meta/llama-3.1-8b-instruct"  # مجاني 10k/يوم ✅
 _OPENROUTER_MODEL = "meta-llama/llama-3.1-8b-instruct:free"  # مجاني
+# Kimi K3 (Moonshot AI) — أحدث نموذج مفتوح المصدر (2.8T معامل، MoE، 896
+# خبيراً/16 نشِط لكل توكن)، أُطلق 16 يوليو 2026 وصدرت أوزانه الكاملة في
+# 27 يوليو 2026. أداء من فئة frontier (منافس لنماذج مغلقة) عبر OpenRouter.
+# مدفوع ($3/$15 لكل مليون توكن دخل/خرج) → لا يُختار تلقائياً ضمن الاكتشاف
+# المجاني، بل فقط عند تحديده صراحةً عبر model_key="kimi" (انظر OPENROUTER_MODELS).
+_OPENROUTER_KIMI_MODEL = "moonshotai/kimi-k3"
 _OPENROUTER_URL   = "https://openrouter.ai/api/v1/chat/completions"
+
+# نماذج OpenRouter القابلة للاختيار صراحةً (مثل ANTHROPIC_MODELS أدناه) —
+# استخدمها عبر LLMFallback(model_key="kimi") لتجاوز الاكتشاف التلقائي
+# للنماذج المجانية واستخدام Kimi K3 تحديداً.
+OPENROUTER_MODELS = {
+    "free": _OPENROUTER_MODEL,       # الافتراضي — نموذج مجاني (Llama 3.1 8B)
+    "kimi": _OPENROUTER_KIMI_MODEL,  # Kimi K3 — أقوى نموذج مفتوح المصدر متاح حالياً (مدفوع)
+}
 _OPENAI_MODEL     = "gpt-4o-mini"
 _TOGETHER_MODEL   = "meta-llama/Llama-3-8b-chat-hf"
 _GEMINI_MODEL     = "gemini-2.5-flash"  # gemini-1.5-flash أُطفئ نهائياً ويرجع 404
@@ -430,11 +445,16 @@ class LLMFallback:
         self.max_tokens  = max_tokens
         self.temperature = temperature
         self.timeout     = timeout
-        # model_key اختياري: يسمح باختيار نموذج Anthropic محدد من
-        # ANTHROPIC_MODELS (مثال: model_key="fable" لاستخدام claude-fable-5
-        # في محرك السرد الإبداعي ai/fable_engine.py). إن لم يُمرَّر، يُستخدم
-        # الافتراضي "sonnet" كما كان سابقاً — لا تغيير في السلوك القديم.
-        self._model_key  = model_key if model_key in ANTHROPIC_MODELS else None
+        # model_key اختياري: يسمح باختيار نموذج محدد من ANTHROPIC_MODELS
+        # (مثال: model_key="fable" لاستخدام claude-fable-5 في محرك السرد
+        # الإبداعي ai/fable_engine.py) أو من OPENROUTER_MODELS (مثال:
+        # model_key="kimi" لاستخدام Kimi K3 عبر OpenRouter بدل الاكتشاف
+        # التلقائي للنماذج المجانية). إن لم يُمرَّر أو لم يُطابق أياً منهما،
+        # يُستخدم السلوك الافتراضي القديم — لا تغيير في السلوك القديم.
+        self._model_key  = (
+            model_key if model_key in ANTHROPIC_MODELS or model_key in OPENROUTER_MODELS
+            else None
+        )
 
         self._openrouter_models: List[str] = [_OPENROUTER_MODEL]
         self._provider, self._api_key, self._model = self._detect_provider()
@@ -499,12 +519,18 @@ class LLMFallback:
         if k and k.startswith("AIzaSy"):
             chain.append((Provider.GEMINI, k, _GEMINI_MODEL))
 
-        # 4) OpenRouter — اكتشاف تلقائي للنماذج المجانية المتاحة
+        # 4) OpenRouter — نموذج مُختار صراحةً (مثال: "kimi" لـKimi K3) يتجاوز
+        #    الاكتشاف التلقائي، وإلا يُكتشف أفضل نموذج مجاني متاح تلقائياً.
         k = os.getenv("OPENROUTER_API_KEY", "").strip()
         if k:
-            models = discover_openrouter_models(k)
-            self._openrouter_models = models
-            chain.append((Provider.OPENROUTER, k, models[0]))
+            if self._model_key in OPENROUTER_MODELS:
+                chosen = OPENROUTER_MODELS[self._model_key]
+                self._openrouter_models = [chosen]
+                chain.append((Provider.OPENROUTER, k, chosen))
+            else:
+                models = discover_openrouter_models(k)
+                self._openrouter_models = models
+                chain.append((Provider.OPENROUTER, k, models[0]))
 
         # 5) Groq
         k = os.getenv("GROQ_API_KEY", "").strip()
