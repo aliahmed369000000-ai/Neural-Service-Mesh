@@ -40,6 +40,10 @@ import requests
 #   Cloudflare → developers.cloudflare.com/workers-ai/models (فئة 7-8B)
 FREE_DIRECT_MODELS: List[str] = [
     # Groq — نماذج إنتاجية سريعة (مجانية بالكامل، بدون بطاقة)
+    # gpt-oss-120b أولاً: أقوى نموذج مفتوح المصدر متاح مجاناً على Groq حالياً
+    # (116B معامل، Apache 2.0، حلّ محل llama-4-maverick/kimi-k2 اللذين تم
+    # التخلي عنهما من Groq — تحقّق بتاريخ أغسطس 2026)
+    "groq:openai/gpt-oss-120b",
     "groq:llama-3.1-8b-instant",
     "groq:llama-3.3-70b-versatile",
     "groq:openai/gpt-oss-20b",
@@ -143,10 +147,10 @@ ULTRAPLINIAN_MODELS: Dict[str, List[str]] = {
 
 # عدد نماذج كل مستوى تراكمياً — للعرض في الواجهة
 # (+5 عبر كل المستويات بسبب FREE_DIRECT_MODELS المضافة في "fast")
-TIER_CUMULATIVE = {"fast": 25, "standard": 37, "smart": 48, "power": 57, "ultra": 59}
+TIER_CUMULATIVE = {"fast": 26, "standard": 38, "smart": 49, "power": 58, "ultra": 60}
 
-# الحد الافتراضي للسباق (يُقيّد التكلفة) — 8 لتغطية كل FREE_DIRECT_MODELS افتراضياً
-DEFAULT_MAX_MODELS = 8
+# الحد الافتراضي للسباق (يُقيّد التكلفة) — 9 لتغطية كل FREE_DIRECT_MODELS افتراضياً
+DEFAULT_MAX_MODELS = 9
 
 # موجّه العمق — يُضاف لكل طلب ULTRAPLINIAN
 DEPTH_DIRECTIVE = """
@@ -330,7 +334,12 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # نماذج Groq البديلة عند 403 على النموذج المطلوب (نفس منطق llm_fallback.py) —
 # مُحدَّثة على معرّفات Groq الرسمية الحالية (console.groq.com/docs/models)
-_GROQ_FALLBACK_MODELS = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "openai/gpt-oss-20b"]
+_GROQ_FALLBACK_MODELS = [
+    "openai/gpt-oss-120b",
+    "llama-3.1-8b-instant",
+    "llama-3.3-70b-versatile",
+    "openai/gpt-oss-20b",
+]
 
 
 def _parse_model_id(model: str) -> tuple[str, str]:
