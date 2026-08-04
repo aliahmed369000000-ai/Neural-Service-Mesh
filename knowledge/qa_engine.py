@@ -558,9 +558,10 @@ def _refine_confidence(result: Dict[str, Any]) -> float:
 
 # ═══════════════════════════════════════════════════════════════════════════
 # فحص تأسيس الإجابة على المصدر (ai/nsm_answer_verifier.py) — DeepEval
-# FaithfulnessMetric + Claude كحَكَم. استيراد كسول + تدهور آمن كامل، بنفس
-# نمط _get_deep_awareness أعلاه: أي فشل (لا deepeval، لا مفتاح API،
-# مشكلة شبكة) يُرجع {"available": False, ...} بدل رمي استثناء يوقف
+# FaithfulnessMetric + حَكَم مجاني بالكامل عبر ai/free_router.py (Groq/
+# Gemini/Cloudflare). استيراد كسول + تدهور آمن كامل، بنفس نمط
+# _get_deep_awareness أعلاه: أي فشل (لا deepeval، لا مفتاح مجاني، مشكلة
+# شبكة) يُرجع {"available": False, ...} بدل رمي استثناء يوقف
 # answer_question() كاملة.
 # ═══════════════════════════════════════════════════════════════════════════
 def _check_answer_faithfulness(question: str, result: Dict[str, Any]) -> Dict[str, Any]:
@@ -1445,8 +1446,8 @@ def answer_question(
          (لا torch، لا checkpoint، إلخ) يُتجاهل بصمت والإجابة الرمزية تبقى
          كما هي دون أي تغيير في السلوك الافتراضي (generation_mode=False).
       6. (اختياري) include_faithfulness_check=True: يتحقق عبر
-         ai/nsm_answer_verifier.py (DeepEval FaithfulnessMetric + Claude
-         كحَكَم) أن result["summary"] مؤسَّس فعلاً على result["verses"]
+         ai/nsm_answer_verifier.py (DeepEval FaithfulnessMetric + حَكَم
+         مجاني بالكامل عبر ai/free_router.py) أن result["summary"] مؤسَّس فعلاً على result["verses"]
          ولا يحتوي اختلاقاً. False افتراضياً (يستدعي LLM حَكَم بطيء
          ومكلِف، لا يجب تشغيله في كل استعلام مستخدم عادي)، ويتدهور بأمان
          كامل لو DeepEval غير مثبَّت أو لا مفتاح Anthropic متاح.

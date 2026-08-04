@@ -61,18 +61,19 @@ class TestVerifyAnswerFaithfulnessGracefulDegradation:
         assert report["score"] is None
         assert "deepeval" in report["reason"]
 
-    def test_unavailable_when_no_api_key(self, monkeypatch):
+    def test_unavailable_when_no_free_key(self, monkeypatch):
         monkeypatch.setattr(verifier, "_deepeval_importable", lambda: True)
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        for var in ("GROQ_API_KEY", "GOOGLE_API_KEY", "CF_API_TOKEN", "CF_ACCOUNT_ID"):
+            monkeypatch.delenv(var, raising=False)
         report = verifier.verify_answer_faithfulness(
             "ما حكم الصبر؟", {"summary": "...", "verses": [{"surah": 2, "ayah": 1, "text": "..."}]},
         )
         assert report["available"] is False
-        assert "ANTHROPIC_API_KEY" in report["reason"]
+        assert "مجاني" in report["reason"]
 
     def test_no_exception_when_missing_context(self, monkeypatch):
         monkeypatch.setattr(verifier, "_deepeval_importable", lambda: True)
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-real")
+        monkeypatch.setenv("GROQ_API_KEY", "test-key-not-real")
         report = verifier.verify_answer_faithfulness(
             "ما حكم الصبر؟", {"summary": "إجابة ما", "verses": [], "primary_concepts": []},
         )
@@ -82,7 +83,7 @@ class TestVerifyAnswerFaithfulnessGracefulDegradation:
 
     def test_no_exception_when_missing_summary(self, monkeypatch):
         monkeypatch.setattr(verifier, "_deepeval_importable", lambda: True)
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-real")
+        monkeypatch.setenv("GROQ_API_KEY", "test-key-not-real")
         report = verifier.verify_answer_faithfulness(
             "ما حكم الصبر؟",
             {"summary": "", "verses": [{"surah": 2, "ayah": 1, "text": "نص الآية"}]},
@@ -113,9 +114,10 @@ class TestQAEngineIntegration:
         assert result["faithfulness_check"] is None
 
     def test_faithfulness_check_runs_gracefully_when_requested(self, monkeypatch):
-        """لا مفتاح API متاح في بيئة الاختبار — يجب أن يرجع تقريراً غير
-        متاح (available=False) بدل رمي استثناء يكسر answer_question()."""
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        """لا مفتاح نموذج مجاني متاح في بيئة الاختبار — يجب أن يرجع تقريراً
+        غير متاح (available=False) بدل رمي استثناء يكسر answer_question()."""
+        for var in ("GROQ_API_KEY", "GOOGLE_API_KEY", "CF_API_TOKEN", "CF_ACCOUNT_ID"):
+            monkeypatch.delenv(var, raising=False)
         from knowledge import qa_engine
 
         ckg = {"concepts": {}, "relations": {}}

@@ -24,20 +24,27 @@ Verifier) — يتحقق أن ملخص الإجابة (result["summary"]) مبن
   - يوفّر CLI فعلي (`deepeval test run`) وتكامل pytest أصيل — يطابق
     اصطلاح الاختبارات الحالي في المشروع (test_*.py بجانب الوحدات).
   - FaithfulnessMetric لا يتطلب OpenAI حصراً: واجهة DeepEvalBaseLLM
-    تسمح بربط أي نموذج — هنا Claude نفسه عبر AnthropicAdvanced
-    (ai/anthropic_advanced.py)، فلا اعتماد على مزوّد إضافي أو مفتاح API
-    ثانٍ لم يكن موجوداً أصلاً في المشروع.
+    تسمح بربط أي نموذج — هنا موجّه النماذج المجانية نفسه المستخدَم في
+    بقية المشروع (ai/free_router.py: Groq → Gemini → Cloudflare)، فلا
+    اعتماد على أي مزوّد مدفوع أو مفتاح Anthropic إضافي.
   - رخصة Apache 2.0 مفتوحة تماماً، وصيانة نشطة.
+
+مجاني بالكامل — بلا أي اعتماد مدفوع:
+  - الحَكَم (judge LLM) هو ai/free_router.py::chat_free نفسه المستخدَم
+    في بقية المشروع (Groq → Gemini → Cloudflare، بالترتيب حتى ينجح
+    أحدها) — لا مفتاح Anthropic ولا أي مزوّد مدفوع آخر مطلوب إطلاقاً.
+  - DeepEval نفسها مكتبة Apache 2.0 مجانية بالكامل.
 
 تدهور آمن كامل (نفس نمط بقية الوحدات الاختيارية في المشروع، مثل
 _get_deep_awareness في qa_engine.py):
   - DeepEval غير مثبَّت (اعتماد اختياري — غير مُدرَج في requirements.txt
     الأساسي لتفادي إثقال بيئة Streamlit Cloud محدودة الذاكرة، بل في
     requirements-verifier.txt منفصل) → available=False، بلا استثناء.
-  - لا ANTHROPIC_API_KEY متاح (الحَكَم يحتاج مفتاحاً فعّالاً)
-    → available=False، بلا استثناء.
-  - أي فشل تقني أثناء القياس نفسه (شبكة، JSON غير صالح من الحَكَم، ...)
-    → available=False + سبب واضح، بلا استثناء يوقف answer_question().
+  - لا يوجد أي مفتاح نموذج مجاني (GROQ_API_KEY / GOOGLE_API_KEY أو
+    CF_API_TOKEN+CF_ACCOUNT_ID) → available=False، بلا استثناء.
+  - أي فشل تقني أثناء القياس نفسه (شبكة، فشل كل المزوّدات المجانية،
+    JSON غير صالح من الحَكَم، ...) → available=False + سبب واضح، بلا
+    استثناء يوقف answer_question().
 
 الاستخدام النموذجي:
     from ai.nsm_answer_verifier import verify_answer_faithfulness
@@ -46,13 +53,13 @@ _get_deep_awareness في qa_engine.py):
         logger.warning(f"إجابة قد تحتوي اختلاقاً: {report['reason']}")
 
 أو ضمن answer_question() نفسها عبر include_faithfulness_check=True
-(اختياري تماماً، False افتراضياً — لأنه يستدعي LLM حَكَم بطيء ومكلِف
-ولا يجب أن يشغَّل في كل استعلام مستخدم عادي).
+(اختياري تماماً، False افتراضياً — لأنه يستدعي LLM حَكَم إضافياً وقد
+يكون بطيئاً نسبياً حتى لو مجانياً، ولا يجب أن يشغَّل في كل استعلام
+مستخدم عادي).
 """
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("NSMAnswerVerifier")
@@ -73,22 +80,27 @@ def _deepeval_importable() -> bool:
     return _DEEPEVAL_AVAILABLE
 
 
-class _ClaudeJudge:
-    """يكسو ai.anthropic_advanced.AnthropicAdvanced بواجهة
-    deepeval.models.DeepEvalBaseLLM — الحَكَم (judge LLM) المستخدَم لقياس
-    FaithfulnessMetric هو Claude نفسه (نفس نموذج بقية النظام في
-    ai/llm_fallback.py)، بدل اعتماد DeepEval الافتراضي على OpenAI."""
+class _FreeRouterJudge:
+    """يكسو ai.free_router.chat_free بواجهة deepeval.models.DeepEvalBaseLLM
+    — الحَكَم (judge LLM) المستخدَم لقياس FaithfulnessMetric هو موجّه
+    النماذج المجانية نفسه المستخدَم في بقية المشروع (Groq → Gemini →
+    Cloudflare)، بدل اعتماد DeepEval الافتراضي على OpenAI أو أي مزوّد
+    مدفوع. اسم النموذج الفعلي الذي نجح يُحدَّث بعد كل استدعاء (يختلف
+    حسب أي مزوّد استجاب أولاً)."""
 
-    def __init__(self, model_name: str = "claude-sonnet-4-6") -> None:
-        from ai.anthropic_advanced import AnthropicAdvanced
-        self._client = AnthropicAdvanced()
+    def __init__(self, model_name: str = "free-router") -> None:
         self._model_name = model_name
 
     def load_model(self):
-        return self._client
+        return self
 
     def _ask(self, prompt: str) -> str:
-        return self._client.ask(prompt)
+        from ai.free_router import chat_free
+        text, model_used = chat_free(
+            [{"role": "user", "content": prompt}], temperature=0.0, max_tokens=1024,
+        )
+        self._model_name = model_used
+        return text
 
     def generate(self, prompt: str, schema: Optional[Any] = None) -> Any:
         """يطابق عقد DeepEvalBaseLLM.generate: بلا schema يُعاد نص خام،
@@ -180,10 +192,15 @@ def verify_answer_faithfulness(
                 "ولا يؤثر على answer_question() نفسها."
             ),
         }
-    if not os.getenv("ANTHROPIC_API_KEY", "").strip():
+    from ai.free_router import has_any_free_key
+    if not has_any_free_key():
         return {
             "available": False, "faithful": None, "score": None,
-            "reason": "لا يوجد ANTHROPIC_API_KEY — الحَكَم (judge LLM) يتطلب مفتاح Anthropic فعّال.",
+            "reason": (
+                "لا يوجد أي مفتاح نموذج مجاني متاح (GROQ_API_KEY أو "
+                "GOOGLE_API_KEY أو CF_API_TOKEN+CF_ACCOUNT_ID) — الحَكَم "
+                "(judge LLM) يحتاج واحداً منها على الأقل، وكلها مجانية."
+            ),
         }
 
     retrieval_context = _build_retrieval_context(qa_result)
@@ -204,7 +221,7 @@ def verify_answer_faithfulness(
         from deepeval.metrics import FaithfulnessMetric
         from deepeval.test_case import LLMTestCase
 
-        judge = _ClaudeJudge()
+        judge = _FreeRouterJudge()
         metric = FaithfulnessMetric(
             threshold=threshold, model=judge, include_reason=True,
             async_mode=False,

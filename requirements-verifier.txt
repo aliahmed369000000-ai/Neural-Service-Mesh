@@ -13,9 +13,13 @@
 #
 # التثبيت المحلي:
 #   pip install -r requirements-verifier.txt
-#   export ANTHROPIC_API_KEY=...   # الحَكَم (judge LLM) هو Claude نفسه
+#   # الحَكَم (judge LLM) مجاني بالكامل عبر ai/free_router.py — يكفي
+#   # مفتاح واحد فقط من التالية (بلا أي اشتراك مدفوع):
+#   export GROQ_API_KEY=...        # أو
+#   export GOOGLE_API_KEY=...      # أو
+#   export CF_API_TOKEN=... ; export CF_ACCOUNT_ID=...
 #
-# بدون هذا الملف مثبَّتاً: ai/nsm_answer_verifier.py يتدهور بأمان كامل
-# (verify_answer_faithfulness يُرجع {"available": False, ...} بلا أي
-# استثناء أو كسر لبقية النظام).
+# بدون هذا الملف مثبَّتاً، أو بدون أي مفتاح مما سبق: ai/nsm_answer_verifier.py
+# يتدهور بأمان كامل (verify_answer_faithfulness يُرجع
+# {"available": False, ...} بلا أي استثناء أو كسر لبقية النظام).
 deepeval>=3.0.0
