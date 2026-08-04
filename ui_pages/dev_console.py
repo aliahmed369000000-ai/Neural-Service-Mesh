@@ -152,3 +152,50 @@ def render_dev_console():
 
         with st.expander("📋 التقرير الكامل (نص)"):
             st.code(st.session_state.get("_dc_validator_text", ""), language=None)
+
+    # ── سجل محادثات تبويب 💬 المحادثة (ai/chat_history_store.py) ─────────
+    st.markdown("---")
+    st.markdown("#### 📜 سجل المحادثات المحفوظة")
+    st.caption(
+        "كل جلسات تبويب 💬 المحادثة المحفوظة بشكل دائم في "
+        "memory/chat_history.db (يبقى طالما لم يُعَد نشر التطبيق من الصفر)."
+    )
+    try:
+        from ai.chat_history_store import list_sessions, get_session_messages
+
+        _dc_sessions_limit = st.slider(
+            "عدد الجلسات المعروضة", 5, 100, 20, 5, key="dc_chat_sessions_limit"
+        )
+        if st.button("🔄 تحديث القائمة", key="dc_chat_sessions_refresh"):
+            st.session_state["_dc_chat_sessions"] = list_sessions(limit=_dc_sessions_limit)
+        if "_dc_chat_sessions" not in st.session_state:
+            st.session_state["_dc_chat_sessions"] = list_sessions(limit=_dc_sessions_limit)
+
+        _sessions = st.session_state["_dc_chat_sessions"]
+        if not _sessions:
+            st.info("لا توجد أي محادثات محفوظة بعد.")
+        else:
+            metric_card(len(_sessions), "جلسة محفوظة")
+            for _sess in _sessions:
+                _label = (
+                    f"🕒 {_sess['started_at'][:16].replace('T', ' ')} → "
+                    f"{_sess['last_at'][:16].replace('T', ' ')} "
+                    f"— {_sess['message_count']} رسالة — `{_sess['session_id'][:8]}…`"
+                )
+                with st.expander(_label):
+                    _msgs = get_session_messages(_sess["session_id"])
+                    if not _msgs:
+                        st.caption("لا رسائل.")
+                        continue
+                    _first = _msgs[0]
+                    st.markdown(
+                        f"**أول من ردّ في هذه المحادثة:** "
+                        f"{'👤 المستخدم' if _first['role'] == 'user' else '🤖 NSM'} "
+                        f"— *{_first['created_at'][:19].replace('T', ' ')}*"
+                    )
+                    for _m in _msgs:
+                        _who = "👤 المستخدم" if _m["role"] == "user" else "🤖 NSM"
+                        _badge = f" ({_m['source_badge']})" if _m.get("source_badge") else ""
+                        st.markdown(f"**{_who}{_badge}:** {_m['content']}")
+    except Exception as _hist_err:
+        st.error(f"❌ تعذّر تحميل سجل المحادثات: {_hist_err}")
