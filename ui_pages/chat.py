@@ -224,6 +224,19 @@ def render_chat():
         .chat-nsm .bbl { line-height:1.7; }
         [data-testid="stChatMessage"] { max-width: 92%; }
     }
+    
+    /* ── زر النجمة (الإشارة المرجعية) ── */
+    .bookmark-btn {
+        display:inline-block;margin-top:0.55rem;padding:0.28rem 0.7rem;
+        font-size:0.85rem;color:var(--text-muted);
+        background:transparent;border:1px solid var(--border);
+        border-radius:10px;cursor:pointer;transition:all .15s ease;
+        direction:rtl;font-family:inherit;margin-left:0.5rem;
+    }
+    .bookmark-btn:hover { color:var(--gold);border-color:var(--gold);}
+    .bookmark-btn.bookmarked { color:var(--gold);background:var(--gold-soft);border-color:var(--gold);}
+    .bookmark-btn:active { transform:scale(0.96); }
+
     </style>
     """, unsafe_allow_html=True)
 
@@ -256,6 +269,42 @@ def render_chat():
             label_visibility="collapsed",
         ).strip()
 
+    # ══════════════════════════════════════════════════════════════════════
+    # 📊 إحصائيات الجلسة + فلتر الرسائل المرجعية
+    # ══════════════════════════════════════════════════════════════════════
+    if st.session_state.nsm_messages:
+        _stats_cols = st.columns(4)
+        _total_msgs = len(st.session_state.nsm_messages)
+        _user_msgs = sum(1 for m in st.session_state.nsm_messages if m[0] == "user")
+        _nsm_msgs = sum(1 for m in st.session_state.nsm_messages if m[0] == "nsm")
+        _total_words = sum(len(m[1].split()) for m in st.session_state.nsm_messages)
+        _bookmarks = st.session_state.get("nsm_bookmarks", set())
+        
+        with _stats_cols[0]:
+            st.metric("📨 الرسائل", _total_msgs, delta=f"{_user_msgs} أنت / {_nsm_msgs} NSM")
+        with _stats_cols[1]:
+            st.metric("📝 الكلمات", _total_words)
+        with _stats_cols[2]:
+            _avg_len = _total_words // max(1, _nsm_msgs)
+            st.metric("📊 متوسط الرد", f"{_avg_len} كلمة")
+        with _stats_cols[3]:
+            st.metric("⭐ المفضلة", len(_bookmarks))
+        
+        # فلتر الرسائل المرجعية
+        _filter_cols = st.columns([3, 1])
+        with _filter_cols[0]:
+            _show_bookmarks_only = st.checkbox(
+                "⭐ عرض الرسائل المفضلة فقط",
+                key="nsm_filter_bookmarks",
+                help="اعرض فقط الرسائل التي وضعت عليها نجمة"
+            )
+        with _filter_cols[1]:
+            if _bookmarks and st.button("🗑 مسح المفضلة", key="nsm_clear_bookmarks"):
+                st.session_state["nsm_bookmarks"] = set()
+                st.rerun()
+    else:
+        _show_bookmarks_only = False
+    
     # عرض المحادثة
     html = '<div class="chat-box-wrap"><div class="chat-box" id="nsm-chat-box">'
     if not st.session_state.nsm_messages:
@@ -291,6 +340,16 @@ def render_chat():
                 f'لا توجد رسائل مطابقة لـ«{_html_esc.escape(_chat_search_query)}»'
                 f'</div>'
             )
+        # فلتر الرسائل المرجعية
+        if st.session_state.get("nsm_filter_bookmarks", False):
+            _bookmarks = st.session_state.get("nsm_bookmarks", set())
+            _all_msgs_indexed = [(_i, _m) for _i, _m in _all_msgs_indexed if _i in _bookmarks]
+            if not _all_msgs_indexed and not _chat_search_query:
+                html += (
+                    '<div style="text-align:center;color:var(--text-muted);padding:2rem 1rem">'
+                    'لا توجد رسائل مفضلة بعد — اضغط على ☆ بجانب أي رسالة لإضافتها للمفضلة'
+                    '</div>'
+                )
         _hidden_count = max(0, len(_all_msgs_indexed) - NSM_CHAT_DISPLAY_LIMIT)
         if _hidden_count:
             _hidden_note = (
@@ -312,7 +371,11 @@ def render_chat():
             if role == "user":
                 import html as _html
                 safe_text = _html.escape(text).replace("\n", "<br>")
-                html += f'<div class="chat-user"><div class="bbl">{safe_text}{ts_html}</div></div>'
+                _is_bookmarked = _i in st.session_state.get("nsm_bookmarks", set())
+                _bookmark_class = "bookmarked" if _is_bookmarked else ""
+                _bookmark_icon = "★" if _is_bookmarked else "☆"
+                _bookmark_btn = f'<button class="bookmark-btn {_bookmark_class}" onclick="this.classList.toggle(&quot;bookmarked&quot;); var icon=this.textContent; this.textContent = icon.includes(&quot;★&quot;) ? &quot;☆&quot; : &quot;★&quot;;">{_bookmark_icon}</button>'
+                html += f'<div class="chat-user"><div class="bbl">{safe_text}{ts_html}{_bookmark_btn}</div></div>'
             else:
                 ctx_html = f'<div class="ctx-tag">📎 {ctx_tag}</div>' if ctx_tag else ""
                 src_html = (
@@ -332,6 +395,9 @@ def render_chat():
                     safe_reply = _html.escape(text).replace("\n", "<br>")
                 else:
                     safe_reply = text
+                _is_bookmarked = _i in st.session_state.get("nsm_bookmarks", set())
+                _bookmark_class = "bookmarked" if _is_bookmarked else ""
+                _bookmark_icon = "★" if _is_bookmarked else "☆"
                 html += f'''<div class="chat-nsm">
                     <span style="font-size:1.4rem;margin-top:3px">🧠</span>
                     <div class="bbl">{ctx_html}{src_html}<div class="bbl-text" id="nsm-bbl-{_i}">{safe_reply}</div>{_audio_html}
@@ -343,6 +409,7 @@ def render_chat():
                                             b.textContent='✓ تم النسخ';
                                             setTimeout(function(){{b.textContent=old;}}, 1300);
                                          }});">📋 نسخ</button>
+                            <button class="bookmark-btn {_bookmark_class}" onclick="this.classList.toggle(&quot;bookmarked&quot;); var icon=this.textContent; this.textContent = icon.includes(&quot;★&quot;) ? &quot;☆&quot; : &quot;★&quot;;">{_bookmark_icon}</button>
                             {ts_html}
                         </div>
                     </div>
@@ -399,7 +466,40 @@ def render_chat():
         };
         tryBind();
     })();
-    </script>
+    
+
+    // ── اختصار Ctrl+Enter للإرسال ──
+    (function() {
+        function setupKeyboardShortcut() {
+            const doc = window.parent ? window.parent.document : document;
+            const textarea = doc.querySelector('textarea[aria-label="سؤالك"]');
+            if (textarea && !textarea.dataset.nsmShortcutBound) {
+                textarea.dataset.nsmShortcutBound = "1";
+                textarea.addEventListener('keydown', function(e) {
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                        e.preventDefault();
+                        const sendBtn = doc.querySelector('button[data-testid*="nsm_send"]') || 
+                                         doc.querySelector('.st-key-nsm_send_wrap button');
+                        if (sendBtn && !sendBtn.disabled) {
+                            sendBtn.click();
+                        }
+                    }
+                });
+                return true;
+            }
+            return false;
+        }
+        let attempts = 0;
+        const trySetup = () => {
+            attempts++;
+            if (!setupKeyboardShortcut() && attempts < 10) {
+                setTimeout(trySetup, 100);
+            }
+        };
+        trySetup();
+    })();
+
+</script>
     """, height=0)
 
     # ── تقييم آخر رد (👍/👎) لتغذية autotune_feedback ──
@@ -625,6 +725,31 @@ def render_chat():
                     if st.button(q, key=f"chat_q_{i}", use_container_width=True):
                         st.session_state._chat_pending = q
 
+    # ══════════════════════════════════════════════════════════════════════
+    # 💡 اقتراحات متابعة ذكية (بناءً على آخر رد)
+    # ══════════════════════════════════════════════════════════════════════
+    if st.session_state.nsm_messages and st.session_state.nsm_messages[-1][0] == "nsm":
+        _last_response = st.session_state.nsm_messages[-1][1]
+        # توليد اقتراحات بسيطة بناءً على الكلمات المفتاحية في الرد
+        _suggestions = []
+        _response_lower = _last_response.lower()
+        
+        # اقتراحات عامة
+        if "مثال" not in _response_lower and "أمثلة" not in _response_lower:
+            _suggestions.append("أعطني مثالاً على ذلك")
+        if "لماذا" not in _response_lower:
+            _suggestions.append("لماذا هذا مهم؟")
+        if "كيف" not in _response_lower:
+            _suggestions.append("كيف يمكن تطبيق هذا؟")
+        
+        if _suggestions:
+            st.markdown("**💡 اقتراحات للمتابعة:**")
+            _sug_cols = st.columns(len(_suggestions))
+            for i, sug in enumerate(_suggestions[:3]):  # حد أقصى 3 اقتراحات
+                with _sug_cols[i]:
+                    if st.button(sug, key=f"chat_suggestion_{i}", use_container_width=True):
+                        st.session_state._chat_pending = sug
+    
     # أدوات المحادثة: مسح / إعادة توليد آخر رد / تصدير — بجانب بعضها
     # (لا بعد أدوات المالك)
     st.caption("🛠️ أدوات المحادثة")
