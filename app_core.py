@@ -3043,6 +3043,146 @@ def _skeleton(kind: str = "text", lines: int = 3) -> None:
 
 
 
+def render_skip_link(target_id: str = "nsm-main-content", label: str = "تخطّى إلى المحتوى الرئيسي") -> None:
+    """رابط تخطٍّ للوصول بلوحة المفاتيح/قارئ الشاشة (WCAG 2.4.1) — يظهر
+    أولاً ضمن ترتيب الـtab، يأخذ المستخدم إلى بداية المحتوى الرئيسي بدل
+    الاضطرار للمرور على كل عناصر التنقّل. خفيف الوزن لأنه مخفي بصرياً
+    حتى يكتسب التركيز (:focus-visible)."""
+    st.markdown(
+        f'<a class="nsm-skip-link" href="#{target_id}" data-testid="nsm-skip-link">{label}</a>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_focus_styles() -> None:
+    """حقن CSS لإطار تركيز مرئي وواضح على العناصر التفاعلية.
+    إطار Streamlit الافتراضي باهت يصعب رؤيته على خلفية داكنة، لذا نُضيف
+    حلقة (ring) عالية التباين. لا تطال الألوان الأساسية — tokens القائمة
+    تبقى كما هي تماماً."""
+    st.markdown(
+        """
+        <style>
+        :focus-visible {
+            outline: 2px solid var(--primary, #7C5CFC);
+            outline-offset: 2px;
+            border-radius: 6px;
+        }
+        button:focus-visible,
+        [role="tab"]:focus-visible,
+        [data-baseweb="tab"]:focus-visible,
+        a:focus-visible {
+            outline: 2px solid var(--gold, #D4AF37);
+            outline-offset: 3px;
+        }
+        .nsm-skip-link {
+            position: absolute;
+            top: -40px;
+            inset-inline-start: 0;
+            z-index: 10000;
+            background: var(--primary, #7C5CFC);
+            color: #fff;
+            padding: 0.5rem 1rem;
+            border-radius: 0 0 6px 0;
+            font-family: 'Tajawal', sans-serif;
+            text-decoration: none;
+            transition: top .2s ease;
+        }
+        .nsm-skip-link:focus-visible {
+            top: 0;
+            outline: 2px solid var(--gold, #D4AF37);
+            outline-offset: 2px;
+        }
+        .nsm-copy-btn { margin-inline-start: 0.5rem; }
+
+        /* ── حالة فارغة موحّدة (render_empty_state) ── */
+        .empty-state {
+            text-align: center;
+            padding: 2.2rem 1rem;
+            border: 1px dashed var(--border, rgba(255,255,255,0.18));
+            border-radius: 12px;
+            color: var(--text-muted, #94a3b8);
+            font-family: 'Tajawal', sans-serif;
+        }
+        .empty-state-icon { font-size: 2rem; margin-bottom: 0.4rem; }
+        .empty-state-title { font-weight: 700; font-size: 1.05rem; }
+        .empty-state-hint { font-size: 0.85rem; margin-top: 0.3rem; }
+
+        /* ── شريط KPI (render_kpi_strip) ── */
+        .kpi-strip {
+            display: flex;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+            margin: 0.6rem 0;
+        }
+        .kpi-strip-card {
+            flex: 1;
+            min-width: 110px;
+            padding: 0.7rem 0.9rem;
+            border-radius: 10px;
+            background: var(--secondaryBackgroundColor, #1B2333);
+            border: 1px solid var(--border, rgba(255,255,255,0.08));
+            border-inline-start: 3px solid var(--primary, #7C5CFC);
+            font-family: 'Tajawal', sans-serif;
+        }
+        .kpi-strip-card.accent-gold   { border-inline-start-color: var(--gold, #D4AF37); }
+        .kpi-strip-card.accent-blue   { border-inline-start-color: #3b82f6; }
+        .kpi-strip-card.accent-green  { border-inline-start-color: #22c55e; }
+        .kpi-strip-card.accent-red    { border-inline-start-color: #ef4444; }
+        .kpi-strip-value { font-size: 1.3rem; font-weight: 800; }
+        .kpi-strip-label { font-size: 0.78rem; color: var(--text-muted, #94a3b8); }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_empty_state(title: str, hint: str = "", icon: str = "🫥") -> None:
+    """رسالة \"لا توجد بيانات\" موحَّدة بصرياً بدل الرسائل النصية المتباينة
+    بين التبويبات. مقروءة لقارئ الشاشة عبر aria-live=\"polite\"، ومتّسقة
+    الهوامش والأيقونة في كل موضع يستدعيها."""
+    hint_html = f'<div class="empty-state-hint">{hint}</div>' if hint else ""
+    st.markdown(
+        f"""
+        <div class="empty-state" role="status" aria-live="polite">
+            <div class="empty-state-icon" aria-hidden="true">{icon}</div>
+            <div class="empty-state-title">{title}</div>
+            {hint_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_kpi_strip(items: list) -> None:
+    """شريط KPIs نحيف متجاوب — يستقبل قائمة [(value, label)] أو
+    [(value, label, accent)] حيث accent أحد: gold | blue | green | red
+    | primary (افتراضي). القيم تُعرَض فورياً كما هي. منفصل عن metric_card
+    لأنها موجّهة لعرض أفقي مضغوط يلائم الشاشات الصغيرة."""
+    if not items:
+        return
+    cards = []
+    for entry in items:
+        if len(entry) == 2:
+            value, label = entry
+            accent = "primary"
+        else:
+            value, label, accent = entry
+        # تهريب كامل بالترتيب الصحيح: & أولاً (حتى لا نُعيد تهريب ما هُرّب)،
+        # ثم < و> — يمنع حقن HTML من أي قيمة قادمة من بيانات المستخدم.
+        safe_value = str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        safe_label = str(label).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        cards.append(
+            f'<div class="kpi-strip-card accent-{accent}">'
+            f'<div class="kpi-strip-value">{safe_value}</div>'
+            f'<div class="kpi-strip-label">{safe_label}</div>'
+            f"</div>"
+        )
+    st.markdown(
+        f'<div class="kpi-strip" role="list">{"".join(cards)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
 __all__ = [
     _name for _name in dir()
     if not _name.startswith("__") and _name not in ("annotations", "_name")

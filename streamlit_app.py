@@ -148,6 +148,17 @@ def _show_help_dialog():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def main():
+    # ── قابلية الوصول + أنماط التركيز — إضافة فقط، لا تغيّر أي سلوك قائم ──
+    # render_focus_styles: يحقن CSS لإطار تركيز مرئي + تنسيق أصناف الحالة
+    #   الفارغة وشريط KPI (الدوال الجديدة في app_core).
+    # render_skip_link: رابط تخطٍّ لقارئ الشاشة/لوحة المفاتيح (WCAG 2.4.1).
+    # كلاهما معرَّف بحماية try/except كي لا يكسر أي rerun لو تعذّر الحقن.
+    try:
+        render_focus_styles()
+        render_skip_link()
+    except Exception:
+        pass
+
     # ── الشريط الجانبي — OpenRouter ───────────────────────────────────────
     with st.sidebar:
         st.markdown("## 🌐 Neural Service Mesh")
