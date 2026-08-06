@@ -130,6 +130,19 @@ except Exception:
     _SCIENTIST_OK = False
 
 try:
+    from ai.command_lexicon import (
+        handle_help_command as _help_handle,
+        rewrite_to_canonical as _rewrite_cmd,
+        normalize_ar as _norm_ar,
+    )
+    _LEXICON_OK = True
+except Exception:
+    _help_handle = None
+    _rewrite_cmd = lambda t: t
+    _norm_ar = lambda t: (t or "").strip().lower()
+    _LEXICON_OK = False
+
+try:
     from ai.gpu_runtime import (
         torch_device as _gpu_torch_device,
         suggest_batch_size as _gpu_suggest_batch,
@@ -1537,6 +1550,20 @@ def handle_training_command(user_input: str) -> Optional[str]:
     text = (user_input or "").strip()
     if not text:
         return None
+
+    # مساعدة وصياغة موحّدة (أوامر / مساعدة / ماذا تستطيع)
+    if _LEXICON_OK and _help_handle is not None:
+        try:
+            help_out = _help_handle(text)
+            if help_out is not None:
+                return help_out
+        except Exception as _h_err:
+            logger.warning("lexicon help: %s", _h_err)
+        try:
+            text = _rewrite_cmd(text)
+        except Exception:
+            pass
+
     low = text.lower()
 
     # العالِم المبتكر + المدير الأمني والمالي
@@ -1818,13 +1845,15 @@ def handle_training_command(user_input: str) -> Optional[str]:
 
     # أوامر قصيرة
     aliases = {
-
         "جرد": inventory,
         "inventory": inventory,
+        "مخزون": inventory,
         "خطة": lifecycle_plan,
         "plan": lifecycle_plan,
+        "خطة تدريب": lifecycle_plan,
         "ckg": ckg_status,
         "حالة ckg": ckg_status,
+        "وضع ckg": ckg_status,
         "خسارة": ckg_loss_trend,
         "loss": ckg_loss_trend,
         "محفوظات": list_saved_models,
@@ -1835,9 +1864,18 @@ def handle_training_command(user_input: str) -> Optional[str]:
         "أول مهمة": (lambda: _sb_run_first_mission(False) if _SANDBOX_OK else "لا sandbox"),
         "ثاني مهمة": (lambda: _sb_run_second_mission(False) if _SANDBOX_OK else "لا sandbox"),
         "المهمة الثانية": (lambda: _sb_run_second_mission(False) if _SANDBOX_OK else "لا sandbox"),
+        "أوامر": (lambda: _help_handle("أوامر") if _help_handle else inventory),
+        "مساعدة": (lambda: _help_handle("مساعدة") if _help_handle else inventory),
     }
-    if text.strip().lower() in aliases:
-        fn = aliases[text.strip().lower()]
+    key = text.strip().lower()
+    if key in aliases:
+        fn = aliases[key]
         return fn() if fn is not lifecycle_plan else lifecycle_plan()
+    # مطابقة بعد التطبيع
+    if _LEXICON_OK:
+        nkey = _norm_ar(text)
+        for ak, fn in list(aliases.items()):
+            if _norm_ar(ak) == nkey:
+                return fn() if fn is not lifecycle_plan else lifecycle_plan()
 
     return None
