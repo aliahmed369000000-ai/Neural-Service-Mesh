@@ -6,14 +6,13 @@ Arabic Transformer — NSM v3.1
     ✓ قاموس الـtokenizer ثنائي الاتجاه (word_to_id / id_to_word) لتمكين encode+decode
     ✓ المصفوفة المدروسة (.csv/.npy)
 
-الـ Tokenizer (v3.1):
-    WordTokenizer — قاموس كلمات (word-level) مع encode() و decode().
-    يُبنى من نصوص CKG/القرآن/جمل التدريب، ويُحفظ مع الأوزان.
-    HashTokenizer ما زال متاحاً للتوافق الخلفي لكنه لم يعد الافتراضي
-    (لا يدعم decode وبالتالي لا توليد نص مقروء).
+الـ Tokenizer (v3.2):
+    WordTokenizer — قاموس كلمات (word-level) مع encode() و decode() [افتراضي].
+    BPETokenizer  — Byte-Pair Encoding (subword) عبر ai.bpe_tokenizer — أفضل
+                    للكلمات النادرة والمشتقات العربية.
+    HashTokenizer — متقادم، للتوافق فقط (بدون decode مفيد).
 
-تحذير: تغيير الـtokenizer غير متوافق مع أوزان مدرَّبة على hash IDs —
-يلزم إعادة تدريب من الصفر بعد الترقية إلى WordTokenizer.
+تحذير: تغيير نوع الـtokenizer يكسر توافق الأوزان السابقة ويلزم إعادة تدريب.
 """
 from __future__ import annotations
 
@@ -714,23 +713,36 @@ class ArabicTransformer:
 
     VERSION 3.1: WordTokenizer افتراضي (كسر توافق أوزان hash السابقة).
     """
-    VERSION = "3.1.0-NSM"
+    VERSION = "3.2.0-NSM"
 
     def __init__(self, d_model=D_MODEL, n_heads=N_HEADS, d_ff=D_FF,
                  n_layers=N_LAYERS, max_seq=MAX_SEQ_LEN,
                  vocab_size=VOCAB_SIZE, lr=LEARNING_RATE,
                  weights_dir=WEIGHTS_DIR, core_csv=None,
                  tokenizer: Optional[object] = None,
-                 use_hash_tokenizer: bool = False):
-
+                 use_hash_tokenizer: bool = False,
+                 tokenizer_type: str = "word"):
+        """
+        tokenizer_type: "word" | "bpe" | "hash"
+        يُتجاهل إذا مُرِّر كائن tokenizer مباشرة.
+        """
         self.lr          = lr
         self.max_seq     = max_seq
         self.weights_dir = weights_dir
 
         if tokenizer is not None:
             self.tokenizer = tokenizer
-        elif use_hash_tokenizer:
+        elif use_hash_tokenizer or tokenizer_type == "hash":
             self.tokenizer = HashTokenizer(vocab_size)
+        elif tokenizer_type == "bpe":
+            try:
+                from ai.bpe_tokenizer import BPETokenizer
+            except ImportError:
+                from bpe_tokenizer import BPETokenizer  # type: ignore
+            bpe_path = str(Path(weights_dir) / "bpe_tokenizer.json") if weights_dir else "models/bpe_tokenizer.json"
+            alt = "models/bpe_tokenizer.json"
+            path = bpe_path if os.path.exists(bpe_path) else (alt if os.path.exists(alt) else bpe_path)
+            self.tokenizer = BPETokenizer(vocab_size, vocab_path=path if os.path.exists(path) else None)
         else:
             vocab_path = str(Path(weights_dir) / "tokenizer_vocab.json") if weights_dir else WordTokenizer.DEFAULT_VOCAB_PATH
             self.tokenizer = WordTokenizer(vocab_size, vocab_path=vocab_path if os.path.exists(vocab_path) else WordTokenizer.DEFAULT_VOCAB_PATH)
@@ -972,7 +984,8 @@ class ArabicTransformer:
             # قاموس الـtokenizer (encode/decode) — ضروري لتوليد نص مقروء
             if hasattr(self.tokenizer, "save"):
                 try:
-                    self.tokenizer.save(str(tmp_dir / "tokenizer_vocab.json"))
+                    tok_name = "bpe_tokenizer.json" if type(self.tokenizer).__name__ == "BPETokenizer" else "tokenizer_vocab.json"
+                    self.tokenizer.save(str(tmp_dir / tok_name))
                 except Exception as e:
                     logger.warning(f"[Transformer] تعذّر حفظ قاموس الـtokenizer: {e}")
 
@@ -1024,12 +1037,13 @@ class ArabicTransformer:
         for i, blk in enumerate(self.blocks):
             blk.load(str(d / f"block_{i}"))
 
-        vocab_p = d / "tokenizer_vocab.json"
-        if vocab_p.exists() and hasattr(self.tokenizer, "load"):
-            try:
-                self.tokenizer.load(str(vocab_p))
-            except Exception as e:
-                logger.warning(f"[Transformer] تعذّر تحميل قاموس الـtokenizer: {e}")
+        for vocab_p in (d / "bpe_tokenizer.json", d / "tokenizer_vocab.json"):
+            if vocab_p.exists() and hasattr(self.tokenizer, "load"):
+                try:
+                    self.tokenizer.load(str(vocab_p))
+                    break
+                except Exception as e:
+                    logger.warning(f"[Transformer] تعذّر تحميل قاموس الـtokenizer: {e}")
 
         meta_p = d / "meta.json"
         if meta_p.exists():

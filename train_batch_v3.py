@@ -6,7 +6,8 @@
 
 تجاوز يدوي (اختياري):
   NSM_PACK_SIZE=40 NSM_PACKS_PER_RUN=8 python3 train_batch_v3.py
-  NSM_RESET_TRAIN=1 python3 train_batch_v3.py   # إعادة تدريب من الصفر (بعد WordTokenizer)
+  NSM_RESET_TRAIN=1 python3 train_batch_v3.py   # إعادة تدريب من الصفر
+  NSM_TOKENIZER=bpe python3 train_batch_v3.py     # استخدام BPE بدل word-level
 """
 from __future__ import annotations
 
@@ -117,24 +118,39 @@ def main() -> int:
     from ai.arabic_transformer import ArabicTransformer, WordTokenizer
 
     reset = os.environ.get("NSM_RESET_TRAIN", "").strip() in ("1", "true", "yes")
-    TOKENIZER_VERSION = "word-v1"
+    tok_mode = os.environ.get("NSM_TOKENIZER", "word").strip().lower()
+    if tok_mode not in ("word", "bpe"):
+        tok_mode = "word"
+    TOKENIZER_VERSION = "bpe-v1" if tok_mode == "bpe" else "word-v1"
 
-    # بناء/تحديث قاموس WordTokenizer من جمل التدريب (مرة عند الحاجة)
-    vocab_path = os.path.join(WEIGHTS_DIR, "tokenizer_vocab.json")
-    tok = WordTokenizer(vocab_size=8192, vocab_path=vocab_path if os.path.exists(vocab_path) else None)
-    if not os.path.exists(vocab_path) or len(getattr(tok, "word_to_id", {})) <= 64:
-        print("Building WordTokenizer vocabulary from training sentences…")
-        n_vocab = tok.build_from_texts(sentences, max_vocab=8192)
-        os.makedirs(WEIGHTS_DIR, exist_ok=True)
-        tok.save(vocab_path)
-        print(f"Vocab size: {n_vocab} → {vocab_path}")
+    os.makedirs(WEIGHTS_DIR, exist_ok=True)
+    if tok_mode == "bpe":
+        from ai.bpe_tokenizer import BPETokenizer
+        vocab_path = os.path.join(WEIGHTS_DIR, "bpe_tokenizer.json")
+        tok = BPETokenizer(vocab_size=8192, vocab_path=vocab_path if os.path.exists(vocab_path) else None)
+        if not os.path.exists(vocab_path) or len(tok.token_to_id) <= 20:
+            print("Training BPE tokenizer on sentences…")
+            n_vocab = tok.train(sentences)
+            tok.save(vocab_path)
+            print(f"BPE vocab: {n_vocab} merges={len(tok.merges)} → {vocab_path}")
+        else:
+            print(f"Loaded BPE vocab ({len(tok.token_to_id)} tokens, {len(tok.merges)} merges)")
     else:
-        print(f"Loaded existing vocab ({len(tok.word_to_id)} tokens) from {vocab_path}")
+        vocab_path = os.path.join(WEIGHTS_DIR, "tokenizer_vocab.json")
+        tok = WordTokenizer(vocab_size=8192, vocab_path=vocab_path if os.path.exists(vocab_path) else None)
+        if not os.path.exists(vocab_path) or len(getattr(tok, "word_to_id", {})) <= 64:
+            print("Building WordTokenizer vocabulary from training sentences…")
+            n_vocab = tok.build_from_texts(sentences, max_vocab=8192)
+            tok.save(vocab_path)
+            print(f"Vocab size: {n_vocab} → {vocab_path}")
+        else:
+            print(f"Loaded existing vocab ({len(tok.word_to_id)} tokens) from {vocab_path}")
 
     print("Loading ArabicTransformer (120M: d_model=1216, n_layers=8)…")
     model = ArabicTransformer(
         d_model=1216, n_heads=16, d_ff=2560, n_layers=8, vocab_size=8192,
         tokenizer=tok, weights_dir=WEIGHTS_DIR,
+        tokenizer_type=tok_mode,
     )
 
     state = load_state()
