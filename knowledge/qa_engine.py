@@ -1624,3 +1624,16 @@ def question_similarity(q1: str, q2: str) -> float:
     inter = len(t1 & t2)
     union = len(t1 | t2)
     return round(inter / union, 4) if union else 0.0
+
+
+# ── تعزيز لهجي اختياري (لا يغيّر المسار الافتراضي إلا عند الاستدعاء) ─────────
+def yemeni_dialect_context(question: str) -> dict:
+    """
+    يُرجع تحليل لهجة + سياق RAG يمني للسؤال.
+    آمن: عند أي فشل يُرجع قاموساً فارغاً تقريباً.
+    """
+    try:
+        from ai.dialect_boost import analyze_and_boost
+        return analyze_and_boost(question)
+    except Exception as e:
+        return {"query": question, "error": str(e), "dialect_score": 0.0, "rag_context": ""}
