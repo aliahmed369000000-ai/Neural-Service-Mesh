@@ -713,6 +713,20 @@ class SocialAgentManager:
 
         def _one(pid: str):
             pid_text = per_platform_text.get(pid, text)
+            # Crisis / freeze gate (social_swarm)
+            try:
+                from ai.social_swarm import pre_publish_check
+                chk = pre_publish_check(pid_text)
+                if not chk.get("ok"):
+                    res, ok = f"ERROR: blocked_by_crisis_gate — {chk.get('reason_ar')}", False
+                    if resume_key is not None:
+                        _save_checkpoint(resume_key, pid, ok, res)
+                    with lock:
+                        results[pid] = res
+                    log_event(pid, "publish_blocked", "agent", pid_text, reply_content=str(chk), ok=False)
+                    return
+            except Exception:
+                pass
             adapter = self.adapters.get(pid)
             if not adapter:
                 res, ok = "ERROR: منصة غير معروفة", False

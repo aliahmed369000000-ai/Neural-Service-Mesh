@@ -172,6 +172,13 @@ except Exception:
     _SOV_OK = False
 
 try:
+    from ai.social_swarm import handle_social_swarm_command as _social_swarm_handle
+    _SOCIAL_SWARM_OK = True
+except Exception:
+    _social_swarm_handle = None
+    _SOCIAL_SWARM_OK = False
+
+try:
     from ai.continuous_training_agent import handle_continuous_command as _cont_handle
     _CONT_OK = True
 except Exception:
@@ -1614,6 +1621,15 @@ def handle_training_command(user_input: str) -> Optional[str]:
             pass
 
     low = text.lower()
+
+    # السرب الاجتماعي
+    if _SOCIAL_SWARM_OK and _social_swarm_handle is not None:
+        try:
+            ss = _social_swarm_handle(text)
+            if ss is not None:
+                return ss
+        except Exception as _ss_err:
+            logger.warning("social_swarm: %s", _ss_err)
 
     # سيادة التشغيل: MCP/WorldModel/Sensors
     if _SOV_OK and _sov_handle is not None:
