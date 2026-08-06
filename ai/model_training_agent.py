@@ -66,6 +66,13 @@ except Exception:
     _fb_handle = None
     _FEEDBACK_OK = False
 
+try:
+    from ai.training_web_access import handle_web_command as _web_handle
+    _WEB_ACCESS_OK = True
+except Exception:
+    _web_handle = None
+    _WEB_ACCESS_OK = False
+
 # ── مسارات NSM المعروفة (اختيارية — أحد الأهداف وليست الوحيدة) ──────────────
 STATE_V3 = ROOT / "ckg_train_state_v3.json"
 SENTENCES_V3 = ROOT / "ckg_sentences_v3.pkl"
@@ -1428,6 +1435,15 @@ def handle_training_command(user_input: str) -> Optional[str]:
                 return fb
         except Exception as _fb_err:
             logger.warning("feedback handle: %s", _fb_err)
+
+    # وصول إنترنت محكوم (arxiv / HF / بحث مقيّد)
+    if _WEB_ACCESS_OK and _web_handle is not None:
+        try:
+            web = _web_handle(text)
+            if web is not None:
+                return web
+        except Exception as _web_err:
+            logger.warning("web handle: %s", _web_err)
 
     # جرد / inventory
     if re.search(r"(جرد|مخزون|ما\s*المتاح|inventory|بيئة\s*التدريب|ماذا\s*تستطيع)", text, re.I):

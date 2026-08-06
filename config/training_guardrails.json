@@ -94,5 +94,35 @@
       "/training/predict",
       "/training/drift"
     ]
+  },
+  "web_access": {
+    "enabled": true,
+    "allow_model_download": false,
+    "allow_dataset_download": false,
+    "max_results": 5,
+    "timeout_seconds": 15,
+    "whitelist": [
+      "arxiv.org",
+      "export.arxiv.org",
+      "api.semanticscholar.org",
+      "huggingface.co",
+      "hf.co",
+      "stackoverflow.com",
+      "api.stackexchange.com",
+      "github.com",
+      "api.github.com",
+      "raw.githubusercontent.com",
+      "docs.python.org",
+      "pytorch.org",
+      "scikit-learn.org",
+      "numpy.org",
+      "duckduckgo.com",
+      "lite.duckduckgo.com",
+      "api.duckduckgo.com",
+      "en.wikipedia.org",
+      "ar.wikipedia.org",
+      "kaggle.com",
+      "www.kaggle.com"
+    ]
   }
 }

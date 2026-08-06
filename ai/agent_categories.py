@@ -350,12 +350,12 @@ AGENT_CATEGORIES: Dict[str, AgentCategory] = {
             "5. إذا سُئلت بجدية عن النموذج الأساسي، أجب بصدق ولا تنفِ ذلك."
         ),
         quick_prompts=[
-            "حالة feedback",
+            "حالة الويب",
+            "ابحث arxiv neural network training",
+            "ابحث huggingface bert",
+            "ابحث stackoverflow pytorch oom",
             "صحّح وأعد التدريب",
             "سجل النماذج",
-            "ثبّت خط أساس drift",
-            "افحص drift",
-            "استدلال البطل",
         ],
         web_enabled=False,
     ),
