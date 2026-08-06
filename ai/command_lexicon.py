@@ -88,6 +88,8 @@ INTENT_PHRASES: Dict[str, List[str]] = {
     "agent_evo": ["تطور ذاتي", "سجل الوكيل", "agent v2"],
     "swarm": ["سرب", "swarm", "mesh", "وكلاء لامركز"],
     "economic_dash": ["لوحه الاقتصاد", "محرك اقتصاد", "ايرادات", "marketplace"],
+    "roadmap": ["ماذا بعد", "خريطه تطوير", "تفعيل انتاج"],
+    "continuous": ["تدريب مستمر", "راقب جوده", "صيان تدريب"],
 
     # جرد / حالة عامة
     "inventory": ["جرد", "مخزون", "ما المتاح", "بيئه التدريب", "inventory", "وش عندك"],
@@ -370,6 +372,8 @@ def rewrite_to_canonical(text: str) -> str:
         "agent_evo": text,
         "swarm": text,
         "economic_dash": "لوحة الاقتصاد",
+        "roadmap": "ماذا بعد",
+        "continuous": "تدريب مستمر",
     }.get(intent, text)
     return canonical
 

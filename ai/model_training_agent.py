@@ -151,6 +151,20 @@ except Exception:
     _ECONOMIC_OK = False
 
 try:
+    from ai.production_activation import handle_production_command as _prod_handle
+    _PROD_OK = True
+except Exception:
+    _prod_handle = None
+    _PROD_OK = False
+
+try:
+    from ai.continuous_training_agent import handle_continuous_command as _cont_handle
+    _CONT_OK = True
+except Exception:
+    _cont_handle = None
+    _CONT_OK = False
+
+try:
     from ai.command_lexicon import (
         handle_help_command as _help_handle,
         rewrite_to_canonical as _rewrite_cmd,
@@ -1586,6 +1600,22 @@ def handle_training_command(user_input: str) -> Optional[str]:
             pass
 
     low = text.lower()
+
+    # تفعيل الإنتاجية + تدريب مستمر
+    if _PROD_OK and _prod_handle is not None:
+        try:
+            pr = _prod_handle(text)
+            if pr is not None:
+                return pr
+        except Exception as _pr_err:
+            logger.warning("production: %s", _pr_err)
+    if _CONT_OK and _cont_handle is not None:
+        try:
+            ct = _cont_handle(text)
+            if ct is not None:
+                return ct
+        except Exception as _ct_err:
+            logger.warning("continuous: %s", _ct_err)
 
     # المحرك الاقتصادي (AIaaS / سوق / Arbitrage / بيانات)
     if _ECONOMIC_OK and _economic_handle is not None:

@@ -186,9 +186,20 @@ class ReasoningPipeline:
         episode_store: Optional[EpisodeStore] = None,
         record_episodes: bool = True,
         transformer_weights_path: Optional[str] = "models/transformer_ckg_v1",
+        use_deep_routing: bool = True,
+        deep_routing_blend: float = 0.45,
     ):
         self.encoder = VectorEncoder()
         self.ckg = ckg if ckg is not None else CKGManager()
+        self.use_deep_routing = bool(use_deep_routing)
+        self.deep_routing_blend = float(max(0.0, min(1.0, deep_routing_blend)))
+        self._deep_router = None
+        if self.use_deep_routing:
+            try:
+                from ai.deep_routing_network import get_default_deep_network
+                self._deep_router = get_default_deep_network()
+            except Exception:
+                self._deep_router = None
 
         if core is not None:
             self.core = core
@@ -599,6 +610,22 @@ class ReasoningPipeline:
             "W_MEMORY":   round(float(decision_vec[2]), 6),
             "W_TOPOLOGY": round(float(decision_vec[3]), 6),
         }
+
+        # تفعيل DeepRoutingNetwork: مزج أوزان التوجيه العميق مع NeuralCore
+        if getattr(self, "_deep_router", None) is not None and getattr(self, "use_deep_routing", False):
+            try:
+                deep_w = self._deep_router.predict_routing_weights(context_vector)
+                b = float(getattr(self, "deep_routing_blend", 0.45))
+                for k in ("W_SEMANTIC", "W_SCORE", "W_MEMORY", "W_TOPOLOGY"):
+                    if k in deep_w:
+                        weights[k] = round((1.0 - b) * float(weights[k]) + b * float(deep_w[k]), 6)
+                # إعادة تطبيع
+                s = sum(weights.values()) or 1.0
+                weights = {k: round(v / s, 6) for k, v in weights.items()}
+                weights["_deep_routing"] = 1.0
+                weights["_deep_blend"] = b
+            except Exception:
+                weights["_deep_routing"] = 0.0
 
         # إن كان target قد بُني بناءً على memory_hits قبل recall، أعد بناءه
         # هنا بشكل صحيح لإظهار target_used الفعلي (لا يُعاد التدريب).
