@@ -1,0 +1,69 @@
+# NSM Production — فصل الواجهة عن API
+# الاستخدام:
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# الخدمات:
+#   nsm-ui   — Streamlit :8501
+#   nsm-api  — FastAPI   :5000  (ضع GPU على هذه الخدمة في RunPod/AWS)
+#   nsm-mcp  — MCP stdio غير معرّض كمنفذ؛ يُشغَّل عبر وكيل/SSH أو بوابة منفصلة
+
+services:
+  nsm-api:
+    build: .
+    container_name: nsm-api
+    restart: unless-stopped
+    command: >
+      uvicorn api_server:app --host 0.0.0.0 --port 5000 --workers 2
+    ports:
+      - "5000:5000"
+    environment:
+      - NSM_ENV=production
+      - NSM_MCP_OPEN=${NSM_MCP_OPEN:-0}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      - STRIPE_PRICE_PRO=${STRIPE_PRICE_PRO:-}
+      - STRIPE_PRICE_ENTERPRISE=${STRIPE_PRICE_ENTERPRISE:-}
+    volumes:
+      - nsm_data:/app/artifacts
+      - nsm_models:/app/models
+      - nsm_aiaas:/app/artifacts/aiaas
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  nsm-ui:
+    build: .
+    container_name: nsm-ui
+    restart: unless-stopped
+    command: >
+      streamlit run streamlit_app.py --server.port=8501 --server.address=0.0.0.0
+    ports:
+      - "8501:8501"
+    environment:
+      - NSM_ENV=production
+      - NSM_API_URL=${NSM_API_URL:-http://nsm-api:5000}
+    depends_on:
+      - nsm-api
+    volumes:
+      - nsm_data:/app/artifacts
+
+  nsm-social:
+    build: .
+    container_name: nsm-social
+    restart: unless-stopped
+    profiles: ["social"]
+    command: python3 scripts/social_swarm_daemon.py --loop --interval 3600
+    environment:
+      - NSM_ENV=production
+      - UNSPLASH_ACCESS_KEY=${UNSPLASH_ACCESS_KEY:-}
+    volumes:
+      - nsm_data:/app/artifacts
+    depends_on:
+      - nsm-api
+
+volumes:
+  nsm_data:
+  nsm_models:
+  nsm_aiaas:

@@ -208,6 +208,13 @@ except Exception:
     _RL_OK = False
 
 try:
+    from ai.stripe_billing import handle_billing_command as _bill_handle
+    _BILL_OK = True
+except Exception:
+    _bill_handle = None
+    _BILL_OK = False
+
+try:
     from ai.mcp_internal_gateway import handle_gateway_command as _gw_handle
     _GW_OK = True
 except Exception:
@@ -1672,6 +1679,14 @@ def handle_training_command(user_input: str) -> Optional[str]:
 
     low = text.lower()
 
+
+    if _BILL_OK and _bill_handle is not None:
+        try:
+            bl = _bill_handle(text)
+            if bl is not None:
+                return bl
+        except Exception as _bl_err:
+            logger.warning("billing: %s", _bl_err)
 
     if _RL_OK and _rl_handle is not None:
         try:

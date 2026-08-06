@@ -349,3 +349,34 @@ def aiaas_invoice(tenant_id: str):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("api_server:app", host="0.0.0.0", port=5000, reload=True)
+
+
+@app.post("/billing/checkout")
+async def billing_checkout(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        from ai.stripe_billing import create_checkout_session
+        return create_checkout_session(
+            plan=str(body.get("plan") or "pro"),
+            success_url=str(body.get("success_url") or "https://example.com/success"),
+            cancel_url=str(body.get("cancel_url") or "https://example.com/cancel"),
+            customer_email=body.get("email"),
+        )
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/gtm/status")
+def gtm_status():
+    """حالة جاهزية Go-to-Market."""
+    from pathlib import Path as _P
+    return {
+        "ok": True,
+        "docker_compose_prod": _P("docker-compose.prod.yml").is_file(),
+        "stripe_configured": bool(os.environ.get("STRIPE_SECRET_KEY")),
+        "mcp_server": _P("mcp_server/server.py").is_file(),
+        "social_daemon": _P("scripts/social_swarm_daemon.py").is_file(),
+    }
