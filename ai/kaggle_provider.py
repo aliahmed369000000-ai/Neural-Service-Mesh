@@ -239,6 +239,13 @@ def generate_kernel_script(
             import torch.nn as nn
             import torch.optim as optim
             import numpy as np
+            import subprocess as _sp
+
+            try:
+                print("nvidia-smi:")
+                print(_sp.check_output(["nvidia-smi", "-L"], text=True, timeout=10))
+            except Exception as _e:
+                print("nvidia-smi unavailable:", _e)
 
             cuda = torch.cuda.is_available()
             n_gpu = torch.cuda.device_count() if cuda else 0
@@ -383,18 +390,25 @@ def generate_kernel_metadata(
     username: str = "nsm-agent",
     title: Optional[str] = None,
     enable_gpu: bool = True,
+    accelerator: str = "NvidiaTeslaT4",
 ) -> Dict[str, Any]:
-    """metadata.json لـ Kaggle Kernels API / CLI."""
+    """metadata.json لـ Kaggle Kernels API / CLI.
+
+    accelerator أمثلة مدعومة عبر CLI:
+      NvidiaTeslaT4 | NvidiaTeslaT4Highmem | NvidiaTeslaP100 (غير موصى — مشاكل PyTorch)
+      NvidiaL4 | NvidiaTeslaA100 | ...
+    Dual T4 ×2: يُطلب عبر واجهة Kaggle؛ API يعتمد NvidiaTeslaT4 غالباً.
+    """
     slug = _safe_slug(f"nsm-{job_id}")
-    return {
+    meta: Dict[str, Any] = {
         "id": f"{username}/{slug}",
         "id_no": None,
         "title": title or f"NSM Training {job_id}",
-        "code_file": "nsm_train.py",
+        "code_file": "nsm_train.ipynb",
         "language": "python",
-        "kernel_type": "script",
+        "kernel_type": "notebook",
         "is_private": True,
-        "enable_gpu": enable_gpu,
+        "enable_gpu": bool(enable_gpu),
         "enable_tpu": False,
         "enable_internet": True,
         "dataset_sources": [],
@@ -402,6 +416,10 @@ def generate_kernel_metadata(
         "kernel_sources": [],
         "model_sources": [],
     }
+    if enable_gpu and accelerator:
+        # machine_shape يُقرأ من CLI الحديث عند الدفع
+        meta["machine_shape"] = accelerator
+    return meta
 
 
 # ─── مهام محلية (توليد + دفع اختياري) ─────────────────────────────────────
@@ -411,6 +429,8 @@ def prepare_kaggle_job(
     epochs: int = 15,
     title: str = "NSM Training Agent",
     username: Optional[str] = None,
+    accelerator: str = "NvidiaTeslaT4",
+    enable_gpu: bool = True,
 ) -> Dict[str, Any]:
     """
     يجهّز مجلد مهمة جاهز للرفع:
@@ -453,11 +473,43 @@ def prepare_kaggle_job(
     # إن بقي العنوان مخصصاً، اجعل الـid يعتمد على slug من العنوان أيضاً لتفادي تحذير Kaggle
     title_slug = _safe_slug(effective_title)
     script = generate_kernel_script(job_id, csv_rel=csv_path, epochs=epochs, title=effective_title)
-    meta = generate_kernel_metadata(job_id, username=user, title=effective_title, enable_gpu=True)
+    meta = generate_kernel_metadata(
+        job_id,
+        username=user,
+        title=effective_title,
+        enable_gpu=enable_gpu,
+        accelerator=accelerator if enable_gpu else "",
+    )
     # فرض تطابق id مع slug العنوان
     meta["id"] = f"{user}/{title_slug}"
 
+    # سكربت خام للمرجعية + دفتر notebook (أفضل لتفعيل GPU على Kaggle)
     (job_dir / "nsm_train.py").write_text(script, encoding="utf-8")
+    nb = {
+        "nbformat": 4,
+        "nbformat_minor": 5,
+        "metadata": {
+            "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
+            "language_info": {"name": "python", "version": "3.10.0"},
+            "accelerator": "GPU",
+            "kaggle": {"accelerator": "nvidiaTeslaT4", "isInternetEnabled": True},
+        },
+        "cells": [
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "metadata": {},
+                "outputs": [],
+                "source": script,
+            }
+        ],
+    }
+    (job_dir / "nsm_train.ipynb").write_text(
+        json.dumps(nb, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    # تأكد أن code_file في metadata يشير للدفتر
+    meta["code_file"] = "nsm_train.ipynb"
+    meta["kernel_type"] = "notebook"
     (job_dir / "kernel-metadata.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -478,7 +530,8 @@ def prepare_kaggle_job(
         "status": "prepared",
         "job_dir": str(job_dir.relative_to(ROOT)),
         "kernel_id": meta["id"],
-        "enable_gpu": True,
+        "enable_gpu": enable_gpu,
+        "accelerator": accelerator if enable_gpu else None,
         "epochs": epochs,
         "csv_copied": copied_csv,
         "created_at": _now(),
@@ -523,12 +576,26 @@ def push_kaggle_kernel(job_id: str) -> Dict[str, Any]:
         }
 
     try:
-        # kaggle kernels push -p <folder>
+        # اقرأ accelerator من metadata إن وُجد
+        accel = "NvidiaTeslaT4"
+        meta_path = job_dir / "kernel-metadata.json"
+        if meta_path.is_file():
+            try:
+                _m = json.loads(meta_path.read_text(encoding="utf-8"))
+                if _m.get("machine_shape"):
+                    accel = str(_m["machine_shape"])
+                elif not _m.get("enable_gpu"):
+                    accel = ""
+            except Exception:
+                pass
+        cmd = ["kaggle", "kernels", "push", "-p", str(job_dir)]
+        if accel:
+            cmd += ["--accelerator", accel]
         proc = subprocess.run(
-            ["kaggle", "kernels", "push", "-p", str(job_dir)],
+            cmd,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=180,
             cwd=str(job_dir),
         )
         out = (proc.stdout or "") + "\n" + (proc.stderr or "")
@@ -803,7 +870,27 @@ def handle_kaggle_command(user_input: str) -> Optional[str]:
         m_ep = re.search(r"(?:epochs?|حقب|عصور)\s*[=:]?\s*(\d+)", text, re.I)
         if m_ep:
             epochs = max(1, min(100, int(m_ep.group(1))))
-        job = prepare_kaggle_job(csv_path=csv_path, epochs=epochs)
+        # تسريع GPU — افتراضي T4
+        accel = "NvidiaTeslaT4"
+        enable_gpu = True
+        if re.search(r"(بدون\s*gpu|no\s*gpu|cpu\s*only|عطل\s*gpu)", text, re.I):
+            enable_gpu = False
+            accel = ""
+        elif re.search(r"(t4\s*highmem|highmem)", text, re.I):
+            accel = "NvidiaTeslaT4Highmem"
+        elif re.search(r"(dual\s*t4|t4\s*[x×]2|كرتين|بطاقتين)", text, re.I):
+            # طلب T4؛ Dual×2 غالباً من الواجهة — T4 عبر API هو الأقرب
+            accel = "NvidiaTeslaT4"
+        elif re.search(r"(a100)", text, re.I):
+            accel = "NvidiaTeslaA100"
+        elif re.search(r"(l4\b)", text, re.I):
+            accel = "NvidiaL4"
+        job = prepare_kaggle_job(
+            csv_path=csv_path,
+            epochs=epochs,
+            accelerator=accel or "NvidiaTeslaT4",
+            enable_gpu=enable_gpu,
+        )
         return (
             "## 🟧 مهمة Kaggle جاهزة للرفع\n\n"
             + "```json\n"

@@ -84,3 +84,31 @@ print(multi_gpu_training_snippet())
 
 ## أمان
 لا ترفع `kaggle.json` إلى Git. أضفه لـ `.gitignore` (موجود مسبقاً لأنماط الأسرار الشائعة). استخدم متغيرات بيئة على السيرفر.
+
+
+## تفعيل تسريع GPU (مهم)
+
+الوكيل يضبط تلقائياً:
+- `"enable_gpu": true`
+- `"machine_shape": "NvidiaTeslaT4"`
+- `kaggle kernels push --accelerator NvidiaTeslaT4`
+- نوع Kernel = **notebook** (أفضل من script لتفعيل GPU)
+
+### إذا بقي التشغيل على CPU
+أسباب شائعة:
+1. **نفاد حصة GPU الأسبوعية** (~30 ساعة) — راجع [Kaggle Settings](https://www.kaggle.com/settings)
+2. **أول تفعيل لنواة جديدة** — Kaggle أحياناً يتجاهل الـaccelerator من API:
+   - افتح الرابط الذي يطبعه الوكيل بعد الدفع
+   - Settings → **Accelerator → GPU T4 ×2**
+   - Save Version → Run All
+   - بعد ذلك، الدفعات التالية عبر API تحافظ على الإعداد غالباً
+3. تأكد أن Internet ON إن احتجت تحميل حزم
+
+### أوامر الوكيل المتعلقة بالـGPU
+```
+جهّز kaggle          # T4 افتراضي
+درّب kaggle dual t4  # يطلب T4 (Dual×2 من الواجهة إن لزم)
+ادفع kaggle <id>
+حالة kaggle <id>
+حمّل kaggle <id>
+```
