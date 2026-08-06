@@ -215,6 +215,20 @@ except Exception:
     _BILL_OK = False
 
 try:
+    from ai.cognitive_microkernel import handle_kernel_command as _kern_handle
+    _KERN_OK = True
+except Exception:
+    _kern_handle = None
+    _KERN_OK = False
+
+try:
+    from ai.cosmic_mesh import handle_mesh_command as _mesh_handle
+    _MESH_OK = True
+except Exception:
+    _mesh_handle = None
+    _MESH_OK = False
+
+try:
     from ai.mcp_internal_gateway import handle_gateway_command as _gw_handle
     _GW_OK = True
 except Exception:
@@ -1679,6 +1693,21 @@ def handle_training_command(user_input: str) -> Optional[str]:
 
     low = text.lower()
 
+
+    if _KERN_OK and _kern_handle is not None:
+        try:
+            kn = _kern_handle(text)
+            if kn is not None:
+                return kn
+        except Exception as _kn_err:
+            logger.warning("kernel: %s", _kn_err)
+    if _MESH_OK and _mesh_handle is not None:
+        try:
+            mh = _mesh_handle(text)
+            if mh is not None:
+                return mh
+        except Exception as _mh_err:
+            logger.warning("mesh: %s", _mh_err)
 
     if _BILL_OK and _bill_handle is not None:
         try:
