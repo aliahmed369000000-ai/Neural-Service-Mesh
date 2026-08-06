@@ -192,6 +192,35 @@ except Exception:
     _pred_handle = None
     _PRED_OK = False
 
+
+try:
+    from ai.autonomous_train_devops import handle_train_devops_command as _devops_handle
+    _DEVOPS_OK = True
+except Exception:
+    _devops_handle = None
+    _DEVOPS_OK = False
+
+try:
+    from ai.mcp_internal_gateway import handle_gateway_command as _gw_handle
+    _GW_OK = True
+except Exception:
+    _gw_handle = None
+    _GW_OK = False
+
+try:
+    from ai.quantization_worker import handle_quant_command as _quant_handle
+    _QUANT_OK = True
+except Exception:
+    _quant_handle = None
+    _QUANT_OK = False
+
+try:
+    from ai.sensors_training_bridge import handle_sensor_bridge_command as _sbridge_handle
+    _SBRIDGE_OK = True
+except Exception:
+    _sbridge_handle = None
+    _SBRIDGE_OK = False
+
 try:
     from ai.continuous_training_agent import handle_continuous_command as _cont_handle
     _CONT_OK = True
@@ -1635,6 +1664,36 @@ def handle_training_command(user_input: str) -> Optional[str]:
             pass
 
     low = text.lower()
+
+
+    if _DEVOPS_OK and _devops_handle is not None:
+        try:
+            dv = _devops_handle(text)
+            if dv is not None:
+                return dv
+        except Exception as _dv_err:
+            logger.warning("devops: %s", _dv_err)
+    if _GW_OK and _gw_handle is not None:
+        try:
+            gw = _gw_handle(text)
+            if gw is not None:
+                return gw
+        except Exception as _gw_err:
+            logger.warning("gateway: %s", _gw_err)
+    if _QUANT_OK and _quant_handle is not None:
+        try:
+            qt = _quant_handle(text)
+            if qt is not None:
+                return qt
+        except Exception as _qt_err:
+            logger.warning("quant: %s", _qt_err)
+    if _SBRIDGE_OK and _sbridge_handle is not None:
+        try:
+            sb = _sbridge_handle(text)
+            if sb is not None:
+                return sb
+        except Exception as _sb_err:
+            logger.warning("sbridge: %s", _sb_err)
 
     if _PRED_OK and _pred_handle is not None:
         try:

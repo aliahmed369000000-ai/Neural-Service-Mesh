@@ -120,7 +120,7 @@ def handle_sovereignty_command(user_input: str) -> Optional[str]:
     text = (user_input or "").strip()
     if not text:
         return None
-    if re.search(r"(نبض[ةه]\s*معرف|knowledge\s*pulse|حساسات)", text, re.I):
+    if re.search(r"(نبض[ةه]\s*معرف|knowledge\s*pulse)", text, re.I):
         return "## 📡 نبضة معرفية\n\n```json\n" + json.dumps(knowledge_pulse(), ensure_ascii=False, indent=2, default=str)[:3500] + "\n```"
     if re.search(r"(تدريب\s*مبوّب|gated\s*train|سياد[ةه]\s*تدريب)", text, re.I):
         return "## 🛂 تدريب مبوّب بنموذج العالم\n\n```json\n" + json.dumps(gated_continuous_training(), ensure_ascii=False, indent=2, default=str)[:3500] + "\n```"

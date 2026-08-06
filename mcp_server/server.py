@@ -398,3 +398,13 @@ def mcp_auth_check(api_key: str = "") -> str:
         return json.dumps({"ok": ok, **meta}, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def unified_knowledge_query(question: str) -> str:
+    """نواة موحدة: CKG + ReasoningPipeline عبر البوابة الداخلية."""
+    try:
+        from ai.mcp_internal_gateway import unified_query
+        return json.dumps(unified_query(question), ensure_ascii=False, default=str)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
