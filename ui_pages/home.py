@@ -289,6 +289,66 @@ def render_home():
                 st.toast("تم فتح البحث الكامل", icon="🔍")
                 st.rerun()
 
+    # ── 💡 أسئلة مقترحة — تسهّل البداية للمستخدم الجديد دون الحاجة لابتكار سؤال
+    # من الصفر. الضغط على أي سؤال يملأ حقل البحث السريع أعلاه ويعرض النتيجة
+    # فوراً (نفس مسار البحث المعرفي الموجود)، أو ينقل لـQ&A حسب الرغبة.
+    # إضافة فقط — لا تغيّر أي منطق بحث أو تبويب قائم.
+    st.markdown("---")
+    st.markdown('<div class="section-header">💡 أسئلة مقترحة للبدء</div>', unsafe_allow_html=True)
+    st.caption("اضغط على أي سؤال لاستكشافه مباشرة عبر الشبكة المعرفية")
+
+    _suggested_qs = [
+        "ما هو الصبر في القرآن؟",
+        "معنى التقوى",
+        "الجذر اللغوي للرحمة",
+        "ما الفرق بين العلم والمعرفة؟",
+        "مفهوم العدل في الإسلام",
+        "التوبة وشروطها",
+        "الإيمان بالغيب",
+        "ماذا تعني البركة؟",
+    ]
+    _sq_cols = st.columns(4)
+    for _i, _sq in enumerate(_suggested_qs):
+        with _sq_cols[_i % 4]:
+            if st.button(_sq, key=f"home_suggested_q_{_i}", use_container_width=True):
+                # نملأ البحث السريع ونفعّل عرضه فوراً
+                with st.spinner("🔍 جارٍ البحث..."):
+                    _sq_result = search_knowledge(_sq)
+                st.session_state["_nsm_home_last_quick_search"] = (_sq, _sq_result)
+                st.session_state["home_quick_search_input"] = _sq  # محاولة تعبئة الحقل إن أمكن
+                st.rerun()
+
+    # ── 🌟 مفهوم اليوم — مفهوم عشوائي ثابت لنفس اليوم (لا يتغير بكل rerun)
+    # يعتمد على تاريخ اليوم فقط، فلا يحتاج تخزين دائم ولا يغيّر أي حالة قائمة.
+    st.markdown("---")
+    st.markdown('<div class="section-header">🌟 مفهوم اليوم</div>', unsafe_allow_html=True)
+    _day_concepts = [
+        ("الصبر", "من أعظم القيم القرآنية، مرتبط بالصلاة واليقين والرضا."),
+        ("التقوى", "وقاية النفس من غضب الله بامتثال أوامره واجتناب نواهيه."),
+        ("الرحمة", "صفة إلهية جامعة، ومنها اشتق اسم الرحمن والرحيم."),
+        ("العدل", "إعطاء كل ذي حق حقه، أساس الحكم والعلاقات."),
+        ("العلم", "نور يرفع الله به الذين آمنوا درجات."),
+        ("التوبة", "رجوع إلى الله بعد المعصية، بشروطها المعروفة."),
+        ("الإخلاص", "تصفية العمل من كل شائبة لوجه الله وحده."),
+        ("البركة", "الزيادة والنماء في الخير والوقت والمال."),
+        ("الصلاح", "استقامة الحال ظاهراً وباطناً."),
+        ("اليقين", "ثبوت العلم وانتفاء الشك، أعلى درجات الإيمان."),
+    ]
+    import datetime as _dt
+    _day_idx = _dt.date.today().toordinal() % len(_day_concepts)
+    _today_concept, _today_desc = _day_concepts[_day_idx]
+    st.markdown(f"""
+    <div class="concept-card">
+        <div class="concept-name">📌 {_today_concept}</div>
+        <div style="color:var(--text-muted);font-size:0.92rem;margin-top:0.35rem;">{_today_desc}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    if st.button(f"استكشف «{_today_concept}» الآن", key="home_concept_of_day_btn", use_container_width=True):
+        with st.spinner("🔍 جارٍ البحث..."):
+            _cd_result = search_knowledge(_today_concept)
+        st.session_state["_nsm_home_last_quick_search"] = (_today_concept, _cd_result)
+        st.rerun()
+
     st.markdown("---")
     st.markdown('<div class="section-header">🚀 استكشف NSM</div>', unsafe_allow_html=True)
 
@@ -298,6 +358,9 @@ def render_home():
         ("📖", "القرآن الكريم", "بحث آية بآية، مرتبط تلقائياً بشبكة المفاهيم والجذور العربية.", "📚 المعرفة"),
         ("🤖", "الوكلاء الأذكياء", "وكلاء مستقلون للتنفيذ والتنسيق ضمن سرب ذكي متكامل.", "🤖 الوكلاء"),
         ("🎭", "المحتوى الإبداعي", "توليد نصوص ومحتوى إبداعي عربي بأسلوب متعدد الأنماط.", "🎭 إبداع"),
+        ("🌐", "الترجمة", "ترجمة فورية عربي ↔ لغات أخرى عبر سلسلة الاحتياط الذكية.", "🌐 ترجمة"),
+        ("📡", "الوكيل الاجتماعي", "نشر ورد تلقائي ومراقبة عبر منصات متعددة بشخصية NSM الموحّدة.", "📡 الوكيل الاجتماعي"),
+        ("🎓", "التدريب", "إحصاءات النظام المعرفي وأدوات التدريب الذاتي.", "🎓 التدريب"),
     ]
     _cards_html = "".join(f"""
             <div class="feature-card" data-tab-target="{_target_tab}" tabindex="0" role="button">
