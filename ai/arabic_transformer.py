@@ -960,35 +960,73 @@ class ArabicTransformer:
             out.append((word, prob))
         return out
 
-    def generate_ids(self, text: str, max_new=20, temp=0.8) -> np.ndarray:
-        """يُولِّد تسلسل IDs."""
+    def generate_ids(
+        self,
+        text: str,
+        max_new=20,
+        temp=0.8,
+        top_k: int = 50,
+        top_p: float = 0.92,
+        repetition_penalty: float = 1.1,
+    ) -> np.ndarray:
+        """يُولِّد تسلسل IDs مع nucleus/top-k وpenalty تكرار."""
         eos = getattr(self.tokenizer, "EOS", 3)
         ids = list(self.tokenizer.encode(text, self.max_seq - max_new))
-        # أزل EOS الختامي إن وُجد حتى نكمل التوليد
         if ids and ids[-1] == eos:
             ids = ids[:-1]
+        try:
+            from ai.sampling_utils import sample_token
+        except ImportError:
+            sample_token = None  # type: ignore
         for _ in range(max_new):
-            if len(ids) >= self.max_seq: break
-            arr  = np.array(ids[-self.max_seq:], np.int64)
-            S    = len(arr)
-            mask = np.triu(np.ones((S,S), bool), k=1)
-            p, _ = self._forward(arr, mask)
-            lp   = p[-1]
-            if temp != 1.0:
-                lp = _softmax((np.log(np.clip(lp,1e-10,1))/temp).reshape(1,-1)).flatten()
-            lp = np.clip(lp, 0, None)
-            s = float(lp.sum())
-            if s <= 0:
+            if len(ids) >= self.max_seq:
                 break
-            lp = lp / s
-            nxt = int(np.random.choice(len(lp), p=lp))
-            if nxt == eos: break
+            arr = np.array(ids[-self.max_seq:], np.int64)
+            S = len(arr)
+            mask = np.triu(np.ones((S, S), bool), k=1)
+            p, _ = self._forward(arr, mask)
+            lp = p[-1]
+            if sample_token is not None:
+                nxt = sample_token(
+                    lp,
+                    temperature=temp,
+                    top_k=top_k,
+                    top_p=top_p,
+                    recent_ids=ids[-32:],
+                    repetition_penalty=repetition_penalty,
+                )
+            else:
+                if temp != 1.0:
+                    lp = _softmax((np.log(np.clip(lp, 1e-10, 1)) / temp).reshape(1, -1)).flatten()
+                lp = np.clip(lp, 0, None)
+                s = float(lp.sum())
+                if s <= 0:
+                    break
+                lp = lp / s
+                nxt = int(np.random.choice(len(lp), p=lp))
+            if nxt == eos:
+                break
             ids.append(nxt)
         return np.array(ids, np.int64)
 
-    def generate(self, text: str, max_new=20, temp=0.8) -> str:
-        """يُولِّد نصاً عربياً مقروءاً عبر decode()."""
-        ids = self.generate_ids(text, max_new=max_new, temp=temp)
+    def generate(
+        self,
+        text: str,
+        max_new=20,
+        temp=0.8,
+        top_k: int = 50,
+        top_p: float = 0.92,
+        repetition_penalty: float = 1.1,
+    ) -> str:
+        """يُولِّد نصاً عربياً مع nucleus sampling (أسلوب حديث)."""
+        ids = self.generate_ids(
+            text,
+            max_new=max_new,
+            temp=temp,
+            top_k=top_k,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
+        )
         if hasattr(self.tokenizer, "decode"):
             return self.tokenizer.decode(ids, skip_special=True)
         return " ".join(str(int(i)) for i in ids)
