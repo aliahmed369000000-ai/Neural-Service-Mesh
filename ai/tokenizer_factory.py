@@ -21,6 +21,11 @@ ALIASES = {
     "sp": "sentencepiece",
     "unigram": "unigram",
     "unigramlm": "unigram",
+    "char": "char",
+    "character": "char",
+    "bytebpe": "byte_bpe",
+    "byte_bpe": "byte_bpe",
+    "bbpe": "byte_bpe",
     "hash": "hash",
 }
 
@@ -30,6 +35,8 @@ DEFAULT_PATHS = {
     "wordpiece": "models/wordpiece_tokenizer.json",
     "sentencepiece": "models/sentencepiece_tokenizer.json",
     "unigram": "models/unigram_tokenizer.json",
+    "char": "models/char_tokenizer.json",
+    "byte_bpe": "models/byte_bpe_tokenizer.json",
 }
 
 
@@ -40,6 +47,8 @@ def list_tokenizers() -> List[Dict[str, str]]:
         {"id": "wordpiece", "name": "WordPiece", "desc": "Longest-match مع ##"},
         {"id": "sentencepiece", "name": "SentencePiece-BPE", "desc": "BPE على محارف + ▁"},
         {"id": "unigram", "name": "Unigram LM", "desc": "تجزئة Viterbi بالاحتمالات"},
+        {"id": "char", "name": "Character", "desc": "محرف = رمز"},
+        {"id": "byte_bpe", "name": "Byte-level BPE", "desc": "BPE على بايتات UTF-8 (أسلوب GPT-2)"},
         {"id": "hash", "name": "Hash (متقادم)", "desc": "FNV بدون decode حقيقي"},
     ]
 
@@ -82,6 +91,16 @@ def get_tokenizer(
         path = vocab_path or DEFAULT_PATHS["unigram"]
         return UnigramTokenizer(vocab_size, vocab_path=path)
 
+    if t == "char":
+        from ai.char_tokenizer import CharTokenizer
+        path = vocab_path or DEFAULT_PATHS["char"]
+        return CharTokenizer(vocab_size, vocab_path=path)
+
+    if t == "byte_bpe":
+        from ai.byte_bpe_tokenizer import ByteBPETokenizer
+        path = vocab_path or DEFAULT_PATHS["byte_bpe"]
+        return ByteBPETokenizer(vocab_size, vocab_path=path)
+
     # word
     from ai.arabic_transformer import WordTokenizer
     path = vocab_path or DEFAULT_PATHS["word"]
@@ -96,6 +115,8 @@ def tokenizer_version_tag(tokenizer_type: str) -> str:
         "wordpiece": "wordpiece-v1",
         "sentencepiece": "sentencepiece-v1",
         "unigram": "unigram-v1",
+        "char": "char-v1",
+        "byte_bpe": "byte-bpe-v1",
         "hash": "hash-v1",
     }.get(t, "word-v1")
 
@@ -107,5 +128,7 @@ def tokenizer_save_name(tokenizer_obj) -> str:
         "WordPieceTokenizer": "wordpiece_tokenizer.json",
         "SentencePieceTokenizer": "sentencepiece_tokenizer.json",
         "UnigramTokenizer": "unigram_tokenizer.json",
+        "CharTokenizer": "char_tokenizer.json",
+        "ByteBPETokenizer": "byte_bpe_tokenizer.json",
         "WordTokenizer": "tokenizer_vocab.json",
     }.get(name, "tokenizer_vocab.json")

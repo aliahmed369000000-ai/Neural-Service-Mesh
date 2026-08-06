@@ -11,6 +11,8 @@
   NSM_TOKENIZER=wordpiece python3 train_batch_v3.py       # WordPiece
   NSM_TOKENIZER=sentencepiece python3 train_batch_v3.py   # SentencePiece-style
   NSM_TOKENIZER=unigram python3 train_batch_v3.py         # Unigram LM
+  NSM_TOKENIZER=char python3 train_batch_v3.py            # Character-level
+  NSM_TOKENIZER=byte_bpe python3 train_batch_v3.py        # Byte-level BPE
 """
 from __future__ import annotations
 
@@ -128,13 +130,19 @@ def main() -> int:
         tok_mode = "sentencepiece"
     if tok_mode in ("unigramlm",):
         tok_mode = "unigram"
-    if tok_mode not in ("word", "bpe", "wordpiece", "sentencepiece", "unigram"):
+    if tok_mode in ("character",):
+        tok_mode = "char"
+    if tok_mode in ("bbpe", "bytebpe"):
+        tok_mode = "byte_bpe"
+    if tok_mode not in ("word", "bpe", "wordpiece", "sentencepiece", "unigram", "char", "byte_bpe"):
         tok_mode = "word"
     TOKENIZER_VERSION = {
         "bpe": "bpe-v1",
         "wordpiece": "wordpiece-v1",
         "sentencepiece": "sentencepiece-v1",
         "unigram": "unigram-v1",
+        "char": "char-v1",
+        "byte_bpe": "byte-bpe-v1",
         "word": "word-v1",
     }[tok_mode]
 
@@ -183,6 +191,28 @@ def main() -> int:
             print(f"Unigram vocab: {n_vocab} → {vocab_path}")
         else:
             print(f"Loaded Unigram vocab ({len(tok.token_to_id)} tokens)")
+    elif tok_mode == "char":
+        from ai.char_tokenizer import CharTokenizer
+        vocab_path = os.path.join(WEIGHTS_DIR, "char_tokenizer.json")
+        tok = CharTokenizer(vocab_size=512, vocab_path=vocab_path if os.path.exists(vocab_path) else None)
+        if not os.path.exists(vocab_path) or len(tok.token_to_id) <= 20:
+            print("Building Char tokenizer…")
+            n_vocab = tok.train(sentences)
+            tok.save(vocab_path)
+            print(f"Char vocab: {n_vocab} → {vocab_path}")
+        else:
+            print(f"Loaded Char vocab ({len(tok.token_to_id)} tokens)")
+    elif tok_mode == "byte_bpe":
+        from ai.byte_bpe_tokenizer import ByteBPETokenizer
+        vocab_path = os.path.join(WEIGHTS_DIR, "byte_bpe_tokenizer.json")
+        tok = ByteBPETokenizer(vocab_size=8192, vocab_path=vocab_path if os.path.exists(vocab_path) else None)
+        if not os.path.exists(vocab_path) or len(tok.merges) == 0:
+            print("Training Byte-level BPE…")
+            n_vocab = tok.train(sentences)
+            tok.save(vocab_path)
+            print(f"Byte-BPE vocab: {n_vocab} merges={len(tok.merges)} → {vocab_path}")
+        else:
+            print(f"Loaded Byte-BPE vocab ({len(tok.token_to_id)} tokens, {len(tok.merges)} merges)")
     else:
         vocab_path = os.path.join(WEIGHTS_DIR, "tokenizer_vocab.json")
         tok = WordTokenizer(vocab_size=8192, vocab_path=vocab_path if os.path.exists(vocab_path) else None)
