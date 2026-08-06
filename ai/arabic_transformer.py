@@ -6,8 +6,9 @@ Arabic Transformer — NSM v3.1
     ✓ قاموس الـtokenizer ثنائي الاتجاه (word_to_id / id_to_word) لتمكين encode+decode
     ✓ المصفوفة المدروسة (.csv/.npy)
 
-الـ Tokenizer (v3.6):
-    Word / BPE / WordPiece / SentencePiece / Unigram / Char / Byte-BPE / Hash
+الـ Tokenizer (v3.7):
+    Word / BPE / WordPiece / SentencePiece / Unigram / Char / Byte-BPE /
+    Modern-BBPE (GPT-4/tiktoken — الموصى به حديثاً) / Hash
     مصنع: ai.tokenizer_factory.get_tokenizer(type)
 
 تحذير: تغيير نوع الـtokenizer يكسر توافق الأوزان ويلزم إعادة تدريب.
@@ -711,7 +712,7 @@ class ArabicTransformer:
 
     VERSION 3.1: WordTokenizer افتراضي (كسر توافق أوزان hash السابقة).
     """
-    VERSION = "3.6.0-NSM"
+    VERSION = "3.7.0-NSM"
 
     def __init__(self, d_model=D_MODEL, n_heads=N_HEADS, d_ff=D_FF,
                  n_layers=N_LAYERS, max_seq=MAX_SEQ_LEN,
@@ -721,7 +722,7 @@ class ArabicTransformer:
                  use_hash_tokenizer: bool = False,
                  tokenizer_type: str = "word"):
         """
-        tokenizer_type: "word"|"bpe"|"wordpiece"|"sentencepiece"|"unigram"|"char"|"byte_bpe"|"hash"
+        tokenizer_type: "word"|"bpe"|"wordpiece"|"sentencepiece"|"unigram"|"char"|"byte_bpe"|"modern_bbpe"|"hash"
         يُتجاهل إذا مُرِّر كائن tokenizer مباشرة.
         """
         self.lr          = lr
@@ -786,6 +787,15 @@ class ArabicTransformer:
             alt = "models/byte_bpe_tokenizer.json"
             path = bb_path if os.path.exists(bb_path) else (alt if os.path.exists(alt) else bb_path)
             self.tokenizer = ByteBPETokenizer(vocab_size, vocab_path=path if os.path.exists(path) else None)
+        elif tokenizer_type in ("modern_bbpe", "modernbbpe", "tiktoken", "gpt4"):
+            try:
+                from ai.modern_bbpe_tokenizer import ModernBBPETokenizer
+            except ImportError:
+                from modern_bbpe_tokenizer import ModernBBPETokenizer  # type: ignore
+            mb_path = str(Path(weights_dir) / "modern_bbpe_tokenizer.json") if weights_dir else "models/modern_bbpe_tokenizer.json"
+            alt = "models/modern_bbpe_tokenizer.json"
+            path = mb_path if os.path.exists(mb_path) else (alt if os.path.exists(alt) else mb_path)
+            self.tokenizer = ModernBBPETokenizer(vocab_size, vocab_path=path if os.path.exists(path) else None)
         else:
             vocab_path = str(Path(weights_dir) / "tokenizer_vocab.json") if weights_dir else WordTokenizer.DEFAULT_VOCAB_PATH
             self.tokenizer = WordTokenizer(vocab_size, vocab_path=vocab_path if os.path.exists(vocab_path) else WordTokenizer.DEFAULT_VOCAB_PATH)
@@ -1040,6 +1050,8 @@ class ArabicTransformer:
                         tok_name = "char_tokenizer.json"
                     elif _tn == "ByteBPETokenizer":
                         tok_name = "byte_bpe_tokenizer.json"
+                    elif _tn == "ModernBBPETokenizer":
+                        tok_name = "modern_bbpe_tokenizer.json"
                     else:
                         tok_name = "tokenizer_vocab.json"
                     self.tokenizer.save(str(tmp_dir / tok_name))
@@ -1095,6 +1107,7 @@ class ArabicTransformer:
             blk.load(str(d / f"block_{i}"))
 
         for vocab_p in (
+            d / "modern_bbpe_tokenizer.json",
             d / "byte_bpe_tokenizer.json",
             d / "char_tokenizer.json",
             d / "unigram_tokenizer.json",

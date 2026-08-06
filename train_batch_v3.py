@@ -13,6 +13,7 @@
   NSM_TOKENIZER=unigram python3 train_batch_v3.py         # Unigram LM
   NSM_TOKENIZER=char python3 train_batch_v3.py            # Character-level
   NSM_TOKENIZER=byte_bpe python3 train_batch_v3.py        # Byte-level BPE
+  NSM_TOKENIZER=modern_bbpe python3 train_batch_v3.py     # GPT-4/tiktoken-style (موصى به)
 """
 from __future__ import annotations
 
@@ -134,7 +135,9 @@ def main() -> int:
         tok_mode = "char"
     if tok_mode in ("bbpe", "bytebpe"):
         tok_mode = "byte_bpe"
-    if tok_mode not in ("word", "bpe", "wordpiece", "sentencepiece", "unigram", "char", "byte_bpe"):
+    if tok_mode in ("modernbbpe", "tiktoken", "gpt4"):
+        tok_mode = "modern_bbpe"
+    if tok_mode not in ("word", "bpe", "wordpiece", "sentencepiece", "unigram", "char", "byte_bpe", "modern_bbpe"):
         tok_mode = "word"
     TOKENIZER_VERSION = {
         "bpe": "bpe-v1",
@@ -143,6 +146,7 @@ def main() -> int:
         "unigram": "unigram-v1",
         "char": "char-v1",
         "byte_bpe": "byte-bpe-v1",
+        "modern_bbpe": "modern-bbpe-v1",
         "word": "word-v1",
     }[tok_mode]
 
@@ -213,6 +217,17 @@ def main() -> int:
             print(f"Byte-BPE vocab: {n_vocab} merges={len(tok.merges)} → {vocab_path}")
         else:
             print(f"Loaded Byte-BPE vocab ({len(tok.token_to_id)} tokens, {len(tok.merges)} merges)")
+    elif tok_mode == "modern_bbpe":
+        from ai.modern_bbpe_tokenizer import ModernBBPETokenizer
+        vocab_path = os.path.join(WEIGHTS_DIR, "modern_bbpe_tokenizer.json")
+        tok = ModernBBPETokenizer(vocab_size=16000, vocab_path=vocab_path if os.path.exists(vocab_path) else None)
+        if not os.path.exists(vocab_path) or len(tok.merges) == 0:
+            print("Training Modern BBPE (GPT-4/tiktoken-style)…")
+            n_vocab = tok.train(sentences)
+            tok.save(vocab_path)
+            print(f"Modern-BBPE vocab: {n_vocab} merges={len(tok.merges)} → {vocab_path}")
+        else:
+            print(f"Loaded Modern-BBPE vocab ({len(tok.token_to_id)} tokens, {len(tok.merges)} merges)")
     else:
         vocab_path = os.path.join(WEIGHTS_DIR, "tokenizer_vocab.json")
         tok = WordTokenizer(vocab_size=8192, vocab_path=vocab_path if os.path.exists(vocab_path) else None)
