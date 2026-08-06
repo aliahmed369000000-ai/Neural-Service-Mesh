@@ -169,6 +169,183 @@ async def whatsapp_webhook_receive(request: Request):
     return {"status": "ok"}
 
 
+
+
+# ── Model Training Agent: registry + experimental inference ───────────────
+
+
+@app.post("/training/remote-results")
+async def training_remote_results(request: Request):
+    """استقبال نتائج تدريب من Colab/عقدة بعيدة (ميتا JSON)."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "invalid json"}, status_code=400)
+    try:
+        import os
+        from ai.remote_gpu_provider import ingest_remote_package
+        secret = os.environ.get("NSM_REMOTE_WEBHOOK_SECRET") or ""
+        result = ingest_remote_package(body if isinstance(body, dict) else {}, expected_secret=secret)
+        code = 200 if result.get("ok") else 401
+        return JSONResponse(result, status_code=code)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/training/remote-status")
+def training_remote_status():
+    try:
+        from ai.remote_gpu_provider import remote_status_report, get_provider
+        return {
+            "ok": True,
+            "report": remote_status_report(),
+            "active_provider": get_provider().status(),
+        }
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.get("/training/registry")
+def training_registry():
+    try:
+        from ai.training_feedback_loop import load_registry, registry_report
+        return {"ok": True, "registry": load_registry(), "report": registry_report()}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/training/champion")
+def training_champion():
+    try:
+        from ai.training_feedback_loop import get_champion
+        ch = get_champion()
+        if not ch:
+            return {"ok": False, "error": "no champion"}
+        return {"ok": True, "champion": ch}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/training/predict")
+async def training_predict(request: Request):
+    """استدلال تجريبي على بطل السجل — body: {"features": [..]}"""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    features = body.get("features") if isinstance(body, dict) else None
+    try:
+        from ai.training_feedback_loop import predict_with_champion_demo
+        text = predict_with_champion_demo(features=features)
+        return {"ok": True, "result": text}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/training/drift")
+def training_drift_status():
+    try:
+        from pathlib import Path as _P
+        import json as _json
+        base = _P("artifacts/model_training/drift/baseline.json")
+        last = _P("artifacts/model_training/drift/last_check.json")
+        return {
+            "ok": True,
+            "baseline": _json.loads(base.read_text()) if base.is_file() else None,
+            "last_check": _json.loads(last.read_text()) if last.is_file() else None,
+        }
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+
+# ── AIaaS: multi-tenant training as a service ─────────────────────────────
+@app.get("/aiaas/status")
+def aiaas_status():
+    try:
+        from ai.aiaas_platform import platform_status, load_tenants_index, PLANS, DOMAINS
+        return {
+            "ok": True,
+            "tenants": len((load_tenants_index().get("tenants") or {})),
+            "plans": PLANS,
+            "domains": {k: v.get("status") for k, v in DOMAINS.items()},
+            "report": platform_status(),
+        }
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/aiaas/tenants")
+async def aiaas_create_tenant(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        from ai.aiaas_platform import create_tenant
+        rec = create_tenant(
+            name=str(body.get("name") or "api-tenant"),
+            plan=str(body.get("plan") or "free"),
+            email=str(body.get("email") or ""),
+        )
+        return {"ok": True, "tenant": rec}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/aiaas/jobs")
+async def aiaas_run_job(request: Request):
+    """Header: X-API-Key: nsm_...  Body: {domain, epochs?, goal?}"""
+    api_key = request.headers.get("X-API-Key") or request.headers.get("x-api-key") or ""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        from ai.aiaas_platform import authenticate_api_key, run_tenant_job
+        ten = authenticate_api_key(api_key)
+        if not ten:
+            return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+        job = run_tenant_job(
+            ten["id"],
+            domain=str(body.get("domain") or "tabular_classification"),
+            epochs=body.get("epochs"),
+            goal=body.get("goal"),
+        )
+        return job
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+
+
+@app.post("/aiaas/upload")
+async def aiaas_upload(request: Request):
+    """رفع CSV لمساحة المستأجر. Header X-API-Key. multipart: file"""
+    api_key = request.headers.get("X-API-Key") or request.headers.get("x-api-key") or ""
+    try:
+        from ai.aiaas_platform import authenticate_api_key, save_tenant_upload
+        ten = authenticate_api_key(api_key)
+        if not ten:
+            return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+        form = await request.form()
+        f = form.get("file")
+        if f is None:
+            return JSONResponse({"ok": False, "error": "file required"}, status_code=400)
+        content = await f.read()
+        name = getattr(f, "filename", None) or "upload.csv"
+        rel = save_tenant_upload(ten["id"], str(name), content)
+        return {"ok": True, "path": rel, "tenant_id": ten["id"]}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.get("/aiaas/invoice/{tenant_id}")
+def aiaas_invoice(tenant_id: str):
+    try:
+        from ai.aiaas_platform import estimate_invoice
+        return {"ok": True, "invoice": estimate_invoice(tenant_id)}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("api_server:app", host="0.0.0.0", port=5000, reload=True)

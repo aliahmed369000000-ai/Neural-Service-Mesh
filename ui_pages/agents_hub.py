@@ -231,7 +231,87 @@ def _render_agent_page(category):
                 file_label = f"📎 {uploaded_file.name}" + (" (مقتطع للطول)" if _truncated else "")
                 st.caption(f"{file_label} — سيُرسَل محتواه مع رسالتك التالية للوكيل.")
 
+
+    # ── لوحة تدريب خاصة بوكيل تدريب النماذج: CSV حقيقي + رفع ──
+    if category.key == "model_trainer":
+        st.markdown("#### 🧪 تدريب سريع على بيانات")
+        try:
+            from ai.model_training_agent import (
+                list_csv_datasets,
+                train_from_csv,
+                save_upload_and_train,
+                train_torch_cnn_demo,
+                train_torch_text_demo,
+            )
+            _mt_ok = True
+        except Exception as _mt_err:
+            _mt_ok = False
+            st.caption(f"تعذّر تحميل أدوات التدريب: {_mt_err}")
+
+        if _mt_ok:
+            with st.expander("📄 ملفات CSV في المشروع", expanded=False):
+                st.markdown(list_csv_datasets())
+
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                if st.button("درّب classification_demo", key=f"mt_demo_clf_{category.key}", use_container_width=True):
+                    with st.spinner("تدريب على CSV…"):
+                        _res = train_from_csv("data/samples/classification_demo.csv", epochs=25)
+                    st.session_state[msg_key].append(("user", "درّب على csv data/samples/classification_demo.csv", "", __import__("datetime").datetime.now().strftime("%H:%M")))
+                    st.session_state[msg_key].append(("bot", _res, "🧬 CSV Train", __import__("datetime").datetime.now().strftime("%H:%M")))
+                    st.session_state[cnt_key] = st.session_state.get(cnt_key, 0) + 1
+                    st.rerun()
+            with c2:
+                if st.button("درّب CNN تجريبي", key=f"mt_demo_cnn_{category.key}", use_container_width=True):
+                    with st.spinner("تدريب CNN…"):
+                        _res = train_torch_cnn_demo(epochs=15)
+                    st.session_state[msg_key].append(("user", "درّب cnn", "", __import__("datetime").datetime.now().strftime("%H:%M")))
+                    st.session_state[msg_key].append(("bot", _res, "🧬 CNN", __import__("datetime").datetime.now().strftime("%H:%M")))
+                    st.session_state[cnt_key] = st.session_state.get(cnt_key, 0) + 1
+                    st.rerun()
+            with c3:
+                if st.button("درّب نص Transformer", key=f"mt_demo_txt_{category.key}", use_container_width=True):
+                    with st.spinner("تدريب نص…"):
+                        _res = train_torch_text_demo(epochs=12)
+                    st.session_state[msg_key].append(("user", "درّب نص", "", __import__("datetime").datetime.now().strftime("%H:%M")))
+                    st.session_state[msg_key].append(("bot", _res, "🧬 Text", __import__("datetime").datetime.now().strftime("%H:%M")))
+                    st.session_state[cnt_key] = st.session_state.get(cnt_key, 0) + 1
+                    st.rerun()
+
+            # رفع CSV للتدريب المباشر (بايتات كاملة وليس مقتطفاً نصياً)
+            _csv_up = st.file_uploader(
+                "📤 ارفع CSV للتدريب المباشر (يُحفظ ثم يُدرَّب)",
+                type=["csv"],
+                key=f"mt_csv_upload_{category.key}",
+            )
+            _target_col = st.text_input(
+                "عمود الهدف (اختياري — افتراضي: label/target/آخر عمود)",
+                key=f"mt_target_col_{category.key}",
+                placeholder="label",
+            )
+            if _csv_up is not None:
+                st.caption(f"ملف جاهز: {_csv_up.name} ({_csv_up.size} بايت)")
+                if st.button("🚀 درّب على الملف المرفوع", key=f"mt_train_upload_{category.key}", use_container_width=True):
+                    with st.spinner("حفظ + تدريب…"):
+                        _raw = _csv_up.getvalue()
+                        _res = save_upload_and_train(
+                            _csv_up.name,
+                            _raw,
+                            target_col=(_target_col.strip() or None),
+                            epochs=25,
+                        )
+                    st.session_state[msg_key].append(
+                        ("user", f"رفع وتدريب: {_csv_up.name}", "", __import__("datetime").datetime.now().strftime("%H:%M"))
+                    )
+                    st.session_state[msg_key].append(
+                        ("bot", _res, "🧬 Upload Train", __import__("datetime").datetime.now().strftime("%H:%M"))
+                    )
+                    st.session_state[cnt_key] = st.session_state.get(cnt_key, 0) + 1
+                    st.rerun()
+            st.markdown("---")
+
     if category.quick_prompts:
+
         st.markdown("**⚡ أسئلة سريعة:**")
         qcols = st.columns(len(category.quick_prompts))
         for i, q in enumerate(category.quick_prompts):

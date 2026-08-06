@@ -1,0 +1,156 @@
+{
+  "version": "1.0",
+  "description": "حواجز أمان لوكيل تدريب النماذج — ميزانية، مسارات، شروط توقف",
+  "sandbox": {
+    "allowed_read_roots": [
+      "data",
+      "data/samples",
+      "artifacts/model_training",
+      "knowledge",
+      "ai",
+      "models"
+    ],
+    "allowed_write_roots": [
+      "artifacts/model_training",
+      "artifacts/model_training/logs",
+      "artifacts/model_training/uploads",
+      "artifacts/model_training/missions"
+    ],
+    "forbidden_write_globs": [
+      "ai/**",
+      "ui_pages/**",
+      "streamlit_app.py",
+      "app_core.py",
+      ".git/**",
+      "scripts/**",
+      "core/**"
+    ],
+    "max_runtime_seconds": 300,
+    "max_epochs": 50,
+    "max_samples": 5000,
+    "max_upload_mb": 25,
+    "require_toy_first": true
+  },
+  "budget": {
+    "max_missions_per_hour": 20,
+    "max_gpu_minutes_per_day": 60,
+    "allow_gpu": true,
+    "prefer_cpu_for_toy": true
+  },
+  "early_stopping": {
+    "enabled": true,
+    "patience": 5,
+    "min_delta": 0.001,
+    "monitor": "val_loss",
+    "mode": "min"
+  },
+  "first_mission": {
+    "id": "mission_001_toy_classification",
+    "name": "أول مهمة: تصنيف جدولي صغير (Toy)",
+    "dataset": "data/samples/classification_demo.csv",
+    "task": "classification",
+    "model": "torch_mlp",
+    "epochs": 15,
+    "max_runtime_seconds": 120
+  },
+  "second_mission": {
+    "id": "mission_002_toy_text_sentiment",
+    "name": "المهمة الثانية: تصنيف مشاعر نصية (Toy)",
+    "dataset": "data/samples/text_sentiment_demo.csv",
+    "task": "classification",
+    "model": "torch_text",
+    "epochs": 20,
+    "max_runtime_seconds": 180,
+    "prefer": "text"
+  },
+  "missions": [
+    {
+      "id": "mission_001_toy_classification",
+      "name": "أول مهمة: تصنيف جدولي صغير (Toy)",
+      "dataset": "data/samples/classification_demo.csv",
+      "task": "classification",
+      "model": "torch_mlp",
+      "epochs": 15,
+      "max_runtime_seconds": 120
+    },
+    {
+      "id": "mission_002_toy_text_sentiment",
+      "name": "المهمة الثانية: تصنيف مشاعر نصية (Toy)",
+      "dataset": "data/samples/text_sentiment_demo.csv",
+      "task": "classification",
+      "model": "torch_text",
+      "epochs": 20,
+      "max_runtime_seconds": 180,
+      "prefer": "text"
+    }
+  ],
+  "feedback": {
+    "max_self_correct_retries": 3,
+    "drift_threshold": 0.35,
+    "auto_register_on_success": true,
+    "experimental_api_routes": [
+      "/training/registry",
+      "/training/champion",
+      "/training/predict",
+      "/training/drift"
+    ]
+  },
+  "web_access": {
+    "enabled": true,
+    "allow_model_download": false,
+    "allow_dataset_download": false,
+    "max_results": 5,
+    "timeout_seconds": 15,
+    "whitelist": [
+      "arxiv.org",
+      "export.arxiv.org",
+      "api.semanticscholar.org",
+      "huggingface.co",
+      "hf.co",
+      "stackoverflow.com",
+      "api.stackexchange.com",
+      "github.com",
+      "api.github.com",
+      "raw.githubusercontent.com",
+      "docs.python.org",
+      "pytorch.org",
+      "scikit-learn.org",
+      "numpy.org",
+      "duckduckgo.com",
+      "lite.duckduckgo.com",
+      "api.duckduckgo.com",
+      "en.wikipedia.org",
+      "ar.wikipedia.org",
+      "kaggle.com",
+      "www.kaggle.com"
+    ]
+  },
+  "factory": {
+    "require_approval_for_deploy": true,
+    "require_approval_above_accuracy_gain": 0.03,
+    "max_autonomous_steps": 8,
+    "default_target_accuracy": 0.9,
+    "auto_approve_toy": true,
+    "crisis_after_failures": 3
+  },
+  "aiaas": {
+    "enabled": true,
+    "default_plan": "free",
+    "isolate_tenants": true,
+    "billing_estimate_only": true
+  },
+  "apex": {
+    "mergers_enabled": true,
+    "synthetic_enabled": true,
+    "dao_simulation_only": true,
+    "real_crypto_wallets": false,
+    "max_synthetic_rows": 500,
+    "max_merge_candidates": 5
+  },
+  "gpu": {
+    "oom_max_retries": 4,
+    "min_batch_size": 1,
+    "default_batch_size": 32,
+    "note": "NSM_ALLOW_GPU=1 لتفعيل CUDA عند توفره"
+  }
+}

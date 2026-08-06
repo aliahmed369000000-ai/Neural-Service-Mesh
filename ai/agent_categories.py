@@ -67,6 +67,14 @@ except Exception:
     run_content_pipeline = None
     _CONTENT_OK = False
 
+# وكيل تدريب النماذج — أدوات حقيقية لإدارة دورة حياة التدريب (CKG / ArabicTransformer)
+try:
+    from ai.model_training_agent import handle_training_command
+    _TRAINING_AGENT_OK = True
+except Exception:
+    handle_training_command = None
+    _TRAINING_AGENT_OK = False
+
 # 🆕 Chain-of-Thought + Few-shot Prompting (ai/chain_of_thought.py +
 # ai/prompt_engine.py) — كانتا موجودتين بالمشروع منذ فترة وموثَّقتين
 # كـ"أولوية #2" في تقرير تحليل سابق، لكن غير مربوطتين بأي مكان إطلاقاً
@@ -311,12 +319,55 @@ AGENT_CATEGORIES: Dict[str, AgentCategory] = {
             "ما أساسيات كتابة عنوان متوافق مع SEO؟",
         ],
     ),
-}
 
+    "model_trainer": AgentCategory(
+        key="model_trainer",
+        emoji="🧬",
+        title="تدريب النماذج",
+        subtitle="وكيل عام: دورة حياة أي نموذج — بيانات، خوارزميات، تدريب، تقييم، وحفظ (NSM + sklearn + PyTorch)",
+        system_prompt=(
+            "أنت وكيل \"تدريب النماذج\" داخل نظام NSM (Neural Service Mesh).\n"
+            "تخصصك: أتمتة دورة حياة تدريب نماذج الذكاء الاصطناعي بشكل عام — "
+            "وليس مقصوراً على CKG فقط. تغطي:\n"
+            "- نماذج NSM الداخلية (ArabicTransformer/CKG، NeuralCore، KnowledgeTrainer، سكربتات train_*.py)\n"
+            "- نماذج scikit-learn (تصنيف/انحدار) عند توفر المكتبة\n"
+            "- شبكات PyTorch البسيطة (MLP) عند توفر torch\n"
+            "- تخطيط واختيار خوارزميات لأي مهمة يصفها المستخدم\n"
+            "أوامر أدوات حقيقية (نفّذها المستخدم حرفياً تقريباً):\n"
+            "- جرد البيئة / inventory\n"
+            "- خطة دورة الحياة [وصف المهمة]\n"
+            "- اقترح خوارزمية لـ …\n"
+            "- درّب تصنيف تجريبي / درّب انحدار تجريبي\n"
+            "- درّب شبكة torch [عدد الحقب]\n"
+            "- حالة ckg / إعدادات ckg / شغّل تدريب ckg [تجريبي]\n"
+            "- شغّل train_yemeni أو pilot أو batch\n"
+            "- نماذج محفوظة\n"
+            "قواعد:\n"
+            "1. أجب بالعربية الفصحى العملية.\n"
+            "2. لا تختلق مقاييس تدريب — إن لم تُنفَّذ أداة، وجّه للأمر المناسب.\n"
+            "3. لا تعد بإعادة تدريب CKG من الصفر أو رفع أوزان ضخمة إلى git.\n"
+            "4. نبّه عند نقص الرام أو المكتبات.\n"
+            "5. إذا سُئلت بجدية عن النموذج الأساسي، أجب بصدق ولا تنفِ ذلك."
+        ),
+        quick_prompts=[
+            "حالة gpu",
+            "حالة الذروة",
+            "حالة المنصة",
+            "حالة المصنع",
+            "هدف: اجعل دقة التصنيف أعلى من 90%",
+            "موافقات",
+            "صحّح وأعد التدريب",
+            "حالة الويب",
+            "سجل النماذج",
+        ],
+        web_enabled=False,
+    ),
+
+}
 
 CATEGORY_ORDER: List[str] = [
     "assistant", "automation", "analytics", "reasoning", "coding", "research",
-    "maintenance", "content",
+    "maintenance", "content", "model_trainer",
 ]
 
 
@@ -488,6 +539,19 @@ class CategoryAgentChat:
                 self._last_provider = "📝 Content Pipeline"
                 self.history.append((user_input, cmd_response))
                 self._log_audit(user_input, cmd_response, source, "📝 Content Pipeline", True)
+                return cmd_response
+
+        # ── وكيل تدريب النماذج فقط: أوامر دورة حياة التدريب الحقيقية ──
+        if (
+            self.category.key == "model_trainer"
+            and _TRAINING_AGENT_OK
+            and handle_training_command is not None
+        ):
+            cmd_response = handle_training_command(user_input.strip())
+            if cmd_response is not None:
+                self._last_provider = "🧬 Model Training Agent"
+                self.history.append((user_input, cmd_response))
+                self._log_audit(user_input, cmd_response, source, "🧬 Model Training Agent", True)
                 return cmd_response
 
         # ── بحث ويب حقيقي (DuckDuckGo) قبل توليد الرد ──

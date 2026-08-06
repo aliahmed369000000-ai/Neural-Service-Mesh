@@ -136,6 +136,37 @@ def render_health():
     except Exception as _me:
         st.info(f"تعذّر تحميل قائمة النماذج: {_me}")
 
+    # ── جاهزية المشروع (تحليل ثابت للكود، لا يحتاج بيانات تشغيل حيّة) ────
+    st.markdown("")
+    st.markdown('<div class="section-header">🩺 جاهزية المشروع (تحليل الكود)</div>', unsafe_allow_html=True)
+    try:
+        from ai.validator import Phase6Validator
+        _v = Phase6Validator(mesh=None)
+        _report = _v.generate()
+        _dc = _report.get("dead_code", {})
+        _pc = _report.get("phase_coverage", {})
+        _p7 = _report.get("phase7_readiness", {})
+
+        _h1, _h2, _h3 = st.columns(3)
+        _h1.metric("🧬 تغطية المراحل", f"{_pc.get('overall_coverage_pct', 0):.0f}%")
+        _h2.metric("💀 كود ميت", f"{_dc.get('dead_pct', 0):.1f}%",
+                    delta=None if _dc.get("dead_count", 0) == 0 else f"{_dc.get('dead_count')} ملف",
+                    delta_color="inverse")
+        _h3.metric("🎯 جاهزية Phase 7", f"{_p7.get('score', 0):.0f}/{_p7.get('max_score', 100)}")
+
+        if _dc.get("dead_files"):
+            with st.expander(f"📄 الملفات غير المربوطة ({_dc['dead_count']})"):
+                for _f in _dc["dead_files"]:
+                    st.code(_f, language=None)
+
+        _recs = _p7.get("recommendations") or []
+        if _recs:
+            with st.expander(f"💡 توصيات لرفع الجاهزية ({len(_recs)})"):
+                for _r in _recs:
+                    st.markdown(f"- {_r}")
+    except Exception as _ve:
+        st.info(f"تعذّر تحميل تقرير الجاهزية: {_ve}")
+
     # ── GitHub Push ───────────────────────────────────────────────────────
     st.markdown("")
     st.markdown('<div class="section-header">🚀 رفع إلى GitHub</div>', unsafe_allow_html=True)
