@@ -10,10 +10,8 @@ ai/stt_engine.py
 الاستخدام:
     from ai.stt_engine import transcribe_audio
     text, error = transcribe_audio(audio_bytes, mime_type="audio/wav")
-    if error:
-        ...  # اعرض رسالة خطأ عربية للمستخدم
-    else:
-        ...  # استخدم `text` كمدخل نصي عادي في خط أنابيب المحادثة
+    # للهجة اليمنية: dialect_mode="yemeni" (يحافظ على ألفاظ اللهجة)
+    text, error = transcribe_audio(audio_bytes, dialect_mode="yemeni")
 """
 from __future__ import annotations
 
@@ -27,21 +25,37 @@ from typing import Optional, Tuple
 from ai.offline_mode import is_offline, offline_message
 
 _STT_MODEL = "gemini-2.5-flash"
-_TRANSCRIBE_PROMPT = (
+_TRANSCRIBE_PROMPT_MSA = (
     "انسخ (فرّغ) هذا المقطع الصوتي حرفياً إلى نص عربي فصيح دون أي إضافة "
     "أو تعليق أو ترجمة — أعد النص المنطوق فقط كما هو. إن كان الصوت غير "
     "مفهوم أو صامتاً، أعد نصاً فارغاً."
 )
 
+_TRANSCRIBE_PROMPT_YEMENI = (
+    "فرّغ هذا المقطع الصوتي إلى نص عربي كما نُطق حرفياً. "
+    "إذا كانت اللهجة يمنية أو خليجية فحافظ على ألفاظ اللهجة "
+    "(مثل: ايش، ليش، وين، ياخوي، ابشر، سدا) ولا تحوّلها إلى فصحى. "
+    "لا تضف تعليقاً أو ترجمة — أعد النص المنطوق فقط. "
+    "إن كان الصوت غير مفهوم أو صامتاً، أعد نصاً فارغاً."
+)
+
+# توافق خلفي
+_TRANSCRIBE_PROMPT = _TRANSCRIBE_PROMPT_MSA
+
 MAX_AUDIO_BYTES = 15 * 1024 * 1024  # 15MB سقف أمان قبل الإرسال للـAPI
 
 
-def transcribe_audio(audio_bytes: bytes, mime_type: str = "audio/wav") -> Tuple[str, Optional[str]]:
+def transcribe_audio(
+    audio_bytes: bytes,
+    mime_type: str = "audio/wav",
+    dialect_mode: str = "msa",
+) -> Tuple[str, Optional[str]]:
     """
     يحوّل صوتاً إلى نص عربي. يعيد (النص, رسالة_خطأ).
-    - عند النجاح: (النص المُفرَّغ, None)
-    - عند الفشل: ("", "رسالة خطأ عربية واضحة")
-    لا يرفع استثناءً أبداً — كل فشل يُترجَم لرسالة عربية في القيمة الثانية.
+    dialect_mode: "msa" | "yemeni" | "auto"
+      - yemeni: يحافظ على ألفاظ اللهجة في التفريغ
+      - msa: يفضّل صياغة فصيحة
+    لا يرفع استثناءً أبداً.
     """
     if not audio_bytes:
         return "", "لم يصل أي صوت للتفريغ."
@@ -59,11 +73,17 @@ def transcribe_audio(audio_bytes: bytes, mime_type: str = "audio/wav") -> Tuple[
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
            f"{_STT_MODEL}:generateContent?key={api_key}")
 
+    mode = (dialect_mode or "msa").strip().lower()
+    if mode in ("yemeni", "ye", "dialect"):
+        prompt = _TRANSCRIBE_PROMPT_YEMENI
+    else:
+        prompt = _TRANSCRIBE_PROMPT_MSA
+
     body = {
         "contents": [{
             "role": "user",
             "parts": [
-                {"text": _TRANSCRIBE_PROMPT},
+                {"text": prompt},
                 {"inline_data": {"mime_type": mime_type, "data": base64.b64encode(audio_bytes).decode("ascii")}},
             ],
         }],
