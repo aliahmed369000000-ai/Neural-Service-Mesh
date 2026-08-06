@@ -97,6 +97,9 @@ INTENT_PHRASES: Dict[str, List[str]] = {
     "sovereignty": ["سياده النظام", "جسر mcp", "sovereignty"],
     "knowledge_pulse": ["نبضه معرف", "knowledge pulse"],
     "sensor_bridge": ["جسر حساسات", "حساسات تدريب", "sensors bridge"],
+    "rl_enable": ["تفعيل تعلم معزز", "تفعيل rl", "reinforcement"],
+    "rl_cycle": ["دورة rl", "دورة تعلم معزز"],
+    "rl_status": ["حاله rl", "حالة التعلم المعزز"],
     "gated_train": ["تدريب مبوب", "سياده تدريب"],
     "continuous": ["تدريب مستمر", "راقب جوده", "صيان تدريب"],
 
@@ -390,6 +393,9 @@ def rewrite_to_canonical(text: str) -> str:
         "sovereignty": "سيادة النظام",
         "knowledge_pulse": "نبضة معرفية",
         "sensor_bridge": "جسر حساسات",
+        "rl_enable": "تفعيل تعلم معزز",
+        "rl_cycle": "دورة RL",
+        "rl_status": "حالة التعلم المعزز",
         "gated_train": "تدريب مبوّب",
         "continuous": "تدريب مستمر",
     }.get(intent, text)

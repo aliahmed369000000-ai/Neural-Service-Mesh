@@ -201,6 +201,13 @@ except Exception:
     _DEVOPS_OK = False
 
 try:
+    from ai.reinforcement_learning import handle_rl_command as _rl_handle
+    _RL_OK = True
+except Exception:
+    _rl_handle = None
+    _RL_OK = False
+
+try:
     from ai.mcp_internal_gateway import handle_gateway_command as _gw_handle
     _GW_OK = True
 except Exception:
@@ -1665,6 +1672,14 @@ def handle_training_command(user_input: str) -> Optional[str]:
 
     low = text.lower()
 
+
+    if _RL_OK and _rl_handle is not None:
+        try:
+            rl = _rl_handle(text)
+            if rl is not None:
+                return rl
+        except Exception as _rl_err:
+            logger.warning("rl: %s", _rl_err)
 
     if _DEVOPS_OK and _devops_handle is not None:
         try:

@@ -713,6 +713,20 @@ class ReasoningPipeline:
                     logger.warning(f"NeuralCore autosave failed: {e}")
                 self._queries_since_save = 0
 
+        
+        # Reinforcement Learning: حدّث سياسة التوجيه من مكافأة الجودة
+        try:
+            from ai.reinforcement_learning import enable_rl_on_pipeline_result
+            _rl = enable_rl_on_pipeline_result(type("R", (), {
+                "decision_weights": weights,
+                "quality": quality,
+                "answer_text": answer_text,
+            })())
+            if isinstance(weights, dict) and _rl.get("weights_after"):
+                weights = {**weights, **_rl["weights_after"], "_rl_action": _rl.get("action"), "_rl_reward": _rl.get("reward")}
+        except Exception:
+            pass
+
         return PipelineResult(
             question=question,
             context_vector=context_vector.tolist(),
