@@ -179,6 +179,20 @@ except Exception:
     _SOCIAL_SWARM_OK = False
 
 try:
+    from ai.active_retrain_loop import handle_active_retrain_command as _retrain_handle
+    _RETRAIN_OK = True
+except Exception:
+    _retrain_handle = None
+    _RETRAIN_OK = False
+
+try:
+    from world_model.predictive_sim import handle_predictive_command as _pred_handle
+    _PRED_OK = True
+except Exception:
+    _pred_handle = None
+    _PRED_OK = False
+
+try:
     from ai.continuous_training_agent import handle_continuous_command as _cont_handle
     _CONT_OK = True
 except Exception:
@@ -1621,6 +1635,22 @@ def handle_training_command(user_input: str) -> Optional[str]:
             pass
 
     low = text.lower()
+
+    if _PRED_OK and _pred_handle is not None:
+        try:
+            pd = _pred_handle(text)
+            if pd is not None:
+                return pd
+        except Exception as _pd_err:
+            logger.warning("predictive: %s", _pd_err)
+
+    if _RETRAIN_OK and _retrain_handle is not None:
+        try:
+            rt = _retrain_handle(text)
+            if rt is not None:
+                return rt
+        except Exception as _rt_err:
+            logger.warning("active_retrain: %s", _rt_err)
 
     # السرب الاجتماعي
     if _SOCIAL_SWARM_OK and _social_swarm_handle is not None:

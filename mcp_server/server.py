@@ -376,3 +376,25 @@ def knowledge_pulse() -> str:
         return json.dumps(_pulse(), ensure_ascii=False, default=str)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def campaign_simulate(text: str, platforms: str = "twitter,linkedin,telegram") -> str:
+    """محاكاة تفاعل الجمهور وتكلفة الميزانية قبل النشر/الحملة."""
+    try:
+        from world_model.predictive_sim import full_campaign_sim
+        plats = [p.strip() for p in (platforms or "").split(",") if p.strip()]
+        return json.dumps(full_campaign_sim(text, plats or None), ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def mcp_auth_check(api_key: str = "") -> str:
+    """التحقق من مفتاح مستأجر AIaaS لاستخدام MCP المدفوع."""
+    try:
+        from mcp_server.monetization import authenticate_mcp_key
+        ok, meta = authenticate_mcp_key(api_key or None)
+        return json.dumps({"ok": ok, **meta}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False)

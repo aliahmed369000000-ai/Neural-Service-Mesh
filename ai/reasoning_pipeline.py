@@ -611,21 +611,50 @@ class ReasoningPipeline:
             "W_TOPOLOGY": round(float(decision_vec[3]), 6),
         }
 
-        # تفعيل DeepRoutingNetwork: مزج أوزان التوجيه العميق مع NeuralCore
-        if getattr(self, "_deep_router", None) is not None and getattr(self, "use_deep_routing", False):
+        # مزج عائلة الشبكات المعزولة: DeepRouting + DynamicWeight + NeuralWeight
+        if getattr(self, "use_deep_routing", False):
             try:
-                deep_w = self._deep_router.predict_routing_weights(context_vector)
-                b = float(getattr(self, "deep_routing_blend", 0.45))
-                for k in ("W_SEMANTIC", "W_SCORE", "W_MEMORY", "W_TOPOLOGY"):
-                    if k in deep_w:
-                        weights[k] = round((1.0 - b) * float(weights[k]) + b * float(deep_w[k]), 6)
-                # إعادة تطبيع
-                s = sum(weights.values()) or 1.0
-                weights = {k: round(v / s, 6) for k, v in weights.items()}
-                weights["_deep_routing"] = 1.0
-                weights["_deep_blend"] = b
+                ensemble = []  # (dict weights, blend coefficient)
+                # NeuralCore baseline already in weights — weight 1.0-b_total later
+                if getattr(self, "_deep_router", None) is not None:
+                    try:
+                        ensemble.append((self._deep_router.predict_routing_weights(context_vector), 0.35))
+                    except Exception:
+                        pass
+                try:
+                    from ai.dynamic_weight_layer import (
+                        get_default_dynamic_layer,
+                        extract_routing_weights_dynamic,
+                    )
+                    dyn = get_default_dynamic_layer()
+                    ensemble.append((extract_routing_weights_dynamic(dyn), 0.20))
+                    weights["_dynamic_layer"] = 1.0
+                except Exception:
+                    weights["_dynamic_layer"] = 0.0
+                try:
+                    from ai.neural_weights import get_default_layer, extract_routing_weights
+                    nl = get_default_layer()
+                    ensemble.append((extract_routing_weights(nl), 0.15))
+                    weights["_neural_weight_layer"] = 1.0
+                except Exception:
+                    weights["_neural_weight_layer"] = 0.0
+                if ensemble:
+                    keys = ("W_SEMANTIC", "W_SCORE", "W_MEMORY", "W_TOPOLOGY")
+                    b_sum = sum(b for _, b in ensemble)
+                    b_sum = min(0.85, max(0.1, b_sum))
+                    base_c = 1.0 - b_sum
+                    merged = {k: base_c * float(weights.get(k, 0.0)) for k in keys}
+                    for dw, b in ensemble:
+                        for k in keys:
+                            if k in dw:
+                                merged[k] += b * float(dw[k])
+                    s = sum(merged.values()) or 1.0
+                    for k in keys:
+                        weights[k] = round(merged[k] / s, 6)
+                    weights["_ensemble_routing"] = 1.0
+                    weights["_deep_routing"] = 1.0 if any(True for _ in ensemble) else 0.0
             except Exception:
-                weights["_deep_routing"] = 0.0
+                weights["_ensemble_routing"] = 0.0
 
         # إن كان target قد بُني بناءً على memory_hits قبل recall، أعد بناءه
         # هنا بشكل صحيح لإظهار target_used الفعلي (لا يُعاد التدريب).
