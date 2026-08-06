@@ -6,9 +6,9 @@ Arabic Transformer — NSM v3.1
     ✓ قاموس الـtokenizer ثنائي الاتجاه (word_to_id / id_to_word) لتمكين encode+decode
     ✓ المصفوفة المدروسة (.csv/.npy)
 
-الـ Tokenizer (v3.5):
-    Word / BPE / WordPiece / SentencePiece-BPE / Unigram LM / Hash
-    مصنع موحّد: ai.tokenizer_factory.get_tokenizer(type)
+الـ Tokenizer (v3.6):
+    Word / BPE / WordPiece / SentencePiece / Unigram / Char / Byte-BPE / Hash
+    مصنع: ai.tokenizer_factory.get_tokenizer(type)
 
 تحذير: تغيير نوع الـtokenizer يكسر توافق الأوزان ويلزم إعادة تدريب.
 """
@@ -711,7 +711,7 @@ class ArabicTransformer:
 
     VERSION 3.1: WordTokenizer افتراضي (كسر توافق أوزان hash السابقة).
     """
-    VERSION = "3.5.0-NSM"
+    VERSION = "3.6.0-NSM"
 
     def __init__(self, d_model=D_MODEL, n_heads=N_HEADS, d_ff=D_FF,
                  n_layers=N_LAYERS, max_seq=MAX_SEQ_LEN,
@@ -721,7 +721,7 @@ class ArabicTransformer:
                  use_hash_tokenizer: bool = False,
                  tokenizer_type: str = "word"):
         """
-        tokenizer_type: "word" | "bpe" | "wordpiece" | "sentencepiece" | "unigram" | "hash"
+        tokenizer_type: "word"|"bpe"|"wordpiece"|"sentencepiece"|"unigram"|"char"|"byte_bpe"|"hash"
         يُتجاهل إذا مُرِّر كائن tokenizer مباشرة.
         """
         self.lr          = lr
@@ -768,6 +768,24 @@ class ArabicTransformer:
             alt = "models/unigram_tokenizer.json"
             path = ug_path if os.path.exists(ug_path) else (alt if os.path.exists(alt) else ug_path)
             self.tokenizer = UnigramTokenizer(vocab_size, vocab_path=path if os.path.exists(path) else None)
+        elif tokenizer_type in ("char", "character"):
+            try:
+                from ai.char_tokenizer import CharTokenizer
+            except ImportError:
+                from char_tokenizer import CharTokenizer  # type: ignore
+            ch_path = str(Path(weights_dir) / "char_tokenizer.json") if weights_dir else "models/char_tokenizer.json"
+            alt = "models/char_tokenizer.json"
+            path = ch_path if os.path.exists(ch_path) else (alt if os.path.exists(alt) else ch_path)
+            self.tokenizer = CharTokenizer(vocab_size, vocab_path=path if os.path.exists(path) else None)
+        elif tokenizer_type in ("byte_bpe", "bbpe", "bytebpe"):
+            try:
+                from ai.byte_bpe_tokenizer import ByteBPETokenizer
+            except ImportError:
+                from byte_bpe_tokenizer import ByteBPETokenizer  # type: ignore
+            bb_path = str(Path(weights_dir) / "byte_bpe_tokenizer.json") if weights_dir else "models/byte_bpe_tokenizer.json"
+            alt = "models/byte_bpe_tokenizer.json"
+            path = bb_path if os.path.exists(bb_path) else (alt if os.path.exists(alt) else bb_path)
+            self.tokenizer = ByteBPETokenizer(vocab_size, vocab_path=path if os.path.exists(path) else None)
         else:
             vocab_path = str(Path(weights_dir) / "tokenizer_vocab.json") if weights_dir else WordTokenizer.DEFAULT_VOCAB_PATH
             self.tokenizer = WordTokenizer(vocab_size, vocab_path=vocab_path if os.path.exists(vocab_path) else WordTokenizer.DEFAULT_VOCAB_PATH)
@@ -1018,6 +1036,10 @@ class ArabicTransformer:
                         tok_name = "sentencepiece_tokenizer.json"
                     elif _tn == "UnigramTokenizer":
                         tok_name = "unigram_tokenizer.json"
+                    elif _tn == "CharTokenizer":
+                        tok_name = "char_tokenizer.json"
+                    elif _tn == "ByteBPETokenizer":
+                        tok_name = "byte_bpe_tokenizer.json"
                     else:
                         tok_name = "tokenizer_vocab.json"
                     self.tokenizer.save(str(tmp_dir / tok_name))
@@ -1073,6 +1095,8 @@ class ArabicTransformer:
             blk.load(str(d / f"block_{i}"))
 
         for vocab_p in (
+            d / "byte_bpe_tokenizer.json",
+            d / "char_tokenizer.json",
             d / "unigram_tokenizer.json",
             d / "sentencepiece_tokenizer.json",
             d / "wordpiece_tokenizer.json",
