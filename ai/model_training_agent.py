@@ -137,6 +137,13 @@ except Exception:
     _META_OK = False
 
 try:
+    from ai.super_ai_orchestrator import handle_super_command as _super_handle
+    _SUPER_OK = True
+except Exception:
+    _super_handle = None
+    _SUPER_OK = False
+
+try:
     from ai.command_lexicon import (
         handle_help_command as _help_handle,
         rewrite_to_canonical as _rewrite_cmd,
@@ -1572,6 +1579,15 @@ def handle_training_command(user_input: str) -> Optional[str]:
             pass
 
     low = text.lower()
+
+    # Super AI Orchestrator — حوسبة فائقة / بيانات / تطور / سرب
+    if _SUPER_OK and _super_handle is not None:
+        try:
+            su = _super_handle(text)
+            if su is not None:
+                return su
+        except Exception as _su_err:
+            logger.warning("super-ai: %s", _su_err)
 
     # Meta-AI — تفكير عميق / NAS / عتاد / ذاكرة متجهة
     if _META_OK and _meta_handle is not None:

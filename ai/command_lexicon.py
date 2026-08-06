@@ -81,6 +81,12 @@ INTENT_PHRASES: Dict[str, List[str]] = {
     "remember": ["تذكر", "احفظ خبره"],
     "recall": ["استرجع", "خبرات سابق", "ذاكر مشابه"],
     "mem_stats": ["احصاء الذاكره", "memory stats"],
+    "super_status": ["super", "super-ai", "foundation", "منظومه فائق", "حاله super"],
+    "super_cycle": ["دوره super", "شغل super", "super cycle"],
+    "parallel3d": ["توازي ثلاثي", "3d parallel", "deepspeed", "megatron"],
+    "synthetic": ["مصنع بيانات", "بيانات اصطناع", "synthetic data"],
+    "agent_evo": ["تطور ذاتي", "سجل الوكيل", "agent v2"],
+    "swarm": ["سرب", "swarm", "mesh", "وكلاء لامركز"],
 
     # جرد / حالة عامة
     "inventory": ["جرد", "مخزون", "ما المتاح", "بيئه التدريب", "inventory", "وش عندك"],
@@ -231,6 +237,30 @@ HELP_CATALOG: List[Tuple[str, List[Tuple[str, str]]]] = [
             ("سجل نماذج", "البطل والمنافسون"),
         ],
     ),
+    (
+        "Meta-AI",
+        [
+            ("حالة meta", "تفكير / NAS / عتاد / ذاكرة"),
+            ("دورة meta", "تشغيل قدرات Meta"),
+            ("فكر عميق …", "Tree of Thoughts"),
+            ("تطور جيني N أجيال", "Neuroevolution"),
+            ("تحسين عتاد", "توصيات GPU"),
+            ("تذكر / استرجع", "ذاكرة متجهة"),
+        ],
+    ),
+    (
+        "Super AI Orchestrator",
+        [
+            ("حالة super", "سقف المنظومة"),
+            ("دورة super", "حوسبة+بيانات+تطور+سرب"),
+            ("توازي ثلاثي 7B 8 gpu", "DP/TP/PP + DeepSpeed"),
+            ("مصنع بيانات 100 عينة", "توليد وتصفية"),
+            ("تطور ذاتي score=0.85", "إصدار وكيل جديد"),
+            ("سجل الوكيل", "إصدارات Foundation Agent"),
+            ("حالة السرب", "شبكة Mesh"),
+            ("حاكِ مزامنة كوكبية", "تبادل خبرات"),
+        ],
+    ),
 ]
 
 
@@ -328,6 +358,12 @@ def rewrite_to_canonical(text: str) -> str:
         "remember": text,
         "recall": text,
         "mem_stats": "إحصاء الذاكرة",
+        "super_status": "حالة super",
+        "super_cycle": "دورة super",
+        "parallel3d": text,
+        "synthetic": text,
+        "agent_evo": text,
+        "swarm": text,
     }.get(intent, text)
     return canonical
 
