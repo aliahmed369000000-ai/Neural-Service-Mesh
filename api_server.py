@@ -172,6 +172,38 @@ async def whatsapp_webhook_receive(request: Request):
 
 
 # ── Model Training Agent: registry + experimental inference ───────────────
+
+
+@app.post("/training/remote-results")
+async def training_remote_results(request: Request):
+    """استقبال نتائج تدريب من Colab/عقدة بعيدة (ميتا JSON)."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "invalid json"}, status_code=400)
+    try:
+        import os
+        from ai.remote_gpu_provider import ingest_remote_package
+        secret = os.environ.get("NSM_REMOTE_WEBHOOK_SECRET") or ""
+        result = ingest_remote_package(body if isinstance(body, dict) else {}, expected_secret=secret)
+        code = 200 if result.get("ok") else 401
+        return JSONResponse(result, status_code=code)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/training/remote-status")
+def training_remote_status():
+    try:
+        from ai.remote_gpu_provider import remote_status_report, get_provider
+        return {
+            "ok": True,
+            "report": remote_status_report(),
+            "active_provider": get_provider().status(),
+        }
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
 @app.get("/training/registry")
 def training_registry():
     try:

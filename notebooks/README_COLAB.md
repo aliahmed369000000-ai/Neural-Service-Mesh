@@ -19,3 +19,20 @@
 
 ## غير مدعوم في المستودع
 التحكم في واجهة Colab من متصفح خارجي (Playwright/Selenium) — غير مستقر وغالباً مخالف لشروط الخدمة.
+
+
+## ربط النتائج بخادمك (بدون أتمتة متصفح)
+
+```bash
+# على السيرفر
+export NSM_REMOTE_WEBHOOK_SECRET=mysecret
+uvicorn api_server:app --host 0.0.0.0 --port 5000
+
+# في Colab
+export NSM_REMOTE_WEBHOOK_URL=https://YOUR_HOST:5000/training/remote-results
+export NSM_REMOTE_WEBHOOK_SECRET=mysecret
+python scripts/colab_result_push.py --csv data/samples/classification_demo.csv
+```
+
+الواجهة: `POST /training/remote-results` · `GET /training/remote-status`  
+الكود: `ai/remote_gpu_provider.py`

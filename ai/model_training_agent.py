@@ -95,6 +95,13 @@ except Exception:
     _APEX_OK = False
 
 try:
+    from ai.remote_gpu_provider import handle_remote_gpu_command as _remote_gpu_handle
+    _REMOTE_GPU_OK = True
+except Exception:
+    _remote_gpu_handle = None
+    _REMOTE_GPU_OK = False
+
+try:
     from ai.gpu_runtime import (
         torch_device as _gpu_torch_device,
         suggest_batch_size as _gpu_suggest_batch,
@@ -1503,6 +1510,14 @@ def handle_training_command(user_input: str) -> Optional[str]:
     if not text:
         return None
     low = text.lower()
+
+    if _REMOTE_GPU_OK and _remote_gpu_handle is not None:
+        try:
+            rg = _remote_gpu_handle(text)
+            if rg is not None:
+                return rg
+        except Exception as _rg_err:
+            logger.warning("remote gpu: %s", _rg_err)
 
     # Apex autonomy (mergers / synthetic / DAO sim)
     if _APEX_OK and _apex_handle is not None:
