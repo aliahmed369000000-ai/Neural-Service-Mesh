@@ -15,6 +15,7 @@ def analyze_and_boost(query: str, top_k_rag: int = 3) -> Dict[str, Any]:
     """
     يُرجع:
       dialect_score, is_yemeni, expanded_queries, expansion_terms, rag_context, rag_hits
+      + hybrid_score / camel عند توفر خط الأنابيب الموحّد
     """
     out: Dict[str, Any] = {
         "query": query,
@@ -27,6 +28,26 @@ def analyze_and_boost(query: str, top_k_rag: int = 3) -> Dict[str, Any]:
     }
     if not query or not str(query).strip():
         return out
+
+    # المسار المفضّل: خط الأنابيب الموحّد (تنظيف + هجين + RAG)
+    try:
+        from ai.nlp_pipeline import process_query
+        info = process_query(query, use_rag=True, top_k_rag=top_k_rag)
+        out.update({
+            "dialect_score": float(info.get("hybrid_score") or info.get("dialect_score") or 0.0),
+            "is_yemeni": bool(info.get("is_yemeni")),
+            "normalized": info.get("normalized") or info.get("cleaned") or query,
+            "expanded_queries": info.get("expanded_queries") or [query],
+            "expansion_terms": info.get("expansion_terms") or [],
+            "rag_context": info.get("rag_context") or "",
+            "rag_hits": info.get("rag_hits") or [],
+            "hybrid_score": float(info.get("hybrid_score") or 0.0),
+            "camel": info.get("camel") or {},
+            "pipeline": info.get("pipeline") or [],
+        })
+        return out
+    except Exception:
+        pass
 
     try:
         from ai.yemeni_dialect import detect_yemeni_score, normalize_yemeni
