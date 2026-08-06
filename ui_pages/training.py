@@ -187,6 +187,82 @@ def render_training():
 
     st.markdown("")
 
+    # ── ArabicTransformer v3.1 + WordTokenizer — حالة تدريب مولّد النص ──
+    # إضافة عرض فقط: يقرأ ckg_train_state_v3.json وملف القاموس إن وُجد.
+    st.markdown(
+        '<div class="section-header">🔤 ArabicTransformer · WordTokenizer</div>',
+        unsafe_allow_html=True,
+    )
+    _tf_state_path = "ckg_train_state_v3.json"
+    _tf_vocab_path = "models/transformer_ckg_v3/tokenizer_vocab.json"
+    _tf_state = {}
+    if os.path.exists(_tf_state_path):
+        try:
+            import json as _json
+            with open(_tf_state_path, encoding="utf-8") as _f:
+                _tf_state = _json.load(_f)
+        except Exception:
+            _tf_state = {}
+    _tf_pos = int(_tf_state.get("position", 0) or 0)
+    _tf_tok_ver = _tf_state.get("tokenizer_version") or "غير محدد"
+    _tf_tail = _tf_state.get("loss_history_tail") or []
+    _tf_last_loss = _tf_tail[-1] if _tf_tail else None
+    _tf_vocab_n = 0
+    if os.path.exists(_tf_vocab_path):
+        try:
+            import json as _json
+            with open(_tf_vocab_path, encoding="utf-8") as _f:
+                _tf_vocab_n = len((_json.load(_f).get("word_to_id") or {}))
+        except Exception:
+            _tf_vocab_n = 0
+
+    _c1, _c2, _c3, _c4 = st.columns(4)
+    with _c1:
+        metric_card(f"{_tf_pos:,}", "موضع التدريب (جمل)")
+    with _c2:
+        metric_card(f"{_tf_vocab_n:,}" if _tf_vocab_n else "—", "حجم القاموس")
+    with _c3:
+        metric_card(
+            f"{_tf_last_loss:.3f}" if isinstance(_tf_last_loss, (int, float)) else "—",
+            "آخر خسارة v3",
+        )
+    with _c4:
+        metric_card(str(_tf_tok_ver), "إصدار الـtokenizer")
+
+    if _tf_tok_ver not in ("word-v1",) or _tf_vocab_n == 0:
+        st.info(
+            "تم الانتقال إلى **WordTokenizer** (encode/decode). "
+            "الأوزان القديمة المبنية على hash لم تعد صالحة — "
+            "شغّل: `NSM_RESET_TRAIN=1 python3 train_batch_v3.py` على بيئة برام كافية، "
+            "أو ابنِ القاموس أولاً: `python3 scripts/build_tokenizer_vocab.py`."
+        )
+    else:
+        st.caption(
+            "القاموس جاهز. التوليد النصي يتطلّب أوزاناً مدرَّبة على WordTokenizer "
+            "(generate يعيد نصاً عربياً بعد التدريب)."
+        )
+
+    # تجربة توليد خفيفة — فقط إذا وُجدت أوزان متوافقة (لا تحميل نموذج ضخم بلا داعٍ)
+    _tf_emb = "models/transformer_ckg_v3/embedding.npy"
+    if os.path.exists(_tf_emb) and _tf_tok_ver == "word-v1":
+        with st.expander("🧪 تجربة توليد نص (بعد التدريب)", expanded=False):
+            _g_prompt = st.text_input("بداية النص", value="الصبر", key="tf_gen_prompt")
+            if st.button("توليد", key="tf_gen_btn"):
+                try:
+                    with st.spinner("تحميل النموذج وتوليد…"):
+                        from ai.arabic_transformer import ArabicTransformer
+                        _m = ArabicTransformer(
+                            d_model=1216, n_heads=16, d_ff=2560, n_layers=8,
+                            weights_dir="models/transformer_ckg_v3",
+                        )
+                        _m.load("models/transformer_ckg_v3")
+                        _out = _m.generate(_g_prompt, max_new=12, temp=0.9)
+                    st.success(_out)
+                except Exception as _ge:
+                    st.warning(f"تعذّر التوليد: {_ge}")
+
+    st.markdown("")
+
     # معلومات الـ Checkpoint
     saved_at = checkpoint.get("saved_at", "")
     if saved_at:

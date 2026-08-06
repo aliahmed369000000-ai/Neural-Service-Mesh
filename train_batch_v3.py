@@ -6,6 +6,7 @@
 
 تجاوز يدوي (اختياري):
   NSM_PACK_SIZE=40 NSM_PACKS_PER_RUN=8 python3 train_batch_v3.py
+  NSM_RESET_TRAIN=1 python3 train_batch_v3.py   # إعادة تدريب من الصفر (بعد WordTokenizer)
 """
 from __future__ import annotations
 
@@ -115,6 +116,9 @@ def main() -> int:
 
     from ai.arabic_transformer import ArabicTransformer, WordTokenizer
 
+    reset = os.environ.get("NSM_RESET_TRAIN", "").strip() in ("1", "true", "yes")
+    TOKENIZER_VERSION = "word-v1"
+
     # بناء/تحديث قاموس WordTokenizer من جمل التدريب (مرة عند الحاجة)
     vocab_path = os.path.join(WEIGHTS_DIR, "tokenizer_vocab.json")
     tok = WordTokenizer(vocab_size=8192, vocab_path=vocab_path if os.path.exists(vocab_path) else None)
@@ -132,13 +136,36 @@ def main() -> int:
         d_model=1216, n_heads=16, d_ff=2560, n_layers=8, vocab_size=8192,
         tokenizer=tok, weights_dir=WEIGHTS_DIR,
     )
-    if os.path.exists(WEIGHTS_DIR):
-        model.load(WEIGHTS_DIR)
-        print(f"Loaded weights from {WEIGHTS_DIR}")
-    else:
-        print(f"No checkpoint at {WEIGHTS_DIR} — بدء أوزان جديدة")
 
     state = load_state()
+    prev_tok_ver = state.get("tokenizer_version")
+    weights_compatible = (
+        not reset
+        and prev_tok_ver == TOKENIZER_VERSION
+        and os.path.exists(os.path.join(WEIGHTS_DIR, "embedding.npy"))
+    )
+    if weights_compatible:
+        model.load(WEIGHTS_DIR)
+        print(f"Loaded weights from {WEIGHTS_DIR} (tokenizer_version={TOKENIZER_VERSION})")
+    else:
+        if reset:
+            print("NSM_RESET_TRAIN=1 → بدء أوزان جديدة وتصفير موضع التدريب")
+        elif prev_tok_ver and prev_tok_ver != TOKENIZER_VERSION:
+            print(
+                f"Tokenizer تغيّر ({prev_tok_ver} → {TOKENIZER_VERSION}) — "
+                "تجاهل الأوزان القديمة وبدء تدريب من الصفر"
+            )
+        else:
+            print(f"No compatible checkpoint at {WEIGHTS_DIR} — بدء أوزان جديدة")
+        state = {
+            "position": 0,
+            "loss_history_tail": [],
+            "runs": 0,
+            "total_sentences_seen": 0,
+            "tokenizer_version": TOKENIZER_VERSION,
+        }
+
+    state["tokenizer_version"] = TOKENIZER_VERSION
     pos = int(state.get("position", 0))
     if pos >= n:
         print(f"DONE_ALL: التدريب مكتمل بالفعل ({pos}/{n})")
@@ -176,6 +203,8 @@ def main() -> int:
     state["last_packs_per_run"] = packs_done
     state["last_elapsed_s"] = round(elapsed, 1)
     state["last_avail_ram_gb"] = round(avail, 2)
+    state["tokenizer_version"] = TOKENIZER_VERSION
+    state["model_version"] = getattr(model, "VERSION", "3.1")
     save_state(state)
 
     pct = 100.0 * pos / n
