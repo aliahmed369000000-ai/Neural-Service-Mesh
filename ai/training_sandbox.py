@@ -181,12 +181,19 @@ def detect_compute() -> Dict[str, Any]:
     try:
         import torch
 
-        if torch.cuda.is_available() and info["allow_gpu"]:
+        env_allow = os.environ.get("NSM_ALLOW_GPU", "").strip() in ("1", "true", "yes")
+        if torch.cuda.is_available() and info["allow_gpu"] and (
+            env_allow or not info["prefer_cpu_for_toy"]
+        ):
             info["gpu_available"] = True
             info["gpu_name"] = torch.cuda.get_device_name(0)
             info["cuda_version"] = getattr(torch.version, "cuda", None)
-            if not info["prefer_cpu_for_toy"]:
-                info["device"] = "cuda"
+            info["device"] = "cuda"
+        elif torch.cuda.is_available():
+            info["gpu_available"] = True
+            info["gpu_name"] = torch.cuda.get_device_name(0)
+            info["cuda_version"] = getattr(torch.version, "cuda", None)
+            # يبقى cpu إن prefer_cpu_for_toy ولم يُفرض NSM_ALLOW_GPU
     except Exception:
         pass
     # رام
@@ -390,42 +397,108 @@ def list_mission_logs(limit: int = 15) -> str:
     return "\n".join(lines)
 
 
-def run_first_mission(dry_run: bool = False) -> str:
-    """
-    إطلاق أول مهمة تدريبية (Toy classification) تحت الحواجز.
-    يستخدم data/samples/classification_demo.csv ونموذج MLP صغير.
-    """
+
+
+def _missions_in_last_hour() -> int:
+    """عدد المهام التي بدأت خلال الساعة الأخيرة (من ملفات missions/)."""
+    import time as _time
+    cutoff = _time.time() - 3600
+    n = 0
+    for p in MISSION_DIR.glob("*.json"):
+        try:
+            if p.stat().st_mtime >= cutoff:
+                n += 1
+        except Exception:
+            pass
+    return n
+
+
+def check_mission_budget() -> Optional[str]:
+    """يعيد رسالة رفض إن تجاوزت الميزانية، وإلا None."""
     cfg = load_guardrails()
-    fm = cfg.get("first_mission") or {}
-    mission_id = str(fm.get("id") or "mission_001_toy_classification")
-    # لاحقة زمنية لتجنّب الكتابة فوق سجل سابق
+    max_h = int((cfg.get("budget") or {}).get("max_missions_per_hour") or 20)
+    n = _missions_in_last_hour()
+    if n >= max_h:
+        return (
+            f"❌ ميزانية المهام: تم تشغيل {n} مهمة خلال الساعة الأخيرة "
+            f"(الحد {max_h}). انتظر قبل مهمة جديدة."
+        )
+    return None
+
+
+def run_mission(
+    mission_key: str = "first_mission",
+    dry_run: bool = False,
+    epochs_override: Optional[int] = None,
+) -> str:
+    """تشغيل مهمة معرّفة في config (first_mission / second_mission)."""
+    budget_msg = check_mission_budget()
+    if budget_msg and not dry_run:
+        return budget_msg
+
+    cfg = load_guardrails()
+    fm = cfg.get(mission_key)
+    if not fm and str(mission_key).startswith("mission_"):
+        for m in cfg.get("missions") or []:
+            if not isinstance(m, dict):
+                continue
+            if m.get("id") == mission_key or mission_key in str(m.get("id")):
+                fm = m
+                break
+    if not fm:
+        if mission_key in ("1", "first", "الأولى"):
+            fm = cfg.get("first_mission")
+        elif mission_key in ("2", "second", "الثانية"):
+            fm = cfg.get("second_mission")
+    if not isinstance(fm, dict):
+        return (
+            f"❌ مهمة غير معروفة: `{mission_key}`. "
+            "المتاح: first_mission, second_mission"
+        )
+
+    mission_id = str(fm.get("id") or mission_key)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
     mid = f"{mission_id}_{stamp}"
-    name = str(fm.get("name") or "أول مهمة: تصنيف Toy")
+    name = str(fm.get("name") or mission_id)
     dataset = str(fm.get("dataset") or "data/samples/classification_demo.csv")
-    epochs = clamp_epochs(int(fm.get("epochs") or 15))
+    epochs = clamp_epochs(int(epochs_override or fm.get("epochs") or 15))
     timeout = max_runtime_seconds(int(fm.get("max_runtime_seconds") or 120))
+    prefer = str(fm.get("prefer") or fm.get("model") or "torch")
+    if prefer in ("torch_mlp", "mlp"):
+        prefer = "torch"
+    if prefer in ("torch_text", "text_transformer"):
+        prefer = "text"
+    if prefer in ("torch_cnn",):
+        prefer = "cnn"
 
     log = MissionLog(
         mission_id=mid,
         name=name,
         started_at=datetime.now(timezone.utc).isoformat(),
     )
-    log.event("info", "بدء المهمة الأولى", dataset=dataset, epochs=epochs, timeout=timeout)
+    log.event(
+        "info",
+        "بدء المهمة",
+        dataset=dataset,
+        epochs=epochs,
+        timeout=timeout,
+        prefer=prefer,
+    )
     log.event("info", "فحص الحوسبة", **detect_compute())
 
     if dry_run:
         log.finish("dry_run", {"message": "لم يُنفَّذ تدريب فعلي"})
-        return (
-            f"## 🧪 أول مهمة (dry-run)\n\n"
-            f"- mission_id: `{mid}`\n"
-            f"- dataset: `{dataset}`\n"
-            f"- epochs: {epochs} | timeout: {timeout}s\n"
-            f"- الحواجز: مفعّلة\n"
-            f"- السجل: `artifacts/model_training/missions/{mid}.json`"
-        )
+        lines = [
+            "## 🧪 مهمة dry-run",
+            "",
+            f"- mission_id: `{mid}`",
+            f"- name: {name}",
+            f"- dataset: `{dataset}`",
+            f"- epochs: {epochs} | timeout: {timeout}s | prefer: {prefer}",
+            f"- السجل: `artifacts/model_training/missions/{mid}.json`",
+        ]
+        return "\n".join(lines)
 
-    # التحقق من المسارات
     try:
         ds_path = assert_read_allowed(dataset)
         log.event("info", "مسار البيانات مسموح", path=str(ds_path.relative_to(ROOT)))
@@ -433,15 +506,18 @@ def run_first_mission(dry_run: bool = False) -> str:
         log.finish("failed", {"error": str(e)})
         return f"❌ فشل فحص المسار: {e}"
 
+    target = fm.get("target_col")
+    if not target:
+        target = "label" if ("label" in dataset or "sentiment" in dataset) else None
+
     def _train():
-        # استيراد محلي لتفادي دورات
         from ai.model_training_agent import train_from_csv
 
         return train_from_csv(
             str(ds_path.relative_to(ROOT)),
-            target_col="label",
+            target_col=target,
             epochs=epochs,
-            prefer="torch",
+            prefer=prefer,
         )
 
     t0 = time.time()
@@ -454,22 +530,33 @@ def run_first_mission(dry_run: bool = False) -> str:
                 "elapsed_s": round(elapsed, 2),
                 "epochs": epochs,
                 "dataset": dataset,
+                "prefer": prefer,
                 "result_preview": (result_text or "")[:1500],
             },
         )
-        return (
-            f"## ✅ أول مهمة تدريبية اكتملت\n\n"
-            f"- mission_id: `{mid}`\n"
-            f"- المدة: {elapsed:.1f}s (حد {timeout}s)\n"
-            f"- epochs: {epochs}\n"
-            f"- السجل الكامل: `{out_path.relative_to(ROOT)}`\n"
-            f"- JSONL: `artifacts/model_training/logs/{mid}.jsonl`\n\n"
-            f"{result_text}"
-        )
+        lines = [
+            "## ✅ المهمة اكتملت",
+            "",
+            f"- mission_id: `{mid}`",
+            f"- name: **{name}**",
+            f"- المدة: {elapsed:.1f}s (حد {timeout}s)",
+            f"- السجل: `{out_path.relative_to(ROOT)}`",
+            "",
+            result_text or "",
+        ]
+        return "\n".join(lines)
     except SandboxTimeout:
         log.finish("timeout", {"timeout_s": timeout})
-        return f"❌ توقفت المهمة: تجاوز المهلة ({timeout}s). راجع الحواجز في config/training_guardrails.json"
+        return f"❌ تجاوز المهلة ({timeout}s)"
     except Exception as e:
         log.event("error", str(e), traceback=traceback.format_exc()[-1500:])
         log.finish("failed", {"error": str(e)})
         return f"❌ فشلت المهمة: {type(e).__name__}: {e}"
+
+
+def run_first_mission(dry_run: bool = False) -> str:
+    return run_mission("first_mission", dry_run=dry_run)
+
+
+def run_second_mission(dry_run: bool = False) -> str:
+    return run_mission("second_mission", dry_run=dry_run)

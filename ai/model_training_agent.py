@@ -42,6 +42,8 @@ try:
         detect_compute as _sb_detect_compute,
         list_mission_logs as _sb_list_missions,
         run_first_mission as _sb_run_first_mission,
+        run_second_mission as _sb_run_second_mission,
+        run_mission as _sb_run_mission,
         sandbox_status_report as _sb_status,
         EarlyStopping as _EarlyStopping,
         assert_write_allowed as _sb_assert_write,
@@ -587,7 +589,16 @@ def train_torch_mlp(
         opt = optim.Adam(model.parameters(), lr=1e-3)
 
         history: List[float] = []
+        val_history: List[float] = []
+        stopped_early = False
+        es = None
+        if _SANDBOX_OK:
+            try:
+                es = _EarlyStopping.from_config()
+            except Exception:
+                es = None
         model.train()
+        actual_epochs = 0
         for ep in range(epochs):
             opt.zero_grad()
             out = model(Xtr)
@@ -595,6 +606,16 @@ def train_torch_mlp(
             loss.backward()
             opt.step()
             history.append(float(loss.item()))
+            actual_epochs = ep + 1
+            model.eval()
+            with torch.no_grad():
+                vo = model(Xte)
+                vl = float(loss_fn(vo, yte if n_out == 1 else yte).item())
+            model.train()
+            val_history.append(vl)
+            if es is not None and es.step(vl):
+                stopped_early = True
+                break
 
         model.eval()
         with torch.no_grad():
@@ -1041,14 +1062,39 @@ def train_torch_on_arrays(
     ).to(device)
     opt = optim.Adam(model.parameters(), lr=1e-3)
     hist = []
+    val_hist = []
+    stopped_early = False
+    es = None
+    if _SANDBOX_OK:
+        try:
+            from ai.training_sandbox import EarlyStopping, load_guardrails
+            _es_cfg = (load_guardrails().get("early_stopping") or {})
+            if _es_cfg.get("enabled", True):
+                es = EarlyStopping.from_config()
+        except Exception:
+            es = _EarlyStopping.from_config() if _SANDBOX_OK else None
+
     model.train()
-    for _ in range(epochs):
+    actual_epochs = 0
+    for ep in range(epochs):
         opt.zero_grad()
         out = model(X_t[tr])
         loss = loss_fn(out, y_t[tr])
         loss.backward()
         opt.step()
-        hist.append(float(loss.item()))
+        train_l = float(loss.item())
+        hist.append(train_l)
+        actual_epochs = ep + 1
+        # val loss each epoch
+        model.eval()
+        with torch.no_grad():
+            v_out = model(X_t[te])
+            v_loss = float(loss_fn(v_out, y_t[te]).item())
+        model.train()
+        val_hist.append(v_loss)
+        if es is not None and es.step(v_loss):
+            stopped_early = True
+            break
     model.eval()
     with torch.no_grad():
         out = model(X_t[te])
@@ -1059,11 +1105,28 @@ def train_torch_on_arrays(
             metric = float(loss_fn(out, y_t[te]).item())
             mname = "MSE"
     outp = ARTIFACTS / f"torch_mlp_csv_{task}_{int(time.time())}.pt"
-    torch.save({"state_dict": model.state_dict(), "task": task, "n_features": n_features}, outp)
+    if _SANDBOX_OK:
+        try:
+            _sb_assert_write(outp)
+        except Exception:
+            pass
+    torch.save(
+        {
+            "state_dict": model.state_dict(),
+            "task": task,
+            "n_features": n_features,
+            "actual_epochs": actual_epochs,
+            "early_stopped": stopped_early,
+            "val_loss_history": val_hist[-20:],
+        },
+        outp,
+    )
+    es_note = f" | early_stop@{actual_epochs}" if stopped_early else f" | epochs={actual_epochs}"
     return (
         f"## ✅ Torch MLP على بيانات حقيقية\n"
-        f"- {mname}={metric:.4f} | epochs={epochs} | features={n_features}\n"
-        f"- loss آخر: {', '.join(f'{x:.4f}' for x in hist[-5:])}\n"
+        f"- {mname}={metric:.4f} | planned={epochs}{es_note} | features={n_features}\n"
+        f"- train loss: {', '.join(f'{x:.4f}' for x in hist[-5:])}\n"
+        f"- val loss: {', '.join(f'{x:.4f}' for x in val_hist[-5:])}\n"
         f"- `{outp.relative_to(ROOT)}`"
     )
 
@@ -1124,7 +1187,16 @@ def train_torch_cnn_on_arrays(
     model = SmallCNN(length, n_out).to(device)
     opt = optim.Adam(model.parameters(), lr=1e-3)
     hist = []
+    val_hist = []
+    stopped_early = False
+    es = None
+    if _SANDBOX_OK:
+        try:
+            es = _EarlyStopping.from_config()
+        except Exception:
+            es = None
     model.train()
+    actual_epochs = 0
     for _ in range(epochs):
         opt.zero_grad()
         out = model(Xt[tr])
@@ -1132,6 +1204,16 @@ def train_torch_cnn_on_arrays(
         loss.backward()
         opt.step()
         hist.append(float(loss.item()))
+        actual_epochs += 1
+        model.eval()
+        with torch.no_grad():
+            v_out = model(Xt[te])
+            v_loss = float(loss_fn(v_out, yt[te]).item())
+        model.train()
+        val_hist.append(v_loss)
+        if es is not None and es.step(v_loss):
+            stopped_early = True
+            break
     model.eval()
     with torch.no_grad():
         out = model(Xt[te])
@@ -1207,7 +1289,16 @@ def train_torch_text_on_texts(
     model = TinyTextTransformer(vocab, n_out)
     opt = optim.Adam(model.parameters(), lr=2e-3)
     hist = []
+    val_hist = []
+    stopped_early = False
+    es = None
+    if _SANDBOX_OK:
+        try:
+            es = _EarlyStopping.from_config()
+        except Exception:
+            es = None
     model.train()
+    actual_epochs = 0
     for _ in range(epochs):
         opt.zero_grad()
         out = model(X[tr])
@@ -1215,6 +1306,16 @@ def train_torch_text_on_texts(
         loss.backward()
         opt.step()
         hist.append(float(loss.item()))
+        actual_epochs += 1
+        model.eval()
+        with torch.no_grad():
+            v_out = model(X[te])
+            v_loss = float(loss_fn(v_out, yt[te]).item())
+        model.train()
+        val_hist.append(v_loss)
+        if es is not None and es.step(v_loss):
+            stopped_early = True
+            break
     model.eval()
     with torch.no_grad():
         out = model(X[te])
@@ -1465,7 +1566,7 @@ def handle_training_command(user_input: str) -> Optional[str]:
             return _sb_list_missions()
         return "وحدة sandbox غير محمّلة."
     if re.search(
-        r"(أول\s*مهمة|المهمة\s*الأولى|first\s*mission|أطلق\s*المهمة|تشغيل\s*المهمة\s*الأولى)",
+        r"(أول\s*مهمة|المهمة\s*الأولى|first\s*mission|أطلق\s*المهمة\s*الأولى)",
         text,
         re.I,
     ):
@@ -1473,6 +1574,16 @@ def handle_training_command(user_input: str) -> Optional[str]:
             return "وحدة sandbox غير محمّلة."
         dry = bool(re.search(r"تجريب|dry\s*-?run|محاكاة", text, re.I))
         return _sb_run_first_mission(dry_run=dry)
+
+    if re.search(
+        r"(ثاني(?:ة)?\s*مهمة|المهمة\s*الثانية|second\s*mission|أطلق\s*المهمة\s*الثانية)",
+        text,
+        re.I,
+    ):
+        if not _SANDBOX_OK:
+            return "وحدة sandbox غير محمّلة."
+        dry = bool(re.search(r"تجريب|dry\s*-?run|محاكاة", text, re.I))
+        return _sb_run_second_mission(dry_run=dry)
 
     # أوامر قصيرة
     aliases = {
@@ -1491,6 +1602,8 @@ def handle_training_command(user_input: str) -> Optional[str]:
         "قائمة csv": list_csv_datasets,
         "sandbox": (_sb_status if _SANDBOX_OK else inventory),
         "أول مهمة": (lambda: _sb_run_first_mission(False) if _SANDBOX_OK else "لا sandbox"),
+        "ثاني مهمة": (lambda: _sb_run_second_mission(False) if _SANDBOX_OK else "لا sandbox"),
+        "المهمة الثانية": (lambda: _sb_run_second_mission(False) if _SANDBOX_OK else "لا sandbox"),
     }
     if text.strip().lower() in aliases:
         fn = aliases[text.strip().lower()]

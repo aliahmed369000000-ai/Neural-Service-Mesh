@@ -85,6 +85,26 @@ services:
     cpus: 2.0
     restart: "no"
 
+  # نفس بيئة التدريب مع تمرير GPU (يتطلب NVIDIA Container Toolkit)
+  nsm-training-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile.training
+    container_name: nsm-training-gpu
+    profiles: ["training-gpu"]
+    volumes:
+      - ./artifacts/model_training:/app/artifacts/model_training
+      - ./data/samples:/app/data/samples:ro
+      - ./config:/app/config:ro
+    environment:
+      - NSM_TRAINING_SANDBOX=1
+      - NSM_ALLOW_GPU=1
+      - NSM_OFFLINE_MODE=1
+    mem_limit: 4g
+    cpus: 4.0
+    gpus: all
+    restart: "no"
+
 volumes:
   ollama_data:
   nsm_memory:

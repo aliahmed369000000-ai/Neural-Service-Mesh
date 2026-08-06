@@ -352,9 +352,9 @@ AGENT_CATEGORIES: Dict[str, AgentCategory] = {
         quick_prompts=[
             "حالة sandbox",
             "أول مهمة تدريبية",
-            "قائمة csv",
-            "درّب على csv data/samples/classification_demo.csv",
+            "ثاني مهمة",
             "سجل المهام",
+            "قائمة csv",
             "نماذج محفوظة",
         ],
         web_enabled=False,

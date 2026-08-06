@@ -52,5 +52,36 @@
     "model": "torch_mlp",
     "epochs": 15,
     "max_runtime_seconds": 120
-  }
+  },
+  "second_mission": {
+    "id": "mission_002_toy_text_sentiment",
+    "name": "المهمة الثانية: تصنيف مشاعر نصية (Toy)",
+    "dataset": "data/samples/text_sentiment_demo.csv",
+    "task": "classification",
+    "model": "torch_text",
+    "epochs": 20,
+    "max_runtime_seconds": 180,
+    "prefer": "text"
+  },
+  "missions": [
+    {
+      "id": "mission_001_toy_classification",
+      "name": "أول مهمة: تصنيف جدولي صغير (Toy)",
+      "dataset": "data/samples/classification_demo.csv",
+      "task": "classification",
+      "model": "torch_mlp",
+      "epochs": 15,
+      "max_runtime_seconds": 120
+    },
+    {
+      "id": "mission_002_toy_text_sentiment",
+      "name": "المهمة الثانية: تصنيف مشاعر نصية (Toy)",
+      "dataset": "data/samples/text_sentiment_demo.csv",
+      "task": "classification",
+      "model": "torch_text",
+      "epochs": 20,
+      "max_runtime_seconds": 180,
+      "prefer": "text"
+    }
+  ]
 }

@@ -5,15 +5,18 @@
 #   docker build -f Dockerfile.training -t nsm-training .
 # تشغيل أول مهمة:
 #   docker run --rm -v "$(pwd)/artifacts/model_training:/app/artifacts/model_training" nsm-training
-# مع GPU (إن وُجد NVIDIA Container Toolkit):
-#   docker run --rm --gpus all -v "$(pwd)/artifacts/model_training:/app/artifacts/model_training" nsm-training
+# مع GPU (NVIDIA Container Toolkit):
+#   docker run --rm --gpus all -e NSM_ALLOW_GPU=1 \
+#     -v "$(pwd)/artifacts/model_training:/app/artifacts/model_training" nsm-training
+# ملاحظة: الصورة الافتراضية torch CPU؛ لـ CUDA ابنِ من pytorch/pytorch:2.x-cuda* لاحقاً.
 
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    NSM_TRAINING_SANDBOX=1
+    NSM_TRAINING_SANDBOX=1 \
+    NSM_ALLOW_GPU=0
 
 WORKDIR /app
 
