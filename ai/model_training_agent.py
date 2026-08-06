@@ -158,6 +158,13 @@ except Exception:
     _PROD_OK = False
 
 try:
+    from ai.civilization_layer import handle_civilization_command as _civ_handle
+    _CIV_OK = True
+except Exception:
+    _civ_handle = None
+    _CIV_OK = False
+
+try:
     from ai.continuous_training_agent import handle_continuous_command as _cont_handle
     _CONT_OK = True
 except Exception:
@@ -1600,6 +1607,15 @@ def handle_training_command(user_input: str) -> Optional[str]:
             pass
 
     low = text.lower()
+
+    # طبقة الحضارة / ما بعد القمة
+    if _CIV_OK and _civ_handle is not None:
+        try:
+            cv = _civ_handle(text)
+            if cv is not None:
+                return cv
+        except Exception as _cv_err:
+            logger.warning("civilization: %s", _cv_err)
 
     # تفعيل الإنتاجية + تدريب مستمر
     if _PROD_OK and _prod_handle is not None:

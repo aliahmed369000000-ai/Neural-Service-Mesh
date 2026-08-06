@@ -89,6 +89,11 @@ INTENT_PHRASES: Dict[str, List[str]] = {
     "swarm": ["سرب", "swarm", "mesh", "وكلاء لامركز"],
     "economic_dash": ["لوحه الاقتصاد", "محرك اقتصاد", "ايرادات", "marketplace"],
     "roadmap": ["ماذا بعد", "خريطه تطوير", "تفعيل انتاج"],
+    "civ_status": ["طبقه حضار", "ما بعد القمه", "civilization"],
+    "grand_mesh": ["grand mesh", "شبكه معرف", "عولمه ckg"],
+    "cog_swarm": ["محاكاه عقول", "تناظر مدارس"],
+    "edge_os": ["نظام تشغيل معرف", "edge runtime"],
+    "guardrail": ["حارس معرف", "تحقق ادعا", "كشف تزييف"],
     "continuous": ["تدريب مستمر", "راقب جوده", "صيان تدريب"],
 
     # جرد / حالة عامة
@@ -373,6 +378,11 @@ def rewrite_to_canonical(text: str) -> str:
         "swarm": text,
         "economic_dash": "لوحة الاقتصاد",
         "roadmap": "ماذا بعد",
+        "civ_status": "طبقة حضارة",
+        "grand_mesh": "شبكة معرفية كونية",
+        "cog_swarm": "محاكاة عقول حول: أخلاقيات الذكاء الاصطناعي",
+        "edge_os": "نظام تشغيل معرفي",
+        "guardrail": text,
         "continuous": "تدريب مستمر",
     }.get(intent, text)
     return canonical
