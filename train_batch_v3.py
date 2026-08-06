@@ -1,67 +1,186 @@
-import sys, time, json, pickle, os
-sys.path.insert(0, '.')
-from ai.arabic_transformer import ArabicTransformer
+"""
+تدريب ArabicTransformer v3 (120M) على ckg_sentences_v3.pkl
+مع تكيّف تلقائي لحجم الحزمة حسب الرام المتاحة.
+
+يكمل تلقائياً من آخر checkpoint (ckg_train_state_v3.json + models/transformer_ckg_v3).
+
+تجاوز يدوي (اختياري):
+  NSM_PACK_SIZE=40 NSM_PACKS_PER_RUN=8 python3 train_batch_v3.py
+"""
+from __future__ import annotations
+
+import json
+import os
+import pickle
+import sys
+import time
+
+sys.path.insert(0, ".")
 
 WEIGHTS_DIR = "models/transformer_ckg_v3"
 STATE_FILE = "ckg_train_state_v3.json"
-PACK_SIZE = 80           # جمل لكل حزمة ملصوقة (sequence packing).
-                         # قياس فعلي (benchmark_single_batch_v3.py + فحص استقرار عبر
-                         # 6 حزم متتالية): ذروة RSS مستقرة عند ~2.93GB من ~3.7GB
-                         # متاحة — هامش أمان ~0.8GB. حجم 90 يقترب من ~3.2GB (هامش أضيق)،
-                         # وحجم 100 يقترب من ~3.68GB (خطر OOM فعلي) — الكلفة تكبر أسرع
-                         # من خطي مع الحجم (attention على التسلسل الملصوق كامل)، فـ80
-                         # هو أقصى توسيع آمن لحجم الحزمة نفسه.
-PACKS_PER_RUN = 16       # عدد الحزم في نفس الاستدعاء. الذاكرة تستقر بعد أول حزمتين ولا
-                         # تتراكم مع زيادة عدد الحزم (تم التحقق فعلياً حتى 6 حزم متتالية) —
-                         # فرفع العدد لا يزيد خطر OOM، فقط وقت التنفيذ الإجمالي. لا يوجد
-                         # حد زمني صارم للاستدعاء الواحد في بيئة التشغيل الحالية، فرُفع
-                         # العدد من 4 إلى 16 (240 → 1,280 جملة/استدعاء تقريباً).
+SENTENCES_FILE = "ckg_sentences_v3.pkl"
 
-with open('ckg_sentences_v3.pkl', 'rb') as f:
-    sentences = pickle.load(f)
-N = len(sentences)
+# قياس مرجعي: PACK_SIZE=80 → ذروة RSS ~2.93GB على بيئة ~3.7GB متاحة
+_REF_PACK_SIZE = 80
+_REF_PEAK_GB = 2.93
+_SAFETY_MARGIN_GB = 0.35
 
-m = ArabicTransformer(d_model=1216, n_heads=16, d_ff=2560, n_layers=8, vocab_size=8192)
-if os.path.exists(WEIGHTS_DIR):
-    m.load(WEIGHTS_DIR)
 
-if os.path.exists(STATE_FILE):
-    state = json.loads(open(STATE_FILE).read())
-else:
-    state = {"position": 0, "loss_history_tail": []}
+def available_ram_gb() -> float:
+    """MemAvailable من /proc/meminfo (GiB)."""
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as f:
+            info = {}
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 2:
+                    info[parts[0].rstrip(":")] = int(parts[1])  # kB
+        avail_kb = info.get("MemAvailable") or info.get("MemFree", 0)
+        return avail_kb / (1024.0 * 1024.0)
+    except Exception:
+        return 1.5
 
-pos = state["position"]
-if pos >= N:
-    print(f"DONE_ALL: التدريب مكتمل بالفعل ({pos}/{N})")
-    sys.exit(0)
 
-t0 = time.time()
-losses = []
-for _ in range(PACKS_PER_RUN):
-    if pos >= N:
-        break
-    end = min(pos + PACK_SIZE, N)
-    pack = sentences[pos:end]
-    loss = m.train_step_batch(pack)
-    losses.append(loss)
-    pos = end
+def choose_pack_size(avail_gb: float) -> int:
+    """PACK_SIZE آمن تقريباً حسب الرام. 0 = غير كافٍ."""
+    budget = max(0.0, avail_gb - _SAFETY_MARGIN_GB)
+    if budget < 1.2:
+        return 0
+    ratio = budget / _REF_PEAK_GB
+    size = int(_REF_PACK_SIZE * ratio)
+    size = max(4, min(_REF_PACK_SIZE, size))
+    return max(4, (size // 4) * 4)
 
-elapsed = time.time() - t0
-m.save(WEIGHTS_DIR)  # atomic (write-temp-then-replace) — راجع arabic_transformer.py
-state["position"] = pos
-state["loss_history_tail"] = [round(x, 3) for x in losses]
 
-# كتابة atomic لملف الحالة نفسه: لو الانقطاع حصل هنا بالذات، الملف
-# القديم يفضل سليم بدل JSON نص-مكتوب/تالف.
-tmp_state = STATE_FILE + ".tmp"
-with open(tmp_state, 'w') as f:
-    json.dump(state, f)
-os.replace(tmp_state, STATE_FILE)
+def choose_packs_per_run(avail_gb: float) -> int:
+    """عدد الحزم لكل استدعاء (الذاكرة تستقر بعد أول حزمتين)."""
+    if avail_gb >= 3.2:
+        return 16
+    if avail_gb >= 2.4:
+        return 8
+    if avail_gb >= 1.8:
+        return 4
+    return 2
 
-pct = pos / N * 100
-avg_loss = sum(losses) / len(losses)
-print(f"[{pos}/{N}] ({pct:.1f}%) avg_loss={avg_loss:.3f} elapsed={elapsed:.1f}s "
-      f"({PACKS_PER_RUN} حزم × {PACK_SIZE} جملة = حتى {PACKS_PER_RUN*PACK_SIZE} جملة/استدعاء)")
-if pos >= N:
-    print("DONE_ALL")
 
+def load_state() -> dict:
+    if os.path.exists(STATE_FILE):
+        with open(STATE_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    return {
+        "position": 0,
+        "loss_history_tail": [],
+        "runs": 0,
+        "total_sentences_seen": 0,
+    }
+
+
+def save_state(state: dict) -> None:
+    tmp = STATE_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False)
+    os.replace(tmp, STATE_FILE)
+
+
+def main() -> int:
+    avail = available_ram_gb()
+
+    env_pack = os.environ.get("NSM_PACK_SIZE", "").strip()
+    env_packs = os.environ.get("NSM_PACKS_PER_RUN", "").strip()
+    pack_size = int(env_pack) if env_pack.isdigit() else choose_pack_size(avail)
+    packs_per_run = int(env_packs) if env_packs.isdigit() else choose_packs_per_run(avail)
+
+    print(
+        f"ENV: available_ram≈{avail:.2f} GiB | pack_size={pack_size} | "
+        f"packs_per_run={packs_per_run}"
+    )
+    if env_pack or env_packs:
+        print("ENV: تجاوز يدوي نشط (NSM_PACK_SIZE / NSM_PACKS_PER_RUN)")
+
+    if pack_size <= 0:
+        print(
+            f"ABORT: الرام المتاحة ({avail:.2f} GiB) غير كافية لتدريب آمن "
+            f"(120M يحتاج تقريباً ≥1.5–2 GiB متاح مع هامش أمان)."
+        )
+        return 2
+
+    if not os.path.exists(SENTENCES_FILE):
+        print(f"ABORT: ملف البيانات غير موجود: {SENTENCES_FILE}")
+        return 1
+
+    with open(SENTENCES_FILE, "rb") as f:
+        sentences = pickle.load(f)
+    n = len(sentences)
+
+    from ai.arabic_transformer import ArabicTransformer
+
+    print("Loading ArabicTransformer (120M: d_model=1216, n_layers=8)…")
+    model = ArabicTransformer(
+        d_model=1216, n_heads=16, d_ff=2560, n_layers=8, vocab_size=8192
+    )
+    if os.path.exists(WEIGHTS_DIR):
+        model.load(WEIGHTS_DIR)
+        print(f"Loaded weights from {WEIGHTS_DIR}")
+    else:
+        print(f"No checkpoint at {WEIGHTS_DIR} — بدء أوزان جديدة")
+
+    state = load_state()
+    pos = int(state.get("position", 0))
+    if pos >= n:
+        print(f"DONE_ALL: التدريب مكتمل بالفعل ({pos}/{n})")
+        return 0
+
+    print(f"Resume from position {pos}/{n} ({100.0 * pos / n:.1f}%)")
+    start_pos = pos
+
+    t0 = time.time()
+    losses: list[float] = []
+    packs_done = 0
+    for _ in range(packs_per_run):
+        if pos >= n:
+            break
+        end = min(pos + pack_size, n)
+        pack = sentences[pos:end]
+        loss = float(model.train_step_batch(pack))
+        losses.append(loss)
+        pos = end
+        packs_done += 1
+        print(f"  pack {packs_done}/{packs_per_run}  pos={pos}/{n}  loss={loss:.4f}")
+
+    elapsed = time.time() - t0
+    model.save(WEIGHTS_DIR)
+
+    processed = pos - start_pos
+    prev_tail = list(state.get("loss_history_tail") or [])
+    new_tail = (prev_tail + [round(x, 3) for x in losses])[-64:]
+
+    state["position"] = pos
+    state["loss_history_tail"] = new_tail
+    state["runs"] = int(state.get("runs", 0)) + 1
+    state["total_sentences_seen"] = int(state.get("total_sentences_seen", 0)) + processed
+    state["last_pack_size"] = pack_size
+    state["last_packs_per_run"] = packs_done
+    state["last_elapsed_s"] = round(elapsed, 1)
+    state["last_avail_ram_gb"] = round(avail, 2)
+    save_state(state)
+
+    pct = 100.0 * pos / n
+    avg_loss = sum(losses) / len(losses) if losses else float("nan")
+    rate = processed / elapsed if elapsed > 0 else 0.0
+    remaining = n - pos
+    eta_s = remaining / rate if rate > 0 else float("inf")
+    eta_str = f"{eta_s / 60:.0f} min" if eta_s < 1e12 else "n/a"
+
+    print(
+        f"[{pos}/{n}] ({pct:.1f}%) avg_loss={avg_loss:.3f} elapsed={elapsed:.1f}s "
+        f"({packs_done} حزم × حتى {pack_size} جملة | {processed} جملة هذا التشغيل | "
+        f"{rate:.1f} جملة/ث | ETA≈{eta_str})"
+    )
+    if pos >= n:
+        print("DONE_ALL")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
