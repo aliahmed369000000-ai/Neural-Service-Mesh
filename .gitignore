@@ -71,3 +71,4 @@ data/artifacts.db
 *.key
 id_rsa
 id_ed25519
+models/transformer_ckg_v3/
