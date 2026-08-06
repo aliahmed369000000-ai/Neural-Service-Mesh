@@ -76,6 +76,15 @@ _DEFAULT_VOICE = {
     TTSProvider.GTTS: "ar",                  # gTTS يستخدم رمز لغة لا اسم صوت
 }
 
+# أصوات Edge الأقرب للهجة اليمنية (خليج/جزيرة) عند dialect_hint="yemeni"
+_YEMENI_EDGE_VOICES = (
+    "ar-SA-HamedNeural",
+    "ar-SA-ZariyahNeural",
+    "ar-AE-HamdanNeural",
+    "ar-KW-FahedNeural",
+    "ar-QA-MoazNeural",
+)
+
 _GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
 
 
@@ -311,11 +320,17 @@ class TTSEngine:
         self._failed_until[provider] = time.time() + _FAILURE_COOLDOWN_SEC
 
     # ── الواجهة العامة ────────────────────────────────────────────────
-    def synthesize(self, text: str, voice: str = "") -> TTSResult:
-        """يحوّل النص لصوت، مجرّباً كل مزوّد بالترتيب حتى ينجح أحدها."""
+    def synthesize(self, text: str, voice: str = "", dialect_hint: str = "") -> TTSResult:
+        """يحوّل النص لصوت، مجرّباً كل مزوّد بالترتيب حتى ينجح أحدها.
+
+        dialect_hint: "yemeni" يختار صوتاً خليجياً أقرب للهجة إن لم يُمرَّر voice.
+        """
         text = (text or "").strip()
         if not text:
             return TTSResult(audio_bytes=b"", provider=TTSProvider.EDGE, error="نص فارغ")
+
+        if not voice and (dialect_hint or "").lower() in ("yemeni", "ye", "dialect"):
+            voice = os.getenv("NSM_YEMENI_VOICE", "").strip() or _YEMENI_EDGE_VOICES[0]
 
         if is_offline():
             # كل مزوّدي TTS الحاليين (حتى Edge وgTTS بلا مفتاح) يتصلون
@@ -341,7 +356,9 @@ class TTSEngine:
                         os.getenv("ELEVENLABS_API_KEY", ""),
                     )
                 elif provider == TTSProvider.EDGE:
-                    result = _synthesize_edge(text, voice)
+                    result = _synthesize_edge(
+                        text, voice or _DEFAULT_VOICE[TTSProvider.EDGE]
+                    )
                 else:  # GTTS
                     result = _synthesize_gtts(text, voice)
 
