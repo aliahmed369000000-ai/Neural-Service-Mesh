@@ -674,6 +674,607 @@ def list_saved_models() -> str:
     return "\n".join(lines)
 
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 5b) تدريب على CSV حقيقي + رفع ملفات + CNN + نص
+# ═══════════════════════════════════════════════════════════════════════════
+
+UPLOAD_DIR = ARTIFACTS / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+_CSV_SEARCH_ROOTS = (
+    ROOT / "data",
+    ROOT / "knowledge_sources",
+    ARTIFACTS,
+    ROOT / "artifacts",
+)
+
+
+def _find_csv_files(limit: int = 40) -> List[Path]:
+    found: List[Path] = []
+    seen = set()
+    for root in _CSV_SEARCH_ROOTS:
+        if not root.is_dir():
+            continue
+        try:
+            for p in root.rglob("*.csv"):
+                if not p.is_file():
+                    continue
+                key = str(p.resolve())
+                if key in seen:
+                    continue
+                seen.add(key)
+                found.append(p)
+                if len(found) >= limit:
+                    return found
+        except Exception:
+            continue
+    return found
+
+
+def list_csv_datasets() -> str:
+    files = _find_csv_files()
+    lines = ["## 📄 ملفات CSV المتاحة للتدريب", ""]
+    if not files:
+        lines.append("لا توجد ملفات CSV تحت data/ أو artifacts/.")
+        lines.append("ارفع ملفاً من واجهة الوكيل أو ضع CSV في `data/samples/`.")
+        return "\n".join(lines)
+    for p in files:
+        try:
+            mb = p.stat().st_size / (1024 * 1024)
+            rel = p.relative_to(ROOT)
+            # peek header
+            header = ""
+            with open(p, encoding="utf-8", errors="replace") as f:
+                header = f.readline().strip()[:120]
+            lines.append(f"- `{rel}` ({mb:.2f} MB) — أعمدة: `{header}`")
+        except Exception as e:
+            lines.append(f"- `{p.name}` (خطأ قراءة: {e})")
+    lines.append("")
+    lines.append("للتدريب: `درّب على csv data/samples/classification_demo.csv`")
+    lines.append("أو: `درّب على csv <المسار> الهدف=label`")
+    return "\n".join(lines)
+
+
+def _load_csv_table(path: Path, max_rows: int = 5000):
+    """يحمّل CSV إلى قائمة صفوف + رؤوس. بدون pandas."""
+    import csv as _csv
+
+    with open(path, encoding="utf-8", errors="replace", newline="") as f:
+        reader = _csv.reader(f)
+        rows = list(reader)
+    if not rows:
+        raise ValueError("ملف فارغ")
+    header = [h.strip() for h in rows[0]]
+    data = rows[1 : max_rows + 1]
+    return header, data
+
+
+def _infer_target_and_matrix(header: List[str], data: List[List[str]], target_col: Optional[str] = None):
+    """يستنتج عمود الهدف ويبني X (float) و y."""
+    if not data:
+        raise ValueError("لا توجد صفوف بيانات")
+
+    col_idx = {h: i for i, h in enumerate(header)}
+    if target_col and target_col in col_idx:
+        t_i = col_idx[target_col]
+    else:
+        # تفضيل أسماء شائعة ثم آخر عمود
+        for cand in ("label", "target", "y", "class", "الهدف", "التصنيف", "label_id"):
+            if cand in col_idx:
+                t_i = col_idx[cand]
+                break
+        else:
+            t_i = len(header) - 1
+
+    # أعمدة نصية vs رقمية
+    text_cols: List[int] = []
+    num_cols: List[int] = []
+    for i, h in enumerate(header):
+        if i == t_i:
+            continue
+        # عيّنة
+        sample_vals = [r[i] for r in data[:30] if i < len(r)]
+        numeric_ok = 0
+        for v in sample_vals:
+            try:
+                float(v.replace(",", ""))
+                numeric_ok += 1
+            except Exception:
+                pass
+        if sample_vals and numeric_ok / max(1, len(sample_vals)) >= 0.7:
+            num_cols.append(i)
+        else:
+            text_cols.append(i)
+
+    y_raw = [r[t_i] if t_i < len(r) else "" for r in data]
+
+    # هدف رقمي؟
+    y_num = []
+    y_num_ok = True
+    for v in y_raw:
+        try:
+            y_num.append(float(str(v).replace(",", "")))
+        except Exception:
+            y_num_ok = False
+            break
+
+    # تصنيف إذا قيم فريدة قليلة
+    unique = list(dict.fromkeys(y_raw))
+    is_classification = (not y_num_ok) or (len(unique) <= max(15, int(0.05 * len(y_raw)) + 1))
+
+    if is_classification:
+        label_to_id = {lab: i for i, lab in enumerate(unique)}
+        y = np.array([label_to_id[v] for v in y_raw], dtype=np.int64)
+        task = "classification"
+        label_map = {i: lab for lab, i in label_to_id.items()}
+    else:
+        y = np.array(y_num, dtype=np.float64)
+        task = "regression"
+        label_map = None
+
+    if num_cols:
+        X_list = []
+        for r in data:
+            row = []
+            for i in num_cols:
+                try:
+                    row.append(float(str(r[i]).replace(",", "")))
+                except Exception:
+                    row.append(0.0)
+            X_list.append(row)
+        X = np.array(X_list, dtype=np.float64)
+        feature_mode = "numeric"
+        feature_names = [header[i] for i in num_cols]
+        texts = None
+    elif text_cols:
+        # عمود نص أساسي = أطول/أول نصي
+        ti = text_cols[0]
+        texts = [r[ti] if ti < len(r) else "" for r in data]
+        X = None
+        feature_mode = "text"
+        feature_names = [header[ti]]
+    else:
+        raise ValueError("لم يُعثر على أعمدة ميزات صالحة")
+
+    return {
+        "X": X,
+        "y": y,
+        "task": task,
+        "feature_mode": feature_mode,
+        "feature_names": feature_names,
+        "texts": texts,
+        "target_name": header[t_i],
+        "label_map": label_map,
+        "n_samples": len(data),
+    }
+
+
+def _text_to_bow(texts: List[str], vocab_size: int = 512) -> np.ndarray:
+    """Bag-of-hashed-words بسيط (بدون مكتبات إضافية)."""
+    mat = np.zeros((len(texts), vocab_size), dtype=np.float64)
+    for i, t in enumerate(texts):
+        for tok in str(t).lower().replace("،", " ").replace(".", " ").split():
+            if len(tok) < 2:
+                continue
+            h = 2166136261
+            for ch in tok:
+                h ^= ord(ch)
+                h = (h * 16777619) & 0xFFFFFFFF
+            mat[i, h % vocab_size] += 1.0
+        s = mat[i].sum()
+        if s > 0:
+            mat[i] /= s
+    return mat
+
+
+def train_from_csv(
+    path_str: str,
+    target_col: Optional[str] = None,
+    epochs: int = 30,
+    prefer: str = "auto",
+) -> str:
+    """تدريب على ملف CSV من القرص (مسار نسبي أو مطلق داخل المشروع)."""
+    raw = path_str.strip().strip("`\"'")
+    path = Path(raw)
+    if not path.is_file():
+        path = ROOT / raw
+    if not path.is_file():
+        # بحث بالاسم
+        matches = [p for p in _find_csv_files(80) if p.name == Path(raw).name]
+        if matches:
+            path = matches[0]
+    if not path.is_file():
+        return f"❌ لم يُعثر على الملف: `{path_str}`\nاستخدم **قائمة csv** لعرض المتاح."
+
+    try:
+        header, data = _load_csv_table(path)
+        bundle = _infer_target_and_matrix(header, data, target_col=target_col)
+    except Exception as e:
+        return f"❌ فشل قراءة/تفسير CSV: {type(e).__name__}: {e}"
+
+    task = bundle["task"]
+    lines = [
+        f"## 📥 تدريب من CSV",
+        f"- الملف: `{path.relative_to(ROOT) if path.is_relative_to(ROOT) else path}`",
+        f"- عينات: **{bundle['n_samples']}** | المهمة: **{task}** | الهدف: `{bundle['target_name']}`",
+        f"- نمط الميزات: **{bundle['feature_mode']}** → {bundle['feature_names'][:8]}",
+        "",
+    ]
+
+    # جهّز X
+    if bundle["feature_mode"] == "text":
+        X = _text_to_bow(bundle["texts"] or [])
+        lines.append(f"- تحويل النص إلى BoW بحجم {X.shape[1]}")
+    else:
+        X = bundle["X"]
+        # تطبيع
+        mu = X.mean(axis=0)
+        sig = X.std(axis=0) + 1e-8
+        X = (X - mu) / sig
+
+    y = bundle["y"]
+    n = len(y)
+    rng = np.random.default_rng(42)
+    idx = rng.permutation(n)
+    split = max(1, int(n * 0.75))
+    tr, te = idx[:split], idx[split:]
+    if len(te) == 0:
+        te = tr[-max(1, len(tr) // 5) :]
+
+    use_torch = prefer in ("auto", "torch", "pytorch", "cnn", "text")
+    use_sk = prefer in ("auto", "sklearn", "sk") and _SKLEARN_OK and bundle["feature_mode"] == "numeric"
+
+    results = []
+
+    if use_sk and bundle["feature_mode"] == "numeric":
+        try:
+            from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+            from sklearn.metrics import accuracy_score, f1_score, mean_squared_error, r2_score
+
+            if task == "classification":
+                m = RandomForestClassifier(n_estimators=60, random_state=42)
+                m.fit(X[tr], y[tr])
+                pred = m.predict(X[te])
+                acc = float(accuracy_score(y[te], pred))
+                f1 = float(f1_score(y[te], pred, average="weighted"))
+                results.append(f"sklearn RF: Accuracy={acc:.4f} F1={f1:.4f}")
+                out = ARTIFACTS / f"csv_rf_clf_{int(time.time())}.pkl"
+            else:
+                m = RandomForestRegressor(n_estimators=60, random_state=42)
+                m.fit(X[tr], y[tr])
+                pred = m.predict(X[te])
+                mse = float(mean_squared_error(y[te], pred))
+                r2 = float(r2_score(y[te], pred))
+                results.append(f"sklearn RF: MSE={mse:.4f} R²={r2:.4f}")
+                out = ARTIFACTS / f"csv_rf_reg_{int(time.time())}.pkl"
+            with open(out, "wb") as f:
+                pickle.dump({"model": m, "path": str(path), "task": task}, f)
+            results.append(f"محفوظ: `{out.relative_to(ROOT)}`")
+        except Exception as e:
+            results.append(f"sklearn فشل: {e}")
+
+    if use_torch and _TORCH_OK:
+        try:
+            if prefer in ("cnn",) and bundle["feature_mode"] == "numeric":
+                results.append(train_torch_cnn_on_arrays(X, y, task, epochs=epochs))
+            elif bundle["feature_mode"] == "text" or prefer in ("text",):
+                results.append(
+                    train_torch_text_on_texts(
+                        bundle["texts"] or [], y, task, epochs=epochs
+                    )
+                )
+            else:
+                # MLP على المصفوفة
+                results.append(train_torch_on_arrays(X, y, task, epochs=epochs))
+        except Exception as e:
+            results.append(f"torch فشل: {e}")
+    elif use_torch and not _TORCH_OK:
+        results.append("PyTorch غير متاح.")
+
+    if not results:
+        results.append("لم يُشغَّل أي محرك تدريب (تحقق من المكتبات).")
+
+    lines.append("### النتائج")
+    body = "\n".join(lines)
+    for r in results:
+        if isinstance(r, str) and r.startswith("##"):
+            body += "\n\n" + r
+        else:
+            body += "\n- " + str(r)
+    return body
+
+
+def train_torch_on_arrays(
+    X: np.ndarray, y: np.ndarray, task: str, epochs: int = 30, hidden: int = 64
+) -> str:
+    if not _TORCH_OK:
+        return "PyTorch غير متاح"
+    epochs = max(3, min(int(epochs), 120))
+    n_features = X.shape[1]
+    device = torch.device("cpu")
+    X_t = torch.tensor(X, dtype=torch.float32, device=device)
+    n = X.shape[0]
+    idx = np.random.default_rng(0).permutation(n)
+    split = max(1, int(n * 0.75))
+    te = idx[split:] if len(idx[split:]) > 0 else idx[-1:]
+    tr = idx[:split]
+
+    if task == "classification":
+        n_out = int(y.max()) + 1
+        y_t = torch.tensor(y, dtype=torch.long, device=device)
+        loss_fn = nn.CrossEntropyLoss()
+    else:
+        n_out = 1
+        y_t = torch.tensor(y.reshape(-1, 1), dtype=torch.float32, device=device)
+        loss_fn = nn.MSELoss()
+
+    model = nn.Sequential(
+        nn.Linear(n_features, hidden),
+        nn.ReLU(),
+        nn.Dropout(0.1),
+        nn.Linear(hidden, hidden // 2),
+        nn.ReLU(),
+        nn.Linear(hidden // 2, n_out),
+    ).to(device)
+    opt = optim.Adam(model.parameters(), lr=1e-3)
+    hist = []
+    model.train()
+    for _ in range(epochs):
+        opt.zero_grad()
+        out = model(X_t[tr])
+        loss = loss_fn(out, y_t[tr])
+        loss.backward()
+        opt.step()
+        hist.append(float(loss.item()))
+    model.eval()
+    with torch.no_grad():
+        out = model(X_t[te])
+        if task == "classification":
+            metric = float((out.argmax(-1) == y_t[te]).float().mean().item())
+            mname = "Accuracy"
+        else:
+            metric = float(loss_fn(out, y_t[te]).item())
+            mname = "MSE"
+    outp = ARTIFACTS / f"torch_mlp_csv_{task}_{int(time.time())}.pt"
+    torch.save({"state_dict": model.state_dict(), "task": task, "n_features": n_features}, outp)
+    return (
+        f"## ✅ Torch MLP على بيانات حقيقية\n"
+        f"- {mname}={metric:.4f} | epochs={epochs} | features={n_features}\n"
+        f"- loss آخر: {', '.join(f'{x:.4f}' for x in hist[-5:])}\n"
+        f"- `{outp.relative_to(ROOT)}`"
+    )
+
+
+def train_torch_cnn_on_arrays(
+    X: np.ndarray, y: np.ndarray, task: str, epochs: int = 25
+) -> str:
+    """Conv1d على متجه الميزات (مناسب لبيانات جدولية/إشارات قصيرة)."""
+    if not _TORCH_OK:
+        return "PyTorch غير متاح"
+    epochs = max(3, min(int(epochs), 100))
+    n, f = X.shape
+    # حشّ إلى طول زوجي مناسب
+    length = max(8, f)
+    if f < length:
+        pad = np.zeros((n, length - f), dtype=np.float64)
+        Xc = np.concatenate([X, pad], axis=1)
+    else:
+        Xc = X[:, :length]
+        length = Xc.shape[1]
+
+    device = torch.device("cpu")
+    Xt = torch.tensor(Xc, dtype=torch.float32, device=device).unsqueeze(1)  # B,1,L
+    idx = np.random.default_rng(1).permutation(n)
+    split = max(1, int(n * 0.75))
+    te = idx[split:] if len(idx[split:]) > 0 else idx[-1:]
+    tr = idx[:split]
+
+    class SmallCNN(nn.Module):
+        def __init__(self, length: int, n_out: int):
+            super().__init__()
+            self.conv = nn.Sequential(
+                nn.Conv1d(1, 16, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.Conv1d(16, 32, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.AdaptiveAvgPool1d(4),
+            )
+            self.fc = nn.Sequential(
+                nn.Flatten(),
+                nn.Linear(32 * 4, 64),
+                nn.ReLU(),
+                nn.Linear(64, n_out),
+            )
+
+        def forward(self, x):
+            return self.fc(self.conv(x))
+
+    if task == "classification":
+        n_out = int(y.max()) + 1
+        yt = torch.tensor(y, dtype=torch.long, device=device)
+        loss_fn = nn.CrossEntropyLoss()
+    else:
+        n_out = 1
+        yt = torch.tensor(y.reshape(-1, 1), dtype=torch.float32, device=device)
+        loss_fn = nn.MSELoss()
+
+    model = SmallCNN(length, n_out).to(device)
+    opt = optim.Adam(model.parameters(), lr=1e-3)
+    hist = []
+    model.train()
+    for _ in range(epochs):
+        opt.zero_grad()
+        out = model(Xt[tr])
+        loss = loss_fn(out, yt[tr])
+        loss.backward()
+        opt.step()
+        hist.append(float(loss.item()))
+    model.eval()
+    with torch.no_grad():
+        out = model(Xt[te])
+        if task == "classification":
+            metric = float((out.argmax(-1) == yt[te]).float().mean().item())
+            mname = "Accuracy"
+        else:
+            metric = float(loss_fn(out, yt[te]).item())
+            mname = "MSE"
+    outp = ARTIFACTS / f"torch_cnn_{task}_{int(time.time())}.pt"
+    torch.save({"state_dict": model.state_dict(), "task": task, "length": length}, outp)
+    return (
+        f"## ✅ Torch CNN-1D\n"
+        f"- {mname}={metric:.4f} | epochs={epochs} | length={length}\n"
+        f"- loss: {', '.join(f'{x:.4f}' for x in hist[-5:])}\n"
+        f"- `{outp.relative_to(ROOT)}`"
+    )
+
+
+def train_torch_text_on_texts(
+    texts: List[str], y: np.ndarray, task: str, epochs: int = 20, max_len: int = 32
+) -> str:
+    """Tokenizer حرفي بسيط + Embedding + TransformerEncoder layer."""
+    if not _TORCH_OK:
+        return "PyTorch غير متاح"
+    epochs = max(3, min(int(epochs), 80))
+    # بناء قاموس أحرف
+    chars = sorted({c for t in texts for c in str(t)})[:200]
+    stoi = {c: i + 2 for i, c in enumerate(chars)}  # 0 pad, 1 unk
+    vocab = len(stoi) + 2
+
+    def encode(t: str) -> List[int]:
+        ids = [stoi.get(c, 1) for c in str(t)[:max_len]]
+        if len(ids) < max_len:
+            ids += [0] * (max_len - len(ids))
+        return ids[:max_len]
+
+    X = torch.tensor([encode(t) for t in texts], dtype=torch.long)
+    n = len(texts)
+    idx = np.random.default_rng(2).permutation(n)
+    split = max(1, int(n * 0.75))
+    te = idx[split:] if len(idx[split:]) > 0 else idx[-1:]
+    tr = idx[:split]
+
+    class TinyTextTransformer(nn.Module):
+        def __init__(self, vocab: int, n_out: int, d: int = 64, nhead: int = 4):
+            super().__init__()
+            self.emb = nn.Embedding(vocab, d, padding_idx=0)
+            layer = nn.TransformerEncoderLayer(
+                d_model=d, nhead=nhead, dim_feedforward=128, batch_first=True, dropout=0.1
+            )
+            self.enc = nn.TransformerEncoder(layer, num_layers=2)
+            self.head = nn.Linear(d, n_out)
+
+        def forward(self, x):
+            h = self.emb(x)
+            mask = x == 0
+            h = self.enc(h, src_key_padding_mask=mask)
+            # mean pool over non-pad
+            mask_f = (~mask).float().unsqueeze(-1)
+            pooled = (h * mask_f).sum(1) / mask_f.sum(1).clamp(min=1.0)
+            return self.head(pooled)
+
+    if task == "classification":
+        n_out = int(y.max()) + 1
+        yt = torch.tensor(y, dtype=torch.long)
+        loss_fn = nn.CrossEntropyLoss()
+    else:
+        n_out = 1
+        yt = torch.tensor(y.reshape(-1, 1), dtype=torch.float32)
+        loss_fn = nn.MSELoss()
+
+    model = TinyTextTransformer(vocab, n_out)
+    opt = optim.Adam(model.parameters(), lr=2e-3)
+    hist = []
+    model.train()
+    for _ in range(epochs):
+        opt.zero_grad()
+        out = model(X[tr])
+        loss = loss_fn(out, yt[tr])
+        loss.backward()
+        opt.step()
+        hist.append(float(loss.item()))
+    model.eval()
+    with torch.no_grad():
+        out = model(X[te])
+        if task == "classification":
+            metric = float((out.argmax(-1) == yt[te]).float().mean().item())
+            mname = "Accuracy"
+        else:
+            metric = float(loss_fn(out, yt[te]).item())
+            mname = "MSE"
+    outp = ARTIFACTS / f"torch_text_{task}_{int(time.time())}.pt"
+    torch.save(
+        {"state_dict": model.state_dict(), "stoi": stoi, "task": task, "max_len": max_len},
+        outp,
+    )
+    return (
+        f"## ✅ Torch Text Transformer (صغير)\n"
+        f"- {mname}={metric:.4f} | epochs={epochs} | vocab_chars={vocab} | max_len={max_len}\n"
+        f"- loss: {', '.join(f'{x:.4f}' for x in hist[-5:])}\n"
+        f"- `{outp.relative_to(ROOT)}`"
+    )
+
+
+def save_upload_and_train(
+    filename: str,
+    raw_bytes: bytes,
+    target_col: Optional[str] = None,
+    prefer: str = "auto",
+    epochs: int = 25,
+) -> str:
+    """حفظ ملف مرفوع ثم تدريبه (CSV أو نص سطور label\\ttext)."""
+    safe = Path(filename).name.replace("..", "_")
+    dest = UPLOAD_DIR / f"{int(time.time())}_{safe}"
+    dest.write_bytes(raw_bytes)
+    if safe.lower().endswith(".csv"):
+        return (
+            f"تم حفظ الرفع: `{dest.relative_to(ROOT)}`\n\n"
+            + train_from_csv(str(dest), target_col=target_col, epochs=epochs, prefer=prefer)
+        )
+    # محاولة تفسير كنص: كل سطر label||text أو text فقط
+    try:
+        text = raw_bytes.decode("utf-8", errors="replace")
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        tmp = UPLOAD_DIR / f"{dest.stem}_as.csv"
+        import csv as _csv
+
+        with tmp.open("w", encoding="utf-8", newline="") as f:
+            w = _csv.writer(f)
+            w.writerow(["text", "label"])
+            for ln in lines[:3000]:
+                if "||" in ln:
+                    a, b = ln.split("||", 1)
+                    w.writerow([b.strip(), a.strip()])
+                elif "\t" in ln:
+                    a, b = ln.split("\t", 1)
+                    w.writerow([b.strip(), a.strip()])
+                else:
+                    w.writerow([ln, "0"])
+        return (
+            f"تم تحويل النص إلى CSV: `{tmp.relative_to(ROOT)}`\n\n"
+            + train_from_csv(str(tmp), target_col="label", epochs=epochs, prefer="text")
+        )
+    except Exception as e:
+        return f"حُفظ الملف `{dest.relative_to(ROOT)}` لكن تعذّر التدريب التلقائي: {e}"
+
+
+def train_torch_cnn_demo(epochs: int = 20) -> str:
+    """تجربة CNN على بيانات اصطناعية جدولية."""
+    rng = np.random.default_rng(7)
+    X = rng.normal(size=(500, 24))
+    y = (X[:, :3].sum(axis=1) > 0).astype(np.int64)
+    return train_torch_cnn_on_arrays(X, y, "classification", epochs=epochs)
+
+
+def train_torch_text_demo(epochs: int = 15) -> str:
+    pos = ["رائع جدا", "ممتاز", "أحب هذا", "تجربة جيدة", "أنصح به"] * 30
+    neg = ["سيء", "فظيع", "لا أنصح", "مخيب", "ضعيف"] * 30
+    texts = pos + neg
+    y = np.array([1] * len(pos) + [0] * len(neg), dtype=np.int64)
+    return train_torch_text_on_texts(texts, y, "classification", epochs=epochs)
+
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 6) موجّه الأوامر النصية
 # ═══════════════════════════════════════════════════════════════════════════
@@ -788,6 +1389,50 @@ def handle_training_command(user_input: str) -> Optional[str]:
         task = "regression" if re.search(r"انحدار|regress", text, re.I) else "classification"
         return train_torch_mlp(task=task, epochs=epochs)
 
+    # قائمة CSV
+    if re.search(r"(قائمة|عرض|list).{0,12}(csv|بيانات)|ملفات\s*csv|csv\s*files", text, re.I):
+        return list_csv_datasets()
+
+    # درّب على csv path
+    # درّب على csv path
+    m_csv = re.search(
+        r"(درّب|درب|train).{0,40}?((?:[\w./\\-]+/)*[\w.-]+\.csv)",
+        text,
+        re.I,
+    )
+    if m_csv:
+        path_csv = m_csv.group(2)
+        target = None
+        mt = re.search(r"(?:هدف|target|label)\s*[=:]\s*([\w\u0600-\u06FF]+)", text, re.I)
+        if mt:
+            target = mt.group(1)
+        epochs = 30
+        me = re.search(r"(\d+)\s*(حقب|epochs?)", text, re.I)
+        if me:
+            epochs = int(me.group(1))
+        prefer = "auto"
+        if re.search(r"\bcnn\b|شبكة\s*التفاف", text, re.I):
+            prefer = "cnn"
+        elif re.search(r"نص|text|transformer", text, re.I):
+            prefer = "text"
+        elif re.search(r"sklearn|غاب|forest", text, re.I):
+            prefer = "sklearn"
+        return train_from_csv(path_csv, target_col=target, epochs=epochs, prefer=prefer)
+
+    if re.search(r"(درّب|درب|train).{0,15}(cnn|التفاف|convolution)", text, re.I):
+        epochs = 20
+        m = re.search(r"(\d+)\s*(حقب|epochs?)", text, re.I)
+        if m:
+            epochs = int(m.group(1))
+        return train_torch_cnn_demo(epochs=epochs)
+
+    if re.search(r"(درّب|درب|train).{0,20}(نص|text\s*transformer|transformer\s*نص)", text, re.I):
+        epochs = 15
+        m = re.search(r"(\d+)\s*(حقب|epochs?)", text, re.I)
+        if m:
+            epochs = int(m.group(1))
+        return train_torch_text_demo(epochs=epochs)
+
     # أوامر قصيرة
     aliases = {
         "جرد": inventory,
@@ -800,6 +1445,8 @@ def handle_training_command(user_input: str) -> Optional[str]:
         "loss": ckg_loss_trend,
         "محفوظات": list_saved_models,
         "نماذج": list_saved_models,
+        "csv": list_csv_datasets,
+        "قائمة csv": list_csv_datasets,
     }
     if text.strip().lower() in aliases:
         fn = aliases[text.strip().lower()]
