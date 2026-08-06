@@ -26,6 +26,10 @@ ALIASES = {
     "bytebpe": "byte_bpe",
     "byte_bpe": "byte_bpe",
     "bbpe": "byte_bpe",
+    "modern_bbpe": "modern_bbpe",
+    "modernbbpe": "modern_bbpe",
+    "tiktoken": "modern_bbpe",
+    "gpt4": "modern_bbpe",
     "hash": "hash",
 }
 
@@ -37,6 +41,7 @@ DEFAULT_PATHS = {
     "unigram": "models/unigram_tokenizer.json",
     "char": "models/char_tokenizer.json",
     "byte_bpe": "models/byte_bpe_tokenizer.json",
+    "modern_bbpe": "models/modern_bbpe_tokenizer.json",
 }
 
 
@@ -49,6 +54,7 @@ def list_tokenizers() -> List[Dict[str, str]]:
         {"id": "unigram", "name": "Unigram LM", "desc": "تجزئة Viterbi بالاحتمالات"},
         {"id": "char", "name": "Character", "desc": "محرف = رمز"},
         {"id": "byte_bpe", "name": "Byte-level BPE", "desc": "BPE على بايتات UTF-8 (أسلوب GPT-2)"},
+        {"id": "modern_bbpe", "name": "Modern BBPE (GPT-4/tiktoken)", "desc": "regex pretok + byte BPE — الأفضل عملياً 2024+"},
         {"id": "hash", "name": "Hash (متقادم)", "desc": "FNV بدون decode حقيقي"},
     ]
 
@@ -101,6 +107,11 @@ def get_tokenizer(
         path = vocab_path or DEFAULT_PATHS["byte_bpe"]
         return ByteBPETokenizer(vocab_size, vocab_path=path)
 
+    if t == "modern_bbpe":
+        from ai.modern_bbpe_tokenizer import ModernBBPETokenizer
+        path = vocab_path or DEFAULT_PATHS["modern_bbpe"]
+        return ModernBBPETokenizer(vocab_size, vocab_path=path)
+
     # word
     from ai.arabic_transformer import WordTokenizer
     path = vocab_path or DEFAULT_PATHS["word"]
@@ -117,6 +128,7 @@ def tokenizer_version_tag(tokenizer_type: str) -> str:
         "unigram": "unigram-v1",
         "char": "char-v1",
         "byte_bpe": "byte-bpe-v1",
+        "modern_bbpe": "modern-bbpe-v1",
         "hash": "hash-v1",
     }.get(t, "word-v1")
 
@@ -130,5 +142,6 @@ def tokenizer_save_name(tokenizer_obj) -> str:
         "UnigramTokenizer": "unigram_tokenizer.json",
         "CharTokenizer": "char_tokenizer.json",
         "ByteBPETokenizer": "byte_bpe_tokenizer.json",
+        "ModernBBPETokenizer": "modern_bbpe_tokenizer.json",
         "WordTokenizer": "tokenizer_vocab.json",
     }.get(name, "tokenizer_vocab.json")
