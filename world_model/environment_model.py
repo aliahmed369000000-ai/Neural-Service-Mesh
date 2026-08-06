@@ -283,6 +283,68 @@ class EnvironmentModel:
         except Exception as exc:
             logger.error(f"[EnvironmentModel] update_from_ckg error: {exc}")
 
+
+    def assess_training_safety(self, action: str = "run_training_loop",
+                               estimated_vram_mb: int = 4096) -> dict:
+        """
+        بوابة أمان قبل أوامر التدريب الثقيلة.
+        تتوقع مخاطر OOM / فشل متكرر / موارد بناءً على حالة العالم المحلية.
+        لا تضمن غياب الأعطال — قرار تحفظي.
+        """
+        import shutil
+        risks = []
+        green = True
+        # مساحة قرص
+        try:
+            usage = shutil.disk_usage(str(Path(self._path).resolve().parent.parent))
+            free_gb = usage.free / (1024 ** 3)
+            if free_gb < 2.0:
+                risks.append(f"مساحة قرص منخفضة: {free_gb:.1f}GB")
+                green = False
+            elif free_gb < 5.0:
+                risks.append(f"مساحة قرص محدودة: {free_gb:.1f}GB")
+        except Exception:
+            pass
+        # GPU إن وُجد
+        try:
+            import torch
+            if torch.cuda.is_available():
+                props = torch.cuda.get_device_properties(0)
+                total = getattr(props, "total_memory", 0) / (1024 ** 2)
+                if total and estimated_vram_mb > total * 0.85:
+                    risks.append(
+                        f"VRAM قد لا تكفي: مطلوب~{estimated_vram_mb}MB المتاح~{total:.0f}MB"
+                    )
+                    green = False
+            else:
+                risks.append("لا CUDA — التدريب الثقيل على CPU قد يكون بطيئاً")
+        except Exception:
+            risks.append("تعذّر فحص GPU — افترض حذراً على الأجهزة الضعيفة")
+        # فشل سابق
+        with self._lock:
+            failures = self._state.get("known_failures") or {}
+            alerts = self._state.get("sensor_alerts") or []
+        oom_hits = [k for k in failures if "oom" in k.lower() or "memory" in k.lower()]
+        if oom_hits:
+            risks.append(f"سجل فشل ذاكرة سابق: {oom_hits[:3]}")
+            green = False
+        recent_crit = [a for a in alerts[-20:] if str(a.get("severity", "")).lower() in ("error", "critical")]
+        if len(recent_crit) >= 3:
+            risks.append("تنبيهات حساسات حرجة متكررة")
+            green = False
+        decision = "allow" if green else "deny_or_review"
+        return {
+            "action": action,
+            "decision": decision,
+            "green_light": green,
+            "risks": risks,
+            "estimated_vram_mb": estimated_vram_mb,
+            "recommendation_ar": (
+                "تنفيذ مسموح بحذر" if green else
+                "لا تنفّذ التدريب الثقيل الآن — خفّض batch/epochs أو استخدم Kaggle"
+            ),
+        }
+
     def summary(self) -> dict:
         with self._lock:
             return {

@@ -165,6 +165,13 @@ except Exception:
     _CIV_OK = False
 
 try:
+    from ai.sovereignty_loop import handle_sovereignty_command as _sov_handle
+    _SOV_OK = True
+except Exception:
+    _sov_handle = None
+    _SOV_OK = False
+
+try:
     from ai.continuous_training_agent import handle_continuous_command as _cont_handle
     _CONT_OK = True
 except Exception:
@@ -1607,6 +1614,15 @@ def handle_training_command(user_input: str) -> Optional[str]:
             pass
 
     low = text.lower()
+
+    # سيادة التشغيل: MCP/WorldModel/Sensors
+    if _SOV_OK and _sov_handle is not None:
+        try:
+            sv = _sov_handle(text)
+            if sv is not None:
+                return sv
+        except Exception as _sv_err:
+            logger.warning("sovereignty: %s", _sv_err)
 
     # طبقة الحضارة / ما بعد القمة
     if _CIV_OK and _civ_handle is not None:

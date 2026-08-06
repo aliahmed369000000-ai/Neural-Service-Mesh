@@ -94,6 +94,9 @@ INTENT_PHRASES: Dict[str, List[str]] = {
     "cog_swarm": ["محاكاه عقول", "تناظر مدارس"],
     "edge_os": ["نظام تشغيل معرف", "edge runtime"],
     "guardrail": ["حارس معرف", "تحقق ادعا", "كشف تزييف"],
+    "sovereignty": ["سياده النظام", "جسر mcp", "sovereignty"],
+    "knowledge_pulse": ["نبضه معرف", "حساسات", "knowledge pulse"],
+    "gated_train": ["تدريب مبوب", "سياده تدريب"],
     "continuous": ["تدريب مستمر", "راقب جوده", "صيان تدريب"],
 
     # جرد / حالة عامة
@@ -383,6 +386,9 @@ def rewrite_to_canonical(text: str) -> str:
         "cog_swarm": "محاكاة عقول حول: أخلاقيات الذكاء الاصطناعي",
         "edge_os": "نظام تشغيل معرفي",
         "guardrail": text,
+        "sovereignty": "سيادة النظام",
+        "knowledge_pulse": "نبضة معرفية",
+        "gated_train": "تدريب مبوّب",
         "continuous": "تدريب مستمر",
     }.get(intent, text)
     return canonical
