@@ -158,6 +158,13 @@ class PositionalEncoding:
     def forward(self, seq_len: int) -> np.ndarray:
         return self._table[:seq_len]
 
+    def forward_indices(self, pos_idx: np.ndarray) -> np.ndarray:
+        """إضافة دعم الـ batching: يُرجع الترميز الموضعي لمصفوفة مؤشرات
+        مخصصة (بدل الافتراض إن التسلسل متتابع من 0). يُستخدم مع تقنية
+        'sequence packing' حيث كل جملة داخل الحزمة الملصوقة تبدأ مواضعها
+        من 0 من جديد رغم إنها فعلياً في نص الحزمة الطويلة."""
+        return self._table[pos_idx]
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 4. Core Matrix Layer — قلب الشبكة (784×784 ثابتة)
@@ -507,6 +514,28 @@ class OutputHead:
         g    = probs.copy(); g[np.arange(n), targets] -= 1; g /= n
         return loss, g
 
+    def loss_grad_masked(self, probs, targets, valid_mask: np.ndarray):
+        """
+        مثل loss_grad لكن تستبعد مواضع غير صالحة (valid_mask=False) من
+        حساب الخسارة والتدرّج تمامًا. تُستخدم مع 'sequence packing':
+        عند لصق عدة جمل في تسلسل واحد، آخر رمز في كل جملة (عدا الأخيرة)
+        يقع بجانب أول رمز من الجملة التالية في المصفوفة — توقّع "الرمز
+        التالي" هناك يكون بلا معنى (يخلط بين جملتين غير مرتبطتين)، فيجب
+        استبعاده من التدريب بدل تعليم النموذج نمطًا خاطئًا.
+        """
+        n_valid = int(valid_mask.sum())
+        if n_valid == 0:
+            return 0.0, np.zeros_like(probs)
+        idx = np.arange(len(targets))
+        p_correct = np.clip(probs[idx, targets], 1e-10, 1)
+        losses = -np.log(p_correct)
+        loss = float((losses * valid_mask).sum() / n_valid)
+        g = probs.copy()
+        g[idx, targets] -= 1
+        g /= n_valid
+        g[~valid_mask] = 0.0
+        return loss, g
+
     def backward(self, grad, lr):
         gW = grad.T @ self._X; gb = grad.sum(0); gX = grad @ self.W
         self.W -= lr * np.clip(gW, -CLIP_GRAD, CLIP_GRAD); np.clip(self.W,-5,5,out=self.W)
@@ -599,6 +628,76 @@ class ArabicTransformer:
     def train_batch(self, texts: List[str]) -> float:
         losses = [self.train_step(t) for t in texts if t.strip()]
         return float(np.mean(losses)) if losses else 0.0
+
+    def train_step_batch(self, texts: List[str]) -> float:
+        """
+        تدريب حقيقي متوازٍ رياضياً لعدة جمل معًا (sequence packing):
+        تُلصَق كل الجمل في تسلسل واحد طويل، مع:
+        - قناع attention يمنع أي جملة من "رؤية" جملة أخرى (block-diagonal)
+        - ترميز موضعي يبدأ من 0 لكل جملة على حدة (forward_indices)
+        - استبعاد نقاط حدود الجمل من حساب الخسارة (loss_grad_masked)
+
+        الفائدة: تمريرة forward/backward واحدة بدل استدعاء منفصل لكل
+        جملة — يقلل overhead بايثون الكبير نسبياً على الجمل القصيرة،
+        ويستغل numpy/BLAS بكفاءة أعلى على مصفوفات أكبر، حتى على معالج
+        واحد. النتيجة رياضياً مطابقة لتحديث batch gradient descent حقيقي
+        (تراكم كل الجمل قبل تحديث الأوزان مرة واحدة) بدل SGD متتالي.
+        """
+        segments = []
+        for t in texts:
+            if not t.strip():
+                continue
+            ids = self.tokenizer.encode(t, self.max_seq)
+            if len(ids) >= 2:
+                segments.append(ids)
+        if not segments:
+            return 0.0
+
+        # ── لصق الجمل + بناء مصفوفة المواضع لكل جملة تبدأ من 0 ──
+        packed = np.concatenate(segments)
+        pos_full = np.concatenate([np.arange(len(s)) for s in segments])
+        seg_id_full = np.concatenate(
+            [np.full(len(s), i) for i, s in enumerate(segments)]
+        )
+
+        inp      = packed[:-1]
+        tgt      = packed[1:]
+        pos_inp  = pos_full[:-1]
+        seg_inp  = seg_id_full[:-1]
+        seg_tgt  = seg_id_full[1:]
+        S = len(inp)
+
+        # صالح فقط لو الهدف من نفس جملة المدخل (يستبعد نقاط الحدود)
+        valid_mask = (seg_inp == seg_tgt)
+
+        # قناع attention: يمنع النظر للمستقبل (causal) + يمنع النظر
+        # لجملة مختلفة (block-diagonal)، بنفس اصطلاح True=ممنوع
+        causal   = np.triu(np.ones((S, S), bool), k=1)
+        cross_seg = seg_inp[:, None] != seg_inp[None, :]
+        mask = causal | cross_seg
+
+        # ── forward (نفس الطبقات الموجودة، بدون أي تعديل عليها) ──
+        X = self.embedding.forward(inp)
+        X = X + self.pos_enc.forward_indices(pos_inp)
+        X = X + self.core.forward(X)
+        for blk in self.blocks:
+            X = blk.forward(X, mask)
+        probs = self.head.forward(X)
+
+        loss, gp = self.head.loss_grad_masked(probs, tgt, valid_mask)
+
+        # ── backward (نفس مسار train_step تمامًا) ──
+        gX = self.head.backward(gp, self.lr)
+        for blk in reversed(self.blocks):
+            gX = blk.backward(gX, self.lr)
+        gc = self.core.backward(gX, self.lr)
+        self.embedding.backward(gX + gc, self.lr)
+
+        self._steps += 1
+        self._loss_history.append(loss)
+        if len(self._loss_history) > 500:
+            self._loss_history = self._loss_history[-250:]
+        return float(loss)
 
     # ── inference ─────────────────────────────────────────────────────────────
     def encode(self, text: str) -> np.ndarray:
