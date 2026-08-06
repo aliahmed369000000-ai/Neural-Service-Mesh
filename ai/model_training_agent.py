@@ -87,6 +87,13 @@ except Exception:
     _aiaas_handle = None
     _AIAAS_OK = False
 
+try:
+    from ai.apex_autonomy import handle_apex_command as _apex_handle
+    _APEX_OK = True
+except Exception:
+    _apex_handle = None
+    _APEX_OK = False
+
 # ── مسارات NSM المعروفة (اختيارية — أحد الأهداف وليست الوحيدة) ──────────────
 STATE_V3 = ROOT / "ckg_train_state_v3.json"
 SENTENCES_V3 = ROOT / "ckg_sentences_v3.pkl"
@@ -1440,6 +1447,15 @@ def handle_training_command(user_input: str) -> Optional[str]:
     if not text:
         return None
     low = text.lower()
+
+    # Apex autonomy (mergers / synthetic / DAO sim)
+    if _APEX_OK and _apex_handle is not None:
+        try:
+            apx = _apex_handle(text)
+            if apx is not None:
+                return apx
+        except Exception as _apx_err:
+            logger.warning("apex handle: %s", _apx_err)
 
     # AIaaS platform commands
     if _AIAAS_OK and _aiaas_handle is not None:

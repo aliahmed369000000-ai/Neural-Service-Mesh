@@ -138,5 +138,13 @@
     "default_plan": "free",
     "isolate_tenants": true,
     "billing_estimate_only": true
+  },
+  "apex": {
+    "mergers_enabled": true,
+    "synthetic_enabled": true,
+    "dao_simulation_only": true,
+    "real_crypto_wallets": false,
+    "max_synthetic_rows": 500,
+    "max_merge_candidates": 5
   }
 }
