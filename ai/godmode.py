@@ -22,6 +22,12 @@ import json
 import re
 from typing import Dict, List, Optional
 
+try:
+    from ai.arabic_nlp import _normalize_hamza
+except Exception:
+    def _normalize_hamza(s: str) -> str:  # احتياط: بدون تطبيع لو تعذّر الاستيراد
+        return s
+
 
 NSM_PERSONA_PROMPT = (
     "أنت الشخصية الموحّدة لنظام NSM (Neural Service Mesh) — مساعد ذكاء "
@@ -40,16 +46,34 @@ COORDINATOR_SYSTEM_PROMPT = (
 )
 
 
+def _query_words(query: str) -> List[str]:
+    """يستخرج كلمات الاستعلام بعد تطبيع الهمزة (نفس _normalize_hamza
+    المستخدَمة في ai.arabic_nlp)، مع إضافة نسخة كل كلمة بعد إزالة "ال"
+    التعريف كمرشّح إضافي (نفس منطق إزالة "ال" المستخدَم فعلاً في
+    ai.llm_fallback._suggest_ckg_concepts). بدونها، كلمة استعلام مثل
+    "الأتمتة" لا تطابق "اتمتة" في وصف الفئة (اختلاف الهمزة)، ولا
+    "الأتمتة" تطابق "أتمتة" المجرَّدة من "ال" — فيفشل التوجيه الحتمي
+    رغم وجود تطابق فعلي بالمعنى، ويسقط الاستعلام للجوء العام أو LLM
+    الاحتياطي بلا داعٍ."""
+    q = _normalize_hamza(query.strip().lower())
+    words = [w for w in q.replace("؟", " ").replace("،", " ").split() if len(w) >= 3]
+    expanded: List[str] = []
+    for w in words:
+        expanded.append(w)
+        if w.startswith("ال") and len(w) > 3:
+            expanded.append(w[2:])
+    return expanded
+
+
 def _keyword_scores(query: str, categories: Dict[str, object]) -> Dict[str, int]:
     """نقاط تطابق كلمات مفتاحية بسيطة بين الاستعلام وعنوان/وصف/أسئلة كل فئة."""
-    q = query.strip().lower()
-    words = {w for w in q.replace("؟", " ").replace("،", " ").split() if len(w) >= 3}
+    words = set(_query_words(query))
     scores: Dict[str, int] = {}
     for key, cat in categories.items():
-        haystack = " ".join(
+        haystack = _normalize_hamza(" ".join(
             [getattr(cat, "title", ""), getattr(cat, "subtitle", "")]
             + list(getattr(cat, "quick_prompts", []) or [])
-        ).lower()
+        ).lower())
         scores[key] = sum(1 for w in words if w in haystack)
     return scores
 
@@ -138,11 +162,10 @@ def route_query_verbose(
     Returns:
         (قائمة المفاتيح المختارة، طريقة التوجيه، نقاط الكلمات المفتاحية)
     """
-    q = query.strip().lower()
-    if not q or not categories:
+    if not query.strip() or not categories:
         return [], "empty", {}
 
-    words = {w for w in q.replace("؟", " ").replace("،", " ").split() if len(w) >= 3}
+    words = set(_query_words(query))
     if not words:
         return list(categories.keys())[:1], "default", {}
 
