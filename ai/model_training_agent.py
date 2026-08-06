@@ -144,6 +144,13 @@ except Exception:
     _SUPER_OK = False
 
 try:
+    from ai.commercial_economy import handle_economic_command as _economic_handle
+    _ECONOMIC_OK = True
+except Exception:
+    _economic_handle = None
+    _ECONOMIC_OK = False
+
+try:
     from ai.command_lexicon import (
         handle_help_command as _help_handle,
         rewrite_to_canonical as _rewrite_cmd,
@@ -1579,6 +1586,15 @@ def handle_training_command(user_input: str) -> Optional[str]:
             pass
 
     low = text.lower()
+
+    # المحرك الاقتصادي (AIaaS / سوق / Arbitrage / بيانات)
+    if _ECONOMIC_OK and _economic_handle is not None:
+        try:
+            ec = _economic_handle(text)
+            if ec is not None:
+                return ec
+        except Exception as _ec_err:
+            logger.warning("economic: %s", _ec_err)
 
     # Super AI Orchestrator — حوسبة فائقة / بيانات / تطور / سرب
     if _SUPER_OK and _super_handle is not None:

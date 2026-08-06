@@ -87,6 +87,7 @@ INTENT_PHRASES: Dict[str, List[str]] = {
     "synthetic": ["مصنع بيانات", "بيانات اصطناع", "synthetic data"],
     "agent_evo": ["تطور ذاتي", "سجل الوكيل", "agent v2"],
     "swarm": ["سرب", "swarm", "mesh", "وكلاء لامركز"],
+    "economic_dash": ["لوحه الاقتصاد", "محرك اقتصاد", "ايرادات", "marketplace"],
 
     # جرد / حالة عامة
     "inventory": ["جرد", "مخزون", "ما المتاح", "بيئه التدريب", "inventory", "وش عندك"],
@@ -259,6 +260,10 @@ HELP_CATALOG: List[Tuple[str, List[Tuple[str, str]]]] = [
             ("سجل الوكيل", "إصدارات Foundation Agent"),
             ("حالة السرب", "شبكة Mesh"),
             ("حاكِ مزامنة كوكبية", "تبادل خبرات"),
+            ("لوحة الاقتصاد", "إيرادات القنوات الأربع"),
+            ("انشر نموذج", "كتالوج السوق"),
+            ("هامش spot", "Compute arbitrage"),
+            ("بيع بيانات", "تسعير اصطناعي"),
         ],
     ),
 ]
@@ -364,6 +369,7 @@ def rewrite_to_canonical(text: str) -> str:
         "synthetic": text,
         "agent_evo": text,
         "swarm": text,
+        "economic_dash": "لوحة الاقتصاد",
     }.get(intent, text)
     return canonical
 
