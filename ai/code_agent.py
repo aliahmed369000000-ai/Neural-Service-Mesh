@@ -20,11 +20,42 @@ _MAX_READ = 5000  # حد القراءة بالحروف
 
 
 # ══════════════════════════════════════════════════════════════════
+# 0. حماية المسارات — كل الدوال أدناه تستقبل path من نص دردشة خام
+#    (عبر nsm_chat._handle_code_command)، وكانت تمرّره مباشرة لـ
+#    ROOT / path بلا أي تحقق. مسار مثل "../../../etc/passwd" أو مسار
+#    مطلق "/etc/passwd" يهرب فعلياً من مجلد المشروع تماماً — Python
+#    نفسه يحلّ ".." عند resolve()/فتح الملف، و"/" المطلق يستبدل الجذر
+#    بالكامل (Path.__truediv__ الموثَّق). كان هذا يعني أن أي مستخدم في
+#    الدردشة يقدر يقرأ (افحص/ملخص/صحح) أو حتى يكتب (عدل/أنشئ) أي ملف
+#    على القرص يملك المسار صلاحية الوصول له — مثل secrets.toml أو
+#    مفاتيح API في متغيرات البيئة على Streamlit Cloud.
+# ══════════════════════════════════════════════════════════════════
+def _safe_path(path: str) -> "Path | None":
+    """يحلّ مسار مستخدم نسبي إلى مسار مطلق آمن داخل ROOT حصراً فقط.
+    يرفض (يعيد None) أي مسار مطلق أو أي ".." يهرب فعلياً خارج مجلد
+    المشروع بعد الحلّ (resolve) — سواء وُجد الملف أصلاً (قراءة/تعديل)
+    أو لم يوجد بعد (إنشاء)."""
+    if not path or not path.strip():
+        return None
+    try:
+        candidate = (ROOT / path.strip()).resolve()
+        candidate.relative_to(ROOT.resolve())
+    except (ValueError, OSError):
+        return None
+    return candidate
+
+
+_UNSAFE_PATH_MSG = "❌ مسار غير مسموح به (خارج مجلد المشروع)."
+
+
+# ══════════════════════════════════════════════════════════════════
 # 1. قراءة ملف
 # ══════════════════════════════════════════════════════════════════
 def read_file(path: str) -> str:
     try:
-        f = ROOT / path
+        f = _safe_path(path)
+        if f is None:
+            return _UNSAFE_PATH_MSG
         if not f.exists():
             return f"❌ الملف غير موجود: {path}"
         size = f.stat().st_size
@@ -41,7 +72,9 @@ def read_file(path: str) -> str:
 # ══════════════════════════════════════════════════════════════════
 def list_files(folder: str = ".") -> str:
     try:
-        base = ROOT / folder
+        base = _safe_path(folder)
+        if base is None:
+            return _UNSAFE_PATH_MSG
         if not base.exists():
             return f"❌ المجلد غير موجود: {folder}"
         skip = {"knowledge", "checkpoints", "data", "__pycache__", ".git"}
@@ -65,7 +98,9 @@ def list_files(folder: str = ".") -> str:
 # ══════════════════════════════════════════════════════════════════
 def edit_file(path: str, old: str, new: str) -> str:
     try:
-        f = ROOT / path
+        f = _safe_path(path)
+        if f is None:
+            return _UNSAFE_PATH_MSG
         if not f.exists():
             return f"❌ الملف غير موجود: {path}"
         content = f.read_text(encoding="utf-8")
@@ -83,7 +118,9 @@ def edit_file(path: str, old: str, new: str) -> str:
 # ══════════════════════════════════════════════════════════════════
 def create_file(path: str, content: str) -> str:
     try:
-        f = ROOT / path
+        f = _safe_path(path)
+        if f is None:
+            return _UNSAFE_PATH_MSG
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(content, encoding="utf-8")
         return f"✅ تم إنشاء {path}"
@@ -199,7 +236,9 @@ def project_suggestions(filter_type: str = "") -> str:
 # ══════════════════════════════════════════════════════════════════
 def fix_file(path: str) -> str:
     try:
-        f = ROOT / path
+        f = _safe_path(path)
+        if f is None:
+            return _UNSAFE_PATH_MSG
         if not f.exists():
             return f"❌ الملف غير موجود: {path}"
         text = f.read_text(encoding="utf-8")
@@ -223,7 +262,9 @@ def fix_file(path: str) -> str:
 # ══════════════════════════════════════════════════════════════════
 def summarize_file(path: str) -> str:
     try:
-        f = ROOT / path
+        f = _safe_path(path)
+        if f is None:
+            return _UNSAFE_PATH_MSG
         if not f.exists():
             return f"❌ الملف غير موجود: {path}"
         text = f.read_text(encoding="utf-8", errors="replace")
