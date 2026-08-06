@@ -284,6 +284,28 @@ async def aiaas_run_job(request: Request):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+
+
+@app.post("/aiaas/upload")
+async def aiaas_upload(request: Request):
+    """رفع CSV لمساحة المستأجر. Header X-API-Key. multipart: file"""
+    api_key = request.headers.get("X-API-Key") or request.headers.get("x-api-key") or ""
+    try:
+        from ai.aiaas_platform import authenticate_api_key, save_tenant_upload
+        ten = authenticate_api_key(api_key)
+        if not ten:
+            return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+        form = await request.form()
+        f = form.get("file")
+        if f is None:
+            return JSONResponse({"ok": False, "error": "file required"}, status_code=400)
+        content = await f.read()
+        name = getattr(f, "filename", None) or "upload.csv"
+        rel = save_tenant_upload(ten["id"], str(name), content)
+        return {"ok": True, "path": rel, "tenant_id": ten["id"]}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
 @app.get("/aiaas/invoice/{tenant_id}")
 def aiaas_invoice(tenant_id: str):
     try:

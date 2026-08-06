@@ -233,6 +233,23 @@ def record_usage(tenant_id: str, train_seconds: float = 0.0, models_delta: int =
     )
 
 
+
+def save_tenant_upload(tenant_id: str, filename: str, content: bytes) -> str:
+    """حفظ ملف مرفوع داخل مساحة المستأجر فقط."""
+    if not get_tenant(tenant_id):
+        raise ValueError("مستأجر غير موجود")
+    plan = PLANS.get((get_tenant(tenant_id) or {}).get("plan") or "free", PLANS["free"])
+    max_mb = float(plan.get("max_upload_mb") or 5)
+    if len(content) > max_mb * 1024 * 1024:
+        raise ValueError(f"الملف أكبر من حد الخطة ({max_mb} MB)")
+    safe = re.sub(r"[^a-zA-Z0-9._\-]", "_", filename)[:120]
+    if not safe.lower().endswith(".csv"):
+        safe += ".csv"
+    dest = _tenant_dir(tenant_id) / "data" / safe
+    dest.write_bytes(content)
+    return str(dest.relative_to(ROOT))
+
+
 def estimate_invoice(tenant_id: str) -> Dict[str, Any]:
     rec = get_tenant(tenant_id) or {}
     plan_key = rec.get("plan") or "free"

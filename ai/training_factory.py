@@ -104,8 +104,10 @@ def parse_goal(text: str) -> FactoryGoal:
         domain = "arabic_dialects"
     elif re.search(r"مشاعر|sentiment", t, re.I):
         domain = "sentiment"
-    elif re.search(r"قرآن|islami|دين", t, re.I):
-        domain = "islamic_knowledge"
+    elif re.search(r"جذر|صرف|roots", t, re.I):
+        domain = "ckg_roots"
+    elif re.search(r"ckg|كيان|معرفة|قرآن|islami|دين|مفهوم", t, re.I):
+        domain = "ckg"
     elif re.search(r"تصنيف|classif", t, re.I):
         domain = "classification"
 
@@ -185,6 +187,8 @@ def _agent_data_discover(goal: FactoryGoal) -> Tuple[str, Dict[str, Any]]:
                 q = "Arabic dialect identification neural network"
             elif goal.domain_hint == "sentiment":
                 q = "Arabic sentiment classification"
+            elif goal.domain_hint in ("ckg", "ckg_roots", "islamic_knowledge"):
+                q = "Arabic knowledge graph concept classification Quran"
             arx = search_arxiv(q, max_results=3)
             notes.append("arXiv: تم الجلب")
             meta["arxiv_preview"] = arx[:500]
@@ -200,20 +204,35 @@ def _agent_data_discover(goal: FactoryGoal) -> Tuple[str, Dict[str, Any]]:
 
 
 def _agent_data_prepare(goal: FactoryGoal) -> Tuple[str, Dict[str, Any]]:
-    """اختيار أفضل CSV محلي حسب المجال."""
+    """اختيار/تصدير أفضل CSV حسب المجال — CKG يُصدَّر من معرفة المشروع."""
     mapping = {
         "sentiment": "data/samples/text_sentiment_demo.csv",
-        "arabic_dialects": "data/samples/text_sentiment_demo.csv",  # تقريب Toy حتى تتوفر بيانات لهجات
+        "arabic_dialects": "data/samples/text_sentiment_demo.csv",
         "classification": "data/samples/classification_demo.csv",
-        "islamic_knowledge": "data/samples/classification_demo.csv",
         "general": "data/samples/classification_demo.csv",
     }
-    path = mapping.get(goal.domain_hint, mapping["general"])
+    meta: Dict[str, Any] = {}
+    path = mapping.get(goal.domain_hint)
+
+    if goal.domain_hint in ("ckg", "ckg_roots", "islamic_knowledge") or path is None and re.search(
+        r"ckg|كيان|معرفة|قرآن", goal.raw_text, re.I
+    ):
+        try:
+            from ai.ckg_training_export import export_for_goal
+
+            path, meta = export_for_goal(goal.domain_hint, goal.raw_text)
+            return (
+                f"تصدير CKG → `{path}` (n={meta.get('n_rows')}, labels={meta.get('labels')})",
+                {"dataset": path, "ckg_export": meta},
+            )
+        except Exception as e:
+            return f"❌ فشل تصدير CKG: {e}", {"dataset": None}
+
     if goal.target_metric == "mse":
         path = "data/samples/regression_demo.csv"
+    path = path or mapping["general"]
     full = ROOT / path
     if not full.is_file():
-        # أي csv
         found = list((ROOT / "data" / "samples").glob("*.csv"))
         if found:
             path = str(found[0].relative_to(ROOT))
@@ -226,7 +245,7 @@ def _agent_engineer_select(goal: FactoryGoal, dataset: Optional[str]) -> Tuple[s
     prefer = "torch"
     if dataset and "text" in dataset:
         prefer = "text"
-    elif goal.domain_hint in ("sentiment", "arabic_dialects"):
+    elif goal.domain_hint in ("sentiment", "arabic_dialects", "ckg", "ckg_roots", "islamic_knowledge"):
         prefer = "text"
     elif goal.target_metric == "mse":
         prefer = "torch"

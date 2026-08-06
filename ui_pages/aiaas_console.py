@@ -80,9 +80,18 @@ def render_aiaas_console():
                 [k for k, v in DOMAINS.items() if v.get("status") != "planned"],
             )
             epochs = st.slider("عدد الحقب", 5, int(PLANS.get((idx[tid] or {}).get("plan") or "free", PLANS["free"])["max_epochs"]), 15)
+            up = st.file_uploader("رفع CSV خاص بالمستأجر (اختياري)", type=["csv"], key="aiaas_up")
+            dataset_rel = None
+            if up is not None:
+                from ai.aiaas_platform import save_tenant_upload
+                try:
+                    dataset_rel = save_tenant_upload(tid, up.name, up.getvalue())
+                    st.info(f"حُفظ في مساحة المستأجر: `{dataset_rel}`")
+                except Exception as e:
+                    st.error(str(e))
             if st.button("🚀 تشغيل مهمة تدريب", type="primary"):
                 with st.spinner("جاري التدريب في بيئة المستأجر…"):
-                    job = run_tenant_job(tid, domain=domain, epochs=epochs)
+                    job = run_tenant_job(tid, domain=domain, epochs=epochs, dataset_rel=dataset_rel)
                 if job.get("ok") is False or job.get("error"):
                     st.error(job.get("error") or "فشل")
                 else:

@@ -19,6 +19,7 @@ from ui_pages.qa import render_qa
 from ui_pages.higgsfield import render_higgsfield, _render_hf_result
 from ui_pages.training import render_training, render_nsm_routing
 from ui_pages.aiaas_console import render_aiaas_console
+from ui_pages.training_ops_dashboard import render_training_ops_dashboard
 from ui_pages.memory import render_memory
 from ui_pages.health import render_health
 from ui_pages.advanced_api import render_advanced_api
@@ -428,6 +429,7 @@ def main():
         ("📡 الوكيل الاجتماعي", render_social_agent),
         ("🎓 التدريب", render_training),
         ("☁️ AIaaS", render_aiaas_console),
+        ("📡 عمليات التدريب", render_training_ops_dashboard),
     ]
     if st.session_state.get("_dev_console_unlocked", False):
         _tab_defs.append(("⚙️ النظام", render_system_group))
