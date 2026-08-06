@@ -106,6 +106,11 @@ class Phase6Validator:
             # منفصل + requirements.txt خاص بها) — ليست كوداً ميتاً، بل
             # مشروع فرعي مستقل غير مستورد أبداً من مشروع Streamlit الرئيسي.
             "whatsapp_gateway/api/webhook.py",
+            # سكربتات CLI مستقلة تُشغَّل يدوياً (python3 <script>.py)، بتصميمها
+            # لا يستوردها أي كود آخر — ليست كوداً ميتاً.
+            "benchmark_single_batch_v3.py",
+            "scripts/build_tokenizer_vocab.py",
+            "scripts/check_whatsapp_gateway_sync.py",
         ]
 
     # ── Root detection ─────────────────────────────────────────────────────
