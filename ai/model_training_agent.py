@@ -215,6 +215,13 @@ except Exception:
     _BILL_OK = False
 
 try:
+    from ai.ckg_quality_tool import handle_ckg_quality_command as _ckgq_handle
+    _CKGQ_OK = True
+except Exception:
+    _ckgq_handle = None
+    _CKGQ_OK = False
+
+try:
     from ai.cognitive_microkernel import handle_kernel_command as _kern_handle
     _KERN_OK = True
 except Exception:
@@ -1708,6 +1715,14 @@ def handle_training_command(user_input: str) -> Optional[str]:
                 return mh
         except Exception as _mh_err:
             logger.warning("mesh: %s", _mh_err)
+
+    if _CKGQ_OK and _ckgq_handle is not None:
+        try:
+            cq = _ckgq_handle(text)
+            if cq is not None:
+                return cq
+        except Exception as _cq_err:
+            logger.warning("ckg_quality: %s", _cq_err)
 
     if _BILL_OK and _bill_handle is not None:
         try:
