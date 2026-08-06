@@ -427,10 +427,35 @@ def prepare_kaggle_job(
         username
         or os.environ.get("KAGGLE_USERNAME")
         or os.environ.get("KAGGLE_USER")
-        or "nsm-agent"
+        or None
     )
-    script = generate_kernel_script(job_id, csv_rel=csv_path, epochs=epochs, title=title)
-    meta = generate_kernel_metadata(job_id, username=user, title=title, enable_gpu=True)
+    if not user:
+        # حاول قراءة username من kaggle.json
+        try:
+            import json as _json
+            for cand in (
+                Path.home() / ".kaggle" / "kaggle.json",
+                Path(os.environ.get("KAGGLE_CONFIG_DIR") or "") / "kaggle.json",
+            ):
+                if cand.is_file():
+                    data = _json.loads(cand.read_text(encoding="utf-8"))
+                    user = data.get("username") or data.get("user")
+                    if user:
+                        break
+        except Exception:
+            pass
+    user = user or "nsm-agent"
+    # slug يجب أن يطابق العنوان حتى لا يرفض Kaggle أو يُنتج URL مختلف
+    slug = _safe_slug(f"nsm-{job_id}")
+    # عنوان نظيف يحل إلى نفس الـslug
+    clean_title = slug.replace("-", " ")
+    effective_title = title if title and title != "NSM Training Agent" else clean_title
+    # إن بقي العنوان مخصصاً، اجعل الـid يعتمد على slug من العنوان أيضاً لتفادي تحذير Kaggle
+    title_slug = _safe_slug(effective_title)
+    script = generate_kernel_script(job_id, csv_rel=csv_path, epochs=epochs, title=effective_title)
+    meta = generate_kernel_metadata(job_id, username=user, title=effective_title, enable_gpu=True)
+    # فرض تطابق id مع slug العنوان
+    meta["id"] = f"{user}/{title_slug}"
 
     (job_dir / "nsm_train.py").write_text(script, encoding="utf-8")
     (job_dir / "kernel-metadata.json").write_text(
@@ -508,20 +533,41 @@ def push_kaggle_kernel(job_id: str) -> Dict[str, Any]:
         )
         out = (proc.stdout or "") + "\n" + (proc.stderr or "")
         success = proc.returncode == 0
+        # استخراج رابط/slug الفعلي من مخرجات CLI
+        actual_url = None
+        actual_slug = None
+        import re as _re
+        murl = _re.search(r"https://www\.kaggle\.com/code/([\w\-]+)/([\w\-]+)", out)
+        if murl:
+            actual_slug = f"{murl.group(1)}/{murl.group(2)}"
+            actual_url = murl.group(0)
         result = {
             "ok": success,
             "job_id": job_id,
             "status": "pushed" if success else "push_failed",
             "returncode": proc.returncode,
             "output": out[-4000:],
+            "kernel_slug": actual_slug,
+            "kernel_url": actual_url,
             "finished_at": _now(),
         }
-        # حدّث job.json
+        # حدّث job.json + metadata id إن تغيّر الـslug
         jp = job_dir / "job.json"
         if jp.is_file():
             data = json.loads(jp.read_text(encoding="utf-8"))
-            data.update({k: result[k] for k in ("status", "ok", "output", "finished_at")})
+            data.update({k: result[k] for k in ("status", "ok", "output", "finished_at", "kernel_slug", "kernel_url") if k in result})
+            if actual_slug:
+                data["kernel_id"] = actual_slug
             jp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        if actual_slug:
+            meta_path = job_dir / "kernel-metadata.json"
+            if meta_path.is_file():
+                try:
+                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                    meta["id"] = actual_slug
+                    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+                except Exception:
+                    pass
         return result
     except subprocess.TimeoutExpired:
         return {"ok": False, "job_id": job_id, "error": "انتهت مهلة الدفع (120s)"}
@@ -538,6 +584,14 @@ def status_kaggle_kernel(job_id: str) -> Dict[str, Any]:
 
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     kernel_id = meta.get("id") or ""
+    # فضّل الـslug الفعلي المحفوظ بعد الدفع
+    jp = job_dir / "job.json"
+    if jp.is_file():
+        try:
+            jdata = json.loads(jp.read_text(encoding="utf-8"))
+            kernel_id = jdata.get("kernel_slug") or jdata.get("kernel_id") or kernel_id
+        except Exception:
+            pass
     ok_cred, msg = ensure_kaggle_env()
     if not ok_cred or not _kaggle_cli_available():
         return {
@@ -579,6 +633,13 @@ def download_kaggle_output(job_id: str) -> Dict[str, Any]:
 
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     kernel_id = meta.get("id") or ""
+    jp = job_dir / "job.json"
+    if jp.is_file():
+        try:
+            jdata = json.loads(jp.read_text(encoding="utf-8"))
+            kernel_id = jdata.get("kernel_slug") or jdata.get("kernel_id") or kernel_id
+        except Exception:
+            pass
     out_dir = job_dir / "output"
     out_dir.mkdir(parents=True, exist_ok=True)
 
