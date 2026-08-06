@@ -124,5 +124,13 @@
       "kaggle.com",
       "www.kaggle.com"
     ]
+  },
+  "factory": {
+    "require_approval_for_deploy": true,
+    "require_approval_above_accuracy_gain": 0.03,
+    "max_autonomous_steps": 8,
+    "default_target_accuracy": 0.9,
+    "auto_approve_toy": true,
+    "crisis_after_failures": 3
   }
 }

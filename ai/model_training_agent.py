@@ -73,6 +73,13 @@ except Exception:
     _web_handle = None
     _WEB_ACCESS_OK = False
 
+try:
+    from ai.training_factory import handle_factory_command as _factory_handle
+    _FACTORY_OK = True
+except Exception:
+    _factory_handle = None
+    _FACTORY_OK = False
+
 # ── مسارات NSM المعروفة (اختيارية — أحد الأهداف وليست الوحيدة) ──────────────
 STATE_V3 = ROOT / "ckg_train_state_v3.json"
 SENTENCES_V3 = ROOT / "ckg_sentences_v3.pkl"
@@ -1426,6 +1433,15 @@ def handle_training_command(user_input: str) -> Optional[str]:
     if not text:
         return None
     low = text.lower()
+
+    # مصنع مستقل (أهداف عامة + موافقات)
+    if _FACTORY_OK and _factory_handle is not None:
+        try:
+            fac = _factory_handle(text)
+            if fac is not None:
+                return fac
+        except Exception as _fac_err:
+            logger.warning("factory handle: %s", _fac_err)
 
     # حلقة التغذية الراجعة / registry / drift أولاً
     if _FEEDBACK_OK and _fb_handle is not None:
