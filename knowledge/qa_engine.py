@@ -731,9 +731,8 @@ def _apply_neural_boost(
     question: str, related_concepts: List[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
     """
-    يعزّز ترتيب related_concepts دلالياً عبر مقارنة hash IDs (بدون توليد
-    نص حر — انظر توثيق HashTokenizer في ai/arabic_transformer.py).
-    عند أي فشل: يُرجع القائمة كما هي دون أي تعديل (fallback آمن كامل).
+    يعزّز ترتيب related_concepts دلالياً عبر مقارنة token IDs من WordTokenizer
+    (أو HashTokenizer إن فُعّل يدوياً). عند أي فشل: يُرجع القائمة كما هي.
     """
     if not related_concepts:
         return related_concepts
@@ -747,7 +746,15 @@ def _apply_neural_boost(
         n = len(top_ids)
 
         def boost_of(name: str) -> float:
-            ids = booster.tokenizer.encode(name, 3)
+            tok = booster.tokenizer
+            if hasattr(tok, "content_ids"):
+                ids = tok.content_ids(name, 3)
+            else:
+                ids = tok.encode(name, 8)
+                special = {getattr(tok, "PAD", 0), getattr(tok, "BOS", 2),
+                           getattr(tok, "EOS", 3), getattr(tok, "SEP", 4),
+                           getattr(tok, "MASK", 5)}
+                ids = [int(x) for x in ids if int(x) not in special]
             if len(ids) == 0:
                 return 0.0
             first_id = int(ids[0])

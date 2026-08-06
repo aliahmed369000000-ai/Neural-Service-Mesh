@@ -366,16 +366,25 @@ class ReasoningPipeline:
 
     def _transformer_boost(self, question: str, concept_name: str) -> float:
         """
-        يستخدم ArabicTransformer.predict_next() لمقارنة hash IDs بدون فك تشفير:
-        لو أول hash ID لاسم المفهوم ظهر ضمن أعلى توقعات النموذج للسؤال،
-        يُعتبر ده إشارة فهم دلالي حقيقي من الشبكة الـ40M. يُعيد 0..1.
+        يستخدم ArabicTransformer.predict_next() لمقارنة token IDs:
+        لو أول رمز محتوى لاسم المفهوم ظهر ضمن أعلى توقعات النموذج للسؤال،
+        يُعتبر إشارة فهم دلالي من الشبكة. يُعيد 0..1.
         """
         if self.transformer is None:
             return 0.0
         try:
             top = self.transformer.predict_next(question, top_k=15)
             top_ids = {i for i, _ in top}
-            concept_ids = self.transformer.tokenizer.encode(concept_name, 3)
+            tok = self.transformer.tokenizer
+            if hasattr(tok, "content_ids"):
+                concept_ids = tok.content_ids(concept_name, 3)
+            else:
+                concept_ids = tok.encode(concept_name, 8)
+                # تخطّي الرموز الخاصة إن وُجدت في البداية/النهاية
+                special = {getattr(tok, "PAD", 0), getattr(tok, "BOS", 2),
+                           getattr(tok, "EOS", 3), getattr(tok, "SEP", 4),
+                           getattr(tok, "MASK", 5)}
+                concept_ids = [int(x) for x in concept_ids if int(x) not in special]
             if len(concept_ids) == 0:
                 return 0.0
             first_id = int(concept_ids[0])

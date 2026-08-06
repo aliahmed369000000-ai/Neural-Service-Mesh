@@ -43,7 +43,7 @@ import numpy as np
 from ai.arabic_transformer import (
     D_MODEL, N_HEADS, MAX_SEQ_LEN, VOCAB_SIZE, LEARNING_RATE, CLIP_GRAD,
     _xavier, _relu, _softmax,
-    HashTokenizer, TokenEmbedding, PositionalEncoding, CoreMatrixLayer,
+    WordTokenizer, HashTokenizer, TokenEmbedding, PositionalEncoding, CoreMatrixLayer,
     MultiHeadAttention, LayerNorm, OutputHead,
 )
 
@@ -234,7 +234,7 @@ class MoEArabicTransformer:
         self.lr = lr
         self.max_seq = max_seq
 
-        self.tokenizer = HashTokenizer(vocab_size)
+        self.tokenizer = WordTokenizer(vocab_size)
         self.embedding = TokenEmbedding(vocab_size, d_model)
         self.pos_enc = PositionalEncoding(d_model, max_seq)
         self.core = CoreMatrixLayer(core_csv, d_model)

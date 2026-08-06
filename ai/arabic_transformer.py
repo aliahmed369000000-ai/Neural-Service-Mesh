@@ -1,20 +1,19 @@
 """
-Arabic Transformer — NSM v3.0
+Arabic Transformer — NSM v3.1
 ==============================
-مبدأ التصميم الأساسي:
-    النموذج لا يحفظ أي نص أو بيانات تدريب.
-    كل ما يتعلمه يُخزَّن حصراً في الأوزان (Weights).
-    البيانات تُمتَص → تُعدِّل الأوزان → تُرمى.
-
 ما يُحفَظ على disk:
-    ✓ أوزان الشبكة (.npy)        ← الذاكرة الحقيقية للنموذج
-    ✓ المصفوفة المدروسة (.csv/.npy) ← بذرة ابتدائية قابلة للتدريب (لم تعد مجمَّدة)، قلب الشبكة
-    ✗ لا نصوص، لا كلمات، لا قواعد بيانات
+    ✓ أوزان الشبكة (.npy)
+    ✓ قاموس الـtokenizer ثنائي الاتجاه (word_to_id / id_to_word) لتمكين encode+decode
+    ✓ المصفوفة المدروسة (.csv/.npy)
 
-الـ Tokenizer:
-    يعمل بـ character n-grams + hash trick.
-    لا يحفظ أي كلمة — فقط دالة تحويل رياضية.
-    الجدول الوحيد المحفوظ: embedding matrix (أوزان).
+الـ Tokenizer (v3.1):
+    WordTokenizer — قاموس كلمات (word-level) مع encode() و decode().
+    يُبنى من نصوص CKG/القرآن/جمل التدريب، ويُحفظ مع الأوزان.
+    HashTokenizer ما زال متاحاً للتوافق الخلفي لكنه لم يعد الافتراضي
+    (لا يدعم decode وبالتالي لا توليد نص مقروء).
+
+تحذير: تغيير الـtokenizer غير متوافق مع أوزان مدرَّبة على hash IDs —
+يلزم إعادة تدريب من الصفر بعد الترقية إلى WordTokenizer.
 """
 from __future__ import annotations
 
@@ -37,7 +36,7 @@ N_HEADS      = 16
 D_FF         = 8384
 N_LAYERS     = 16
 MAX_SEQ_LEN  = 128
-VOCAB_SIZE   = 8192     # حجم ثابت — hash space، لا يتوسع
+VOCAB_SIZE   = 8192     # سقف القاموس الافتراضي (word-level + UNK)
 LEARNING_RATE = 1e-4
 CLIP_GRAD    = 1.0
 WEIGHTS_DIR  = "models/transformer"
@@ -63,27 +62,161 @@ def _layer_norm_fwd(x, g, b, eps=1e-6):
 # ══════════════════════════════════════════════════════════════════════════════
 # 1. Hash Tokenizer — لا يحفظ أي نص
 # ══════════════════════════════════════════════════════════════════════════════
-class HashTokenizer:
+class WordTokenizer:
     """
-    Tokenizer يعمل بالـ hashing فقط.
+    Tokenizer كلمات (word-level) ثنائي الاتجاه.
 
-    لا يوجد vocab، لا word2id، لا أي نص محفوظ.
-    كل كلمة → hash رقمي → ID في النطاق [6, VOCAB_SIZE).
-    
-    الرموز الخاصة (ثوابت لا تتغير):
+    الرموز الخاصة (ثابتة):
         PAD=0, UNK=1, BOS=2, EOS=3, SEP=4, MASK=5
-    
-    النتيجة: النموذج يتعلم تمثيل الكلمات عبر الأوزان،
-    وليس عبر جدول نصي محفوظ.
+
+    - encode(text) → مصفوفة IDs
+    - decode(ids)  → نص عربي مقروء
+    - يُحفظ القاموس مع أوزان النموذج (tokenizer_vocab.json)
     """
     PAD, UNK, BOS, EOS, SEP, MASK = 0, 1, 2, 3, 4, 5
-    OFFSET = 6  # أول ID متاح للكلمات
+    OFFSET = 6
+    SPECIAL = ("<PAD>", "<UNK>", "<BOS>", "<EOS>", "<SEP>", "<MASK>")
+    DEFAULT_VOCAB_PATH = "models/tokenizer_vocab.json"
+
+    def __init__(self, vocab_size: int = VOCAB_SIZE, vocab_path: Optional[str] = None):
+        self.vocab_size = int(vocab_size)
+        self.word_to_id: Dict[str, int] = {}
+        self.id_to_word: Dict[int, str] = {}
+        for i, tok in enumerate(self.SPECIAL):
+            self.word_to_id[tok] = i
+            self.id_to_word[i] = tok
+        path = vocab_path or self.DEFAULT_VOCAB_PATH
+        if path and os.path.exists(path):
+            self.load(path)
+        elif self.vocab_size > self.OFFSET:
+            # قاموس بذرة صغير حتى يُبنى من بيانات التدريب
+            self._seed_minimal_vocab()
+
+    def _seed_minimal_vocab(self) -> None:
+        """كلمات عربية شائعة كبذرة أولية (قبل build_from_texts)."""
+        seed = [
+            "الله", "الرحمن", "الرحيم", "الصبر", "التقوى", "الايمان", "العلم",
+            "العدل", "الرحمه", "التوبه", "القران", "الاسلام", "الصلاه", "الزكاه",
+            "الصوم", "الحج", "النبي", "الرسول", "المومن", "الكفر", "الجنة",
+            "النار", "الدنيا", "الاخره", "الحق", "الباطل", "الخير", "الشر",
+            "الكتاب", "السنه", "الحديث", "الايه", "السوره", "المعرفة", "الحكمه",
+            "ما", "هو", "هي", "من", "في", "على", "الى", "عن", "مع", "هذا",
+            "هذه", "ذلك", "التي", "الذي", "كان", "كانت", "يكون", "قال", "قيل",
+        ]
+        for w in seed:
+            self._add_word(self._normalize(w))
+
+    def _add_word(self, word: str) -> int:
+        if not word:
+            return self.UNK
+        if word in self.word_to_id:
+            return self.word_to_id[word]
+        if len(self.word_to_id) >= self.vocab_size:
+            return self.UNK
+        idx = len(self.word_to_id)
+        self.word_to_id[word] = idx
+        self.id_to_word[idx] = word
+        return idx
+
+    def _normalize(self, text: str) -> str:
+        import re
+        text = re.sub(r"[\u064B-\u065F\u0670]", "", text)
+        text = text.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
+        text = text.replace("ى", "ي").replace("ة", "ه")
+        return text
+
+    def _tokenize_words(self, text: str) -> List[str]:
+        import re
+        return re.findall(r"[\u0600-\u06FF]+|\d+", self._normalize(text))
+
+    def build_from_texts(self, texts: List[str], max_vocab: Optional[int] = None) -> int:
+        """يبني القاموس من قائمة نصوص حسب التكرار (الأكثر شيوعاً أولاً)."""
+        from collections import Counter
+        cap = max_vocab or self.vocab_size
+        counts: Counter = Counter()
+        for t in texts:
+            counts.update(self._tokenize_words(t))
+        # إعادة تهيئة مع الرموز الخاصة فقط
+        self.word_to_id = {tok: i for i, tok in enumerate(self.SPECIAL)}
+        self.id_to_word = {i: tok for i, tok in enumerate(self.SPECIAL)}
+        for word, _freq in counts.most_common(max(0, cap - self.OFFSET)):
+            self._add_word(word)
+        self.vocab_size = max(self.vocab_size, len(self.word_to_id))
+        return len(self.word_to_id)
+
+    def encode(self, text: str, max_len: int = MAX_SEQ_LEN) -> np.ndarray:
+        words = self._tokenize_words(text)
+        ids = [self.BOS]
+        for w in words:
+            ids.append(self.word_to_id.get(w, self.UNK))
+        ids.append(self.EOS)
+        ids = ids[:max_len]
+        return np.array(ids, dtype=np.int64)
+
+    def decode(self, ids, skip_special: bool = True) -> str:
+        """IDs → نص عربي."""
+        if isinstance(ids, np.ndarray):
+            ids = ids.tolist()
+        special = {self.PAD, self.UNK, self.BOS, self.EOS, self.SEP, self.MASK}
+        parts: List[str] = []
+        for i in ids:
+            i = int(i)
+            if skip_special and i in special:
+                continue
+            parts.append(self.id_to_word.get(i, self.SPECIAL[self.UNK]))
+        return " ".join(parts)
+
+    def content_ids(self, text: str, max_len: int = MAX_SEQ_LEN) -> np.ndarray:
+        """encode بدون BOS/EOS — مفيد لمقارنة المفاهيم."""
+        words = self._tokenize_words(text)
+        ids = [self.word_to_id.get(w, self.UNK) for w in words][:max_len]
+        return np.array(ids, dtype=np.int64)
+
+    def vocab_id(self) -> int:
+        return max(self.vocab_size, len(self.word_to_id))
+
+    def save(self, path: Optional[str] = None) -> str:
+        path = path or self.DEFAULT_VOCAB_PATH
+        d = os.path.dirname(path)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        import json
+        payload = {
+            "vocab_size": self.vocab_size,
+            "word_to_id": self.word_to_id,
+            "version": "word-tokenizer-v1",
+        }
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+        os.replace(tmp, path)
+        return path
+
+    def load(self, path: str) -> None:
+        import json
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        self.word_to_id = {str(k): int(v) for k, v in data.get("word_to_id", {}).items()}
+        self.id_to_word = {int(v): str(k) for k, v in self.word_to_id.items()}
+        self.vocab_size = int(data.get("vocab_size", max(self.vocab_size, len(self.word_to_id))))
+        # ضمان الرموز الخاصة
+        for i, tok in enumerate(self.SPECIAL):
+            self.word_to_id[tok] = i
+            self.id_to_word[i] = tok
+
+
+class HashTokenizer:
+    """
+    [متقادم] Tokenizer بالـ hashing فقط — بدون decode.
+    أُبقي للتوافق مع كود قديم؛ المسار الافتراضي هو WordTokenizer.
+    """
+    PAD, UNK, BOS, EOS, SEP, MASK = 0, 1, 2, 3, 4, 5
+    OFFSET = 6
 
     def __init__(self, vocab_size: int = VOCAB_SIZE):
         self.vocab_size = vocab_size
 
     def _hash_word(self, word: str) -> int:
-        """كلمة → ID ثابت بالـ FNV-1a hash."""
         h = 2166136261
         for ch in word.encode("utf-8"):
             h ^= ch
@@ -92,23 +225,44 @@ class HashTokenizer:
 
     def _normalize(self, text: str) -> str:
         import re
-        text = re.sub(r'[\u064B-\u065F\u0670]', '', text)   # إزالة التشكيل
-        text = text.replace('أ','ا').replace('إ','ا').replace('آ','ا')
-        text = text.replace('ى','ي').replace('ة','ه')
+        text = re.sub(r"[\u064B-\u065F\u0670]", "", text)
+        text = text.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
+        text = text.replace("ى", "ي").replace("ة", "ه")
         return text
 
     def encode(self, text: str, max_len: int = MAX_SEQ_LEN) -> np.ndarray:
-        """نص → array of IDs. لا يُخزَّن شيء."""
         import re
-        words = re.findall(r'[\u0600-\u06FF]+|\d+', self._normalize(text))
-        ids   = [self.BOS] + [self._hash_word(w) for w in words] + [self.EOS]
-        ids   = ids[:max_len]
+        words = re.findall(r"[\u0600-\u06FF]+|\d+", self._normalize(text))
+        ids = [self.BOS] + [self._hash_word(w) for w in words] + [self.EOS]
+        return np.array(ids[:max_len], dtype=np.int64)
+
+    def decode(self, ids, skip_special: bool = True) -> str:
+        """غير مدعوم — يُرجع تمثيلاً رقمياً فقط."""
+        if isinstance(ids, np.ndarray):
+            ids = ids.tolist()
+        special = {self.PAD, self.UNK, self.BOS, self.EOS, self.SEP, self.MASK}
+        out = []
+        for i in ids:
+            i = int(i)
+            if skip_special and i in special:
+                continue
+            out.append(f"#{i}")
+        return " ".join(out)
+
+    def content_ids(self, text: str, max_len: int = MAX_SEQ_LEN) -> np.ndarray:
+        import re
+        words = re.findall(r"[\u0600-\u06FF]+|\d+", self._normalize(text))
+        ids = [self._hash_word(w) for w in words][:max_len]
         return np.array(ids, dtype=np.int64)
 
     def vocab_id(self) -> int:
         return self.vocab_size
 
-    # لا توجد دوال save/load — لا شيء للحفظ
+    def save(self, path: Optional[str] = None) -> None:
+        return None
+
+    def load(self, path: str) -> None:
+        return None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -554,26 +708,34 @@ class OutputHead:
 # ══════════════════════════════════════════════════════════════════════════════
 class ArabicTransformer:
     """
-    ما يتعلمه النموذج يُخزَّن في الأوزان فقط:
-        embedding.npy        — تمثيل الكلمات
-        core_matrix_*.npy    — projection حول المصفوفة المدروسة
-        block_N_*.npy        — طبقات الانتباه والـ FFN
-        output_head_*.npy    — التنبؤ بالكلمة التالية
+    ما يتعلمه النموذج يُخزَّن في الأوزان + قاموس الـtokenizer:
+        embedding.npy / block_*.npy / output_head_*.npy
+        tokenizer_vocab.json  — قاموس ثنائي الاتجاه (encode/decode)
 
-    لا يوجد أي ملف نصي يحتوي على بيانات تدريب.
+    VERSION 3.1: WordTokenizer افتراضي (كسر توافق أوزان hash السابقة).
     """
-    VERSION = "3.0.0-NSM"
+    VERSION = "3.1.0-NSM"
 
     def __init__(self, d_model=D_MODEL, n_heads=N_HEADS, d_ff=D_FF,
                  n_layers=N_LAYERS, max_seq=MAX_SEQ_LEN,
                  vocab_size=VOCAB_SIZE, lr=LEARNING_RATE,
-                 weights_dir=WEIGHTS_DIR, core_csv=None):
+                 weights_dir=WEIGHTS_DIR, core_csv=None,
+                 tokenizer: Optional[object] = None,
+                 use_hash_tokenizer: bool = False):
 
         self.lr          = lr
         self.max_seq     = max_seq
         self.weights_dir = weights_dir
 
-        self.tokenizer   = HashTokenizer(vocab_size)
+        if tokenizer is not None:
+            self.tokenizer = tokenizer
+        elif use_hash_tokenizer:
+            self.tokenizer = HashTokenizer(vocab_size)
+        else:
+            vocab_path = str(Path(weights_dir) / "tokenizer_vocab.json") if weights_dir else WordTokenizer.DEFAULT_VOCAB_PATH
+            self.tokenizer = WordTokenizer(vocab_size, vocab_path=vocab_path if os.path.exists(vocab_path) else WordTokenizer.DEFAULT_VOCAB_PATH)
+        # مواءمة vocab_size مع القاموس الفعلي إن وُجد
+        vocab_size = max(vocab_size, getattr(self.tokenizer, "vocab_id", lambda: vocab_size)())
         self.embedding   = TokenEmbedding(vocab_size, d_model)
         self.pos_enc     = PositionalEncoding(d_model, max_seq)
         self.core        = CoreMatrixLayer(core_csv, d_model)
@@ -709,7 +871,7 @@ class ArabicTransformer:
         return hidden[1:-1].mean(0) if len(hidden) > 2 else hidden.mean(0)
 
     def predict_next(self, text: str, top_k=5, temp=1.0) -> List[Tuple[int, float]]:
-        """يُعيد top_k من أزواج (hash_id, prob) — لا توجد كلمات محفوظة."""
+        """يُعيد top_k من أزواج (token_id, prob)."""
         ids = self.tokenizer.encode(text, self.max_seq - 1)
         if not len(ids): return []
         S    = len(ids)
@@ -721,9 +883,25 @@ class ArabicTransformer:
         top  = np.argsort(lp)[::-1][:top_k]
         return [(int(i), float(lp[i])) for i in top]
 
-    def generate(self, text: str, max_new=20, temp=0.8) -> np.ndarray:
-        """يُولِّد تسلسل IDs (hash). لا كلمات محفوظة."""
+    def predict_next_words(self, text: str, top_k=5, temp=1.0) -> List[Tuple[str, float]]:
+        """مثل predict_next مع فك التشفير إلى كلمات."""
+        pairs = self.predict_next(text, top_k=top_k, temp=temp)
+        out = []
+        for tid, prob in pairs:
+            if hasattr(self.tokenizer, "id_to_word"):
+                word = self.tokenizer.id_to_word.get(int(tid), f"#{tid}")
+            else:
+                word = self.tokenizer.decode([tid], skip_special=False)
+            out.append((word, prob))
+        return out
+
+    def generate_ids(self, text: str, max_new=20, temp=0.8) -> np.ndarray:
+        """يُولِّد تسلسل IDs."""
+        eos = getattr(self.tokenizer, "EOS", 3)
         ids = list(self.tokenizer.encode(text, self.max_seq - max_new))
+        # أزل EOS الختامي إن وُجد حتى نكمل التوليد
+        if ids and ids[-1] == eos:
+            ids = ids[:-1]
         for _ in range(max_new):
             if len(ids) >= self.max_seq: break
             arr  = np.array(ids[-self.max_seq:], np.int64)
@@ -733,11 +911,22 @@ class ArabicTransformer:
             lp   = p[-1]
             if temp != 1.0:
                 lp = _softmax((np.log(np.clip(lp,1e-10,1))/temp).reshape(1,-1)).flatten()
-            lp = np.clip(lp, 0, None); lp /= lp.sum()
+            lp = np.clip(lp, 0, None)
+            s = float(lp.sum())
+            if s <= 0:
+                break
+            lp = lp / s
             nxt = int(np.random.choice(len(lp), p=lp))
-            if nxt == HashTokenizer.EOS: break
+            if nxt == eos: break
             ids.append(nxt)
         return np.array(ids, np.int64)
+
+    def generate(self, text: str, max_new=20, temp=0.8) -> str:
+        """يُولِّد نصاً عربياً مقروءاً عبر decode()."""
+        ids = self.generate_ids(text, max_new=max_new, temp=temp)
+        if hasattr(self.tokenizer, "decode"):
+            return self.tokenizer.decode(ids, skip_special=True)
+        return " ".join(str(int(i)) for i in ids)
 
     # ── stats ─────────────────────────────────────────────────────────────────
     def stats(self) -> dict:
@@ -749,7 +938,7 @@ class ArabicTransformer:
             "avg_loss":     round(float(avg), 5),
             "recent_loss":  round(float(rec), 5),
             "core_matrix":  self.core.info(),
-            "storage":      "weights_only — no text stored",
+            "storage":      "weights + tokenizer vocab (encode/decode)",
         }
 
     # ── save / load (أوزان فقط) ───────────────────────────────────────────────
@@ -780,10 +969,19 @@ class ArabicTransformer:
             for i, blk in enumerate(self.blocks):
                 blk.save(str(tmp_dir / f"block_{i}"))
 
-            # meta: معلومات فنية فقط، لا بيانات تدريب
+            # قاموس الـtokenizer (encode/decode) — ضروري لتوليد نص مقروء
+            if hasattr(self.tokenizer, "save"):
+                try:
+                    self.tokenizer.save(str(tmp_dir / "tokenizer_vocab.json"))
+                except Exception as e:
+                    logger.warning(f"[Transformer] تعذّر حفظ قاموس الـtokenizer: {e}")
+
+            # meta: معلومات فنية
             meta = {
                 "version": self.VERSION, "train_steps": self._steps,
-                "storage_policy": "weights_only",
+                "storage_policy": "weights_and_tokenizer_vocab",
+                "tokenizer": type(self.tokenizer).__name__,
+                "vocab_size": int(getattr(self.tokenizer, "vocab_id", lambda: 0)()),
                 "saved_at": datetime.now(timezone.utc).isoformat(),
             }
             (tmp_dir / "meta.json").write_text(
@@ -826,12 +1024,19 @@ class ArabicTransformer:
         for i, blk in enumerate(self.blocks):
             blk.load(str(d / f"block_{i}"))
 
+        vocab_p = d / "tokenizer_vocab.json"
+        if vocab_p.exists() and hasattr(self.tokenizer, "load"):
+            try:
+                self.tokenizer.load(str(vocab_p))
+            except Exception as e:
+                logger.warning(f"[Transformer] تعذّر تحميل قاموس الـtokenizer: {e}")
+
         meta_p = d / "meta.json"
         if meta_p.exists():
             import json
-            self._steps = json.loads(meta_p.read_text())  .get("train_steps", 0)
+            self._steps = json.loads(meta_p.read_text()).get("train_steps", 0)
 
-        logger.info(f"[Transformer] ✓ الأوزان محملة ← {d}")
+        logger.info(f"[Transformer] ✓ الأوزان + القاموس محملة ← {d}")
         return self
 
 

@@ -113,11 +113,24 @@ def main() -> int:
         sentences = pickle.load(f)
     n = len(sentences)
 
-    from ai.arabic_transformer import ArabicTransformer
+    from ai.arabic_transformer import ArabicTransformer, WordTokenizer
+
+    # بناء/تحديث قاموس WordTokenizer من جمل التدريب (مرة عند الحاجة)
+    vocab_path = os.path.join(WEIGHTS_DIR, "tokenizer_vocab.json")
+    tok = WordTokenizer(vocab_size=8192, vocab_path=vocab_path if os.path.exists(vocab_path) else None)
+    if not os.path.exists(vocab_path) or len(getattr(tok, "word_to_id", {})) <= 64:
+        print("Building WordTokenizer vocabulary from training sentences…")
+        n_vocab = tok.build_from_texts(sentences, max_vocab=8192)
+        os.makedirs(WEIGHTS_DIR, exist_ok=True)
+        tok.save(vocab_path)
+        print(f"Vocab size: {n_vocab} → {vocab_path}")
+    else:
+        print(f"Loaded existing vocab ({len(tok.word_to_id)} tokens) from {vocab_path}")
 
     print("Loading ArabicTransformer (120M: d_model=1216, n_layers=8)…")
     model = ArabicTransformer(
-        d_model=1216, n_heads=16, d_ff=2560, n_layers=8, vocab_size=8192
+        d_model=1216, n_heads=16, d_ff=2560, n_layers=8, vocab_size=8192,
+        tokenizer=tok, weights_dir=WEIGHTS_DIR,
     )
     if os.path.exists(WEIGHTS_DIR):
         model.load(WEIGHTS_DIR)
