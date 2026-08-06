@@ -72,3 +72,6 @@ data/artifacts.db
 id_rsa
 id_ed25519
 models/transformer_ckg_v3/
+
+# نتائج قياس أداء محلية (تختلف حسب جهاز التشغيل) — السكربت مُتتبَّع، النتيجة لا
+benchmark_single_batch_v3_result.json
