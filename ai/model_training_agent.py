@@ -109,6 +109,13 @@ except Exception:
     _KAGGLE_OK = False
 
 try:
+    from ai.remote_training_orchestrator import handle_orchestrator_command as _orch_handle
+    _ORCH_OK = True
+except Exception:
+    _orch_handle = None
+    _ORCH_OK = False
+
+try:
     from ai.gpu_runtime import (
         torch_device as _gpu_torch_device,
         suggest_batch_size as _gpu_suggest_batch,
@@ -1517,6 +1524,15 @@ def handle_training_command(user_input: str) -> Optional[str]:
     if not text:
         return None
     low = text.lower()
+
+    # منسّق المنصات البعيدة (Kaggle + Colab + كفاءة التدريب)
+    if _ORCH_OK and _orch_handle is not None:
+        try:
+            oc = _orch_handle(text)
+            if oc is not None:
+                return oc
+        except Exception as _oc_err:
+            logger.warning("orchestrator: %s", _oc_err)
 
     # Kaggle (API + Dual T4) — قبل remote العام لأن أوامره أكثر تحديداً
     if _KAGGLE_OK and _kaggle_handle is not None:

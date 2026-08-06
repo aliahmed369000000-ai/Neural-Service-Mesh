@@ -80,3 +80,4 @@ benchmark_single_batch_v3_result.json
 
 # مهام Kaggle المحلية المُولَّدة وقت التشغيل
 artifacts/model_training/kaggle_jobs/
+artifacts/model_training/orchestrator/

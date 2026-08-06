@@ -112,3 +112,14 @@ print(multi_gpu_training_snippet())
 حالة kaggle <id>
 حمّل kaggle <id>
 ```
+
+## المنسّق الموحّد (Orchestrator)
+
+```
+حالة المنصات
+درّب بعيد kaggle
+درّب بعيد kaggle وادفع epochs 30
+خطة كفاءة
+```
+
+الكود: `ai/remote_training_orchestrator.py` — تدريب فعّال (AMP + DataParallel + AdamW + early stop).

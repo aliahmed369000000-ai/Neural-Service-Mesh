@@ -36,3 +36,22 @@ python scripts/colab_result_push.py --csv data/samples/classification_demo.csv
 
 الواجهة: `POST /training/remote-results` · `GET /training/remote-status`  
 الكود: `ai/remote_gpu_provider.py`
+
+## المنسّق الموحّد + تدريب فعّال
+
+من داخل NSM أو بعد bootstrap:
+
+```
+مهمة colab
+حالة المنصات
+خطة كفاءة
+```
+
+أو في خلية Colab:
+
+```python
+from ai.remote_training_orchestrator import efficient_nn_training_source
+exec(compile(efficient_nn_training_source("colab_local"), "t.py", "exec"))
+```
+
+لا يوجد تحكم بمتصفح Colab من الخارج (سياسة المشروع + شروط Google).
