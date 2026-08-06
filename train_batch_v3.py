@@ -7,7 +7,8 @@
 تجاوز يدوي (اختياري):
   NSM_PACK_SIZE=40 NSM_PACKS_PER_RUN=8 python3 train_batch_v3.py
   NSM_RESET_TRAIN=1 python3 train_batch_v3.py   # إعادة تدريب من الصفر
-  NSM_TOKENIZER=bpe python3 train_batch_v3.py     # استخدام BPE بدل word-level
+  NSM_TOKENIZER=bpe python3 train_batch_v3.py          # BPE
+  NSM_TOKENIZER=wordpiece python3 train_batch_v3.py    # WordPiece
 """
 from __future__ import annotations
 
@@ -119,9 +120,15 @@ def main() -> int:
 
     reset = os.environ.get("NSM_RESET_TRAIN", "").strip() in ("1", "true", "yes")
     tok_mode = os.environ.get("NSM_TOKENIZER", "word").strip().lower()
-    if tok_mode not in ("word", "bpe"):
+    if tok_mode in ("wp",):
+        tok_mode = "wordpiece"
+    if tok_mode not in ("word", "bpe", "wordpiece"):
         tok_mode = "word"
-    TOKENIZER_VERSION = "bpe-v1" if tok_mode == "bpe" else "word-v1"
+    TOKENIZER_VERSION = {
+        "bpe": "bpe-v1",
+        "wordpiece": "wordpiece-v1",
+        "word": "word-v1",
+    }[tok_mode]
 
     os.makedirs(WEIGHTS_DIR, exist_ok=True)
     if tok_mode == "bpe":
@@ -135,6 +142,17 @@ def main() -> int:
             print(f"BPE vocab: {n_vocab} merges={len(tok.merges)} → {vocab_path}")
         else:
             print(f"Loaded BPE vocab ({len(tok.token_to_id)} tokens, {len(tok.merges)} merges)")
+    elif tok_mode == "wordpiece":
+        from ai.wordpiece_tokenizer import WordPieceTokenizer
+        vocab_path = os.path.join(WEIGHTS_DIR, "wordpiece_tokenizer.json")
+        tok = WordPieceTokenizer(vocab_size=8192, vocab_path=vocab_path if os.path.exists(vocab_path) else None)
+        if not os.path.exists(vocab_path) or len(tok.token_to_id) <= 20:
+            print("Training WordPiece tokenizer on sentences…")
+            n_vocab = tok.train(sentences)
+            tok.save(vocab_path)
+            print(f"WordPiece vocab: {n_vocab} → {vocab_path}")
+        else:
+            print(f"Loaded WordPiece vocab ({len(tok.token_to_id)} tokens)")
     else:
         vocab_path = os.path.join(WEIGHTS_DIR, "tokenizer_vocab.json")
         tok = WordTokenizer(vocab_size=8192, vocab_path=vocab_path if os.path.exists(vocab_path) else None)
