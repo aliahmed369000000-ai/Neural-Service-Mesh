@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import pickle
 import sys
@@ -72,6 +73,17 @@ def choose_packs_per_run(avail_gb: float) -> int:
     return 2
 
 
+def compute_lr(step: int, warmup_steps: int, total_steps: int,
+               lr_max: float = 1e-4, lr_min: float = 8e-6) -> float:
+    """دفء خطي ثم تناقص كوساين — أفضل تقاربًا من معدل تعلم ثابت."""
+    if total_steps <= warmup_steps:
+        return lr_max
+    if step < warmup_steps:
+        return lr_min + (lr_max - lr_min) * step / max(1, warmup_steps)
+    progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
+    return lr_min + 0.5 * (lr_max - lr_min) * (1.0 + math.cos(math.pi * progress))
+
+
 def load_state() -> dict:
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, encoding="utf-8") as f:
@@ -109,7 +121,7 @@ def main() -> int:
     if pack_size <= 0:
         print(
             f"ABORT: الرام المتاحة ({avail:.2f} GiB) غير كافية لتدريب آمن "
-            f"(120M يحتاج تقريباً ≥1.5–2 GiB متاح مع هامش أمان)."
+            f"(200M يحتاج تقريباً ≥2–3 GiB متاح مع هامش أمان)."
         )
         return 2
 
@@ -286,16 +298,45 @@ def main() -> int:
     t0 = time.time()
     losses: list[float] = []
     packs_done = 0
-    for _ in range(packs_per_run):
+
+    # ── جدول معدل التعلم: دفء خطي ← → تناقص كوساين ──────────────────────
+    global_step    = int(state.get("global_step", 0))
+    total_steps_est = max(1, -(-n // max(1, pack_size)))   # ceiling div
+    WARMUP_STEPS   = max(10, total_steps_est // 12)        # ~8% دفء
+    LR_MAX, LR_MIN = 1e-4, 8e-6
+    MID_SAVE_EVERY = 4   # checkpoint وسطي كل 4 حزم (يحمي من انقطاع التدريب)
+
+    for pack_i in range(packs_per_run):
         if pos >= n:
             break
         end = min(pos + pack_size, n)
         pack = sentences[pos:end]
+
+        # تحديث معدل التعلم قبل كل حزمة
+        lr = compute_lr(global_step, WARMUP_STEPS, total_steps_est, LR_MAX, LR_MIN)
+        model.lr = lr
+
         loss = float(model.train_step_batch(pack))
         losses.append(loss)
         pos = end
         packs_done += 1
-        print(f"  pack {packs_done}/{packs_per_run}  pos={pos}/{n}  loss={loss:.4f}")
+        global_step += 1
+        print(f"  pack {packs_done}/{packs_per_run}  pos={pos}/{n}"
+              f"  loss={loss:.4f}  lr={lr:.2e}")
+
+        # ── checkpoint وسطي: يحفظ الأوزان + الحالة كل MID_SAVE_EVERY حزم ──
+        if packs_done % MID_SAVE_EVERY == 0 and pos < n:
+            model.save(WEIGHTS_DIR)
+            _mid = dict(state)
+            _mid["position"]          = pos
+            _mid["global_step"]       = global_step
+            _mid["loss_history_tail"] = (
+                list(state.get("loss_history_tail") or []) +
+                [round(x, 3) for x in losses]
+            )[-64:]
+            save_state(_mid)
+            print(f"  ✓ checkpoint وسطي محفوظ (pos={pos}/{n}"
+                  f"  {100.0*pos/n:.1f}%)")
 
     elapsed = time.time() - t0
     model.save(WEIGHTS_DIR)
@@ -308,12 +349,14 @@ def main() -> int:
     state["loss_history_tail"] = new_tail
     state["runs"] = int(state.get("runs", 0)) + 1
     state["total_sentences_seen"] = int(state.get("total_sentences_seen", 0)) + processed
+    state["global_step"] = global_step
     state["last_pack_size"] = pack_size
     state["last_packs_per_run"] = packs_done
     state["last_elapsed_s"] = round(elapsed, 1)
     state["last_avail_ram_gb"] = round(avail, 2)
     state["tokenizer_version"] = TOKENIZER_VERSION
     state["model_version"] = getattr(model, "VERSION", "3.1")
+    state["last_lr"] = round(lr, 8)
     save_state(state)
 
     pct = 100.0 * pos / n
