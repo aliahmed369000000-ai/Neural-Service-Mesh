@@ -130,6 +130,13 @@ except Exception:
     _SCIENTIST_OK = False
 
 try:
+    from ai.meta_ai_system import handle_meta_command as _meta_handle
+    _META_OK = True
+except Exception:
+    _meta_handle = None
+    _META_OK = False
+
+try:
     from ai.command_lexicon import (
         handle_help_command as _help_handle,
         rewrite_to_canonical as _rewrite_cmd,
@@ -1565,6 +1572,15 @@ def handle_training_command(user_input: str) -> Optional[str]:
             pass
 
     low = text.lower()
+
+    # Meta-AI — تفكير عميق / NAS / عتاد / ذاكرة متجهة
+    if _META_OK and _meta_handle is not None:
+        try:
+            mt = _meta_handle(text)
+            if mt is not None:
+                return mt
+        except Exception as _mt_err:
+            logger.warning("meta-ai: %s", _mt_err)
 
     # العالِم المبتكر + المدير الأمني والمالي
     if _SCIENTIST_OK and _scientist_handle is not None:

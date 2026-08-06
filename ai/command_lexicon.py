@@ -71,6 +71,17 @@ INTENT_PHRASES: Dict[str, List[str]] = {
     "help_platforms": ["اوامر المنصات", "مساعدة kaggle", "مساعدة colab"],
     "help_architect": ["اوامر المعماري", "مساعدة معماري"],
     "help_scientist": ["اوامر العالم", "مساعدة العالم", "اوامر الامن", "اوامر التكلفه"],
+    # Meta-AI
+    "meta_status": ["meta", "meta-ai", "حاله meta", "ذكاء خارق", "ميتا"],
+    "meta_cycle": ["دوره meta", "شغل meta", "meta cycle"],
+    "reason": ["فكر عميق", "سيناريو تدريب", "tree of thought", "reasoning"],
+    "reflect": ["نقد ذاتي", "لماذا فشل", "مراجعه فشل"],
+    "nas": ["تطور جيني", "neuroevolution", "nas", "جيل شبكات"],
+    "hardware": ["تحسين عتاد", "hardware", "كرت الشاشه", "gpu profile"],
+    "remember": ["تذكر", "احفظ خبره"],
+    "recall": ["استرجع", "خبرات سابق", "ذاكر مشابه"],
+    "mem_stats": ["احصاء الذاكره", "memory stats"],
+
     # جرد / حالة عامة
     "inventory": ["جرد", "مخزون", "ما المتاح", "بيئه التدريب", "inventory", "وش عندك"],
     "plan": ["خطه تدريب", "خطه", "دوره حياه", "lifecycle", "plan"],
@@ -308,6 +319,15 @@ def rewrite_to_canonical(text: str) -> str:
         "train_reg": "درّب انحدار تجريبي",
         "train_torch": "درّب شبكة torch",
         "gpu_status": "حالة gpu",
+        "meta_status": "حالة meta",
+        "meta_cycle": "دورة meta",
+        "reason": text,
+        "reflect": text,
+        "nas": text,  # يحافظ على عدد الأجيال/الشبكات
+        "hardware": text,
+        "remember": text,
+        "recall": text,
+        "mem_stats": "إحصاء الذاكرة",
     }.get(intent, text)
     return canonical
 
