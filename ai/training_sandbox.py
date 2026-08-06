@@ -170,6 +170,23 @@ def max_runtime_seconds(override: Optional[int] = None) -> int:
 
 
 def detect_compute() -> Dict[str, Any]:
+    try:
+        from ai.gpu_runtime import detect_device, vram_snapshot
+        d = detect_device()
+        snap = vram_snapshot()
+        return {
+            "device": d.device_str,
+            "gpu_available": bool(snap.get("cuda_available")),
+            "gpu_name": snap.get("name"),
+            "cuda_version": snap.get("cuda_version"),
+            "free_vram_gb": snap.get("free_vram_gb"),
+            "total_vram_gb": snap.get("total_vram_gb"),
+            "prefer_cpu_for_toy": bool(load_guardrails()["budget"].get("prefer_cpu_for_toy", True)),
+            "allow_gpu": bool(load_guardrails()["budget"].get("allow_gpu", True)),
+            "policy_reason": d.reason,
+        }
+    except Exception:
+        pass
     info: Dict[str, Any] = {
         "device": "cpu",
         "gpu_available": False,

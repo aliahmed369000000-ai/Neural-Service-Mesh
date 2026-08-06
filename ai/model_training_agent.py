@@ -94,6 +94,32 @@ except Exception:
     _apex_handle = None
     _APEX_OK = False
 
+try:
+    from ai.gpu_runtime import (
+        torch_device as _gpu_torch_device,
+        suggest_batch_size as _gpu_suggest_batch,
+        run_with_oom_backoff as _gpu_oom_backoff,
+        empty_cache as _gpu_empty_cache,
+        device_report_md as _gpu_report,
+        detect_device as _gpu_detect,
+    )
+    _GPU_OK = True
+except Exception:
+    _GPU_OK = False
+    def _gpu_torch_device(force_gpu=None):
+        import torch
+        return torch.device("cpu"), None
+    def _gpu_suggest_batch(n, n_features=64, free_vram_gb=None, base=32):
+        return max(4, min(32, n))
+    def _gpu_oom_backoff(fn, initial_batch, min_batch=1, max_retries=4):
+        return fn(initial_batch), initial_batch, ["cpu_fallback"]
+    def _gpu_empty_cache():
+        pass
+    def _gpu_report():
+        return "GPU runtime غير محمّل"
+    def _gpu_detect(force_gpu=None):
+        return None
+
 # ── مسارات NSM المعروفة (اختيارية — أحد الأهداف وليست الوحيدة) ──────────────
 STATE_V3 = ROOT / "ckg_train_state_v3.json"
 SENTENCES_V3 = ROOT / "ckg_sentences_v3.pkl"
@@ -583,7 +609,7 @@ def train_torch_mlp(
     epochs = _sb_clamp_epochs(max(3, min(int(epochs), 100)))
     hidden = max(8, min(int(hidden), 512))
     t0 = time.time()
-    device = torch.device("cpu")
+    device, _dev_info = _gpu_torch_device()
 
     try:
         rng = np.random.default_rng(42)
@@ -1065,106 +1091,136 @@ def train_from_csv(
 
 
 def train_torch_on_arrays(
-    X: np.ndarray, y: np.ndarray, task: str, epochs: int = 30, hidden: int = 64
+    X: np.ndarray,
+    y: np.ndarray,
+    task: str,
+    epochs: int = 25,
 ) -> str:
-    if not _TORCH_OK:
-        return "PyTorch غير متاح"
+    import torch
+    import torch.nn as nn
+
     epochs = _sb_clamp_epochs(max(3, min(int(epochs), 120)))
-    n_features = X.shape[1]
-    device = torch.device("cpu")
-    X_t = torch.tensor(X, dtype=torch.float32, device=device)
-    n = X.shape[0]
-    idx = np.random.default_rng(0).permutation(n)
-    split = max(1, int(n * 0.75))
-    te = idx[split:] if len(idx[split:]) > 0 else idx[-1:]
-    tr = idx[:split]
+    device, dev_info = _gpu_torch_device()
+    n_samples, n_features = int(X.shape[0]), int(X.shape[1])
+    free_v = getattr(dev_info, "free_vram_gb", None) if dev_info else None
+    init_bs = _gpu_suggest_batch(n_samples, n_features=n_features, free_vram_gb=free_v)
 
-    if task == "classification":
-        n_out = int(y.max()) + 1
-        y_t = torch.tensor(y, dtype=torch.long, device=device)
-        loss_fn = nn.CrossEntropyLoss()
-    else:
-        n_out = 1
-        y_t = torch.tensor(y.reshape(-1, 1), dtype=torch.float32, device=device)
-        loss_fn = nn.MSELoss()
-
-    model = nn.Sequential(
-        nn.Linear(n_features, hidden),
-        nn.ReLU(),
-        nn.Dropout(0.1),
-        nn.Linear(hidden, hidden // 2),
-        nn.ReLU(),
-        nn.Linear(hidden // 2, n_out),
-    ).to(device)
-    opt = optim.Adam(model.parameters(), lr=1e-3)
-    hist = []
-    val_hist = []
-    stopped_early = False
-    es = None
-    if _SANDBOX_OK:
-        try:
-            from ai.training_sandbox import EarlyStopping, load_guardrails
-            _es_cfg = (load_guardrails().get("early_stopping") or {})
-            if _es_cfg.get("enabled", True):
-                es = EarlyStopping.from_config()
-        except Exception:
-            es = _EarlyStopping.from_config() if _SANDBOX_OK else None
-
-    model.train()
-    actual_epochs = 0
-    for ep in range(epochs):
-        opt.zero_grad()
-        out = model(X_t[tr])
-        loss = loss_fn(out, y_t[tr])
-        loss.backward()
-        opt.step()
-        train_l = float(loss.item())
-        hist.append(train_l)
-        actual_epochs = ep + 1
-        # val loss each epoch
+    def _run(batch_size: int) -> str:
+        X_t = torch.tensor(X, dtype=torch.float32, device=device)
+        n = X_t.shape[0]
+        idx = np.random.permutation(n)
+        split = max(1, int(0.8 * n))
+        tr, te = idx[:split], idx[split:] if split < n else idx[-1:]
+        if task == "classification":
+            n_out = int(y.max()) + 1 if y.size else 2
+            y_t = torch.tensor(y, dtype=torch.long, device=device)
+            loss_fn = nn.CrossEntropyLoss()
+        else:
+            n_out = 1
+            y_t = torch.tensor(y.reshape(-1, 1), dtype=torch.float32, device=device)
+            loss_fn = nn.MSELoss()
+        model = nn.Sequential(
+            nn.Linear(n_features, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, n_out),
+        ).to(device)
+        opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+        hist = []
+        val_hist = []
+        stopped_early = False
+        es = None
+        if _SANDBOX_OK:
+            try:
+                from ai.training_sandbox import EarlyStopping, load_guardrails
+                _es_cfg = (load_guardrails().get("early_stopping") or {})
+                if _es_cfg.get("enabled", True):
+                    es = EarlyStopping.from_config()
+            except Exception:
+                es = _EarlyStopping.from_config() if _SANDBOX_OK else None
+        model.train()
+        actual_epochs = 0
+        tr_idx = tr
+        for ep in range(epochs):
+            model.train()
+            # mini-batches
+            perm = np.random.permutation(tr_idx)
+            ep_loss = 0.0
+            n_batches = 0
+            for i in range(0, len(perm), batch_size):
+                bi = perm[i : i + batch_size]
+                xb = X_t[bi]
+                yb = y_t[bi]
+                opt.zero_grad()
+                out = model(xb)
+                loss = loss_fn(out, yb)
+                loss.backward()
+                opt.step()
+                ep_loss += float(loss.item())
+                n_batches += 1
+            train_l = ep_loss / max(1, n_batches)
+            hist.append(train_l)
+            actual_epochs = ep + 1
+            model.eval()
+            with torch.no_grad():
+                v_out = model(X_t[te])
+                v_loss = float(loss_fn(v_out, y_t[te]).item())
+            model.train()
+            val_hist.append(v_loss)
+            if es is not None and es.step(v_loss):
+                stopped_early = True
+                break
         model.eval()
         with torch.no_grad():
-            v_out = model(X_t[te])
-            v_loss = float(loss_fn(v_out, y_t[te]).item())
-        model.train()
-        val_hist.append(v_loss)
-        if es is not None and es.step(v_loss):
-            stopped_early = True
-            break
-    model.eval()
-    with torch.no_grad():
-        out = model(X_t[te])
-        if task == "classification":
-            metric = float((out.argmax(-1) == y_t[te]).float().mean().item())
-            mname = "Accuracy"
-        else:
-            metric = float(loss_fn(out, y_t[te]).item())
-            mname = "MSE"
-    outp = ARTIFACTS / f"torch_mlp_csv_{task}_{int(time.time())}.pt"
-    if _SANDBOX_OK:
-        try:
-            _sb_assert_write(outp)
-        except Exception:
-            pass
-    torch.save(
-        {
-            "state_dict": model.state_dict(),
-            "task": task,
-            "n_features": n_features,
-            "actual_epochs": actual_epochs,
-            "early_stopped": stopped_early,
-            "val_loss_history": val_hist[-20:],
-        },
-        outp,
-    )
-    es_note = f" | early_stop@{actual_epochs}" if stopped_early else f" | epochs={actual_epochs}"
-    return (
-        f"## ✅ Torch MLP على بيانات حقيقية\n"
-        f"- {mname}={metric:.4f} | planned={epochs}{es_note} | features={n_features}\n"
-        f"- train loss: {', '.join(f'{x:.4f}' for x in hist[-5:])}\n"
-        f"- val loss: {', '.join(f'{x:.4f}' for x in val_hist[-5:])}\n"
-        f"- `{outp.relative_to(ROOT)}`"
-    )
+            out = model(X_t[te])
+            if task == "classification":
+                metric = float((out.argmax(-1) == y_t[te]).float().mean().item())
+                mname = "Accuracy"
+            else:
+                metric = float(loss_fn(out, y_t[te]).item())
+                mname = "MSE"
+        outp = ARTIFACTS / f"torch_mlp_csv_{task}_{int(time.time())}.pt"
+        if _SANDBOX_OK:
+            try:
+                _sb_assert_write(outp)
+            except Exception:
+                pass
+        cpu_state = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+        torch.save(
+            {
+                "state_dict": cpu_state,
+                "task": task,
+                "n_features": n_features,
+                "actual_epochs": actual_epochs,
+                "early_stopped": stopped_early,
+                "val_loss_history": val_hist[-20:],
+                "device": str(device),
+                "batch_size": batch_size,
+            },
+            outp,
+        )
+        _gpu_empty_cache()
+        es_note = f" | early_stop@{actual_epochs}" if stopped_early else f" | epochs={actual_epochs}"
+        dev_note = f" | device={device}"
+        if dev_info is not None:
+            dev_note += f" ({getattr(dev_info, 'reason', '')})"
+        return (
+            f"## ✅ Torch MLP على بيانات حقيقية\n"
+            f"- {mname}={metric:.4f} | planned={epochs}{es_note} | features={n_features} | batch={batch_size}{dev_note}\n"
+            f"- train loss: {', '.join(f'{x:.4f}' for x in hist[-5:])}\n"
+            f"- val loss: {', '.join(f'{x:.4f}' for x in val_hist[-5:])}\n"
+            f"- `{outp.relative_to(ROOT)}`"
+        )
+
+    try:
+        result, used_bs, oom_log = _gpu_oom_backoff(_run, init_bs, min_batch=1, max_retries=4)
+        if len(oom_log) > 1:
+            result += "\n- OOM backoff: " + " → ".join(oom_log)
+        return result
+    except Exception as e:
+        _gpu_empty_cache()
+        return f"❌ فشل تدريب MLP على {device}: {type(e).__name__}: {e}"
 
 
 def train_torch_cnn_on_arrays(
@@ -1184,7 +1240,7 @@ def train_torch_cnn_on_arrays(
         Xc = X[:, :length]
         length = Xc.shape[1]
 
-    device = torch.device("cpu")
+    device, _dev_info = _gpu_torch_device()
     Xt = torch.tensor(Xc, dtype=torch.float32, device=device).unsqueeze(1)  # B,1,L
     idx = np.random.default_rng(1).permutation(n)
     split = max(1, int(n * 0.75))
@@ -1636,6 +1692,9 @@ def handle_training_command(user_input: str) -> Optional[str]:
         if m:
             epochs = int(m.group(1))
         return train_torch_text_demo(epochs=epochs)
+
+    if re.search(r"(حالة|status).{0,10}(gpu|cuda|vram|كرت)", text, re.I) or text.lower() in ("gpu", "حالة gpu"):
+        return _gpu_report()
 
     # Sandbox / أول مهمة
     if re.search(r"(حالة|status).{0,12}(sandbox|عزل|حواجز|guardrail)|sandbox\s*status", text, re.I):

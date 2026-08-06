@@ -146,5 +146,11 @@
     "real_crypto_wallets": false,
     "max_synthetic_rows": 500,
     "max_merge_candidates": 5
+  },
+  "gpu": {
+    "oom_max_retries": 4,
+    "min_batch_size": 1,
+    "default_batch_size": 32,
+    "note": "NSM_ALLOW_GPU=1 لتفعيل CUDA عند توفره"
   }
 }
