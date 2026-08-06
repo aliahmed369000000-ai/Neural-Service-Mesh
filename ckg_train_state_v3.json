@@ -1,1 +1,1 @@
-{"position": 2560, "loss_history_tail": [8.562, 8.469, 8.356, 8.217, 8.147, 7.911, 7.863, 7.727, 7.701, 7.633, 7.674, 7.6, 7.386, 7.282, 7.481, 7.405]}
+{"position": 1200, "loss_history_tail": [10.665, 10.509, 10.438, 10.249, 10.135, 9.911, 9.783, 9.655, 9.473, 9.422, 9.313, 9.078, 8.851, 8.882, 8.701], "runs": 3, "total_sentences_seen": 1200, "tokenizer_version": "word-v1", "last_pack_size": 80, "last_packs_per_run": 5, "last_elapsed_s": 70.3, "last_avail_ram_gb": 3.57, "model_version": "3.1.0-NSM"}
