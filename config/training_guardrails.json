@@ -1,0 +1,56 @@
+{
+  "version": "1.0",
+  "description": "حواجز أمان لوكيل تدريب النماذج — ميزانية، مسارات، شروط توقف",
+  "sandbox": {
+    "allowed_read_roots": [
+      "data",
+      "data/samples",
+      "artifacts/model_training",
+      "knowledge",
+      "ai",
+      "models"
+    ],
+    "allowed_write_roots": [
+      "artifacts/model_training",
+      "artifacts/model_training/logs",
+      "artifacts/model_training/uploads",
+      "artifacts/model_training/missions"
+    ],
+    "forbidden_write_globs": [
+      "ai/**",
+      "ui_pages/**",
+      "streamlit_app.py",
+      "app_core.py",
+      ".git/**",
+      "scripts/**",
+      "core/**"
+    ],
+    "max_runtime_seconds": 300,
+    "max_epochs": 50,
+    "max_samples": 5000,
+    "max_upload_mb": 25,
+    "require_toy_first": true
+  },
+  "budget": {
+    "max_missions_per_hour": 20,
+    "max_gpu_minutes_per_day": 60,
+    "allow_gpu": true,
+    "prefer_cpu_for_toy": true
+  },
+  "early_stopping": {
+    "enabled": true,
+    "patience": 5,
+    "min_delta": 0.001,
+    "monitor": "val_loss",
+    "mode": "min"
+  },
+  "first_mission": {
+    "id": "mission_001_toy_classification",
+    "name": "أول مهمة: تصنيف جدولي صغير (Toy)",
+    "dataset": "data/samples/classification_demo.csv",
+    "task": "classification",
+    "model": "torch_mlp",
+    "epochs": 15,
+    "max_runtime_seconds": 120
+  }
+}

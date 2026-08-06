@@ -350,11 +350,11 @@ AGENT_CATEGORIES: Dict[str, AgentCategory] = {
             "5. إذا سُئلت بجدية عن النموذج الأساسي، أجب بصدق ولا تنفِ ذلك."
         ),
         quick_prompts=[
-            "جرد البيئة",
+            "حالة sandbox",
+            "أول مهمة تدريبية",
             "قائمة csv",
             "درّب على csv data/samples/classification_demo.csv",
-            "درّب cnn",
-            "درّب نص",
+            "سجل المهام",
             "نماذج محفوظة",
         ],
         web_enabled=False,

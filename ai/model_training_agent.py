@@ -34,6 +34,28 @@ ROOT = Path(__file__).resolve().parent.parent
 ARTIFACTS = ROOT / "artifacts" / "model_training"
 ARTIFACTS.mkdir(parents=True, exist_ok=True)
 
+# Sandbox / Guardrails (اختياري — لا يكسر الوكيل إن تعذّر الاستيراد)
+try:
+    from ai.training_sandbox import (
+        clamp_epochs as _sb_clamp_epochs,
+        clamp_samples as _sb_clamp_samples,
+        detect_compute as _sb_detect_compute,
+        list_mission_logs as _sb_list_missions,
+        run_first_mission as _sb_run_first_mission,
+        sandbox_status_report as _sb_status,
+        EarlyStopping as _EarlyStopping,
+        assert_write_allowed as _sb_assert_write,
+    )
+    _SANDBOX_OK = True
+except Exception:
+    _SANDBOX_OK = False
+
+    def _sb_clamp_epochs(e):
+        return max(1, min(int(e), 50))
+
+    def _sb_clamp_samples(n):
+        return max(1, min(int(n), 5000))
+
 # ── مسارات NSM المعروفة (اختيارية — أحد الأهداف وليست الوحيدة) ──────────────
 STATE_V3 = ROOT / "ckg_train_state_v3.json"
 SENTENCES_V3 = ROOT / "ckg_sentences_v3.pkl"
@@ -520,7 +542,7 @@ def train_torch_mlp(
     task = task.lower().strip()
     n_samples = max(80, min(int(n_samples), 4000))
     n_features = max(2, min(int(n_features), 128))
-    epochs = max(3, min(int(epochs), 100))
+    epochs = _sb_clamp_epochs(max(3, min(int(epochs), 100)))
     hidden = max(8, min(int(hidden), 512))
     t0 = time.time()
     device = torch.device("cpu")
@@ -990,7 +1012,7 @@ def train_torch_on_arrays(
 ) -> str:
     if not _TORCH_OK:
         return "PyTorch غير متاح"
-    epochs = max(3, min(int(epochs), 120))
+    epochs = _sb_clamp_epochs(max(3, min(int(epochs), 120)))
     n_features = X.shape[1]
     device = torch.device("cpu")
     X_t = torch.tensor(X, dtype=torch.float32, device=device)
@@ -1052,7 +1074,7 @@ def train_torch_cnn_on_arrays(
     """Conv1d على متجه الميزات (مناسب لبيانات جدولية/إشارات قصيرة)."""
     if not _TORCH_OK:
         return "PyTorch غير متاح"
-    epochs = max(3, min(int(epochs), 100))
+    epochs = _sb_clamp_epochs(max(3, min(int(epochs), 100)))
     n, f = X.shape
     # حشّ إلى طول زوجي مناسب
     length = max(8, f)
@@ -1135,7 +1157,7 @@ def train_torch_text_on_texts(
     """Tokenizer حرفي بسيط + Embedding + TransformerEncoder layer."""
     if not _TORCH_OK:
         return "PyTorch غير متاح"
-    epochs = max(3, min(int(epochs), 80))
+    epochs = _sb_clamp_epochs(max(3, min(int(epochs), 80)))
     # بناء قاموس أحرف
     chars = sorted({c for t in texts for c in str(t)})[:200]
     stoi = {c: i + 2 for i, c in enumerate(chars)}  # 0 pad, 1 unk
@@ -1433,8 +1455,28 @@ def handle_training_command(user_input: str) -> Optional[str]:
             epochs = int(m.group(1))
         return train_torch_text_demo(epochs=epochs)
 
+    # Sandbox / أول مهمة
+    if re.search(r"(حالة|status).{0,12}(sandbox|عزل|حواجز|guardrail)|sandbox\s*status", text, re.I):
+        if _SANDBOX_OK:
+            return _sb_status()
+        return "وحدة sandbox غير محمّلة."
+    if re.search(r"(سجل|قائمة).{0,12}(مهام|missions)|list\s*missions", text, re.I):
+        if _SANDBOX_OK:
+            return _sb_list_missions()
+        return "وحدة sandbox غير محمّلة."
+    if re.search(
+        r"(أول\s*مهمة|المهمة\s*الأولى|first\s*mission|أطلق\s*المهمة|تشغيل\s*المهمة\s*الأولى)",
+        text,
+        re.I,
+    ):
+        if not _SANDBOX_OK:
+            return "وحدة sandbox غير محمّلة."
+        dry = bool(re.search(r"تجريب|dry\s*-?run|محاكاة", text, re.I))
+        return _sb_run_first_mission(dry_run=dry)
+
     # أوامر قصيرة
     aliases = {
+
         "جرد": inventory,
         "inventory": inventory,
         "خطة": lifecycle_plan,
@@ -1447,6 +1489,8 @@ def handle_training_command(user_input: str) -> Optional[str]:
         "نماذج": list_saved_models,
         "csv": list_csv_datasets,
         "قائمة csv": list_csv_datasets,
+        "sandbox": (_sb_status if _SANDBOX_OK else inventory),
+        "أول مهمة": (lambda: _sb_run_first_mission(False) if _SANDBOX_OK else "لا sandbox"),
     }
     if text.strip().lower() in aliases:
         fn = aliases[text.strip().lower()]

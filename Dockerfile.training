@@ -1,0 +1,46 @@
+# NSM Training Sandbox — حاوية معزولة لمهام تدريب الوكيل فقط
+# لا تشغّل Streamlit؛ صلاحيات كتابة محدودة لمجلد المخرجات.
+#
+# بناء:
+#   docker build -f Dockerfile.training -t nsm-training .
+# تشغيل أول مهمة:
+#   docker run --rm -v "$(pwd)/artifacts/model_training:/app/artifacts/model_training" nsm-training
+# مع GPU (إن وُجد NVIDIA Container Toolkit):
+#   docker run --rm --gpus all -v "$(pwd)/artifacts/model_training:/app/artifacts/model_training" nsm-training
+
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    NSM_TRAINING_SANDBOX=1
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# متطلبات خفيفة للتدريب (numpy + torch CPU افتراضياً)
+COPY requirements.txt .
+RUN pip install --no-cache-dir numpy && \
+    pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu || \
+    pip install --no-cache-dir torch
+
+# نسخ ما يلزم للتدريب فقط (تقليل سطح الهجوم)
+COPY ai/ ./ai/
+COPY data/samples/ ./data/samples/
+COPY config/ ./config/
+COPY scripts/run_first_training_mission.py ./scripts/run_first_training_mission.py
+COPY train_batch_v3.py ./train_batch_v3.py
+
+RUN mkdir -p artifacts/model_training/logs artifacts/model_training/missions artifacts/model_training/uploads \
+    && chmod -R a+rwX artifacts/model_training
+
+# مستخدم غير جذر
+RUN useradd -m -u 10001 nsmtrainer && chown -R nsmtrainer:nsmtrainer /app
+USER nsmtrainer
+
+VOLUME ["/app/artifacts/model_training"]
+
+CMD ["python3", "scripts/run_first_training_mission.py"]
