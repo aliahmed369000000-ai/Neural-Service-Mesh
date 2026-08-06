@@ -401,6 +401,14 @@ def _rephrase_in_yemeni_dialect(
                     f"| ملخص الإجابة عليه: {prev_s[:200]}"
                 )
 
+        # حقن أمثلة RAG لهجية إن وُجدت في النتيجة (تلقائي من answer_question)
+        rag_ctx = (result.get("dialect_rag_context") or "").strip()
+        if rag_ctx:
+            facts_lines.append(
+                "أمثلة لهجية مسترجَعة من مدونة يمنية (للاستئناس بالأسلوب فقط، "
+                "لا تختلق حقائق دينية منها):\n" + rag_ctx[:800]
+            )
+
         query = (
             f"السؤال الأصلي: {question}\n\n"
             f"الحقائق المسترجَعة (لا تُغيّرها، فقط أعد صياغتها بلهجة يمنية "
@@ -1418,6 +1426,68 @@ def generate_answer(
 # ═══════════════════════════════════════════════════════════════════════════
 # 6) الدالة الرئيسية — تجميع كل المراحل
 # ═══════════════════════════════════════════════════════════════════════════
+
+def _auto_yemeni_rag_boost(
+    question: str,
+    concept_matches: List[Tuple[str, float]],
+    concepts_db: Dict[str, Any],
+    dialect_score_threshold: float = 0.25,
+) -> Tuple[List[Tuple[str, float]], Dict[str, Any]]:
+    """
+    حقن تلقائي لسياق RAG اللهجي عند ارتفاع درجة اللهجة اليمنية.
+
+    - يوسّع استخراج المفاهيم عبر صيغ الاستعلام البديلة (فصيح↔لهجة)
+    - يُرجع (concept_matches المحدّثة, معلومات dialect_boost)
+    لا يفشل المسار أبداً: عند أي خطأ يُرجع المدخلات كما هي.
+    """
+    meta: Dict[str, Any] = {
+        "dialect_score": 0.0,
+        "is_yemeni": False,
+        "rag_context": "",
+        "rag_hits": [],
+        "expanded_queries": [],
+        "expansion_terms": [],
+        "injected": False,
+    }
+    try:
+        from ai.dialect_boost import analyze_and_boost
+        info = analyze_and_boost(question, top_k_rag=3)
+        meta.update({
+            "dialect_score": float(info.get("dialect_score") or 0.0),
+            "is_yemeni": bool(info.get("is_yemeni")),
+            "rag_context": info.get("rag_context") or "",
+            "rag_hits": info.get("rag_hits") or [],
+            "expanded_queries": info.get("expanded_queries") or [],
+            "expansion_terms": info.get("expansion_terms") or [],
+        })
+    except Exception as e:
+        logger.debug(f"[qa_engine] dialect_boost غير متاح: {e}")
+        return concept_matches, meta
+
+    if meta["dialect_score"] < dialect_score_threshold:
+        return concept_matches, meta
+
+    # توسيع المفاهيم من الاستعلامات البديلة
+    try:
+        existing = {c for c, _ in concept_matches}
+        for q2 in (meta.get("expanded_queries") or [])[1:4]:
+            for name, score in extract_concepts_from_question(q2, concepts_db):
+                if name not in existing:
+                    concept_matches.append((name, round(float(score) * 0.85, 4)))
+                    existing.add(name)
+        for term in (meta.get("expansion_terms") or [])[:8]:
+            for name, score in extract_concepts_from_question(term, concepts_db):
+                if name not in existing:
+                    concept_matches.append((name, round(float(score) * 0.75, 4)))
+                    existing.add(name)
+        concept_matches.sort(key=lambda x: -x[1])
+        meta["injected"] = True
+    except Exception as e:
+        logger.warning(f"[qa_engine] فشل توسيع المفاهيم اللهجي: {e}")
+
+    return concept_matches, meta
+
+
 def answer_question(
     question: str,
     ckg: Dict[str, Any],
@@ -1488,6 +1558,11 @@ def answer_question(
 
     # 1. استخراج المفاهيم
     concept_matches = extract_concepts_from_question(question, concepts_db)
+
+    # 1.b حقن RAG لهجي تلقائي (توسيع مفاهيم + سياق أمثلة عند لهجة يمنية)
+    concept_matches, _yemeni_rag_meta = _auto_yemeni_rag_boost(
+        question, concept_matches, concepts_db,
+    )
 
     # دعم أسئلة المتابعة: لو السؤال الحالي لم يستخرج مفاهيم كافية (أو حتى
     # لو استخرج)، نضيف مفاهيم السؤال السابق كمرشّحين إضافيين بوزن مخفَّض
@@ -1602,6 +1677,28 @@ def answer_question(
         _check_answer_faithfulness(question, result) if include_faithfulness_check else None
     )
 
+    # 7. بيانات حقن RAG اللهجي (للواجهة والمسارات اللاحقة)
+    try:
+        result["dialect_score"] = float(_yemeni_rag_meta.get("dialect_score") or 0.0)
+        result["dialect_is_yemeni"] = bool(_yemeni_rag_meta.get("is_yemeni"))
+        result["dialect_rag_injected"] = bool(_yemeni_rag_meta.get("injected"))
+        result["dialect_rag_context"] = _yemeni_rag_meta.get("rag_context") or ""
+        result["dialect_rag_hits"] = _yemeni_rag_meta.get("rag_hits") or []
+        result["dialect_expanded_queries"] = _yemeni_rag_meta.get("expanded_queries") or []
+        # إلحاق مقتطف أمثلة لهجية بالملخص فقط عند حقن فعلي ووجود سياق
+        if (
+            result.get("dialect_rag_injected")
+            and result.get("dialect_rag_context")
+            and result.get("summary")
+        ):
+            # لا نطيل الملخص أكثر من اللازم — سطران كحد
+            ctx = result["dialect_rag_context"].strip()
+            if ctx and ctx not in result["summary"]:
+                result["dialect_context_note"] = ctx
+    except Exception:
+        result.setdefault("dialect_score", 0.0)
+        result.setdefault("dialect_rag_injected", False)
+
     return result
 
 
@@ -1624,16 +1721,3 @@ def question_similarity(q1: str, q2: str) -> float:
     inter = len(t1 & t2)
     union = len(t1 | t2)
     return round(inter / union, 4) if union else 0.0
-
-
-# ── تعزيز لهجي اختياري (لا يغيّر المسار الافتراضي إلا عند الاستدعاء) ─────────
-def yemeni_dialect_context(question: str) -> dict:
-    """
-    يُرجع تحليل لهجة + سياق RAG يمني للسؤال.
-    آمن: عند أي فشل يُرجع قاموساً فارغاً تقريباً.
-    """
-    try:
-        from ai.dialect_boost import analyze_and_boost
-        return analyze_and_boost(question)
-    except Exception as e:
-        return {"query": question, "error": str(e), "dialect_score": 0.0, "rag_context": ""}
