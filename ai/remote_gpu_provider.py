@@ -4,6 +4,7 @@ Remote GPU Provider — واجهة موحّدة لتشغيل التدريب عل
   • LocalGPUProvider: الجهاز الحالي (Colab / سيرفرك) عبر gpu_runtime
   • ColabBridgeProvider: جلسة Colab تدفع النتائج عبر webhook/API
   • RunPodProvider: هيكل جاهز (يحتاج API key — اختياري)
+  • Kaggle: عبر ai.kaggle_provider (API Kernels + Dual T4 داخل الدفتر)
 
 لا يتضمن أتمتة متصفح Google Colab (Playwright).
 """
@@ -223,6 +224,10 @@ def get_provider(name: Optional[str] = None) -> RemoteGPUProvider:
         return ColabBridgeProvider()
     if n in ("runpod", "pod"):
         return RunPodProvider()
+    # kaggle يُدار عبر ai.kaggle_provider (أوامر مستقلة + Dual T4)
+    if n in ("kaggle", "kag"):
+        # لا نعيد كائن RemoteGPUProvider هنا — استخدم handle_kaggle_command
+        return LocalGPUProvider()  # fallback آمن مع تلميح في status
     return LocalGPUProvider()
 
 
@@ -341,6 +346,21 @@ def remote_status_report() -> str:
         lines.append(f"### {name}")
         lines.append(f"- {json.dumps(st, ensure_ascii=False)}")
     lines.append("")
+    # ملخص Kaggle إن توفّر
+    try:
+        from ai.kaggle_provider import credentials_status, list_kaggle_jobs
+        kc = credentials_status()
+        nj = len(list_kaggle_jobs())
+        lines.append("### kaggle")
+        lines.append(
+            f"- credentials: {'✅' if kc.get('ready') else '❌'} | "
+            f"cli: {'✅' if kc.get('cli') else '❌'} | jobs: {nj}"
+        )
+        lines.append("- أوامر: `حالة kaggle` · `جهّز kaggle` · `ادفع kaggle <id>`")
+    except Exception:
+        lines.append("### kaggle")
+        lines.append("- وحدة ai.kaggle_provider غير محمّلة")
+
     lines.append(
         "أوامر: `حالة remote gpu` · `درّب remote csv …` · "
         "Webhook: `POST /training/remote-results`"

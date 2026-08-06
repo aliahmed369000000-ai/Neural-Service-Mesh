@@ -102,6 +102,13 @@ except Exception:
     _REMOTE_GPU_OK = False
 
 try:
+    from ai.kaggle_provider import handle_kaggle_command as _kaggle_handle
+    _KAGGLE_OK = True
+except Exception:
+    _kaggle_handle = None
+    _KAGGLE_OK = False
+
+try:
     from ai.gpu_runtime import (
         torch_device as _gpu_torch_device,
         suggest_batch_size as _gpu_suggest_batch,
@@ -276,7 +283,7 @@ def inventory() -> str:
     lines.append(f"### مجلد مخرجات الوكيل: `{ARTIFACTS.relative_to(ROOT)}/`")
     lines.append("")
     lines.append(
-        "الوكيل يدعم: (1) تدريب عام sklearn/torch، (2) تشغيل سكربتات NSM، "
+        "الوكيل يدعم: (1) تدريب عام sklearn/torch، (2) تشغيل سكربتات NSM، (2b) Kaggle API + Dual T4 — أوامر `حالة kaggle` / `جهّز kaggle`، "
         "(3) تخطيط دورة حياة لأي مهمة تصفها."
     )
     return "\n".join(lines)
@@ -1510,6 +1517,15 @@ def handle_training_command(user_input: str) -> Optional[str]:
     if not text:
         return None
     low = text.lower()
+
+    # Kaggle (API + Dual T4) — قبل remote العام لأن أوامره أكثر تحديداً
+    if _KAGGLE_OK and _kaggle_handle is not None:
+        try:
+            kg = _kaggle_handle(text)
+            if kg is not None:
+                return kg
+        except Exception as _kg_err:
+            logger.warning("kaggle: %s", _kg_err)
 
     if _REMOTE_GPU_OK and _remote_gpu_handle is not None:
         try:

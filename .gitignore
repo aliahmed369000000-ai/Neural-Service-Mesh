@@ -67,6 +67,8 @@ data/artifacts.db
 .env.*
 !.env.example
 .streamlit/secrets.toml
+kaggle.json
+**/.kaggle/
 *.pem
 *.key
 id_rsa
@@ -75,3 +77,6 @@ models/transformer_ckg_v3/
 
 # نتائج قياس أداء محلية (تختلف حسب جهاز التشغيل) — السكربت مُتتبَّع، النتيجة لا
 benchmark_single_batch_v3_result.json
+
+# مهام Kaggle المحلية المُولَّدة وقت التشغيل
+artifacts/model_training/kaggle_jobs/
