@@ -116,6 +116,13 @@ except Exception:
     _ORCH_OK = False
 
 try:
+    from ai.ai_architect import handle_architect_command as _architect_handle
+    _ARCHITECT_OK = True
+except Exception:
+    _architect_handle = None
+    _ARCHITECT_OK = False
+
+try:
     from ai.gpu_runtime import (
         torch_device as _gpu_torch_device,
         suggest_batch_size as _gpu_suggest_batch,
@@ -290,7 +297,7 @@ def inventory() -> str:
     lines.append(f"### مجلد مخرجات الوكيل: `{ARTIFACTS.relative_to(ROOT)}/`")
     lines.append("")
     lines.append(
-        "الوكيل يدعم: (1) تدريب عام sklearn/torch، (2) تشغيل سكربتات NSM، (2b) Kaggle API + Dual T4 — أوامر `حالة kaggle` / `جهّز kaggle`، "
+        "الوكيل يدعم: (0) مهندس معماري — تحكيم/بحث فائق/ضغط/اتحاد، (1) تدريب عام sklearn/torch، (2) تشغيل سكربتات NSM، (2b) Kaggle API + Dual T4 — أوامر `حالة kaggle` / `جهّز kaggle`، "
         "(3) تخطيط دورة حياة لأي مهمة تصفها."
     )
     return "\n".join(lines)
@@ -1524,6 +1531,15 @@ def handle_training_command(user_input: str) -> Optional[str]:
     if not text:
         return None
     low = text.lower()
+
+    # المهندس المعماري (تحكيم / بحث فائق / ضغط / اتحادي)
+    if _ARCHITECT_OK and _architect_handle is not None:
+        try:
+            ar = _architect_handle(text)
+            if ar is not None:
+                return ar
+        except Exception as _ar_err:
+            logger.warning("architect: %s", _ar_err)
 
     # منسّق المنصات البعيدة (Kaggle + Colab + كفاءة التدريب)
     if _ORCH_OK and _orch_handle is not None:
