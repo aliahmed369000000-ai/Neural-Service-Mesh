@@ -1,0 +1,6 @@
+{
+  "version": "3.0.0-NSM",
+  "train_steps": 32,
+  "storage_policy": "weights_only",
+  "saved_at": "2026-08-06T02:54:15.303143+00:00"
+}
