@@ -1693,6 +1693,18 @@ def handle_training_command(user_input: str) -> Optional[str]:
             epochs = int(m.group(1))
         return train_torch_text_demo(epochs=epochs)
 
+    if re.search(r"(colab|كوكلاب|google\s*colab)", text, re.I):
+        return (
+            "## 📒 تشغيل الوكيل على Google Colab\n\n"
+            "1. Runtime → Change runtime type → **GPU (T4)**\n"
+            "2. ارفع أو افتح الدفتر: `notebooks/NSM_Colab_Training_Agent.ipynb`\n"
+            "3. نفّذ الخلايا: clone → pip → (اختياري Drive) → حالة gpu → تدريب\n"
+            "4. اضبط في الدفتر: `os.environ['NSM_ALLOW_GPU']='1'`\n\n"
+            "التهيئة: `scripts/colab_bootstrap.py`\n"
+            "الدليل: `notebooks/README_COLAB.md`\n\n"
+            "_التحكم في Colab من متصفح خارجي غير مدعوم في المستودع._"
+        )
+
     if re.search(r"(حالة|status).{0,10}(gpu|cuda|vram|كرت)", text, re.I) or text.lower() in ("gpu", "حالة gpu"):
         return _gpu_report()
 
