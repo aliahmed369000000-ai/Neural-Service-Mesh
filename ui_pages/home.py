@@ -15,7 +15,38 @@ def render_home():
     # 0=الرئيسية 1=المعرفة 2=المحادثة 3=الوكلاء 4=إبداع. مُعرَّف هنا أول
     # الدالة لأنه يُستخدم في أكثر من موضع أدناه (بطاقات الاستكشاف + التنقّل
     # الآلي بعد البحث السريع/متابعة المحادثة) — نسخة واحدة بدل تكرارها.
-    _tab_index_map = {"📚 المعرفة": 1, "💬 المحادثة": 2, "🤖 الوكلاء": 3, "🎭 إبداع": 4}
+    # فهرس التبويبات حسب ترتيبها الفعلي في streamlit_app.main() — يُحدَّث
+    # عند إضافة/إعادة ترتيب تبويبات رئيسية. يُستخدم للتنقّل الآلي من البطاقات.
+    _tab_index_map = {
+        "📚 المعرفة": 1,
+        "💬 المحادثة": 2,
+        "🤖 الوكلاء": 3,
+        "🎭 إبداع": 4,
+        "🌐 ترجمة": 5,
+        "🎬 Higgsfield": 6,
+        "📡 الوكيل الاجتماعي": 7,
+        "🎓 التدريب": 8,
+        "ℹ️ عن NSM": 9,  # يتقدّم إن فُتح وضع المالك (يُضاف تبويبان قبلها)
+    }
+
+    # ── 👋 ترحيب أول زيارة — يظهر مرة واحدة فقط في الجلسة، قابل للإغلاق
+    # إضافة UX فقط: لا يغيّر أي مسار بيانات أو منطق قائم.
+    if not st.session_state.get("_nsm_welcome_dismissed", False):
+        with st.container():
+            st.markdown("""
+            <div class="concept-card" style="border-right:3px solid var(--gold);margin-bottom:0.6rem;">
+                <div style="font-weight:700;font-size:1.02rem;margin-bottom:0.35rem;">👋 مرحباً بك في Neural Service Mesh</div>
+                <div style="color:var(--text-muted);font-size:0.9rem;line-height:1.75;">
+                    ابدأ من <b>الأسئلة المقترحة</b> أو <b>مفهوم اليوم</b> بالأسفل، أو انتقل مباشرةً إلى
+                    <b>المحادثة</b> و<b>المعرفة</b>. النظام يعمل حتى بدون أي مفتاح API.
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            _wcols = st.columns([1, 5])
+            with _wcols[0]:
+                if st.button("حسناً، فهمت", key="nsm_welcome_dismiss", use_container_width=True):
+                    st.session_state["_nsm_welcome_dismissed"] = True
+                    st.rerun()
 
     # ── 🧭 تنقّل آلي معلَّق: بعد أي زر Python حقيقي (بحث سريع / متابعة
     # محادثة أدناه) يطلب الانتقال لتبويب معيّن، نخزّن الهدف بـsession_state
@@ -283,16 +314,23 @@ def render_home():
             </div>
             """, unsafe_allow_html=True)
 
-            if st.button("📖 عرض النتيجة الكاملة في تبويب البحث", key="home_quick_search_open_full"):
-                st.session_state["search_query"] = _qs_q
-                st.session_state["_nsm_home_jump_target"] = "📚 المعرفة"
-                st.toast("تم فتح البحث الكامل", icon="🔍")
-                st.rerun()
+            _res_cols = st.columns(2)
+            with _res_cols[0]:
+                if st.button("📖 عرض النتيجة الكاملة في البحث", key="home_quick_search_open_full", use_container_width=True):
+                    st.session_state["search_query"] = _qs_q
+                    st.session_state["_nsm_home_jump_target"] = "📚 المعرفة"
+                    st.toast("تم فتح البحث الكامل", icon="🔍")
+                    st.rerun()
+            with _res_cols[1]:
+                if st.button("💬 ناقش في المحادثة", key="home_quick_search_to_chat", use_container_width=True):
+                    st.session_state._chat_pending = _qs_q
+                    st.session_state["_nsm_home_jump_target"] = "💬 المحادثة"
+                    st.toast("جارٍ فتح المحادثة…", icon="💬")
+                    st.rerun()
 
     # ── 💡 أسئلة مقترحة — تسهّل البداية للمستخدم الجديد دون الحاجة لابتكار سؤال
     # من الصفر. الضغط على أي سؤال يملأ حقل البحث السريع أعلاه ويعرض النتيجة
-    # فوراً (نفس مسار البحث المعرفي الموجود)، أو ينقل لـQ&A حسب الرغبة.
-    # إضافة فقط — لا تغيّر أي منطق بحث أو تبويب قائم.
+    # فوراً (نفس مسار البحث المعرفي الموجود). إضافة فقط — لا تغيّر منطقاً قائماً.
     st.markdown("---")
     st.markdown('<div class="section-header">💡 أسئلة مقترحة للبدء</div>', unsafe_allow_html=True)
     st.caption("اضغط على أي سؤال لاستكشافه مباشرة عبر الشبكة المعرفية")
@@ -311,11 +349,10 @@ def render_home():
     for _i, _sq in enumerate(_suggested_qs):
         with _sq_cols[_i % 4]:
             if st.button(_sq, key=f"home_suggested_q_{_i}", use_container_width=True):
-                # نملأ البحث السريع ونفعّل عرضه فوراً
                 with st.spinner("🔍 جارٍ البحث..."):
                     _sq_result = search_knowledge(_sq)
                 st.session_state["_nsm_home_last_quick_search"] = (_sq, _sq_result)
-                st.session_state["home_quick_search_input"] = _sq  # محاولة تعبئة الحقل إن أمكن
+                st.session_state["home_quick_search_input"] = _sq
                 st.rerun()
 
     # ── 🌟 مفهوم اليوم — مفهوم عشوائي ثابت لنفس اليوم (لا يتغير بكل rerun)

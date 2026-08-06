@@ -316,8 +316,10 @@ def render_chat():
             <div style="font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:0.3rem">
                 ابدأ محادثتك مع NSM
             </div>
-            <div style="font-size:0.85rem;max-width:340px;line-height:1.8">
-                اسأل عن مفهوم إسلامي، آية قرآنية، أو أي موضوع آخر — أو جرّب أحد الأسئلة السريعة بالأسفل
+            <div style="font-size:0.85rem;max-width:360px;line-height:1.85">
+                اسأل عن مفهوم إسلامي، آية قرآنية، جذر لغوي، أو أي موضوع آخر.<br>
+                النظام يجيب عبر الشبكة المعرفية حتى بدون مفاتيح API.<br>
+                <span style="opacity:0.85">جرّب أحد الأسئلة السريعة بالأسفل للبدء فوراً</span>
             </div>
         </div>'''
     else:
@@ -700,18 +702,20 @@ def render_chat():
         )
 
     # أسئلة سريعة — كاملة عند بداية المحادثة فقط، ثم مطوية لتقليل الازدحام البصري
+    # مرتبة لتغطي معرفة إسلامية + مفاهيم عامة مفيدة للمستخدم العربي
     quick_qs = [
         "ما هي أركان الإسلام؟",
-        "ما هو الذكاء الاصطناعي؟",
+        "معنى التقوى في القرآن",
         "ما هي سورة الفاتحة؟",
-        "ما هو الجبر الخطي؟",
+        "ما هو الصبر؟",
         "من هم الخلفاء الراشدون؟",
-        "ما هي لغة Python؟",
+        "ما الفرق بين العلم والمعرفة؟",
         "ما هي سورة الكهف؟",
-        "ما هي التغذية السليمة؟",
+        "اشرح مفهوم الرحمة",
     ]
     if not st.session_state.nsm_messages:
-        st.markdown("**⚡ أسئلة سريعة:**")
+        st.markdown("**⚡ ابدأ بسؤال سريع:**")
+        st.caption("اضغط أي سؤال لإرساله فوراً — يمكنك تعديل الصياغة لاحقاً")
         quick_cols = st.columns(4)
         for i, q in enumerate(quick_qs):
             with quick_cols[i % 4]:
@@ -734,17 +738,21 @@ def render_chat():
         _suggestions = []
         _response_lower = _last_response.lower()
         
-        # اقتراحات عامة
+        # اقتراحات عامة مفيدة — تُعرض فقط إن لم يكن الرد يذكرها أصلاً
         if "مثال" not in _response_lower and "أمثلة" not in _response_lower:
-            _suggestions.append("أعطني مثالاً على ذلك")
+            _suggestions.append("أعطني مثالاً عملياً")
+        if "آية" not in _response_lower and "سورة" not in _response_lower:
+            _suggestions.append("ما الآيات المرتبطة؟")
         if "لماذا" not in _response_lower:
             _suggestions.append("لماذا هذا مهم؟")
-        if "كيف" not in _response_lower:
-            _suggestions.append("كيف يمكن تطبيق هذا؟")
+        if "كيف" not in _response_lower and len(_suggestions) < 3:
+            _suggestions.append("كيف أطبّق هذا؟")
+        if "ببساطة" not in _response_lower and "باختصار" not in _response_lower and len(_suggestions) < 3:
+            _suggestions.append("اشرح لي باختصار")
         
         if _suggestions:
             st.markdown("**💡 اقتراحات للمتابعة:**")
-            _sug_cols = st.columns(len(_suggestions))
+            _sug_cols = st.columns(len(_suggestions[:3]))
             for i, sug in enumerate(_suggestions[:3]):  # حد أقصى 3 اقتراحات
                 with _sug_cols[i]:
                     if st.button(sug, key=f"chat_suggestion_{i}", use_container_width=True):

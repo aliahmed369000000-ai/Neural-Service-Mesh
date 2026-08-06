@@ -201,6 +201,26 @@ def main():
 
         st.markdown("---")
 
+        # ── 🚀 تنقّل سريع — اختصارات للأقسام الأكثر استخداماً
+        # يعتمد على نفس آلية _nsm_home_jump_target المستخدمة في الرئيسية
+        # (حقن سكربت ينقر التبويب المطلوب). إضافة UX فقط.
+        st.markdown("### 🚀 تنقّل سريع")
+        _nav_items = [
+            ("📚 المعرفة", "📚 المعرفة"),
+            ("💬 المحادثة", "💬 المحادثة"),
+            ("🤖 الوكلاء", "🤖 الوكلاء"),
+            ("🎭 إبداع", "🎭 إبداع"),
+        ]
+        _nav_cols = st.columns(2)
+        for _ni, (_nlabel, _ntarget) in enumerate(_nav_items):
+            with _nav_cols[_ni % 2]:
+                if st.button(_nlabel, key=f"sidebar_nav_{_ni}", use_container_width=True):
+                    st.session_state["_nsm_home_jump_target"] = _ntarget
+                    st.rerun()
+        st.caption("أو استخدم Ctrl+K / ⌘K للبحث السريع")
+
+        st.markdown("---")
+
         # ── 👤 الحساب (تسجيل دخول / إنشاء حساب) ─────────────────────────
         st.markdown("### 👤 الحساب")
         try:
