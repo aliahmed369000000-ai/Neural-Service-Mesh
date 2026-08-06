@@ -166,11 +166,28 @@ def pre_publish_check(text: str) -> Dict[str, Any]:
     if neg >= 3:
         flags.append("negative_density")
     frozen = FREEZE_FLAG.is_file()
+    verifier_note = None
+    # ربط اختياري بـ nsm_answer_verifier (Claude/DeepEval إن توفّر — لا يفشل بدون مفاتيح)
+    try:
+        from ai.nsm_answer_verifier import verify_answer_faithfulness
+        v = verify_answer_faithfulness({
+            "answer": text or "",
+            "summary": text or "",
+            "question": "social_publish_candidate",
+        })
+        if isinstance(v, dict):
+            verifier_note = {k: v.get(k) for k in ("score", "success", "reason", "error") if k in v}
+            sc = v.get("score")
+            if sc is not None and float(sc) < 0.35:
+                flags.append("verifier_low_faithfulness")
+    except Exception as e:
+        verifier_note = {"skipped": True, "error": e.__class__.__name__}
     ok = not flags and not frozen
     return {
         "ok": ok,
         "flags": flags,
         "frozen": frozen,
+        "verifier": verifier_note,
         "recommendation": "publish" if ok else "block",
         "reason_ar": (
             "آمن للنشر ضمن الفحص الآلي" if ok else
