@@ -69,6 +69,12 @@ def list_techniques() -> List[Dict[str, Any]]:
             "status": "optional",
         },
         {
+            "id": "diarization_optional",
+            "name": "فصل متحدثين (pyannote) اختياري",
+            "module": "ai.diarization_optional",
+            "status": "optional",
+        },
+        {
             "id": "sequence_packing",
             "name": "Sequence packing في تدريب ArabicTransformer",
             "module": "train_batch_v3",
