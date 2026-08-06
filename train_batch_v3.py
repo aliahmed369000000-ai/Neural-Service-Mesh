@@ -1,5 +1,5 @@
 """
-تدريب ArabicTransformer v3 (120M) على ckg_sentences_v3.pkl
+تدريب ArabicTransformer v3 (200M) على ckg_sentences_v3.pkl
 مع تكيّف تلقائي لحجم الحزمة حسب الرام المتاحة.
 
 يكمل تلقائياً من آخر checkpoint (ckg_train_state_v3.json + models/transformer_ckg_v3).
@@ -29,10 +29,10 @@ WEIGHTS_DIR = "models/transformer_ckg_v3"
 STATE_FILE = "ckg_train_state_v3.json"
 SENTENCES_FILE = "ckg_sentences_v3.pkl"
 
-# قياس مرجعي: PACK_SIZE=80 → ذروة RSS ~2.93GB على بيئة ~3.7GB متاحة
-_REF_PACK_SIZE = 80
-_REF_PEAK_GB = 2.93
-_SAFETY_MARGIN_GB = 0.35
+# قياس مرجعي: PACK_SIZE=100 → ذروة RSS ~4.1GB على بيئة ~5GB+ متاحة (نموذج 200M)
+_REF_PACK_SIZE = 100
+_REF_PEAK_GB = 4.1
+_SAFETY_MARGIN_GB = 0.40
 
 
 def available_ram_gb() -> float:
@@ -239,9 +239,9 @@ def main() -> int:
         else:
             print(f"Loaded existing vocab ({len(tok.word_to_id)} tokens) from {vocab_path}")
 
-    print("Loading ArabicTransformer (120M: d_model=1216, n_layers=8)…")
+    print("Loading ArabicTransformer (200M: d_model=1536, n_layers=8)…")
     model = ArabicTransformer(
-        d_model=1216, n_heads=16, d_ff=2560, n_layers=8, vocab_size=8192,
+        d_model=1536, n_heads=16, d_ff=4096, n_layers=8, vocab_size=8192,
         tokenizer=tok, weights_dir=WEIGHTS_DIR,
         tokenizer_type=tok_mode,
     )
