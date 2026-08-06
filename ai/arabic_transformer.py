@@ -6,11 +6,12 @@ Arabic Transformer — NSM v3.1
     ✓ قاموس الـtokenizer ثنائي الاتجاه (word_to_id / id_to_word) لتمكين encode+decode
     ✓ المصفوفة المدروسة (.csv/.npy)
 
-الـ Tokenizer (v3.3):
-    WordTokenizer      — كلمات كاملة [افتراضي].
-    BPETokenizer       — Byte-Pair Encoding (ai.bpe_tokenizer).
-    WordPieceTokenizer — WordPiece / ## (ai.wordpiece_tokenizer) — ترميز longest-match.
-    HashTokenizer      — متقادم.
+الـ Tokenizer (v3.4):
+    WordTokenizer            — كلمات كاملة [افتراضي].
+    BPETokenizer             — BPE على مستوى الكلمة (ai.bpe_tokenizer).
+    WordPieceTokenizer       — WordPiece / ## (ai.wordpiece_tokenizer).
+    SentencePieceTokenizer   — SentencePiece-style BPE + ▁ (ai.sentencepiece_tokenizer).
+    HashTokenizer            — متقادم.
 
 تحذير: تغيير نوع الـtokenizer يكسر توافق الأوزان ويلزم إعادة تدريب.
 """
@@ -713,7 +714,7 @@ class ArabicTransformer:
 
     VERSION 3.1: WordTokenizer افتراضي (كسر توافق أوزان hash السابقة).
     """
-    VERSION = "3.3.0-NSM"
+    VERSION = "3.4.0-NSM"
 
     def __init__(self, d_model=D_MODEL, n_heads=N_HEADS, d_ff=D_FF,
                  n_layers=N_LAYERS, max_seq=MAX_SEQ_LEN,
@@ -723,7 +724,7 @@ class ArabicTransformer:
                  use_hash_tokenizer: bool = False,
                  tokenizer_type: str = "word"):
         """
-        tokenizer_type: "word" | "bpe" | "wordpiece" | "hash"
+        tokenizer_type: "word" | "bpe" | "wordpiece" | "sentencepiece" | "hash"
         يُتجاهل إذا مُرِّر كائن tokenizer مباشرة.
         """
         self.lr          = lr
@@ -752,6 +753,15 @@ class ArabicTransformer:
             alt = "models/wordpiece_tokenizer.json"
             path = wp_path if os.path.exists(wp_path) else (alt if os.path.exists(alt) else wp_path)
             self.tokenizer = WordPieceTokenizer(vocab_size, vocab_path=path if os.path.exists(path) else None)
+        elif tokenizer_type in ("sentencepiece", "spm", "sp"):
+            try:
+                from ai.sentencepiece_tokenizer import SentencePieceTokenizer
+            except ImportError:
+                from sentencepiece_tokenizer import SentencePieceTokenizer  # type: ignore
+            sp_path = str(Path(weights_dir) / "sentencepiece_tokenizer.json") if weights_dir else "models/sentencepiece_tokenizer.json"
+            alt = "models/sentencepiece_tokenizer.json"
+            path = sp_path if os.path.exists(sp_path) else (alt if os.path.exists(alt) else sp_path)
+            self.tokenizer = SentencePieceTokenizer(vocab_size, vocab_path=path if os.path.exists(path) else None)
         else:
             vocab_path = str(Path(weights_dir) / "tokenizer_vocab.json") if weights_dir else WordTokenizer.DEFAULT_VOCAB_PATH
             self.tokenizer = WordTokenizer(vocab_size, vocab_path=vocab_path if os.path.exists(vocab_path) else WordTokenizer.DEFAULT_VOCAB_PATH)
@@ -998,6 +1008,8 @@ class ArabicTransformer:
                         tok_name = "bpe_tokenizer.json"
                     elif _tn == "WordPieceTokenizer":
                         tok_name = "wordpiece_tokenizer.json"
+                    elif _tn == "SentencePieceTokenizer":
+                        tok_name = "sentencepiece_tokenizer.json"
                     else:
                         tok_name = "tokenizer_vocab.json"
                     self.tokenizer.save(str(tmp_dir / tok_name))
@@ -1052,7 +1064,12 @@ class ArabicTransformer:
         for i, blk in enumerate(self.blocks):
             blk.load(str(d / f"block_{i}"))
 
-        for vocab_p in (d / "wordpiece_tokenizer.json", d / "bpe_tokenizer.json", d / "tokenizer_vocab.json"):
+        for vocab_p in (
+            d / "sentencepiece_tokenizer.json",
+            d / "wordpiece_tokenizer.json",
+            d / "bpe_tokenizer.json",
+            d / "tokenizer_vocab.json",
+        ):
             if vocab_p.exists() and hasattr(self.tokenizer, "load"):
                 try:
                     self.tokenizer.load(str(vocab_p))
