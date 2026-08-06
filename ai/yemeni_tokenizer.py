@@ -262,11 +262,13 @@ _WORD_RE     = re.compile(r"[\u0600-\u06FF\u0660-\u0669]+|[0-9]+|[،.؟!:\"()\-\
 
 
 def _normalize(text: str) -> str:
-    """إزالة التشكيل وتوحيد أشكال الحروف."""
+    """إزالة التشكيل وتوحيد أشكال الحروف + تخفيف التكرار المفرط (لهجة)."""
     text = _TASHKEEL_RE.sub("", text)
     text = re.sub(r"[أإآٱ]", "ا", text)
     text = re.sub(r"[ىئ]", "ي", text)
     text = text.replace("ة", "ه")
+    # خاااااصة → خاصه (حد أقصى حرفين متتاليين)
+    text = re.sub(r"(.)\1{2,}", r"\1\1", text)
     return text.strip()
 
 
@@ -625,6 +627,40 @@ class YemeniTokenizer:
     # حفظ / تحميل القاموس
     # ──────────────────────────────────────────────────────────────────────
 
+    def expand_from_lisan_lexicon(
+        self,
+        lexicon_path: str = "data/yemeni/dialect_lexicon.json",
+        max_words: int = 4000,
+    ) -> int:
+        """
+        يوسّع القاموس من معجم Lisan-Yemeni المستخرج.
+        يزيد تغطية الكلمات اللهجية ويقلّل UNK → دقة أعلى للهجة.
+        """
+        if not os.path.exists(lexicon_path):
+            logger.warning(f"[YemeniTokenizer] لا يوجد معجم: {lexicon_path}")
+            return 0
+        with open(lexicon_path, encoding="utf-8") as f:
+            data = json.load(f)
+        entries = data.get("entries") or []
+        before = self.vocab_size
+        for e in entries[:max_words]:
+            for key in ("raw", "token", "norm", "stem"):
+                w = e.get(key)
+                if not w or not isinstance(w, str):
+                    continue
+                w = w.strip()
+                if len(w) < 2:
+                    continue
+                self._add_word(_normalize(w))
+                if _normalize(w) != w:
+                    self._add_word(w)
+        added = self.vocab_size - before
+        logger.info(
+            f"[YemeniTokenizer] توسيع Lisan: +{added} "
+            f"(الآن {self.vocab_size:,} / سقف {MAX_VOCAB_SIZE})"
+        )
+        return added
+
     def save_vocab(self, path: str) -> None:
         """
         يحفظ القاموس كـ JSON شفاف (word → id).
@@ -710,23 +746,31 @@ def get_yemeni_tokenizer(
     vocab_path:  Optional[str] = _DEFAULT_VOCAB_PATH,
     grow_vocab:  bool = True,
     normalize:   bool = True,
+    expand_lisan: bool = True,
+    lisan_max_words: int = 4000,
 ) -> YemeniTokenizer:
     """
     يُعيد مثيل YemeniTokenizer:
     • يحمّل القاموس المحفوظ إن وُجد.
     • يبدأ بالقاموس البذري إن لم يوجد.
-
-    Parameters
-    ----------
-    vocab_path : مسار ملف JSON للقاموس المحفوظ (None = بذري فقط).
-    grow_vocab : السماح بتوسيع القاموس ديناميكياً.
-    normalize  : تطبيع النص قبل الترميز.
+    • إن وُجد data/yemeni/dialect_lexicon.json يوسّع القاموس تلقائياً (دقة لهجة أعلى).
     """
-    return YemeniTokenizer(
+    tok = YemeniTokenizer(
         grow_vocab=grow_vocab,
         normalize=normalize,
         vocab_path=vocab_path if (vocab_path and os.path.exists(vocab_path)) else None,
     )
+    if expand_lisan:
+        lex = "data/yemeni/dialect_lexicon.json"
+        if os.path.exists(lex):
+            added = tok.expand_from_lisan_lexicon(lex, max_words=lisan_max_words)
+            if added > 0 and vocab_path:
+                try:
+                    os.makedirs(os.path.dirname(vocab_path) or ".", exist_ok=True)
+                    tok.save_vocab(vocab_path)
+                except Exception as e:
+                    logger.warning(f"[YemeniTokenizer] تعذّر حفظ القاموس الموسّع: {e}")
+    return tok
 
 
 # ══════════════════════════════════════════════════════════════════════════════
