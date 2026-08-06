@@ -754,27 +754,64 @@ class ArabicTransformer:
 
     # ── save / load (أوزان فقط) ───────────────────────────────────────────────
     def save(self, directory: Optional[str] = None) -> None:
-        """يحفظ الأوزان فقط. لا نصوص، لا بيانات."""
-        d = Path(directory or self.weights_dir)
-        d.mkdir(parents=True, exist_ok=True)
+        """
+        يحفظ الأوزان فقط. لا نصوص، لا بيانات.
 
-        self.embedding.save(str(d / "embedding.npy"))
-        self.core.save(str(d / "core_matrix"))
-        self.head.save(str(d / "output_head"))
-        for i, blk in enumerate(self.blocks):
-            blk.save(str(d / f"block_{i}"))
+        آمن ضد الانقطاع (crash-safe): يكتب كل الملفات (~30 ملف .npy) في
+        فولدر مؤقت بجانب الهدف، وبعدين يستبدل الفولدر النهائي بيه بعملية
+        واحدة atomic (os.replace على مستوى الفولدر بالكامل — نفس القرص).
+        لو انقطع التنفيذ في أي لحظة أثناء الكتابة نفسها (timeout/kill)،
+        الفولدر النهائي القديم يفضل سليماً 100% زي ما كان، ولا يحصل خلط
+        بين ملفات قديمة وجديدة (checkpoint نص-مكتوب كان بيتحمّل بصمت
+        بدون أي error ويعطي أوزان تالفة).
+        """
+        import json, shutil, tempfile
 
-        # meta: معلومات فنية فقط، لا بيانات تدريب
-        import json
-        meta = {
-            "version": self.VERSION, "train_steps": self._steps,
-            "storage_policy": "weights_only",
-            "saved_at": datetime.now(timezone.utc).isoformat(),
-        }
-        (d / "meta.json").write_text(
-            json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        logger.info(f"[Transformer] ✓ حُفِظت الأوزان → {d}")
+        final_dir = Path(directory or self.weights_dir)
+        final_dir.parent.mkdir(parents=True, exist_ok=True)
+
+        tmp_dir = Path(tempfile.mkdtemp(
+            prefix=f".{final_dir.name}_tmp_", dir=str(final_dir.parent)
+        ))
+        try:
+            self.embedding.save(str(tmp_dir / "embedding.npy"))
+            self.core.save(str(tmp_dir / "core_matrix"))
+            self.head.save(str(tmp_dir / "output_head"))
+            for i, blk in enumerate(self.blocks):
+                blk.save(str(tmp_dir / f"block_{i}"))
+
+            # meta: معلومات فنية فقط، لا بيانات تدريب
+            meta = {
+                "version": self.VERSION, "train_steps": self._steps,
+                "storage_policy": "weights_only",
+                "saved_at": datetime.now(timezone.utc).isoformat(),
+            }
+            (tmp_dir / "meta.json").write_text(
+                json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+
+            # الاستبدال الفعلي — خطوة واحدة atomic، إما تتم بالكامل أو لا تتم إطلاقاً
+            backup_dir = None
+            if final_dir.exists():
+                backup_dir = Path(tempfile.mkdtemp(
+                    prefix=f".{final_dir.name}_old_", dir=str(final_dir.parent)
+                ))
+                backup_dir.rmdir()
+                os.replace(str(final_dir), str(backup_dir))
+            try:
+                os.replace(str(tmp_dir), str(final_dir))
+            except Exception:
+                # فشل الاستبدال النهائي — رجّع القديم زي ما كان ولا تفقد شيء
+                if backup_dir is not None and backup_dir.exists():
+                    os.replace(str(backup_dir), str(final_dir))
+                raise
+            if backup_dir is not None and backup_dir.exists():
+                shutil.rmtree(backup_dir, ignore_errors=True)
+        finally:
+            if tmp_dir.exists():
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        logger.info(f"[Transformer] ✓ حُفِظت الأوزان (atomic) → {final_dir}")
 
     def load(self, directory: Optional[str] = None) -> "ArabicTransformer":
         d = Path(directory or self.weights_dir)

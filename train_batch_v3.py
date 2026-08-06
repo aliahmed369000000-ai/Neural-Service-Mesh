@@ -47,11 +47,16 @@ for _ in range(PACKS_PER_RUN):
     pos = end
 
 elapsed = time.time() - t0
-m.save(WEIGHTS_DIR)
+m.save(WEIGHTS_DIR)  # atomic (write-temp-then-replace) — راجع arabic_transformer.py
 state["position"] = pos
 state["loss_history_tail"] = [round(x, 3) for x in losses]
-with open(STATE_FILE, 'w') as f:
+
+# كتابة atomic لملف الحالة نفسه: لو الانقطاع حصل هنا بالذات، الملف
+# القديم يفضل سليم بدل JSON نص-مكتوب/تالف.
+tmp_state = STATE_FILE + ".tmp"
+with open(tmp_state, 'w') as f:
     json.dump(state, f)
+os.replace(tmp_state, STATE_FILE)
 
 pct = pos / N * 100
 avg_loss = sum(losses) / len(losses)
