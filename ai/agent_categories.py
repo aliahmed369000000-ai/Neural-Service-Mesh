@@ -67,6 +67,14 @@ except Exception:
     run_content_pipeline = None
     _CONTENT_OK = False
 
+# وكيل تدريب النماذج — أدوات حقيقية لإدارة دورة حياة التدريب (CKG / ArabicTransformer)
+try:
+    from ai.model_training_agent import handle_training_command
+    _TRAINING_AGENT_OK = True
+except Exception:
+    handle_training_command = None
+    _TRAINING_AGENT_OK = False
+
 # 🆕 Chain-of-Thought + Few-shot Prompting (ai/chain_of_thought.py +
 # ai/prompt_engine.py) — كانتا موجودتين بالمشروع منذ فترة وموثَّقتين
 # كـ"أولوية #2" في تقرير تحليل سابق، لكن غير مربوطتين بأي مكان إطلاقاً
@@ -311,12 +319,45 @@ AGENT_CATEGORIES: Dict[str, AgentCategory] = {
             "ما أساسيات كتابة عنوان متوافق مع SEO؟",
         ],
     ),
-}
 
+    "model_trainer": AgentCategory(
+        key="model_trainer",
+        emoji="🧬",
+        title="تدريب النماذج",
+        subtitle="أتمتة دورة حياة النموذج: بيانات، ضبط معلمات، تدريب، تقييم، وحفظ",
+        system_prompt=(
+            "أنت وكيل \"تدريب النماذج\" داخل نظام NSM (Neural Service Mesh).\n"
+            "تخصصك: إدارة دورة حياة نماذج الذكاء الاصطناعي في المشروع — "
+            "من فحص البيانات وإعدادها، إلى اقتراح المعلمات الفائقة، ومراقبة التدريب، "
+            "وتحليل الخسارة، والتقييم، وصولاً لحفظ الأوزان.\n"
+            "الأدوات الحقيقية المتاحة عبر أوامر صريحة:\n"
+            "- \"حالة التدريب\" → تقرير تقدّم CKG / ArabicTransformer v3\n"
+            "- \"اقترح إعدادات\" → PACK_SIZE و PACKS حسب الرام\n"
+            "- \"تحليل الخسارة\" → اتجاه loss من سجل الحالة\n"
+            "- \"خطة دورة الحياة\" → خارطة بيانات→تدريب→تقييم→نشر\n"
+            "- \"شغّل خطوة تدريب\" أو \"شغّل خطوة تدريب تجريبي\" → تشغيل محدود وآمن\n"
+            "قواعد الإجابة:\n"
+            "1. أجب بالعربية الفصحى الواضحة، وكن عملياً (أوامر وخطوات قابلة للتنفيذ).\n"
+            "2. لا تختلق أرقام تقدّم أو خسارة — إن لم تُنفَّذ الأداة، قل ذلك واقترح الأمر المناسب.\n"
+            "3. لا تعِد بإعادة التدريب من الصفر أو رفع أوزان كبيرة إلى git (الأوزان محلية ومُتجاهَلة عمداً).\n"
+            "4. نبّه عند انخفاض الرام (النموذج ~120M يحتاج عادةً ≥ 3.5 GB).\n"
+            "5. إذا سُئلت بجدية عن النموذج الأساسي، أجب بصدق ولا تنفِ ذلك."
+        ),
+        quick_prompts=[
+            "حالة التدريب",
+            "اقترح إعدادات",
+            "تحليل الخسارة",
+            "خطة دورة الحياة",
+            "شغّل خطوة تدريب تجريبي",
+        ],
+        web_enabled=False,
+    ),
+
+}
 
 CATEGORY_ORDER: List[str] = [
     "assistant", "automation", "analytics", "reasoning", "coding", "research",
-    "maintenance", "content",
+    "maintenance", "content", "model_trainer",
 ]
 
 
@@ -488,6 +529,19 @@ class CategoryAgentChat:
                 self._last_provider = "📝 Content Pipeline"
                 self.history.append((user_input, cmd_response))
                 self._log_audit(user_input, cmd_response, source, "📝 Content Pipeline", True)
+                return cmd_response
+
+        # ── وكيل تدريب النماذج فقط: أوامر دورة حياة التدريب الحقيقية ──
+        if (
+            self.category.key == "model_trainer"
+            and _TRAINING_AGENT_OK
+            and handle_training_command is not None
+        ):
+            cmd_response = handle_training_command(user_input.strip())
+            if cmd_response is not None:
+                self._last_provider = "🧬 Model Training Agent"
+                self.history.append((user_input, cmd_response))
+                self._log_audit(user_input, cmd_response, source, "🧬 Model Training Agent", True)
                 return cmd_response
 
         # ── بحث ويب حقيقي (DuckDuckGo) قبل توليد الرد ──
