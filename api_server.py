@@ -169,6 +169,61 @@ async def whatsapp_webhook_receive(request: Request):
     return {"status": "ok"}
 
 
+
+
+# ── Model Training Agent: registry + experimental inference ───────────────
+@app.get("/training/registry")
+def training_registry():
+    try:
+        from ai.training_feedback_loop import load_registry, registry_report
+        return {"ok": True, "registry": load_registry(), "report": registry_report()}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/training/champion")
+def training_champion():
+    try:
+        from ai.training_feedback_loop import get_champion
+        ch = get_champion()
+        if not ch:
+            return {"ok": False, "error": "no champion"}
+        return {"ok": True, "champion": ch}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/training/predict")
+async def training_predict(request: Request):
+    """استدلال تجريبي على بطل السجل — body: {"features": [..]}"""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    features = body.get("features") if isinstance(body, dict) else None
+    try:
+        from ai.training_feedback_loop import predict_with_champion_demo
+        text = predict_with_champion_demo(features=features)
+        return {"ok": True, "result": text}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/training/drift")
+def training_drift_status():
+    try:
+        from pathlib import Path as _P
+        import json as _json
+        base = _P("artifacts/model_training/drift/baseline.json")
+        last = _P("artifacts/model_training/drift/last_check.json")
+        return {
+            "ok": True,
+            "baseline": _json.loads(base.read_text()) if base.is_file() else None,
+            "last_check": _json.loads(last.read_text()) if last.is_file() else None,
+        }
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("api_server:app", host="0.0.0.0", port=5000, reload=True)

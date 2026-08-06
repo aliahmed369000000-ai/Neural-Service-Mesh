@@ -58,6 +58,14 @@ except Exception:
     def _sb_clamp_samples(n):
         return max(1, min(int(n), 5000))
 
+
+try:
+    from ai.training_feedback_loop import handle_feedback_command as _fb_handle
+    _FEEDBACK_OK = True
+except Exception:
+    _fb_handle = None
+    _FEEDBACK_OK = False
+
 # ── مسارات NSM المعروفة (اختيارية — أحد الأهداف وليست الوحيدة) ──────────────
 STATE_V3 = ROOT / "ckg_train_state_v3.json"
 SENTENCES_V3 = ROOT / "ckg_sentences_v3.pkl"
@@ -1411,6 +1419,15 @@ def handle_training_command(user_input: str) -> Optional[str]:
     if not text:
         return None
     low = text.lower()
+
+    # حلقة التغذية الراجعة / registry / drift أولاً
+    if _FEEDBACK_OK and _fb_handle is not None:
+        try:
+            fb = _fb_handle(text)
+            if fb is not None:
+                return fb
+        except Exception as _fb_err:
+            logger.warning("feedback handle: %s", _fb_err)
 
     # جرد / inventory
     if re.search(r"(جرد|مخزون|ما\s*المتاح|inventory|بيئة\s*التدريب|ماذا\s*تستطيع)", text, re.I):

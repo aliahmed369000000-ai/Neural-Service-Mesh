@@ -83,5 +83,16 @@
       "max_runtime_seconds": 180,
       "prefer": "text"
     }
-  ]
+  ],
+  "feedback": {
+    "max_self_correct_retries": 3,
+    "drift_threshold": 0.35,
+    "auto_register_on_success": true,
+    "experimental_api_routes": [
+      "/training/registry",
+      "/training/champion",
+      "/training/predict",
+      "/training/drift"
+    ]
+  }
 }
