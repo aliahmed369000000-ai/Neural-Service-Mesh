@@ -224,6 +224,74 @@ def training_drift_status():
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
+
+
+# ── AIaaS: multi-tenant training as a service ─────────────────────────────
+@app.get("/aiaas/status")
+def aiaas_status():
+    try:
+        from ai.aiaas_platform import platform_status, load_tenants_index, PLANS, DOMAINS
+        return {
+            "ok": True,
+            "tenants": len((load_tenants_index().get("tenants") or {})),
+            "plans": PLANS,
+            "domains": {k: v.get("status") for k, v in DOMAINS.items()},
+            "report": platform_status(),
+        }
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/aiaas/tenants")
+async def aiaas_create_tenant(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        from ai.aiaas_platform import create_tenant
+        rec = create_tenant(
+            name=str(body.get("name") or "api-tenant"),
+            plan=str(body.get("plan") or "free"),
+            email=str(body.get("email") or ""),
+        )
+        return {"ok": True, "tenant": rec}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/aiaas/jobs")
+async def aiaas_run_job(request: Request):
+    """Header: X-API-Key: nsm_...  Body: {domain, epochs?, goal?}"""
+    api_key = request.headers.get("X-API-Key") or request.headers.get("x-api-key") or ""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        from ai.aiaas_platform import authenticate_api_key, run_tenant_job
+        ten = authenticate_api_key(api_key)
+        if not ten:
+            return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+        job = run_tenant_job(
+            ten["id"],
+            domain=str(body.get("domain") or "tabular_classification"),
+            epochs=body.get("epochs"),
+            goal=body.get("goal"),
+        )
+        return job
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/aiaas/invoice/{tenant_id}")
+def aiaas_invoice(tenant_id: str):
+    try:
+        from ai.aiaas_platform import estimate_invoice
+        return {"ok": True, "invoice": estimate_invoice(tenant_id)}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("api_server:app", host="0.0.0.0", port=5000, reload=True)

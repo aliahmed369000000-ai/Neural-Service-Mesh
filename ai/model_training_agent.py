@@ -80,6 +80,13 @@ except Exception:
     _factory_handle = None
     _FACTORY_OK = False
 
+try:
+    from ai.aiaas_platform import handle_aiaas_command as _aiaas_handle
+    _AIAAS_OK = True
+except Exception:
+    _aiaas_handle = None
+    _AIAAS_OK = False
+
 # ── مسارات NSM المعروفة (اختيارية — أحد الأهداف وليست الوحيدة) ──────────────
 STATE_V3 = ROOT / "ckg_train_state_v3.json"
 SENTENCES_V3 = ROOT / "ckg_sentences_v3.pkl"
@@ -1433,6 +1440,15 @@ def handle_training_command(user_input: str) -> Optional[str]:
     if not text:
         return None
     low = text.lower()
+
+    # AIaaS platform commands
+    if _AIAAS_OK and _aiaas_handle is not None:
+        try:
+            aa = _aiaas_handle(text)
+            if aa is not None:
+                return aa
+        except Exception as _aa_err:
+            logger.warning("aiaas handle: %s", _aa_err)
 
     # مصنع مستقل (أهداف عامة + موافقات)
     if _FACTORY_OK and _factory_handle is not None:

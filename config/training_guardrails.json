@@ -132,5 +132,11 @@
     "default_target_accuracy": 0.9,
     "auto_approve_toy": true,
     "crisis_after_failures": 3
+  },
+  "aiaas": {
+    "enabled": true,
+    "default_plan": "free",
+    "isolate_tenants": true,
+    "billing_estimate_only": true
   }
 }
