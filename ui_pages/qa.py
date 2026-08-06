@@ -164,6 +164,17 @@ def render_qa():
     st.markdown(f"**درجة الثقة:** {confidence:.0%}")
     st.progress(confidence)
 
+    # ── سياق RAG لهجي (حقن تلقائي عند اكتشاف لهجة يمنية) ──
+    if result.get("dialect_rag_injected") or result.get("dialect_is_yemeni"):
+        _ds = float(result.get("dialect_score") or 0.0)
+        st.markdown("")
+        st.caption(f"🇾🇪 مؤشر اللهجة اليمنية: {_ds:.0%}"
+                   + (" — تم حقن أمثلة RAG تلقائياً" if result.get("dialect_rag_injected") else ""))
+        _ctx = (result.get("dialect_context_note") or result.get("dialect_rag_context") or "").strip()
+        if _ctx:
+            with st.expander("📚 أمثلة لهجية مسترجَعة (RAG)", expanded=False):
+                st.markdown(_ctx)
+
     # ── أثر التفكير (اختياري — ai/chain_of_thought.py) ──
     if result.get("reasoning_trace"):
         with st.expander("🧠 لماذا هذه الإجابة؟"):
