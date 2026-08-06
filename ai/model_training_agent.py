@@ -123,6 +123,13 @@ except Exception:
     _ARCHITECT_OK = False
 
 try:
+    from ai.scientist_manager import handle_scientist_command as _scientist_handle
+    _SCIENTIST_OK = True
+except Exception:
+    _scientist_handle = None
+    _SCIENTIST_OK = False
+
+try:
     from ai.gpu_runtime import (
         torch_device as _gpu_torch_device,
         suggest_batch_size as _gpu_suggest_batch,
@@ -1531,6 +1538,15 @@ def handle_training_command(user_input: str) -> Optional[str]:
     if not text:
         return None
     low = text.lower()
+
+    # العالِم المبتكر + المدير الأمني والمالي
+    if _SCIENTIST_OK and _scientist_handle is not None:
+        try:
+            sc = _scientist_handle(text)
+            if sc is not None:
+                return sc
+        except Exception as _sc_err:
+            logger.warning("scientist: %s", _sc_err)
 
     # المهندس المعماري (تحكيم / بحث فائق / ضغط / اتحادي)
     if _ARCHITECT_OK and _architect_handle is not None:

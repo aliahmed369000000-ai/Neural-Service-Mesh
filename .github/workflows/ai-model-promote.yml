@@ -1,0 +1,37 @@
+# ترقية نموذج NSM — لا نشر أعمى
+name: AI Model Promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_id:
+        description: 'معرف النموذج في السجل'
+        required: true
+      confirm:
+        description: 'اكتب promote لتأكيد الترقية'
+        required: true
+        default: ''
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'promote'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Sanity compile
+        run: |
+          python -m py_compile ai/ai_cicd.py ai/model_training_agent.py || true
+      - name: Show registry
+        run: |
+          if [ -f artifacts/model_training/scientist/registry/model_registry.json ]; then
+            cat artifacts/model_training/scientist/registry/model_registry.json
+          else
+            echo "لا سجل نماذج بعد"
+          fi
+      - name: Notice
+        run: |
+          echo "الترقية اليدوية المؤكدة للنموذج: ${{ github.event.inputs.model_id }}"
+          echo "اربط هنا خطوات نسخ الأوزان إلى مسار الإنتاج / Streamlit secrets حسب بيئتك."

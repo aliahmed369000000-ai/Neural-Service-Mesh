@@ -82,3 +82,4 @@ benchmark_single_batch_v3_result.json
 artifacts/model_training/kaggle_jobs/
 artifacts/model_training/orchestrator/
 artifacts/model_training/architect/
+artifacts/model_training/scientist/
