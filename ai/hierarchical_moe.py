@@ -47,15 +47,112 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SAVE_DIR = ROOT / "artifacts" / "hierarchical_moe"
 DEFAULT_SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
-# ── فئات المعرفة الإسلامية الافتراضية (مستوى 1) ──────────────────────────────
+# ── فئات المستوى 1 + خبراء المستوى 2 (دين + تخصصات عامة) ───────────────────
+# الدين: نفس التقسيم الشرعي السابق. باقي التخصصات: خبير/خبراء لكل مجال.
 DEFAULT_CATEGORIES: Dict[str, List[str]] = {
-    "fiqh": ["fiqh_hanafi", "fiqh_maliki", "fiqh_shafii", "fiqh_hanbali"],
-    "tafsir": ["tafsir_general", "tafsir_linguistic"],
-    "hadith": ["hadith_riwaya", "hadith_diraya"],
-    "aqidah": ["aqidah_general", "aqidah_comparative"],
-    "seerah": ["seerah_prophet", "seerah_khulafa"],
-    "arabic": ["arabic_nahw", "arabic_balagha"],
-    "general": ["general_assistant"],
+    # ── الدين الإسلامي ──
+    "fiqh": [
+        "fiqh_hanafi",
+        "fiqh_maliki",
+        "fiqh_shafii",
+        "fiqh_hanbali",
+        "fiqh_general",
+    ],
+    "tafsir": [
+        "tafsir_general",
+        "tafsir_linguistic",
+        "tafsir_thematic",
+    ],
+    "hadith": [
+        "hadith_riwaya",
+        "hadith_diraya",
+        "hadith_ahkam",
+    ],
+    "aqidah": [
+        "aqidah_general",
+        "aqidah_comparative",
+        "aqidah_tawhid",
+    ],
+    "seerah": [
+        "seerah_prophet",
+        "seerah_khulafa",
+        "seerah_events",
+    ],
+    # ── لغة عربية ──
+    "arabic": [
+        "arabic_nahw",
+        "arabic_balagha",
+        "arabic_sarf",
+        "arabic_translation",
+    ],
+    # ── تخصصات عامة ──
+    "programming": [
+        "prog_python",
+        "prog_web",
+        "prog_algorithms",
+        "prog_systems",
+    ],
+    "sports": [
+        "sports_football",
+        "sports_fitness",
+        "sports_general",
+    ],
+    "science": [
+        "science_physics",
+        "science_chemistry",
+        "science_biology",
+        "science_general",
+    ],
+    "math": [
+        "math_algebra",
+        "math_geometry",
+        "math_stats",
+        "math_general",
+    ],
+    "medicine": [
+        "med_general",
+        "med_nutrition",
+        "med_public_health",
+    ],
+    "technology": [
+        "tech_ai",
+        "tech_networks",
+        "tech_hardware",
+        "tech_security",
+    ],
+    "business": [
+        "biz_marketing",
+        "biz_finance",
+        "biz_management",
+        "biz_entrepreneurship",
+    ],
+    "education": [
+        "edu_teaching",
+        "edu_curriculum",
+        "edu_learning",
+    ],
+    "history": [
+        "hist_islamic",
+        "hist_world",
+        "hist_general",
+    ],
+    "media": [
+        "media_content",
+        "media_social",
+        "media_journalism",
+    ],
+    "psychology": [
+        "psych_general",
+        "psych_development",
+    ],
+    "law": [
+        "law_general",
+        "law_civil",
+    ],
+    "general": [
+        "general_assistant",
+        "general_research",
+    ],
 }
 
 

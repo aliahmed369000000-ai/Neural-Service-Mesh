@@ -42,11 +42,96 @@ from ai.moe_ckg_bridge import _KEYWORD_TO_CATEGORY, map_cluster_to_category
 CATEGORY_ORDER = list(DEFAULT_CATEGORIES.keys())  # fiqh, tafsir, ...
 
 
+# جمل بذرية للفئات غير المغطاة جيداً في CKG (برمجة، رياضة، …)
+SEED_SENTENCES: Dict[str, List[str]] = {
+    "programming": [
+        "كيف أكتب دالة python لحساب المتوسط؟",
+        "ما الفرق بين list و dict في البرمجة؟",
+        "شرح خوارزمية البحث الثنائي مع مثال كود",
+        "كيف أبني API بسيط باستخدام FastAPI؟",
+        "ما هو git commit وكيف أرفع التغييرات؟",
+        "تحسين أداء حلقة for في جافاسكربت",
+        "مفهوم class والوراثة في البرمجة الكائنية",
+        "تصحيح خطأ IndexError في بايثون",
+    ],
+    "sports": [
+        "تمارين لياقة يومية للمبتدئين",
+        "قوانين كرة القدم في ركلة الجزاء",
+        "كيف أحسّن التحمل في الجري؟",
+        "أفضل تمارين بناء عضلات البطن",
+        "نظام غذائي مرتبط بالتدريب الرياضي",
+        "استراتيجية فريق في مباراة كرة قدم",
+    ],
+    "science": [
+        "قانون نيوتن الثاني في الفيزياء",
+        "تفاعل كيميائي بين حمض وقاعدة",
+        "دورة الخلية في علم الأحياء",
+        "ما هو التمثيل الضوئي في النباتات؟",
+        "شرح البنية الذرية بشكل مبسط",
+    ],
+    "math": [
+        "حل معادلة من الدرجة الثانية",
+        "مساحة المثلث باستخدام الارتفاع",
+        "مقدمة في الإحصاء والمتوسط الحسابي",
+        "ما هو المشتق في التفاضل؟",
+        "ضرب المصفوفات في الجبر الخطي",
+    ],
+    "medicine": [
+        "أعراض نزلات البرد الشائعة وعلاجها المنزلي",
+        "أسس التغذية السليمة اليومية",
+        "الوقاية من الأمراض المعدية",
+        "متى يجب مراجعة الطبيب عند الحمى؟",
+    ],
+    "technology": [
+        "ما هو الذكاء الاصطناعي وكيف يعمل؟",
+        "أساسيات أمن الشبكات والحماية",
+        "الفرق بين CPU و GPU",
+        "مفاهيم الحوسبة السحابية",
+    ],
+    "business": [
+        "خطة تسويق لمنتج جديد",
+        "إدارة التدفق النقدي في شركة ناشئة",
+        "مهارات القيادة وإدارة الفرق",
+        "مقدمة في الاستثمار والتمويل",
+    ],
+    "education": [
+        "أساليب تدريس فعّالة للطلاب",
+        "تصميم منهج تعليمي واضح",
+        "تحفيز التعلم الذاتي لدى المتعلمين",
+    ],
+    "history": [
+        "أحداث مهمة في التاريخ الإسلامي",
+        "أسباب الحرب العالمية الثانية",
+        "نشأة الحضارات القديمة",
+    ],
+    "media": [
+        "كتابة محتوى جذاب للمنصات الاجتماعية",
+        "أساسيات الصحافة الرقمية",
+        "استراتيجية نشر على يوتيوب",
+    ],
+    "psychology": [
+        "إدارة القلق بطرق عملية",
+        "مراحل النمو النفسي للطفل",
+        "تحفيز السلوك الإيجابي",
+    ],
+    "law": [
+        "مبادئ العقد في القانون المدني",
+        "حقوق الأطراف في الدعوى القضائية",
+        "مفهوم التشريع والأنظمة",
+    ],
+    "arabic": [
+        "قواعد النحو في إعراب الفعل",
+        "أساليب البلاغة في التشبيه",
+        "ميزان الصرف للأفعال العربية",
+        "ترجمة نص عربي إلى لغة أخرى بدقة",
+    ],
+}
+
+
 def label_sentence(text: str) -> str:
     for pat, cat in _KEYWORD_TO_CATEGORY:
         if re.search(pat, text or "", re.I):
             return cat
-    # تلميحات إنجليزية/حقول من بيانات CKG
     low = (text or "").lower()
     for key, cat in [
         ("quran", "tafsir"),
@@ -56,6 +141,8 @@ def label_sentence(text: str) -> str:
         ("seerah", "seerah"),
         ("arabic", "arabic"),
         ("nahw", "arabic"),
+        ("python", "programming"),
+        ("code", "programming"),
         ("مجال", "general"),
     ]:
         if key in low:
@@ -88,6 +175,12 @@ def load_sentences(max_samples: int) -> List[str]:
             print(f"  + {path.name}: {len(data) if hasattr(data, '__len__') else '?'} → إجمالي {len(sentences)}")
         except Exception as e:
             print(f"  ! فشل {path.name}: {e}")
+    # بذور التخصصات العامة (تُكرر لتقوية الإشارة)
+    for cat, seeds in SEED_SENTENCES.items():
+        for _ in range(40):
+            for s in seeds:
+                sentences.append(s)
+        print(f"  + seeds[{cat}]: {len(seeds)}×40")
     # إزالة تكرار مع الحفاظ على ترتيب تقريبي
     seen = set()
     uniq = []
@@ -95,6 +188,10 @@ def load_sentences(max_samples: int) -> List[str]:
         if s not in seen:
             seen.add(s)
             uniq.append(s)
+    # أعد إضافة البذور بعد إزالة التكرار (مكررة عمداً للتوازن)
+    for cat, seeds in SEED_SENTENCES.items():
+        for _ in range(30):
+            uniq.extend(seeds)
     random.shuffle(uniq)
     if max_samples > 0 and len(uniq) > max_samples:
         uniq = uniq[:max_samples]
@@ -105,8 +202,13 @@ def encode_batch(texts: List[str], labels: List[str], encoder: VectorEncoder) ->
     X = np.zeros((len(texts), 784), dtype=np.float64)
     y = np.zeros(len(texts), dtype=np.int64)
     cat_to_i = {c: i for i, c in enumerate(CATEGORY_ORDER)}
+    # domain في VectorEncoder محدود — نمرّر general للتخصصات الجديدة مع النص الحامل للإشارة
+    known_domains = {
+        "fiqh", "tafsir", "hadith", "aqidah", "seerah", "arabic", "general",
+        "history", "science", "education",
+    }
     for i, (t, lab) in enumerate(zip(texts, labels)):
-        domain = lab if lab in ("fiqh", "tafsir", "hadith", "aqidah", "seerah", "arabic", "general") else "general"
+        domain = lab if lab in known_domains else "general"
         X[i] = encoder.encode(t, domain=domain, importance=0.6, certainty=0.75)
         y[i] = cat_to_i.get(lab, cat_to_i["general"])
     return X, y
@@ -183,15 +285,23 @@ def train(
 
     print("=== بناء النموذج ===")
     path = DEFAULT_SAVE_DIR / "hierarchical_moe.pt"
+    model = None
     if path.is_file():
         try:
             model = HierarchicalMoE.load(path)
-            print(f"  استكمال من {path} ({model.total_experts()} خبراء)")
+            if set(model._group_order) != set(CATEGORY_ORDER):
+                print(
+                    f"  فئات مختلفة (محمّل={len(model._group_order)}، مطلوب={len(CATEGORY_ORDER)}) — إعادة بناء"
+                )
+                model = None
+            else:
+                print(f"  استكمال من {path} ({model.total_experts()} خبراء)")
         except Exception as e:
             print(f"  تحميل فشل ({e}) — نموذج جديد")
-            model = build_default_moe(d_model=d_model, top_k_groups=2, top_k_experts=3)
-    else:
+            model = None
+    if model is None:
         model = build_default_moe(d_model=d_model, top_k_groups=2, top_k_experts=3)
+        print(f"  نموذج جديد: {len(CATEGORY_ORDER)} فئات، {model.total_experts()} خبراء")
 
     # تأكد من تطابق d_model
     if model.d_model != d_model:
