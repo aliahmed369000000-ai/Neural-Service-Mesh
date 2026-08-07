@@ -61,16 +61,18 @@ def render_unified_agent():
     st.markdown(
         """
 <div class="nsm-hero-panel">
-  <div class="nsm-hero-title">🎯 الوكيل الموحّد</div>
+  <div class="nsm-hero-title">🎯 الوكيل الموحّد — مدير مشروعك الشخصي</div>
   <p class="nsm-hero-sub">
-    محادثة واحدة مستمرة — كل رسالة تُوجَّه تلقائياً للمتخصص الأنسب، مع ذاكرة مشتركة عبر المواضيع.
-    أوامر المشروع (تدريب، CKG، LFS…) تُنفَّذ مباشرة عبر جسر الأدوات قبل أي رد عام.
+    أنا الواجهة الواحدة التي تجمع كل شيء: أفكر، وأقرر متى أبحث في الويب، ومتى أولّد صوراً،
+    ومتى أكتب كوداً، ومتى أطلق الوكلاء المتخصصين تحتي. هم ينفّذون المهام وأنا أجمع النتائج
+    وأتحمل المسؤولية النهائية عن الجواب. أعطني الهدف فقط.
   </p>
   <div class="nsm-chip-row">
-    <span class="nsm-chip nsm-chip--accent">توجيه تلقائي</span>
-    <span class="nsm-chip">ذاكرة مشتركة</span>
-    <span class="nsm-chip">أوامر حقيقية</span>
-    <span class="nsm-chip">بحث ويب اختياري</span>
+    <span class="nsm-chip nsm-chip--accent">مدير واحد</span>
+    <span class="nsm-chip">تفويض ذكي</span>
+    <span class="nsm-chip">توليف نهائي</span>
+    <span class="nsm-chip">أوامر مشروع حقيقية</span>
+    <span class="nsm-chip">بحث ويب</span>
   </div>
 </div>
         """,
@@ -129,7 +131,7 @@ def render_unified_agent():
         html_out += (
             '<div class="ua-empty">'
             '<div class="big">🎯</div>'
-            '<div class="hint">اكتب سؤالاً أو أمراً — سيُوجَّه للمتخصص الأنسب أو يُنفَّذ عبر أدوات المشروع.</div>'
+            '<div class="hint">أعطني الهدف فقط — أنا أقرر الأدوات والوكلاء المناسبين، أجمع النتائج، وأتحمل المسؤولية النهائية عن الجواب.</div>'
             "</div>"
         )
     else:
@@ -195,11 +197,14 @@ def render_unified_agent():
             st.session_state.unified_agent_msgs.append(
                 ("user", text, "", datetime.now().strftime("%H:%M"))
             )
-        with st.spinner("⟳ توجيه وتنفيذ…"):
+        with st.spinner("⟳ أفكر وأختار الفريق المناسب…"):
             response, meta = bot.chat(text, force_web=web_toggle)
-        badge = f"{meta.get('category_emoji', '🤖')} {meta.get('category_title', '')}"
-        if meta.get("route_method") == "project_bridge":
-            badge = meta.get("provider_badge") or "🧬 Project Agent"
+        # شارة المدير الموحّد أو وكيل المشروع تأخذ الأولوية
+        route = meta.get("route_method") or ""
+        if route == "project_bridge" or meta.get("category_key") == "master_orchestrator":
+            badge = meta.get("provider_badge") or f"{meta.get('category_emoji', '🎯')} {meta.get('category_title', 'المدير الموحّد')}"
+        else:
+            badge = f"{meta.get('category_emoji', '🤖')} {meta.get('category_title', '')}"
         qb = meta.get("quality_badge", "")
         if qb:
             badge = f"{badge} · {qb}"

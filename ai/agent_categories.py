@@ -686,16 +686,26 @@ class CategoryAgentChat:
 
 
 class UnifiedAgentChat:
-    """وكيل واحد موحّد: واجهة محادثة مستمرة وذاكرة مشتركة عبر كل الرسائل،
-    مع توجيه تلقائي لكل رسالة على حدة إلى أنسب متخصص من AGENT_CATEGORIES
-    خلف الكواليس (نفس route_query_verbose المستخدَمة في 🤝 منسّق الوكلاء)
-    — بدل خلط كل الـ System Prompts في وكيل عام واحد (يُضعف الدقة)، أو
-    عزل كل فئة بذاكرتها الخاصة (يكسر استمرارية المحادثة عبر المواضيع).
+    """🎯 الوكيل الموحّد = مدير المشروع الشخصي (Master Orchestrator)
 
-    يعيد استخدام كائنات CategoryAgentChat نفسها (بلا تعديل عليها) —
-    فقط "يستعير" ذاكرتها المؤقتة لكل استدعاء لتمرير السياق المشترك بدل
-    ذاكرة الفئة المعزولة، ثم يتتبّع السجل الموحّد في self.shared_history.
+    الواجهة الواحدة التي تجمع كل شيء:
+    - يفكر ويقرر متى يبحث في الويب، متى يفوّض لوكلاء متخصصين، متى يستخدم أدوات المشروع.
+    - الوكلاء المتخصصون (AGENT_CATEGORIES) يعملون **تحته**؛ هو يعطيهم المهام ويجمع نتائجهم.
+    - القرار والمسؤولية النهائية عن الجواب تبقى عنده دائماً.
+
+    السلوك:
+      1) أوامر المشروع التنفيذية → عبر agent_project_bridge / NSM Agent أولاً.
+      2) المهام المعقّدة / متعددة الأبعاد → يختار 2–3 وكلاء، يشغّلهم، يولّف إجابة واحدة.
+      3) المهام البسيطة → يوجّه لأنسب متخصص واحد مع الحفاظ على الذاكرة المشتركة.
     """
+
+    # كلمات تشير إلى مهمة مركّبة تستحق تفويضاً متعدد الوكلاء
+    _COMPLEX_HINTS = (
+        "حلل", "حلّل", "راجع", "قارن", "خطة", "استراتيجية", "من جميع الجوانب",
+        "شامل", "متكامل", "تقرير", "قيّم", "اقترح خطة", "صمّم", "ابنِ",
+        "ابحث ثم", "حلل ثم", "من ناحية", "وزوايا", "متعدد", "وكلاء",
+        "analyze", "compare", "plan", "strategy", "comprehensive", "report",
+    )
 
     def __init__(self) -> None:
         self._bots: Dict[str, CategoryAgentChat] = {}
@@ -707,23 +717,83 @@ class UnifiedAgentChat:
             self._bots[key] = CategoryAgentChat(key)
         return self._bots[key]
 
-    def chat(self, user_input: str, force_web: "bool | None" = None) -> "Tuple[str, dict]":
-        """يوجّه الرسالة تلقائياً لأنسب متخصص، يمرّر له الذاكرة المشتركة
-        كسياق، ويعيد (الرد، بيانات وصفية عن المتخصص الذي أجاب)."""
-        if not user_input.strip():
-            return "الرجاء كتابة سؤالك.", {}
+    def _is_complex(self, text: str) -> bool:
+        """هل الطلب يبدو مركّباً بما يكفي لتفويض عدة وكلاء؟"""
+        t = (text or "").strip()
+        if len(t) < 40:
+            return False
+        low = t.lower()
+        hits = sum(1 for h in self._COMPLEX_HINTS if h in low)
+        # أسئلة طويلة أو تحتوي أكثر من مؤشر تعقيد
+        return hits >= 1 or (len(t) > 120 and ("و" in t or "ثم" in t or "و" in low))
 
+    def _synthesize(self, task: str, agent_replies: Dict[str, str]) -> str:
+        """يولّف ردود الوكلاء الفرعية في إجابة واحدة نهائية تحت مسؤولية المدير."""
+        if not agent_replies:
+            return "لم أستطع جمع ردود من الوكلاء الفرعيين."
+        if len(agent_replies) == 1:
+            return next(iter(agent_replies.values()))
+
+        parts = []
+        for key, reply in agent_replies.items():
+            cat = AGENT_CATEGORIES.get(key)
+            title = cat.title if cat else key
+            emoji = cat.emoji if cat else "•"
+            parts.append(f"[{emoji} {title}]\n{reply.strip()}")
+
+        combined = "\n\n───\n\n".join(parts)
+        synth_prompt = (
+            "أنت المدير الأعلى (Master Orchestrator) في نظام NSM.\n"
+            "الوكلاء المتخصصون أرسلوا لك التقارير التالية حول مهمة المستخدم.\n"
+            "مهمتك: وَلِّف إجابة واحدة نهائية واضحة بالعربية، احتفظ بالأفضل من كل تقرير، "
+            "احذف التكرار، وكن أنت المسؤول النهائي عن الجواب (لا تذكر أسماء الوكلاء إلا إذا لزم).\n"
+            "ابدأ مباشرة بالجواب المفيد، بدون مقدمات طويلة.\n\n"
+            f"مهمة المستخدم:\n{task.strip()}\n\n"
+            f"تقارير الوكلاء:\n{combined}"
+        )
+        try:
+            _llm = LLMFallback()
+            if getattr(_llm, "available", False):
+                result = _llm.generate(
+                    synth_prompt,
+                    system_prompt=(
+                        "أنت مدير مشروع شخصي ذكي. تجمع نتائج فريقك وتقدّم جواباً واحداً "
+                        "واضحاً ومسؤولاً بالعربية. لا تختلق معلومات غير موجودة في التقارير."
+                    ),
+                )
+                text = (result.text or "").strip()
+                if text:
+                    return text
+        except Exception:
+            pass
+
+        # fallback بسيط إذا فشل التوليف عبر LLM
+        return (
+            "📋 **ملخص من فريق الوكلاء** (توليف تلقائي):\n\n"
+            + "\n\n".join(
+                f"**{AGENT_CATEGORIES[k].emoji} {AGENT_CATEGORIES[k].title}**\n{v}"
+                for k, v in agent_replies.items()
+            )
+        )
+
+    def chat(self, user_input: str, force_web: "bool | None" = None) -> "Tuple[str, dict]":
+        """الواجهة الرئيسية: أقرر، أفوّض، أجمع، وأتحمل المسؤولية النهائية."""
+        if not user_input.strip():
+            return "الرجاء كتابة سؤالك أو هدفك.", {}
+
+        # 1) أوامر المشروع التنفيذية الحقيقية لها أولوية مطلقة
         try:
             from ai.agent_project_bridge import dispatch_with_meta
             _br, _badge = dispatch_with_meta(user_input.strip())
             if _br is not None:
                 meta = {
                     "category_key": "project_bridge",
-                    "category_title": "وكيل المشروع",
+                    "category_title": "وكيل المشروع التنفيذي",
                     "category_emoji": "🧬",
                     "route_method": "project_bridge",
                     "provider_badge": _badge or "🧬 Project Agent",
                     "quality_badge": "",
+                    "delegated_agents": [],
                 }
                 self.shared_history.append((user_input, _br))
                 self.turns_meta.append(meta)
@@ -731,34 +801,78 @@ class UnifiedAgentChat:
         except Exception:
             pass
 
+        # 2) تحديد الوكلاء المناسبين
+        max_agents = 3 if self._is_complex(user_input) else 1
         if _ROUTING_OK and route_query_verbose is not None:
             selected, route_method, _scores = route_query_verbose(
-                user_input, AGENT_CATEGORIES, max_agents=1
+                user_input, AGENT_CATEGORIES, max_agents=max_agents
             )
         else:
             selected, route_method = [], "default"
-        key = selected[0] if selected else ("assistant" if "assistant" in AGENT_CATEGORIES else next(iter(AGENT_CATEGORIES)))
-        bot = self._get_bot(key)
 
-        # حقن الذاكرة المشتركة كسياق بدل ذاكرة الفئة المعزولة الخاصة بالبوت
-        bot.history = list(self.shared_history[-4:])
-        response = bot.chat(user_input, force_web=force_web, source="unified")
+        if not selected:
+            selected = ["assistant"] if "assistant" in AGENT_CATEGORIES else [next(iter(AGENT_CATEGORIES))]
+            route_method = "default"
 
-        cat = AGENT_CATEGORIES[key]
+        # 3) حالة وكيل واحد فقط → نفس السلوك السابق (سريع ودقيق)
+        if len(selected) == 1:
+            key = selected[0]
+            bot = self._get_bot(key)
+            bot.history = list(self.shared_history[-4:])
+            response = bot.chat(user_input, force_web=force_web, source="unified")
+            cat = AGENT_CATEGORIES[key]
+            meta = {
+                "category_key": key,
+                "category_title": cat.title,
+                "category_emoji": cat.emoji,
+                "route_method": route_method,
+                "provider_badge": bot.last_provider_badge(),
+                "quality_badge": bot.last_quality_badge(),
+                "delegated_agents": [key],
+            }
+            self.shared_history.append((user_input, response))
+            self.turns_meta.append(meta)
+            return response, meta
+
+        # 4) تفويض متعدد: أشغّل الوكلاء وأولّف النتيجة بنفسي
+        agent_replies: Dict[str, str] = {}
+        failed: List[str] = []
+        badges: List[str] = []
+
+        for key in selected:
+            try:
+                bot = self._get_bot(key)
+                # سياق مشترك مختصر
+                bot.history = list(self.shared_history[-3:])
+                resp = bot.chat(user_input, force_web=force_web, source="unified_multi")
+                agent_replies[key] = resp
+                try:
+                    badges.append(bot.last_provider_badge() or "")
+                except Exception:
+                    pass
+            except Exception as e:
+                failed.append(key)
+                agent_replies[key] = f"⚠️ تعذّر الحصول على رد من هذا الوكيل: {e}"
+
+        final = self._synthesize(user_input, {k: v for k, v in agent_replies.items() if k not in failed})
+
+        # وصف الشفافية للمستخدم (بدون إضعاف دور المدير)
+        team_label = " + ".join(
+            f"{AGENT_CATEGORIES[k].emoji}{AGENT_CATEGORIES[k].title}"
+            for k in selected if k in AGENT_CATEGORIES
+        )
         meta = {
-            "category_key": key,
-            "category_title": cat.title,
-            "category_emoji": cat.emoji,
-            "route_method": route_method,
-            "provider_badge": bot.last_provider_badge(),
-            # 🆕 شارة جودة موحّدة (نسبة% + تصنيف + إشارة إعادة توليد إن حدثت)
-            # — نفس الميزة المضافة لـ CategoryAgentChat، معروضة الآن أيضاً
-            # في الوكيل الموحّد وليس فقط في تبويب "🤖 وكلاء AI".
-            "quality_badge": bot.last_quality_badge(),
+            "category_key": "master_orchestrator",
+            "category_title": "المدير الموحّد",
+            "category_emoji": "🎯",
+            "route_method": f"multi:{route_method}",
+            "provider_badge": f"🎯 مدير المشروع · فريق: {team_label}",
+            "quality_badge": "",
+            "delegated_agents": selected,
         }
-        self.shared_history.append((user_input, response))
+        self.shared_history.append((user_input, final))
         self.turns_meta.append(meta)
-        return response, meta
+        return final, meta
 
     def clear_history(self) -> None:
         self.shared_history.clear()
