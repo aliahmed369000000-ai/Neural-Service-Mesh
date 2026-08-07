@@ -1,7 +1,7 @@
 {
   "d_model": 128,
   "d_ff": 512,
-  "top_k_groups": 2,
+  "top_k_groups": 3,
   "top_k_experts": 3,
   "lb_coeff": 0.01,
   "dropout": 0.05,
@@ -250,54 +250,54 @@
         "category": "fiqh",
         "name": "fiqh_hanafi",
         "description": "fiqh/fiqh_hanafi",
-        "created_at": 1786146028.158946,
-        "usage_count": 505,
-        "total_gate_weight": 173.7952781766653
+        "created_at": 1786147061.8531938,
+        "usage_count": 1324,
+        "total_gate_weight": 443.25847179442644
       },
       "fiqh_maliki": {
         "expert_id": "fiqh_maliki",
         "category": "fiqh",
         "name": "fiqh_maliki",
         "description": "fiqh/fiqh_maliki",
-        "created_at": 1786146028.1602612,
-        "usage_count": 514,
-        "total_gate_weight": 171.90693815797567
+        "created_at": 1786147061.8544185,
+        "usage_count": 1343,
+        "total_gate_weight": 442.09388303756714
       },
       "fiqh_shafii": {
         "expert_id": "fiqh_shafii",
         "category": "fiqh",
         "name": "fiqh_shafii",
         "description": "fiqh/fiqh_shafii",
-        "created_at": 1786146028.16158,
-        "usage_count": 501,
-        "total_gate_weight": 160.16119853034616
+        "created_at": 1786147061.8555968,
+        "usage_count": 1328,
+        "total_gate_weight": 443.37259317934513
       },
       "fiqh_hanbali": {
         "expert_id": "fiqh_hanbali",
         "category": "fiqh",
         "name": "fiqh_hanbali",
         "description": "fiqh/fiqh_hanbali",
-        "created_at": 1786146028.164175,
-        "usage_count": 536,
-        "total_gate_weight": 173.79704431444407
+        "created_at": 1786147061.8569412,
+        "usage_count": 1327,
+        "total_gate_weight": 450.84376306831837
       },
       "fiqh_general": {
         "expert_id": "fiqh_general",
         "category": "fiqh",
         "name": "fiqh_general",
         "description": "fiqh/fiqh_general",
-        "created_at": 1786146028.1657302,
-        "usage_count": 523,
-        "total_gate_weight": 175.9200358018279
+        "created_at": 1786147061.858135,
+        "usage_count": 1336,
+        "total_gate_weight": 447.39078203961253
       },
       "fiqh_contemporary": {
         "expert_id": "fiqh_contemporary",
         "category": "fiqh",
         "name": "fiqh_contemporary",
         "description": "fiqh/fiqh_contemporary",
-        "created_at": 1786146028.16705,
-        "usage_count": 526,
-        "total_gate_weight": 179.4195043295622
+        "created_at": 1786147061.8593946,
+        "usage_count": 1319,
+        "total_gate_weight": 432.04051503539085
       }
     },
     "tafsir": {
@@ -306,36 +306,36 @@
         "category": "tafsir",
         "name": "tafsir_general",
         "description": "tafsir/tafsir_general",
-        "created_at": 1786146028.1687002,
-        "usage_count": 767,
-        "total_gate_weight": 250.76873240619898
+        "created_at": 1786147061.8615613,
+        "usage_count": 1746,
+        "total_gate_weight": 593.2051099017262
       },
       "tafsir_linguistic": {
         "expert_id": "tafsir_linguistic",
         "category": "tafsir",
         "name": "tafsir_linguistic",
         "description": "tafsir/tafsir_linguistic",
-        "created_at": 1786146028.170028,
-        "usage_count": 758,
-        "total_gate_weight": 250.83160978928208
+        "created_at": 1786147061.8628516,
+        "usage_count": 1733,
+        "total_gate_weight": 591.9701451286674
       },
       "tafsir_thematic": {
         "expert_id": "tafsir_thematic",
         "category": "tafsir",
         "name": "tafsir_thematic",
         "description": "tafsir/tafsir_thematic",
-        "created_at": 1786146028.1713881,
-        "usage_count": 788,
-        "total_gate_weight": 269.58248081058264
+        "created_at": 1786147061.8642817,
+        "usage_count": 1766,
+        "total_gate_weight": 577.3838300779462
       },
       "tafsir_scientific": {
         "expert_id": "tafsir_scientific",
         "category": "tafsir",
         "name": "tafsir_scientific",
         "description": "tafsir/tafsir_scientific",
-        "created_at": 1786146028.1729298,
-        "usage_count": 783,
-        "total_gate_weight": 260.81717824563384
+        "created_at": 1786147061.8657043,
+        "usage_count": 1742,
+        "total_gate_weight": 566.4409123435616
       }
     },
     "hadith": {
@@ -344,36 +344,36 @@
         "category": "hadith",
         "name": "hadith_riwaya",
         "description": "hadith/hadith_riwaya",
-        "created_at": 1786146028.1746397,
-        "usage_count": 700,
-        "total_gate_weight": 230.93853467330337
+        "created_at": 1786147061.8677073,
+        "usage_count": 1734,
+        "total_gate_weight": 595.3106717094779
       },
       "hadith_diraya": {
         "expert_id": "hadith_diraya",
         "category": "hadith",
         "name": "hadith_diraya",
         "description": "hadith/hadith_diraya",
-        "created_at": 1786146028.1760845,
-        "usage_count": 722,
-        "total_gate_weight": 251.40627946704626
+        "created_at": 1786147061.8709872,
+        "usage_count": 1726,
+        "total_gate_weight": 580.7147891148925
       },
       "hadith_ahkam": {
         "expert_id": "hadith_ahkam",
         "category": "hadith",
         "name": "hadith_ahkam",
         "description": "hadith/hadith_ahkam",
-        "created_at": 1786146028.1774473,
-        "usage_count": 701,
-        "total_gate_weight": 236.37955113127828
+        "created_at": 1786147061.8742902,
+        "usage_count": 1737,
+        "total_gate_weight": 580.9014480523765
       },
       "hadith_takhrij": {
         "expert_id": "hadith_takhrij",
         "category": "hadith",
         "name": "hadith_takhrij",
         "description": "hadith/hadith_takhrij",
-        "created_at": 1786146028.178761,
-        "usage_count": 706,
-        "total_gate_weight": 224.27563712745905
+        "created_at": 1786147061.8775773,
+        "usage_count": 1766,
+        "total_gate_weight": 564.0730917267501
       }
     },
     "aqidah": {
@@ -382,36 +382,36 @@
         "category": "aqidah",
         "name": "aqidah_general",
         "description": "aqidah/aqidah_general",
-        "created_at": 1786146028.18072,
-        "usage_count": 796,
-        "total_gate_weight": 263.6538892239332
+        "created_at": 1786147061.8812823,
+        "usage_count": 1923,
+        "total_gate_weight": 656.1291427016258
       },
       "aqidah_comparative": {
         "expert_id": "aqidah_comparative",
         "category": "aqidah",
         "name": "aqidah_comparative",
         "description": "aqidah/aqidah_comparative",
-        "created_at": 1786146028.1832316,
-        "usage_count": 774,
-        "total_gate_weight": 256.93253164738417
+        "created_at": 1786147061.8847072,
+        "usage_count": 1893,
+        "total_gate_weight": 621.9274170994759
       },
       "aqidah_tawhid": {
         "expert_id": "aqidah_tawhid",
         "category": "aqidah",
         "name": "aqidah_tawhid",
         "description": "aqidah/aqidah_tawhid",
-        "created_at": 1786146028.1848605,
-        "usage_count": 789,
-        "total_gate_weight": 273.44333673268557
+        "created_at": 1786147061.887983,
+        "usage_count": 1873,
+        "total_gate_weight": 623.8571147955954
       },
       "aqidah_sects": {
         "expert_id": "aqidah_sects",
         "category": "aqidah",
         "name": "aqidah_sects",
         "description": "aqidah/aqidah_sects",
-        "created_at": 1786146028.1861687,
-        "usage_count": 794,
-        "total_gate_weight": 256.97024119645357
+        "created_at": 1786147061.8912747,
+        "usage_count": 1868,
+        "total_gate_weight": 617.0863228663802
       }
     },
     "seerah": {
@@ -420,36 +420,36 @@
         "category": "seerah",
         "name": "seerah_prophet",
         "description": "seerah/seerah_prophet",
-        "created_at": 1786146028.1878235,
-        "usage_count": 757,
-        "total_gate_weight": 253.4456264525652
+        "created_at": 1786147061.8948255,
+        "usage_count": 1827,
+        "total_gate_weight": 597.9104597605765
       },
       "seerah_khulafa": {
         "expert_id": "seerah_khulafa",
         "category": "seerah",
         "name": "seerah_khulafa",
         "description": "seerah/seerah_khulafa",
-        "created_at": 1786146028.189774,
-        "usage_count": 765,
-        "total_gate_weight": 240.23517145961523
+        "created_at": 1786147061.898219,
+        "usage_count": 1842,
+        "total_gate_weight": 588.4427192285657
       },
       "seerah_events": {
         "expert_id": "seerah_events",
         "category": "seerah",
         "name": "seerah_events",
         "description": "seerah/seerah_events",
-        "created_at": 1786146028.1918175,
-        "usage_count": 762,
-        "total_gate_weight": 256.948582559824
+        "created_at": 1786147061.9015384,
+        "usage_count": 1806,
+        "total_gate_weight": 621.5693784430623
       },
       "seerah_companions": {
         "expert_id": "seerah_companions",
         "category": "seerah",
         "name": "seerah_companions",
         "description": "seerah/seerah_companions",
-        "created_at": 1786146028.1939232,
-        "usage_count": 758,
-        "total_gate_weight": 263.3706176057458
+        "created_at": 1786147061.904923,
+        "usage_count": 1836,
+        "total_gate_weight": 629.0774440094829
       }
     },
     "usul": {
@@ -458,27 +458,27 @@
         "category": "usul",
         "name": "usul_fiqh",
         "description": "usul/usul_fiqh",
-        "created_at": 1786146028.1958904,
-        "usage_count": 1123,
-        "total_gate_weight": 376.01399838365614
+        "created_at": 1786147061.9085736,
+        "usage_count": 2720,
+        "total_gate_weight": 868.8861820809543
       },
       "usul_qawaid": {
         "expert_id": "usul_qawaid",
         "category": "usul",
         "name": "usul_qawaid",
         "description": "usul/usul_qawaid",
-        "created_at": 1786146028.198935,
-        "usage_count": 1123,
-        "total_gate_weight": 375.73482674360275
+        "created_at": 1786147061.9161923,
+        "usage_count": 2720,
+        "total_gate_weight": 935.6476729884744
       },
       "usul_maqasid": {
         "expert_id": "usul_maqasid",
         "category": "usul",
         "name": "usul_maqasid",
         "description": "usul/usul_maqasid",
-        "created_at": 1786146028.2004943,
-        "usage_count": 1123,
-        "total_gate_weight": 371.251174621284
+        "created_at": 1786147061.919846,
+        "usage_count": 2720,
+        "total_gate_weight": 915.4661406725645
       }
     },
     "tajweed": {
@@ -487,27 +487,27 @@
         "category": "tajweed",
         "name": "tajweed_rules",
         "description": "tajweed/tajweed_rules",
-        "created_at": 1786146028.201954,
-        "usage_count": 113,
-        "total_gate_weight": 39.36133820936084
+        "created_at": 1786147061.9232569,
+        "usage_count": 2608,
+        "total_gate_weight": 896.2578369565308
       },
       "tajweed_qiraat": {
         "expert_id": "tajweed_qiraat",
         "category": "tajweed",
         "name": "tajweed_qiraat",
         "description": "tajweed/tajweed_qiraat",
-        "created_at": 1786146028.203343,
-        "usage_count": 113,
-        "total_gate_weight": 32.092321909964085
+        "created_at": 1786147061.926976,
+        "usage_count": 2608,
+        "total_gate_weight": 842.7674889862537
       },
       "tajweed_hifz": {
         "expert_id": "tajweed_hifz",
         "category": "tajweed",
         "name": "tajweed_hifz",
         "description": "tajweed/tajweed_hifz",
-        "created_at": 1786146028.2048008,
-        "usage_count": 113,
-        "total_gate_weight": 41.54633949697018
+        "created_at": 1786147061.9303017,
+        "usage_count": 2608,
+        "total_gate_weight": 868.9746737517416
       }
     },
     "islamic_finance": {
@@ -516,27 +516,27 @@
         "category": "islamic_finance",
         "name": "isf_banking",
         "description": "islamic_finance/isf_banking",
-        "created_at": 1786146028.209778,
-        "usage_count": 1073,
-        "total_gate_weight": 353.40728821977973
+        "created_at": 1786147061.933817,
+        "usage_count": 2247,
+        "total_gate_weight": 730.522281318903
       },
       "isf_contracts": {
         "expert_id": "isf_contracts",
         "category": "islamic_finance",
         "name": "isf_contracts",
         "description": "islamic_finance/isf_contracts",
-        "created_at": 1786146028.2115407,
-        "usage_count": 1073,
-        "total_gate_weight": 351.03162638098
+        "created_at": 1786147061.9372277,
+        "usage_count": 2247,
+        "total_gate_weight": 751.5657223761082
       },
       "isf_zakat_calc": {
         "expert_id": "isf_zakat_calc",
         "category": "islamic_finance",
         "name": "isf_zakat_calc",
         "description": "islamic_finance/isf_zakat_calc",
-        "created_at": 1786146028.2129574,
-        "usage_count": 1073,
-        "total_gate_weight": 368.56108444929123
+        "created_at": 1786147061.941279,
+        "usage_count": 2247,
+        "total_gate_weight": 764.9119957573712
       }
     },
     "arabic": {
@@ -545,36 +545,36 @@
         "category": "arabic",
         "name": "arabic_nahw",
         "description": "arabic/arabic_nahw",
-        "created_at": 1786146028.2147036,
-        "usage_count": 65,
-        "total_gate_weight": 22.02472909539938
+        "created_at": 1786147061.944745,
+        "usage_count": 1825,
+        "total_gate_weight": 604.7427756115794
       },
       "arabic_balagha": {
         "expert_id": "arabic_balagha",
         "category": "arabic",
         "name": "arabic_balagha",
         "description": "arabic/arabic_balagha",
-        "created_at": 1786146028.2160575,
-        "usage_count": 69,
-        "total_gate_weight": 23.77850691229105
+        "created_at": 1786147061.947988,
+        "usage_count": 1844,
+        "total_gate_weight": 622.4725121632218
       },
       "arabic_sarf": {
         "expert_id": "arabic_sarf",
         "category": "arabic",
         "name": "arabic_sarf",
         "description": "arabic/arabic_sarf",
-        "created_at": 1786146028.2174444,
-        "usage_count": 58,
-        "total_gate_weight": 19.008995555341244
+        "created_at": 1786147061.9512646,
+        "usage_count": 1816,
+        "total_gate_weight": 601.9894364178181
       },
       "arabic_translation": {
         "expert_id": "arabic_translation",
         "category": "arabic",
         "name": "arabic_translation",
         "description": "arabic/arabic_translation",
-        "created_at": 1786146028.2187498,
-        "usage_count": 60,
-        "total_gate_weight": 19.187768146395683
+        "created_at": 1786147061.9547448,
+        "usage_count": 1820,
+        "total_gate_weight": 605.7952784150839
       }
     },
     "literature": {
@@ -583,36 +583,36 @@
         "category": "literature",
         "name": "lit_poetry",
         "description": "literature/lit_poetry",
-        "created_at": 1786146028.2202933,
-        "usage_count": 728,
-        "total_gate_weight": 231.6545857936144
+        "created_at": 1786147061.958195,
+        "usage_count": 1610,
+        "total_gate_weight": 536.2495142742991
       },
       "lit_prose": {
         "expert_id": "lit_prose",
         "category": "literature",
         "name": "lit_prose",
         "description": "literature/lit_prose",
-        "created_at": 1786146028.2216077,
-        "usage_count": 720,
-        "total_gate_weight": 240.08289452269673
+        "created_at": 1786147061.9615388,
+        "usage_count": 1602,
+        "total_gate_weight": 540.3959410488605
       },
       "lit_criticism": {
         "expert_id": "lit_criticism",
         "category": "literature",
         "name": "lit_criticism",
         "description": "literature/lit_criticism",
-        "created_at": 1786146028.2229598,
-        "usage_count": 731,
-        "total_gate_weight": 243.34694799035788
+        "created_at": 1786147061.9648988,
+        "usage_count": 1604,
+        "total_gate_weight": 534.0294767133892
       },
       "lit_arabic_classic": {
         "expert_id": "lit_arabic_classic",
         "category": "literature",
         "name": "lit_arabic_classic",
         "description": "literature/lit_arabic_classic",
-        "created_at": 1786146028.2244194,
-        "usage_count": 740,
-        "total_gate_weight": 257.9155738055706
+        "created_at": 1786147061.9683194,
+        "usage_count": 1637,
+        "total_gate_weight": 540.3250669240952
       }
     },
     "programming": {
@@ -621,54 +621,54 @@
         "category": "programming",
         "name": "prog_python",
         "description": "programming/prog_python",
-        "created_at": 1786146028.2259567,
-        "usage_count": 526,
-        "total_gate_weight": 176.74232391268015
+        "created_at": 1786147061.9718032,
+        "usage_count": 1227,
+        "total_gate_weight": 409.3600610345602
       },
       "prog_web": {
         "expert_id": "prog_web",
         "category": "programming",
         "name": "prog_web",
         "description": "programming/prog_web",
-        "created_at": 1786146028.2273679,
-        "usage_count": 503,
-        "total_gate_weight": 165.7480981722474
+        "created_at": 1786147061.975133,
+        "usage_count": 1227,
+        "total_gate_weight": 414.0047272518277
       },
       "prog_algorithms": {
         "expert_id": "prog_algorithms",
         "category": "programming",
         "name": "prog_algorithms",
         "description": "programming/prog_algorithms",
-        "created_at": 1786146028.2307196,
-        "usage_count": 501,
-        "total_gate_weight": 168.0705621689558
+        "created_at": 1786147061.9784386,
+        "usage_count": 1224,
+        "total_gate_weight": 417.764429859817
       },
       "prog_systems": {
         "expert_id": "prog_systems",
         "category": "programming",
         "name": "prog_systems",
         "description": "programming/prog_systems",
-        "created_at": 1786146028.2342196,
-        "usage_count": 505,
-        "total_gate_weight": 164.8137374818325
+        "created_at": 1786147061.9818726,
+        "usage_count": 1227,
+        "total_gate_weight": 403.2769233286381
       },
       "prog_mobile": {
         "expert_id": "prog_mobile",
         "category": "programming",
         "name": "prog_mobile",
         "description": "programming/prog_mobile",
-        "created_at": 1786146028.2357705,
-        "usage_count": 520,
-        "total_gate_weight": 175.943619184196
+        "created_at": 1786147061.9851766,
+        "usage_count": 1185,
+        "total_gate_weight": 385.3697581142187
       },
       "prog_data": {
         "expert_id": "prog_data",
         "category": "programming",
         "name": "prog_data",
         "description": "programming/prog_data",
-        "created_at": 1786146028.2371848,
-        "usage_count": 493,
-        "total_gate_weight": 164.6816586330533
+        "created_at": 1786147061.98856,
+        "usage_count": 1227,
+        "total_gate_weight": 409.224103435874
       }
     },
     "technology": {
@@ -677,54 +677,54 @@
         "category": "technology",
         "name": "tech_ai",
         "description": "technology/tech_ai",
-        "created_at": 1786146028.2386403,
-        "usage_count": 59,
-        "total_gate_weight": 17.555192969739437
+        "created_at": 1786147061.9930468,
+        "usage_count": 1194,
+        "total_gate_weight": 403.9712017402053
       },
       "tech_networks": {
         "expert_id": "tech_networks",
         "category": "technology",
         "name": "tech_networks",
         "description": "technology/tech_networks",
-        "created_at": 1786146028.2403216,
-        "usage_count": 58,
-        "total_gate_weight": 20.63331988453865
+        "created_at": 1786147061.9963858,
+        "usage_count": 1202,
+        "total_gate_weight": 403.2499658688903
       },
       "tech_hardware": {
         "expert_id": "tech_hardware",
         "category": "technology",
         "name": "tech_hardware",
         "description": "technology/tech_hardware",
-        "created_at": 1786146028.2417035,
-        "usage_count": 61,
-        "total_gate_weight": 22.536467641592026
+        "created_at": 1786147061.9997087,
+        "usage_count": 1177,
+        "total_gate_weight": 392.8896252065897
       },
       "tech_security": {
         "expert_id": "tech_security",
         "category": "technology",
         "name": "tech_security",
         "description": "technology/tech_security",
-        "created_at": 1786146028.2431557,
-        "usage_count": 62,
-        "total_gate_weight": 21.250649765133858
+        "created_at": 1786147062.0030096,
+        "usage_count": 1216,
+        "total_gate_weight": 404.93901616334915
       },
       "tech_cloud": {
         "expert_id": "tech_cloud",
         "category": "technology",
         "name": "tech_cloud",
         "description": "technology/tech_cloud",
-        "created_at": 1786146028.2445083,
-        "usage_count": 60,
-        "total_gate_weight": 18.66806150972843
+        "created_at": 1786147062.0065022,
+        "usage_count": 1196,
+        "total_gate_weight": 394.3624401912093
       },
       "tech_devops": {
         "expert_id": "tech_devops",
         "category": "technology",
         "name": "tech_devops",
         "description": "technology/tech_devops",
-        "created_at": 1786146028.2458403,
-        "usage_count": 60,
-        "total_gate_weight": 19.35630837082863
+        "created_at": 1786147062.0098786,
+        "usage_count": 1173,
+        "total_gate_weight": 386.58775217086077
       }
     },
     "science": {
@@ -733,36 +733,36 @@
         "category": "science",
         "name": "science_physics",
         "description": "science/science_physics",
-        "created_at": 1786146028.2472844,
-        "usage_count": 782,
-        "total_gate_weight": 264.817870490253
+        "created_at": 1786147062.0132937,
+        "usage_count": 2025,
+        "total_gate_weight": 668.0926840305328
       },
       "science_chemistry": {
         "expert_id": "science_chemistry",
         "category": "science",
         "name": "science_chemistry",
         "description": "science/science_chemistry",
-        "created_at": 1786146028.2486885,
-        "usage_count": 755,
-        "total_gate_weight": 251.09658930450678
+        "created_at": 1786147062.0166204,
+        "usage_count": 2036,
+        "total_gate_weight": 686.3958100900054
       },
       "science_biology": {
         "expert_id": "science_biology",
         "category": "science",
         "name": "science_biology",
         "description": "science/science_biology",
-        "created_at": 1786146028.2515225,
-        "usage_count": 754,
-        "total_gate_weight": 246.44382341578603
+        "created_at": 1786147062.019875,
+        "usage_count": 2027,
+        "total_gate_weight": 687.2261892929673
       },
       "science_general": {
         "expert_id": "science_general",
         "category": "science",
         "name": "science_general",
         "description": "science/science_general",
-        "created_at": 1786146028.2528844,
-        "usage_count": 748,
-        "total_gate_weight": 250.64171562343836
+        "created_at": 1786147062.0234566,
+        "usage_count": 2045,
+        "total_gate_weight": 669.285310678184
       }
     },
     "math": {
@@ -771,45 +771,45 @@
         "category": "math",
         "name": "math_algebra",
         "description": "math/math_algebra",
-        "created_at": 1786146028.2543995,
-        "usage_count": 590,
-        "total_gate_weight": 195.43059000372887
+        "created_at": 1786147062.0269082,
+        "usage_count": 1458,
+        "total_gate_weight": 490.2802399471402
       },
       "math_geometry": {
         "expert_id": "math_geometry",
         "category": "math",
         "name": "math_geometry",
         "description": "math/math_geometry",
-        "created_at": 1786146028.2559457,
-        "usage_count": 568,
-        "total_gate_weight": 187.8141848295927
+        "created_at": 1786147062.0301769,
+        "usage_count": 1452,
+        "total_gate_weight": 480.3183696717024
       },
       "math_stats": {
         "expert_id": "math_stats",
         "category": "math",
         "name": "math_stats",
         "description": "math/math_stats",
-        "created_at": 1786146028.2572849,
-        "usage_count": 587,
-        "total_gate_weight": 201.68804581463337
+        "created_at": 1786147062.033539,
+        "usage_count": 1489,
+        "total_gate_weight": 488.8490914851427
       },
       "math_general": {
         "expert_id": "math_general",
         "category": "math",
         "name": "math_general",
         "description": "math/math_general",
-        "created_at": 1786146028.2586918,
-        "usage_count": 553,
-        "total_gate_weight": 180.732207685709
+        "created_at": 1786147062.037036,
+        "usage_count": 1500,
+        "total_gate_weight": 504.97070683538914
       },
       "math_calculus": {
         "expert_id": "math_calculus",
         "category": "math",
         "name": "math_calculus",
         "description": "math/math_calculus",
-        "created_at": 1786146028.260069,
-        "usage_count": 546,
-        "total_gate_weight": 182.33497025817633
+        "created_at": 1786147062.0403607,
+        "usage_count": 1508,
+        "total_gate_weight": 504.5815880447626
       }
     },
     "astronomy": {
@@ -818,27 +818,27 @@
         "category": "astronomy",
         "name": "astro_solar",
         "description": "astronomy/astro_solar",
-        "created_at": 1786146028.2615354,
-        "usage_count": 997,
-        "total_gate_weight": 314.10779075324535
+        "created_at": 1786147062.0437508,
+        "usage_count": 2015,
+        "total_gate_weight": 672.9261714071035
       },
       "astro_observation": {
         "expert_id": "astro_observation",
         "category": "astronomy",
         "name": "astro_observation",
         "description": "astronomy/astro_observation",
-        "created_at": 1786146028.2628734,
-        "usage_count": 997,
-        "total_gate_weight": 322.0437131524086
+        "created_at": 1786147062.047006,
+        "usage_count": 2015,
+        "total_gate_weight": 667.3634736835957
       },
       "astro_general": {
         "expert_id": "astro_general",
         "category": "astronomy",
         "name": "astro_general",
         "description": "astronomy/astro_general",
-        "created_at": 1786146028.264258,
-        "usage_count": 997,
-        "total_gate_weight": 360.84849550947547
+        "created_at": 1786147062.05032,
+        "usage_count": 2015,
+        "total_gate_weight": 674.7103528901935
       }
     },
     "geography": {
@@ -847,27 +847,27 @@
         "category": "geography",
         "name": "geo_physical",
         "description": "geography/geo_physical",
-        "created_at": 1786146028.2659564,
-        "usage_count": 892,
-        "total_gate_weight": 269.737696506083
+        "created_at": 1786147062.05369,
+        "usage_count": 2105,
+        "total_gate_weight": 699.3736229725182
       },
       "geo_human": {
         "expert_id": "geo_human",
         "category": "geography",
         "name": "geo_human",
         "description": "geography/geo_human",
-        "created_at": 1786146028.2673953,
-        "usage_count": 892,
-        "total_gate_weight": 320.0111881047487
+        "created_at": 1786147062.0570831,
+        "usage_count": 2105,
+        "total_gate_weight": 695.7886487692595
       },
       "geo_maps": {
         "expert_id": "geo_maps",
         "category": "geography",
         "name": "geo_maps",
         "description": "geography/geo_maps",
-        "created_at": 1786146028.2689974,
-        "usage_count": 892,
-        "total_gate_weight": 302.25111639499664
+        "created_at": 1786147062.0603108,
+        "usage_count": 2105,
+        "total_gate_weight": 709.8377267196774
       }
     },
     "engineering": {
@@ -876,36 +876,36 @@
         "category": "engineering",
         "name": "eng_civil",
         "description": "engineering/eng_civil",
-        "created_at": 1786146028.270468,
-        "usage_count": 751,
-        "total_gate_weight": 251.65058283507824
+        "created_at": 1786147062.063772,
+        "usage_count": 2321,
+        "total_gate_weight": 770.4903368726373
       },
       "eng_electrical": {
         "expert_id": "eng_electrical",
         "category": "engineering",
         "name": "eng_electrical",
         "description": "engineering/eng_electrical",
-        "created_at": 1786146028.271872,
-        "usage_count": 743,
-        "total_gate_weight": 250.92294827848673
+        "created_at": 1786147062.0670426,
+        "usage_count": 2334,
+        "total_gate_weight": 789.7114365696907
       },
       "eng_mechanical": {
         "expert_id": "eng_mechanical",
         "category": "engineering",
         "name": "eng_mechanical",
         "description": "engineering/eng_mechanical",
-        "created_at": 1786146028.2732685,
-        "usage_count": 727,
-        "total_gate_weight": 239.7198617607355
+        "created_at": 1786147062.070337,
+        "usage_count": 2351,
+        "total_gate_weight": 779.6522915437818
       },
       "eng_general": {
         "expert_id": "eng_general",
         "category": "engineering",
         "name": "eng_general",
         "description": "engineering/eng_general",
-        "created_at": 1786146028.2746074,
-        "usage_count": 731,
-        "total_gate_weight": 241.70660758763552
+        "created_at": 1786147062.0738637,
+        "usage_count": 2345,
+        "total_gate_weight": 777.1459371894598
       }
     },
     "medicine": {
@@ -914,36 +914,36 @@
         "category": "medicine",
         "name": "med_general",
         "description": "medicine/med_general",
-        "created_at": 1786146028.2760613,
-        "usage_count": 771,
-        "total_gate_weight": 258.1990946829319
+        "created_at": 1786147062.0774782,
+        "usage_count": 1807,
+        "total_gate_weight": 587.028756454587
       },
       "med_nutrition": {
         "expert_id": "med_nutrition",
         "category": "medicine",
         "name": "med_nutrition",
         "description": "medicine/med_nutrition",
-        "created_at": 1786146028.2773573,
-        "usage_count": 769,
-        "total_gate_weight": 251.2104595527053
+        "created_at": 1786147062.0808725,
+        "usage_count": 1829,
+        "total_gate_weight": 585.4360048100352
       },
       "med_public_health": {
         "expert_id": "med_public_health",
         "category": "medicine",
         "name": "med_public_health",
         "description": "medicine/med_public_health",
-        "created_at": 1786146028.278688,
-        "usage_count": 764,
-        "total_gate_weight": 246.32330491021276
+        "created_at": 1786147062.0841866,
+        "usage_count": 1833,
+        "total_gate_weight": 628.215818323195
       },
       "med_first_aid": {
         "expert_id": "med_first_aid",
         "category": "medicine",
         "name": "med_first_aid",
         "description": "medicine/med_first_aid",
-        "created_at": 1786146028.2801285,
-        "usage_count": 750,
-        "total_gate_weight": 262.26714155077934
+        "created_at": 1786147062.0875354,
+        "usage_count": 1854,
+        "total_gate_weight": 640.3194195665419
       }
     },
     "psychology": {
@@ -952,27 +952,27 @@
         "category": "psychology",
         "name": "psych_general",
         "description": "psychology/psych_general",
-        "created_at": 1786146028.2815685,
-        "usage_count": 1093,
-        "total_gate_weight": 337.2273164689541
+        "created_at": 1786147062.0910752,
+        "usage_count": 2785,
+        "total_gate_weight": 937.3746484927833
       },
       "psych_development": {
         "expert_id": "psych_development",
         "category": "psychology",
         "name": "psych_development",
         "description": "psychology/psych_development",
-        "created_at": 1786146028.2828972,
-        "usage_count": 1093,
-        "total_gate_weight": 373.0619459860027
+        "created_at": 1786147062.0943696,
+        "usage_count": 2785,
+        "total_gate_weight": 917.7403818611056
       },
       "psych_clinical": {
         "expert_id": "psych_clinical",
         "category": "psychology",
         "name": "psych_clinical",
         "description": "psychology/psych_clinical",
-        "created_at": 1786146028.284243,
-        "usage_count": 1093,
-        "total_gate_weight": 382.71073799207807
+        "created_at": 1786147062.0976887,
+        "usage_count": 2785,
+        "total_gate_weight": 929.8849643580616
       }
     },
     "sports": {
@@ -981,36 +981,36 @@
         "category": "sports",
         "name": "sports_football",
         "description": "sports/sports_football",
-        "created_at": 1786146028.2856681,
-        "usage_count": 706,
-        "total_gate_weight": 235.88562405854464
+        "created_at": 1786147062.1012359,
+        "usage_count": 1944,
+        "total_gate_weight": 659.1647797375917
       },
       "sports_fitness": {
         "expert_id": "sports_fitness",
         "category": "sports",
         "name": "sports_fitness",
         "description": "sports/sports_fitness",
-        "created_at": 1786146028.2870266,
-        "usage_count": 728,
-        "total_gate_weight": 246.99164581298828
+        "created_at": 1786147062.1052785,
+        "usage_count": 1933,
+        "total_gate_weight": 623.0745790973306
       },
       "sports_general": {
         "expert_id": "sports_general",
         "category": "sports",
         "name": "sports_general",
         "description": "sports/sports_general",
-        "created_at": 1786146028.2885432,
-        "usage_count": 721,
-        "total_gate_weight": 230.99625768139958
+        "created_at": 1786147062.1086545,
+        "usage_count": 1948,
+        "total_gate_weight": 651.3592867776752
       },
       "sports_olympic": {
         "expert_id": "sports_olympic",
         "category": "sports",
         "name": "sports_olympic",
         "description": "sports/sports_olympic",
-        "created_at": 1786146028.2901354,
-        "usage_count": 731,
-        "total_gate_weight": 248.12647514417768
+        "created_at": 1786147062.1121805,
+        "usage_count": 1909,
+        "total_gate_weight": 644.4013534188271
       }
     },
     "family": {
@@ -1019,27 +1019,27 @@
         "category": "family",
         "name": "family_parenting",
         "description": "family/family_parenting",
-        "created_at": 1786146028.2919111,
-        "usage_count": 1095,
-        "total_gate_weight": 381.91688049584627
+        "created_at": 1786147062.1156967,
+        "usage_count": 2639,
+        "total_gate_weight": 883.8145807683468
       },
       "family_marriage": {
         "expert_id": "family_marriage",
         "category": "family",
         "name": "family_marriage",
         "description": "family/family_marriage",
-        "created_at": 1786146028.2933831,
-        "usage_count": 1095,
-        "total_gate_weight": 368.53517642989755
+        "created_at": 1786147062.1193001,
+        "usage_count": 2639,
+        "total_gate_weight": 884.547176271677
       },
       "family_youth": {
         "expert_id": "family_youth",
         "category": "family",
         "name": "family_youth",
         "description": "family/family_youth",
-        "created_at": 1786146028.294826,
-        "usage_count": 1095,
-        "total_gate_weight": 344.54794315993786
+        "created_at": 1786147062.1227057,
+        "usage_count": 2639,
+        "total_gate_weight": 870.6382444798946
       }
     },
     "cooking": {
@@ -1048,27 +1048,27 @@
         "category": "cooking",
         "name": "cook_recipes",
         "description": "cooking/cook_recipes",
-        "created_at": 1786146028.2963102,
-        "usage_count": 114,
-        "total_gate_weight": 36.77542087063193
+        "created_at": 1786147062.127736,
+        "usage_count": 1992,
+        "total_gate_weight": 667.6997395567596
       },
       "cook_healthy": {
         "expert_id": "cook_healthy",
         "category": "cooking",
         "name": "cook_healthy",
         "description": "cooking/cook_healthy",
-        "created_at": 1786146028.2976391,
-        "usage_count": 114,
-        "total_gate_weight": 37.82163632288575
+        "created_at": 1786147062.131212,
+        "usage_count": 1992,
+        "total_gate_weight": 673.5518906079233
       },
       "cook_arabic": {
         "expert_id": "cook_arabic",
         "category": "cooking",
         "name": "cook_arabic",
         "description": "cooking/cook_arabic",
-        "created_at": 1786146028.2989612,
-        "usage_count": 114,
-        "total_gate_weight": 39.4029433876276
+        "created_at": 1786147062.1352751,
+        "usage_count": 1992,
+        "total_gate_weight": 650.7483715862036
       }
     },
     "travel": {
@@ -1077,27 +1077,27 @@
         "category": "travel",
         "name": "travel_planning",
         "description": "travel/travel_planning",
-        "created_at": 1786146028.3006082,
-        "usage_count": 1023,
-        "total_gate_weight": 318.6365711390972
+        "created_at": 1786147062.140775,
+        "usage_count": 2554,
+        "total_gate_weight": 851.4063345864415
       },
       "travel_hajj_umrah": {
         "expert_id": "travel_hajj_umrah",
         "category": "travel",
         "name": "travel_hajj_umrah",
         "description": "travel/travel_hajj_umrah",
-        "created_at": 1786146028.3019378,
-        "usage_count": 1023,
-        "total_gate_weight": 351.88924204930663
+        "created_at": 1786147062.1482365,
+        "usage_count": 2554,
+        "total_gate_weight": 858.6939375512302
       },
       "travel_culture": {
         "expert_id": "travel_culture",
         "category": "travel",
         "name": "travel_culture",
         "description": "travel/travel_culture",
-        "created_at": 1786146028.3032966,
-        "usage_count": 1023,
-        "total_gate_weight": 352.47418803721666
+        "created_at": 1786147062.1548243,
+        "usage_count": 2554,
+        "total_gate_weight": 843.8997271358967
       }
     },
     "environment": {
@@ -1106,27 +1106,27 @@
         "category": "environment",
         "name": "env_climate",
         "description": "environment/env_climate",
-        "created_at": 1786146028.3051114,
-        "usage_count": 1033,
-        "total_gate_weight": 385.168909534812
+        "created_at": 1786147062.1567507,
+        "usage_count": 2331,
+        "total_gate_weight": 796.9209926314652
       },
       "env_conservation": {
         "expert_id": "env_conservation",
         "category": "environment",
         "name": "env_conservation",
         "description": "environment/env_conservation",
-        "created_at": 1786146028.3064852,
-        "usage_count": 1033,
-        "total_gate_weight": 310.62695010751486
+        "created_at": 1786147062.1599252,
+        "usage_count": 2331,
+        "total_gate_weight": 767.4991699159145
       },
       "env_sustainability": {
         "expert_id": "env_sustainability",
         "category": "environment",
         "name": "env_sustainability",
         "description": "environment/env_sustainability",
-        "created_at": 1786146028.3079014,
-        "usage_count": 1033,
-        "total_gate_weight": 337.20414002239704
+        "created_at": 1786147062.1612856,
+        "usage_count": 2331,
+        "total_gate_weight": 766.579838514328
       }
     },
     "agriculture": {
@@ -1135,27 +1135,27 @@
         "category": "agriculture",
         "name": "agri_crops",
         "description": "agriculture/agri_crops",
-        "created_at": 1786146028.309441,
-        "usage_count": 959,
-        "total_gate_weight": 288.37834246456623
+        "created_at": 1786147062.1627789,
+        "usage_count": 1854,
+        "total_gate_weight": 624.0359889790416
       },
       "agri_livestock": {
         "expert_id": "agri_livestock",
         "category": "agriculture",
         "name": "agri_livestock",
         "description": "agriculture/agri_livestock",
-        "created_at": 1786146028.310775,
-        "usage_count": 959,
-        "total_gate_weight": 311.5738437026739
+        "created_at": 1786147062.1640472,
+        "usage_count": 1854,
+        "total_gate_weight": 621.7250051386654
       },
       "agri_modern": {
         "expert_id": "agri_modern",
         "category": "agriculture",
         "name": "agri_modern",
         "description": "agriculture/agri_modern",
-        "created_at": 1786146028.3121963,
-        "usage_count": 959,
-        "total_gate_weight": 359.04781678691506
+        "created_at": 1786147062.1654708,
+        "usage_count": 1854,
+        "total_gate_weight": 608.239007871598
       }
     },
     "business": {
@@ -1164,36 +1164,36 @@
         "category": "business",
         "name": "biz_marketing",
         "description": "business/biz_marketing",
-        "created_at": 1786146028.3136332,
-        "usage_count": 639,
-        "total_gate_weight": 218.70598410069942
+        "created_at": 1786147062.166921,
+        "usage_count": 1609,
+        "total_gate_weight": 537.8254146054387
       },
       "biz_finance": {
         "expert_id": "biz_finance",
         "category": "business",
         "name": "biz_finance",
         "description": "business/biz_finance",
-        "created_at": 1786146028.3150024,
-        "usage_count": 649,
-        "total_gate_weight": 221.3083459660411
+        "created_at": 1786147062.169914,
+        "usage_count": 1604,
+        "total_gate_weight": 522.0475837811828
       },
       "biz_management": {
         "expert_id": "biz_management",
         "category": "business",
         "name": "biz_management",
         "description": "business/biz_management",
-        "created_at": 1786146028.3172762,
-        "usage_count": 638,
-        "total_gate_weight": 204.94585092365742
+        "created_at": 1786147062.1728666,
+        "usage_count": 1605,
+        "total_gate_weight": 539.4398403950036
       },
       "biz_entrepreneurship": {
         "expert_id": "biz_entrepreneurship",
         "category": "business",
         "name": "biz_entrepreneurship",
         "description": "business/biz_entrepreneurship",
-        "created_at": 1786146028.318912,
-        "usage_count": 642,
-        "total_gate_weight": 211.03981782868505
+        "created_at": 1786147062.1761672,
+        "usage_count": 1605,
+        "total_gate_weight": 541.6871632635593
       }
     },
     "economy": {
@@ -1202,27 +1202,27 @@
         "category": "economy",
         "name": "econ_macro",
         "description": "economy/econ_macro",
-        "created_at": 1786146028.3204162,
-        "usage_count": 944,
-        "total_gate_weight": 319.03040301054716
+        "created_at": 1786147062.179586,
+        "usage_count": 2254,
+        "total_gate_weight": 765.4920555092394
       },
       "econ_micro": {
         "expert_id": "econ_micro",
         "category": "economy",
         "name": "econ_micro",
         "description": "economy/econ_micro",
-        "created_at": 1786146028.3217425,
-        "usage_count": 944,
-        "total_gate_weight": 315.74948816373944
+        "created_at": 1786147062.1837864,
+        "usage_count": 2254,
+        "total_gate_weight": 730.2766066603363
       },
       "econ_markets": {
         "expert_id": "econ_markets",
         "category": "economy",
         "name": "econ_markets",
         "description": "economy/econ_markets",
-        "created_at": 1786146028.3232174,
-        "usage_count": 944,
-        "total_gate_weight": 309.22011018544436
+        "created_at": 1786147062.1862018,
+        "usage_count": 2254,
+        "total_gate_weight": 758.2313409037888
       }
     },
     "law": {
@@ -1231,27 +1231,27 @@
         "category": "law",
         "name": "law_general",
         "description": "law/law_general",
-        "created_at": 1786146028.3246834,
-        "usage_count": 99,
-        "total_gate_weight": 32.15538512915373
+        "created_at": 1786147062.1876636,
+        "usage_count": 2622,
+        "total_gate_weight": 881.2403253875673
       },
       "law_civil": {
         "expert_id": "law_civil",
         "category": "law",
         "name": "law_civil",
         "description": "law/law_civil",
-        "created_at": 1786146028.3261833,
-        "usage_count": 99,
-        "total_gate_weight": 34.76138699054718
+        "created_at": 1786147062.1890228,
+        "usage_count": 2622,
+        "total_gate_weight": 880.4537015110254
       },
       "law_commercial": {
         "expert_id": "law_commercial",
         "category": "law",
         "name": "law_commercial",
         "description": "law/law_commercial",
-        "created_at": 1786146028.3275802,
-        "usage_count": 99,
-        "total_gate_weight": 32.08322801068425
+        "created_at": 1786147062.1903462,
+        "usage_count": 2622,
+        "total_gate_weight": 860.3059747740626
       }
     },
     "career": {
@@ -1260,27 +1260,27 @@
         "category": "career",
         "name": "career_jobs",
         "description": "career/career_jobs",
-        "created_at": 1786146028.3290298,
-        "usage_count": 112,
-        "total_gate_weight": 34.38816972821951
+        "created_at": 1786147062.1917405,
+        "usage_count": 2196,
+        "total_gate_weight": 742.0513502806425
       },
       "career_cv": {
         "expert_id": "career_cv",
         "category": "career",
         "name": "career_cv",
         "description": "career/career_cv",
-        "created_at": 1786146028.3303502,
-        "usage_count": 112,
-        "total_gate_weight": 37.51476204022765
+        "created_at": 1786147062.1931129,
+        "usage_count": 2196,
+        "total_gate_weight": 727.3810061216354
       },
       "career_skills": {
         "expert_id": "career_skills",
         "category": "career",
         "name": "career_skills",
         "description": "career/career_skills",
-        "created_at": 1786146028.3317387,
-        "usage_count": 112,
-        "total_gate_weight": 40.09706795960665
+        "created_at": 1786147062.194385,
+        "usage_count": 2196,
+        "total_gate_weight": 726.567645445466
       }
     },
     "education": {
@@ -1289,36 +1289,36 @@
         "category": "education",
         "name": "edu_teaching",
         "description": "education/edu_teaching",
-        "created_at": 1786146028.3339312,
-        "usage_count": 668,
-        "total_gate_weight": 221.3214868977666
+        "created_at": 1786147062.1957645,
+        "usage_count": 1642,
+        "total_gate_weight": 546.4251026511192
       },
       "edu_curriculum": {
         "expert_id": "edu_curriculum",
         "category": "education",
         "name": "edu_curriculum",
         "description": "education/edu_curriculum",
-        "created_at": 1786146028.337359,
-        "usage_count": 687,
-        "total_gate_weight": 233.27025101333857
+        "created_at": 1786147062.1971436,
+        "usage_count": 1687,
+        "total_gate_weight": 557.7312291637063
       },
       "edu_learning": {
         "expert_id": "edu_learning",
         "category": "education",
         "name": "edu_learning",
         "description": "education/edu_learning",
-        "created_at": 1786146028.3418872,
-        "usage_count": 682,
-        "total_gate_weight": 233.00349323824048
+        "created_at": 1786147062.198466,
+        "usage_count": 1689,
+        "total_gate_weight": 551.4460202455521
       },
       "edu_exams": {
         "expert_id": "edu_exams",
         "category": "education",
         "name": "edu_exams",
         "description": "education/edu_exams",
-        "created_at": 1786146028.3453617,
-        "usage_count": 666,
-        "total_gate_weight": 213.40476825088263
+        "created_at": 1786147062.199859,
+        "usage_count": 1681,
+        "total_gate_weight": 577.3976455777884
       }
     },
     "history": {
@@ -1327,27 +1327,27 @@
         "category": "history",
         "name": "hist_islamic",
         "description": "history/hist_islamic",
-        "created_at": 1786146028.3490322,
-        "usage_count": 1017,
-        "total_gate_weight": 320.1265352368355
+        "created_at": 1786147062.2012758,
+        "usage_count": 2027,
+        "total_gate_weight": 712.4164572507143
       },
       "hist_world": {
         "expert_id": "hist_world",
         "category": "history",
         "name": "hist_world",
         "description": "history/hist_world",
-        "created_at": 1786146028.352438,
-        "usage_count": 1017,
-        "total_gate_weight": 355.9385882727802
+        "created_at": 1786147062.20256,
+        "usage_count": 2027,
+        "total_gate_weight": 642.9109353180975
       },
       "hist_general": {
         "expert_id": "hist_general",
         "category": "history",
         "name": "hist_general",
         "description": "history/hist_general",
-        "created_at": 1786146028.3557682,
-        "usage_count": 1017,
-        "total_gate_weight": 340.9348753094673
+        "created_at": 1786147062.2038696,
+        "usage_count": 2027,
+        "total_gate_weight": 671.6726133041084
       }
     },
     "media": {
@@ -1356,36 +1356,36 @@
         "category": "media",
         "name": "media_content",
         "description": "media/media_content",
-        "created_at": 1786146028.3597546,
-        "usage_count": 780,
-        "total_gate_weight": 264.336668536067
+        "created_at": 1786147062.2052586,
+        "usage_count": 2060,
+        "total_gate_weight": 700.4336617030203
       },
       "media_social": {
         "expert_id": "media_social",
         "category": "media",
         "name": "media_social",
         "description": "media/media_social",
-        "created_at": 1786146028.363551,
-        "usage_count": 790,
-        "total_gate_weight": 265.8694643750787
+        "created_at": 1786147062.2065752,
+        "usage_count": 2080,
+        "total_gate_weight": 695.355276286602
       },
       "media_journalism": {
         "expert_id": "media_journalism",
         "category": "media",
         "name": "media_journalism",
         "description": "media/media_journalism",
-        "created_at": 1786146028.3670175,
-        "usage_count": 770,
-        "total_gate_weight": 237.71810814365745
+        "created_at": 1786147062.209399,
+        "usage_count": 2099,
+        "total_gate_weight": 701.5471599027514
       },
       "media_video": {
         "expert_id": "media_video",
         "category": "media",
         "name": "media_video",
         "description": "media/media_video",
-        "created_at": 1786146028.3720305,
-        "usage_count": 780,
-        "total_gate_weight": 272.0757563114166
+        "created_at": 1786147062.2128375,
+        "usage_count": 2080,
+        "total_gate_weight": 675.663901515305
       }
     },
     "philosophy": {
@@ -1394,27 +1394,27 @@
         "category": "philosophy",
         "name": "phil_general",
         "description": "philosophy/phil_general",
-        "created_at": 1786146028.37636,
-        "usage_count": 993,
-        "total_gate_weight": 329.9254458285868
+        "created_at": 1786147062.2176108,
+        "usage_count": 2419,
+        "total_gate_weight": 800.5789425596595
       },
       "phil_ethics": {
         "expert_id": "phil_ethics",
         "category": "philosophy",
         "name": "phil_ethics",
         "description": "philosophy/phil_ethics",
-        "created_at": 1786146028.379928,
-        "usage_count": 993,
-        "total_gate_weight": 328.2580399699509
+        "created_at": 1786147062.220913,
+        "usage_count": 2419,
+        "total_gate_weight": 812.7078352682292
       },
       "phil_logic": {
         "expert_id": "phil_logic",
         "category": "philosophy",
         "name": "phil_logic",
         "description": "philosophy/phil_logic",
-        "created_at": 1786146028.3833973,
-        "usage_count": 993,
-        "total_gate_weight": 334.81651454791427
+        "created_at": 1786147062.224242,
+        "usage_count": 2419,
+        "total_gate_weight": 805.7132202982903
       }
     },
     "art": {
@@ -1423,27 +1423,27 @@
         "category": "art",
         "name": "art_design",
         "description": "art/art_design",
-        "created_at": 1786146028.3869646,
-        "usage_count": 995,
-        "total_gate_weight": 356.2389041483402
+        "created_at": 1786147062.227659,
+        "usage_count": 1985,
+        "total_gate_weight": 659.6916820630431
       },
       "art_calligraphy": {
         "expert_id": "art_calligraphy",
         "category": "art",
         "name": "art_calligraphy",
         "description": "art/art_calligraphy",
-        "created_at": 1786146028.3905623,
-        "usage_count": 995,
-        "total_gate_weight": 321.89345490187407
+        "created_at": 1786147062.230975,
+        "usage_count": 1985,
+        "total_gate_weight": 667.7673133946955
       },
       "art_visual": {
         "expert_id": "art_visual",
         "category": "art",
         "name": "art_visual",
         "description": "art/art_visual",
-        "created_at": 1786146028.3944461,
-        "usage_count": 995,
-        "total_gate_weight": 316.86764128133655
+        "created_at": 1786147062.2343109,
+        "usage_count": 1985,
+        "total_gate_weight": 657.5410081930459
       }
     },
     "general": {
@@ -1452,100 +1452,142 @@
         "category": "general",
         "name": "general_assistant",
         "description": "general/general_assistant",
-        "created_at": 1786146028.3990843,
-        "usage_count": 1031,
-        "total_gate_weight": 362.83072531968355
+        "created_at": 1786147062.2379138,
+        "usage_count": 2508,
+        "total_gate_weight": 839.8990666419268
       },
       "general_research": {
         "expert_id": "general_research",
         "category": "general",
         "name": "general_research",
         "description": "general/general_research",
-        "created_at": 1786146028.4029071,
-        "usage_count": 1031,
-        "total_gate_weight": 350.9990895502269
+        "created_at": 1786147062.2412255,
+        "usage_count": 2508,
+        "total_gate_weight": 837.2338904291391
       },
       "general_daily": {
         "expert_id": "general_daily",
         "category": "general",
         "name": "general_daily",
         "description": "general/general_daily",
-        "created_at": 1786146028.406279,
-        "usage_count": 1031,
-        "total_gate_weight": 317.1701832637191
+        "created_at": 1786147062.2458081,
+        "usage_count": 2508,
+        "total_gate_weight": 830.8670457527041
       }
     }
   },
-  "train": {
-    "epochs": 4,
-    "max_samples": 4500,
-    "n_used": 3712,
-    "batch_size": 64,
-    "lr": 0.001,
+  "wide_parallel_train": {
     "d_model": 128,
-    "label_counts": {
-      "math": 128,
-      "medicine": 128,
-      "islamic_finance": 128,
-      "family": 128,
-      "hadith": 128,
-      "programming": 128,
-      "philosophy": 128,
-      "history": 128,
-      "seerah": 128,
-      "business": 128,
-      "media": 128,
-      "sports": 128,
-      "usul": 128,
-      "tafsir": 128,
-      "engineering": 128,
-      "astronomy": 128,
-      "education": 128,
-      "aqidah": 128,
-      "environment": 128,
-      "psychology": 128,
-      "travel": 128,
-      "economy": 128,
-      "art": 128,
-      "agriculture": 128,
-      "geography": 128,
-      "general": 128,
-      "fiqh": 128,
-      "science": 128,
-      "literature": 128
+    "n_samples": 7000,
+    "n_experts": 129,
+    "n_categories": 35,
+    "macro_acc": 0.8858571452753884,
+    "per_category_acc": {
+      "fiqh": 0.33500000834465027,
+      "tafsir": 0.8700000047683716,
+      "hadith": 0.7799999713897705,
+      "aqidah": 0.32499998807907104,
+      "seerah": 0.9150000214576721,
+      "usul": 0.9700000286102295,
+      "tajweed": 1.0,
+      "islamic_finance": 0.9350000023841858,
+      "arabic": 1.0,
+      "literature": 0.9100000262260437,
+      "programming": 1.0,
+      "technology": 1.0,
+      "science": 1.0,
+      "math": 1.0,
+      "astronomy": 0.7549999952316284,
+      "geography": 1.0,
+      "engineering": 0.9950000047683716,
+      "medicine": 0.5249999761581421,
+      "psychology": 0.8650000095367432,
+      "sports": 1.0,
+      "family": 0.8849999904632568,
+      "cooking": 0.9800000190734863,
+      "travel": 0.9900000095367432,
+      "environment": 0.9750000238418579,
+      "agriculture": 0.9700000286102295,
+      "business": 0.9950000047683716,
+      "economy": 0.824999988079071,
+      "law": 1.0,
+      "career": 1.0,
+      "education": 0.9850000143051147,
+      "history": 0.8149999976158142,
+      "media": 1.0,
+      "philosophy": 0.8149999976158142,
+      "art": 0.9649999737739563,
+      "general": 0.625
     },
     "history": [
       {
+        "phase": 1,
         "epoch": 1,
-        "loss": 4.832033313553909,
-        "ce": 3.505687220343228,
-        "aux": 3.7770451677256616,
-        "acc": 0.2755926724137931
+        "acc": 0.10222199665648597
       },
       {
+        "phase": 1,
         "epoch": 2,
-        "loss": 4.606742036753688,
-        "ce": 3.4212068524853936,
-        "aux": 3.7363965593535324,
-        "acc": 0.6336206896551724
+        "acc": 0.568359375
       },
       {
+        "phase": 1,
         "epoch": 3,
-        "loss": 4.471306537759715,
-        "ce": 3.3517630387996804,
-        "aux": 3.7594545257502587,
-        "acc": 0.7130926724137931
+        "acc": 0.7718775357518878
       },
       {
+        "phase": 1,
         "epoch": 4,
-        "loss": 4.374037709729425,
-        "ce": 3.2882954539923834,
-        "aux": 3.8141654935376397,
-        "acc": 0.7289870689655172
+        "acc": 0.794351156268801
+      },
+      {
+        "phase": 1,
+        "epoch": 5,
+        "acc": 0.8582589285714286
+      },
+      {
+        "phase": 1,
+        "epoch": 6,
+        "acc": 0.8672762789896556
+      },
+      {
+        "phase": 1,
+        "epoch": 7,
+        "acc": 0.8838778414896556
+      },
+      {
+        "phase": 1,
+        "epoch": 8,
+        "acc": 0.8798701294830867
+      },
+      {
+        "phase": 1,
+        "epoch": 9,
+        "acc": 0.8848797678947449
+      },
+      {
+        "phase": 2,
+        "epoch": 1,
+        "acc": 0.8883421272039413
+      },
+      {
+        "phase": 2,
+        "epoch": 2,
+        "acc": 0.8896484375
+      },
+      {
+        "phase": 2,
+        "epoch": 3,
+        "acc": 0.8895216115883419
+      },
+      {
+        "phase": 2,
+        "epoch": 4,
+        "acc": 0.8873782477208546
       }
     ],
-    "eval_acc": 0.712890625,
-    "elapsed_sec": 85.1,
-    "projector": "artifacts/hierarchical_moe/moe_projector.npy"
+    "elapsed_sec": 91.5,
+    "phases": "router_then_all_experts_parallel_batches",
+    "note": "MoE هرمي متخصص (~17M) — ليس بديلاً عن LLM بمليارات المعاملات"
   }
 }
