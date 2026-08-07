@@ -222,6 +222,13 @@ except Exception:
     _CKGQ_OK = False
 
 try:
+    from ai.git_lfs_helper import handle_lfs_command as _lfs_handle
+    _LFS_OK = True
+except Exception:
+    _lfs_handle = None
+    _LFS_OK = False
+
+try:
     from ai.cognitive_microkernel import handle_kernel_command as _kern_handle
     _KERN_OK = True
 except Exception:
@@ -1715,6 +1722,14 @@ def handle_training_command(user_input: str) -> Optional[str]:
                 return mh
         except Exception as _mh_err:
             logger.warning("mesh: %s", _mh_err)
+
+    if _LFS_OK and _lfs_handle is not None:
+        try:
+            lf = _lfs_handle(text)
+            if lf is not None:
+                return lf
+        except Exception as _lf_err:
+            logger.warning("lfs: %s", _lf_err)
 
     if _CKGQ_OK and _ckgq_handle is not None:
         try:

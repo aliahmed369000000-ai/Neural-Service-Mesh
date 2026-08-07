@@ -88,3 +88,6 @@ artifacts/model_training/super_ai/
 artifacts/model_training/economic/
 artifacts/model_training/commercial/
 artifacts/model_training/civilization/
+
+.tools/
+
