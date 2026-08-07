@@ -342,6 +342,9 @@ AGENT_CATEGORIES: Dict[str, AgentCategory] = {
             "- حالة ckg / إعدادات ckg / شغّل تدريب ckg [تجريبي]\n"
             "- شغّل train_yemeni أو pilot أو batch\n"
             "- نماذج محفوظة\n"
+            "- فحص ckg / تقرير ckg\n"
+            "- تفعيل تعلم معزز / دورة RL\n"
+            "- ضبط معلمات تدريب / سرب اجتماعي / سيادة النظام\n"
             "قواعد:\n"
             "1. أجب بالعربية الفصحى العملية.\n"
             "2. لا تختلق مقاييس تدريب — إن لم تُنفَّذ أداة، وجّه للأمر المناسب.\n"
@@ -350,14 +353,14 @@ AGENT_CATEGORIES: Dict[str, AgentCategory] = {
             "5. إذا سُئلت بجدية عن النموذج الأساسي، أجب بصدق ولا تنفِ ذلك."
         ),
         quick_prompts=[
+            "فحص ckg",
+            "حالة التعلم المعزز",
+            "ضبط معلمات تدريب",
+            "ماذا بعد",
             "حالة gpu",
-            "حالة الذروة",
-            "حالة المنصة",
-            "حالة المصنع",
-            "هدف: اجعل دقة التصنيف أعلى من 90%",
-            "موافقات",
-            "صحّح وأعد التدريب",
-            "حالة الويب",
+            "سرب اجتماعي",
+            "سيادة النظام",
+            "جسر حساسات",
             "سجل النماذج",
         ],
         web_enabled=False,
@@ -518,6 +521,19 @@ class CategoryAgentChat:
         """
         if not user_input.strip():
             return "الرجاء كتابة سؤالك."
+
+        # ── جسر المشروع: أوامر الوكيل المدمجة (تدريب/CKG/سرب/RL/…) ──
+        # يعمل لكل الفئات حتى لا تُفقد الأوامر عند التوجيه الخاطئ
+        try:
+            from ai.agent_project_bridge import dispatch_with_meta
+            _br, _badge = dispatch_with_meta(user_input.strip())
+            if _br is not None:
+                self._last_provider = _badge or "🧬 Project Agent"
+                self.history.append((user_input, _br))
+                self._log_audit(user_input, _br, source, self._last_provider, True)
+                return _br
+        except Exception:
+            pass
 
         # ── وكيل الصيانة الذاتية فقط: أوامر تشخيص حقيقية على ملفات المشروع ──
         if (
@@ -696,6 +712,24 @@ class UnifiedAgentChat:
         كسياق، ويعيد (الرد، بيانات وصفية عن المتخصص الذي أجاب)."""
         if not user_input.strip():
             return "الرجاء كتابة سؤالك.", {}
+
+        try:
+            from ai.agent_project_bridge import dispatch_with_meta
+            _br, _badge = dispatch_with_meta(user_input.strip())
+            if _br is not None:
+                meta = {
+                    "category_key": "project_bridge",
+                    "category_title": "وكيل المشروع",
+                    "category_emoji": "🧬",
+                    "route_method": "project_bridge",
+                    "provider_badge": _badge or "🧬 Project Agent",
+                    "quality_badge": "",
+                }
+                self.shared_history.append((user_input, _br))
+                self.turns_meta.append(meta)
+                return _br, meta
+        except Exception:
+            pass
 
         if _ROUTING_OK and route_query_verbose is not None:
             selected, route_method, _scores = route_query_verbose(

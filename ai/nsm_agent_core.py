@@ -1652,6 +1652,14 @@ class NSMAgent:
     # run() — للتوافق مع nsm_chat.py القديم
     # ══════════════════════════════════════════════════════════════
     def run(self, user_input: str) -> str:
+        try:
+            from ai.agent_project_bridge import dispatch_agent_message
+            _bridged = dispatch_agent_message(user_input)
+            if _bridged is not None:
+                return _bridged
+        except Exception:
+            pass
+
         """
         يجمع كل chunks من run_stream في نص واحد.
         متوافق 100% مع nsm_chat.py بدون أي تعديل فيه.
