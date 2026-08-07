@@ -134,9 +134,18 @@ class MoECKGBridge:
 
             self.moe.eval()
             dm = self.moe.d_model
-            # إسقاط ثابت شبه-عشوائي قابل للتكرار (لا يحتاج تدريب أولي)
-            rng = np.random.RandomState(42)
-            self.projector = (rng.randn(dm, 784).astype(np.float64) * (2.0 / np.sqrt(784)))
+            proj_path = MOE_PATH.parent / "moe_projector.npy"
+            if proj_path.is_file():
+                P = np.load(str(proj_path))
+                if getattr(P, "shape", None) == (dm, 784):
+                    self.projector = P.astype(np.float64)
+                    logger.info("مسقط MoE محمّل من %s", proj_path)
+                else:
+                    rng = np.random.RandomState(42)
+                    self.projector = rng.randn(dm, 784).astype(np.float64) * (2.0 / np.sqrt(784))
+            else:
+                rng = np.random.RandomState(42)
+                self.projector = rng.randn(dm, 784).astype(np.float64) * (2.0 / np.sqrt(784))
         except Exception as e:
             self._load_error = str(e)
             self.moe = None

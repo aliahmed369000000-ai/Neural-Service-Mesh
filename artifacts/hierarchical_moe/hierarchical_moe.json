@@ -19,8 +19,7 @@
       "fiqh_hanafi",
       "fiqh_maliki",
       "fiqh_shafii",
-      "fiqh_hanbali",
-      "fiqh_zahiri"
+      "fiqh_hanbali"
     ],
     "tafsir": [
       "tafsir_general",
@@ -53,45 +52,36 @@
         "category": "fiqh",
         "name": "fiqh_hanafi",
         "description": "fiqh/fiqh_hanafi",
-        "created_at": 1786142767.0580947,
-        "usage_count": 0,
-        "total_gate_weight": 0.0
+        "created_at": 1786144862.2291727,
+        "usage_count": 7337,
+        "total_gate_weight": 2547.185928799212
       },
       "fiqh_maliki": {
         "expert_id": "fiqh_maliki",
         "category": "fiqh",
         "name": "fiqh_maliki",
         "description": "fiqh/fiqh_maliki",
-        "created_at": 1786142767.0592515,
-        "usage_count": 0,
-        "total_gate_weight": 0.0
+        "created_at": 1786144862.230588,
+        "usage_count": 7084,
+        "total_gate_weight": 2359.6986364871264
       },
       "fiqh_shafii": {
         "expert_id": "fiqh_shafii",
         "category": "fiqh",
         "name": "fiqh_shafii",
         "description": "fiqh/fiqh_shafii",
-        "created_at": 1786142767.0604239,
-        "usage_count": 0,
-        "total_gate_weight": 0.0
+        "created_at": 1786144862.2318206,
+        "usage_count": 6977,
+        "total_gate_weight": 2279.828009188175
       },
       "fiqh_hanbali": {
         "expert_id": "fiqh_hanbali",
         "category": "fiqh",
         "name": "fiqh_hanbali",
         "description": "fiqh/fiqh_hanbali",
-        "created_at": 1786142767.0615847,
-        "usage_count": 0,
-        "total_gate_weight": 0.0
-      },
-      "fiqh_zahiri": {
-        "expert_id": "fiqh_zahiri",
-        "category": "fiqh",
-        "name": "fiqh_zahiri",
-        "description": "خبير مضاف ديناميكياً: fiqh_zahiri",
-        "created_at": 1786142767.117035,
-        "usage_count": 0,
-        "total_gate_weight": 0.0
+        "created_at": 1786144862.2331133,
+        "usage_count": 7021,
+        "total_gate_weight": 2286.287423633039
       }
     },
     "tafsir": {
@@ -100,18 +90,18 @@
         "category": "tafsir",
         "name": "tafsir_general",
         "description": "tafsir/tafsir_general",
-        "created_at": 1786142767.0628433,
-        "usage_count": 0,
-        "total_gate_weight": 0.0
+        "created_at": 1786144862.2349062,
+        "usage_count": 9204,
+        "total_gate_weight": 4664.972738057375
       },
       "tafsir_linguistic": {
         "expert_id": "tafsir_linguistic",
         "category": "tafsir",
         "name": "tafsir_linguistic",
         "description": "tafsir/tafsir_linguistic",
-        "created_at": 1786142767.0640447,
-        "usage_count": 0,
-        "total_gate_weight": 0.0
+        "created_at": 1786144862.2362225,
+        "usage_count": 9204,
+        "total_gate_weight": 4539.027249842882
       }
     },
     "hadith": {
@@ -120,18 +110,18 @@
         "category": "hadith",
         "name": "hadith_riwaya",
         "description": "hadith/hadith_riwaya",
-        "created_at": 1786142767.0652764,
-        "usage_count": 0,
-        "total_gate_weight": 0.0
+        "created_at": 1786144862.2378063,
+        "usage_count": 9318,
+        "total_gate_weight": 4905.193703949451
       },
       "hadith_diraya": {
         "expert_id": "hadith_diraya",
         "category": "hadith",
         "name": "hadith_diraya",
         "description": "hadith/hadith_diraya",
-        "created_at": 1786142767.066555,
-        "usage_count": 0,
-        "total_gate_weight": 0.0
+        "created_at": 1786144862.2391872,
+        "usage_count": 9318,
+        "total_gate_weight": 4412.806284546852
       }
     },
     "aqidah": {
@@ -140,18 +130,18 @@
         "category": "aqidah",
         "name": "aqidah_general",
         "description": "aqidah/aqidah_general",
-        "created_at": 1786142767.0678284,
-        "usage_count": 0,
-        "total_gate_weight": 0.0
+        "created_at": 1786144862.2406344,
+        "usage_count": 9541,
+        "total_gate_weight": 5037.829784184694
       },
       "aqidah_comparative": {
         "expert_id": "aqidah_comparative",
         "category": "aqidah",
         "name": "aqidah_comparative",
         "description": "aqidah/aqidah_comparative",
-        "created_at": 1786142767.0690372,
-        "usage_count": 0,
-        "total_gate_weight": 0.0
+        "created_at": 1786144862.2420542,
+        "usage_count": 9541,
+        "total_gate_weight": 4503.170219831169
       }
     },
     "seerah": {
@@ -160,18 +150,18 @@
         "category": "seerah",
         "name": "seerah_prophet",
         "description": "seerah/seerah_prophet",
-        "created_at": 1786142767.070325,
-        "usage_count": 0,
-        "total_gate_weight": 0.0
+        "created_at": 1786144862.2434487,
+        "usage_count": 9590,
+        "total_gate_weight": 4586.704042881727
       },
       "seerah_khulafa": {
         "expert_id": "seerah_khulafa",
         "category": "seerah",
         "name": "seerah_khulafa",
         "description": "seerah/seerah_khulafa",
-        "created_at": 1786142767.071536,
-        "usage_count": 0,
-        "total_gate_weight": 0.0
+        "created_at": 1786144862.2447739,
+        "usage_count": 9590,
+        "total_gate_weight": 5003.295960888267
       }
     },
     "arabic": {
@@ -180,18 +170,18 @@
         "category": "arabic",
         "name": "arabic_nahw",
         "description": "arabic/arabic_nahw",
-        "created_at": 1786142767.072782,
-        "usage_count": 0,
-        "total_gate_weight": 0.0
+        "created_at": 1786144862.2462866,
+        "usage_count": 876,
+        "total_gate_weight": 438.15076050162315
       },
       "arabic_balagha": {
         "expert_id": "arabic_balagha",
         "category": "arabic",
         "name": "arabic_balagha",
         "description": "arabic/arabic_balagha",
-        "created_at": 1786142767.0740242,
-        "usage_count": 0,
-        "total_gate_weight": 0.0
+        "created_at": 1786144862.2477188,
+        "usage_count": 876,
+        "total_gate_weight": 437.84923861920834
       }
     },
     "general": {
@@ -200,10 +190,87 @@
         "category": "general",
         "name": "general_assistant",
         "description": "general/general_assistant",
-        "created_at": 1786142767.075378,
-        "usage_count": 0,
-        "total_gate_weight": 0.0
+        "created_at": 1786144862.2491417,
+        "usage_count": 9598,
+        "total_gate_weight": 9598.0
       }
     }
+  },
+  "train": {
+    "epochs": 8,
+    "max_samples": 5000,
+    "n_used": 3600,
+    "batch_size": 64,
+    "lr": 0.001,
+    "d_model": 128,
+    "label_counts": {
+      "tafsir": 600,
+      "seerah": 600,
+      "hadith": 600,
+      "fiqh": 600,
+      "aqidah": 600,
+      "general": 600
+    },
+    "history": [
+      {
+        "epoch": 1,
+        "loss": 2.8792627610658346,
+        "ce": 1.9082881003095393,
+        "aux": 2.3291569509004293,
+        "acc": 0.2935855263157895
+      },
+      {
+        "epoch": 2,
+        "loss": 2.6403685829095673,
+        "ce": 1.851872910533035,
+        "aux": 2.3977844882429693,
+        "acc": 0.5822368421052632
+      },
+      {
+        "epoch": 3,
+        "loss": 2.5258369487628602,
+        "ce": 1.818157574586701,
+        "aux": 2.432673040189241,
+        "acc": 0.6962719298245614
+      },
+      {
+        "epoch": 4,
+        "loss": 2.470990201883149,
+        "ce": 1.7888059908883613,
+        "aux": 2.4556288259071217,
+        "acc": 0.6910635964912281
+      },
+      {
+        "epoch": 5,
+        "loss": 2.4293038050333657,
+        "ce": 1.75956770620848,
+        "aux": 2.473277368043598,
+        "acc": 0.7088815789473685
+      },
+      {
+        "epoch": 6,
+        "loss": 2.393187665102775,
+        "ce": 1.7305621138790197,
+        "aux": 2.48994733576189,
+        "acc": 0.7042214912280702
+      },
+      {
+        "epoch": 7,
+        "loss": 2.3609605797550133,
+        "ce": 1.7016313912575705,
+        "aux": 2.50568559713531,
+        "acc": 0.7110745614035088
+      },
+      {
+        "epoch": 8,
+        "loss": 2.3284228224503365,
+        "ce": 1.6734462223554913,
+        "aux": 2.5198787346220852,
+        "acc": 0.6866776315789473
+      }
+    ],
+    "eval_acc": 0.693359375,
+    "elapsed_sec": 59.45,
+    "projector": "artifacts/hierarchical_moe/moe_projector.npy"
   }
 }
