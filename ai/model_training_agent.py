@@ -968,6 +968,151 @@ def list_saved_models() -> str:
     return "\n".join(lines)
 
 
+def training_dashboard() -> str:
+    """لوحة تحكم موحّدة لوكيل تدريب النماذج — نظرة عامة + توصيات فورية."""
+    lines = [
+        "## 🎛️ لوحة تحكم تدريب النماذج",
+        "",
+        "أنا **مدير تدريب النماذج** داخل NSM: أراقب البيئة، أقترح الخطوة التالية،",
+        "وأشغّل أدوات حقيقية (بدون اختلاق مقاييس).",
+        "",
+    ]
+
+    # موارد سريعة
+    ram = _ram_gb()
+    lines.append("### 📡 الموارد")
+    lines.append(f"- رام متاحة ≈ **{ram:.2f} GB**")
+    try:
+        gpu_txt = _gpu_report()
+        first = (gpu_txt or "").splitlines()[0] if gpu_txt else "GPU: غير معروف"
+        lines.append(f"- {first}")
+    except Exception:
+        lines.append("- GPU: تعذّر التقرير")
+    lines.append(f"- scikit-learn: {'✅' if _SKLEARN_OK else '❌'}")
+    lines.append(f"- PyTorch: {'✅' if _TORCH_OK else '❌'}")
+    lines.append("")
+
+    # CKG
+    lines.append("### 🧬 حالة CKG / ArabicTransformer")
+    try:
+        st = _load_json(STATE_V3) if STATE_V3.is_file() else None
+        if st:
+            epoch = st.get("epoch") or st.get("global_step") or st.get("steps") or "?"
+            loss = st.get("last_loss") or st.get("loss") or st.get("avg_loss")
+            packs = st.get("packs_done") or st.get("packs") or "?"
+            lines.append(f"- حالة محفوظة: ✅ | خطوة/عصر: **{epoch}** | حزم: **{packs}**")
+            if loss is not None:
+                lines.append(f"- آخر خسارة مسجّلة: **{loss}**")
+        else:
+            lines.append("- لا يوجد `ckg_train_state_v3.json` بعد.")
+    except Exception as e:
+        lines.append(f"- تعذّر قراءة حالة CKG: {e}")
+    lines.append(f"- سكربت v3: {'✅' if TRAIN_V3.is_file() else '❌'}")
+    lines.append("")
+
+    # نماذج محفوظة (مختصر)
+    lines.append("### 💾 آخر النماذج المحفوظة")
+    try:
+        if ARTIFACTS.is_dir():
+            files = sorted(
+                [p for p in ARTIFACTS.rglob("*") if p.is_file()],
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )[:5]
+            if files:
+                for p in files:
+                    mb = p.stat().st_size / (1024 * 1024)
+                    rel = p.relative_to(ROOT) if p.is_relative_to(ROOT) else p.name
+                    lines.append(f"- `{rel}` ({mb:.2f} MB)")
+            else:
+                lines.append("- لا توجد مخرجات بعد.")
+        else:
+            lines.append("- مجلد المخرجات غير موجود بعد.")
+    except Exception:
+        lines.append("- تعذّر سرد المخرجات.")
+    lines.append("")
+
+    # تدريب مستمر
+    lines.append("### 🔄 التدريب الذاتي المستمر")
+    try:
+        ct_log = ROOT / "artifacts" / "model_training" / "continuous" / "training_triggers.jsonl"
+        if ct_log.is_file():
+            raw = ct_log.read_text(encoding="utf-8", errors="ignore").strip().splitlines()
+            lines.append(f"- سجل الأحداث: **{len(raw)}** حدث")
+            if raw:
+                try:
+                    last = json.loads(raw[-1])
+                    q = (last.get("quality") or {}).get("score")
+                    action = (last.get("plan") or {}).get("action")
+                    lines.append(f"- آخر تقييم جودة: **{q}** | إجراء: **{action}**")
+                except Exception:
+                    lines.append("- آخر حدث موجود (تعذّر تفصيله).")
+        else:
+            lines.append("- لم يُسجَّل أي دورة تدريب مستمر بعد. جرّب: `تدريب مستمر`")
+    except Exception as e:
+        lines.append(f"- {e}")
+    lines.append("")
+
+    # توصيات ذكية
+    lines.append("### 🎯 الخطوة التالية المقترحة")
+    lines.append(smart_train_next(recommend_only=True))
+    lines.append("")
+    lines.append("---")
+    lines.append(
+        "**أوامر سريعة:** `جرد` · `حالة ckg` · `شغّل تدريب ckg تجريبي` · "
+        "`درّب شبكة torch` · `درّب تصنيف تجريبي` · `نماذج محفوظة` · `تدريب مستمر` · `خطة`"
+    )
+    return "\n".join(lines)
+
+
+def smart_train_next(recommend_only: bool = False) -> str:
+    """يختار بأمان أفضل خطوة تدريب تالية حسب حالة البيئة.
+
+    إن recommend_only=True يعيد توصية نصية فقط بدون تشغيل ثقيل.
+    """
+    ram = _ram_gb()
+
+    has_v3_script = TRAIN_V3.is_file()
+    has_sentences = any(
+        p.is_file() for p in (SENTENCES_V3, SENTENCES_V2, SENTENCES_V1, GENERAL_AR)
+    )
+    st = _load_json(STATE_V3) if STATE_V3.is_file() else None
+
+    if has_v3_script and has_sentences and ram >= 1.2:
+        if st is None:
+            if not recommend_only:
+                return run_ckg_step(packs=1, dry_run=False)
+            return (
+                "① **شغّل تدريب ckg تجريبي** (حزمة واحدة) للتحقق من المسار.\n"
+                "② بعدها راقب بـ `حالة ckg` و`خسارة`.\n"
+                "③ عند الاستقرار زد الحزم تدريجياً."
+            )
+        return (
+            "① راجع `حالة ckg` و`خسارة`.\n"
+            "② إن كان الاتجاه جيداً: `شغّل تدريب ckg` بحزمة أو حزمتين.\n"
+            "③ أو جرّب `درّب شبكة torch` / `درّب تصنيف تجريبي` للتحقق من مسارات أخرى."
+        )
+
+    if _SKLEARN_OK and ram >= 0.8:
+        return (
+            "① ابدأ بـ **درّب تصنيف تجريبي** للتحقق السريع من مسار sklearn.\n"
+            "② إن كان لديك CSV: `قائمة csv` ثم `درّب من csv ...`\n"
+            "③ لشبكات أعقد: ثبّت torch ثم `درّب شبكة torch`."
+        )
+
+    if _TORCH_OK and ram >= 1.0:
+        return (
+            "① **درّب شبكة torch** (MLP تجريبي) للتحقق من المسار.\n"
+            "② راقب الرام — قلّل الحقب إن لزم.\n"
+            "③ احفظ النتائج تحت `artifacts/model_training/`."
+        )
+
+    return (
+        "① نفّذ **جرد** لرؤية المكتبات والبيانات المتاحة.\n"
+        "② ثبّت scikit-learn أو torch حسب الحاجة.\n"
+        "③ إن كانت رام منخفضة (<1 GB) استخدم `dry-run` أو Colab (`colab`)."
+    )
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 5b) تدريب على CSV حقيقي + رفع ملفات + CNN + نص
@@ -1707,6 +1852,24 @@ def handle_training_command(user_input: str) -> Optional[str]:
 
     low = text.lower()
 
+    # ── لوحة التحكم والخطوة التالية (أولوية عالية قبل الموجّهات الفرعية) ──
+    if re.search(
+        r"(لوحة\s*التحكم|dashboard|نظرة\s*عامة\s*(على\s*)?(التدريب)?|"
+        r"حالة\s*التدريب|وضع\s*التدريب|ملخص\s*التدريب|تقرير\s*التدريب|"
+        r"^لوحة$|^dashboard$)",
+        text,
+        re.I,
+    ):
+        return training_dashboard()
+
+    if re.search(
+        r"(^ماذا\s*بعد$|^الخطوة\s*التالية$|next\s*step|"
+        r"اقترح\s*(ال)?خطوة|ابدأ\s*تدريب\s*ذكي|تدريب\s*ذكي|smart\s*train)",
+        text,
+        re.I,
+    ):
+        execute = bool(re.search(r"(ابدأ|شغّل|نفّذ|execute|start)", text, re.I))
+        return smart_train_next(recommend_only=not execute)
 
     if _KERN_OK and _kern_handle is not None:
         try:
@@ -2147,6 +2310,25 @@ def handle_training_command(user_input: str) -> Optional[str]:
         dry = bool(re.search(r"تجريب|dry\s*-?run|محاكاة", text, re.I))
         return _sb_run_second_mission(dry_run=dry)
 
+    # لوحة التحكم / الخطوة التالية الذكية
+    if re.search(
+        r"(لوحة\s*التحكم|dashboard|نظرة\s*عامة|حالة\s*التدريب|وضع\s*التدريب|"
+        r"ملخص\s*التدريب|تقرير\s*التدريب)",
+        text,
+        re.I,
+    ):
+        return training_dashboard()
+
+    if re.search(
+        r"(الخطوة\s*التالية|ماذا\s*بعد|next\s*step|اقترح\s*(خطوة|تدريب)|"
+        r"ابدأ\s*تدريب\s*ذكي|تدريب\s*ذكي|smart\s*train)",
+        text,
+        re.I,
+    ):
+        # "ابدأ تدريب ذكي" ينفّذ إن أمكن؛ الباقي توصية فقط
+        execute = bool(re.search(r"(ابدأ|شغّل|نفّذ|execute|start)", text, re.I))
+        return smart_train_next(recommend_only=not execute)
+
     # أوامر قصيرة
     aliases = {
         "جرد": inventory,
@@ -2162,8 +2344,15 @@ def handle_training_command(user_input: str) -> Optional[str]:
         "loss": ckg_loss_trend,
         "محفوظات": list_saved_models,
         "نماذج": list_saved_models,
+        "نماذج محفوظة": list_saved_models,
         "csv": list_csv_datasets,
         "قائمة csv": list_csv_datasets,
+        "لوحة": training_dashboard,
+        "لوحة التحكم": training_dashboard,
+        "dashboard": training_dashboard,
+        "نظرة عامة": training_dashboard,
+        "ماذا بعد": (lambda: smart_train_next(True)),
+        "الخطوة التالية": (lambda: smart_train_next(True)),
         "sandbox": (_sb_status if _SANDBOX_OK else inventory),
         "أول مهمة": (lambda: _sb_run_first_mission(False) if _SANDBOX_OK else "لا sandbox"),
         "ثاني مهمة": (lambda: _sb_run_second_mission(False) if _SANDBOX_OK else "لا sandbox"),

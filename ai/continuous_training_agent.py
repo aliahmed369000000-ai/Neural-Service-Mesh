@@ -110,12 +110,50 @@ def run_continuous_cycle(sample_answer: str = "", prefer_remote: bool = True) ->
     return event
 
 
+def continuous_status() -> str:
+    """ملخص حالة التدريب الذاتي المستمر من السجل المحلي."""
+    lines = ["## 🔄 حالة التدريب الذاتي المستمر", ""]
+    if not LOG_PATH.is_file():
+        lines.append("لا يوجد سجل بعد. شغّل `تدريب مستمر` لتسجيل أول دورة.")
+        lines.append("")
+        lines.append(trigger_local_training_hint())
+        return "\n".join(lines)
+    try:
+        rows = LOG_PATH.read_text(encoding="utf-8", errors="ignore").strip().splitlines()
+    except Exception as e:
+        return f"تعذّر قراءة السجل: {e}"
+    lines.append(f"- عدد الأحداث المسجّلة: **{len(rows)}**")
+    if rows:
+        try:
+            last = json.loads(rows[-1])
+            q = last.get("quality") or {}
+            plan = last.get("plan") or {}
+            lines.append(f"- آخر وقت: `{last.get('at', '?')}`")
+            lines.append(f"- جودة أخيرة: **{q.get('score', '?')}** (ضعيف={q.get('weak')})")
+            if q.get("reasons"):
+                lines.append(f"- أسباب: {', '.join(map(str, q.get('reasons', [])[:5]))}")
+            lines.append(f"- إجراء مخطط: **{plan.get('action', '?')}** — {plan.get('reason_ar', '')}")
+        except Exception:
+            lines.append("- آخر حدث موجود لكن تعذّر تفصيله.")
+    lines.append("")
+    lines.append(trigger_local_training_hint())
+    return "\n".join(lines)
+
+
 def handle_continuous_command(user_input: str) -> Optional[str]:
     import re
     text = (user_input or "").strip()
     if not text:
         return None
-    if not re.search(r"(تدريب\s*مستمر|continuous\s*train|صيان[ةه]\s*تدريب|راقب\s*جود[ةه]|اعادة\s*تدريب\s*ذاتي)", text, re.I):
+    if re.search(r"(حالة|status|سجل).{0,12}(تدريب\s*مستمر|continuous)", text, re.I) or re.search(
+        r"(تدريب\s*مستمر).{0,8}(حالة|status|سجل)", text, re.I
+    ):
+        return continuous_status()
+    if not re.search(
+        r"(تدريب\s*مستمر|continuous\s*train|صيان[ةه]\s*تدريب|راقب\s*جود[ةه]|اعادة\s*تدريب\s*ذاتي)",
+        text,
+        re.I,
+    ):
         return None
     ev = run_continuous_cycle(prefer_remote=bool(re.search(r"kaggle|بعيد", text, re.I)))
     return (
