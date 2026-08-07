@@ -1,0 +1,209 @@
+{
+  "d_model": 128,
+  "d_ff": 512,
+  "top_k_groups": 2,
+  "top_k_experts": 3,
+  "lb_coeff": 0.01,
+  "dropout": 0.05,
+  "group_order": [
+    "fiqh",
+    "tafsir",
+    "hadith",
+    "aqidah",
+    "seerah",
+    "arabic",
+    "general"
+  ],
+  "experts": {
+    "fiqh": [
+      "fiqh_hanafi",
+      "fiqh_maliki",
+      "fiqh_shafii",
+      "fiqh_hanbali",
+      "fiqh_zahiri"
+    ],
+    "tafsir": [
+      "tafsir_general",
+      "tafsir_linguistic"
+    ],
+    "hadith": [
+      "hadith_riwaya",
+      "hadith_diraya"
+    ],
+    "aqidah": [
+      "aqidah_general",
+      "aqidah_comparative"
+    ],
+    "seerah": [
+      "seerah_prophet",
+      "seerah_khulafa"
+    ],
+    "arabic": [
+      "arabic_nahw",
+      "arabic_balagha"
+    ],
+    "general": [
+      "general_assistant"
+    ]
+  },
+  "expert_meta": {
+    "fiqh": {
+      "fiqh_hanafi": {
+        "expert_id": "fiqh_hanafi",
+        "category": "fiqh",
+        "name": "fiqh_hanafi",
+        "description": "fiqh/fiqh_hanafi",
+        "created_at": 1786142767.0580947,
+        "usage_count": 0,
+        "total_gate_weight": 0.0
+      },
+      "fiqh_maliki": {
+        "expert_id": "fiqh_maliki",
+        "category": "fiqh",
+        "name": "fiqh_maliki",
+        "description": "fiqh/fiqh_maliki",
+        "created_at": 1786142767.0592515,
+        "usage_count": 0,
+        "total_gate_weight": 0.0
+      },
+      "fiqh_shafii": {
+        "expert_id": "fiqh_shafii",
+        "category": "fiqh",
+        "name": "fiqh_shafii",
+        "description": "fiqh/fiqh_shafii",
+        "created_at": 1786142767.0604239,
+        "usage_count": 0,
+        "total_gate_weight": 0.0
+      },
+      "fiqh_hanbali": {
+        "expert_id": "fiqh_hanbali",
+        "category": "fiqh",
+        "name": "fiqh_hanbali",
+        "description": "fiqh/fiqh_hanbali",
+        "created_at": 1786142767.0615847,
+        "usage_count": 0,
+        "total_gate_weight": 0.0
+      },
+      "fiqh_zahiri": {
+        "expert_id": "fiqh_zahiri",
+        "category": "fiqh",
+        "name": "fiqh_zahiri",
+        "description": "خبير مضاف ديناميكياً: fiqh_zahiri",
+        "created_at": 1786142767.117035,
+        "usage_count": 0,
+        "total_gate_weight": 0.0
+      }
+    },
+    "tafsir": {
+      "tafsir_general": {
+        "expert_id": "tafsir_general",
+        "category": "tafsir",
+        "name": "tafsir_general",
+        "description": "tafsir/tafsir_general",
+        "created_at": 1786142767.0628433,
+        "usage_count": 0,
+        "total_gate_weight": 0.0
+      },
+      "tafsir_linguistic": {
+        "expert_id": "tafsir_linguistic",
+        "category": "tafsir",
+        "name": "tafsir_linguistic",
+        "description": "tafsir/tafsir_linguistic",
+        "created_at": 1786142767.0640447,
+        "usage_count": 0,
+        "total_gate_weight": 0.0
+      }
+    },
+    "hadith": {
+      "hadith_riwaya": {
+        "expert_id": "hadith_riwaya",
+        "category": "hadith",
+        "name": "hadith_riwaya",
+        "description": "hadith/hadith_riwaya",
+        "created_at": 1786142767.0652764,
+        "usage_count": 0,
+        "total_gate_weight": 0.0
+      },
+      "hadith_diraya": {
+        "expert_id": "hadith_diraya",
+        "category": "hadith",
+        "name": "hadith_diraya",
+        "description": "hadith/hadith_diraya",
+        "created_at": 1786142767.066555,
+        "usage_count": 0,
+        "total_gate_weight": 0.0
+      }
+    },
+    "aqidah": {
+      "aqidah_general": {
+        "expert_id": "aqidah_general",
+        "category": "aqidah",
+        "name": "aqidah_general",
+        "description": "aqidah/aqidah_general",
+        "created_at": 1786142767.0678284,
+        "usage_count": 0,
+        "total_gate_weight": 0.0
+      },
+      "aqidah_comparative": {
+        "expert_id": "aqidah_comparative",
+        "category": "aqidah",
+        "name": "aqidah_comparative",
+        "description": "aqidah/aqidah_comparative",
+        "created_at": 1786142767.0690372,
+        "usage_count": 0,
+        "total_gate_weight": 0.0
+      }
+    },
+    "seerah": {
+      "seerah_prophet": {
+        "expert_id": "seerah_prophet",
+        "category": "seerah",
+        "name": "seerah_prophet",
+        "description": "seerah/seerah_prophet",
+        "created_at": 1786142767.070325,
+        "usage_count": 0,
+        "total_gate_weight": 0.0
+      },
+      "seerah_khulafa": {
+        "expert_id": "seerah_khulafa",
+        "category": "seerah",
+        "name": "seerah_khulafa",
+        "description": "seerah/seerah_khulafa",
+        "created_at": 1786142767.071536,
+        "usage_count": 0,
+        "total_gate_weight": 0.0
+      }
+    },
+    "arabic": {
+      "arabic_nahw": {
+        "expert_id": "arabic_nahw",
+        "category": "arabic",
+        "name": "arabic_nahw",
+        "description": "arabic/arabic_nahw",
+        "created_at": 1786142767.072782,
+        "usage_count": 0,
+        "total_gate_weight": 0.0
+      },
+      "arabic_balagha": {
+        "expert_id": "arabic_balagha",
+        "category": "arabic",
+        "name": "arabic_balagha",
+        "description": "arabic/arabic_balagha",
+        "created_at": 1786142767.0740242,
+        "usage_count": 0,
+        "total_gate_weight": 0.0
+      }
+    },
+    "general": {
+      "general_assistant": {
+        "expert_id": "general_assistant",
+        "category": "general",
+        "name": "general_assistant",
+        "description": "general/general_assistant",
+        "created_at": 1786142767.075378,
+        "usage_count": 0,
+        "total_gate_weight": 0.0
+      }
+    }
+  }
+}

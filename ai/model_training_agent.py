@@ -271,6 +271,13 @@ except Exception:
     _CONT_OK = False
 
 try:
+    from ai.hierarchical_moe import handle_moe_command as _moe_handle
+    _MOE_OK = True
+except Exception:
+    _moe_handle = None
+    _MOE_OK = False
+
+try:
     from ai.command_lexicon import (
         handle_help_command as _help_handle,
         rewrite_to_canonical as _rewrite_cmd,
@@ -2005,6 +2012,15 @@ def handle_training_command(user_input: str) -> Optional[str]:
                 return ct
         except Exception as _ct_err:
             logger.warning("continuous: %s", _ct_err)
+
+    # Hierarchical Dynamic MoE (خليط خبراء هرمي)
+    if _MOE_OK and _moe_handle is not None:
+        try:
+            moe_out = _moe_handle(text)
+            if moe_out is not None:
+                return moe_out
+        except Exception as _moe_err:
+            logger.warning("hierarchical_moe: %s", _moe_err)
 
     # المحرك الاقتصادي (AIaaS / سوق / Arbitrage / بيانات)
     if _ECONOMIC_OK and _economic_handle is not None:
