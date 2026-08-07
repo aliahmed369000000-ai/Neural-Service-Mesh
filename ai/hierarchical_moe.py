@@ -47,111 +47,123 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SAVE_DIR = ROOT / "artifacts" / "hierarchical_moe"
 DEFAULT_SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
-# ── فئات المستوى 1 + خبراء المستوى 2 (دين + تخصصات عامة) ───────────────────
-# الدين: نفس التقسيم الشرعي السابق. باقي التخصصات: خبير/خبراء لكل مجال.
+# ── فئات المستوى 1 + خبراء المستوى 2 (دين موسّع + تخصصات واسعة) ────────────
 DEFAULT_CATEGORIES: Dict[str, List[str]] = {
     # ── الدين الإسلامي ──
     "fiqh": [
-        "fiqh_hanafi",
-        "fiqh_maliki",
-        "fiqh_shafii",
-        "fiqh_hanbali",
-        "fiqh_general",
+        "fiqh_hanafi", "fiqh_maliki", "fiqh_shafii", "fiqh_hanbali",
+        "fiqh_general", "fiqh_contemporary",
     ],
     "tafsir": [
-        "tafsir_general",
-        "tafsir_linguistic",
-        "tafsir_thematic",
+        "tafsir_general", "tafsir_linguistic", "tafsir_thematic", "tafsir_scientific",
     ],
     "hadith": [
-        "hadith_riwaya",
-        "hadith_diraya",
-        "hadith_ahkam",
+        "hadith_riwaya", "hadith_diraya", "hadith_ahkam", "hadith_takhrij",
     ],
     "aqidah": [
-        "aqidah_general",
-        "aqidah_comparative",
-        "aqidah_tawhid",
+        "aqidah_general", "aqidah_comparative", "aqidah_tawhid", "aqidah_sects",
     ],
     "seerah": [
-        "seerah_prophet",
-        "seerah_khulafa",
-        "seerah_events",
+        "seerah_prophet", "seerah_khulafa", "seerah_events", "seerah_companions",
     ],
-    # ── لغة عربية ──
+    "usul": [
+        "usul_fiqh", "usul_qawaid", "usul_maqasid",
+    ],
+    "tajweed": [
+        "tajweed_rules", "tajweed_qiraat", "tajweed_hifz",
+    ],
+    "islamic_finance": [
+        "isf_banking", "isf_contracts", "isf_zakat_calc",
+    ],
+    # ── لغات وآداب ──
     "arabic": [
-        "arabic_nahw",
-        "arabic_balagha",
-        "arabic_sarf",
-        "arabic_translation",
+        "arabic_nahw", "arabic_balagha", "arabic_sarf", "arabic_translation",
     ],
-    # ── تخصصات عامة ──
+    "literature": [
+        "lit_poetry", "lit_prose", "lit_criticism", "lit_arabic_classic",
+    ],
+    # ── تقنية وبرمجة ──
     "programming": [
-        "prog_python",
-        "prog_web",
-        "prog_algorithms",
-        "prog_systems",
-    ],
-    "sports": [
-        "sports_football",
-        "sports_fitness",
-        "sports_general",
-    ],
-    "science": [
-        "science_physics",
-        "science_chemistry",
-        "science_biology",
-        "science_general",
-    ],
-    "math": [
-        "math_algebra",
-        "math_geometry",
-        "math_stats",
-        "math_general",
-    ],
-    "medicine": [
-        "med_general",
-        "med_nutrition",
-        "med_public_health",
+        "prog_python", "prog_web", "prog_algorithms", "prog_systems",
+        "prog_mobile", "prog_data",
     ],
     "technology": [
-        "tech_ai",
-        "tech_networks",
-        "tech_hardware",
-        "tech_security",
+        "tech_ai", "tech_networks", "tech_hardware", "tech_security",
+        "tech_cloud", "tech_devops",
     ],
-    "business": [
-        "biz_marketing",
-        "biz_finance",
-        "biz_management",
-        "biz_entrepreneurship",
+    # ── علوم ورياضيات ──
+    "science": [
+        "science_physics", "science_chemistry", "science_biology", "science_general",
     ],
-    "education": [
-        "edu_teaching",
-        "edu_curriculum",
-        "edu_learning",
+    "math": [
+        "math_algebra", "math_geometry", "math_stats", "math_general", "math_calculus",
     ],
-    "history": [
-        "hist_islamic",
-        "hist_world",
-        "hist_general",
+    "astronomy": [
+        "astro_solar", "astro_observation", "astro_general",
     ],
-    "media": [
-        "media_content",
-        "media_social",
-        "media_journalism",
+    "geography": [
+        "geo_physical", "geo_human", "geo_maps",
+    ],
+    "engineering": [
+        "eng_civil", "eng_electrical", "eng_mechanical", "eng_general",
+    ],
+    # ── صحة ونفس ──
+    "medicine": [
+        "med_general", "med_nutrition", "med_public_health", "med_first_aid",
     ],
     "psychology": [
-        "psych_general",
-        "psych_development",
+        "psych_general", "psych_development", "psych_clinical",
+    ],
+    # ── مجتمع وحياة ──
+    "sports": [
+        "sports_football", "sports_fitness", "sports_general", "sports_olympic",
+    ],
+    "family": [
+        "family_parenting", "family_marriage", "family_youth",
+    ],
+    "cooking": [
+        "cook_recipes", "cook_healthy", "cook_arabic",
+    ],
+    "travel": [
+        "travel_planning", "travel_hajj_umrah", "travel_culture",
+    ],
+    "environment": [
+        "env_climate", "env_conservation", "env_sustainability",
+    ],
+    "agriculture": [
+        "agri_crops", "agri_livestock", "agri_modern",
+    ],
+    # ── أعمال واقتصاد وقانون ──
+    "business": [
+        "biz_marketing", "biz_finance", "biz_management", "biz_entrepreneurship",
+    ],
+    "economy": [
+        "econ_macro", "econ_micro", "econ_markets",
     ],
     "law": [
-        "law_general",
-        "law_civil",
+        "law_general", "law_civil", "law_commercial",
+    ],
+    "career": [
+        "career_jobs", "career_cv", "career_skills",
+    ],
+    # ── تعليم وإعلام وفكر ──
+    "education": [
+        "edu_teaching", "edu_curriculum", "edu_learning", "edu_exams",
+    ],
+    "history": [
+        "hist_islamic", "hist_world", "hist_general",
+    ],
+    "media": [
+        "media_content", "media_social", "media_journalism", "media_video",
+    ],
+    "philosophy": [
+        "phil_general", "phil_ethics", "phil_logic",
+    ],
+    "art": [
+        "art_design", "art_calligraphy", "art_visual",
     ],
     "general": [
-        "general_assistant",
-        "general_research",
+        "general_assistant", "general_research", "general_daily",
     ],
 }
 
