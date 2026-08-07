@@ -59,6 +59,11 @@ def render_knowledge_hub():
 
 def render_agents_group():
     """🤖 الوكلاء: يجمع الوكيل الموحّد + وكلاء AI + منسّق الوكلاء + السرب الذكي."""
+    st.markdown(
+        '<div class="nsm-section-title">🤖 مركز الوكلاء</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption("الوكيل الموحّد للمحادثة اليومية · وكلاء متخصصون · منسّق · سرب")
     sub = st.tabs(["🎯 الوكيل الموحّد", "🤖 وكلاء AI", "🤝 منسّق الوكلاء", "🐝 السرب الذكي"])
     with sub[0]: render_unified_agent()
     with sub[1]: render_agents_hub()

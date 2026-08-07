@@ -1998,6 +1998,242 @@ h3 { font-size: clamp(1.05rem, 3.2vw, 1.3rem); font-weight: 700; }
 @media (max-width: 768px) {
     .nsm-cmdk-fab { bottom: 16px; left: 16px; width: 44px; height: 44px; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   NSM Aesthetic Layer v2 — صقل بصري موحّد
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* خلفية أنعم + عمق */
+.stApp {
+    background: var(--bg) !important;
+}
+[data-testid="stAppViewContainer"] > .main {
+    background: transparent !important;
+}
+.main .block-container {
+    padding-top: 1.1rem !important;
+    padding-bottom: 2.5rem !important;
+    max-width: 1200px !important;
+}
+
+/* شريط علوي زجاجي */
+header[data-testid="stHeader"] {
+    background: color-mix(in srgb, var(--bg) 78%, transparent) !important;
+    backdrop-filter: blur(14px) saturate(1.2);
+    border-bottom: 1px solid var(--border);
+}
+
+/* الشريط الجانبي */
+[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, color-mix(in srgb, var(--surface2) 92%, var(--gold) 8%) 0%, var(--bg) 100%) !important;
+    border-left: 1px solid var(--border) !important;
+}
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+    color: var(--text-muted);
+}
+
+/* التبويبات — أوضح وأكثر أناقة */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0.35rem !important;
+    background: var(--surface) !important;
+    padding: 0.4rem !important;
+    border-radius: 14px !important;
+    border: 1px solid var(--border) !important;
+    backdrop-filter: blur(10px);
+    flex-wrap: wrap !important;
+}
+.stTabs [data-baseweb="tab"] {
+    border-radius: 10px !important;
+    padding: 0.45rem 0.9rem !important;
+    font-weight: 700 !important;
+    color: var(--text-muted) !important;
+    border: 1px solid transparent !important;
+    transition: all .18s ease !important;
+}
+.stTabs [data-baseweb="tab"]:hover {
+    color: var(--text) !important;
+    background: var(--gold-soft) !important;
+}
+.stTabs [aria-selected="true"] {
+    background: var(--accent-grad) !important;
+    color: #fff !important;
+    border: none !important;
+    box-shadow: 0 4px 14px var(--gold-soft) !important;
+}
+.stTabs [data-baseweb="tab-highlight"] {
+    display: none !important;
+}
+.stTabs [data-baseweb="tab-border"] {
+    display: none !important;
+}
+
+/* البطاقات والمقاييس */
+[data-testid="stMetric"] {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 14px !important;
+    padding: 0.85rem 1rem !important;
+    box-shadow: 0 4px 18px var(--shadow);
+}
+[data-testid="stMetric"] label {
+    color: var(--text-muted) !important;
+    font-weight: 600 !important;
+}
+[data-testid="stMetric"] [data-testid="stMetricValue"] {
+    color: var(--text) !important;
+    font-weight: 800 !important;
+}
+
+/* Expander أنظف */
+[data-testid="stExpander"] {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 14px !important;
+    overflow: hidden;
+}
+[data-testid="stExpander"] details summary {
+    font-weight: 700 !important;
+}
+
+/* رسائل النجاح/التحذير */
+[data-testid="stAlert"] {
+    border-radius: 12px !important;
+    border: 1px solid var(--border) !important;
+}
+
+/* شريط تمرير أنيق */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--gold) 45%, var(--border));
+    border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: var(--gold);
+}
+
+/* عناوين أقسام موحّدة */
+.nsm-section-title {
+    font-family: 'IBM Plex Sans Arabic', Tajawal, sans-serif;
+    font-weight: 800;
+    font-size: 1.15rem;
+    color: var(--text);
+    margin: 0.4rem 0 0.75rem;
+    padding-bottom: 0.45rem;
+    border-bottom: 2px solid transparent;
+    border-image: linear-gradient(90deg, var(--gold), var(--emerald), transparent) 1;
+    direction: rtl;
+}
+.nsm-hero-panel {
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(135deg, var(--gold-soft), var(--emerald-soft)), var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 1.25rem 1.4rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 8px 28px var(--shadow);
+    direction: rtl;
+}
+.nsm-hero-panel::before {
+    content: "";
+    position: absolute;
+    inset: -40% auto auto -10%;
+    width: 220px; height: 220px;
+    background: radial-gradient(circle, var(--gold-soft), transparent 70%);
+    pointer-events: none;
+}
+.nsm-hero-title {
+    position: relative;
+    font-size: 1.55rem;
+    font-weight: 900;
+    background: var(--accent-grad);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    margin: 0 0 0.35rem;
+}
+.nsm-hero-sub {
+    position: relative;
+    color: var(--text-muted);
+    font-size: 0.92rem;
+    line-height: 1.75;
+    margin: 0;
+}
+.nsm-chip-row {
+    display: flex; flex-wrap: wrap; gap: 0.4rem;
+    margin-top: 0.85rem; direction: rtl;
+}
+.nsm-chip {
+    display: inline-flex; align-items: center; gap: 0.3rem;
+    padding: 0.28rem 0.7rem;
+    border-radius: 999px;
+    font-size: 0.78rem; font-weight: 700;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+}
+.nsm-chip--accent {
+    background: var(--gold-soft);
+    border-color: color-mix(in srgb, var(--gold) 35%, var(--border));
+    color: var(--gold);
+}
+
+/* محادثة موحّدة — فقاعات أوضح */
+.ua-box, .agent-box {
+    background:
+        radial-gradient(ellipse 80% 50% at 100% 0%, var(--gold-soft), transparent 55%),
+        var(--bg) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 18px !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 8px 24px var(--shadow) !important;
+}
+.ua-user .bbl, .agent-user .bbl {
+    box-shadow: 0 6px 18px var(--gold-soft) !important;
+}
+.ua-bot .bbl, .agent-bot .bbl {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+}
+.ua-badge, .agent-badge {
+    background: var(--gold-soft) !important;
+    border-color: color-mix(in srgb, var(--gold) 30%, var(--border)) !important;
+    color: var(--gold) !important;
+    font-weight: 700 !important;
+}
+
+/* أزرار ثانوية متناسقة */
+.stButton>button {
+    border-radius: 12px !important;
+}
+.stButton>button[kind="secondary"] {
+    background: var(--surface2) !important;
+}
+
+/* تحسين toggle */
+[data-testid="stWidgetLabel"] p {
+    font-weight: 600 !important;
+}
+
+/* فاصل بصري خفيف */
+.nsm-divider {
+    height: 1px;
+    margin: 1rem 0;
+    background: linear-gradient(90deg, transparent, var(--border), transparent);
+}
+
+@media (max-width: 768px) {
+    .main .block-container {
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
+    .nsm-hero-title { font-size: 1.25rem; }
+    .stTabs [data-baseweb="tab"] {
+        padding: 0.35rem 0.65rem !important;
+        font-size: 0.85rem !important;
+    }
+}
+
 </style>
 """
 
