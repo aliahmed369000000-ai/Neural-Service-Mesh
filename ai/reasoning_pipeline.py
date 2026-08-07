@@ -188,11 +188,18 @@ class ReasoningPipeline:
         transformer_weights_path: Optional[str] = "models/transformer_ckg_v1",
         use_deep_routing: bool = True,
         deep_routing_blend: float = 0.45,
+        use_moe: bool = True,
+        moe_blend: float = 0.25,
+        moe_train_on_query: bool = False,
     ):
         self.encoder = VectorEncoder()
         self.ckg = ckg if ckg is not None else CKGManager()
         self.use_deep_routing = bool(use_deep_routing)
         self.deep_routing_blend = float(max(0.0, min(1.0, deep_routing_blend)))
+        self.use_moe = bool(use_moe)
+        self.moe_blend = float(max(0.0, min(1.0, moe_blend)))
+        self.moe_train_on_query = bool(moe_train_on_query)
+        self._moe_bridge = None
         self._deep_router = None
         if self.use_deep_routing:
             try:
@@ -200,6 +207,13 @@ class ReasoningPipeline:
                 self._deep_router = get_default_deep_network()
             except Exception:
                 self._deep_router = None
+        if self.use_moe:
+            try:
+                from ai.moe_ckg_bridge import get_moe_bridge
+                self._moe_bridge = get_moe_bridge(blend=self.moe_blend, enabled=True)
+            except Exception as _moe_init_err:
+                logger.warning("MoE bridge init failed: %s", _moe_init_err)
+                self._moe_bridge = None
 
         if core is not None:
             self.core = core
@@ -663,6 +677,58 @@ class ReasoningPipeline:
 
         # 4: Decision
         ranked = self._decide(weights, matched, related, memory_hits, question=question)
+
+        # 4b: Hierarchical MoE — تعزيز ترتيب المفاهيم حسب مسار الخبراء
+        moe_info: Dict[str, Any] = {"moe_applied": False}
+        if getattr(self, "use_moe", False) and getattr(self, "_moe_bridge", None) is not None:
+            try:
+                from ai.moe_ckg_bridge import (
+                    moe_boost_pipeline_ranked,
+                    map_cluster_to_category,
+                )
+                if ranked:
+                    ranked, moe_info = moe_boost_pipeline_ranked(
+                        ranked,
+                        context_vector,
+                        question=question,
+                        blend=self.moe_blend,
+                    )
+                else:
+                    # لا مفاهيم بعد — نسجّل أوزان الفئات فقط للشفافية
+                    cw = self._moe_bridge.category_weights(context_vector, question)
+                    moe_info = {
+                        "moe_applied": bool(self._moe_bridge.available),
+                        "category_weights": cw,
+                        "note": "no_ranked_concepts",
+                    }
+                weights["_moe_routing"] = 1.0 if moe_info.get("moe_applied") else 0.0
+                if moe_info.get("category_weights"):
+                    top_cats = sorted(
+                        moe_info["category_weights"].items(),
+                        key=lambda kv: -kv[1],
+                    )[:3]
+                    for cat, w in top_cats:
+                        weights[f"_moe_cat_{cat}"] = round(float(w), 4)
+                # تدريب خفيف اختياري لراوتر المجموعات من clusters المطابقة
+                if self.moe_train_on_query and matched:
+                    prefs = []
+                    for m in matched:
+                        cat = map_cluster_to_category(m.cluster or "")
+                        if cat not in prefs:
+                            prefs.append(cat)
+                    if prefs:
+                        try:
+                            tr = self._moe_bridge.train_on_context(
+                                context_vector, prefs, steps=2
+                            )
+                            moe_info["moe_train"] = tr
+                        except Exception as _mt_err:
+                            logger.debug("moe train_on_query: %s", _mt_err)
+            except Exception as _moe_err:
+                logger.warning("MoE rerank skipped: %s", _moe_err)
+                weights["_moe_routing"] = 0.0
+        else:
+            weights["_moe_routing"] = 0.0
 
         # 5: Answer
         answer_text = self._build_answer_text(question, ranked, weights)
