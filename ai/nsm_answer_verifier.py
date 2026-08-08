@@ -165,6 +165,52 @@ def _build_retrieval_context(qa_result: Dict[str, Any]) -> List[str]:
     return context
 
 
+
+def _normalize_ar_tokens(text: str) -> set:
+    """تطبيع خفيف + تقسيم إلى كلمات عربية/لاتينية ذات معنى (≥2 أحرف)."""
+    import re
+    if not text:
+        return set()
+    # إزالة التشكيل والأرقام الزائدة الشائعة
+    text = re.sub(r"[\u064B-\u065F\u0670\u0640]", "", text)
+    text = re.sub(r"[^\u0600-\u06FFa-zA-Z0-9\s]", " ", text)
+    tokens = {t.lower() for t in text.split() if len(t) >= 2}
+    # كلمات وظيفية شائعة لا تفيد في قياس التأسيس
+    stop = {
+        "من", "في", "على", "إلى", "عن", "أن", "إن", "ما", "لا", "لم", "لن",
+        "هذا", "هذه", "ذلك", "تلك", "التي", "الذي", "هو", "هي", "هم", "ثم",
+        "أو", "و", "ف", "ب", "ك", "ل", "ال", "قد", "كان", "يكون", "بين",
+        "the", "a", "an", "of", "to", "in", "on", "and", "or", "is", "are",
+    }
+    return {t for t in tokens if t not in stop}
+
+
+def _lexical_faithfulness_score(summary: str, retrieval_context: list) -> dict:
+    """مقياس تأسيس معجمي محلي بالكامل — يعمل بدون deepeval وبدون أي LLM.
+    مفيد في الوضع المغلق (NSM_OFFLINE_MODE) أو عند غياب مفاتيح النماذج المجانية.
+
+    score ≈ نسبة كلمات الإجابة التي تظهر أيضاً في السياق المسترجَع.
+    ليس بديلاً كاملاً عن FaithfulnessMetric (لا يفهم المعنى)، لكنه إشارة
+    عملية سريعة ومنعدمة التكلفة.
+    """
+    sum_toks = _normalize_ar_tokens(summary)
+    if not sum_toks:
+        return {"score": None, "overlap": 0, "summary_tokens": 0, "context_tokens": 0}
+    ctx_toks: set = set()
+    for c in retrieval_context:
+        ctx_toks |= _normalize_ar_tokens(c)
+    if not ctx_toks:
+        return {"score": 0.0, "overlap": 0, "summary_tokens": len(sum_toks), "context_tokens": 0}
+    overlap = sum_toks & ctx_toks
+    score = len(overlap) / max(len(sum_toks), 1)
+    return {
+        "score": round(float(score), 4),
+        "overlap": len(overlap),
+        "summary_tokens": len(sum_toks),
+        "context_tokens": len(ctx_toks),
+    }
+
+
 def verify_answer_faithfulness(
     question: str,
     qa_result: Dict[str, Any],
@@ -178,35 +224,19 @@ def verify_answer_faithfulness(
     يُرجع دائماً dict بنفس الشكل التالي، بلا رمي استثناء أبداً:
         {
             "available": bool,        # هل تم القياس فعلياً؟
-            "faithful":  bool | None, # None لو available=False
+            "faithful":  bool | None, # None لو لا يمكن الحكم
             "score":     float | None,
+            "method":    str | None,  # "deepeval" | "lexical" | None
             "reason":    str,
         }
+    عند غياب deepeval أو مفاتيح الحَكَم أو في NSM_OFFLINE_MODE يُستخدم
+    مقياس معجمي محلي (method="lexical") بدل الفشل الصامت.
     """
-    if not _deepeval_importable():
-        return {
-            "available": False, "faithful": None, "score": None,
-            "reason": (
-                "deepeval غير مثبَّت (اعتماد اختياري — انظر "
-                "requirements-verifier.txt). هذا التحقق اختياري بالكامل "
-                "ولا يؤثر على answer_question() نفسها."
-            ),
-        }
-    from ai.free_router import has_any_free_key
-    if not has_any_free_key():
-        return {
-            "available": False, "faithful": None, "score": None,
-            "reason": (
-                "لا يوجد أي مفتاح نموذج مجاني متاح (GROQ_API_KEY أو "
-                "GOOGLE_API_KEY أو CF_API_TOKEN+CF_ACCOUNT_ID) — الحَكَم "
-                "(judge LLM) يحتاج واحداً منها على الأقل، وكلها مجانية."
-            ),
-        }
-
     retrieval_context = _build_retrieval_context(qa_result)
     if not retrieval_context:
         return {
             "available": True, "faithful": None, "score": None,
+            "method": None,
             "reason": "لا يوجد سياق مسترجَع (لا آيات ولا مفاهيم أساسية) — لا معنى لفحص التأسيس على مصدر غير موجود أصلاً.",
         }
 
@@ -214,8 +244,54 @@ def verify_answer_faithfulness(
     if not summary:
         return {
             "available": True, "faithful": None, "score": None,
+            "method": None,
             "reason": "لا يوجد نص إجابة (summary) لفحصه.",
         }
+
+    def _lexical_report(extra_reason: str = "") -> Dict[str, Any]:
+        lex = _lexical_faithfulness_score(summary, retrieval_context)
+        score = lex.get("score")
+        faithful = bool(score is not None and score >= threshold) if score is not None else None
+        reason = (
+            f"مقياس معجمي محلي (بدون LLM): تداخل {lex.get('overlap', 0)}/"
+            f"{lex.get('summary_tokens', 0)} كلمة من الإجابة مع السياق. "
+            f"{extra_reason}"
+        ).strip()
+        return {
+            "available": True,
+            "faithful": faithful,
+            "score": score,
+            "method": "lexical",
+            "reason": reason,
+            "lexical_detail": lex,
+        }
+
+    # تفضيل DeepEval + حَكَم مجاني عند التوفّر؛ وإلا fallback معجمي
+    # (يعمل في الوضع المغلق وبدون أي مفاتيح API).
+    use_deepeval = _deepeval_importable()
+    has_key = False
+    if use_deepeval:
+        try:
+            from ai.free_router import has_any_free_key
+            has_key = bool(has_any_free_key())
+        except Exception:
+            has_key = False
+
+    # الوضع المغلق: لا نحاول استدعاء مزوّدين سحابيين أصلاً
+    try:
+        from ai.offline_mode import is_offline
+        if is_offline():
+            return _lexical_report("NSM_OFFLINE_MODE=1 — استُخدم المسار المعجمي.")
+    except Exception:
+        pass
+
+    if not use_deepeval or not has_key:
+        why = (
+            "deepeval غير مثبَّت (انظر requirements-verifier.txt)."
+            if not use_deepeval
+            else "لا يوجد مفتاح نموذج مجاني للحَكَم (GROQ/Gemini/Cloudflare)."
+        )
+        return _lexical_report(why)
 
     try:
         from deepeval.metrics import FaithfulnessMetric
@@ -236,11 +312,9 @@ def verify_answer_faithfulness(
             "available": True,
             "faithful": bool(score is not None and score >= threshold),
             "score": score,
+            "method": "deepeval",
             "reason": metric.reason or "",
         }
     except Exception as e:
-        logger.warning(f"[nsm_answer_verifier] فشل قياس FaithfulnessMetric: {e}")
-        return {
-            "available": False, "faithful": None, "score": None,
-            "reason": f"فشل تقني أثناء القياس: {e}",
-        }
+        logger.warning(f"[nsm_answer_verifier] فشل قياس FaithfulnessMetric: {e} — انتقال للمعجمي")
+        return _lexical_report(f"فشل DeepEval ({e})؛ استُخدم المسار المعجمي.")
