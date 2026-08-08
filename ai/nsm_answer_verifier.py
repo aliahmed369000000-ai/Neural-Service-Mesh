@@ -80,64 +80,176 @@ def _deepeval_importable() -> bool:
     return _DEEPEVAL_AVAILABLE
 
 
-class _FreeRouterJudge:
-    """يكسو ai.free_router.chat_free بواجهة deepeval.models.DeepEvalBaseLLM
-    — الحَكَم (judge LLM) المستخدَم لقياس FaithfulnessMetric هو موجّه
-    النماذج المجانية نفسه المستخدَم في بقية المشروع (Groq → Gemini →
-    Cloudflare)، بدل اعتماد DeepEval الافتراضي على OpenAI أو أي مزوّد
-    مدفوع. اسم النموذج الفعلي الذي نجح يُحدَّث بعد كل استدعاء (يختلف
-    حسب أي مزوّد استجاب أولاً)."""
+def _make_free_router_judge_class():
+    """يبني صنف الحَكَم مع وراثة DeepEvalBaseLLM إن توفّر deepeval."""
+    bases: tuple = ()
+    try:
+        from deepeval.models.base_model import DeepEvalBaseLLM as _Base
+        bases = (_Base,)
+    except Exception:
+        bases = ()
 
-    def __init__(self, model_name: str = "free-router") -> None:
-        self._model_name = model_name
+    class _FreeRouterJudge(*bases):  # type: ignore[misc]
+        """حَكَم FaithfulnessMetric عبر نماذج مجانية — يفضّل Gemini ثم Groq ثم
+        Cloudflare (جودة حكم أعلى على العربية)، مع واجهة DeepEvalBaseLLM عند
+        توفّر deepeval (DeepEval 4.x يتطلب الوراثة الصريحة)."""
 
-    def load_model(self):
-        return self
+        def __init__(self, model_name: str = "free-router-judge") -> None:
+            self._model_name = model_name
 
-    def _ask(self, prompt: str) -> str:
-        from ai.free_router import chat_free
-        text, model_used = chat_free(
-            [{"role": "user", "content": prompt}], temperature=0.0, max_tokens=1024,
-        )
-        self._model_name = model_used
-        return text
+        def load_model(self):
+            return self
 
-    def generate(self, prompt: str, schema: Optional[Any] = None) -> Any:
-        """يطابق عقد DeepEvalBaseLLM.generate: بلا schema يُعاد نص خام،
-        ومع schema (نموذج pydantic تستخدمه مقاييس DeepEval الداخلية مثل
-        FaithfulnessMetric لاستخراج truths/claims بصيغة منظّمة) يُعاد
-        كائن الـschema نفسه بعد تحليل رد الحَكَم كـJSON."""
-        if schema is None:
-            return self._ask(prompt)
-        return self._generate_structured(prompt, schema)
+        def get_model_name(self) -> str:
+            return self._model_name
 
-    async def a_generate(self, prompt: str, schema: Optional[Any] = None) -> Any:
-        # AnthropicAdvanced متزامن بالكامل (urllib.request) — لا نسخة
-        # async حقيقية متاحة حالياً، فنعيد استخدام المسار المتزامن.
-        return self.generate(prompt, schema)
+        def _ask(self, prompt: str) -> str:
+            """ترتيب الحَكَم: Gemini → Groq → Cloudflare (ثم chat_free كاحتياط)."""
+            import os
+            import json
+            import urllib.request
 
-    def _generate_structured(self, prompt: str, schema: Any) -> Any:
-        format_hint = (
-            "\n\nأجب بصيغة JSON صالحة فقط تطابق تماماً هذا المخطط، بلا أي "
-            f"نص أو شرح خارج الـJSON نفسه:\n{schema.model_json_schema()}"
-        )
-        raw = self._ask(prompt + format_hint)
-        for attempt_text in (raw, _extract_json_block(raw)):
-            if not attempt_text:
-                continue
+            errors: list = []
+
+            def _post(url: str, headers: dict, payload: dict, timeout: int = 60) -> dict:
+                data = json.dumps(payload).encode()
+                req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    return json.loads(resp.read().decode())
+
+            gkey = os.getenv("GOOGLE_API_KEY", "").strip()
+            if gkey:
+                try:
+                    url = (
+                        "https://generativelanguage.googleapis.com/v1beta/models/"
+                        f"gemini-2.5-flash:generateContent?key={gkey}"
+                    )
+                    data = _post(
+                        url,
+                        {"Content-Type": "application/json"},
+                        {
+                            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                            "generationConfig": {
+                                "maxOutputTokens": 1024,
+                                "temperature": 0.0,
+                            },
+                        },
+                    )
+                    text = data["candidates"][0]["content"]["parts"][0]["text"]
+                    if text and text.strip():
+                        self._model_name = "gemini:gemini-2.5-flash"
+                        return text.strip()
+                except Exception as exc:
+                    errors.append(f"gemini:{exc}")
+
+            gq = os.getenv("GROQ_API_KEY", "").strip()
+            if gq:
+                for model in ("llama-3.1-8b-instant", "llama-3.3-70b-versatile"):
+                    try:
+                        data = _post(
+                            "https://api.groq.com/openai/v1/chat/completions",
+                            {
+                                "Authorization": f"Bearer {gq}",
+                                "Content-Type": "application/json",
+                                "User-Agent": "NSM-Faithfulness-Judge/1.0",
+                            },
+                            {
+                                "model": model,
+                                "messages": [{"role": "user", "content": prompt}],
+                                "temperature": 0.0,
+                                "max_tokens": 1024,
+                            },
+                        )
+                        text = (
+                            (data.get("choices") or [{}])[0]
+                            .get("message", {})
+                            .get("content", "")
+                        )
+                        if text and text.strip():
+                            self._model_name = f"groq:{model}"
+                            return text.strip()
+                    except Exception as exc:
+                        errors.append(f"groq:{model}:{exc}")
+
+            token = os.getenv("CF_API_TOKEN", "").strip()
+            account = os.getenv("CF_ACCOUNT_ID", "").strip()
+            if token and account:
+                try:
+                    model = "@cf/meta/llama-3.1-8b-instruct"
+                    url = (
+                        f"https://api.cloudflare.com/client/v4/accounts/"
+                        f"{account}/ai/run/{model}"
+                    )
+                    data = _post(
+                        url,
+                        {
+                            "Authorization": f"Bearer {token}",
+                            "Content-Type": "application/json",
+                        },
+                        {
+                            "messages": [{"role": "user", "content": prompt}],
+                            "max_tokens": 1024,
+                        },
+                    )
+                    text = (data.get("result") or {}).get("response", "") or ""
+                    if text and text.strip():
+                        self._model_name = f"cloudflare:{model}"
+                        return text.strip()
+                except Exception as exc:
+                    errors.append(f"cloudflare:{exc}")
+
             try:
-                return schema.model_validate_json(attempt_text)
-            except Exception:
-                continue
-        # محاولة أخيرة: إعادة سؤال الحَكَم صراحة بإعادة تهيئة نفس الرد فقط
-        retry_raw = self._ask(
-            "أعد صياغة هذا كـJSON صالح فقط يطابق نفس المخطط أعلاه، بلا أي "
-            f"نص خارج الـJSON:\n{raw}"
-        )
-        return schema.model_validate_json(retry_raw)
+                from ai.free_router import chat_free
 
-    def get_model_name(self) -> str:
-        return self._model_name
+                text, model_used = chat_free(
+                    [{"role": "user", "content": prompt}],
+                    temperature=0.0,
+                    max_tokens=1024,
+                )
+                self._model_name = model_used
+                return text
+            except Exception as exc:
+                errors.append(f"chat_free:{exc}")
+
+            raise RuntimeError(
+                "تعذّر استدعاء أي حَكَم مجاني (Gemini/Groq/Cloudflare). "
+                + " | ".join(str(e)[:80] for e in errors[:3])
+            )
+
+        def generate(self, prompt: str, schema: Optional[Any] = None) -> Any:
+            if schema is None:
+                return self._ask(prompt)
+            return self._generate_structured(prompt, schema)
+
+        async def a_generate(self, prompt: str, schema: Optional[Any] = None) -> Any:
+            return self.generate(prompt, schema)
+
+        def _generate_structured(self, prompt: str, schema: Any) -> Any:
+            format_hint = (
+                "\n\nRespond with VALID JSON only matching this schema exactly. "
+                "No markdown fences, no commentary:\n"
+                f"{schema.model_json_schema()}"
+            )
+            raw = self._ask(prompt + format_hint)
+            for attempt_text in (raw, _extract_json_block(raw)):
+                if not attempt_text:
+                    continue
+                try:
+                    return schema.model_validate_json(attempt_text)
+                except Exception:
+                    continue
+            retry_raw = self._ask(
+                "Return ONLY valid JSON matching the same schema. "
+                f"Fix this output:\n{raw[:2000]}"
+            )
+            block = _extract_json_block(retry_raw) or retry_raw
+            return schema.model_validate_json(block)
+
+    return _FreeRouterJudge
+
+
+_FreeRouterJudge = _make_free_router_judge_class()
+
 
 
 def _extract_json_block(text: str) -> str:
@@ -167,45 +279,98 @@ def _build_retrieval_context(qa_result: Dict[str, Any]) -> List[str]:
 
 
 def _normalize_ar_tokens(text: str) -> set:
-    """تطبيع خفيف + تقسيم إلى كلمات عربية/لاتينية ذات معنى (≥2 أحرف)."""
+    """تطبيع عربي أقوى + تقسيم إلى رموز ذات معنى (≥2 أحرف).
+
+    - إزالة التشكيل والتطويل
+    - توحيد الألف (أإآٱ → ا) والياء (ى → ي) والتاء المربوطة (ة → ه)
+    - إزالة أداة التعريف «ال» من بداية الرمز لمطابقة ألطف
+    - استبعاد كلمات وظيفية شائعة
+    """
     import re
     if not text:
         return set()
-    # إزالة التشكيل والأرقام الزائدة الشائعة
     text = re.sub(r"[\u064B-\u065F\u0670\u0640]", "", text)
+    text = re.sub(r"[أإآٱ]", "ا", text)
+    text = text.replace("ى", "ي").replace("ة", "ه")
     text = re.sub(r"[^\u0600-\u06FFa-zA-Z0-9\s]", " ", text)
-    tokens = {t.lower() for t in text.split() if len(t) >= 2}
-    # كلمات وظيفية شائعة لا تفيد في قياس التأسيس
+    raw_tokens = [t.lower() for t in text.split() if len(t) >= 2]
     stop = {
-        "من", "في", "على", "إلى", "عن", "أن", "إن", "ما", "لا", "لم", "لن",
-        "هذا", "هذه", "ذلك", "تلك", "التي", "الذي", "هو", "هي", "هم", "ثم",
-        "أو", "و", "ف", "ب", "ك", "ل", "ال", "قد", "كان", "يكون", "بين",
-        "the", "a", "an", "of", "to", "in", "on", "and", "or", "is", "are",
+        "من", "في", "على", "إلى", "الى", "عن", "ان", "إن", "أن", "ما", "لا", "لم", "لن",
+        "هذا", "هذه", "ذلك", "تلك", "التي", "الذي", "الذين", "هو", "هي", "هم", "ثم",
+        "او", "أو", "و", "ف", "ب", "ك", "ل", "ال", "قد", "كان", "يكون", "بين", "مع",
+        "الى", "علي", "ايها", "أيها", "الذين", "لعلكم", "لقد", "كل", "بعض",
+        "the", "a", "an", "of", "to", "in", "on", "and", "or", "is", "are", "for",
     }
-    return {t for t in tokens if t not in stop}
+    out: set = set()
+    for t in raw_tokens:
+        if t in stop:
+            continue
+        out.add(t)
+        # نسخة بدون «ال» التعريف
+        if t.startswith("ال") and len(t) > 3:
+            bare = t[2:]
+            if bare not in stop and len(bare) >= 2:
+                out.add(bare)
+    return out
+
+
+# عتبة افتراضية ألطف للمسار المعجمي (لا يفهم المعنى؛ يحتاج مرونة أعلى)
+_LEXICAL_DEFAULT_THRESHOLD = 0.38
 
 
 def _lexical_faithfulness_score(summary: str, retrieval_context: list) -> dict:
-    """مقياس تأسيس معجمي محلي بالكامل — يعمل بدون deepeval وبدون أي LLM.
-    مفيد في الوضع المغلق (NSM_OFFLINE_MODE) أو عند غياب مفاتيح النماذج المجانية.
+    """مقياس تأسيس معجمي محلي بالكامل — بدون deepeval وبدون LLM.
 
-    score ≈ نسبة كلمات الإجابة التي تظهر أيضاً في السياق المسترجَع.
-    ليس بديلاً كاملاً عن FaithfulnessMetric (لا يفهم المعنى)، لكنه إشارة
-    عملية سريعة ومنعدمة التكلفة.
+    score = نسبة رموز الإجابة التي تظهر في السياق (بعد التطبيع العربي).
+    يُحسب أيضاً soft_score بمطابقة البادئة (≥4 أحرف) لتقليل الحساسية
+    للاختلافات الصرفية الخفيفة.
     """
     sum_toks = _normalize_ar_tokens(summary)
     if not sum_toks:
-        return {"score": None, "overlap": 0, "summary_tokens": 0, "context_tokens": 0}
+        return {
+            "score": None,
+            "soft_score": None,
+            "overlap": 0,
+            "summary_tokens": 0,
+            "context_tokens": 0,
+        }
     ctx_toks: set = set()
     for c in retrieval_context:
         ctx_toks |= _normalize_ar_tokens(c)
     if not ctx_toks:
-        return {"score": 0.0, "overlap": 0, "summary_tokens": len(sum_toks), "context_tokens": 0}
-    overlap = sum_toks & ctx_toks
-    score = len(overlap) / max(len(sum_toks), 1)
+        return {
+            "score": 0.0,
+            "soft_score": 0.0,
+            "overlap": 0,
+            "summary_tokens": len(sum_toks),
+            "context_tokens": 0,
+        }
+
+    hard = sum_toks & ctx_toks
+    hard_score = len(hard) / max(len(sum_toks), 1)
+
+    soft_hits = 0
+    for t in sum_toks:
+        if t in ctx_toks:
+            soft_hits += 1
+            continue
+        if len(t) < 4:
+            continue
+        if any(
+            (c.startswith(t) or t.startswith(c)) and abs(len(c) - len(t)) <= 3
+            for c in ctx_toks
+            if len(c) >= 4
+        ):
+            soft_hits += 1
+    soft_score = soft_hits / max(len(sum_toks), 1)
+    # المزج: 70% تطابق صارم + 30% ليّن
+    blended = 0.7 * hard_score + 0.3 * soft_score
+
     return {
-        "score": round(float(score), 4),
-        "overlap": len(overlap),
+        "score": round(float(blended), 4),
+        "soft_score": round(float(soft_score), 4),
+        "hard_score": round(float(hard_score), 4),
+        "overlap": len(hard),
         "summary_tokens": len(sum_toks),
         "context_tokens": len(ctx_toks),
     }
@@ -214,7 +379,7 @@ def _lexical_faithfulness_score(summary: str, retrieval_context: list) -> dict:
 def verify_answer_faithfulness(
     question: str,
     qa_result: Dict[str, Any],
-    threshold: float = 0.7,
+    threshold: float = 0.5,
 ) -> Dict[str, Any]:
     """
     يتحقق أن qa_result["summary"] مؤسَّس فعلاً على qa_result["verses"] +
@@ -251,10 +416,18 @@ def verify_answer_faithfulness(
     def _lexical_report(extra_reason: str = "") -> Dict[str, Any]:
         lex = _lexical_faithfulness_score(summary, retrieval_context)
         score = lex.get("score")
-        faithful = bool(score is not None and score >= threshold) if score is not None else None
+        # عتبة ألطف للمسار المعجمي ما لم يمرّر المستدعي عتبة أقل صراحةً
+        lex_threshold = min(float(threshold), _LEXICAL_DEFAULT_THRESHOLD)
+        faithful = (
+            bool(score is not None and score >= lex_threshold)
+            if score is not None
+            else None
+        )
         reason = (
             f"مقياس معجمي محلي (بدون LLM): تداخل {lex.get('overlap', 0)}/"
-            f"{lex.get('summary_tokens', 0)} كلمة من الإجابة مع السياق. "
+            f"{lex.get('summary_tokens', 0)} كلمة "
+            f"(صارم={lex.get('hard_score')}, ليّن={lex.get('soft_score')}, "
+            f"عتبة={lex_threshold}). "
             f"{extra_reason}"
         ).strip()
         return {
@@ -262,6 +435,7 @@ def verify_answer_faithfulness(
             "faithful": faithful,
             "score": score,
             "method": "lexical",
+            "threshold_used": lex_threshold,
             "reason": reason,
             "lexical_detail": lex,
         }
