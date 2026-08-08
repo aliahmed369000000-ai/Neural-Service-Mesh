@@ -107,6 +107,20 @@ except Exception:
 # نفس عتبة تصنيف "ضعيف" في response_quality.py (overall < 0.40).
 _LOW_QUALITY_THRESHOLD = 0.40
 
+# 🆕 ذاكرة دائمة/دلالية لكل وكيل — نفس محرك ConversationMemory المُستخدَم
+# أصلاً في تبويب "المحادثة الذكية" (nsm_memory.py)، بنفس سلسلة التراجع:
+# Qdrant Cloud (إن توفرت المفاتيح) ← TF-IDF محلي ← بحث كلمات مفتاحية.
+# كل فئة وكيل تحصل على session_id ثابت خاص بها في نفس قاعدة SQLite
+# المشتركة (memory/nsm_context.db)، فتصبح ذاكرتها دائمة عبر إعادة التشغيل
+# وقابلة للاسترجاع الدلالي عبر جلسات سابقة، بدل الاعتماد فقط على قائمة
+# self.history بالذاكرة المؤقتة التي كانت تُفقد عند انتهاء الجلسة.
+try:
+    from nsm_memory import ConversationMemory
+    _AGENT_MEMORY_OK = True
+except Exception:
+    ConversationMemory = None
+    _AGENT_MEMORY_OK = False
+
 
 # ══════════════════════════════════════════════════════════════════
 # تعريف الفئات
@@ -498,6 +512,18 @@ class CategoryAgentChat:
 
         self.history: List[Tuple[str, str]] = []
         self._last_provider = ""
+
+        # 🆕 ذاكرة دائمة/دلالية خاصة بهذا الوكيل — session_id ثابت لكل فئة
+        # (agent_<key>) يعزلها عن باقي الفئات وعن جلسة "المحادثة الذكية"
+        # الرئيسية، مع مشاركة نفس قاعدة SQLite ونفس مرآة Qdrant الاختيارية.
+        # فشل التهيئة (نادر) يُبتلَع بأمان — الوكيل يستمر بالعمل بذاكرة
+        # الجلسة المؤقتة self.history فقط كما كان قبل هذه الميزة.
+        self.memory: Optional["ConversationMemory"] = None
+        if _AGENT_MEMORY_OK:
+            try:
+                self.memory = ConversationMemory(session_id=f"agent_{category_key}")
+            except Exception:
+                self.memory = None
         # 🆕 آخر تقييم جودة (نسبة% وتصنيف)، وهل أُعيد توليد الرد الأخير
         # بسبب جودة ضعيفة — تُقرَأ من الواجهة (Unified/Hub/Orchestrator)
         # لعرض شارة جودة موحّدة بدل إعادة حساب score_response في كل مكان.
@@ -585,6 +611,17 @@ class CategoryAgentChat:
                 sp = sp + "\n\nنتائج بحث ويب ذات صلة بسؤال المستخدم:\n" + web_results
                 searched = True
 
+        # 🆕 حقن سياق الذاكرة الدائمة/الدلالية لهذا الوكيل (حقائق محفوظة +
+        # محادثات سابقة ذات صلة من جلسات قديمة، عبر Qdrant إن توفرت وإلا
+        # TF-IDF محلي). أي فشل يُبتلَع بأمان ولا يمنع الرد الأصلي.
+        if self.memory is not None:
+            try:
+                mem_ctx = self.memory.build_memory_context(user_input)
+                if mem_ctx:
+                    sp = sp + "\n\nسياق من ذاكرة هذا الوكيل:\n" + mem_ctx
+            except Exception:
+                pass
+
         # 🆕 تعزيز السؤال بأمثلة مشابهة (few-shot) ومفاهيم مرتبطة من CKG عبر
         # ChainOfThoughtBuilder (خطوة "تفكير" شفافة قبل الإرسال للنموذج).
         # أي فشل (ذاكرة فارغة، CKG غير محمَّل...) يُبتلَع ويُستخدَم السؤال
@@ -638,6 +675,13 @@ class CategoryAgentChat:
         )
         self._last_provider = f"🌐 {provider_label}" if searched else provider_label
         self.history.append((user_input, result.text))
+        # 🆕 حفظ الدور في الذاكرة الدائمة/الدلالية لهذا الوكيل (SQLite +
+        # مرآة Qdrant اختيارية) — best-effort، لا يوقف المحادثة عند الفشل.
+        if self.memory is not None:
+            try:
+                self.memory.add(user_input, result.text)
+            except Exception:
+                pass
         self._log_audit(user_input, result.text, source, provider_label, searched)
         return result.text
 
