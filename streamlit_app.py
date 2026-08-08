@@ -21,6 +21,7 @@ from ui_pages.training import render_training, render_nsm_routing
 from ui_pages.aiaas_console import render_aiaas_console
 from ui_pages.economic_engine import render_economic_engine, render_aiaas_economy_hub
 from ui_pages.training_ops_dashboard import render_training_ops_dashboard
+from ui_pages.moe_agent_studio import render_moe_agent_studio
 from ui_pages.memory import render_memory
 from ui_pages.health import render_health
 from ui_pages.advanced_api import render_advanced_api
@@ -434,6 +435,7 @@ def main():
         ("🎬 Higgsfield", render_higgsfield),
         ("📡 الوكيل الاجتماعي", render_social_agent),
         ("🎓 التدريب", render_training),
+        ("🧩 MoE والوكيل", render_moe_agent_studio),
         ("☁️ AIaaS والاقتصاد", render_aiaas_economy_hub),
         ("📡 عمليات التدريب", render_training_ops_dashboard),
     ]

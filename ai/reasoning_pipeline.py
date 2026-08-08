@@ -131,6 +131,7 @@ class PipelineResult:
     quality: Optional[Dict[str, float]] = None
     net_architecture: Optional[str] = None   # مثال: "784→784→5→32→4" (يتحدث مع النمو)
     grew: bool = False                        # True إذا نمت الشبكة في هذه الخطوة
+    moe_routing: Optional[Dict[str, Any]] = None  # تصنيف MoE للعرض في الواجهة
 
     def to_dict(self) -> dict:
         return {
@@ -149,6 +150,7 @@ class PipelineResult:
             "quality": self.quality,
             "net_architecture": self.net_architecture,
             "grew": self.grew,
+            "moe_routing": self.moe_routing,
         }
 
 
@@ -730,8 +732,49 @@ class ReasoningPipeline:
         else:
             weights["_moe_routing"] = 0.0
 
+        # تلخيص توجيه MoE للواجهة
+        moe_summary: Optional[Dict[str, Any]] = None
+        if moe_info.get("moe_applied") and moe_info.get("category_weights"):
+            ranked_cats = sorted(
+                moe_info["category_weights"].items(), key=lambda kv: -kv[1]
+            )
+            top_cat, top_w = ranked_cats[0]
+            second_w = ranked_cats[1][1] if len(ranked_cats) > 1 else 0.0
+            conf = float(min(1.0, top_w + 0.5 * (top_w - second_w)))
+            experts: List[str] = []
+            try:
+                if self._moe_bridge and self._moe_bridge.moe is not None:
+                    g = self._moe_bridge.moe.groups.get(top_cat)
+                    if g is not None:
+                        experts = list(g._id_order)[:4]
+            except Exception:
+                experts = []
+            moe_summary = {
+                "top": top_cat,
+                "confidence": round(conf, 4),
+                "weight": round(float(top_w), 4),
+                "alternatives": [
+                    {"category": c, "weight": round(float(w), 4)}
+                    for c, w in ranked_cats[1:3]
+                ],
+                "experts": experts,
+            }
+            moe_info["summary"] = moe_summary
+
         # 5: Answer
         answer_text = self._build_answer_text(question, ranked, weights)
+        if moe_summary:
+            alts = ", ".join(
+                f"{a['category']} ({a['weight']})" for a in moe_summary.get("alternatives") or []
+            )
+            exp = ", ".join(moe_summary.get("experts") or []) or "—"
+            banner = (
+                f"🧩 **توجيه MoE:** `{moe_summary['top']}` "
+                f"(ثقة {moe_summary['confidence']:.0%}) · خبراء: {exp}"
+            )
+            if alts:
+                banner += f" · بدائل: {alts}"
+            answer_text = banner + chr(10)*2 + answer_text
 
         # ── Experience Learning: بناء وتخزين Episode (Requirements #1,#2,#4,#5) ──
         episode_id: Optional[str] = None
@@ -809,6 +852,7 @@ class ReasoningPipeline:
             quality=quality,
             net_architecture=self.core.net.architecture_str(),
             grew=grew,
+            moe_routing=moe_summary or moe_info,
         )
 
     def submit_feedback(
