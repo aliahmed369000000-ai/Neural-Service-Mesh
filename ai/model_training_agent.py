@@ -999,6 +999,25 @@ def training_dashboard() -> str:
     lines.append(f"- PyTorch: {'✅' if _TORCH_OK else '❌'}")
     lines.append("")
 
+    # آخر مهام التدريب الموحّدة
+    lines.append("### 📜 آخر مهام التدريب")
+    try:
+        runs = _read_training_runs(8)
+        if not runs:
+            lines.append("- لا سجل بعد. استخدم: `مهمة تدريب data/samples/classification_demo.csv الهدف=label`")
+        else:
+            for r in reversed(runs[-5:]):
+                st = r.get("status", "?")
+                plan = r.get("plan") or {}
+                lines.append(
+                    f"- `{r.get('id','?')}` · **{st}** · {plan.get('path') or r.get('path')} "
+                    f"({plan.get('task','?')}/{plan.get('engine','?')})"
+                )
+        lines.append("- أوامر: `سجل مهام التدريب` · `مهمة تدريب <csv> الهدف=label` · أضف `نفّذ` للتشغيل")
+    except Exception as e:
+        lines.append(f"- تعذّر قراءة السجل: {e}")
+    lines.append("")
+
     # CKG
     lines.append("### 🧬 حالة CKG / ArabicTransformer")
     try:
@@ -1337,6 +1356,258 @@ def _text_to_bow(texts: List[str], vocab_size: int = 512) -> np.ndarray:
     return mat
 
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 3b) دورة تدريب موحّدة — معاينة / تنفيذ / سجل مهام
+# ═══════════════════════════════════════════════════════════════════════════
+
+TRAINING_RUNS_LOG = ARTIFACTS / "training_runs.jsonl"
+_ALLOWED_DATA_ROOTS = (
+    ROOT / "data",
+    ROOT / "artifacts",
+    ROOT / "knowledge_sources",
+    ARTIFACTS,
+)
+
+
+def _safe_resolve_data_path(path_str: str) -> Path:
+    """يحل المسار ويرفض أي ملف خارج مجلدات المشروع المسموحة."""
+    raw = (path_str or "").strip().strip("`\"'")
+    if not raw:
+        raise ValueError("مسار فارغ")
+    if ".." in Path(raw).parts:
+        raise PermissionError("مسارات تحتوي .. غير مسموحة")
+    candidates = []
+    p = Path(raw)
+    if p.is_file():
+        candidates.append(p.resolve())
+    candidates.append((ROOT / raw).resolve())
+    # بحث بالاسم تحت data/
+    name = Path(raw).name
+    for root in _ALLOWED_DATA_ROOTS:
+        if root.is_dir():
+            for hit in root.rglob(name):
+                if hit.is_file():
+                    candidates.append(hit.resolve())
+                    break
+    allowed = [r.resolve() for r in _ALLOWED_DATA_ROOTS if r.exists()]
+    for c in candidates:
+        try:
+            if not c.is_file():
+                continue
+            ok = any(str(c).startswith(str(a) + sep) or c == a for a in allowed for sep in ("/",))
+            # أيضاً أي مسار تحت ROOT
+            if str(c).startswith(str(ROOT.resolve()) + "/"):
+                # رفض المسارات الحساسة
+                rel = c.relative_to(ROOT.resolve())
+                if rel.parts and rel.parts[0] in {".git", ".env", "secrets"}:
+                    raise PermissionError(f"مسار محظور: {rel}")
+                return c
+        except PermissionError:
+            raise
+        except Exception:
+            continue
+    raise FileNotFoundError(f"لم يُعثر على ملف آمن داخل المشروع: {path_str}")
+
+
+def _append_training_run(row: dict) -> None:
+    ARTIFACTS.mkdir(parents=True, exist_ok=True)
+    with open(TRAINING_RUNS_LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def _read_training_runs(limit: int = 30) -> List[dict]:
+    if not TRAINING_RUNS_LOG.is_file():
+        return []
+    rows = []
+    with open(TRAINING_RUNS_LOG, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except Exception:
+                continue
+    return rows[-limit:]
+
+
+def inspect_training_data(path_str: str, target_col: Optional[str] = None) -> dict:
+    """فحص البيانات والهدف ونوع المهمة + اختيار محرك مقترح."""
+    path = _safe_resolve_data_path(path_str)
+    header, data = _load_csv_table(path)
+    bundle = _infer_target_and_matrix(header, data, target_col=target_col)
+    task = bundle["task"]
+    n_samples = int(bundle["n_samples"])
+    if bundle["feature_mode"] == "text":
+        n_features = 512  # BoW لاحقاً
+    else:
+        n_features = int(bundle["X"].shape[1]) if bundle["X"] is not None else 0
+    n_classes = None
+    if task == "classification":
+        n_classes = int(len(set(bundle["y"].tolist()))) if hasattr(bundle["y"], "tolist") else None
+    # اختيار محرك تلقائي
+    if bundle["feature_mode"] == "text":
+        engine = "torch" if _TORCH_OK else "sklearn"
+    elif n_samples < 5000 and n_features < 200 and _SKLEARN_OK:
+        engine = "sklearn"
+    elif _TORCH_OK:
+        engine = "torch"
+    elif _SKLEARN_OK:
+        engine = "sklearn"
+    else:
+        engine = "none"
+    return {
+        "path": str(path.relative_to(ROOT) if path.is_relative_to(ROOT) else path),
+        "abs_path": str(path),
+        "target": bundle["target_name"],
+        "task": task,
+        "feature_mode": bundle["feature_mode"],
+        "feature_names": bundle["feature_names"],
+        "n_samples": n_samples,
+        "n_features": n_features,
+        "n_classes": n_classes,
+        "engine": engine,
+        "sklearn_ok": _SKLEARN_OK,
+        "torch_ok": _TORCH_OK,
+        "bundle": bundle,
+    }
+
+
+def format_training_plan(info: dict, execute: bool = False) -> str:
+    lines = [
+        "## 📋 خطة مهمة تدريب" + (" (تنفيذ)" if execute else " (معاينة — Dry-run)"),
+        "",
+        f"- الملف: `{info['path']}`",
+        f"- الهدف: `{info['target']}`",
+        f"- نوع المهمة: **{info['task']}**",
+        f"- العينات: **{info['n_samples']}** · الميزات: **{info['n_features']}**",
+    ]
+    if info.get("n_classes") is not None:
+        lines.append(f"- عدد الفئات: **{info['n_classes']}**")
+    lines.append(f"- نمط الميزات: **{info['feature_mode']}** → {info['feature_names'][:8]}")
+    lines.append(f"- المحرك المقترح: **{info['engine']}** (sklearn={'✅' if info['sklearn_ok'] else '❌'} · torch={'✅' if info['torch_ok'] else '❌'})")
+    lines.append("")
+    if not execute:
+        lines.append("> هذه **معاينة آمنة**. لتشغيل التدريب فعلياً أضف: `نفّذ` أو `execute`.")
+        lines.append(">")
+        lines.append(f"> مثال: `مهمة تدريب {info['path']} الهدف={info['target']} نفّذ`")
+    return "\n".join(lines)
+
+
+def run_training_mission(
+    path_str: str,
+    target_col: Optional[str] = None,
+    epochs: int = 30,
+    prefer: str = "auto",
+    execute: bool = False,
+) -> str:
+    """
+    دورة موحّدة: فحص → خطة → (اختياري) تنفيذ مع سجل حالات
+    planned | running | completed | failed | rejected
+    """
+    run_id = f"run_{int(time.time())}"
+    base = {
+        "id": run_id,
+        "ts": time.time(),
+        "path": path_str,
+        "target": target_col,
+        "execute": bool(execute),
+    }
+    try:
+        info = inspect_training_data(path_str, target_col=target_col)
+    except PermissionError as e:
+        base.update({"status": "rejected", "error": str(e)})
+        _append_training_run(base)
+        return f"## 🚫 مرفوض\n\n{e}"
+    except FileNotFoundError as e:
+        base.update({"status": "rejected", "error": str(e)})
+        _append_training_run(base)
+        return f"## 🚫 مرفوض\n\n{e}"
+    except Exception as e:
+        base.update({"status": "failed", "error": f"{type(e).__name__}: {e}"})
+        _append_training_run(base)
+        return f"## ❌ فشل الفحص\n\n{type(e).__name__}: {e}"
+
+    base["status"] = "planned"
+    base["plan"] = {
+        "task": info["task"],
+        "n_samples": info["n_samples"],
+        "n_features": info["n_features"],
+        "n_classes": info.get("n_classes"),
+        "engine": info["engine"],
+        "path": info["path"],
+        "target": info["target"],
+    }
+    _append_training_run(base)
+
+    plan_txt = format_training_plan(info, execute=execute)
+    if not execute:
+        return plan_txt
+
+    # تنفيذ فعلي
+    running = dict(base)
+    running["status"] = "running"
+    running["ts"] = time.time()
+    _append_training_run(running)
+
+    eng = prefer if prefer not in ("auto", "") else info["engine"]
+    if eng == "none":
+        fail = dict(base)
+        fail.update({"status": "failed", "error": "لا يتوفر sklearn ولا torch"})
+        _append_training_run(fail)
+        return plan_txt + "\n\n❌ لا يتوفر محرك تدريب."
+
+    try:
+        result = train_from_csv(
+            info["abs_path"],
+            target_col=info["target"],
+            epochs=epochs,
+            prefer=eng if eng in ("sklearn", "torch", "text", "cnn") else "auto",
+        )
+        done = dict(base)
+        done.update({
+            "status": "completed",
+            "ts": time.time(),
+            "engine": eng,
+            "result_preview": (result or "")[:500],
+        })
+        _append_training_run(done)
+        return plan_txt + "\n\n---\n" + result
+    except Exception as e:
+        fail = dict(base)
+        fail.update({"status": "failed", "ts": time.time(), "error": f"{type(e).__name__}: {e}"})
+        _append_training_run(fail)
+        return plan_txt + f"\n\n## ❌ فشل التنفيذ\n\n{type(e).__name__}: {e}"
+
+
+def list_training_runs(limit: int = 15) -> str:
+    rows = _read_training_runs(limit=max(5, min(int(limit), 50)))
+    lines = ["## 📜 سجل مهام التدريب", ""]
+    if not rows:
+        lines.append("لا توجد مهام مسجّلة بعد.")
+        lines.append("جرّب: `مهمة تدريب data/samples/classification_demo.csv الهدف=label`")
+        return "\n".join(lines)
+    for r in reversed(rows):
+        st = r.get("status", "?")
+        icon = {
+            "planned": "📋",
+            "running": "⏳",
+            "completed": "✅",
+            "failed": "❌",
+            "rejected": "🚫",
+        }.get(st, "•")
+        plan = r.get("plan") or {}
+        lines.append(
+            f"{icon} `{r.get('id')}` · **{st}** · "
+            f"{plan.get('path') or r.get('path')} · "
+            f"task={plan.get('task', '?')} · engine={plan.get('engine', r.get('engine', '?'))}"
+        )
+        if r.get("error"):
+            lines.append(f"   ↳ {r['error'][:120]}")
+    return "\n".join(lines)
+
+
 def train_from_csv(
     path_str: str,
     target_col: Optional[str] = None,
@@ -1344,17 +1615,14 @@ def train_from_csv(
     prefer: str = "auto",
 ) -> str:
     """تدريب على ملف CSV من القرص (مسار نسبي أو مطلق داخل المشروع)."""
-    raw = path_str.strip().strip("`\"'")
-    path = Path(raw)
-    if not path.is_file():
-        path = ROOT / raw
-    if not path.is_file():
-        # بحث بالاسم
-        matches = [p for p in _find_csv_files(80) if p.name == Path(raw).name]
-        if matches:
-            path = matches[0]
-    if not path.is_file():
-        return f"❌ لم يُعثر على الملف: `{path_str}`\nاستخدم **قائمة csv** لعرض المتاح."
+    try:
+        path = _safe_resolve_data_path(path_str)
+    except PermissionError as e:
+        return f"🚫 مرفوض: {e}"
+    except FileNotFoundError as e:
+        return f"❌ {e}\nاستخدم **قائمة csv** لعرض المتاح."
+    except Exception as e:
+        return f"❌ مسار غير صالح: {type(e).__name__}: {e}"
 
     try:
         header, data = _load_csv_table(path)
@@ -2260,6 +2528,40 @@ def handle_training_command(user_input: str) -> Optional[str]:
             epochs = int(m.group(1))
         task = "regression" if re.search(r"انحدار|regress", text, re.I) else "classification"
         return train_torch_mlp(task=task, epochs=epochs)
+
+    # سجل مهام التدريب
+    if re.search(
+        r"(سجل\s*مهام\s*التدريب|سجل\s*التدريب|training\s*runs|سجل\s*المهام)",
+        text,
+        re.I,
+    ):
+        return list_training_runs()
+
+    # مهمة تدريب موحّدة (معاينة افتراضياً)
+    m_mission = re.search(
+        r"(?:مهمة\s*تدريب|training\s*mission|خطة\s*تدريب\s*على)\s+((?:[\w./\\-]+/)*[\w.-]+\.csv)",
+        text,
+        re.I,
+    )
+    if m_mission:
+        path_csv = m_mission.group(1)
+        target = None
+        mt = re.search(r"(?:هدف|target|label)\s*[=:]\s*([\w\u0600-\u06FF]+)", text, re.I)
+        if mt:
+            target = mt.group(1)
+        epochs = 30
+        me = re.search(r"(\d+)\s*(حقب|epochs?)", text, re.I)
+        if me:
+            epochs = int(me.group(1))
+        prefer = "auto"
+        if re.search(r"sklearn|غاب|forest", text, re.I):
+            prefer = "sklearn"
+        elif re.search(r"torch|pytorch|mlp", text, re.I):
+            prefer = "torch"
+        execute = bool(re.search(r"(نف[ّ]?ذ|شغ[ّ]?ل|execute|run\s*now|ابدأ\s*التنفيذ)", text, re.I))
+        return run_training_mission(
+            path_csv, target_col=target, epochs=epochs, prefer=prefer, execute=execute
+        )
 
     # قائمة CSV
     if re.search(r"(قائمة|عرض|list).{0,12}(csv|بيانات)|ملفات\s*csv|csv\s*files", text, re.I):
