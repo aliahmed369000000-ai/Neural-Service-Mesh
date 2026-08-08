@@ -24,6 +24,27 @@ def render_health():
 
     checks = []
 
+    # ── 0. وضع النشر المغلق (offline)
+    try:
+        from ai.offline_mode import offline_status, disabled_online_features
+        _os = offline_status()
+        if _os.get("offline_mode"):
+            _ok = bool(_os.get("ollama_reachable"))
+            checks.append((
+                "✅" if _ok else "⚠️",
+                "وضع النشر المغلق",
+                _os.get("message") or "نشط",
+                _ok,
+            ))
+            with st.expander("🔒 تفاصيل الوضع المغلق"):
+                st.caption(_os.get("message", ""))
+                st.json({k: v for k, v in _os.items() if k != "message"})
+                st.caption("ميزات معطّلة: " + "، ".join(disabled_online_features()))
+        else:
+            checks.append(("ℹ️", "وضع النشر المغلق", "غير مفعّل (وضع متصل)", True))
+    except Exception as _off_err:
+        checks.append(("⚠️", "وضع النشر المغلق", f"تعذّر الفحص: {_off_err}", False))
+
     # ── 1. الأوزان محفوظة؟
     weights_path = CHECKPOINTS_DIR / "neural_weights.npy"
     if weights_path.exists():
