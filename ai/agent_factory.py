@@ -126,6 +126,43 @@ AGENT_CATALOGUE: Dict[str, dict] = {
         "tags": ["coding", "engineering", "automation"],
         "engine": "NSMAgent",   # 🆕 يميّز هذا الدور كدور منفَّذ فعلياً وليس بيانات وصفية فقط
     },
+
+    "TrendScoutAgent": {
+        "description": "Social trend scout — RSS/rising tags for content planning",
+        "capabilities": ["trends", "hashtags", "social_listen"],
+        "input_schema": {"limit": "int"},
+        "output_schema": {"trends": "list", "tags": "list"},
+        "tags": ["social", "trends"],
+        "engine": "NSMAgent",
+        "role_prompt": (
+            "أنت TrendScoutAgent: رصد اتجاهات المحتوى عبر مصادر RSS عامة، "
+            "استخرج كلمات مفتاحية صاعدة، واقترح زوايا منشورات آمنة ثقافياً."
+        ),
+    },
+    "SocialContentAgent": {
+        "description": "Platform-native psychological content writer",
+        "capabilities": ["copywriting", "platform_voice", "social"],
+        "input_schema": {"topic": "str", "platforms": "list"},
+        "output_schema": {"posts": "dict"},
+        "tags": ["social", "content"],
+        "engine": "NSMAgent",
+        "role_prompt": (
+            "أنت SocialContentAgent: اكتب نصوصاً عربية تناسب كل منصة "
+            "(LinkedIn رصين، X/Threads قصير، TikTok خطّاف)."
+        ),
+    },
+    "SocialCrisisAgent": {
+        "description": "Pre-publish safety and freeze control",
+        "capabilities": ["moderation", "crisis", "guardrail"],
+        "input_schema": {"text": "str"},
+        "output_schema": {"ok": "bool", "flags": "list"},
+        "tags": ["social", "safety"],
+        "engine": "NSMAgent",
+        "role_prompt": (
+            "أنت SocialCrisisAgent: افحص المنشورات قبل النشر بحثاً عن "
+            "مخاطر سياسية/دينية/عدائية؛ اقترح الحظر أو التجميد عند اللزوم."
+        ),
+    },
 }
 
 

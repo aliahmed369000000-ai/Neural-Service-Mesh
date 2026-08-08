@@ -109,6 +109,188 @@ except Exception:
     _KAGGLE_OK = False
 
 try:
+    from ai.remote_training_orchestrator import handle_orchestrator_command as _orch_handle
+    _ORCH_OK = True
+except Exception:
+    _orch_handle = None
+    _ORCH_OK = False
+
+try:
+    from ai.ai_architect import handle_architect_command as _architect_handle
+    _ARCHITECT_OK = True
+except Exception:
+    _architect_handle = None
+    _ARCHITECT_OK = False
+
+try:
+    from ai.scientist_manager import handle_scientist_command as _scientist_handle
+    _SCIENTIST_OK = True
+except Exception:
+    _scientist_handle = None
+    _SCIENTIST_OK = False
+
+try:
+    from ai.meta_ai_system import handle_meta_command as _meta_handle
+    _META_OK = True
+except Exception:
+    _meta_handle = None
+    _META_OK = False
+
+try:
+    from ai.super_ai_orchestrator import handle_super_command as _super_handle
+    _SUPER_OK = True
+except Exception:
+    _super_handle = None
+    _SUPER_OK = False
+
+try:
+    from ai.commercial_economy import handle_economic_command as _economic_handle
+    _ECONOMIC_OK = True
+except Exception:
+    _economic_handle = None
+    _ECONOMIC_OK = False
+
+try:
+    from ai.production_activation import handle_production_command as _prod_handle
+    _PROD_OK = True
+except Exception:
+    _prod_handle = None
+    _PROD_OK = False
+
+try:
+    from ai.civilization_layer import handle_civilization_command as _civ_handle
+    _CIV_OK = True
+except Exception:
+    _civ_handle = None
+    _CIV_OK = False
+
+try:
+    from ai.sovereignty_loop import handle_sovereignty_command as _sov_handle
+    _SOV_OK = True
+except Exception:
+    _sov_handle = None
+    _SOV_OK = False
+
+try:
+    from ai.social_swarm import handle_social_swarm_command as _social_swarm_handle
+    _SOCIAL_SWARM_OK = True
+except Exception:
+    _social_swarm_handle = None
+    _SOCIAL_SWARM_OK = False
+
+try:
+    from ai.active_retrain_loop import handle_active_retrain_command as _retrain_handle
+    _RETRAIN_OK = True
+except Exception:
+    _retrain_handle = None
+    _RETRAIN_OK = False
+
+try:
+    from world_model.predictive_sim import handle_predictive_command as _pred_handle
+    _PRED_OK = True
+except Exception:
+    _pred_handle = None
+    _PRED_OK = False
+
+
+try:
+    from ai.autonomous_train_devops import handle_train_devops_command as _devops_handle
+    _DEVOPS_OK = True
+except Exception:
+    _devops_handle = None
+    _DEVOPS_OK = False
+
+try:
+    from ai.reinforcement_learning import handle_rl_command as _rl_handle
+    _RL_OK = True
+except Exception:
+    _rl_handle = None
+    _RL_OK = False
+
+try:
+    from ai.stripe_billing import handle_billing_command as _bill_handle
+    _BILL_OK = True
+except Exception:
+    _bill_handle = None
+    _BILL_OK = False
+
+try:
+    from ai.ckg_quality_tool import handle_ckg_quality_command as _ckgq_handle
+    _CKGQ_OK = True
+except Exception:
+    _ckgq_handle = None
+    _CKGQ_OK = False
+
+try:
+    from ai.git_lfs_helper import handle_lfs_command as _lfs_handle
+    _LFS_OK = True
+except Exception:
+    _lfs_handle = None
+    _LFS_OK = False
+
+try:
+    from ai.cognitive_microkernel import handle_kernel_command as _kern_handle
+    _KERN_OK = True
+except Exception:
+    _kern_handle = None
+    _KERN_OK = False
+
+try:
+    from ai.cosmic_mesh import handle_mesh_command as _mesh_handle
+    _MESH_OK = True
+except Exception:
+    _mesh_handle = None
+    _MESH_OK = False
+
+try:
+    from ai.mcp_internal_gateway import handle_gateway_command as _gw_handle
+    _GW_OK = True
+except Exception:
+    _gw_handle = None
+    _GW_OK = False
+
+try:
+    from ai.quantization_worker import handle_quant_command as _quant_handle
+    _QUANT_OK = True
+except Exception:
+    _quant_handle = None
+    _QUANT_OK = False
+
+try:
+    from ai.sensors_training_bridge import handle_sensor_bridge_command as _sbridge_handle
+    _SBRIDGE_OK = True
+except Exception:
+    _sbridge_handle = None
+    _SBRIDGE_OK = False
+
+try:
+    from ai.continuous_training_agent import handle_continuous_command as _cont_handle
+    _CONT_OK = True
+except Exception:
+    _cont_handle = None
+    _CONT_OK = False
+
+try:
+    from ai.hierarchical_moe import handle_moe_command as _moe_handle
+    _MOE_OK = True
+except Exception:
+    _moe_handle = None
+    _MOE_OK = False
+
+try:
+    from ai.command_lexicon import (
+        handle_help_command as _help_handle,
+        rewrite_to_canonical as _rewrite_cmd,
+        normalize_ar as _norm_ar,
+    )
+    _LEXICON_OK = True
+except Exception:
+    _help_handle = None
+    _rewrite_cmd = lambda t: t
+    _norm_ar = lambda t: (t or "").strip().lower()
+    _LEXICON_OK = False
+
+try:
     from ai.gpu_runtime import (
         torch_device as _gpu_torch_device,
         suggest_batch_size as _gpu_suggest_batch,
@@ -283,7 +465,7 @@ def inventory() -> str:
     lines.append(f"### مجلد مخرجات الوكيل: `{ARTIFACTS.relative_to(ROOT)}/`")
     lines.append("")
     lines.append(
-        "الوكيل يدعم: (1) تدريب عام sklearn/torch، (2) تشغيل سكربتات NSM، (2b) Kaggle API + Dual T4 — أوامر `حالة kaggle` / `جهّز kaggle`، "
+        "الوكيل يدعم: (0) مهندس معماري — تحكيم/بحث فائق/ضغط/اتحاد، (1) تدريب عام sklearn/torch، (2) تشغيل سكربتات NSM، (2b) Kaggle API + Dual T4 — أوامر `حالة kaggle` / `جهّز kaggle`، "
         "(3) تخطيط دورة حياة لأي مهمة تصفها."
     )
     return "\n".join(lines)
@@ -793,6 +975,193 @@ def list_saved_models() -> str:
     return "\n".join(lines)
 
 
+def training_dashboard() -> str:
+    """لوحة تحكم موحّدة لوكيل تدريب النماذج — نظرة عامة + توصيات فورية."""
+    lines = [
+        "## 🎛️ لوحة تحكم تدريب النماذج",
+        "",
+        "أنا **مدير تدريب النماذج** داخل NSM: أراقب البيئة، أقترح الخطوة التالية،",
+        "وأشغّل أدوات حقيقية (بدون اختلاق مقاييس).",
+        "",
+    ]
+
+    # موارد سريعة
+    ram = _ram_gb()
+    lines.append("### 📡 الموارد")
+    lines.append(f"- رام متاحة ≈ **{ram:.2f} GB**")
+    try:
+        gpu_txt = _gpu_report()
+        first = (gpu_txt or "").splitlines()[0] if gpu_txt else "GPU: غير معروف"
+        lines.append(f"- {first}")
+    except Exception:
+        lines.append("- GPU: تعذّر التقرير")
+    lines.append(f"- scikit-learn: {'✅' if _SKLEARN_OK else '❌'}")
+    lines.append(f"- PyTorch: {'✅' if _TORCH_OK else '❌'}")
+    lines.append("")
+
+    # آخر مهام التدريب الموحّدة
+    lines.append("### 📜 آخر مهام التدريب")
+    try:
+        runs = _read_training_runs(8)
+        if not runs:
+            lines.append("- لا سجل بعد. استخدم: `مهمة تدريب data/samples/classification_demo.csv الهدف=label`")
+        else:
+            for r in reversed(runs[-5:]):
+                st = r.get("status", "?")
+                plan = r.get("plan") or {}
+                lines.append(
+                    f"- `{r.get('id','?')}` · **{st}** · {plan.get('path') or r.get('path')} "
+                    f"({plan.get('task','?')}/{plan.get('engine','?')})"
+                )
+        lines.append("- أوامر: `سجل مهام التدريب` · `مهمة تدريب <csv> الهدف=label` · أضف `نفّذ` للتشغيل")
+    except Exception as e:
+        lines.append(f"- تعذّر قراءة السجل: {e}")
+    lines.append("")
+
+    # CKG
+    lines.append("### 🧬 حالة CKG / ArabicTransformer")
+    try:
+        st = _load_json(STATE_V3) if STATE_V3.is_file() else None
+        if st:
+            epoch = st.get("epoch") or st.get("global_step") or st.get("steps") or "?"
+            loss = st.get("last_loss") or st.get("loss") or st.get("avg_loss")
+            packs = st.get("packs_done") or st.get("packs") or "?"
+            lines.append(f"- حالة محفوظة: ✅ | خطوة/عصر: **{epoch}** | حزم: **{packs}**")
+            if loss is not None:
+                lines.append(f"- آخر خسارة مسجّلة: **{loss}**")
+        else:
+            lines.append("- لا يوجد `ckg_train_state_v3.json` بعد.")
+    except Exception as e:
+        lines.append(f"- تعذّر قراءة حالة CKG: {e}")
+    lines.append(f"- سكربت v3: {'✅' if TRAIN_V3.is_file() else '❌'}")
+    lines.append("")
+
+    # Hierarchical MoE
+    lines.append("### 🧩 Hierarchical MoE")
+    try:
+        from ai.moe_ckg_bridge import get_moe_bridge
+        br = get_moe_bridge()
+        if br.available:
+            m = br.moe
+            lines.append(
+                f"- جاهز ✅ | فئات **{len(m._group_order)}** | خبراء **{m.total_experts()}**"
+            )
+            lines.append(
+                f"- best: temp={getattr(m,'router_temperature','?')} · "
+                f"shared={getattr(m,'shared_coeff','?')} · residual={getattr(m,'input_residual','?')}"
+            )
+            sample = br.classify("ما حكم الصلاة؟")
+            lines.append(f"- عينة: `{sample.get('top')}` (ثقة {sample.get('confidence')})")
+        else:
+            lines.append(f"- غير متاح: {br._load_error}")
+    except Exception as e:
+        lines.append(f"- تعذّر فحص MoE: {e}")
+    lines.append("- أوامر: `صحة moe` · `صنّف: ...` · `إحصاء moe` · `ملخص moe`")
+    lines.append("")
+
+    # نماذج محفوظة (مختصر)
+    lines.append("### 💾 آخر النماذج المحفوظة")
+    try:
+        if ARTIFACTS.is_dir():
+            files = sorted(
+                [p for p in ARTIFACTS.rglob("*") if p.is_file()],
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )[:5]
+            if files:
+                for p in files:
+                    mb = p.stat().st_size / (1024 * 1024)
+                    rel = p.relative_to(ROOT) if p.is_relative_to(ROOT) else p.name
+                    lines.append(f"- `{rel}` ({mb:.2f} MB)")
+            else:
+                lines.append("- لا توجد مخرجات بعد.")
+        else:
+            lines.append("- مجلد المخرجات غير موجود بعد.")
+    except Exception:
+        lines.append("- تعذّر سرد المخرجات.")
+    lines.append("")
+
+    # تدريب مستمر
+    lines.append("### 🔄 التدريب الذاتي المستمر")
+    try:
+        ct_log = ROOT / "artifacts" / "model_training" / "continuous" / "training_triggers.jsonl"
+        if ct_log.is_file():
+            raw = ct_log.read_text(encoding="utf-8", errors="ignore").strip().splitlines()
+            lines.append(f"- سجل الأحداث: **{len(raw)}** حدث")
+            if raw:
+                try:
+                    last = json.loads(raw[-1])
+                    q = (last.get("quality") or {}).get("score")
+                    action = (last.get("plan") or {}).get("action")
+                    lines.append(f"- آخر تقييم جودة: **{q}** | إجراء: **{action}**")
+                except Exception:
+                    lines.append("- آخر حدث موجود (تعذّر تفصيله).")
+        else:
+            lines.append("- لم يُسجَّل أي دورة تدريب مستمر بعد. جرّب: `تدريب مستمر`")
+    except Exception as e:
+        lines.append(f"- {e}")
+    lines.append("")
+
+    # توصيات ذكية
+    lines.append("### 🎯 الخطوة التالية المقترحة")
+    lines.append(smart_train_next(recommend_only=True))
+    lines.append("")
+    lines.append("---")
+    lines.append(
+        "**أوامر سريعة:** `جرد` · `حالة ckg` · `شغّل تدريب ckg تجريبي` · "
+        "`درّب شبكة torch` · `درّب تصنيف تجريبي` · `نماذج محفوظة` · `تدريب مستمر` · `خطة`"
+    )
+    return "\n".join(lines)
+
+
+def smart_train_next(recommend_only: bool = False) -> str:
+    """يختار بأمان أفضل خطوة تدريب تالية حسب حالة البيئة.
+
+    إن recommend_only=True يعيد توصية نصية فقط بدون تشغيل ثقيل.
+    """
+    ram = _ram_gb()
+
+    has_v3_script = TRAIN_V3.is_file()
+    has_sentences = any(
+        p.is_file() for p in (SENTENCES_V3, SENTENCES_V2, SENTENCES_V1, GENERAL_AR)
+    )
+    st = _load_json(STATE_V3) if STATE_V3.is_file() else None
+
+    if has_v3_script and has_sentences and ram >= 1.2:
+        if st is None:
+            if not recommend_only:
+                return run_ckg_step(packs=1, dry_run=False)
+            return (
+                "① **شغّل تدريب ckg تجريبي** (حزمة واحدة) للتحقق من المسار.\n"
+                "② بعدها راقب بـ `حالة ckg` و`خسارة`.\n"
+                "③ عند الاستقرار زد الحزم تدريجياً."
+            )
+        return (
+            "① راجع `حالة ckg` و`خسارة`.\n"
+            "② إن كان الاتجاه جيداً: `شغّل تدريب ckg` بحزمة أو حزمتين.\n"
+            "③ أو جرّب `درّب شبكة torch` / `درّب تصنيف تجريبي` للتحقق من مسارات أخرى."
+        )
+
+    if _SKLEARN_OK and ram >= 0.8:
+        return (
+            "① ابدأ بـ **درّب تصنيف تجريبي** للتحقق السريع من مسار sklearn.\n"
+            "② إن كان لديك CSV: `قائمة csv` ثم `درّب من csv ...`\n"
+            "③ لشبكات أعقد: ثبّت torch ثم `درّب شبكة torch`."
+        )
+
+    if _TORCH_OK and ram >= 1.0:
+        return (
+            "① **درّب شبكة torch** (MLP تجريبي) للتحقق من المسار.\n"
+            "② راقب الرام — قلّل الحقب إن لزم.\n"
+            "③ احفظ النتائج تحت `artifacts/model_training/`."
+        )
+
+    return (
+        "① نفّذ **جرد** لرؤية المكتبات والبيانات المتاحة.\n"
+        "② ثبّت scikit-learn أو torch حسب الحاجة.\n"
+        "③ إن كانت رام منخفضة (<1 GB) استخدم `dry-run` أو Colab (`colab`)."
+    )
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 5b) تدريب على CSV حقيقي + رفع ملفات + CNN + نص
@@ -987,6 +1356,258 @@ def _text_to_bow(texts: List[str], vocab_size: int = 512) -> np.ndarray:
     return mat
 
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 3b) دورة تدريب موحّدة — معاينة / تنفيذ / سجل مهام
+# ═══════════════════════════════════════════════════════════════════════════
+
+TRAINING_RUNS_LOG = ARTIFACTS / "training_runs.jsonl"
+_ALLOWED_DATA_ROOTS = (
+    ROOT / "data",
+    ROOT / "artifacts",
+    ROOT / "knowledge_sources",
+    ARTIFACTS,
+)
+
+
+def _safe_resolve_data_path(path_str: str) -> Path:
+    """يحل المسار ويرفض أي ملف خارج مجلدات المشروع المسموحة."""
+    raw = (path_str or "").strip().strip("`\"'")
+    if not raw:
+        raise ValueError("مسار فارغ")
+    if ".." in Path(raw).parts:
+        raise PermissionError("مسارات تحتوي .. غير مسموحة")
+    candidates = []
+    p = Path(raw)
+    if p.is_file():
+        candidates.append(p.resolve())
+    candidates.append((ROOT / raw).resolve())
+    # بحث بالاسم تحت data/
+    name = Path(raw).name
+    for root in _ALLOWED_DATA_ROOTS:
+        if root.is_dir():
+            for hit in root.rglob(name):
+                if hit.is_file():
+                    candidates.append(hit.resolve())
+                    break
+    allowed = [r.resolve() for r in _ALLOWED_DATA_ROOTS if r.exists()]
+    for c in candidates:
+        try:
+            if not c.is_file():
+                continue
+            ok = any(str(c).startswith(str(a) + sep) or c == a for a in allowed for sep in ("/",))
+            # أيضاً أي مسار تحت ROOT
+            if str(c).startswith(str(ROOT.resolve()) + "/"):
+                # رفض المسارات الحساسة
+                rel = c.relative_to(ROOT.resolve())
+                if rel.parts and rel.parts[0] in {".git", ".env", "secrets"}:
+                    raise PermissionError(f"مسار محظور: {rel}")
+                return c
+        except PermissionError:
+            raise
+        except Exception:
+            continue
+    raise FileNotFoundError(f"لم يُعثر على ملف آمن داخل المشروع: {path_str}")
+
+
+def _append_training_run(row: dict) -> None:
+    ARTIFACTS.mkdir(parents=True, exist_ok=True)
+    with open(TRAINING_RUNS_LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def _read_training_runs(limit: int = 30) -> List[dict]:
+    if not TRAINING_RUNS_LOG.is_file():
+        return []
+    rows = []
+    with open(TRAINING_RUNS_LOG, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except Exception:
+                continue
+    return rows[-limit:]
+
+
+def inspect_training_data(path_str: str, target_col: Optional[str] = None) -> dict:
+    """فحص البيانات والهدف ونوع المهمة + اختيار محرك مقترح."""
+    path = _safe_resolve_data_path(path_str)
+    header, data = _load_csv_table(path)
+    bundle = _infer_target_and_matrix(header, data, target_col=target_col)
+    task = bundle["task"]
+    n_samples = int(bundle["n_samples"])
+    if bundle["feature_mode"] == "text":
+        n_features = 512  # BoW لاحقاً
+    else:
+        n_features = int(bundle["X"].shape[1]) if bundle["X"] is not None else 0
+    n_classes = None
+    if task == "classification":
+        n_classes = int(len(set(bundle["y"].tolist()))) if hasattr(bundle["y"], "tolist") else None
+    # اختيار محرك تلقائي
+    if bundle["feature_mode"] == "text":
+        engine = "torch" if _TORCH_OK else "sklearn"
+    elif n_samples < 5000 and n_features < 200 and _SKLEARN_OK:
+        engine = "sklearn"
+    elif _TORCH_OK:
+        engine = "torch"
+    elif _SKLEARN_OK:
+        engine = "sklearn"
+    else:
+        engine = "none"
+    return {
+        "path": str(path.relative_to(ROOT) if path.is_relative_to(ROOT) else path),
+        "abs_path": str(path),
+        "target": bundle["target_name"],
+        "task": task,
+        "feature_mode": bundle["feature_mode"],
+        "feature_names": bundle["feature_names"],
+        "n_samples": n_samples,
+        "n_features": n_features,
+        "n_classes": n_classes,
+        "engine": engine,
+        "sklearn_ok": _SKLEARN_OK,
+        "torch_ok": _TORCH_OK,
+        "bundle": bundle,
+    }
+
+
+def format_training_plan(info: dict, execute: bool = False) -> str:
+    lines = [
+        "## 📋 خطة مهمة تدريب" + (" (تنفيذ)" if execute else " (معاينة — Dry-run)"),
+        "",
+        f"- الملف: `{info['path']}`",
+        f"- الهدف: `{info['target']}`",
+        f"- نوع المهمة: **{info['task']}**",
+        f"- العينات: **{info['n_samples']}** · الميزات: **{info['n_features']}**",
+    ]
+    if info.get("n_classes") is not None:
+        lines.append(f"- عدد الفئات: **{info['n_classes']}**")
+    lines.append(f"- نمط الميزات: **{info['feature_mode']}** → {info['feature_names'][:8]}")
+    lines.append(f"- المحرك المقترح: **{info['engine']}** (sklearn={'✅' if info['sklearn_ok'] else '❌'} · torch={'✅' if info['torch_ok'] else '❌'})")
+    lines.append("")
+    if not execute:
+        lines.append("> هذه **معاينة آمنة**. لتشغيل التدريب فعلياً أضف: `نفّذ` أو `execute`.")
+        lines.append(">")
+        lines.append(f"> مثال: `مهمة تدريب {info['path']} الهدف={info['target']} نفّذ`")
+    return "\n".join(lines)
+
+
+def run_training_mission(
+    path_str: str,
+    target_col: Optional[str] = None,
+    epochs: int = 30,
+    prefer: str = "auto",
+    execute: bool = False,
+) -> str:
+    """
+    دورة موحّدة: فحص → خطة → (اختياري) تنفيذ مع سجل حالات
+    planned | running | completed | failed | rejected
+    """
+    run_id = f"run_{int(time.time())}"
+    base = {
+        "id": run_id,
+        "ts": time.time(),
+        "path": path_str,
+        "target": target_col,
+        "execute": bool(execute),
+    }
+    try:
+        info = inspect_training_data(path_str, target_col=target_col)
+    except PermissionError as e:
+        base.update({"status": "rejected", "error": str(e)})
+        _append_training_run(base)
+        return f"## 🚫 مرفوض\n\n{e}"
+    except FileNotFoundError as e:
+        base.update({"status": "rejected", "error": str(e)})
+        _append_training_run(base)
+        return f"## 🚫 مرفوض\n\n{e}"
+    except Exception as e:
+        base.update({"status": "failed", "error": f"{type(e).__name__}: {e}"})
+        _append_training_run(base)
+        return f"## ❌ فشل الفحص\n\n{type(e).__name__}: {e}"
+
+    base["status"] = "planned"
+    base["plan"] = {
+        "task": info["task"],
+        "n_samples": info["n_samples"],
+        "n_features": info["n_features"],
+        "n_classes": info.get("n_classes"),
+        "engine": info["engine"],
+        "path": info["path"],
+        "target": info["target"],
+    }
+    _append_training_run(base)
+
+    plan_txt = format_training_plan(info, execute=execute)
+    if not execute:
+        return plan_txt
+
+    # تنفيذ فعلي
+    running = dict(base)
+    running["status"] = "running"
+    running["ts"] = time.time()
+    _append_training_run(running)
+
+    eng = prefer if prefer not in ("auto", "") else info["engine"]
+    if eng == "none":
+        fail = dict(base)
+        fail.update({"status": "failed", "error": "لا يتوفر sklearn ولا torch"})
+        _append_training_run(fail)
+        return plan_txt + "\n\n❌ لا يتوفر محرك تدريب."
+
+    try:
+        result = train_from_csv(
+            info["abs_path"],
+            target_col=info["target"],
+            epochs=epochs,
+            prefer=eng if eng in ("sklearn", "torch", "text", "cnn") else "auto",
+        )
+        done = dict(base)
+        done.update({
+            "status": "completed",
+            "ts": time.time(),
+            "engine": eng,
+            "result_preview": (result or "")[:500],
+        })
+        _append_training_run(done)
+        return plan_txt + "\n\n---\n" + result
+    except Exception as e:
+        fail = dict(base)
+        fail.update({"status": "failed", "ts": time.time(), "error": f"{type(e).__name__}: {e}"})
+        _append_training_run(fail)
+        return plan_txt + f"\n\n## ❌ فشل التنفيذ\n\n{type(e).__name__}: {e}"
+
+
+def list_training_runs(limit: int = 15) -> str:
+    rows = _read_training_runs(limit=max(5, min(int(limit), 50)))
+    lines = ["## 📜 سجل مهام التدريب", ""]
+    if not rows:
+        lines.append("لا توجد مهام مسجّلة بعد.")
+        lines.append("جرّب: `مهمة تدريب data/samples/classification_demo.csv الهدف=label`")
+        return "\n".join(lines)
+    for r in reversed(rows):
+        st = r.get("status", "?")
+        icon = {
+            "planned": "📋",
+            "running": "⏳",
+            "completed": "✅",
+            "failed": "❌",
+            "rejected": "🚫",
+        }.get(st, "•")
+        plan = r.get("plan") or {}
+        lines.append(
+            f"{icon} `{r.get('id')}` · **{st}** · "
+            f"{plan.get('path') or r.get('path')} · "
+            f"task={plan.get('task', '?')} · engine={plan.get('engine', r.get('engine', '?'))}"
+        )
+        if r.get("error"):
+            lines.append(f"   ↳ {r['error'][:120]}")
+    return "\n".join(lines)
+
+
 def train_from_csv(
     path_str: str,
     target_col: Optional[str] = None,
@@ -994,17 +1615,14 @@ def train_from_csv(
     prefer: str = "auto",
 ) -> str:
     """تدريب على ملف CSV من القرص (مسار نسبي أو مطلق داخل المشروع)."""
-    raw = path_str.strip().strip("`\"'")
-    path = Path(raw)
-    if not path.is_file():
-        path = ROOT / raw
-    if not path.is_file():
-        # بحث بالاسم
-        matches = [p for p in _find_csv_files(80) if p.name == Path(raw).name]
-        if matches:
-            path = matches[0]
-    if not path.is_file():
-        return f"❌ لم يُعثر على الملف: `{path_str}`\nاستخدم **قائمة csv** لعرض المتاح."
+    try:
+        path = _safe_resolve_data_path(path_str)
+    except PermissionError as e:
+        return f"🚫 مرفوض: {e}"
+    except FileNotFoundError as e:
+        return f"❌ {e}\nاستخدم **قائمة csv** لعرض المتاح."
+    except Exception as e:
+        return f"❌ مسار غير صالح: {type(e).__name__}: {e}"
 
     try:
         header, data = _load_csv_table(path)
@@ -1516,7 +2134,238 @@ def handle_training_command(user_input: str) -> Optional[str]:
     text = (user_input or "").strip()
     if not text:
         return None
+
+    # مساعدة وصياغة موحّدة (أوامر / مساعدة / ماذا تستطيع)
+    if _LEXICON_OK and _help_handle is not None:
+        try:
+            help_out = _help_handle(text)
+            if help_out is not None:
+                return help_out
+        except Exception as _h_err:
+            logger.warning("lexicon help: %s", _h_err)
+        try:
+            text = _rewrite_cmd(text)
+        except Exception:
+            pass
+
     low = text.lower()
+
+    # ── لوحة التحكم والخطوة التالية (أولوية عالية قبل الموجّهات الفرعية) ──
+    if re.search(
+        r"(لوحة\s*التحكم|dashboard|نظرة\s*عامة\s*(على\s*)?(التدريب)?|"
+        r"حالة\s*التدريب|وضع\s*التدريب|ملخص\s*التدريب|تقرير\s*التدريب|"
+        r"^لوحة$|^dashboard$)",
+        text,
+        re.I,
+    ):
+        return training_dashboard()
+
+    if re.search(
+        r"(^ماذا\s*بعد$|^الخطوة\s*التالية$|next\s*step|"
+        r"اقترح\s*(ال)?خطوة|ابدأ\s*تدريب\s*ذكي|تدريب\s*ذكي|smart\s*train)",
+        text,
+        re.I,
+    ):
+        execute = bool(re.search(r"(ابدأ|شغّل|نفّذ|execute|start)", text, re.I))
+        return smart_train_next(recommend_only=not execute)
+
+    if _KERN_OK and _kern_handle is not None:
+        try:
+            kn = _kern_handle(text)
+            if kn is not None:
+                return kn
+        except Exception as _kn_err:
+            logger.warning("kernel: %s", _kn_err)
+    if _MESH_OK and _mesh_handle is not None:
+        try:
+            mh = _mesh_handle(text)
+            if mh is not None:
+                return mh
+        except Exception as _mh_err:
+            logger.warning("mesh: %s", _mh_err)
+
+    if _LFS_OK and _lfs_handle is not None:
+        try:
+            lf = _lfs_handle(text)
+            if lf is not None:
+                return lf
+        except Exception as _lf_err:
+            logger.warning("lfs: %s", _lf_err)
+
+    if _CKGQ_OK and _ckgq_handle is not None:
+        try:
+            cq = _ckgq_handle(text)
+            if cq is not None:
+                return cq
+        except Exception as _cq_err:
+            logger.warning("ckg_quality: %s", _cq_err)
+
+    if _BILL_OK and _bill_handle is not None:
+        try:
+            bl = _bill_handle(text)
+            if bl is not None:
+                return bl
+        except Exception as _bl_err:
+            logger.warning("billing: %s", _bl_err)
+
+    if _RL_OK and _rl_handle is not None:
+        try:
+            rl = _rl_handle(text)
+            if rl is not None:
+                return rl
+        except Exception as _rl_err:
+            logger.warning("rl: %s", _rl_err)
+
+    if _DEVOPS_OK and _devops_handle is not None:
+        try:
+            dv = _devops_handle(text)
+            if dv is not None:
+                return dv
+        except Exception as _dv_err:
+            logger.warning("devops: %s", _dv_err)
+    if _GW_OK and _gw_handle is not None:
+        try:
+            gw = _gw_handle(text)
+            if gw is not None:
+                return gw
+        except Exception as _gw_err:
+            logger.warning("gateway: %s", _gw_err)
+    if _QUANT_OK and _quant_handle is not None:
+        try:
+            qt = _quant_handle(text)
+            if qt is not None:
+                return qt
+        except Exception as _qt_err:
+            logger.warning("quant: %s", _qt_err)
+    if _SBRIDGE_OK and _sbridge_handle is not None:
+        try:
+            sb = _sbridge_handle(text)
+            if sb is not None:
+                return sb
+        except Exception as _sb_err:
+            logger.warning("sbridge: %s", _sb_err)
+
+    if _PRED_OK and _pred_handle is not None:
+        try:
+            pd = _pred_handle(text)
+            if pd is not None:
+                return pd
+        except Exception as _pd_err:
+            logger.warning("predictive: %s", _pd_err)
+
+    if _RETRAIN_OK and _retrain_handle is not None:
+        try:
+            rt = _retrain_handle(text)
+            if rt is not None:
+                return rt
+        except Exception as _rt_err:
+            logger.warning("active_retrain: %s", _rt_err)
+
+    # السرب الاجتماعي
+    if _SOCIAL_SWARM_OK and _social_swarm_handle is not None:
+        try:
+            ss = _social_swarm_handle(text)
+            if ss is not None:
+                return ss
+        except Exception as _ss_err:
+            logger.warning("social_swarm: %s", _ss_err)
+
+    # سيادة التشغيل: MCP/WorldModel/Sensors
+    if _SOV_OK and _sov_handle is not None:
+        try:
+            sv = _sov_handle(text)
+            if sv is not None:
+                return sv
+        except Exception as _sv_err:
+            logger.warning("sovereignty: %s", _sv_err)
+
+    # طبقة الحضارة / ما بعد القمة
+    if _CIV_OK and _civ_handle is not None:
+        try:
+            cv = _civ_handle(text)
+            if cv is not None:
+                return cv
+        except Exception as _cv_err:
+            logger.warning("civilization: %s", _cv_err)
+
+    # تفعيل الإنتاجية + تدريب مستمر
+    if _PROD_OK and _prod_handle is not None:
+        try:
+            pr = _prod_handle(text)
+            if pr is not None:
+                return pr
+        except Exception as _pr_err:
+            logger.warning("production: %s", _pr_err)
+    if _CONT_OK and _cont_handle is not None:
+        try:
+            ct = _cont_handle(text)
+            if ct is not None:
+                return ct
+        except Exception as _ct_err:
+            logger.warning("continuous: %s", _ct_err)
+
+    # Hierarchical Dynamic MoE (خليط خبراء هرمي)
+    if _MOE_OK and _moe_handle is not None:
+        try:
+            moe_out = _moe_handle(text)
+            if moe_out is not None:
+                return moe_out
+        except Exception as _moe_err:
+            logger.warning("hierarchical_moe: %s", _moe_err)
+
+    # المحرك الاقتصادي (AIaaS / سوق / Arbitrage / بيانات)
+    if _ECONOMIC_OK and _economic_handle is not None:
+        try:
+            ec = _economic_handle(text)
+            if ec is not None:
+                return ec
+        except Exception as _ec_err:
+            logger.warning("economic: %s", _ec_err)
+
+    # Super AI Orchestrator — حوسبة فائقة / بيانات / تطور / سرب
+    if _SUPER_OK and _super_handle is not None:
+        try:
+            su = _super_handle(text)
+            if su is not None:
+                return su
+        except Exception as _su_err:
+            logger.warning("super-ai: %s", _su_err)
+
+    # Meta-AI — تفكير عميق / NAS / عتاد / ذاكرة متجهة
+    if _META_OK and _meta_handle is not None:
+        try:
+            mt = _meta_handle(text)
+            if mt is not None:
+                return mt
+        except Exception as _mt_err:
+            logger.warning("meta-ai: %s", _mt_err)
+
+    # العالِم المبتكر + المدير الأمني والمالي
+    if _SCIENTIST_OK and _scientist_handle is not None:
+        try:
+            sc = _scientist_handle(text)
+            if sc is not None:
+                return sc
+        except Exception as _sc_err:
+            logger.warning("scientist: %s", _sc_err)
+
+    # المهندس المعماري (تحكيم / بحث فائق / ضغط / اتحادي)
+    if _ARCHITECT_OK and _architect_handle is not None:
+        try:
+            ar = _architect_handle(text)
+            if ar is not None:
+                return ar
+        except Exception as _ar_err:
+            logger.warning("architect: %s", _ar_err)
+
+    # منسّق المنصات البعيدة (Kaggle + Colab + كفاءة التدريب)
+    if _ORCH_OK and _orch_handle is not None:
+        try:
+            oc = _orch_handle(text)
+            if oc is not None:
+                return oc
+        except Exception as _oc_err:
+            logger.warning("orchestrator: %s", _oc_err)
 
     # Kaggle (API + Dual T4) — قبل remote العام لأن أوامره أكثر تحديداً
     if _KAGGLE_OK and _kaggle_handle is not None:
@@ -1680,6 +2529,40 @@ def handle_training_command(user_input: str) -> Optional[str]:
         task = "regression" if re.search(r"انحدار|regress", text, re.I) else "classification"
         return train_torch_mlp(task=task, epochs=epochs)
 
+    # سجل مهام التدريب
+    if re.search(
+        r"(سجل\s*مهام\s*التدريب|سجل\s*التدريب|training\s*runs|سجل\s*المهام)",
+        text,
+        re.I,
+    ):
+        return list_training_runs()
+
+    # مهمة تدريب موحّدة (معاينة افتراضياً)
+    m_mission = re.search(
+        r"(?:مهمة\s*تدريب|training\s*mission|خطة\s*تدريب\s*على)\s+((?:[\w./\\-]+/)*[\w.-]+\.csv)",
+        text,
+        re.I,
+    )
+    if m_mission:
+        path_csv = m_mission.group(1)
+        target = None
+        mt = re.search(r"(?:هدف|target|label)\s*[=:]\s*([\w\u0600-\u06FF]+)", text, re.I)
+        if mt:
+            target = mt.group(1)
+        epochs = 30
+        me = re.search(r"(\d+)\s*(حقب|epochs?)", text, re.I)
+        if me:
+            epochs = int(me.group(1))
+        prefer = "auto"
+        if re.search(r"sklearn|غاب|forest", text, re.I):
+            prefer = "sklearn"
+        elif re.search(r"torch|pytorch|mlp", text, re.I):
+            prefer = "torch"
+        execute = bool(re.search(r"(نف[ّ]?ذ|شغ[ّ]?ل|execute|run\s*now|ابدأ\s*التنفيذ)", text, re.I))
+        return run_training_mission(
+            path_csv, target_col=target, epochs=epochs, prefer=prefer, execute=execute
+        )
+
     # قائمة CSV
     if re.search(r"(قائمة|عرض|list).{0,12}(csv|بيانات)|ملفات\s*csv|csv\s*files", text, re.I):
         return list_csv_datasets()
@@ -1768,28 +2651,65 @@ def handle_training_command(user_input: str) -> Optional[str]:
         dry = bool(re.search(r"تجريب|dry\s*-?run|محاكاة", text, re.I))
         return _sb_run_second_mission(dry_run=dry)
 
+    # لوحة التحكم / الخطوة التالية الذكية
+    if re.search(
+        r"(لوحة\s*التحكم|dashboard|نظرة\s*عامة|حالة\s*التدريب|وضع\s*التدريب|"
+        r"ملخص\s*التدريب|تقرير\s*التدريب)",
+        text,
+        re.I,
+    ):
+        return training_dashboard()
+
+    if re.search(
+        r"(الخطوة\s*التالية|ماذا\s*بعد|next\s*step|اقترح\s*(خطوة|تدريب)|"
+        r"ابدأ\s*تدريب\s*ذكي|تدريب\s*ذكي|smart\s*train)",
+        text,
+        re.I,
+    ):
+        # "ابدأ تدريب ذكي" ينفّذ إن أمكن؛ الباقي توصية فقط
+        execute = bool(re.search(r"(ابدأ|شغّل|نفّذ|execute|start)", text, re.I))
+        return smart_train_next(recommend_only=not execute)
+
     # أوامر قصيرة
     aliases = {
-
         "جرد": inventory,
         "inventory": inventory,
+        "مخزون": inventory,
         "خطة": lifecycle_plan,
         "plan": lifecycle_plan,
+        "خطة تدريب": lifecycle_plan,
         "ckg": ckg_status,
         "حالة ckg": ckg_status,
+        "وضع ckg": ckg_status,
         "خسارة": ckg_loss_trend,
         "loss": ckg_loss_trend,
         "محفوظات": list_saved_models,
         "نماذج": list_saved_models,
+        "نماذج محفوظة": list_saved_models,
         "csv": list_csv_datasets,
         "قائمة csv": list_csv_datasets,
+        "لوحة": training_dashboard,
+        "لوحة التحكم": training_dashboard,
+        "dashboard": training_dashboard,
+        "نظرة عامة": training_dashboard,
+        "ماذا بعد": (lambda: smart_train_next(True)),
+        "الخطوة التالية": (lambda: smart_train_next(True)),
         "sandbox": (_sb_status if _SANDBOX_OK else inventory),
         "أول مهمة": (lambda: _sb_run_first_mission(False) if _SANDBOX_OK else "لا sandbox"),
         "ثاني مهمة": (lambda: _sb_run_second_mission(False) if _SANDBOX_OK else "لا sandbox"),
         "المهمة الثانية": (lambda: _sb_run_second_mission(False) if _SANDBOX_OK else "لا sandbox"),
+        "أوامر": (lambda: _help_handle("أوامر") if _help_handle else inventory),
+        "مساعدة": (lambda: _help_handle("مساعدة") if _help_handle else inventory),
     }
-    if text.strip().lower() in aliases:
-        fn = aliases[text.strip().lower()]
+    key = text.strip().lower()
+    if key in aliases:
+        fn = aliases[key]
         return fn() if fn is not lifecycle_plan else lifecycle_plan()
+    # مطابقة بعد التطبيع
+    if _LEXICON_OK:
+        nkey = _norm_ar(text)
+        for ak, fn in list(aliases.items()):
+            if _norm_ar(ak) == nkey:
+                return fn() if fn is not lifecycle_plan else lifecycle_plan()
 
     return None

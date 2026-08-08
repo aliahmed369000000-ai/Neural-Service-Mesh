@@ -18,6 +18,9 @@ NSM MCP Server
                             (ai/ckg_text_encoder_v2.py) بدل الاحتواء الجزئي.
   - check_project_health  : تقرير جاهزية سريع عن حالة الكود (Phase6Validator):
                             نسبة تغطية المراحل، الكود الميت، عدد الملفات.
+  - reasoning_answer      : مسار ReasoningPipeline + DeepRouting على سؤال عربي.
+  - training_safety_check : بوابة نموذج العالم قبل run_training_loop.
+  - knowledge_pulse       : نبضة حساسات + فجوات معرفية محتملة.
 
 التشغيل محلياً (stdio transport):
     python mcp_server/server.py
@@ -330,3 +333,78 @@ def check_project_health() -> str:
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")
+
+
+@mcp.tool()
+def reasoning_answer(question: str, train_on_query: bool = False) -> str:
+    """يشغّل ReasoningPipeline (مع DeepRouting إن توفّر) على سؤال عربي
+    ويعيد ملخص الإجابة والمفاهيم المرتبة. لا يستبدل ask_nsm بل يفعّل
+    مسار CKG→NeuralCore مباشرة للعملاء الخارجيين (Claude/Cursor).
+    """
+    try:
+        from ai.reasoning_pipeline import ReasoningPipeline
+        pipe = ReasoningPipeline(train_on_query=bool(train_on_query), use_deep_routing=True)
+        result = pipe.answer(question or "")
+        payload = {
+            "answer": getattr(result, "answer_text", None) or str(result),
+            "weights": getattr(result, "decision_weights", {}),
+            "ranked": (getattr(result, "ranked_concepts", None) or [])[:8],
+            "deep_routing": bool((getattr(result, "decision_weights", {}) or {}).get("_deep_routing")),
+        }
+        return json.dumps(payload, ensure_ascii=False, default=str)
+    except Exception as e:
+        return json.dumps({"error": f"reasoning_answer failed: {e}"}, ensure_ascii=False)
+
+
+@mcp.tool()
+def training_safety_check(action: str = "run_training_loop", estimated_vram_mb: int = 4096) -> str:
+    """يسأل نموذج العالم: هل تنفيذ تدريب ثقيل آمن الآن؟"""
+    try:
+        from world_model.environment_model import EnvironmentModel
+        env = EnvironmentModel(model_dir=str(_ROOT / "world_model"))
+        report = env.assess_training_safety(action=action, estimated_vram_mb=int(estimated_vram_mb))
+        return json.dumps(report, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": str(e), "green_light": False}, ensure_ascii=False)
+
+
+@mcp.tool()
+def knowledge_pulse() -> str:
+    """نبضة حساسات + إشارة فجوات معرفية لحلقة التعلم النشط."""
+    try:
+        from ai.sovereignty_loop import knowledge_pulse as _pulse
+        return json.dumps(_pulse(), ensure_ascii=False, default=str)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def campaign_simulate(text: str, platforms: str = "twitter,linkedin,telegram") -> str:
+    """محاكاة تفاعل الجمهور وتكلفة الميزانية قبل النشر/الحملة."""
+    try:
+        from world_model.predictive_sim import full_campaign_sim
+        plats = [p.strip() for p in (platforms or "").split(",") if p.strip()]
+        return json.dumps(full_campaign_sim(text, plats or None), ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def mcp_auth_check(api_key: str = "") -> str:
+    """التحقق من مفتاح مستأجر AIaaS لاستخدام MCP المدفوع."""
+    try:
+        from mcp_server.monetization import authenticate_mcp_key
+        ok, meta = authenticate_mcp_key(api_key or None)
+        return json.dumps({"ok": ok, **meta}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def unified_knowledge_query(question: str) -> str:
+    """نواة موحدة: CKG + ReasoningPipeline عبر البوابة الداخلية."""
+    try:
+        from ai.mcp_internal_gateway import unified_query
+        return json.dumps(unified_query(question), ensure_ascii=False, default=str)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)

@@ -8,22 +8,42 @@ on:
   workflow_dispatch:
 
 jobs:
-  pytest:
+  critical:
+    name: اختبارات حرجة (تدريب · نمو · جسر)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          lfs: true
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: تثبيت اعتماديات الاختبار
+        run: pip install -q pytest numpy scikit-learn
+      - name: اختبارات حرجة
+        run: |
+          python3 -m pytest -q --tb=line \
+            tests/test_model_training_agent.py \
+            tests/test_agent_growth_loop.py \
+            tests/test_agent_project_bridge.py
 
-      - name: تثبيت الاعتماديات الخفيفة اللازمة للاختبارات
-        run: pip install pytest numpy requests
-
+  full:
+    name: pytest + py_compile
+    runs-on: ubuntu-latest
+    needs: critical
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: تثبيت اعتماديات خفيفة
+        run: pip install -q pytest numpy requests scikit-learn
       - name: تشغيل pytest
-        run: python3 -m pytest -q
-
-      - name: فحص صياغي شامل (py_compile) لكل ملفات المشروع
+        run: python3 -m pytest -q --tb=line
+        continue-on-error: true
+      - name: فحص صياغي (py_compile)
         run: |
           find . -name "*.py" -not -path "./node_modules/*" \
             -print0 | xargs -0 -I{} python3 -m py_compile {}

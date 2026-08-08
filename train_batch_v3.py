@@ -111,6 +111,26 @@ def main() -> int:
     pack_size = int(env_pack) if env_pack.isdigit() else choose_pack_size(avail)
     packs_per_run = int(env_packs) if env_packs.isdigit() else choose_packs_per_run(avail)
 
+    # Autonomous DevOps override (ckg_train_hparams_override.json)
+    _ov_lr_max = None
+    _ov_lr_min = None
+    try:
+        import pathlib as _pl
+        _ovp = _pl.Path("ckg_train_hparams_override.json")
+        if _ovp.is_file():
+            _ov = json.loads(_ovp.read_text(encoding="utf-8"))
+            if not env_pack and _ov.get("pack_size"):
+                pack_size = int(_ov["pack_size"])
+            if not env_packs and _ov.get("packs_per_run"):
+                packs_per_run = int(_ov["packs_per_run"])
+            if _ov.get("lr_max") is not None:
+                _ov_lr_max = float(_ov["lr_max"])
+            if _ov.get("lr_min") is not None:
+                _ov_lr_min = float(_ov["lr_min"])
+            print(f"ENV: hparams override loaded from {_ovp} note={_ov.get('note')}")
+    except Exception as _ove:
+        print(f"ENV: override skip: {_ove}")
+
     print(
         f"ENV: available_ram≈{avail:.2f} GiB | pack_size={pack_size} | "
         f"packs_per_run={packs_per_run}"
@@ -313,7 +333,7 @@ def main() -> int:
         pack = sentences[pos:end]
 
         # تحديث معدل التعلم قبل كل حزمة
-        lr = compute_lr(global_step, WARMUP_STEPS, total_steps_est, LR_MAX, LR_MIN)
+        lr = compute_lr(global_step, WARMUP_STEPS, total_steps_est, (_ov_lr_max if _ov_lr_max is not None else LR_MAX), (_ov_lr_min if _ov_lr_min is not None else LR_MIN))
         model.lr = lr
 
         loss = float(model.train_step_batch(pack))

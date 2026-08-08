@@ -131,6 +131,7 @@ class PipelineResult:
     quality: Optional[Dict[str, float]] = None
     net_architecture: Optional[str] = None   # مثال: "784→784→5→32→4" (يتحدث مع النمو)
     grew: bool = False                        # True إذا نمت الشبكة في هذه الخطوة
+    moe_routing: Optional[Dict[str, Any]] = None  # تصنيف MoE للعرض في الواجهة
 
     def to_dict(self) -> dict:
         return {
@@ -149,6 +150,7 @@ class PipelineResult:
             "quality": self.quality,
             "net_architecture": self.net_architecture,
             "grew": self.grew,
+            "moe_routing": self.moe_routing,
         }
 
 
@@ -186,9 +188,34 @@ class ReasoningPipeline:
         episode_store: Optional[EpisodeStore] = None,
         record_episodes: bool = True,
         transformer_weights_path: Optional[str] = "models/transformer_ckg_v1",
+        use_deep_routing: bool = True,
+        deep_routing_blend: float = 0.45,
+        use_moe: bool = True,
+        moe_blend: float = 0.25,
+        moe_train_on_query: bool = False,
     ):
         self.encoder = VectorEncoder()
         self.ckg = ckg if ckg is not None else CKGManager()
+        self.use_deep_routing = bool(use_deep_routing)
+        self.deep_routing_blend = float(max(0.0, min(1.0, deep_routing_blend)))
+        self.use_moe = bool(use_moe)
+        self.moe_blend = float(max(0.0, min(1.0, moe_blend)))
+        self.moe_train_on_query = bool(moe_train_on_query)
+        self._moe_bridge = None
+        self._deep_router = None
+        if self.use_deep_routing:
+            try:
+                from ai.deep_routing_network import get_default_deep_network
+                self._deep_router = get_default_deep_network()
+            except Exception:
+                self._deep_router = None
+        if self.use_moe:
+            try:
+                from ai.moe_ckg_bridge import get_moe_bridge
+                self._moe_bridge = get_moe_bridge(blend=self.moe_blend, enabled=True)
+            except Exception as _moe_init_err:
+                logger.warning("MoE bridge init failed: %s", _moe_init_err)
+                self._moe_bridge = None
 
         if core is not None:
             self.core = core
@@ -600,6 +627,51 @@ class ReasoningPipeline:
             "W_TOPOLOGY": round(float(decision_vec[3]), 6),
         }
 
+        # مزج عائلة الشبكات المعزولة: DeepRouting + DynamicWeight + NeuralWeight
+        if getattr(self, "use_deep_routing", False):
+            try:
+                ensemble = []  # (dict weights, blend coefficient)
+                # NeuralCore baseline already in weights — weight 1.0-b_total later
+                if getattr(self, "_deep_router", None) is not None:
+                    try:
+                        ensemble.append((self._deep_router.predict_routing_weights(context_vector), 0.35))
+                    except Exception:
+                        pass
+                try:
+                    from ai.dynamic_weight_layer import (
+                        get_default_dynamic_layer,
+                        extract_routing_weights_dynamic,
+                    )
+                    dyn = get_default_dynamic_layer()
+                    ensemble.append((extract_routing_weights_dynamic(dyn), 0.20))
+                    weights["_dynamic_layer"] = 1.0
+                except Exception:
+                    weights["_dynamic_layer"] = 0.0
+                try:
+                    from ai.neural_weights import get_default_layer, extract_routing_weights
+                    nl = get_default_layer()
+                    ensemble.append((extract_routing_weights(nl), 0.15))
+                    weights["_neural_weight_layer"] = 1.0
+                except Exception:
+                    weights["_neural_weight_layer"] = 0.0
+                if ensemble:
+                    keys = ("W_SEMANTIC", "W_SCORE", "W_MEMORY", "W_TOPOLOGY")
+                    b_sum = sum(b for _, b in ensemble)
+                    b_sum = min(0.85, max(0.1, b_sum))
+                    base_c = 1.0 - b_sum
+                    merged = {k: base_c * float(weights.get(k, 0.0)) for k in keys}
+                    for dw, b in ensemble:
+                        for k in keys:
+                            if k in dw:
+                                merged[k] += b * float(dw[k])
+                    s = sum(merged.values()) or 1.0
+                    for k in keys:
+                        weights[k] = round(merged[k] / s, 6)
+                    weights["_ensemble_routing"] = 1.0
+                    weights["_deep_routing"] = 1.0 if any(True for _ in ensemble) else 0.0
+            except Exception:
+                weights["_ensemble_routing"] = 0.0
+
         # إن كان target قد بُني بناءً على memory_hits قبل recall، أعد بناءه
         # هنا بشكل صحيح لإظهار target_used الفعلي (لا يُعاد التدريب).
         if target is not None:
@@ -608,8 +680,101 @@ class ReasoningPipeline:
         # 4: Decision
         ranked = self._decide(weights, matched, related, memory_hits, question=question)
 
+        # 4b: Hierarchical MoE — تعزيز ترتيب المفاهيم حسب مسار الخبراء
+        moe_info: Dict[str, Any] = {"moe_applied": False}
+        if getattr(self, "use_moe", False) and getattr(self, "_moe_bridge", None) is not None:
+            try:
+                from ai.moe_ckg_bridge import (
+                    moe_boost_pipeline_ranked,
+                    map_cluster_to_category,
+                )
+                if ranked:
+                    ranked, moe_info = moe_boost_pipeline_ranked(
+                        ranked,
+                        context_vector,
+                        question=question,
+                        blend=self.moe_blend,
+                    )
+                else:
+                    # لا مفاهيم بعد — نسجّل أوزان الفئات فقط للشفافية
+                    cw = self._moe_bridge.category_weights(context_vector, question)
+                    moe_info = {
+                        "moe_applied": bool(self._moe_bridge.available),
+                        "category_weights": cw,
+                        "note": "no_ranked_concepts",
+                    }
+                weights["_moe_routing"] = 1.0 if moe_info.get("moe_applied") else 0.0
+                if moe_info.get("category_weights"):
+                    top_cats = sorted(
+                        moe_info["category_weights"].items(),
+                        key=lambda kv: -kv[1],
+                    )[:3]
+                    for cat, w in top_cats:
+                        weights[f"_moe_cat_{cat}"] = round(float(w), 4)
+                # تدريب خفيف اختياري لراوتر المجموعات من clusters المطابقة
+                if self.moe_train_on_query and matched:
+                    prefs = []
+                    for m in matched:
+                        cat = map_cluster_to_category(m.cluster or "")
+                        if cat not in prefs:
+                            prefs.append(cat)
+                    if prefs:
+                        try:
+                            tr = self._moe_bridge.train_on_context(
+                                context_vector, prefs, steps=2
+                            )
+                            moe_info["moe_train"] = tr
+                        except Exception as _mt_err:
+                            logger.debug("moe train_on_query: %s", _mt_err)
+            except Exception as _moe_err:
+                logger.warning("MoE rerank skipped: %s", _moe_err)
+                weights["_moe_routing"] = 0.0
+        else:
+            weights["_moe_routing"] = 0.0
+
+        # تلخيص توجيه MoE للواجهة
+        moe_summary: Optional[Dict[str, Any]] = None
+        if moe_info.get("moe_applied") and moe_info.get("category_weights"):
+            ranked_cats = sorted(
+                moe_info["category_weights"].items(), key=lambda kv: -kv[1]
+            )
+            top_cat, top_w = ranked_cats[0]
+            second_w = ranked_cats[1][1] if len(ranked_cats) > 1 else 0.0
+            conf = float(min(1.0, top_w + 0.5 * (top_w - second_w)))
+            experts: List[str] = []
+            try:
+                if self._moe_bridge and self._moe_bridge.moe is not None:
+                    g = self._moe_bridge.moe.groups.get(top_cat)
+                    if g is not None:
+                        experts = list(g._id_order)[:4]
+            except Exception:
+                experts = []
+            moe_summary = {
+                "top": top_cat,
+                "confidence": round(conf, 4),
+                "weight": round(float(top_w), 4),
+                "alternatives": [
+                    {"category": c, "weight": round(float(w), 4)}
+                    for c, w in ranked_cats[1:3]
+                ],
+                "experts": experts,
+            }
+            moe_info["summary"] = moe_summary
+
         # 5: Answer
         answer_text = self._build_answer_text(question, ranked, weights)
+        if moe_summary:
+            alts = ", ".join(
+                f"{a['category']} ({a['weight']})" for a in moe_summary.get("alternatives") or []
+            )
+            exp = ", ".join(moe_summary.get("experts") or []) or "—"
+            banner = (
+                f"🧩 **توجيه MoE:** `{moe_summary['top']}` "
+                f"(ثقة {moe_summary['confidence']:.0%}) · خبراء: {exp}"
+            )
+            if alts:
+                banner += f" · بدائل: {alts}"
+            answer_text = banner + chr(10)*2 + answer_text
 
         # ── Experience Learning: بناء وتخزين Episode (Requirements #1,#2,#4,#5) ──
         episode_id: Optional[str] = None
@@ -657,6 +822,20 @@ class ReasoningPipeline:
                     logger.warning(f"NeuralCore autosave failed: {e}")
                 self._queries_since_save = 0
 
+        
+        # Reinforcement Learning: حدّث سياسة التوجيه من مكافأة الجودة
+        try:
+            from ai.reinforcement_learning import enable_rl_on_pipeline_result
+            _rl = enable_rl_on_pipeline_result(type("R", (), {
+                "decision_weights": weights,
+                "quality": quality,
+                "answer_text": answer_text,
+            })())
+            if isinstance(weights, dict) and _rl.get("weights_after"):
+                weights = {**weights, **_rl["weights_after"], "_rl_action": _rl.get("action"), "_rl_reward": _rl.get("reward")}
+        except Exception:
+            pass
+
         return PipelineResult(
             question=question,
             context_vector=context_vector.tolist(),
@@ -673,6 +852,7 @@ class ReasoningPipeline:
             quality=quality,
             net_architecture=self.core.net.architecture_str(),
             grew=grew,
+            moe_routing=moe_summary or moe_info,
         )
 
     def submit_feedback(
