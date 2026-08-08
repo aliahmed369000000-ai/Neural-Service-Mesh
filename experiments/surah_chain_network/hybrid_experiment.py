@@ -1,17 +1,15 @@
 """
-Surah-Chain Network — نموذج لغوي (LLM-style) بوسط سوري
+Surah-Chain LM — نموذج لغوي بوسط سوري + انتباه ذاتي قوي
 
 البنية:
-  [Input LLM] Embedding + موضع + LayerNorm + Adapter→7
-  [SurahChain ×114] من شبكهه_114-1.xlsx
-  [Output LLM] Adapter 7→d + LM Head مربوط (weight tying)
-  [Residual bypass] h += x @ W_skip  — حول اختناق البعد 7
+  Embedding + موضع + LN
+  → TransformerBlock × N_PRE  (Multi-Head Causal Attention + FFN)
+  → Adapter → SurahChain×114 → Adapter
+  → Residual bypass (W_skip)
+  → TransformerBlock × N_POST
+  → Tied LM Head
 
-قدرات LM:
-  - WordTokenizer (decode حقيقي) مع بناء قاموس من النصوص
-  - train_step / train_batch
-  - generate() مع temperature و top-k
-  - جدول LR: warmup + cosine decay
+قدرات: WordTokenizer, train_batch, cosine LR, generate.
 """
 from __future__ import annotations
 
@@ -35,9 +33,13 @@ _DIMS_PATH = _HERE / "surah_layer_dims.json"
 if not _DIMS_PATH.exists():
     raise FileNotFoundError(f"missing {_DIMS_PATH}")
 LAYER_DIMS: List[List[int]] = json.loads(_DIMS_PATH.read_text())
-CHAIN_WIDTH = int(LAYER_DIMS[0][0])  # 7
+CHAIN_WIDTH = int(LAYER_DIMS[0][0])
 VOCAB_SIZE = 8192
 DEFAULT_D_MODEL = 512
+DEFAULT_N_HEADS = 8
+DEFAULT_N_PRE = 2
+DEFAULT_N_POST = 2
+DEFAULT_D_FF_MULT = 4
 
 
 class LayerNorm1D:
@@ -51,13 +53,14 @@ class LayerNorm1D:
         mu = x.mean(axis=-1, keepdims=True)
         var = x.var(axis=-1, keepdims=True)
         xhat = (x - mu) / np.sqrt(var + self.eps)
-        self._cache = (xhat,)
+        self._cache = (xhat, mu, var)
         return xhat * self.g + self.b
 
     def backward(self, grad: np.ndarray, lr: float) -> np.ndarray:
-        (xhat,) = self._cache
+        xhat, mu, var = self._cache
         self.g -= lr * (grad * xhat).sum(axis=0)
         self.b -= lr * grad.sum(axis=0)
+        # تقريب شائع: تمرير التدرّج عبر الغيت فقط
         return grad * self.g
 
 
@@ -131,6 +134,185 @@ class SurahChainNetwork:
         return n
 
 
+class MultiHeadCausalAttention:
+    """انتباه ذاتي متعدد الرؤوس مع قناع سببي (Causal)."""
+
+    def __init__(self, d_model: int, n_heads: int = 8, seed: int = 0):
+        assert d_model % n_heads == 0, "d_model يجب أن يقبل القسمة على n_heads"
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.d_head = d_model // n_heads
+        rng = np.random.default_rng(seed)
+        scale = 0.02
+        self.W_q = rng.normal(0, scale, (d_model, d_model)).astype(np.float64)
+        self.W_k = rng.normal(0, scale, (d_model, d_model)).astype(np.float64)
+        self.W_v = rng.normal(0, scale, (d_model, d_model)).astype(np.float64)
+        self.W_o = rng.normal(0, scale, (d_model, d_model)).astype(np.float64)
+        self._cache = {}
+
+    def _split(self, x: np.ndarray) -> np.ndarray:
+        # (S, d) -> (n_heads, S, d_head)
+        S = x.shape[0]
+        return x.reshape(S, self.n_heads, self.d_head).transpose(1, 0, 2)
+
+    def _merge(self, x: np.ndarray) -> np.ndarray:
+        # (n_heads, S, d_head) -> (S, d)
+        return x.transpose(1, 0, 2).reshape(x.shape[1], self.d_model)
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        S = x.shape[0]
+        Q = self._split(x @ self.W_q)
+        K = self._split(x @ self.W_k)
+        V = self._split(x @ self.W_v)
+        scores = np.matmul(Q, np.transpose(K, (0, 2, 1))) / math.sqrt(self.d_head)
+        # causal mask
+        mask = np.triu(np.ones((S, S), dtype=np.float64), k=1) * (-1e9)
+        scores = scores + mask[None, :, :]
+        scores = scores - scores.max(axis=-1, keepdims=True)
+        weights = np.exp(scores)
+        weights = weights / (weights.sum(axis=-1, keepdims=True) + 1e-12)
+        attn = np.matmul(weights, V)  # (H, S, dh)
+        out = self._merge(attn) @ self.W_o
+        self._cache = {"x": x, "Q": Q, "K": K, "V": V, "weights": weights, "attn": attn}
+        return out
+
+    def backward(self, grad: np.ndarray, lr: float) -> np.ndarray:
+        x = self._cache["x"]
+        Q, K, V = self._cache["Q"], self._cache["K"], self._cache["V"]
+        weights = self._cache["weights"]
+        attn = self._cache["attn"]
+        S = x.shape[0]
+
+        # out = merge(attn) @ W_o
+        merged = self._merge(attn)
+        g_W_o = merged.T @ grad
+        g_merged = grad @ self.W_o.T
+        np.clip(g_W_o, -1, 1, out=g_W_o)
+        self.W_o -= lr * g_W_o
+
+        g_attn = self._split(g_merged)  # (H,S,dh)
+
+        # attn = weights @ V
+        g_weights = np.matmul(g_attn, np.transpose(V, (0, 2, 1)))  # (H,S,S)
+        g_V = np.matmul(np.transpose(weights, (0, 2, 1)), g_attn)
+
+        # softmax backward (approx per row)
+        # dL/ds_i = w_i * (g_i - sum_j w_j g_j)
+        sum_gw = (g_weights * weights).sum(axis=-1, keepdims=True)
+        g_scores = weights * (g_weights - sum_gw)
+
+        scale = 1.0 / math.sqrt(self.d_head)
+        g_Q = np.matmul(g_scores, K) * scale
+        g_K = np.matmul(np.transpose(g_scores, (0, 2, 1)), Q) * scale
+
+        g_q = self._merge(g_Q)
+        g_k = self._merge(g_K)
+        g_v = self._merge(g_V)
+
+        g_W_q = x.T @ g_q
+        g_W_k = x.T @ g_k
+        g_W_v = x.T @ g_v
+        for gW, W in ((g_W_q, "W_q"), (g_W_k, "W_k"), (g_W_v, "W_v")):
+            np.clip(gW, -1, 1, out=gW)
+        self.W_q -= lr * g_W_q
+        self.W_k -= lr * g_W_k
+        self.W_v -= lr * g_W_v
+
+        g_x = g_q @ self.W_q.T + g_k @ self.W_k.T + g_v @ self.W_v.T
+        return g_x
+
+
+class FeedForward:
+    def __init__(self, d_model: int, d_ff: int, seed: int = 0):
+        rng = np.random.default_rng(seed)
+        self.W1 = rng.normal(0, 0.02, (d_ff, d_model)).astype(np.float64)
+        self.b1 = np.zeros(d_ff, dtype=np.float64)
+        self.W2 = rng.normal(0, 0.02, (d_model, d_ff)).astype(np.float64)
+        self.b2 = np.zeros(d_model, dtype=np.float64)
+        self._cache = {}
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        h = x @ self.W1.T + self.b1
+        a = np.maximum(h, 0)  # ReLU
+        out = a @ self.W2.T + self.b2
+        self._cache = {"x": x, "h": h, "a": a}
+        return out
+
+    def backward(self, grad: np.ndarray, lr: float) -> np.ndarray:
+        x, h, a = self._cache["x"], self._cache["h"], self._cache["a"]
+        g_W2 = grad.T @ a
+        g_b2 = grad.sum(axis=0)
+        g_a = grad @ self.W2
+        g_h = g_a * (h > 0)
+        g_W1 = g_h.T @ x
+        g_b1 = g_h.sum(axis=0)
+        g_x = g_h @ self.W1
+        for arr in (g_W1, g_W2, g_b1, g_b2):
+            np.clip(arr, -1, 1, out=arr)
+        self.W1 -= lr * g_W1
+        self.b1 -= lr * g_b1
+        self.W2 -= lr * g_W2
+        self.b2 -= lr * g_b2
+        return g_x
+
+
+class TransformerBlock:
+    """Pre-LN: x + Attn(LN(x)) ثم x + FFN(LN(x))."""
+
+    def __init__(self, d_model: int, n_heads: int, d_ff: int, seed: int = 0):
+        self.ln1 = LayerNorm1D(d_model)
+        self.attn = MultiHeadCausalAttention(d_model, n_heads, seed=seed)
+        self.ln2 = LayerNorm1D(d_model)
+        self.ffn = FeedForward(d_model, d_ff, seed=seed + 1)
+        self._cache = {}
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        n1 = self.ln1.forward(x)
+        a = self.attn.forward(n1)
+        x = x + a
+        n2 = self.ln2.forward(x)
+        f = self.ffn.forward(n2)
+        out = x + f
+        self._cache = {"x_in": self._cache.get("x_in"), "after_attn": x}
+        self._cache["x0"] = None
+        self._x0 = None
+        self._after_attn = x - f  # x before ffn residual was x after attn residual
+        # store properly
+        self._res1_in = None
+        return out
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        self._x = x
+        n1 = self.ln1.forward(x)
+        a = self.attn.forward(n1)
+        x2 = x + a
+        self._x2 = x2
+        n2 = self.ln2.forward(x2)
+        f = self.ffn.forward(n2)
+        return x2 + f
+
+    def backward(self, grad: np.ndarray, lr: float) -> np.ndarray:
+        # out = x2 + ffn(ln2(x2))
+        g_x2 = grad
+        g_f = grad
+        g_n2 = self.ffn.backward(g_f, lr)
+        g_x2 = g_x2 + self.ln2.backward(g_n2, lr)
+        # x2 = x + attn(ln1(x))
+        g_x = g_x2
+        g_a = g_x2
+        g_n1 = self.attn.backward(g_a, lr)
+        g_x = g_x + self.ln1.backward(g_n1, lr)
+        return g_x
+
+    def param_count(self) -> int:
+        n = 0
+        for W in (self.attn.W_q, self.attn.W_k, self.attn.W_v, self.attn.W_o):
+            n += W.size
+        n += self.ffn.W1.size + self.ffn.W2.size + self.ffn.b1.size + self.ffn.b2.size
+        n += self.ln1.g.size * 2 + self.ln2.g.size * 2
+        return n
+
+
 def _sinusoidal_positions(seq_len: int, d_model: int) -> np.ndarray:
     pos = np.zeros((seq_len, d_model), dtype=np.float64)
     for i in range(seq_len):
@@ -142,14 +324,7 @@ def _sinusoidal_positions(seq_len: int, d_model: int) -> np.ndarray:
     return pos
 
 
-def cosine_lr(
-    step: int,
-    total_steps: int,
-    base_lr: float,
-    warmup_steps: int = 0,
-    min_lr_ratio: float = 0.1,
-) -> float:
-    """Warmup خطي ثم cosine decay حتى min_lr_ratio * base_lr."""
+def cosine_lr(step, total_steps, base_lr, warmup_steps=0, min_lr_ratio=0.1):
     if total_steps <= 0:
         return base_lr
     if warmup_steps > 0 and step < warmup_steps:
@@ -162,10 +337,6 @@ def cosine_lr(
 
 
 class HybridExperimentModel:
-    """
-    نموذج لغوي: WordTokenizer → LLM Input → SurahChain → Tied LM Head.
-    """
-
     def __init__(
         self,
         d_model: int = DEFAULT_D_MODEL,
@@ -173,16 +344,26 @@ class HybridExperimentModel:
         vocab_size: int = VOCAB_SIZE,
         lr: float = 1e-3,
         seed: int = 42,
-        tokenizer: str = "word",  # "word" | "hash"
+        tokenizer: str = "word",
         vocab_path: Optional[str] = None,
+        n_heads: int = DEFAULT_N_HEADS,
+        n_pre: int = DEFAULT_N_PRE,
+        n_post: int = DEFAULT_N_POST,
+        d_ff_mult: int = DEFAULT_D_FF_MULT,
     ):
         if project_d_model is not None:
             d_model = project_d_model
+        # d_model divisible by n_heads
+        if d_model % n_heads != 0:
+            d_model = (d_model // n_heads) * n_heads
         self.d_model = int(d_model)
         self.vocab_size = int(vocab_size)
         self.base_lr = float(lr)
         self.lr = float(lr)
         self.seed = seed
+        self.n_heads = n_heads
+        self.n_pre = n_pre
+        self.n_post = n_post
 
         if tokenizer == "hash":
             self.tokenizer: Union[WordTokenizer, HashTokenizer] = HashTokenizer(vocab_size)
@@ -197,28 +378,34 @@ class HybridExperimentModel:
         rng = np.random.default_rng(seed)
         self.E = rng.normal(0.0, 0.02, (self.vocab_size, self.d_model)).astype(np.float64)
         self.ln_in = LayerNorm1D(self.d_model)
+
+        d_ff = self.d_model * d_ff_mult
+        self.pre_blocks = [
+            TransformerBlock(self.d_model, n_heads, d_ff, seed=seed + 10 + i)
+            for i in range(n_pre)
+        ]
+        self.post_blocks = [
+            TransformerBlock(self.d_model, n_heads, d_ff, seed=seed + 50 + i)
+            for i in range(n_post)
+        ]
+
         lim = np.sqrt(6.0 / (self.d_model + CHAIN_WIDTH))
         self.W_in = rng.uniform(-lim, lim, (CHAIN_WIDTH, self.d_model)).astype(np.float64)
         self.W_out = rng.uniform(-lim, lim, (self.d_model, CHAIN_WIDTH)).astype(np.float64)
         self.b_out = np.zeros(self.d_model, dtype=np.float64)
-        # مسار متبقٍّ حول السلسلة: يخفّف اختناق البعد 7 ويبقي تدرّج LM أقوى
         lim_s = np.sqrt(6.0 / (self.d_model + self.d_model))
         self.W_skip = rng.uniform(-lim_s, lim_s, (self.d_model, self.d_model)).astype(np.float64)
         self.use_residual_bypass = True
         self._cache: dict = {}
 
     def build_tokenizer_from_texts(self, texts: Sequence[str], max_vocab: Optional[int] = None) -> int:
-        """يبني قاموس WordTokenizer من نصوص التدريب (يجب قبل تدريب جدّي)."""
         if not isinstance(self.tokenizer, WordTokenizer):
             self.tokenizer = WordTokenizer(self.vocab_size)
         n = self.tokenizer.build_from_texts(list(texts), max_vocab=max_vocab or self.vocab_size)
         self.vocab_size = max(self.vocab_size, n)
-        # توسيع E إن لزم
         if self.E.shape[0] < self.vocab_size:
             rng = np.random.default_rng(self.seed)
-            extra = rng.normal(
-                0.0, 0.02, (self.vocab_size - self.E.shape[0], self.d_model)
-            ).astype(np.float64)
+            extra = rng.normal(0.0, 0.02, (self.vocab_size - self.E.shape[0], self.d_model)).astype(np.float64)
             self.E = np.vstack([self.E, extra])
         return n
 
@@ -233,41 +420,39 @@ class HybridExperimentModel:
         self._cache["ids"] = ids
         return x
 
-    def _to_chain(self, x: np.ndarray) -> np.ndarray:
-        self._cache["x_for_adapter"] = x
-        return x @ self.W_in.T
-
-    def _from_chain(self, h7: np.ndarray) -> np.ndarray:
-        self._cache["h7"] = h7
-        return h7 @ self.W_out.T + self.b_out
-
-    def _lm_logits(self, h: np.ndarray) -> np.ndarray:
-        self._cache["h"] = h
-        return h @ self.E.T
-
     def forward_logits(self, ids: np.ndarray) -> np.ndarray:
         x = self._encode_input(ids)
-        h7 = self._to_chain(x)
+        for blk in self.pre_blocks:
+            x = blk.forward(x)
+        self._cache["x_pre"] = x
+
+        h7 = x @ self.W_in.T
+        self._cache["x_for_adapter"] = x
         h7o = self.chain.forward(h7)
-        h = self._from_chain(h7o)
-        if getattr(self, "use_residual_bypass", False):
-            h = h + x @ self.W_skip.T
+        self._cache["h7"] = h7o
+        h_chain = h7o @ self.W_out.T + self.b_out
+        if self.use_residual_bypass:
+            h = h_chain + x @ self.W_skip.T
             self._cache["x_skip"] = x
-        return self._lm_logits(h)
+        else:
+            h = h_chain
+
+        for blk in self.post_blocks:
+            h = blk.forward(h)
+        self._cache["h"] = h
+        return h @ self.E.T
 
     def train_step(self, text: str, max_len: int = 64) -> Optional[float]:
         ids = self.tokenizer.encode(text, max_len)
         if len(ids) < 2:
             return None
         inp = np.asarray(ids[:-1], dtype=np.int64)
-        tgt = np.asarray(ids[1:], dtype=np.int64)
-        tgt = np.clip(tgt, 0, self.E.shape[0] - 1)
+        tgt = np.clip(np.asarray(ids[1:], dtype=np.int64), 0, self.E.shape[0] - 1)
 
         logits = self.forward_logits(inp)
         z = logits - logits.max(axis=-1, keepdims=True)
         exp = np.exp(z)
         probs = exp / exp.sum(axis=-1, keepdims=True)
-
         n = len(tgt)
         loss = -np.log(np.clip(probs[np.arange(n), tgt], 1e-10, 1.0)).mean()
 
@@ -281,9 +466,12 @@ class HybridExperimentModel:
         np.clip(g_E, -1.0, 1.0, out=g_E)
         self.E -= self.lr * g_E
 
-        # تدرّج المسار المتبقّي (حول السلسلة)
+        for blk in reversed(self.post_blocks):
+            g_h = blk.backward(g_h, self.lr)
+
         g_x_skip = None
-        if getattr(self, "use_residual_bypass", False) and "x_skip" in self._cache:
+        g_chain_side = g_h
+        if self.use_residual_bypass and "x_skip" in self._cache:
             x_skip = self._cache["x_skip"]
             g_W_skip = g_h.T @ x_skip
             np.clip(g_W_skip, -5.0, 5.0, out=g_W_skip)
@@ -291,13 +479,12 @@ class HybridExperimentModel:
             g_x_skip = g_h @ self.W_skip
 
         h7 = self._cache["h7"]
-        g_W_out = g_h.T @ h7
-        g_b = g_h.sum(axis=0)
+        g_W_out = g_chain_side.T @ h7
+        g_b = g_chain_side.sum(axis=0)
         np.clip(g_W_out, -5.0, 5.0, out=g_W_out)
         self.W_out -= self.lr * g_W_out
         self.b_out -= self.lr * g_b
-        g7o = g_h @ self.W_out
-
+        g7o = g_chain_side @ self.W_out
         g7 = self.chain.backward(g7o, self.lr)
 
         x = self._cache["x_for_adapter"]
@@ -308,28 +495,17 @@ class HybridExperimentModel:
         if g_x_skip is not None:
             g_x = g_x + g_x_skip
 
+        for blk in reversed(self.pre_blocks):
+            g_x = blk.backward(g_x, self.lr)
+
         g_x = self.ln_in.backward(g_x, self.lr)
         for i, tid in enumerate(self._cache["ids"]):
             self.E[tid] -= self.lr * np.clip(g_x[i], -1.0, 1.0)
-
         return float(loss)
 
-    def train_batch(
-        self,
-        texts: Sequence[str],
-        max_len: int = 64,
-        step: Optional[int] = None,
-        total_steps: Optional[int] = None,
-        warmup_steps: int = 0,
-    ) -> float:
-        """
-        دفعة نصوص: يحدّث LR حسب cosine+warmup إن مُرّر step/total_steps،
-        ثم يدرّب كل جملة في الدفعة ويُرجع متوسط الخسارة.
-        """
+    def train_batch(self, texts, max_len=64, step=None, total_steps=None, warmup_steps=0):
         if step is not None and total_steps is not None:
-            self.set_lr(
-                cosine_lr(step, total_steps, self.base_lr, warmup_steps=warmup_steps)
-            )
+            self.set_lr(cosine_lr(step, total_steps, self.base_lr, warmup_steps=warmup_steps))
         losses = []
         for t in texts:
             loss = self.train_step(t, max_len=max_len)
@@ -337,19 +513,8 @@ class HybridExperimentModel:
                 losses.append(loss)
         return float(np.mean(losses)) if losses else float("nan")
 
-    def generate(
-        self,
-        prompt: str,
-        max_new_tokens: int = 32,
-        temperature: float = 0.9,
-        top_k: int = 40,
-        max_ctx: int = 96,
-    ) -> str:
-        """
-        توليد سببي (autoregressive): يضيف رمزاً واحداً كل مرة حتى EOS أو الحد.
-        """
+    def generate(self, prompt, max_new_tokens=32, temperature=0.9, top_k=40, max_ctx=96):
         ids = list(self.tokenizer.encode(prompt, max_ctx))
-        # أزل EOS الختامي من الـprompt إن وُجد ليُكمِل التوليد
         eos = getattr(self.tokenizer, "EOS", 3)
         bos = getattr(self.tokenizer, "BOS", 2)
         pad = getattr(self.tokenizer, "PAD", 0)
@@ -357,21 +522,16 @@ class HybridExperimentModel:
             ids = ids[:-1]
         if not ids:
             ids = [bos]
-
         for _ in range(max_new_tokens):
             ctx = np.asarray(ids[-max_ctx:], dtype=np.int64)
             logits = self.forward_logits(ctx)
             next_logits = logits[-1].astype(np.float64)
-
-            # امنع PAD/BOS في العيّنة
             next_logits[pad] = -1e9
             next_logits[bos] = -1e9
-
             if top_k and top_k > 0:
                 k = min(top_k, next_logits.size)
                 thresh = np.partition(next_logits, -k)[-k]
                 next_logits = np.where(next_logits < thresh, -1e9, next_logits)
-
             temp = max(temperature, 1e-6)
             next_logits = next_logits / temp
             next_logits -= next_logits.max()
@@ -381,19 +541,21 @@ class HybridExperimentModel:
             ids.append(nid)
             if nid == eos:
                 break
-
         return self.tokenizer.decode(ids, skip_special=True)
 
     def param_count(self) -> dict:
+        attn_params = sum(b.param_count() for b in self.pre_blocks + self.post_blocks)
         return {
             "chain": self.chain.param_count(),
+            "attention_blocks": attn_params,
             "embedding_E": int(self.E.size),
-            "adapters": int(self.W_in.size + self.W_out.size + self.b_out.size + getattr(self, "W_skip", np.zeros(0)).size),
+            "adapters": int(self.W_in.size + self.W_out.size + self.b_out.size + self.W_skip.size),
             "d_model": self.d_model,
+            "n_heads": self.n_heads,
+            "n_pre": self.n_pre,
+            "n_post": self.n_post,
             "vocab_size": self.vocab_size,
             "tokenizer": type(self.tokenizer).__name__,
-            "chain_width": CHAIN_WIDTH,
-            "n_chain_layers": len(self.chain.layers),
         }
 
 
@@ -403,20 +565,11 @@ SurahChainLM = HybridExperimentModel
 if __name__ == "__main__":
     from hybrid_data import SENTENCES
 
-    print("SurahChain LM — فحص generate + batch")
-    m = HybridExperimentModel(d_model=128, lr=2e-3, tokenizer="word")
+    print("SurahChain LM + Multi-Head Attention — فحص")
+    m = HybridExperimentModel(d_model=128, n_heads=4, n_pre=1, n_post=1, lr=1e-3)
     m.build_tokenizer_from_texts(SENTENCES)
-    print("params:", m.param_count())
-    print("vocab words:", len(getattr(m.tokenizer, "word_to_id", {})))
-
-    losses = []
-    for step, batch_start in enumerate(range(0, len(SENTENCES), 8)):
-        batch = SENTENCES[batch_start : batch_start + 8]
-        loss = m.train_batch(batch, step=step, total_steps=20, warmup_steps=2)
-        losses.append(loss)
-        if step >= 5:
-            break
-    print("batch losses:", [round(x, 3) for x in losses])
-
-    out = m.generate("الصبر", max_new_tokens=12, temperature=0.8, top_k=20)
-    print("generate('الصبر') →", out)
+    print(m.param_count())
+    losses = [m.train_step(s) for s in SENTENCES[:12]]
+    losses = [x for x in losses if x is not None]
+    print("losses", [round(x, 3) for x in losses[:6]], "...", round(losses[-1], 3) if losses else None)
+    print("gen:", m.generate("الصبر", max_new_tokens=10, temperature=0.8))

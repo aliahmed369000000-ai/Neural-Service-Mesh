@@ -90,3 +90,24 @@ python experiments/surah_chain_network/hybrid_experiment.py
 # تدريب على CKG (عيّنة قابلة للضبط)
 SCN_N=1500 SCN_EPOCHS=8 python experiments/surah_chain_network/train_ckg_lm.py
 ```
+
+
+## انتباه قوي + تدريب طويل
+
+المعمارية الحالية:
+
+```
+Embedding+Pos+LN
+  → TransformerBlock ×2  (Multi-Head Causal Attention 8 رؤوس + FFN)
+  → Adapter → SurahChain×114 → Adapter + W_skip
+  → TransformerBlock ×2
+  → Tied LM Head
+```
+
+```bash
+# تدريب طويل على CKG (افتراضي: 5000 جملة × 20 عصر × 8 رؤوس)
+python experiments/surah_chain_network/train_ckg_lm.py
+
+SCN_N=8000 SCN_EPOCHS=30 SCN_D_MODEL=256 SCN_N_HEADS=8 \
+  SCN_N_PRE=2 SCN_N_POST=2 python experiments/surah_chain_network/train_ckg_lm.py
+```

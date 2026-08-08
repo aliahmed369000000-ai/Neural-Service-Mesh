@@ -1,16 +1,7 @@
 """
-تدريب SurahChain LM على جمل CKG (ckg_sentences*.pkl).
+تدريب طويل SurahChain LM + Multi-Head Attention على جمل CKG.
 
-من جذر المستودع:
-  python experiments/surah_chain_network/train_ckg_lm.py
-
-متغيرات بيئة:
-  SCN_N          عدد الجمل (افتراضي 1500)
-  SCN_EPOCHS     (افتراضي 8)
-  SCN_BATCH      (افتراضي 16)
-  SCN_D_MODEL    (افتراضي 256)
-  SCN_LR         (افتراضي 1e-3)
-  SCN_MAX_LEN    (افتراضي 64)
+  SCN_N=5000 SCN_EPOCHS=20 python experiments/surah_chain_network/train_ckg_lm.py
 """
 from __future__ import annotations
 
@@ -36,13 +27,16 @@ CKPT_LATEST = CKPT_DIR / "latest_ckg_lm.pkl"
 VOCAB_PATH = _HERE / "tokenizer_vocab_ckg.json"
 STATE_FILE = CKPT_DIR / "ckg_lm_train_state.json"
 
-N = int(os.environ.get("SCN_N", "1500"))
-EPOCHS = int(os.environ.get("SCN_EPOCHS", "8"))
+N = int(os.environ.get("SCN_N", "5000"))
+EPOCHS = int(os.environ.get("SCN_EPOCHS", "20"))
 BATCH = int(os.environ.get("SCN_BATCH", "16"))
 D_MODEL = int(os.environ.get("SCN_D_MODEL", "256"))
-BASE_LR = float(os.environ.get("SCN_LR", "1e-3"))
+N_HEADS = int(os.environ.get("SCN_N_HEADS", "8"))
+N_PRE = int(os.environ.get("SCN_N_PRE", "2"))
+N_POST = int(os.environ.get("SCN_N_POST", "2"))
+BASE_LR = float(os.environ.get("SCN_LR", "8e-4"))
 MAX_LEN = int(os.environ.get("SCN_MAX_LEN", "64"))
-WARMUP_RATIO = 0.08
+WARMUP_RATIO = 0.1
 
 
 def load_ckg_sentences(max_n: int) -> list:
@@ -51,7 +45,7 @@ def load_ckg_sentences(max_n: int) -> list:
         _REPO / "ckg_sentences.pkl",
         _REPO / "ckg_sentences_general_ar.pkl",
     ]
-    all_s: list = []
+    all_s = []
     for p in paths:
         if not p.exists():
             continue
@@ -61,7 +55,6 @@ def load_ckg_sentences(max_n: int) -> list:
             all_s.extend(
                 [s.strip() for s in data if isinstance(s, str) and len(s.strip()) >= 8]
             )
-    # unique
     seen, out = set(), []
     rng = np.random.default_rng(0)
     rng.shuffle(all_s)
@@ -79,22 +72,32 @@ def main():
     CKPT_DIR.mkdir(parents=True, exist_ok=True)
     texts = load_ckg_sentences(N)
     if len(texts) < 10:
-        raise SystemExit(
-            "لا جمل CKG — تأكد من وجود ckg_sentences_v3.pkl في جذر المستودع"
-        )
-    print(f"جمل CKG لل訓練: {len(texts)}")
+        raise SystemExit("لا جمل CKG — ضع ckg_sentences_v3.pkl في جذر المستودع")
+    print(f"جمل CKG: {len(texts)}")
     print("عينة:", texts[:2])
 
-    m = HybridExperimentModel(d_model=D_MODEL, lr=BASE_LR, tokenizer="word")
-    n_vocab = m.build_tokenizer_from_texts(texts, max_vocab=min(8192, max(2000, len(texts) // 2)))
+    m = HybridExperimentModel(
+        d_model=D_MODEL,
+        lr=BASE_LR,
+        tokenizer="word",
+        n_heads=N_HEADS,
+        n_pre=N_PRE,
+        n_post=N_POST,
+    )
+    n_vocab = m.build_tokenizer_from_texts(
+        texts, max_vocab=min(8192, max(3000, len(texts)))
+    )
     m.tokenizer.save(str(VOCAB_PATH))
-    print(f"قاموس: {n_vocab} → {VOCAB_PATH.name}")
+    print(f"قاموس: {n_vocab}")
     print("params:", m.param_count())
 
     steps_per_epoch = max(1, (len(texts) + BATCH - 1) // BATCH)
     total_steps = EPOCHS * steps_per_epoch
     warmup = max(1, int(total_steps * WARMUP_RATIO))
-    print(f"epochs={EPOCHS} batch={BATCH} steps={total_steps} warmup={warmup} max_len={MAX_LEN}")
+    print(
+        f"epochs={EPOCHS} batch={BATCH} steps={total_steps} warmup={warmup} "
+        f"heads={N_HEADS} pre={N_PRE} post={N_POST}"
+    )
 
     best = float("inf")
     history = []
@@ -124,7 +127,7 @@ def main():
             with open(CKPT_BEST, "wb") as f:
                 pickle.dump(m, f)
             mark = " *best*"
-        print(f"epoch {ep:03d}/{EPOCHS}  loss={mean_l:.4f}  lr={m.lr:.5f}{mark}")
+        print(f"epoch {ep:03d}/{EPOCHS}  loss={mean_l:.4f}  lr={m.lr:.6f}{mark}")
 
     with open(CKPT_LATEST, "wb") as f:
         pickle.dump(m, f)
@@ -135,15 +138,16 @@ def main():
         "history": history,
         "seconds": round(time.time() - t0, 1),
         "d_model": D_MODEL,
+        "n_heads": N_HEADS,
+        "n_pre": N_PRE,
+        "n_post": N_POST,
         "vocab": n_vocab,
-        "max_len": MAX_LEN,
-        "residual_bypass": True,
     }
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2))
     print("-" * 50)
     print(f"أفضل loss={best:.4f}  زمن={state['seconds']}s")
-    for prompt in ("الصبر", "القرآن", "سورة", "الإيمان"):
-        gen = m.generate(prompt, max_new_tokens=20, temperature=0.85, top_k=30, max_ctx=96)
+    for prompt in ("الصبر", "القرآن", "سورة", "الإيمان", "العلم"):
+        gen = m.generate(prompt, max_new_tokens=24, temperature=0.8, top_k=30, max_ctx=96)
         print(f"  generate({prompt!r}) → {gen}")
 
 
