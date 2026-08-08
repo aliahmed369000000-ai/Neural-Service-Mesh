@@ -29,13 +29,17 @@ def render_search():
     for i, ex in enumerate(examples):
         with ex_cols[i]:
             if st.button(ex, key=f"ex_{i}", use_container_width=True):
-                query = ex
                 st.session_state["search_query"] = ex
+                st.rerun()
 
     st.markdown("---")
 
     if not query.strip():
-        st.info("اكتب مفهوماً في خانة البحث أعلاه لاستكشاف قاعدة المعرفة.")
+        st.info(
+            "اكتب مفهوماً في خانة البحث أعلاه، أو اختر أحد الأمثلة السريعة. "
+            "النظام يستكشف قاعدة المعرفة المعرفية (CKG) والجذور والآيات المرتبطة."
+        )
+        st.caption("💡 نصيحة: بعد ظهور النتائج يمكنك النقر على أي مفهوم مرتبط للانتقال إليه مباشرة.")
         return
 
     # تنفيذ البحث
@@ -43,7 +47,21 @@ def render_search():
         result = search_knowledge(query.strip())
 
     if not result["found"]:
-        st.warning(f"لم يُعثر على معلومات كافية عن «{query}» حتى الآن. يتعلم النظام بشكل مستمر!")
+        st.warning(
+            f"لم يُعثر على معلومات كافية عن «{query}» حتى الآن. "
+            "يتعلم النظام بشكل مستمر — جرّب مفهوماً أقرب أو أحد الأمثلة أعلاه."
+        )
+        # إن وُجدت جذور/تطابقات جزئية اعرضها كاقتراحات سريعة
+        _hints = result.get("root_matches") or []
+        if _hints:
+            st.caption("اقتراحات قريبة:")
+            _hcols = st.columns(min(6, len(_hints)))
+            for _i, _h in enumerate(_hints[:6]):
+                _name = _h[0] if isinstance(_h, (list, tuple)) else str(_h)
+                with _hcols[_i]:
+                    if st.button(_name, key=f"nf_hint_{_i}", use_container_width=True):
+                        st.session_state["search_query"] = _name
+                        st.rerun()
         return
 
     # ── عرض النتائج ──────────────────────────────────────────────────────
@@ -77,10 +95,20 @@ def render_search():
 
     if related_concepts:
         st.markdown('<div class="section-header">🔗 المفاهيم المرتبطة</div>', unsafe_allow_html=True)
-        tags_html = ""
-        for concept in related_concepts[:12]:
-            tags_html += f'<span class="related-tag">{concept}</span>'
-        st.markdown(tags_html, unsafe_allow_html=True)
+        st.caption("انقر على أي مفهوم لاستكشافه:")
+        _rel_list = list(related_concepts[:12])
+        _ncols = min(6, max(1, len(_rel_list)))
+        _rcols = st.columns(_ncols)
+        for _i, concept in enumerate(_rel_list):
+            with _rcols[_i % _ncols]:
+                if st.button(
+                    str(concept),
+                    key=f"rel_concept_{_i}_{concept}",
+                    use_container_width=True,
+                    help=f"البحث عن: {concept}",
+                ):
+                    st.session_state["search_query"] = str(concept)
+                    st.rerun()
 
     # ── العلاقات من CKG ──────────────────────────────────────────────────
     if result["ckg_relations"]:
