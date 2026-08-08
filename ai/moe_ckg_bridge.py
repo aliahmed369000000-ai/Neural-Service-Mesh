@@ -68,40 +68,47 @@ _CLUSTER_TO_CATEGORY: Dict[str, str] = {
 }
 
 _KEYWORD_TO_CATEGORY: List[Tuple[str, str]] = [
-    (r"فق[هھ]|حنفي|مالكي|شافعي|حنبلي|صلاة|زكاة|صوم|حج|طهارة|وضوء|نكاح|طلاق", "fiqh"),
+    # أولوية عالية: تمييز الالتباس الشائع أولاً
+    (r"سيرة\s*ذاتية|مقابلة\s*عمل|وظيفة|مهارة\s*وظيف|cv\b|resume", "career"),
+    (r"قانون\s*نيوتن|فيزياء|كيمياء|أحياء|بيولوجيا|علوم\s*طبيعي", "science"),
+    (r"وصفة|مطبخ|أكلة|مكونات\s*الطبخ|طبخ", "cooking"),
+    (r"سيرة\s*نبوية|غزوة|صحابة|خلافة\s*الراشد|الهجرة\s*النبوية|السيرة\s*النبوية", "seerah"),
+    # دين
+    (r"فق[هھ]|حنفي|مالكي|شافعي|حنبلي|صلاة|زكاة|صوم|حج|طهارة|وضوء|نكاح|طلاق|فتوى", "fiqh"),
     (r"تفسير|آية|آيات|سورة|قرآن|قران", "tafsir"),
     (r"حديث|أحاديث|رواة|إسناد|بخاري|ترمذي|تخريج", "hadith"),
-    (r"عقيدة|توحيد|إيمان|أسماء\s*الله|قدر|شرك|مذاهب\s*عقد", "aqidah"),
-    (r"سيرة|غزوة|صحابة|خلافة|نبوي|الهجرة", "seerah"),
+    (r"عقيدة|توحيد|إيمان|أسماء\s*الله|قدر|شرك|أركان\s*الإيمان", "aqidah"),
     (r"أصول\s*الفقه|قواعد\s*فقهي|مقاصد\s*الشريعة", "usul"),
     (r"تجويد|قراءات|حفظ\s*القرآن|مخارج\s*الحروف", "tajweed"),
-    (r"تمويل\s*إسلامي|مرابحة|صكوك|تأمين\s*تكافلي|ربا", "islamic_finance"),
+    (r"تمويل\s*إسلامي|مرابحة|صكوك|تأمين\s*تكافلي|\bربا\b", "islamic_finance"),
     (r"نحو|صرف|بلاغة|إعراب|لغة\s*عربي", "arabic"),
     (r"شعر|قصيدة|رواية|أدب|نقد\s*أدبي", "literature"),
-    (r"برمج|برمجة|python|جافا|javascript|كود|خوارزمي|git|api|android|ios", "programming"),
+    # تقنية
+    (r"برمج|برمجة|python|جافا|javascript|كود|خوارزمي|\bgit\b|\bapi\b|android|ios", "programming"),
     (r"ذكاء\s*اصطناعي|شبكات|حاسوب|سيرفر|أمن\s*سيبراني|سحابة|devops|docker", "technology"),
-    (r"فيزياء|كيمياء|أحياء|بيولوجيا|علوم\s*طبيعي", "science"),
     (r"رياضيا|رياضيات|جبر|هندسة\s*مستوية|إحصاء|تفاضل|تكامل", "math"),
     (r"فلك|نجوم|كوكب|مجرة|تلسكوب", "astronomy"),
-    (r"جغرافيا|قارة|مناخ\s*إقليم|خريطة|تضاريس", "geography"),
+    (r"جغرافيا|قارة|خريطة|تضاريس", "geography"),
     (r"هندسة\s*مدنية|كهربائية|ميكانيك|مهندس", "engineering"),
-    (r"طب|مرض|علاج|دواء|صحة|إسعاف|مستشفى", "medicine"),
+    (r"طبي[ب]?|مرض|علاج|دواء|إسعاف|مستشفى|أعراض|عيادة", "medicine"),
     (r"علم\s*نفس|قلق|اكتئاب|سلوك|شخصية", "psychology"),
     (r"رياضة|كرة\s*قدم|مباراة|لياقة|أولمبي|جيم", "sports"),
-    (r"أسرة|زواج|تربية\s*أطفال|أبوين|مراهق", "family"),
-    (r"طبخ|وصفة|مطبخ|أكلة|مكونات\s*الطبخ", "cooking"),
+    (r"أسرة|زواج|تربية\s*أطفال|مراهق", "family"),
     (r"سفر|سياحة|تأشيرة|عمرة|فندق|رحلة", "travel"),
     (r"بيئة|تلوث|مناخ|استدامة|تدوير", "environment"),
-    (r"زراعة|محصول|ماشية|مزرعة|ري\s*زراعي", "agriculture"),
+    (r"زراعة|محصول|ماشية|مزرعة", "agriculture"),
     (r"تسويق|مبيعات|إدارة\s*أعمال|شركة|ريادة", "business"),
     (r"اقتصاد|تضخم|ناتج\s*محلي|سوق\s*مالية|عرض\s*وطلب", "economy"),
-    (r"قانون|محكمة|دعوى|تشريع|محام|عقد\s*قانوني", "law"),
-    (r"وظيفة|سيرة\s*ذاتية|مقابلة\s*عمل|مهارة\s*وظيف", "career"),
+    (r"محكمة|دعوى|تشريع|محام|عقد\s*قانوني|القانون\s*المدني", "law"),
     (r"تعليم|مناهج|تدريس|اختبار|منهج|امتحان", "education"),
     (r"تاريخ|حضارة|عثمان|حرب\s*عالمية|مؤرخ", "history"),
     (r"إعلام|صحافة|محتوى|سوشيال|يوتيوب|فيديو", "media"),
-    (r"فلسفة|أخلاق|منطق\s*صوري|وجود", "philosophy"),
+    (r"فلسفة|أخلاق|منطق\s*صوري", "philosophy"),
     (r"تصميم|خط\s*عربي|فن\s*تشكيلي|رسم|جرافيك", "art"),
+    # سيرة عامة متأخرة (بعد career)
+    (r"السيرة(?!\s*ذاتية)|سيرة\s*ال(?!ذات)|\bنبوي\b", "seerah"),
+    (r"صحة(?!\s*الطعام)|تغذية|فيتامين", "medicine"),
+    (r"قانون(?!\s*نيوتن)", "law"),
 ]
 
 
@@ -120,12 +127,24 @@ def map_cluster_to_category(cluster: str) -> str:
 
 def infer_categories_from_text(text: str) -> List[str]:
     """استخراج فئات محتملة من نص السؤال (للتعزيز الرمزي)."""
-    found: List[str] = []
-    for pat, cat in _KEYWORD_TO_CATEGORY:
-        if re.search(pat, text or "", re.I):
-            if cat not in found:
-                found.append(cat)
-    return found or ["general"]
+    scores = keyword_category_scores(text)
+    if not scores:
+        return ["general"]
+    ranked = sorted(scores.items(), key=lambda x: -x[1])
+    return [c for c, _ in ranked if _ > 0]
+
+
+def keyword_category_scores(text: str) -> Dict[str, float]:
+    """درجات كلمات مفتاحية مرتبة بالأولوية (أول تطابق أقوى)."""
+    scores: Dict[str, float] = {}
+    if not text:
+        return scores
+    for i, (pat, cat) in enumerate(_KEYWORD_TO_CATEGORY):
+        if re.search(pat, text, re.I):
+            # أول الأنماط في القائمة أعلى وزناً
+            w = 1.0 - min(0.5, i * 0.008)
+            scores[cat] = max(scores.get(cat, 0.0), w)
+    return scores
 
 
 class MoECKGBridge:
@@ -237,25 +256,38 @@ class MoECKGBridge:
         self, context_vector: np.ndarray, question: str = ""
     ) -> Dict[str, float]:
         """
-        يُرجع dict: category → وزن نسبي من راوتر المستوى 1 (+ تلميح نصي).
+        تصنيف هجين: راوتر عصبي + درجات كلمات مفتاحية (أوّل مطابقة أقوى).
+        عند وجود إشارة نصية واضحة يُرفع وزن المزج الرمزي تلقائياً.
         """
+        kw = keyword_category_scores(question or "")
         if not self.available:
-            return {c: 1.0 for c in infer_categories_from_text(question)}
+            if not kw:
+                return {"general": 1.0}
+            s = sum(kw.values()) or 1.0
+            return {k: v / s for k, v in kw.items()}
 
         torch = self._torch
         with torch.no_grad():
             x = self.project(context_vector)
-            # راوتر المجموعات فقط
             g_idx, g_w, g_probs, _ = self.moe.group_router(x)
             order = self.moe._group_order
-            probs = g_probs[0].cpu().numpy()  # (n_groups,)
+            probs = g_probs[0].cpu().numpy()
             weights = {order[i]: float(probs[i]) for i in range(len(order))}
 
-        # تعزيز رمزي خفيف من كلمات السؤال
-        for cat in infer_categories_from_text(question):
-            weights[cat] = weights.get(cat, 0.05) + 0.15
+        # مزج تكيّفي: إشارة كلمات قوية → اعتماد أكبر على القواعد
+        if kw:
+            max_kw = max(kw.values())
+            # إشارة نصية واضحة → اعتماد أقوى على القواعد (يحل التباس سيرة/وظيفة، طبخ/طب، …)
+            alpha = 0.50 + 0.48 * max_kw  # 0.50..0.98
+            top_cat = max(kw.items(), key=lambda x: x[1])[0]
+            for cat, sc in kw.items():
+                weights[cat] = weights.get(cat, 0.0) * (1.0 - alpha) + sc * alpha
+            # تعزيز إضافي للفئة الأولى نصياً
+            weights[top_cat] = weights.get(top_cat, 0.0) + 0.25 * alpha
+            for cat in list(weights.keys()):
+                if cat not in kw:
+                    weights[cat] *= (1.0 - 0.65 * alpha)
 
-        # تطبيع
         s = sum(weights.values()) or 1.0
         return {k: v / s for k, v in weights.items()}
 
