@@ -31,9 +31,11 @@ def welcome_card() -> str:
         "| تدريب تجريبي | `مهمة تدريب data/samples/classification_demo.csv الهدف=label` |\n"
         "| تنفيذ آمن | `نفّذ بأمان: افحص المشروع وشغّل اختبارات` |\n"
         "| حالة النمو | `حالة نمو الوكيل` |\n"
+        "| نبض المشروع | `تقرير النظام` أو `كيف حال النظام` |\n"
         + _next_steps(
-            "جرّب `صنّف: كود بايثون لفرز قائمة`",
-            "أو افتح تبويب **🧩 MoE والوكيل** من الشريط العلوي",
+            "جرّب `تقرير النظام` لنظرة شاملة",
+            "أو `صنّف: كود بايثون لفرز قائمة`",
+            "أو افتح تبويب **🧩 MoE والوكيل**",
         )
     )
 
@@ -58,34 +60,18 @@ def handle_user_assist(user_input: str) -> Optional[str]:
     ) or low in {"?", "؟", "أوامر", "commands"}:
         return welcome_card()
 
-    # حالة سريعة للنظام من منظور المستخدم
-    if re.search(r"(كيف\s*حال|حالة\s*النظام|هل\s*كل\s*شيء\s*يعمل|status\s*check)", text, re.I):
-        parts: List[str] = ["## 📡 لمحة سريعة\n"]
+    # حالة / تقرير النظام ككل
+    if re.search(
+        r"(كيف\s*حال|حالة\s*النظام|هل\s*كل\s*شيء\s*يعمل|status\s*check|"
+        r"تقرير\s*النظام|نبض\s*المشروع)",
+        text,
+        re.I,
+    ):
         try:
-            from ai.agent_growth_loop import inspect_project_report
-            parts.append(inspect_project_report())
+            from ai.system_hub import format_system_report
+            return format_system_report()
         except Exception as e:
-            parts.append(f"- فحص المشروع: تعذّر ({e})")
-        try:
-            from ai.moe_ckg_bridge import get_moe_bridge
-            br = get_moe_bridge()
-            if br.available:
-                parts.append(
-                    f"- MoE: ✅ جاهز · {br.moe.total_experts()} خبيراً · "
-                    f"{len(br.moe._group_order)} فئة"
-                )
-            else:
-                parts.append(f"- MoE: غير متاح ({br._load_error})")
-        except Exception as e:
-            parts.append(f"- MoE: تعذّر ({e})")
-        parts.append(
-            _next_steps(
-                "`صحة moe` لتفاصيل الخبراء",
-                "`نفّذ بأمان: افحص المشروع وشغّل اختبارات`",
-                "`مساعدة` لقائمة الأوامر",
-            )
-        )
-        return "\n".join(parts)
+            return f"تعذّر تقرير النظام: {e}"
 
     # نية طبيعية: افحص المشروع (بدون بادئة خطة:)
     if re.search(r"^(افحص|فحص)\s*(المشروع|النظام)?$", text, re.I):

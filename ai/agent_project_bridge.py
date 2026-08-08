@@ -38,6 +38,15 @@ def dispatch_agent_message(user_input: str) -> Optional[str]:
         logger.warning("user assist: %s", e)
         suggest_after_bridge = None  # type: ignore
 
+    # نبض النظام ككل
+    try:
+        from ai.system_hub import handle_system_command
+        r = handle_system_command(text)
+        if r is not None:
+            return r
+    except Exception as e:
+        logger.warning("system hub: %s", e)
+
     # دورة نمو الوكيل (تخطيط / تنفيذ آمن / ذاكرة) — قبل موزّع الأوامر
     try:
         from ai.agent_growth_loop import handle_growth_command
@@ -97,6 +106,13 @@ def dispatch_with_meta(user_input: str) -> Tuple[Optional[str], str]:
     except Exception as e:
         logger.warning("user assist: %s", e)
     try:
+        from ai.system_hub import handle_system_command
+        r = handle_system_command(text)
+        if r is not None:
+            return r, "🌐 System Hub"
+    except Exception as e:
+        logger.warning("system hub: %s", e)
+    try:
         from ai.agent_growth_loop import handle_growth_command
         r = handle_growth_command(text)
         if r is not None:
@@ -135,6 +151,7 @@ def agent_integration_status() -> Dict[str, Any]:
     st: Dict[str, Any] = {"bridge": True, "components": {}}
     for name, path in (
         ("agent_growth_loop", "ai.agent_growth_loop"),
+        ("system_hub", "ai.system_hub"),
         ("model_training_agent", "ai.model_training_agent"),
         ("reasoning_pipeline", "ai.reasoning_pipeline"),
         ("social_swarm", "ai.social_swarm"),

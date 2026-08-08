@@ -12,6 +12,16 @@ def render_health():
     """تبويب صحة النظام."""
     st.markdown('<div class="section-header">🏥 صحة النظام</div>', unsafe_allow_html=True)
 
+    # نبض موحّد للمشروع
+    try:
+        from ai.system_hub import system_snapshot, format_system_report
+        snap = system_snapshot()
+        st.metric("الصحة الكلية (System Hub)", f"{snap['score']:.0%}")
+        with st.expander("🌐 تقرير النظام الموحّد", expanded=True):
+            st.markdown(format_system_report(snap))
+    except Exception as _e:
+        st.caption(f"System Hub غير متاح: {_e}")
+
     checks = []
 
     # ── 1. الأوزان محفوظة؟
