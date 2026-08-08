@@ -111,3 +111,21 @@ python experiments/surah_chain_network/train_ckg_lm.py
 SCN_N=8000 SCN_EPOCHS=30 SCN_D_MODEL=256 SCN_N_HEADS=8 \
   SCN_N_PRE=2 SCN_N_POST=2 python experiments/surah_chain_network/train_ckg_lm.py
 ```
+
+
+## Tokenizer / Activations / Backprop / Generate (محدّث)
+
+| المكوّن | التنفيذ |
+|---------|---------|
+| **StrongTokenizer** | كلمات + حروف + دمج BPE-lite، encode/decode ثنائي |
+| **Activations** | **GELU** في SurahChain وFFN (مع مشتقات backward) |
+| **LayerNorm** | backprop كامل على x وγ وβ |
+| **Attention** | Multi-Head Causal + سياق حتى **256** |
+| **generate** | top-k + top-p + repetition penalty + min_new_tokens |
+
+```python
+from experiments.surah_chain_network.hybrid_experiment import HybridExperimentModel
+m = HybridExperimentModel(tokenizer="strong", d_model=256, n_heads=8)
+m.build_tokenizer_from_texts(texts)
+print(m.generate("الصبر", max_new_tokens=40, top_p=0.9, repetition_penalty=1.2))
+```

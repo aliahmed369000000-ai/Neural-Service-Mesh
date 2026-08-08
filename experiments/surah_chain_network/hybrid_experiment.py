@@ -9,7 +9,7 @@ Surah-Chain LM — نموذج لغوي بوسط سوري + انتباه ذاتي
   → TransformerBlock × N_POST
   → Tied LM Head
 
-قدرات: WordTokenizer, train_batch, cosine LR, generate.
+قدرات: StrongTokenizer, MHA, GELU/SiLU, backprop كامل، generate محسّن، سياق طويل.
 """
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
 from ai.arabic_transformer import HashTokenizer, WordTokenizer
+from strong_tokenizer import StrongTokenizer
 
 _DIMS_PATH = _HERE / "surah_layer_dims.json"
 if not _DIMS_PATH.exists():
@@ -41,8 +42,76 @@ DEFAULT_N_PRE = 2
 DEFAULT_N_POST = 2
 DEFAULT_D_FF_MULT = 4
 
+DEFAULT_D_FF_MULT = 4
+DEFAULT_MAX_CTX = 256
+DEFAULT_MAX_LEN = 128
+GRAD_CLIP = 1.0
+
+
+# ── دوال التفعيل مع مشتقاتها (للـ forward/backward) ─────────────────────────
+def gelu(x):
+    """GELU تقريبي (tanh) — شائع في نماذج Transformer الحديثة."""
+    return 0.5 * x * (1.0 + np.tanh(np.sqrt(2.0 / np.pi) * (x + 0.044715 * x ** 3)))
+
+
+def gelu_grad(x, gy):
+    # مشتق تقريبي لـ GELU
+    k = np.sqrt(2.0 / np.pi)
+    u = k * (x + 0.044715 * x ** 3)
+    t = np.tanh(u)
+    du = k * (1.0 + 3.0 * 0.044715 * x ** 2)
+    return gy * (0.5 * (1.0 + t) + 0.5 * x * (1.0 - t ** 2) * du)
+
+
+def silu(x):
+    """SiLU / Swish: x * sigmoid(x)."""
+    sig = 1.0 / (1.0 + np.exp(-np.clip(x, -40, 40)))
+    return x * sig
+
+
+def silu_grad(x, gy):
+    sig = 1.0 / (1.0 + np.exp(-np.clip(x, -40, 40)))
+    return gy * (sig + x * sig * (1.0 - sig))
+
+
+def relu(x):
+    return np.maximum(x, 0.0)
+
+
+def relu_grad(x, gy):
+    return gy * (x > 0)
+
+
+def tanh_act(x):
+    return np.tanh(x)
+
+
+def tanh_grad(x, gy):
+    t = np.tanh(x)
+    return gy * (1.0 - t ** 2)
+
+
+ACTIVATIONS = {
+    "gelu": (gelu, gelu_grad),
+    "silu": (silu, silu_grad),
+    "relu": (relu, relu_grad),
+    "tanh": (tanh_act, tanh_grad),
+}
+
+
+def clip_grad(g, max_norm=GRAD_CLIP):
+    if g is None:
+        return g
+    norm = float(np.linalg.norm(g))
+    if norm > max_norm and norm > 0:
+        g = g * (max_norm / norm)
+    return g
+
+
 
 class LayerNorm1D:
+    """LayerNorm مع backprop كامل على x وγ وβ."""
+
     def __init__(self, dim: int, eps: float = 1e-5):
         self.g = np.ones(dim, dtype=np.float64)
         self.b = np.zeros(dim, dtype=np.float64)
@@ -52,16 +121,26 @@ class LayerNorm1D:
     def forward(self, x: np.ndarray) -> np.ndarray:
         mu = x.mean(axis=-1, keepdims=True)
         var = x.var(axis=-1, keepdims=True)
-        xhat = (x - mu) / np.sqrt(var + self.eps)
-        self._cache = (xhat, mu, var)
+        std = np.sqrt(var + self.eps)
+        xhat = (x - mu) / std
+        self._cache = (xhat, std, x.shape[-1])
         return xhat * self.g + self.b
 
     def backward(self, grad: np.ndarray, lr: float) -> np.ndarray:
-        xhat, mu, var = self._cache
-        self.g -= lr * (grad * xhat).sum(axis=0)
-        self.b -= lr * grad.sum(axis=0)
-        # تقريب شائع: تمرير التدرّج عبر الغيت فقط
-        return grad * self.g
+        xhat, std, D = self._cache
+        # dL/dg, dL/db
+        dg = (grad * xhat).sum(axis=0)
+        db = grad.sum(axis=0)
+        self.g -= lr * clip_grad(dg)
+        self.b -= lr * clip_grad(db)
+        # dL/dxhat
+        dxhat = grad * self.g
+        # dL/dx (صيغة LN القياسية)
+        # dx = (1/std) * (dxhat - mean(dxhat) - xhat * mean(dxhat * xhat))
+        mean_dxhat = dxhat.mean(axis=-1, keepdims=True)
+        mean_dxhat_xhat = (dxhat * xhat).mean(axis=-1, keepdims=True)
+        dx = (dxhat - mean_dxhat - xhat * mean_dxhat_xhat) / std
+        return dx
 
 
 class SurahChainLayer:
@@ -81,7 +160,7 @@ class SurahChainLayer:
     def forward(self, x: np.ndarray) -> np.ndarray:
         self._x = x
         pre = x @ self.W.T + self.b
-        act = np.tanh(pre)
+        act = gelu(pre)
         normed = self.ln.forward(act)
         shortcut = (x @ self.W_shortcut.T) if self.has_shortcut_proj else x
         self._pre_res = (pre, act)
@@ -92,12 +171,12 @@ class SurahChainLayer:
         if self.has_shortcut_proj:
             g_shortcut_x = grad_out @ self.W_shortcut
             gW_s = grad_out.T @ self._x
-            np.clip(gW_s, -5, 5, out=gW_s)
+            gW_s = clip_grad(gW_s, 5.0)
             self.W_shortcut -= lr * gW_s
         else:
             g_shortcut_x = grad_out
         g_normed = self.ln.backward(grad_out, lr)
-        d_pre = g_normed * (1.0 - act ** 2)
+        d_pre = gelu_grad(pre, g_normed)
         gW = d_pre.T @ self._x
         gb = d_pre.sum(axis=0)
         gx_main = d_pre @ self.W
@@ -233,7 +312,7 @@ class FeedForward:
 
     def forward(self, x: np.ndarray) -> np.ndarray:
         h = x @ self.W1.T + self.b1
-        a = np.maximum(h, 0)  # ReLU
+        a = gelu(h)  # GELU — تفعيل Transformer الحديث
         out = a @ self.W2.T + self.b2
         self._cache = {"x": x, "h": h, "a": a}
         return out
@@ -243,7 +322,7 @@ class FeedForward:
         g_W2 = grad.T @ a
         g_b2 = grad.sum(axis=0)
         g_a = grad @ self.W2
-        g_h = g_a * (h > 0)
+        g_h = gelu_grad(h, g_a)
         g_W1 = g_h.T @ x
         g_b1 = g_h.sum(axis=0)
         g_x = g_h @ self.W1
@@ -257,29 +336,13 @@ class FeedForward:
 
 
 class TransformerBlock:
-    """Pre-LN: x + Attn(LN(x)) ثم x + FFN(LN(x))."""
+    """Pre-LN Transformer: x + Attn(LN(x)) ثم x + FFN(LN(x)) مع GELU."""
 
     def __init__(self, d_model: int, n_heads: int, d_ff: int, seed: int = 0):
         self.ln1 = LayerNorm1D(d_model)
         self.attn = MultiHeadCausalAttention(d_model, n_heads, seed=seed)
         self.ln2 = LayerNorm1D(d_model)
         self.ffn = FeedForward(d_model, d_ff, seed=seed + 1)
-        self._cache = {}
-
-    def forward(self, x: np.ndarray) -> np.ndarray:
-        n1 = self.ln1.forward(x)
-        a = self.attn.forward(n1)
-        x = x + a
-        n2 = self.ln2.forward(x)
-        f = self.ffn.forward(n2)
-        out = x + f
-        self._cache = {"x_in": self._cache.get("x_in"), "after_attn": x}
-        self._cache["x0"] = None
-        self._x0 = None
-        self._after_attn = x - f  # x before ffn residual was x after attn residual
-        # store properly
-        self._res1_in = None
-        return out
 
     def forward(self, x: np.ndarray) -> np.ndarray:
         self._x = x
@@ -292,15 +355,11 @@ class TransformerBlock:
         return x2 + f
 
     def backward(self, grad: np.ndarray, lr: float) -> np.ndarray:
-        # out = x2 + ffn(ln2(x2))
         g_x2 = grad
-        g_f = grad
-        g_n2 = self.ffn.backward(g_f, lr)
+        g_n2 = self.ffn.backward(grad, lr)
         g_x2 = g_x2 + self.ln2.backward(g_n2, lr)
-        # x2 = x + attn(ln1(x))
         g_x = g_x2
-        g_a = g_x2
-        g_n1 = self.attn.backward(g_a, lr)
+        g_n1 = self.attn.backward(g_x2, lr)
         g_x = g_x + self.ln1.backward(g_n1, lr)
         return g_x
 
@@ -344,7 +403,7 @@ class HybridExperimentModel:
         vocab_size: int = VOCAB_SIZE,
         lr: float = 1e-3,
         seed: int = 42,
-        tokenizer: str = "word",
+        tokenizer: str = "strong",
         vocab_path: Optional[str] = None,
         n_heads: int = DEFAULT_N_HEADS,
         n_pre: int = DEFAULT_N_PRE,
@@ -366,13 +425,22 @@ class HybridExperimentModel:
         self.n_post = n_post
 
         if tokenizer == "hash":
-            self.tokenizer: Union[WordTokenizer, HashTokenizer] = HashTokenizer(vocab_size)
-        else:
+            self.tokenizer = HashTokenizer(vocab_size)
+        elif tokenizer == "word":
             vp = vocab_path
             if vp is None:
                 cand = _HERE / "tokenizer_vocab.json"
                 vp = str(cand) if cand.exists() else None
             self.tokenizer = WordTokenizer(vocab_size, vocab_path=vp)
+        else:
+            # افتراضي: StrongTokenizer (كلمات + حروف + BPE-lite)
+            self.tokenizer = StrongTokenizer(vocab_size)
+            if vocab_path and Path(vocab_path).exists():
+                self.tokenizer.load(vocab_path)
+            else:
+                cand = _HERE / "tokenizer_vocab_strong.json"
+                if cand.exists():
+                    self.tokenizer.load(str(cand))
 
         self.chain = SurahChainNetwork(LAYER_DIMS)
         rng = np.random.default_rng(seed)
@@ -399,15 +467,17 @@ class HybridExperimentModel:
         self._cache: dict = {}
 
     def build_tokenizer_from_texts(self, texts: Sequence[str], max_vocab: Optional[int] = None) -> int:
-        if not isinstance(self.tokenizer, WordTokenizer):
-            self.tokenizer = WordTokenizer(self.vocab_size)
+        if not hasattr(self.tokenizer, "build_from_texts"):
+            self.tokenizer = StrongTokenizer(self.vocab_size)
         n = self.tokenizer.build_from_texts(list(texts), max_vocab=max_vocab or self.vocab_size)
-        self.vocab_size = max(self.vocab_size, n)
+        self.vocab_size = max(self.vocab_size, int(n))
         if self.E.shape[0] < self.vocab_size:
             rng = np.random.default_rng(self.seed)
-            extra = rng.normal(0.0, 0.02, (self.vocab_size - self.E.shape[0], self.d_model)).astype(np.float64)
+            extra = rng.normal(
+                0.0, 0.02, (self.vocab_size - self.E.shape[0], self.d_model)
+            ).astype(np.float64)
             self.E = np.vstack([self.E, extra])
-        return n
+        return int(n)
 
     def set_lr(self, lr: float) -> None:
         self.lr = float(lr)
@@ -442,7 +512,7 @@ class HybridExperimentModel:
         self._cache["h"] = h
         return h @ self.E.T
 
-    def train_step(self, text: str, max_len: int = 64) -> Optional[float]:
+    def train_step(self, text: str, max_len: int = DEFAULT_MAX_LEN) -> Optional[float]:
         ids = self.tokenizer.encode(text, max_len)
         if len(ids) < 2:
             return None
@@ -503,7 +573,7 @@ class HybridExperimentModel:
             self.E[tid] -= self.lr * np.clip(g_x[i], -1.0, 1.0)
         return float(loss)
 
-    def train_batch(self, texts, max_len=64, step=None, total_steps=None, warmup_steps=0):
+    def train_batch(self, texts, max_len=DEFAULT_MAX_LEN, step=None, total_steps=None, warmup_steps=0):
         if step is not None and total_steps is not None:
             self.set_lr(cosine_lr(step, total_steps, self.base_lr, warmup_steps=warmup_steps))
         losses = []
@@ -513,7 +583,18 @@ class HybridExperimentModel:
                 losses.append(loss)
         return float(np.mean(losses)) if losses else float("nan")
 
-    def generate(self, prompt, max_new_tokens=32, temperature=0.9, top_k=40, max_ctx=96):
+    def generate(
+        self,
+        prompt,
+        max_new_tokens=48,
+        temperature=0.85,
+        top_k=50,
+        top_p=0.92,
+        repetition_penalty=1.15,
+        max_ctx=DEFAULT_MAX_CTX,
+        min_new_tokens=1,
+    ):
+        """استدلال سببي: top-k + top-p + repetition penalty + سياق طويل."""
         ids = list(self.tokenizer.encode(prompt, max_ctx))
         eos = getattr(self.tokenizer, "EOS", 3)
         bos = getattr(self.tokenizer, "BOS", 2)
@@ -522,25 +603,52 @@ class HybridExperimentModel:
             ids = ids[:-1]
         if not ids:
             ids = [bos]
-        for _ in range(max_new_tokens):
+
+        for step_i in range(max_new_tokens):
             ctx = np.asarray(ids[-max_ctx:], dtype=np.int64)
             logits = self.forward_logits(ctx)
-            next_logits = logits[-1].astype(np.float64)
+            next_logits = logits[-1].astype(np.float64).copy()
             next_logits[pad] = -1e9
             next_logits[bos] = -1e9
+            if step_i < min_new_tokens:
+                next_logits[eos] = -1e9
+
+            if repetition_penalty and repetition_penalty != 1.0:
+                for prev in set(ids):
+                    if next_logits[prev] > 0:
+                        next_logits[prev] /= repetition_penalty
+                    else:
+                        next_logits[prev] *= repetition_penalty
+
             if top_k and top_k > 0:
-                k = min(top_k, next_logits.size)
+                k = min(int(top_k), next_logits.size)
                 thresh = np.partition(next_logits, -k)[-k]
                 next_logits = np.where(next_logits < thresh, -1e9, next_logits)
-            temp = max(temperature, 1e-6)
+
+            temp = max(float(temperature), 1e-6)
             next_logits = next_logits / temp
             next_logits -= next_logits.max()
             probs = np.exp(next_logits)
-            probs = probs / probs.sum()
+            probs = probs / (probs.sum() + 1e-12)
+
+            if top_p is not None and 0 < float(top_p) < 1.0:
+                order = np.argsort(-probs)
+                sorted_p = probs[order]
+                cum = np.cumsum(sorted_p)
+                mask = cum > float(top_p)
+                if mask.any():
+                    first = int(np.argmax(mask))
+                    mask[first] = False
+                    probs[order[mask]] = 0.0
+                    s = probs.sum()
+                    if s > 0:
+                        probs = probs / s
+
             nid = int(np.random.choice(len(probs), p=probs))
             ids.append(nid)
-            if nid == eos:
+            if nid == eos and step_i + 1 >= min_new_tokens:
                 break
+
         return self.tokenizer.decode(ids, skip_special=True)
 
     def param_count(self) -> dict:

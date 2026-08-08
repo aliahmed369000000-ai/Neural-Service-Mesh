@@ -24,7 +24,7 @@ from hybrid_experiment import HybridExperimentModel
 CKPT_DIR = _HERE / "checkpoints"
 CKPT_BEST = CKPT_DIR / "best_ckg_lm.pkl"
 CKPT_LATEST = CKPT_DIR / "latest_ckg_lm.pkl"
-VOCAB_PATH = _HERE / "tokenizer_vocab_ckg.json"
+VOCAB_PATH = _HERE / "tokenizer_vocab_strong.json"
 STATE_FILE = CKPT_DIR / "ckg_lm_train_state.json"
 
 N = int(os.environ.get("SCN_N", "5000"))
@@ -35,7 +35,7 @@ N_HEADS = int(os.environ.get("SCN_N_HEADS", "8"))
 N_PRE = int(os.environ.get("SCN_N_PRE", "2"))
 N_POST = int(os.environ.get("SCN_N_POST", "2"))
 BASE_LR = float(os.environ.get("SCN_LR", "8e-4"))
-MAX_LEN = int(os.environ.get("SCN_MAX_LEN", "64"))
+MAX_LEN = int(os.environ.get("SCN_MAX_LEN", "128"))
 WARMUP_RATIO = 0.1
 
 
@@ -79,7 +79,7 @@ def main():
     m = HybridExperimentModel(
         d_model=D_MODEL,
         lr=BASE_LR,
-        tokenizer="word",
+        tokenizer="strong",
         n_heads=N_HEADS,
         n_pre=N_PRE,
         n_post=N_POST,
