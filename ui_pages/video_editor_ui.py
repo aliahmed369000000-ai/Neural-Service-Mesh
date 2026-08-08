@@ -71,6 +71,7 @@ def render_video_editor():
     op = st.selectbox(
         "العملية",
         [
+            "✨ تحسين ذكي بالذكاء",
             "قص (trim)",
             "تحجيم عمودي 9:16",
             "كتم الصوت",
@@ -85,7 +86,26 @@ def render_video_editor():
 
     result_path = None
     try:
-        if op == "قص (trim)":
+        if op == "✨ تحسين ذكي بالذكاء":
+            try:
+                from ai.video_ai_enhance import list_presets, format_presets_help
+                st.markdown(format_presets_help())
+                presets = list_presets()
+                labels = ["تلقائي (auto)", "احترافي (pro)"] + [
+                    f"{p['label']} ({p['id']})" for p in presets
+                ]
+                ids = ["auto", "pro"] + [p["id"] for p in presets]
+                pick = st.selectbox("وضع التحسين", labels, index=0, key="vedit_ai_mode")
+                mode = ids[labels.index(pick)]
+                crf = st.slider("جودة الترميز CRF", 14, 24, 17, key="vedit_ai_crf")
+            except Exception as e:
+                st.warning(str(e))
+                mode, crf = "clarity", 17
+            if st.button("تطبيق التحسين الذكي", type="primary", key="vedit_ai_run"):
+                with st.spinner("يحسّن الفيديو محلياً…"):
+                    result_path = ve.ai_enhance(work_path, mode=mode, crf=crf)
+
+        elif op == "قص (trim)":
             c_a, c_b = st.columns(2)
             with c_a:
                 start = st.number_input("من (ث)", min_value=0.0, value=0.0, step=0.5)

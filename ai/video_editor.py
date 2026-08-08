@@ -12,6 +12,7 @@ Video Editor Toolkit — أدوات تعديل فيديو لـ NSM Shorts
   • تسريع / تبطيء
   • ضغط خفيف
   • إطار مصغّر (thumbnail)
+  • تحسين ذكي (ai_enhance)
 
 يعتمد على ffmpeg إن وُجد، وإلا moviepy عند الإمكان.
 المخرجات تُحفظ تحت artifacts/video_edits/
@@ -390,6 +391,24 @@ def thumbnail(path: PathLike, at_seconds: float = 1.0) -> Path:
     ])
     if code != 0 or not out.is_file():
         raise VideoEditorError(f"فشل استخراج الإطار: {err[-400:]}")
+    return out
+
+
+
+def ai_enhance(
+    path: PathLike,
+    mode: str = "auto",
+    crf: int = 17,
+) -> Path:
+    """تحسين ذكي عبر ai.video_ai_enhance (محلي، بدون مفاتيح)."""
+    try:
+        from ai.video_ai_enhance import enhance_auto
+    except ImportError as e:
+        raise VideoEditorError("وحدة video_ai_enhance غير متاحة") from e
+    result = enhance_auto(path, mode=mode, crf=crf)
+    out = Path(result["path"])
+    if not out.is_file():
+        raise VideoEditorError("فشل التحسين الذكي")
     return out
 
 
