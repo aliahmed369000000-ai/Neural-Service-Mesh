@@ -1551,6 +1551,16 @@ class NSMAgent:
                 )
             return
 
+        # 🌱 دورة نمو الوكيل — تخطيط/تنفيذ آمن بدون LLM إن أمكن
+        try:
+            from ai.agent_growth_loop import handle_growth_command, format_experience_hints
+            growth_out = handle_growth_command(user_input)
+            if growth_out is not None:
+                yield growth_out
+                return
+        except Exception:
+            format_experience_hints = None  # type: ignore
+
         # 🆕 Planning Engine — يكشف طلبات بناء التطبيقات
         try:
             from ai.nsm_planner import NSMPlanner, is_planning_request
@@ -1561,8 +1571,15 @@ class NSMAgent:
         except ImportError:
             pass  # إذا لم يكن الـ Planner موجوداً، تابع عادياً
 
-        # بناء رسائل API
+        # بناء رسائل API (+ تلميح خبرات مشابهة إن وُجدت)
         system   = _build_system_prompt()
+        try:
+            if format_experience_hints is not None:
+                _hints = format_experience_hints(user_input)
+                if _hints:
+                    system = system + chr(10)*2 + _hints
+        except Exception:
+            pass
         messages: List[Dict] = [{"role": "system", "content": system}]
         messages += self.history[-8:]
         messages.append({"role": "user", "content": user_input})
@@ -1656,6 +1673,18 @@ class NSMAgent:
             from ai.agent_project_bridge import dispatch_agent_message
             _bridged = dispatch_agent_message(user_input)
             if _bridged is not None:
+                try:
+                    from ai.agent_growth_loop import record_experience
+                    # تسجيل نجاح المسار الجسري (أدوات مشروع) كخبرة خفيفة
+                    record_experience(
+                        user_input,
+                        plan=["dispatch_agent_message"],
+                        tools=["project_bridge"],
+                        success=True,
+                        summary=_bridged[:400],
+                    )
+                except Exception:
+                    pass
                 return _bridged
         except Exception:
             pass
