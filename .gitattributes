@@ -84,3 +84,10 @@ knowledge/node_profiles.json -filter -diff -merge
 data/yemeni/Yemeni.zip -filter -diff -merge
 data/yemeni/** -filter -diff -merge
 
+# ── استثناء من LFS: أوزان Hierarchical MoE (قابلة للسحب بدون LFS) ────────
+artifacts/hierarchical_moe/**/*.pt -filter -diff -merge
+artifacts/hierarchical_moe/**/*.npy -filter -diff -merge
+artifacts/hierarchical_moe/hierarchical_moe.pt -filter -diff -merge
+artifacts/hierarchical_moe/moe_learnable_projector.pt -filter -diff -merge
+artifacts/hierarchical_moe/moe_projector.npy -filter -diff -merge
+
