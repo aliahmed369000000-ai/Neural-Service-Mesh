@@ -1004,7 +1004,9 @@ def handle_moe_command(user_input: str) -> Optional[str]:
         re.I,
     ) and not re.search(
         r"(أضف\s*خبير|اضف\s*خبير|add\s*expert|قائمة\s*خبراء|"
-        r"ملخص\s*moe|تقرير\s*موازنة|load\s*balance)",
+        r"ملخص\s*moe|تقرير\s*موازنة|load\s*balance|"
+        r"صنّف|صنف|classify|صحة\s*moe|إحصاء\s*moe|احصاء\s*moe|"
+        r"طب[ّق]\s*أفضل|طبق\s*أفضل|best\s*config)",
         text,
         re.I,
     ):
@@ -1026,6 +1028,57 @@ def handle_moe_command(user_input: str) -> Optional[str]:
     ):
         m = _load_or_create()
         return m.summary()
+
+    # صحة النظام
+    if re.search(r"(صحة|health).{0,10}(moe|خبراء)|best\s*config|أفضل\s*إعداد", text, re.I):
+        try:
+            from ai.moe_ckg_bridge import get_moe_bridge
+            return get_moe_bridge().health_report()
+        except Exception as e:
+            return f"تعذّر تقرير الصحة: {e}"
+
+    # إحصاء التطوير المستمر
+    if re.search(r"(إحصاء|احصاء|stats).{0,12}(moe|خبراء|تصنيف)", text, re.I):
+        try:
+            from ai.moe_continual import stats_report, continual_dashboard
+            if re.search(r"لوحة|dashboard", text, re.I):
+                return continual_dashboard()
+            return stats_report()
+        except Exception as e:
+            return f"تعذّر الإحصاء: {e}"
+
+    # تصنيف: صنّف: نص السؤال
+    m_cls = re.search(r"(?:صنّف|صنف|classify)\s*[:：]?\s*(.+)$", text, re.I | re.S)
+    if m_cls:
+        q = m_cls.group(1).strip()
+        try:
+            from ai.moe_continual import classify_and_adapt
+            r = classify_and_adapt(q, adapt=True)
+            alts = ", ".join(
+                f"`{a['category']}` ({a['weight']})" for a in (r.get("alternatives") or [])
+            )
+            exp = ", ".join(f"`{e}`" for e in (r.get("experts") or [])[:4])
+            lines = [
+                "## تصنيف MoE",
+                f"- السؤال: {q[:200]}",
+                f"- الفئة: **`{r.get('top')}`**",
+                f"- الثقة: **{r.get('confidence')}**",
+                f"- بدائل: {alts or '—'}",
+                f"- خبراء مقترحون: {exp or '—'}",
+                f"- المصدر: `{r.get('source')}`",
+            ]
+            if r.get("adapted"):
+                lines.append("- تكيّف تلقائي: نعم")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"تعذّر التصنيف: {e}"
+
+    # تطبيق أفضل الإعدادات
+    if re.search(r"(طب[ّق]|طبق).{0,12}(أفضل|best).{0,12}(moe|إعداد|config)", text, re.I):
+        m = _load_or_create()
+        m.apply_best_config()
+        m.save(state_path)
+        return "✅ طُبّقت BEST_MOE_CONFIG وحُفظ النموذج.\n\n" + m.summary()
 
     # تقرير موازنة
     if re.search(r"(موازنة|load\s*balance|توزيع\s*خبراء|تقرير\s*حمل)", text, re.I):

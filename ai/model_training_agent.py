@@ -1017,6 +1017,29 @@ def training_dashboard() -> str:
     lines.append(f"- سكربت v3: {'✅' if TRAIN_V3.is_file() else '❌'}")
     lines.append("")
 
+    # Hierarchical MoE
+    lines.append("### 🧩 Hierarchical MoE")
+    try:
+        from ai.moe_ckg_bridge import get_moe_bridge
+        br = get_moe_bridge()
+        if br.available:
+            m = br.moe
+            lines.append(
+                f"- جاهز ✅ | فئات **{len(m._group_order)}** | خبراء **{m.total_experts()}**"
+            )
+            lines.append(
+                f"- best: temp={getattr(m,'router_temperature','?')} · "
+                f"shared={getattr(m,'shared_coeff','?')} · residual={getattr(m,'input_residual','?')}"
+            )
+            sample = br.classify("ما حكم الصلاة؟")
+            lines.append(f"- عينة: `{sample.get('top')}` (ثقة {sample.get('confidence')})")
+        else:
+            lines.append(f"- غير متاح: {br._load_error}")
+    except Exception as e:
+        lines.append(f"- تعذّر فحص MoE: {e}")
+    lines.append("- أوامر: `صحة moe` · `صنّف: ...` · `إحصاء moe` · `ملخص moe`")
+    lines.append("")
+
     # نماذج محفوظة (مختصر)
     lines.append("### 💾 آخر النماذج المحفوظة")
     try:

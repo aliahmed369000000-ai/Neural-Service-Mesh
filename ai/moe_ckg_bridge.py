@@ -348,6 +348,87 @@ class MoECKGBridge:
         out.sort(key=lambda r: float(r.get(score_key) or 0.0), reverse=True)
         return out
 
+
+    def classify(
+        self,
+        question: str,
+        context_vector: Optional[np.ndarray] = None,
+        top_n: int = 3,
+    ) -> Dict[str, Any]:
+        """
+        تصنيف عالي المستوى للسؤال: فئة + ثقة + بدائل.
+        إن لم يُمرَّر context_vector يُبنى من النص عبر VectorEncoder إن أمكن.
+        """
+        q = (question or "").strip()
+        if context_vector is None:
+            try:
+                from ai.knowledge_trainer import VectorEncoder
+                context_vector = VectorEncoder.encode(q, domain="general", importance=0.65, certainty=0.8)
+            except Exception as e:
+                kw = keyword_category_scores(q)
+                if not kw:
+                    return {"top": "general", "confidence": 0.2, "alternatives": [], "source": "fallback", "error": str(e)}
+                ranked = sorted(kw.items(), key=lambda x: -x[1])
+                s = sum(v for _, v in ranked) or 1.0
+                return {
+                    "top": ranked[0][0],
+                    "confidence": float(ranked[0][1] / s),
+                    "alternatives": [{"category": c, "weight": float(v / s)} for c, v in ranked[1:top_n]],
+                    "source": "keywords_only",
+                }
+
+        weights = self.category_weights(context_vector, q)
+        ranked = sorted(weights.items(), key=lambda x: -x[1])
+        top_cat, top_w = ranked[0]
+        # ثقة معدّلة بالفجوة عن الثاني
+        second = ranked[1][1] if len(ranked) > 1 else 0.0
+        gap = top_w - second
+        confidence = float(min(1.0, top_w + 0.5 * gap))
+
+        experts: List[str] = []
+        if self.available and top_cat in getattr(self.moe, "groups", {}):
+            try:
+                experts = list(self.moe.groups[top_cat]._id_order)[:5]
+            except Exception:
+                experts = []
+
+        return {
+            "top": top_cat,
+            "confidence": round(confidence, 4),
+            "weight": round(float(top_w), 4),
+            "alternatives": [
+                {"category": c, "weight": round(float(w), 4)} for c, w in ranked[1:top_n]
+            ],
+            "experts": experts,
+            "source": "hybrid_moe",
+            "available": self.available,
+        }
+
+    def health_report(self) -> str:
+        """تقرير صحة نظام MoE للوحة التحكم."""
+        lines = ["## 🩺 صحة Hierarchical MoE", ""]
+        if not self.available:
+            lines.append(f"- **الحالة:** غير متاح — `{self._load_error}`")
+            return "\n".join(lines)
+        m = self.moe
+        lines.append("- **الحالة:** ✅ جاهز")
+        lines.append(f"- **فئات:** {len(m._group_order)} · **خبراء:** {m.total_experts()}")
+        lines.append(
+            f"- **Best config:** temp={getattr(m,'router_temperature', '?')} · "
+            f"shared={getattr(m,'shared_coeff','?')} · "
+            f"threshold={getattr(m,'weight_threshold','?')} · "
+            f"residual={getattr(m,'input_residual','?')}"
+        )
+        lines.append(f"- **مسقط قابل للتعلم:** {'نعم' if getattr(self,'_torch_projector',None) is not None else 'npy/ثابت'}")
+        lines.append(f"- **blend مع CKG:** {self.blend}")
+        # عيّنة تصنيف
+        sample = self.classify("ما حكم الصلاة في المذهب الشافعي؟")
+        lines.append(
+            f"- **عينة تصنيف:** `{sample.get('top')}` "
+            f"(ثقة {sample.get('confidence')})"
+        )
+        return "\n".join(lines)
+
     def train_on_context(
         self,
         context_vector: np.ndarray,
