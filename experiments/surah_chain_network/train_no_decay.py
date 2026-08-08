@@ -41,7 +41,7 @@ def main():
             state = json.load(f)
         print(f"استؤنف من العصر {state['epoch']}/{TOTAL_EPOCHS}")
     else:
-        m = HybridExperimentModel(project_d_model=256, lr=LR)
+        m = HybridExperimentModel(d_model=256, lr=LR)
         state = {'epoch': 0, 'best_avg': float('inf'), 'best_epoch': 0,
                   'loss_tail': [], 'spike_epochs': []}
         print("بدء تدريب جديد من الصفر (بدون decay)")
