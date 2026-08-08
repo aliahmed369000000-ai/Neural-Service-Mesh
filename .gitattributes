@@ -91,3 +91,9 @@ artifacts/hierarchical_moe/hierarchical_moe.pt -filter -diff -merge
 artifacts/hierarchical_moe/moe_learnable_projector.pt -filter -diff -merge
 artifacts/hierarchical_moe/moe_projector.npy -filter -diff -merge
 
+# ── استثناء من LFS: جمل CKG (pkl) قابلة للسحب بدون LFS ───────────────────
+ckg_sentences.pkl -filter -diff -merge
+ckg_sentences_v2.pkl -filter -diff -merge
+ckg_sentences_v3.pkl -filter -diff -merge
+ckg_sentences_general_ar.pkl -filter -diff -merge
+
