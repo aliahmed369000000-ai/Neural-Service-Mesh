@@ -490,6 +490,7 @@ class FableEngine:
         music_volume: float = 0.10,
         wan_skip_spaces: Optional[set] = None,
         professional_mode: bool = True,
+        cinematic_strategy: str = "hero",
     ) -> bytes:
         """يبني mp4 فعلي (نص متحرك + صوت سرد) من ExplainerScript. يستدعي
         render_audio() تلقائياً إن لم يكن الصوت مولَّداً بعد. يرجع bytes
@@ -538,13 +539,17 @@ class FableEngine:
             # شريط تقدّم + بطاقة ختامية + انتقالات أنعم). يمكن تعطيله صراحة.
             if professional_mode and use_background_music:
                 music_volume = max(music_volume, 0.08)
+            # تفضيل المسار المجاني إن طُلب "free" أو تُرك فارغاً مع تفعيل السينمائي
+            if use_cinematic_backgrounds and cinematic_provider in ("", "free", "auto_free"):
+                cinematic_provider = "wan_free"
             return VideoEngine(
                 use_cinematic_backgrounds=use_cinematic_backgrounds,
-                cinematic_provider=cinematic_provider,
+                cinematic_provider=cinematic_provider or "wan_free",
                 use_background_music=use_background_music,
                 music_volume=music_volume,
                 wan_skip_spaces=wan_skip_spaces,
                 professional_mode=professional_mode,
+                cinematic_strategy=cinematic_strategy,
             ).render(script)
         except ImportError as exc:
             raise RuntimeError(

@@ -18,3 +18,19 @@ def test_progress_bar_draw():
     img = Image.new("RGB", (FRAME_W, FRAME_H), (20, 20, 40))
     out = eng._draw_progress_bar(img, 0.4)
     assert out.size == (FRAME_W, FRAME_H)
+
+def test_hero_strategy_selects_key_shots():
+    from ai.video_engine import VideoEngine
+    eng = VideoEngine(professional_mode=True, cinematic_strategy="hero")
+    eng._use_cinematic_backgrounds = True
+    eng._pro_total_segments = 6
+    assert eng._should_fetch_cinematic(0) is True
+    assert eng._should_fetch_cinematic(5) is True
+    assert eng._should_fetch_cinematic(3) is True  # middle
+    assert eng._should_fetch_cinematic(1) is False
+
+
+def test_free_provider_alias():
+    from ai.video_engine import VideoEngine
+    eng = VideoEngine(cinematic_provider="free")
+    assert eng._cinematic_provider == "wan_free"

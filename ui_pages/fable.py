@@ -579,10 +579,10 @@ def render_fable():
 
             _hf_key_present = bool(os.getenv("HIGGSFIELD_API_KEY", "").strip())
             use_cinematic_bg = st.checkbox(
-                "🎥 خلفيات سينمائية حقيقية (بدل التدرّج اللوني الافتراضي)",
+                "🎥 خلفيات سينمائية (يفضّل المجاني: Wan/LTX على ZeroGPU)",
                 value=False,
                 key="shorts_cinematic_bg_toggle",
-                help="يستبدل الخلفية المتدرّجة الافتراضية بخلفية فيديو حقيقية لكل مشهد.",
+                help="يولّد خلفيات فيديو حقيقية. المسار الافتراضي مجاني عبر Hugging Face ZeroGPU. المدفوع (Higgsfield) اختياري.",
             )
             pro_cols = st.columns(2)
             with pro_cols[0]:
@@ -599,11 +599,12 @@ def render_fable():
                     key="shorts_bg_music",
                     help="نغمات محيطية مولَّدة محلياً تحت السرد (ليست أغنية). عطّلها إن فضّلت صمتاً تاماً.",
                 )
-            cinematic_provider = "higgsfield"
+            cinematic_provider = "wan_free"
+            cinematic_strategy = "hero"
             if use_cinematic_bg:
                 _shorts_provider_options = [
-                    "🆓 Wan2.1 مجاني ⚡ Running on Zero (GPU حقيقي مجاني)",
-                    "💳 Higgsfield (مدفوع — أسرع وأدق، بجودة National Geographic)"
+                    "🆓 مجاني أولاً — LTX/Wan على ZeroGPU (بدون مفتاح إلزامي)",
+                    "💳 Higgsfield (مدفوع — أسرع وأدق)"
                     + ("" if _hf_key_present else " 🔒"),
                 ]
                 _shorts_provider_label = st.radio(
@@ -627,8 +628,20 @@ def render_fable():
                     ),
                 )
                 cinematic_provider = (
-                    "wan_free" if "Wan2.1" in _shorts_provider_label else "higgsfield"
+                    "wan_free" if ("مجاني" in _shorts_provider_label or "Wan" in _shorts_provider_label or "Zero" in _shorts_provider_label)
+                    else "higgsfield"
                 )
+                cinematic_strategy = st.selectbox(
+                    "أي المشاهد تُولَّد سينمائياً؟ (المجاني أبطأ — الأنسب: بطولية)",
+                    options=[
+                        "hero|مشاهد بطولية فقط (أول + وسط + آخر) — موصى به",
+                        "first_last|أول وآخر فقط — أسرع",
+                        "all|كل المشاهد — أجمل وأبطأ",
+                    ],
+                    index=0,
+                    key="shorts_cinematic_strategy",
+                    format_func=lambda x: x.split("|", 1)[1],
+                ).split("|", 1)[0]
                 if cinematic_provider == "wan_free":
                     st.markdown(
                         '<div style="margin:0.3rem 0 0.6rem;">'
@@ -662,6 +675,7 @@ def render_fable():
                             professional_mode=professional_mode,
                             use_background_music=use_bg_music if professional_mode else use_bg_music,
                             music_volume=0.09 if use_bg_music else 0.0,
+                            cinematic_strategy=cinematic_strategy if use_cinematic_bg else "hero",
                         )
                     st.session_state.shorts_mp4 = mp4_bytes
                     st.success("✅ تم إنتاج فيديو Shorts" + (" بجودة احترافية" if professional_mode else ""))

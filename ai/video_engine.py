@@ -116,7 +116,12 @@ def _build_cinematic_prompt(narration: str, visual_notes: str) -> str:
     الأسلوب) حتى تتوافق جودة الخلفية مع بقية NSM."""
     from ai.higgsfield_engine import _build_fallback_prompt
 
-    return _build_fallback_prompt(narration, visual_notes)
+    base = _build_fallback_prompt(narration, visual_notes)
+    # تلميحات مناسبة لـ Shorts عمودي ولمزوّدات مجانية قصيرة المدة
+    return (
+        f"{base}. Vertical 9:16 smartphone framing, cinematic lighting, "
+        "smooth camera, high detail, no text overlay, no watermark"
+    )
 
 
 def _fetch_cinematic_clip(narration: str, visual_notes: str, tmp_dir: str, seg_index: int) -> Optional[str]:
@@ -638,20 +643,31 @@ class VideoEngine:
         music_volume: float = 0.10,
         wan_skip_spaces: Optional[set] = None,
         professional_mode: bool = False,
+        cinematic_strategy: str = "hero",
     ) -> None:
         self._font_path = _resolve_arabic_font()
         # وضع احترافي لـ Shorts: جودة ترميز أعلى، شريط تقدّم، انتقالات أنعم،
         # تظليل vignette، وموسيقى محيطية خفيفة افتراضياً إن طُلب.
         self._professional_mode = bool(professional_mode)
+        # استراتيجية المشاهد السينمائية (مهمّة للمسار المجاني البطيء):
+        #   hero       = أول + أوسط + آخر مشهد فقط (افتراضي — توازن جودة/وقت)
+        #   first_last = أول وآخر فقط
+        #   all        = كل المشاهد (أبطأ، طوابير GPU أطول)
+        self._cinematic_strategy = (
+            cinematic_strategy if cinematic_strategy in ("hero", "first_last", "all") else "hero"
+        )
         # اختياري (opt-in) — راجع شرح الميزة في رأس الملف. لا يُفعَّل أبداً
         # ضمنياً حتى لا يستهلك رصيد Higgsfield المدفوع دون طلب صريح.
         self._use_cinematic_backgrounds = use_cinematic_backgrounds
         # المزوّد عند تفعيل الخلفيات السينمائية: "higgsfield" (مدفوع،
         # أسرع وأدق) أو "wan_free" (Wan2.1 مفتوح المصدر عبر مساحة Hugging
         # Face مجتمعية مجانية — أبطأ وأقل ثباتاً، لكن بدون أي تكلفة).
-        self._cinematic_provider = (
-            cinematic_provider if cinematic_provider in ("higgsfield", "wan_free") else "higgsfield"
-        )
+        _prov = (cinematic_provider or "wan_free").strip().lower()
+        if _prov in ("free", "auto_free", "wan", "wan_free"):
+            _prov = "wan_free"
+        elif _prov not in ("higgsfield", "wan_free"):
+            _prov = "wan_free"  # تفضيل المسار المجاني افتراضياً
+        self._cinematic_provider = _prov
         # مثيل _WanFreeProvider واحد يُنشأ عند الحاجة فقط (lazy) ويُعاد
         # استخدامه لكل مشاهد نفس الفيديو — راجع شرح الكلاس أعلاه.
         self._wan_free_provider: Optional["_WanFreeProvider"] = None
@@ -877,6 +893,22 @@ class VideoEngine:
             resized = resized.subclipped(0, duration)
         return resized
 
+
+    def _should_fetch_cinematic(self, index: int) -> bool:
+        """هل نطلب خلفية مولَّدة لهذا المشهد؟ (يوفر وقت/طابور في المسار المجاني)."""
+        if not self._use_cinematic_backgrounds:
+            return False
+        total = max(1, int(getattr(self, "_pro_total_segments", 1)))
+        strat = getattr(self, "_cinematic_strategy", "hero")
+        if strat == "all":
+            return True
+        if strat == "first_last":
+            return index == 0 or index >= total - 1
+        # hero
+        if total <= 2:
+            return True
+        return index in (0, total // 2, total - 1)
+
     def _build_segment_clip(self, segment, index: int, tmp_dir: str):
         from moviepy import AudioFileClip, ImageClip, concatenate_videoclips
         import numpy as np
@@ -908,7 +940,7 @@ class VideoEngine:
         # لهذا المشهد تحديداً — وإلا نتراجع فوراً للخلفية المتدرّجة المجانية
         # دون أي تأثير على بقية الفيديو.
         cinematic_bg = None
-        if self._use_cinematic_backgrounds:
+        if self._use_cinematic_backgrounds and self._should_fetch_cinematic(index):
             if self._cinematic_provider == "wan_free":
                 if self._wan_free_provider is None:
                     self._wan_free_provider = _WanFreeProvider(initial_dead=self._wan_skip_spaces)
