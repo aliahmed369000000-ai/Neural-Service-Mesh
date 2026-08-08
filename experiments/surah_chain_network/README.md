@@ -53,3 +53,23 @@ python experiments/surah_chain_network/hybrid_experiment.py
 
 ⚠️ **تجريبية** — غير موصولة بعد بمسار `qa_engine` / Streamlit.
 إثبات أن طرفَي LLM + وسط سوري يتعلّمان معاً على نص عربي/CKG.
+
+
+## قدرات النموذج اللغوي (منفّذة)
+
+| القدرة | التفاصيل |
+|--------|----------|
+| **Tokenizer** | `WordTokenizer` (decode حقيقي) + بناء قاموس من نصوص التدريب |
+| **generate()** | توليد سببي مع `temperature` و `top_k` حتى EOS |
+| **train_batch** | دفعات نصوص + متوسط خسارة |
+| **LR schedule** | `cosine_lr`: warmup خطي ثم cosine decay |
+
+```bash
+# تدريب LM سريع (جمل hybrid_data)
+python experiments/surah_chain_network/train_lm.py
+
+# فحص generate بعد بناء قاموس
+python experiments/surah_chain_network/hybrid_experiment.py
+```
+
+متغيرات اختيارية: `SCN_EPOCHS`, `SCN_BATCH`, `SCN_D_MODEL`, `SCN_LR`, `SCN_MAX_LEN`.
