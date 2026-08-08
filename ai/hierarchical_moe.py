@@ -12,6 +12,15 @@ Hierarchical Dynamic Mixture-of-Experts (MoE) — ai/hierarchical_moe.py
       المستوى 2 → راوتر فرعي داخل المجموعة يختار الخبير المحدد
   • Load Balancing: خسارة مساعدة تمنع الاعتماد الدائم على نفس الخبراء
 
+تقنيات MoE المتقدمة المدمجة:
+  • Shared Expert (DeepSeek-style): مسار مشترك دائماً + خبراء موجَّهة
+  • Router Temperature: حدة/ليونة قرار التوجيه
+  • Router Z-Loss (ST-MoE): استقرار logits البوابة
+  • Capacity Factor: حد سعة لكل خبير مع إسقاط الفائض
+  • Noisy Top-K: استكشاف أثناء التدريب (Switch/GShard)
+  • Expert Dropout: تنظيم لمساهمة الخبراء الموجَّهة
+  • MLP Gate + LayerNorm: راوتر أعمق من Linear واحد
+
 الاستخدام السريع:
     from ai.hierarchical_moe import HierarchicalMoE, DEFAULT_CATEGORIES
 
@@ -229,12 +238,14 @@ class ExpertFFN(nn.Module):
 # ══════════════════════════════════════════════════════════════════════════════
 class TopKRouter(nn.Module):
     """
-    راوتر MLP: d_model → hidden → n_targets + Top-K.
+    راوتر MLP متقدم: d_model → hidden → n_targets + Top-K.
 
-    Load balancing (Switch Transformer style):
-      aux_loss = n * Σ_i (f_i · P_i)
-      حيث f_i = نسبة العينات التي اختارت المنفذ i
-            P_i = متوسط احتمال المنفذ i قبل الـ top-k
+    تقنيات:
+      - Temperature scaling على logits
+      - Noisy Top-K (Switch/GShard) أثناء التدريب
+      - Capacity factor لإسقاط الفائض عن سعة الخبير
+      - Load-balancing aux: n * Σ (f_i · P_i)
+      - Router z-loss (ST-MoE): mean(logsumexp(logits)^2)
     """
 
     def __init__(
@@ -246,6 +257,9 @@ class TopKRouter(nn.Module):
         jitter: bool = True,
         hidden_mult: float = 2.0,
         dropout: float = 0.1,
+        temperature: float = 1.0,
+        z_loss_coeff: float = 1e-3,
+        capacity_factor: float = 1.25,
     ):
         super().__init__()
         assert n_targets >= 1
@@ -253,6 +267,9 @@ class TopKRouter(nn.Module):
         self.top_k = max(1, min(top_k, n_targets))
         self.noise_std = noise_std
         self.jitter = jitter
+        self.temperature = max(1e-3, float(temperature))
+        self.z_loss_coeff = float(z_loss_coeff)
+        self.capacity_factor = float(capacity_factor)
         hidden = max(64, int(d_model * hidden_mult))
         self.hidden = hidden
         self.gate = nn.Sequential(
@@ -306,31 +323,55 @@ class TopKRouter(nn.Module):
             aux_loss:  خسارة موازنة الحمل (scalar)
         """
         logits = self.gate(x)  # (B, n)
+        # Temperature scaling (ST-MoE / adaptive routing sharpness)
+        logits_t = logits / self.temperature
 
         if self.training and self.jitter and self.noise_std > 0:
-            # Noisy Top-K (as in Switch / GShard) — يشجّع الاستكشاف
-            noise = torch.randn_like(logits) * self.noise_std
-            noisy = logits + noise * F.softplus(logits)
-            scores = noisy
+            # Noisy Top-K (Switch / GShard) — استكشاف أثناء التدريب
+            noise = torch.randn_like(logits_t) * self.noise_std
+            scores = logits_t + noise * F.softplus(logits_t)
         else:
-            scores = logits
+            scores = logits_t
 
-        probs = F.softmax(logits.float(), dim=-1)  # للتوازن نستخدم logits النظيفة
+        probs = F.softmax(logits_t.float(), dim=-1)
 
         k = min(self.top_k, self.n_targets)
         top_val, top_idx = torch.topk(scores, k=k, dim=-1)
-        # أعد-softmax على المختارين فقط لضمان مجموع أوزان = 1
         top_w = F.softmax(top_val.float(), dim=-1).to(dtype=x.dtype)
 
-        # ── Load-balancing auxiliary loss ──
-        # f: fraction of batch dispatched to each target
         B = x.shape[0]
-        # one-hot of selections (count multiples if k>1)
+        # ── Capacity factor (Switch Transformer): حد أقصى للتوكينات لكل خبير ──
+        if self.training and self.capacity_factor > 0 and B > 1:
+            capacity = max(1, int(self.capacity_factor * B * k / max(1, self.n_targets)))
+            # أعد توزيع الاختيارات التي تتجاوز السعة (drop overflow)
+            for ki in range(k):
+                idx_k = top_idx[:, ki]
+                for expert_i in idx_k.unique().tolist():
+                    positions = (idx_k == expert_i).nonzero(as_tuple=False).view(-1)
+                    if positions.numel() > capacity:
+                        # احتفظ بأعلى أوزان البوابة فقط
+                        scores_pos = top_val[positions, ki]
+                        keep = torch.topk(scores_pos, k=capacity, dim=0).indices
+                        drop = torch.ones(positions.numel(), dtype=torch.bool, device=x.device)
+                        drop[keep] = False
+                        drop_idx = positions[drop]
+                        # حوّل الفائض إلى ثاني أفضل عام (أو صفر وزن)
+                        top_w[drop_idx, ki] = 0.0
+            # أعد تطبيع الأوزان بعد الإسقاط
+            top_w = top_w / (top_w.sum(dim=-1, keepdim=True) + 1e-9)
+
+        # Load-balancing aux (Switch style)
         mask = torch.zeros(B, self.n_targets, device=x.device, dtype=x.dtype)
         mask.scatter_(1, top_idx, 1.0)
-        f = mask.mean(dim=0)  # (n,)
-        P = probs.mean(dim=0)  # (n,)
-        aux_loss = self.n_targets * torch.sum(f * P)
+        f = mask.mean(dim=0)
+        P = probs.mean(dim=0)
+        lb_loss = self.n_targets * torch.sum(f * P)
+
+        # Router z-loss (ST-MoE): يستقرّ لوجيتات البوابة ويمنع انفجارها
+        # z = logsumexp(logits); loss = mean(z^2)
+        z = torch.logsumexp(logits.float(), dim=-1)
+        z_loss = torch.mean(z ** 2)
+        aux_loss = lb_loss + self.z_loss_coeff * z_loss
 
         return top_idx, top_w, probs, aux_loss
 
@@ -466,6 +507,12 @@ class HierarchicalMoE(nn.Module):
         top_k_experts: int = 3,
         dropout: float = 0.05,
         lb_coeff: float = 0.01,
+        use_shared_expert: bool = True,
+        shared_coeff: float = 0.3,
+        router_temperature: float = 1.0,
+        z_loss_coeff: float = 1e-3,
+        capacity_factor: float = 1.25,
+        expert_dropout: float = 0.0,
     ):
         super().__init__()
         self.d_model = d_model
@@ -474,6 +521,12 @@ class HierarchicalMoE(nn.Module):
         self.top_k_experts = top_k_experts
         self.lb_coeff = lb_coeff
         self.dropout_p = dropout
+        self.use_shared_expert = use_shared_expert
+        self.shared_coeff = float(shared_coeff)
+        self.router_temperature = float(router_temperature)
+        self.z_loss_coeff = float(z_loss_coeff)
+        self.capacity_factor = float(capacity_factor)
+        self.expert_dropout = float(expert_dropout)
 
         cats = categories or {k: list(v) for k, v in DEFAULT_CATEGORIES.items()}
         self.groups = nn.ModuleDict()
@@ -492,10 +545,25 @@ class HierarchicalMoE(nn.Module):
 
         n_g = max(1, len(self._group_order))
         self.group_router = TopKRouter(
-            d_model, n_targets=n_g, top_k=min(top_k_groups, n_g)
+            d_model,
+            n_targets=n_g,
+            top_k=min(top_k_groups, n_g),
+            temperature=router_temperature,
+            z_loss_coeff=z_loss_coeff,
+            capacity_factor=capacity_factor,
         )
+        # مزامنة إعدادات الراوترات الفرعية
+        for g in self.groups.values():
+            g.router.temperature = router_temperature
+            g.router.z_loss_coeff = z_loss_coeff
+            g.router.capacity_factor = capacity_factor
 
-        # طبقة إخراج اختيارية خفيفة (توحيد)
+        # Shared Expert (أسلوب DeepSeek-MoE): مسار دائماً نشط + خبراء موجَّهة
+        if use_shared_expert:
+            self.shared_expert = ExpertFFN(d_model, self.d_ff, dropout)
+        else:
+            self.shared_expert = None
+
         self.out_norm = nn.LayerNorm(d_model)
 
     # ── ديناميكية ────────────────────────────────────────────────────────────
@@ -626,6 +694,22 @@ class HierarchicalMoE(nn.Module):
                     info["group_weight_mean"] = float(gw[mask].mean().item())
                     route_info.append(info)
 
+        # Expert dropout (تدريب): إسقاط عشوائي لمساهمة الخبراء الموجَّهة
+        if self.training and self.expert_dropout > 0:
+            keep = (torch.rand(B, device=out.device) > self.expert_dropout).to(out.dtype)
+            while keep.dim() < out.dim():
+                keep = keep.unsqueeze(-1)
+            out = out * keep
+
+        # Shared expert (DeepSeek-style residual pathway)
+        if self.shared_expert is not None:
+            if token_level:
+                B_, T_, D_ = x.shape
+                shared_out = self.shared_expert(x.reshape(B_ * T_, D_)).view(B_, T_, D_)
+            else:
+                shared_out = self.shared_expert(pooled)
+            out = out * (1.0 - self.shared_coeff) + shared_out * self.shared_coeff
+
         out = self.out_norm(out)
         aux_loss = self.lb_coeff * total_aux
 
@@ -638,6 +722,10 @@ class HierarchicalMoE(nn.Module):
                 "group_weights": g_w.detach().cpu().tolist(),
                 "routes": route_info,
                 "aux_loss": float(aux_loss.detach().item()),
+                "shared_expert": bool(self.shared_expert is not None),
+                "shared_coeff": self.shared_coeff,
+                "router_temperature": self.router_temperature,
+                "capacity_factor": self.capacity_factor,
             }
             return out, aux_loss, info_out
         return out, aux_loss
@@ -682,6 +770,8 @@ class HierarchicalMoE(nn.Module):
             f"- d_model={self.d_model} · d_ff={self.d_ff}",
             f"- top_k_groups={self.top_k_groups} · top_k_experts={self.top_k_experts}",
             f"- lb_coeff={self.lb_coeff}",
+            f"- shared_expert={self.use_shared_expert} (coeff={self.shared_coeff})",
+            f"- temperature={self.router_temperature} · z_loss={self.z_loss_coeff} · capacity={self.capacity_factor}",
             f"- فئات: {len(self._group_order)} → {self._group_order}",
             f"- إجمالي الخبراء: **{self.total_experts()}**",
             "",
@@ -704,6 +794,12 @@ class HierarchicalMoE(nn.Module):
             "top_k_experts": self.top_k_experts,
             "lb_coeff": self.lb_coeff,
             "dropout": self.dropout_p,
+            "use_shared_expert": self.use_shared_expert,
+            "shared_coeff": self.shared_coeff,
+            "router_temperature": self.router_temperature,
+            "z_loss_coeff": self.z_loss_coeff,
+            "capacity_factor": self.capacity_factor,
+            "expert_dropout": self.expert_dropout,
             "group_order": list(self._group_order),
             "experts": {
                 cat: self.groups[cat]._id_order for cat in self._group_order
@@ -738,6 +834,12 @@ class HierarchicalMoE(nn.Module):
             top_k_experts=meta["top_k_experts"],
             dropout=meta.get("dropout", 0.05),
             lb_coeff=meta.get("lb_coeff", 0.01),
+            use_shared_expert=meta.get("use_shared_expert", True),
+            shared_coeff=meta.get("shared_coeff", 0.3),
+            router_temperature=meta.get("router_temperature", 1.0),
+            z_loss_coeff=meta.get("z_loss_coeff", 1e-3),
+            capacity_factor=meta.get("capacity_factor", 1.25),
+            expert_dropout=meta.get("expert_dropout", 0.0),
         )
         # استعادة ترتيب الفئات إن اختلف
         model._group_order = list(meta["group_order"])
