@@ -129,3 +129,18 @@ m = HybridExperimentModel(tokenizer="strong", d_model=256, n_heads=8)
 m.build_tokenizer_from_texts(texts)
 print(m.generate("الصبر", max_new_tokens=40, top_p=0.9, repetition_penalty=1.2))
 ```
+
+
+## نسخة PyTorch (موصى بها للتدريب الطويل)
+
+```bash
+python experiments/surah_chain_network/train_ckg_lm_torch.py
+
+# أسرع على GPU إن وُجد
+SCN_N=5000 SCN_EPOCHS=20 SCN_D_MODEL=256 SCN_BATCH=32 \
+  python experiments/surah_chain_network/train_ckg_lm_torch.py
+```
+
+- `hybrid_experiment_torch.py` — SurahChainLM + AdamW + warmup/cosine
+- Checkpoints: `checkpoints/best_ckg_lm_torch.pt`
+- يستخدم GPU تلقائياً إذا `torch.cuda.is_available()`
