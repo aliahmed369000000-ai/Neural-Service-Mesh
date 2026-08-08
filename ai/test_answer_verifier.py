@@ -161,3 +161,59 @@ class TestLexicalFaithfulness:
         r = verifier._lexical_faithfulness_score("", ["نص ما"])
         assert r["score"] is None
 
+    def test_alef_normalization_helps_match(self):
+        # «إلى» vs «الى» after normalization should align stop/filter consistently
+        summary = "الاستعانه بالصبر والصلاه"
+        ctx = ["يا أيها الذين آمنوا استعينوا بالصبر والصلاة إن الله مع الصابرين"]
+        r = verifier._lexical_faithfulness_score(summary, ctx)
+        assert r["score"] is not None and r["score"] >= 0.3
+
+    def test_faithful_case_passes_default_lexical_threshold(self, monkeypatch):
+        monkeypatch.setenv("NSM_OFFLINE_MODE", "1")
+        report = verifier.verify_answer_faithfulness(
+            "ماذا عن الصبر؟",
+            {
+                "summary": "القرآن يحث على الاستعانة بالصبر والصلاة وأن الله مع الصابرين",
+                "verses": [
+                    {
+                        "surah": 2,
+                        "ayah": 153,
+                        "text": "يا أيها الذين آمنوا استعينوا بالصبر والصلاة إن الله مع الصابرين",
+                    }
+                ],
+                "primary_concepts": [{"name": "الصبر"}],
+            },
+            threshold=0.5,
+        )
+        assert report["method"] == "lexical"
+        assert report["available"] is True
+        assert report["score"] is not None
+        assert report["faithful"] is True
+
+    def test_hallucination_fails_lexical(self, monkeypatch):
+        monkeypatch.setenv("NSM_OFFLINE_MODE", "1")
+        report = verifier.verify_answer_faithfulness(
+            "ماذا عن الصبر؟",
+            {
+                "summary": "نيوتن اكتشف الجاذبية وسرعة الضوء ثابتة في الفراغ",
+                "verses": [
+                    {
+                        "surah": 2,
+                        "ayah": 153,
+                        "text": "يا أيها الذين آمنوا استعينوا بالصبر والصلاة إن الله مع الصابرين",
+                    }
+                ],
+            },
+            threshold=0.5,
+        )
+        assert report["method"] == "lexical"
+        assert report["faithful"] is False
+
+
+class TestFreeRouterJudge:
+    def test_judge_class_callable(self):
+        j = verifier._FreeRouterJudge()
+        assert j.get_model_name()
+        assert hasattr(j, "generate")
+        assert hasattr(j, "a_generate")
+        assert hasattr(j, "load_model")
