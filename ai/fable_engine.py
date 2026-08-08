@@ -181,6 +181,42 @@ ARABIC_METERS: Dict[str, Dict[str, str]] = {
 # ذاكرة سردية — SQLite خفيفة تحفظ فصول كل جلسة قصة
 # ══════════════════════════════════════════════════════════════════════════
 
+
+# ══════════════════════════════════════════════════════════════════════════
+# أنماط Shorts الإبداعية — توجّه النبرة والإيقاع البصري
+# ══════════════════════════════════════════════════════════════════════════
+
+SHORTS_STYLES: Dict[str, Dict[str, str]] = {
+    "حقائق سريعة": {
+        "emoji": "⚡",
+        "tone": "أرقام صادمة، جمل قصيرة، إيقاع سريع جداً",
+        "hook": "هل تعلم أن…",
+    },
+    "تحفيزي": {
+        "emoji": "🔥",
+        "tone": "طاقة عالية، مخاطبة مباشرة، خاتمة تدعو للفعل",
+        "hook": "توقّف لحظة…",
+    },
+    "تعليمي": {
+        "emoji": "🧠",
+        "tone": "شرح مبسّط، خطوة بخطوة، أمثلة حسّية",
+        "hook": "في أقل من دقيقة ستفهم…",
+    },
+    "قصصي": {
+        "emoji": "📖",
+        "tone": "سرد درامي قصير، شخصية وحدث وتحوّل",
+        "hook": "في يومٍ ما…",
+    },
+    "درامي": {
+        "emoji": "🎬",
+        "tone": "توتر بصري، مفارقات، نهاية مفتوحة أو صادمة",
+        "hook": "لم يكن أحد يتوقع…",
+    },
+}
+
+DEFAULT_SHORTS_STYLE = "حقائق سريعة"
+
+
 class NarrativeMemory:
     """تخزين فصول القصة لكل جلسة، مع الحفاظ على السياق عبر الأدوار."""
 
@@ -747,19 +783,32 @@ class FableEngine:
     # قصير بسرد صوتي ورسوم متحركة توضيحية). كما في generate_explainer، هذا
     # نص سيناريو فقط (لا فيديو فعلي فعلي) — NSM لا يملك نموذج توليد فيديو.
 
-    def generate_short(self, source_text: str, target_seconds: int = 60) -> ExplainerScript:
+    def generate_short(
+        self,
+        source_text: str,
+        target_seconds: int = 60,
+        style: str = DEFAULT_SHORTS_STYLE,
+        force_offline: bool = False,
+    ) -> ExplainerScript:
         """
-        يلخّص موضوعاً/مصدراً نصياً في سيناريو فيديو رأسي قصير (~60 ثانية
-        افتراضياً) مقسّم إلى 'لقطات' سريعة، مع سرد صوتي مكثّف ووصف رسوم
-        متحركة توضيحية مقترحة لكل لقطة (بديل لصور الفيديو الوثائقي الأطول).
+        يلخّص موضوعاً/مصدراً نصياً في سيناريو فيديو رأسي قصير (~60 ثانية)
+        مع نمط إبداعي (حقائق / تحفيزي / تعليمي / قصصي / درامي).
+        إن تعذّر LLM يُستخدم مولّد محلي بدون مفاتيح.
         """
         target_seconds = max(20, min(int(target_seconds), 90))
         n_beats = max(4, round(target_seconds / 7))  # لقطة كل ~7 ثوانٍ تقريباً
+        style = style if style in SHORTS_STYLES else DEFAULT_SHORTS_STYLE
+        style_meta = SHORTS_STYLES[style]
+
+        if force_offline:
+            return self._generate_short_offline(source_text, target_seconds, n_beats, style)
 
         sp = (
             "أنت كاتب سيناريو من أفضل صنّاع محتوى Shorts/Reels في العالم العربي — "
             "أسلوبك يُضاهي إنتاج NotebookLM ومنصات مثل CapCut/Submagic الاحترافية: "
             "فصحى رشيقة تنبض بالحياة، بعيدة كل البعد عن الجفاف الأكاديمي أو الحشو. "
+            f"النمط الإبداعي المطلوب: {style} — {style_meta['tone']}. "
+            f"ابدأ الخطّاف بأسلوب قريب من: «{style_meta['hook']}». "
             "مهمتك: تحويل النص/الموضوع المُعطى إلى سيناريو فيديو قصير عمودي "
             f"مدته نحو {target_seconds} ثانية، بجودة كتابة استثنائية:\n"
             "- ابدأ بخطّاف (hook) صادم أو مُثير للفضول يُحطّم التوقع خلال أول 3 ثوانٍ "
@@ -783,23 +832,110 @@ class FableEngine:
             history=[], system_prompt=sp,
         )
 
-        segments = self._parse_explainer_segments(result.text)
-        # ضبط المدة الإجمالية لتقارب target_seconds إن أمكن (بدون تلاعب بالنص)
-        # العنوان: أول سطر من المصدر، مقصوص عند حدود الكلمات (لا يُقطَع
-        # حرف عشوائي في منتصف كلمة كما كان يحدث سابقاً مع [:60] الخام).
+        segments = self._parse_explainer_segments(result.text or "")
+        provider = getattr(result.provider, "value", str(result.provider))
+        err = result.error
+
+        # إن فشل التحليل أو النص فارغ → مولّد محلي إبداعي
+        if not segments or (err and not (result.text or "").strip()):
+            offline = self._generate_short_offline(
+                source_text, target_seconds, n_beats, style
+            )
+            if err:
+                offline.error = f"LLM: {err} · استُخدم المولّد المحلي"
+            else:
+                offline.error = offline.error or "مولّد محلي (fallback)"
+            return offline
+
         _raw_title = source_text.strip().splitlines()[0] if source_text.strip() else ""
         if len(_raw_title) > 60:
             _cut = _raw_title[:60].rsplit(" ", 1)[0].rstrip("،,؛:.-")
             title = (_cut or _raw_title[:60]) + "…"
         else:
-            title = _raw_title or "فيديو قصير"
+            title = _raw_title or f"شورت · {style}"
 
         script = ExplainerScript(
             topic=source_text,
             title=title,
             segments=segments,
-            provider=getattr(result.provider, "value", str(result.provider)),
-            error=result.error,
+            provider=provider,
+            error=err,
+            format="شورت",
+        )
+        self._save_script_to_history(script, source_excerpt=source_text)
+        return script
+
+    def _generate_short_offline(
+        self,
+        source_text: str,
+        target_seconds: int,
+        n_beats: int,
+        style: str,
+    ) -> "ExplainerScript":
+        """مولّد Shorts محلي بدون LLM — يعمل دائماً للإبداع السريع."""
+        style = style if style in SHORTS_STYLES else DEFAULT_SHORTS_STYLE
+        meta = SHORTS_STYLES[style]
+        text = (source_text or "").strip() or "موضوع عام للإبداع"
+        # تقسيم إلى جمل
+        parts = re.split(r"[.\n!?؟]+", text)
+        parts = [p.strip() for p in parts if p.strip()]
+        if not parts:
+            parts = [text]
+        # توسيع/تقليص لعدد اللقطات
+        while len(parts) < n_beats:
+            parts.append(parts[len(parts) % max(1, len(parts))])
+        parts = parts[:n_beats]
+        sec_each = max(4, target_seconds // max(1, len(parts)))
+
+        hook_templates = {
+            "حقائق سريعة": "هل تعلم؟ {idea}",
+            "تحفيزي": "توقّف لحظة — {idea}",
+            "تعليمي": "في ثوانٍ ستفهم: {idea}",
+            "قصصي": "بدأت الحكاية عندما {idea}",
+            "درامي": "لم يكن أحد يتوقع: {idea}",
+        }
+        visual_templates = {
+            "حقائق سريعة": "نص كبير في منتصف الشاشة + أرقام متحركة وخلفيّة متدرجة داكنة",
+            "تحفيزي": "كاميرا بطيئة على أفق مضيء + كلمات تظهر بإيقاع قوي",
+            "تعليمي": "رسوم مبسّطة وخطوات مرقّمة تظهر تباعاً بخلفية هادئة",
+            "قصصي": "لقطة سينمائية لشخصية ظليّة تتحرك في فضاء رمزي",
+            "درامي": "تباين إضاءة حادّ، حركة كاميرا بطيئة، نص يظهر كهمس ثم ينفجر",
+        }
+        close_templates = {
+            "حقائق سريعة": "والآن… شاركه قبل أن يختفِي من خلاصتك.",
+            "تحفيزي": "الخطوة التالية عليك أنت — ابدأ اليوم.",
+            "تعليمي": "هذا جوهر الفكرة — طبّقها مرة واحدة وستثبّت.",
+            "قصصي": "وهكذا بقيت الحكاية… وما زال السؤال معلّقاً.",
+            "درامي": "الصمت بعدها أبلغ من أي تعليق.",
+        }
+
+        segments: List[ExplainerSegment] = []
+        for i, idea in enumerate(parts):
+            idea_short = idea[:120]
+            if i == 0:
+                narr = hook_templates.get(style, "{idea}").format(idea=idea_short)
+            elif i == len(parts) - 1:
+                narr = f"{idea_short}. {close_templates.get(style, '')}"
+            else:
+                narr = idea_short
+            segments.append(
+                ExplainerSegment(
+                    index=i + 1,
+                    narration=narr,
+                    visual_notes=visual_templates.get(style, "نص حركي عمودي مع خلفية متدرجة"),
+                    est_seconds=sec_each,
+                )
+            )
+
+        _raw = text.splitlines()[0] if text else "شورت"
+        title = (_raw[:50] + "…") if len(_raw) > 50 else _raw
+        title = f"{meta.get('emoji', '⚡')} {title}"
+        script = ExplainerScript(
+            topic=source_text,
+            title=title,
+            segments=segments,
+            provider="offline-creative",
+            error=None,
             format="شورت",
         )
         self._save_script_to_history(script, source_excerpt=source_text)

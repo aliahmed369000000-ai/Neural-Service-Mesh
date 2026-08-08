@@ -40,11 +40,12 @@ def render_fable():
     engine = st.session_state.fable_engine
 
     story_tab, poem_tab, explainer_tab, shorts_tab, library_tab = st.tabs(
-        ["📖 قصة تفاعلية", "🪶 توليد شعر", "🎬 وثائقي (سيناريو)", "⚡ Shorts (سيناريو)", "📚 مكتبة القصص"]
+        ["📖 قصة تفاعلية", "🪶 توليد شعر", "🎬 وثائقي (سيناريو)", "⚡ Shorts فيديو", "📚 مكتبة القصص"]
     )
 
     # ══════════════════ قصة تفاعلية ══════════════════
     with story_tab:
+        st.caption("🎨 اختر الوضع والراوي ثم ابدأ — يمكنك توجيه القصة بالخيارات في كل فصل.")
         cur = st.session_state.fable_chapter
 
         if cur is None:
@@ -433,18 +434,46 @@ def render_fable():
     with shorts_tab:
         st.markdown(
             '<p style="color:var(--text-muted)">يحوّل نصاً أو موضوعاً إلى فيديو '
-            'قصير عمودي فعلي (~دقيقة واحدة) بسرد صوتي ورسوم متحركة نصية '
-            '(Kinetic Typography) — فكرة مستوحاة من ميزة NotebookLM: Shorts، '
-            'مع رندر mp4 حقيقي داخل المشروع (بدون أدوات خارجية).</p>',
+            'قصير عمودي (~دقيقة) بسرد صوتي ونص حركي — مع أنماط إبداعية، '
+            'مولّد محلي يعمل بدون مفاتيح، ورندر mp4 داخل المشروع.</p>',
             unsafe_allow_html=True,
         )
+        # قوالب أفكار سريعة
+        st.caption("قوالب سريعة")
+        _tpls = [
+            "5 حقائق مذهلة عن الفضاء",
+            "كيف تبدأ يومك بطاقة؟",
+            "قصة نجاح في 60 ثانية",
+            "ما لا تعرفه عن الذكاء الاصطناعي",
+        ]
+        _tc = st.columns(len(_tpls))
+        for _i, _tp in enumerate(_tpls):
+            with _tc[_i]:
+                if st.button(_tp, key=f"shorts_tpl_{_i}", use_container_width=True):
+                    st.session_state["shorts_source"] = _tp
+                    st.rerun()
         source_text = st.text_area(
             "الصق مصدرك أو اكتب الموضوع:",
             placeholder="مثال: فقرة من مقال، ملخص بحث، أو مجرد فكرة موضوع قصير",
             key="shorts_source",
             height=120,
         )
-        target_sec = st.slider("المدة المستهدفة (ثانية)", min_value=20, max_value=90, value=60, step=5)
+        c_style, c_sec, c_off = st.columns([2, 1.2, 1])
+        with c_style:
+            try:
+                from ai.fable_engine import SHORTS_STYLES, DEFAULT_SHORTS_STYLE
+                _style_labels = [f"{v['emoji']} {k}" for k, v in SHORTS_STYLES.items()]
+                _style_keys = list(SHORTS_STYLES.keys())
+                _si = _style_keys.index(DEFAULT_SHORTS_STYLE) if DEFAULT_SHORTS_STYLE in _style_keys else 0
+                _picked = st.selectbox("النمط الإبداعي", _style_labels, index=_si, key="shorts_style_sel")
+                shorts_style = _style_keys[_style_labels.index(_picked)]
+            except Exception:
+                shorts_style = "حقائق سريعة"
+                st.selectbox("النمط الإبداعي", ["حقائق سريعة"], key="shorts_style_sel_fb")
+        with c_sec:
+            target_sec = st.slider("المدة (ث)", min_value=20, max_value=90, value=60, step=5, key="shorts_sec")
+        with c_off:
+            force_offline = st.toggle("مولّد محلي", value=False, help="بدون مفاتيح API — إبداع فوري")
 
         if st.button("⚡ أنشئ سيناريو Shorts", type="primary"):
             if not source_text.strip():
@@ -453,9 +482,13 @@ def render_fable():
                 with st.spinner("يُلخّص ويكتب لقطات سريعة..."):
                     try:
                         st.session_state.shorts_script = engine.generate_short(
-                            source_text.strip(), target_seconds=target_sec
+                            source_text.strip(),
+                            target_seconds=target_sec,
+                            style=shorts_style,
+                            force_offline=force_offline,
                         )
                         st.session_state.shorts_error = None
+                        st.session_state.shorts_mp4 = None
                     except Exception as e:  # noqa: BLE001
                         st.session_state.shorts_script = None
                         st.session_state.shorts_error = str(e)
@@ -470,7 +503,8 @@ def render_fable():
             st.caption(
                 f"عدد اللقطات: {len(short.segments)} · "
                 f"إجمالي المدة التقديرية: ~{short.total_seconds} ثانية · "
-                f"المزوّد: {short.provider}"
+                f"المزوّد: {short.provider} · "
+                f"النمط: {st.session_state.get('shorts_style_sel', '—')}"
             )
             if short.error:
                 st.caption(f"⚠️ ملاحظة تقنية: {short.error}")
