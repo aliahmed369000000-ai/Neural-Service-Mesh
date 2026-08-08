@@ -33,6 +33,7 @@ SAFE_TOOLS = {
     "list_tests",
     "run_safe_tests",
     "training_preview",
+    "training_execute",
     "moe_health",
     "read_key_files",
     "integration_status",
@@ -176,8 +177,12 @@ def decompose_goal(goal: str) -> Dict[str, Any]:
         steps.append("تشغيل اختبارات آمنة محدودة")
         tools.extend(["list_tests", "run_safe_tests"])
     if re.search(r"تدريب|train|csv|نموذج", g, re.I):
-        steps.append("معاينة مهمة تدريب (بدون تنفيذ ثقيل)")
-        tools.append("training_preview")
+        if re.search(r"نف[ّ]?ذ|execute|شغ[ّ]?ل\s*التدريب", g, re.I):
+            steps.append("تنفيذ مهمة تدريب آمنة على data/samples فقط")
+            tools.append("training_execute")
+        else:
+            steps.append("معاينة مهمة تدريب (بدون تنفيذ ثقيل)")
+            tools.append("training_preview")
     if re.search(r"moe|خبراء|تصنيف", g, re.I):
         steps.append("فحص صحة MoE")
         tools.append("moe_health")
@@ -274,6 +279,22 @@ def _tool_training_preview() -> str:
         return f"تعذّرت معاينة التدريب: {e}"
 
 
+def _tool_training_execute() -> Tuple[bool, str]:
+    """تدريب حقيقي محدود على classification_demo فقط (sklearn)."""
+    try:
+        from ai.model_training_agent import run_training_mission
+        out = run_training_mission(
+            "data/samples/classification_demo.csv",
+            target_col="label",
+            prefer="sklearn",
+            execute=True,
+        )
+        ok = "Accuracy" in out or "completed" in out.lower() or "نتائج" in out
+        return ok, out
+    except Exception as e:
+        return False, f"تعذّر تنفيذ التدريب: {e}"
+
+
 def _tool_moe_health() -> str:
     try:
         from ai.moe_ckg_bridge import get_moe_bridge
@@ -326,6 +347,8 @@ def execute_tool(name: str) -> Tuple[bool, str]:
         return _tool_run_safe_tests()
     if name == "training_preview":
         return True, _tool_training_preview()
+    if name == "training_execute":
+        return _tool_training_execute()
     if name == "moe_health":
         return True, _tool_moe_health()
     if name == "integration_status":

@@ -61,3 +61,14 @@ def test_record_and_similar():
     record_experience("تشغيل اختبارات آمنة", ["a"], ["run_safe_tests"], True, "ok")
     sims = similar_experiences("اختبارات المشروع")
     assert isinstance(sims, list)
+
+
+def test_decompose_training_execute():
+    p = decompose_goal("نفّذ تدريب على csv classification")
+    assert "training_execute" in p["tools"]
+
+
+def test_decompose_training_preview_only():
+    p = decompose_goal("معاينة تدريب نموذج")
+    assert "training_preview" in p["tools"]
+    assert "training_execute" not in p["tools"]
