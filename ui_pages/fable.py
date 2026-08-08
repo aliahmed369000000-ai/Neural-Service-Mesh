@@ -39,8 +39,8 @@ def render_fable():
 
     engine = st.session_state.fable_engine
 
-    story_tab, poem_tab, explainer_tab, shorts_tab, library_tab = st.tabs(
-        ["📖 قصة تفاعلية", "🪶 توليد شعر", "🎬 وثائقي (سيناريو)", "⚡ Shorts فيديو", "📚 مكتبة القصص"]
+    story_tab, poem_tab, explainer_tab, shorts_tab, edit_tab, library_tab = st.tabs(
+        ["📖 قصة تفاعلية", "🪶 توليد شعر", "🎬 وثائقي (سيناريو)", "⚡ Shorts فيديو", "✂️ تعديل فيديو", "📚 مكتبة القصص"]
     )
 
     # ══════════════════ قصة تفاعلية ══════════════════
@@ -761,6 +761,14 @@ def render_fable():
                                     st.error(f"⚠️ فشل الرفع على تيك توك: {e}")
 
     # ══════════════════ مكتبة القصص المحفوظة ══════════════════
+    # ══════════════════ تعديل فيديو ══════════════════
+    with edit_tab:
+        try:
+            from ui_pages.video_editor_ui import render_video_editor
+            render_video_editor()
+        except Exception as _ve_err:
+            st.error(f"واجهة تعديل الفيديو: {_ve_err}")
+
     with library_tab:
         st.markdown(
             '<p style="color:var(--text-muted)">كل قصة تفاعلية تُحفظ تلقائياً في قاعدة بيانات SQLite محلية '
