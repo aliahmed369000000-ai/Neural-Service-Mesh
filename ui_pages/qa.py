@@ -30,14 +30,15 @@ def render_qa():
         "ما قصة يوسف؟",
     ]
     ex_cols = st.columns(len(examples))
-    chosen_example = None
     for i, ex in enumerate(examples):
         with ex_cols[i]:
             if st.button(ex, key=f"qa_example_{i}", use_container_width=True):
-                chosen_example = ex
+                st.session_state["qa_question"] = ex
+                st.session_state["_qa_auto_ask"] = True
+                st.rerun()
 
-    default_q = chosen_example or st.session_state.get("qa_question", "")
     st.session_state.setdefault("qa_conversation_history", [])
+    default_q = st.session_state.get("qa_question", "")
     question = st.text_input(
         "اكتب سؤالك هنا:",
         value=default_q,
@@ -67,8 +68,9 @@ def render_qa():
                 st.rerun()
 
     ask = st.button("🔍 اسأل", type="primary")
+    auto_ask = bool(st.session_state.pop("_qa_auto_ask", False))
 
-    if not (ask or chosen_example) or not question.strip():
+    if not (ask or auto_ask) or not question.strip():
         return
 
     ckg  = load_ckg()
@@ -129,16 +131,24 @@ def render_qa():
 
     if similar:
         st.markdown('<div class="section-header">🕘 أسئلة سابقة مشابهة</div>', unsafe_allow_html=True)
-        for s in similar:
+        st.caption("انقر على سؤال لإعادة طرحه:")
+        for _si, s in enumerate(similar):
             if normalize_arabic(s["question"]) == normalize_arabic(question):
                 continue
-            st.markdown(f"""
-            <div class="root-item">
-                <strong>{s['question']}</strong>
-                <span class="badge badge-blue">تشابه: {s['similarity']:.0%}</span>
-                <span class="badge badge-amber">ثقة: {s['confidence']:.0%}</span>
-            </div>
-            """, unsafe_allow_html=True)
+            _sq = s["question"]
+            _col_q, _col_b = st.columns([5, 1])
+            with _col_q:
+                st.markdown(f"""
+                <div class="root-item" style="margin-bottom:0.2rem;">
+                    <strong>{_sq}</strong>
+                    <span class="badge badge-blue">تشابه: {s['similarity']:.0%}</span>
+                    <span class="badge badge-amber">ثقة: {s['confidence']:.0%}</span>
+                </div>
+                """, unsafe_allow_html=True)
+            with _col_b:
+                if st.button("إعادة ←", key=f"qa_similar_reask_{_si}", use_container_width=True, help=_sq):
+                    st.session_state["qa_question"] = _sq
+                    st.rerun()
         st.markdown("")
 
     # ── ملخص الإجابة ──
