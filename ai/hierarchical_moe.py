@@ -177,6 +177,23 @@ DEFAULT_CATEGORIES: Dict[str, List[str]] = {
 }
 
 
+
+# ── أفضل إعدادات MoE (ممارسات Switch / ST-MoE / DeepSeek / Mixtral) ────────
+BEST_MOE_CONFIG: Dict[str, Any] = {
+    "top_k_groups": 3,
+    "top_k_experts": 3,
+    "use_shared_expert": True,
+    "shared_coeff": 0.35,
+    "router_temperature": 0.85,   # أحدّ قليلاً من 1.0 → ثقة أعلى
+    "z_loss_coeff": 1e-3,
+    "capacity_factor": 1.5,        # سعة أوفر قليلاً لتقليل الإسقاط الضار
+    "expert_dropout": 0.08,       # تنظيم أثناء التدريب
+    "lb_coeff": 0.02,             # موازنة حمل أقوى
+    "weight_threshold": 0.15,     # إهمال أوزان Top-K الضعيفة (Mixtral-style)
+    "input_residual": True,       # مسار متبقٍ من الدخل (Transformer FFN style)
+}
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 1) بيانات تعريف الخبير
 # ══════════════════════════════════════════════════════════════════════════════
@@ -257,9 +274,10 @@ class TopKRouter(nn.Module):
         jitter: bool = True,
         hidden_mult: float = 2.0,
         dropout: float = 0.1,
-        temperature: float = 1.0,
+        temperature: float = 0.85,
         z_loss_coeff: float = 1e-3,
-        capacity_factor: float = 1.25,
+        capacity_factor: float = 1.5,
+        weight_threshold: float = 0.15,
     ):
         super().__init__()
         assert n_targets >= 1
@@ -270,6 +288,7 @@ class TopKRouter(nn.Module):
         self.temperature = max(1e-3, float(temperature))
         self.z_loss_coeff = float(z_loss_coeff)
         self.capacity_factor = float(capacity_factor)
+        self.weight_threshold = float(weight_threshold)
         hidden = max(64, int(d_model * hidden_mult))
         self.hidden = hidden
         self.gate = nn.Sequential(
@@ -338,6 +357,12 @@ class TopKRouter(nn.Module):
         k = min(self.top_k, self.n_targets)
         top_val, top_idx = torch.topk(scores, k=k, dim=-1)
         top_w = F.softmax(top_val.float(), dim=-1).to(dtype=x.dtype)
+
+        # Threshold routing (Mixtral-style): أزل المساهمات الضعيفة جداً
+        if self.weight_threshold > 0:
+            tmax = top_w.max(dim=-1, keepdim=True).values.clamp_min(1e-9)
+            top_w = top_w.masked_fill(top_w < (tmax * self.weight_threshold), 0.0)
+            top_w = top_w / top_w.sum(dim=-1, keepdim=True).clamp_min(1e-9)
 
         B = x.shape[0]
         # ── Capacity factor (Switch Transformer): حد أقصى للتوكينات لكل خبير ──
@@ -503,16 +528,18 @@ class HierarchicalMoE(nn.Module):
         d_model: int = 128,
         d_ff: Optional[int] = None,
         categories: Optional[Dict[str, List[str]]] = None,
-        top_k_groups: int = 2,
+        top_k_groups: int = 3,
         top_k_experts: int = 3,
         dropout: float = 0.05,
-        lb_coeff: float = 0.01,
+        lb_coeff: float = 0.02,
         use_shared_expert: bool = True,
-        shared_coeff: float = 0.3,
-        router_temperature: float = 1.0,
+        shared_coeff: float = 0.35,
+        router_temperature: float = 0.85,
         z_loss_coeff: float = 1e-3,
-        capacity_factor: float = 1.25,
-        expert_dropout: float = 0.0,
+        capacity_factor: float = 1.5,
+        expert_dropout: float = 0.08,
+        weight_threshold: float = 0.15,
+        input_residual: bool = True,
     ):
         super().__init__()
         self.d_model = d_model
@@ -527,6 +554,8 @@ class HierarchicalMoE(nn.Module):
         self.z_loss_coeff = float(z_loss_coeff)
         self.capacity_factor = float(capacity_factor)
         self.expert_dropout = float(expert_dropout)
+        self.weight_threshold = float(weight_threshold)
+        self.input_residual = bool(input_residual)
 
         cats = categories or {k: list(v) for k, v in DEFAULT_CATEGORIES.items()}
         self.groups = nn.ModuleDict()
@@ -551,12 +580,14 @@ class HierarchicalMoE(nn.Module):
             temperature=router_temperature,
             z_loss_coeff=z_loss_coeff,
             capacity_factor=capacity_factor,
+            weight_threshold=weight_threshold,
         )
-        # مزامنة إعدادات الراوترات الفرعية
+        # مزامنة إعدادات الراوترات الفرعية على أفضل القيم
         for g in self.groups.values():
             g.router.temperature = router_temperature
             g.router.z_loss_coeff = z_loss_coeff
             g.router.capacity_factor = capacity_factor
+            g.router.weight_threshold = weight_threshold
 
         # Shared Expert (أسلوب DeepSeek-MoE): مسار دائماً نشط + خبراء موجَّهة
         if use_shared_expert:
@@ -710,6 +741,11 @@ class HierarchicalMoE(nn.Module):
                 shared_out = self.shared_expert(pooled)
             out = out * (1.0 - self.shared_coeff) + shared_out * self.shared_coeff
 
+        # Residual connection من الدخل (أفضل استقرار وتمثيل)
+        if self.input_residual:
+            residual = x if token_level else pooled
+            out = out + residual
+
         out = self.out_norm(out)
         aux_loss = self.lb_coeff * total_aux
 
@@ -783,6 +819,36 @@ class HierarchicalMoE(nn.Module):
         lines.append(f"\n- معاملات قابلة للتدريب: **{n_params:,}**")
         return "\n".join(lines)
 
+    def apply_best_config(self) -> "HierarchicalMoE":
+        """تطبيق أفضل إعدادات MoE المعتمدة على النموذج الحالي."""
+        cfg = BEST_MOE_CONFIG
+        self.top_k_groups = int(cfg["top_k_groups"])
+        self.top_k_experts = int(cfg["top_k_experts"])
+        self.shared_coeff = float(cfg["shared_coeff"])
+        self.router_temperature = float(cfg["router_temperature"])
+        self.z_loss_coeff = float(cfg["z_loss_coeff"])
+        self.capacity_factor = float(cfg["capacity_factor"])
+        self.expert_dropout = float(cfg["expert_dropout"])
+        self.lb_coeff = float(cfg["lb_coeff"])
+        self.weight_threshold = float(cfg["weight_threshold"])
+        self.input_residual = bool(cfg["input_residual"])
+        self.use_shared_expert = bool(cfg["use_shared_expert"])
+        if self.use_shared_expert and self.shared_expert is None:
+            self.shared_expert = ExpertFFN(self.d_model, self.d_ff, self.dropout_p)
+        # مزامنة الراوترات
+        self.group_router.top_k = min(self.top_k_groups, self.group_router.n_targets)
+        self.group_router.temperature = self.router_temperature
+        self.group_router.z_loss_coeff = self.z_loss_coeff
+        self.group_router.capacity_factor = self.capacity_factor
+        self.group_router.weight_threshold = self.weight_threshold
+        for g in self.groups.values():
+            g.router.top_k = min(self.top_k_experts, g.router.n_targets)
+            g.router.temperature = self.router_temperature
+            g.router.z_loss_coeff = self.z_loss_coeff
+            g.router.capacity_factor = self.capacity_factor
+            g.router.weight_threshold = self.weight_threshold
+        return self
+
     # ── حفظ / تحميل ──────────────────────────────────────────────────────────
     def save(self, path: Optional[str | Path] = None) -> Path:
         path = Path(path) if path else DEFAULT_SAVE_DIR / "hierarchical_moe.pt"
@@ -800,6 +866,9 @@ class HierarchicalMoE(nn.Module):
             "z_loss_coeff": self.z_loss_coeff,
             "capacity_factor": self.capacity_factor,
             "expert_dropout": self.expert_dropout,
+            "weight_threshold": self.weight_threshold,
+            "input_residual": self.input_residual,
+            "best_config_applied": True,
             "group_order": list(self._group_order),
             "experts": {
                 cat: self.groups[cat]._id_order for cat in self._group_order
@@ -830,19 +899,24 @@ class HierarchicalMoE(nn.Module):
             d_model=meta["d_model"],
             d_ff=meta["d_ff"],
             categories=categories,
-            top_k_groups=meta["top_k_groups"],
-            top_k_experts=meta["top_k_experts"],
+            top_k_groups=meta.get("top_k_groups", BEST_MOE_CONFIG["top_k_groups"]),
+            top_k_experts=meta.get("top_k_experts", BEST_MOE_CONFIG["top_k_experts"]),
             dropout=meta.get("dropout", 0.05),
-            lb_coeff=meta.get("lb_coeff", 0.01),
-            use_shared_expert=meta.get("use_shared_expert", True),
-            shared_coeff=meta.get("shared_coeff", 0.3),
-            router_temperature=meta.get("router_temperature", 1.0),
-            z_loss_coeff=meta.get("z_loss_coeff", 1e-3),
-            capacity_factor=meta.get("capacity_factor", 1.25),
-            expert_dropout=meta.get("expert_dropout", 0.0),
+            lb_coeff=meta.get("lb_coeff", BEST_MOE_CONFIG["lb_coeff"]),
+            use_shared_expert=meta.get("use_shared_expert", BEST_MOE_CONFIG["use_shared_expert"]),
+            shared_coeff=meta.get("shared_coeff", BEST_MOE_CONFIG["shared_coeff"]),
+            router_temperature=meta.get("router_temperature", BEST_MOE_CONFIG["router_temperature"]),
+            z_loss_coeff=meta.get("z_loss_coeff", BEST_MOE_CONFIG["z_loss_coeff"]),
+            capacity_factor=meta.get("capacity_factor", BEST_MOE_CONFIG["capacity_factor"]),
+            expert_dropout=meta.get("expert_dropout", BEST_MOE_CONFIG["expert_dropout"]),
+            weight_threshold=meta.get("weight_threshold", BEST_MOE_CONFIG["weight_threshold"]),
+            input_residual=meta.get("input_residual", BEST_MOE_CONFIG["input_residual"]),
         )
         # استعادة ترتيب الفئات إن اختلف
         model._group_order = list(meta["group_order"])
+        # إن كان الحفظ قديماً بدون best_config — طبّق الأفضل
+        if not meta.get("best_config_applied"):
+            model.apply_best_config()
         # استعادة meta الاستخدام
         for cat, emap in meta.get("expert_meta", {}).items():
             if cat not in model.groups:
@@ -889,15 +963,25 @@ def train_step(
 
 def build_default_moe(
     d_model: int = 128,
-    top_k_groups: int = 2,
-    top_k_experts: int = 3,
+    top_k_groups: int | None = None,
+    top_k_experts: int | None = None,
 ) -> HierarchicalMoE:
-    """مصنع سريع بالإعدادات الافتراضية للمعرفة الإسلامية."""
+    """مصنع سريع — دائماً بأفضل إعدادات MoE المعتمدة."""
+    cfg = BEST_MOE_CONFIG
     return HierarchicalMoE(
         d_model=d_model,
-        top_k_groups=top_k_groups,
-        top_k_experts=top_k_experts,
+        top_k_groups=top_k_groups if top_k_groups is not None else int(cfg["top_k_groups"]),
+        top_k_experts=top_k_experts if top_k_experts is not None else int(cfg["top_k_experts"]),
         categories={k: list(v) for k, v in DEFAULT_CATEGORIES.items()},
+        use_shared_expert=bool(cfg["use_shared_expert"]),
+        shared_coeff=float(cfg["shared_coeff"]),
+        router_temperature=float(cfg["router_temperature"]),
+        z_loss_coeff=float(cfg["z_loss_coeff"]),
+        capacity_factor=float(cfg["capacity_factor"]),
+        expert_dropout=float(cfg["expert_dropout"]),
+        lb_coeff=float(cfg["lb_coeff"]),
+        weight_threshold=float(cfg["weight_threshold"]),
+        input_residual=bool(cfg["input_residual"]),
     )
 
 

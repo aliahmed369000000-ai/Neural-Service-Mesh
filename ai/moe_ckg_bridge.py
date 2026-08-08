@@ -179,10 +179,11 @@ class MoECKGBridge:
             path = Path(moe_path) if moe_path else MOE_PATH
             if path.is_file():
                 self.moe = HierarchicalMoE.load(path, map_location="cpu")
-                logger.info("MoE محمّل من %s (%d خبراء)", path, self.moe.total_experts())
+                self.moe.apply_best_config()
+                logger.info("MoE محمّل من %s (%d خبراء) [best config]", path, self.moe.total_experts())
             else:
                 self.moe = build_default_moe(d_model=d_model or 128)
-                logger.info("MoE افتراضي جديد (%d خبراء)", self.moe.total_experts())
+                logger.info("MoE افتراضي جديد (%d خبراء) [best config]", self.moe.total_experts())
 
             self.moe.eval()
             dm = self.moe.d_model
