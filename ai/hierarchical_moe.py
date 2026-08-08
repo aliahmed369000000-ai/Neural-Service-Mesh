@@ -229,7 +229,7 @@ class ExpertFFN(nn.Module):
 # ══════════════════════════════════════════════════════════════════════════════
 class TopKRouter(nn.Module):
     """
-    راوتر يُخرج أوزان gated لـ top_k فقط من بين n منافذ.
+    راوتر MLP: d_model → hidden → n_targets + Top-K.
 
     Load balancing (Switch Transformer style):
       aux_loss = n * Σ_i (f_i · P_i)
@@ -244,6 +244,8 @@ class TopKRouter(nn.Module):
         top_k: int = 2,
         noise_std: float = 1.0,
         jitter: bool = True,
+        hidden_mult: float = 2.0,
+        dropout: float = 0.1,
     ):
         super().__init__()
         assert n_targets >= 1
@@ -251,20 +253,43 @@ class TopKRouter(nn.Module):
         self.top_k = max(1, min(top_k, n_targets))
         self.noise_std = noise_std
         self.jitter = jitter
-        self.gate = nn.Linear(d_model, n_targets, bias=False)
-        nn.init.normal_(self.gate.weight, mean=0.0, std=0.02)
+        hidden = max(64, int(d_model * hidden_mult))
+        self.hidden = hidden
+        self.gate = nn.Sequential(
+            nn.Linear(d_model, hidden),
+            nn.LayerNorm(hidden),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden, hidden),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden, n_targets, bias=False),
+        )
+        self._init_gate()
+
+    def _init_gate(self) -> None:
+        for m in self.gate.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+        last = self.gate[-1]
+        if isinstance(last, nn.Linear):
+            nn.init.normal_(last.weight, mean=0.0, std=0.02)
 
     def expand_targets(self, new_n: int) -> None:
-        """توسيع طبقة التوجيه عند إضافة منافذ جديدة (خبراء/فئات) دون فقدان الأوزان القديمة."""
+        """توسيع الطبقة الأخيرة فقط عند إضافة منافذ جديدة."""
         if new_n <= self.n_targets:
             return
-        old = self.gate.weight.data  # (n_old, d)
-        d = old.shape[1]
-        new_gate = nn.Linear(d, new_n, bias=False)
-        nn.init.normal_(new_gate.weight, mean=0.0, std=0.02)
+        last = self.gate[-1]
+        assert isinstance(last, nn.Linear)
+        old = last.weight.data  # (n_old, hidden)
+        hid = old.shape[1]
+        new_last = nn.Linear(hid, new_n, bias=False)
+        nn.init.normal_(new_last.weight, mean=0.0, std=0.02)
         with torch.no_grad():
-            new_gate.weight[: self.n_targets].copy_(old)
-        self.gate = new_gate
+            new_last.weight[: self.n_targets].copy_(old)
+        self.gate[-1] = new_last
         self.n_targets = new_n
         self.top_k = min(self.top_k, new_n)
 

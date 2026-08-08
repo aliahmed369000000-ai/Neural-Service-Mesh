@@ -167,8 +167,33 @@ class MoECKGBridge:
 
             self.moe.eval()
             dm = self.moe.d_model
+            self._torch_projector = None
+            learnable = MOE_PATH.parent / "moe_learnable_projector.pt"
             proj_path = MOE_PATH.parent / "moe_projector.npy"
-            if proj_path.is_file():
+            if learnable.is_file():
+                try:
+                    import torch.nn as nn
+                    blob = torch.load(str(learnable), map_location="cpu", weights_only=False)
+                    # LearnableProjector: Linear(784,2d)->GELU->Linear(2d,d)->LN
+                    class _Proj(nn.Module):
+                        def __init__(self, d_out):
+                            super().__init__()
+                            self.net = nn.Sequential(
+                                nn.Linear(784, d_out * 2),
+                                nn.GELU(),
+                                nn.Linear(d_out * 2, d_out),
+                                nn.LayerNorm(d_out),
+                            )
+                        def forward(self, x):
+                            return self.net(x)
+                    proj = _Proj(dm)
+                    proj.load_state_dict(blob["projector"])
+                    proj.eval()
+                    self._torch_projector = proj
+                    logger.info("مسقط MoE القابل للتعلم محمّل من %s", learnable)
+                except Exception as e:
+                    logger.warning("فشل تحميل المسقط القابل للتعلم: %s", e)
+            if self._torch_projector is None and proj_path.is_file():
                 P = np.load(str(proj_path))
                 if getattr(P, "shape", None) == (dm, 784):
                     self.projector = P.astype(np.float64)
@@ -176,7 +201,7 @@ class MoECKGBridge:
                 else:
                     rng = np.random.RandomState(42)
                     self.projector = rng.randn(dm, 784).astype(np.float64) * (2.0 / np.sqrt(784))
-            else:
+            elif self._torch_projector is None:
                 rng = np.random.RandomState(42)
                 self.projector = rng.randn(dm, 784).astype(np.float64) * (2.0 / np.sqrt(784))
         except Exception as e:
@@ -186,7 +211,8 @@ class MoECKGBridge:
 
     @property
     def available(self) -> bool:
-        return self.enabled and self.moe is not None and self.projector is not None
+        has_proj = self.projector is not None or getattr(self, "_torch_projector", None) is not None
+        return self.enabled and self.moe is not None and has_proj
 
     def project(self, context_vector: np.ndarray) -> "torch.Tensor":
         """(784,) أو (B,784) → (B, d_model) torch."""
@@ -195,15 +221,16 @@ class MoECKGBridge:
         if v.ndim == 1:
             v = v.reshape(1, -1)
         if v.shape[-1] != 784:
-            # pad / truncate
             fixed = np.zeros((v.shape[0], 784), dtype=np.float64)
             n = min(784, v.shape[-1])
             fixed[:, :n] = v[:, :n]
             v = fixed
-        # L2 normalize ثم إسقاط
         norms = np.linalg.norm(v, axis=1, keepdims=True) + 1e-8
         v = v / norms
-        projected = v @ self.projector.T  # (B, d_model)
+        if getattr(self, "_torch_projector", None) is not None:
+            with torch.no_grad():
+                return self._torch_projector(torch.from_numpy(v.astype(np.float32)))
+        projected = v @ self.projector.T
         return torch.from_numpy(projected.astype(np.float32))
 
     def category_weights(
