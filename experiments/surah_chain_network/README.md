@@ -144,3 +144,18 @@ SCN_N=5000 SCN_EPOCHS=20 SCN_D_MODEL=256 SCN_BATCH=32 \
 - `hybrid_experiment_torch.py` — SurahChainLM + AdamW + warmup/cosine
 - Checkpoints: `checkpoints/best_ckg_lm_torch.pt`
 - يستخدم GPU تلقائياً إذا `torch.cuda.is_available()`
+
+
+## المسار الرسمي: PyTorch فقط
+
+> نسخة NumPy **Deprecated**. المسار الوحيد الموصى به:
+
+```bash
+python experiments/surah_chain_network/train_ckg_lm_torch.py
+```
+
+تحسينات الأداء:
+- دفعات حقيقية (B×S) بدل جملة بجملة
+- `scaled_dot_product_attention` (سببي)
+- AdamW + grad clip
+- `SCN_COMPILE=1` لتفعيل torch.compile

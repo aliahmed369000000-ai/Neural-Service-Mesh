@@ -1,22 +1,17 @@
 """
-تدريب SurahChain LM (PyTorch) على جمل CKG.
+تدريب SurahChain LM — PyTorch فقط (بدون NumPy).
 
   python experiments/surah_chain_network/train_ckg_lm_torch.py
-
-متغيرات:
-  SCN_N, SCN_EPOCHS, SCN_BATCH, SCN_D_MODEL, SCN_N_HEADS,
-  SCN_N_PRE, SCN_N_POST, SCN_LR, SCN_MAX_LEN
 """
 from __future__ import annotations
 
 import json
 import os
 import pickle
+import random
 import sys
 import time
 from pathlib import Path
-
-import numpy as np
 
 _HERE = Path(__file__).resolve().parent
 _REPO = _HERE.parents[1]
@@ -40,6 +35,7 @@ N_PRE = int(os.environ.get("SCN_N_PRE", "2"))
 N_POST = int(os.environ.get("SCN_N_POST", "2"))
 BASE_LR = float(os.environ.get("SCN_LR", "1e-3"))
 MAX_LEN = int(os.environ.get("SCN_MAX_LEN", "96"))
+COMPILE = os.environ.get("SCN_COMPILE", "0") == "1"
 WARMUP_RATIO = 0.1
 
 
@@ -59,9 +55,8 @@ def load_ckg_sentences(max_n: int) -> list:
             all_s.extend(
                 [s.strip() for s in data if isinstance(s, str) and len(s.strip()) >= 8]
             )
-    seen, out = set(), []
-    rng = np.random.default_rng(0)
-    rng.shuffle(all_s)
+    random.Random(0).shuffle(all_s)
+    out, seen = [], set()
     for s in all_s:
         if s in seen:
             continue
@@ -85,8 +80,11 @@ def main():
         n_heads=N_HEADS,
         n_pre=N_PRE,
         n_post=N_POST,
+        compile_model=COMPILE,
     )
-    n_vocab = m.build_tokenizer_from_texts(texts, max_vocab=min(8192, max(3000, len(texts))))
+    n_vocab = m.build_tokenizer_from_texts(
+        texts, max_vocab=min(8192, max(3000, len(texts)))
+    )
     m.tokenizer.save(str(VOCAB_PATH))
     print(f"قاموس: {n_vocab}")
     print("params:", m.param_count())
@@ -94,7 +92,10 @@ def main():
     steps_per_epoch = max(1, (len(texts) + BATCH - 1) // BATCH)
     total_steps = EPOCHS * steps_per_epoch
     warmup = max(1, int(total_steps * WARMUP_RATIO))
-    print(f"epochs={EPOCHS} batch={BATCH} steps={total_steps} warmup={warmup} device={m.device}")
+    print(
+        f"epochs={EPOCHS} batch={BATCH} steps={total_steps} "
+        f"warmup={warmup} device={m.device} compile={COMPILE}"
+    )
 
     best = float("inf")
     history = []
@@ -103,7 +104,7 @@ def main():
 
     for ep in range(1, EPOCHS + 1):
         order = list(texts)
-        np.random.shuffle(order)
+        random.shuffle(order)
         ep_losses = []
         for i in range(0, len(order), BATCH):
             batch = order[i : i + BATCH]
@@ -114,9 +115,10 @@ def main():
                 total_steps=total_steps,
                 warmup_steps=warmup,
             )
-            ep_losses.append(loss)
+            if loss == loss:  # not NaN
+                ep_losses.append(loss)
             global_step += 1
-        mean_l = float(np.mean(ep_losses))
+        mean_l = sum(ep_losses) / max(1, len(ep_losses))
         history.append({"epoch": ep, "loss": mean_l, "lr": m.lr})
         mark = ""
         if mean_l < best:
@@ -135,6 +137,7 @@ def main():
         "d_model": D_MODEL,
         "device": str(m.device),
         "backend": "pytorch",
+        "real_batch": True,
     }
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2))
     print("-" * 50)

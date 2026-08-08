@@ -14,7 +14,6 @@ from collections import Counter
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-import numpy as np
 
 _AR_DIAC = re.compile(r"[\u064B-\u065F\u0670\u0640]")
 _TOKEN_RE = re.compile(r"[\u0600-\u06FFa-zA-Z0-9]+|[^\s]", re.UNICODE)
@@ -169,11 +168,11 @@ class StrongTokenizer:
                 else:
                     ids.append(self.word_to_id.get(piece, self.UNK))
         ids.append(self.EOS)
-        return np.array(ids[:max_len], dtype=np.int64)
+        return ids[:max_len]
 
     def decode(self, ids, skip_special: bool = True) -> str:
-        if isinstance(ids, np.ndarray):
-            ids = ids.tolist()
+        if not isinstance(ids, list):
+            ids = list(ids)
         special = {self.PAD, self.UNK, self.BOS, self.EOS, self.SEP, self.MASK}
         parts: List[str] = []
         for i in ids:

@@ -1,24 +1,21 @@
 """
-Surah-Chain LM — نسخة PyTorch
+Surah-Chain LM — PyTorch فقط (بدون NumPy)
 
-نفس المعمارية:
-  StrongTokenizer
-  → Embed + Pos + LN
-  → TransformerBlock × N_PRE  (Causal MHA + GELU FFN)
-  → Adapter → SurahChain×114 → Adapter + residual skip
-  → TransformerBlock × N_POST
-  → Tied LM Head
-
-استخدام GPU تلقائياً إن وُجد: device = cuda | cpu
+تحسينات الأداء:
+  - دفعات حقيقية (padding + ignore_index)
+  - scaled_dot_product_attention (سببي / Flash عند الإمكان)
+  - AdamW + clip_grad + cosine warmup
+  - torch.compile اختياري
+  - GPU تلقائي
 """
 from __future__ import annotations
 
 import json
 import math
+import random
 from pathlib import Path
 from typing import List, Optional, Sequence, Union
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -26,9 +23,8 @@ import torch.nn.functional as F
 from strong_tokenizer import StrongTokenizer
 
 _HERE = Path(__file__).resolve().parent
-_DIMS_PATH = _HERE / "surah_layer_dims.json"
-LAYER_DIMS: List[List[int]] = json.loads(_DIMS_PATH.read_text())
-CHAIN_WIDTH = int(LAYER_DIMS[0][0])  # 7
+LAYER_DIMS: List[List[int]] = json.loads((_HERE / "surah_layer_dims.json").read_text())
+CHAIN_WIDTH = int(LAYER_DIMS[0][0])
 
 DEFAULT_D_MODEL = 256
 DEFAULT_N_HEADS = 8
@@ -39,9 +35,7 @@ DEFAULT_MAX_LEN = 128
 
 
 def get_device() -> torch.device:
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    return torch.device("cpu")
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def cosine_lr(step, total_steps, base_lr, warmup_steps=0, min_lr_ratio=0.1):
@@ -51,14 +45,12 @@ def cosine_lr(step, total_steps, base_lr, warmup_steps=0, min_lr_ratio=0.1):
         return base_lr * float(step + 1) / float(max(1, warmup_steps))
     t = step - warmup_steps
     T = max(1, total_steps - warmup_steps)
-    progress = min(1.0, max(0.0, t / T))
+    progress = min(1.0, max(0.0, t / float(T)))
     cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
     return base_lr * (min_lr_ratio + (1.0 - min_lr_ratio) * cosine)
 
 
 class SurahChainLayer(nn.Module):
-    """طبقة FC + GELU + LN + residual (مع إسقاط إن اختلف البعد)."""
-
     def __init__(self, d_in: int, d_out: int):
         super().__init__()
         self.fc = nn.Linear(d_in, d_out)
@@ -75,9 +67,7 @@ class SurahChainNetwork(nn.Module):
     def __init__(self, layer_dims: Optional[List[List[int]]] = None):
         super().__init__()
         dims = layer_dims or LAYER_DIMS
-        self.layers = nn.ModuleList(
-            [SurahChainLayer(int(a), int(b)) for a, b in dims]
-        )
+        self.layers = nn.ModuleList([SurahChainLayer(int(a), int(b)) for a, b in dims])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         for layer in self.layers:
@@ -86,30 +76,49 @@ class SurahChainNetwork(nn.Module):
 
 
 class CausalSelfAttention(nn.Module):
+    """انتباه سببي عبر scaled_dot_product_attention (أسرع)."""
+
     def __init__(self, d_model: int, n_heads: int, dropout: float = 0.1):
         super().__init__()
         assert d_model % n_heads == 0
         self.n_heads = n_heads
         self.d_head = d_model // n_heads
-        self.qkv = nn.Linear(d_model, 3 * d_model)
-        self.proj = nn.Linear(d_model, d_model)
-        self.drop = nn.Dropout(dropout)
+        self.qkv = nn.Linear(d_model, 3 * d_model, bias=False)
+        self.proj = nn.Linear(d_model, d_model, bias=False)
+        self.dropout = dropout
+        self.resid_drop = nn.Dropout(dropout)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (B, S, D)
+    def forward(self, x: torch.Tensor, key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        # x: (B, S, D)  key_padding_mask: (B, S) True = PAD
         B, S, D = x.shape
         qkv = self.qkv(x).reshape(B, S, 3, self.n_heads, self.d_head)
         qkv = qkv.permute(2, 0, 3, 1, 4)  # (3, B, H, S, dh)
         q, k, v = qkv[0], qkv[1], qkv[2]
-        att = (q @ k.transpose(-2, -1)) / math.sqrt(self.d_head)
-        # causal mask
-        mask = torch.triu(torch.ones(S, S, device=x.device, dtype=torch.bool), diagonal=1)
-        att = att.masked_fill(mask, float("-inf"))
-        att = F.softmax(att, dim=-1)
-        att = self.drop(att)
-        y = att @ v  # (B, H, S, dh)
+
+        # SDPA: is_causal=True أسرع من mask يدوي
+        drop_p = self.dropout if self.training else 0.0
+        # attn_mask for padding: True means "ignore" in SDPA float mask convention differs;
+        # use key padding by setting k/v positions - we use additive mask
+        if key_padding_mask is not None:
+            # (B, S) True=pad -> (B, 1, 1, S)
+            pad = key_padding_mask[:, None, None, :]
+            # float mask: -inf where pad
+            attn_bias = torch.zeros(B, 1, 1, S, device=x.device, dtype=q.dtype)
+            attn_bias = attn_bias.masked_fill(pad, float("-inf"))
+            # combine with causal via is_causal only when no pad is tricky;
+            # build full causal+pad mask
+            causal = torch.triu(torch.ones(S, S, device=x.device, dtype=torch.bool), diagonal=1)
+            # (1, 1, S, S)
+            full = causal[None, None, :, :]
+            bias = torch.zeros(B, 1, S, S, device=x.device, dtype=q.dtype)
+            bias = bias.masked_fill(full, float("-inf"))
+            bias = bias.masked_fill(pad.expand(B, 1, S, S), float("-inf"))
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=bias, dropout_p=drop_p)
+        else:
+            y = F.scaled_dot_product_attention(q, k, v, is_causal=True, dropout_p=drop_p)
+
         y = y.transpose(1, 2).contiguous().reshape(B, S, D)
-        return self.drop(self.proj(y))
+        return self.resid_drop(self.proj(y))
 
 
 class TransformerBlock(nn.Module):
@@ -126,15 +135,13 @@ class TransformerBlock(nn.Module):
             nn.Dropout(dropout),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.attn(self.ln1(x))
+    def forward(self, x: torch.Tensor, key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        x = x + self.attn(self.ln1(x), key_padding_mask=key_padding_mask)
         x = x + self.ffn(self.ln2(x))
         return x
 
 
 class SurahChainLM(nn.Module):
-    """نموذج لغوي كامل على PyTorch."""
-
     def __init__(
         self,
         vocab_size: int = 8192,
@@ -151,8 +158,11 @@ class SurahChainLM(nn.Module):
         self.d_model = d_model
         self.vocab_size = vocab_size
         self.max_seq = max_seq
+        self.n_heads = n_heads
+        self.n_pre = n_pre
+        self.n_post = n_post
 
-        self.tok_emb = nn.Embedding(vocab_size, d_model)
+        self.tok_emb = nn.Embedding(vocab_size, d_model, padding_idx=0)
         self.pos_emb = nn.Embedding(max_seq, d_model)
         self.drop = nn.Dropout(dropout)
         self.ln_in = nn.LayerNorm(d_model)
@@ -169,7 +179,6 @@ class SurahChainLM(nn.Module):
             [TransformerBlock(d_model, n_heads, d_ff, dropout) for _ in range(n_post)]
         )
         self.ln_f = nn.LayerNorm(d_model)
-        # tied head: use tok_emb.weight
         self.apply(self._init_weights)
 
     @staticmethod
@@ -180,52 +189,56 @@ class SurahChainLM(nn.Module):
                 nn.init.zeros_(m.bias)
         elif isinstance(m, nn.Embedding):
             nn.init.normal_(m.weight, mean=0.0, std=0.02)
+            if getattr(m, "padding_idx", None) is not None:
+                with torch.no_grad():
+                    m.weight[m.padding_idx].fill_(0)
 
-    def forward(self, idx: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        idx: torch.Tensor,
+        key_padding_mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         """
-        idx: (B, S) long
-        returns logits: (B, S, vocab)
+        idx: (B, S)
+        key_padding_mask: (B, S) True حيث PAD
+        logits: (B, S, vocab)
         """
         B, S = idx.shape
         if S > self.max_seq:
             idx = idx[:, -self.max_seq :]
+            if key_padding_mask is not None:
+                key_padding_mask = key_padding_mask[:, -self.max_seq :]
             S = idx.shape[1]
-        pos = torch.arange(S, device=idx.device).unsqueeze(0)
+
+        pos = torch.arange(S, device=idx.device).unsqueeze(0).expand(B, -1)
         x = self.drop(self.tok_emb(idx) + self.pos_emb(pos))
         x = self.ln_in(x)
 
         for blk in self.pre_blocks:
-            x = blk(x)
+            x = blk(x, key_padding_mask=key_padding_mask)
 
         h7 = self.W_in(x)
-        # SurahChain يتوقع آخر بُعد = عرض السلسلة؛ طبّق على كل موضع
-        flat = h7.reshape(-1, CHAIN_WIDTH)
+        flat = h7.reshape(B * S, CHAIN_WIDTH)
         flat = self.chain(flat)
         h_chain = self.W_out(flat).reshape(B, S, self.d_model)
         x = h_chain + self.W_skip(x)
 
         for blk in self.post_blocks:
-            x = blk(x)
+            x = blk(x, key_padding_mask=key_padding_mask)
         x = self.ln_f(x)
-        logits = F.linear(x, self.tok_emb.weight)  # weight tying
-        return logits
+        return F.linear(x, self.tok_emb.weight)
 
     def param_count(self) -> dict:
-        total = sum(p.numel() for p in self.parameters())
-        chain = sum(p.numel() for p in self.chain.parameters())
         return {
-            "total": total,
-            "chain": chain,
+            "total": sum(p.numel() for p in self.parameters()),
+            "chain": sum(p.numel() for p in self.chain.parameters()),
             "d_model": self.d_model,
             "vocab_size": self.vocab_size,
         }
 
 
 class HybridExperimentModelTorch:
-    """
-    غلاف يوفّر نفس أسلوب الاستخدام تقريباً:
-      build_tokenizer_from_texts, train_batch, generate, set_lr
-    """
+    """واجهة تدريب/توليد — PyTorch فقط، دفعات حقيقية."""
 
     def __init__(
         self,
@@ -237,10 +250,12 @@ class HybridExperimentModelTorch:
         n_post: int = DEFAULT_N_POST,
         device: Optional[Union[str, torch.device]] = None,
         max_seq: int = DEFAULT_MAX_CTX,
+        compile_model: bool = False,
     ):
         self.device = torch.device(device) if device else get_device()
         self.base_lr = lr
         self.lr = lr
+        self.vocab_size = vocab_size
         self.tokenizer = StrongTokenizer(vocab_size)
         self.model = SurahChainLM(
             vocab_size=vocab_size,
@@ -250,24 +265,43 @@ class HybridExperimentModelTorch:
             n_post=n_post,
             max_seq=max_seq,
         ).to(self.device)
-        self.opt = torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=0.01)
-        self.vocab_size = vocab_size
+
+        if compile_model and hasattr(torch, "compile"):
+            try:
+                self.model = torch.compile(self.model)
+                self._compiled = True
+            except Exception:
+                self._compiled = False
+        else:
+            self._compiled = False
+
+        self.opt = torch.optim.AdamW(
+            self.model.parameters(), lr=lr, weight_decay=0.01, betas=(0.9, 0.95)
+        )
 
     def build_tokenizer_from_texts(self, texts: Sequence[str], max_vocab: Optional[int] = None) -> int:
         n = self.tokenizer.build_from_texts(list(texts), max_vocab=max_vocab or self.vocab_size)
-        self.vocab_size = max(self.vocab_size, n)
-        # إعادة بناء embedding إن كبر القاموس
-        if self.model.tok_emb.num_embeddings < self.vocab_size:
-            old = self.model
-            self.model = SurahChainLM(
-                vocab_size=self.vocab_size,
-                d_model=old.d_model,
-                n_heads=old.pre_blocks[0].attn.n_heads if old.pre_blocks else DEFAULT_N_HEADS,
-                n_pre=len(old.pre_blocks),
-                n_post=len(old.post_blocks),
-                max_seq=old.max_seq,
-            ).to(self.device)
-            self.opt = torch.optim.AdamW(self.model.parameters(), lr=self.lr, weight_decay=0.01)
+        self.vocab_size = max(self.vocab_size, int(n))
+        need = self.vocab_size
+        emb = self.model.tok_emb if not self._compiled else self.model
+        # إن كبر القاموس أعد إنشاء النموذج
+        current_vs = self.model.vocab_size if hasattr(self.model, "vocab_size") else need
+        # access underlying module if compiled
+        core = getattr(self.model, "_orig_mod", self.model)
+        if core.tok_emb.num_embeddings < need:
+            cfg = dict(
+                vocab_size=need,
+                d_model=core.d_model,
+                n_heads=core.n_heads,
+                n_pre=core.n_pre,
+                n_post=core.n_post,
+                max_seq=core.max_seq,
+            )
+            self.model = SurahChainLM(**cfg).to(self.device)
+            self._compiled = False
+            self.opt = torch.optim.AdamW(
+                self.model.parameters(), lr=self.lr, weight_decay=0.01, betas=(0.9, 0.95)
+            )
         return int(n)
 
     def set_lr(self, lr: float) -> None:
@@ -275,20 +309,34 @@ class HybridExperimentModelTorch:
         for g in self.opt.param_groups:
             g["lr"] = self.lr
 
-    def train_step(self, text: str, max_len: int = DEFAULT_MAX_LEN) -> Optional[float]:
-        ids = self.tokenizer.encode(text, max_len)
-        if len(ids) < 2:
+    def _encode_batch(self, texts: Sequence[str], max_len: int):
+        """يحضّر tensors: input_ids, labels, pad_mask (True=PAD)."""
+        seqs = []
+        for t in texts:
+            ids = self.tokenizer.encode(t, max_len)
+            if len(ids) < 2:
+                continue
+            seqs.append(ids.tolist() if hasattr(ids, "tolist") else list(ids))
+        if not seqs:
             return None
-        x = torch.tensor(ids[:-1], dtype=torch.long, device=self.device).unsqueeze(0)
-        y = torch.tensor(ids[1:], dtype=torch.long, device=self.device).unsqueeze(0)
-        self.model.train()
-        self.opt.zero_grad(set_to_none=True)
-        logits = self.model(x)
-        loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), y.reshape(-1))
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-        self.opt.step()
-        return float(loss.item())
+        # x = all but last, y = all but first
+        xs = [s[:-1] for s in seqs]
+        ys = [s[1:] for s in seqs]
+        max_s = max(len(x) for x in xs)
+        B = len(xs)
+        x_pad = torch.zeros(B, max_s, dtype=torch.long)
+        y_pad = torch.full((B, max_s), -100, dtype=torch.long)  # ignore_index
+        pad_mask = torch.ones(B, max_s, dtype=torch.bool)  # True = pad
+        for i, (x, y) in enumerate(zip(xs, ys)):
+            L = len(x)
+            x_pad[i, :L] = torch.tensor(x, dtype=torch.long)
+            y_pad[i, :L] = torch.tensor(y, dtype=torch.long)
+            pad_mask[i, :L] = False
+        return (
+            x_pad.to(self.device),
+            y_pad.to(self.device),
+            pad_mask.to(self.device),
+        )
 
     def train_batch(
         self,
@@ -298,14 +346,30 @@ class HybridExperimentModelTorch:
         total_steps: Optional[int] = None,
         warmup_steps: int = 0,
     ) -> float:
+        """دفعة واحدة حقيقية (مصفوفة B×S) — أسرع بكثير من جملة بجملة."""
         if step is not None and total_steps is not None:
             self.set_lr(cosine_lr(step, total_steps, self.base_lr, warmup_steps))
-        losses = []
-        for t in texts:
-            loss = self.train_step(t, max_len=max_len)
-            if loss is not None:
-                losses.append(loss)
-        return float(np.mean(losses)) if losses else float("nan")
+
+        packed = self._encode_batch(texts, max_len)
+        if packed is None:
+            return float("nan")
+        x, y, pad_mask = packed
+
+        self.model.train()
+        self.opt.zero_grad(set_to_none=True)
+        logits = self.model(x, key_padding_mask=pad_mask)
+        loss = F.cross_entropy(
+            logits.reshape(-1, logits.size(-1)),
+            y.reshape(-1),
+            ignore_index=-100,
+        )
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+        self.opt.step()
+        return float(loss.item())
+
+    def train_step(self, text: str, max_len: int = DEFAULT_MAX_LEN) -> Optional[float]:
+        return self.train_batch([text], max_len=max_len)
 
     @torch.no_grad()
     def generate(
@@ -328,13 +392,13 @@ class HybridExperimentModelTorch:
             ids = [bos]
 
         for step_i in range(max_new_tokens):
-            ctx = torch.tensor(ids[-max_ctx:], dtype=torch.long, device=self.device).unsqueeze(0)
+            ctx = torch.tensor([ids[-max_ctx:]], dtype=torch.long, device=self.device)
             logits = self.model(ctx)[0, -1].float()
             logits[pad] = -1e9
             logits[bos] = -1e9
             if step_i < min_new_tokens:
                 logits[eos] = -1e9
-            if repetition_penalty and repetition_penalty != 1.0:
+            if repetition_penalty != 1.0:
                 for prev in set(ids):
                     if logits[prev] > 0:
                         logits[prev] /= repetition_penalty
@@ -350,7 +414,7 @@ class HybridExperimentModelTorch:
                 cum = torch.cumsum(sorted_p, dim=0)
                 mask = cum > top_p
                 mask[0] = False
-                sorted_p[mask] = 0
+                sorted_p = sorted_p.masked_fill(mask, 0.0)
                 sorted_p = sorted_p / sorted_p.sum()
                 choice = torch.multinomial(sorted_p, 1).item()
                 nid = int(sorted_i[choice].item())
@@ -362,18 +426,23 @@ class HybridExperimentModelTorch:
         return self.tokenizer.decode(ids, skip_special=True)
 
     def param_count(self) -> dict:
-        d = self.model.param_count()
+        core = getattr(self.model, "_orig_mod", self.model)
+        d = core.param_count()
         d["device"] = str(self.device)
+        d["compiled"] = self._compiled
         d["tokenizer"] = "StrongTokenizer"
         return d
 
     def save(self, path: str) -> None:
-        path = str(path)
+        core = getattr(self.model, "_orig_mod", self.model)
         torch.save(
             {
-                "model": self.model.state_dict(),
+                "model": core.state_dict(),
                 "vocab_size": self.vocab_size,
-                "d_model": self.model.d_model,
+                "d_model": core.d_model,
+                "n_heads": core.n_heads,
+                "n_pre": core.n_pre,
+                "n_post": core.n_post,
                 "tokenizer": {
                     "word_to_id": self.tokenizer.word_to_id,
                     "merges": self.tokenizer.merges,
@@ -392,16 +461,18 @@ class HybridExperimentModelTorch:
             self.tokenizer.id_to_word = {int(v): str(k) for k, v in self.tokenizer.word_to_id.items()}
             self.tokenizer.merges = [tuple(x) for x in tok.get("merges", [])]
             self.tokenizer.vocab_size = int(tok.get("vocab_size", self.vocab_size))
-        self.model.load_state_dict(ckpt["model"])
-        self.model.to(self.device)
+        core = getattr(self.model, "_orig_mod", self.model)
+        core.load_state_dict(ckpt["model"])
+        core.to(self.device)
 
 
-# توافق الاسم
 HybridExperimentModel = HybridExperimentModelTorch
 
 
 if __name__ == "__main__":
     import sys
+    import time
+
     sys.path.insert(0, str(_HERE))
     from hybrid_data import SENTENCES
 
@@ -409,7 +480,8 @@ if __name__ == "__main__":
     m = HybridExperimentModelTorch(d_model=128, n_heads=4, n_pre=1, n_post=1, lr=1e-3)
     m.build_tokenizer_from_texts(SENTENCES)
     print(m.param_count())
-    losses = [m.train_step(s) for s in SENTENCES[:20]]
-    losses = [x for x in losses if x is not None]
-    print("loss", round(losses[0], 3), "->", round(losses[-1], 3))
+    t0 = time.time()
+    for _ in range(5):
+        loss = m.train_batch(SENTENCES[:16], max_len=48)
+    print(f"5 real batches in {time.time()-t0:.2f}s  last_loss={loss:.3f}")
     print("gen:", m.generate("الصبر", max_new_tokens=12))
