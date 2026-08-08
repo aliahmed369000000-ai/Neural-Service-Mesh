@@ -149,14 +149,24 @@ def enhance_local(
     vf = PRESETS[preset]["vf"]
     out = _out(prefix=f"ai_{preset}")
     crf = max(14, min(28, int(crf)))
-    cmd = [
-        _ffmpeg(), "-y", "-i", str(src),
-        "-vf", vf,
-        "-c:v", "libx264", "-preset", "medium", "-crf", str(crf),
-        "-c:a", "aac", "-b:a", "192k",
-        "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-        str(out),
-    ]
+    try:
+        from ai.ffmpeg_quality import encode_args
+        # CRF من المستخدم يطغى على المستوى الافتراضي
+        tail = encode_args("high", extra_vf=vf)
+        # استبدال crf في الذيل
+        if "-crf" in tail:
+            i = tail.index("-crf")
+            tail[i + 1] = str(crf)
+        cmd = [_ffmpeg(), "-y", "-i", str(src), *tail, str(out)]
+    except Exception:
+        cmd = [
+            _ffmpeg(), "-y", "-i", str(src),
+            "-vf", vf,
+            "-c:v", "libx264", "-preset", "slow", "-crf", str(crf),
+            "-c:a", "aac", "-b:a", "256k",
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+            str(out),
+        ]
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     except subprocess.TimeoutExpired as e:

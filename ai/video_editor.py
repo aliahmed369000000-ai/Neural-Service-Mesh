@@ -29,6 +29,11 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
+try:
+    from ai.ffmpeg_quality import encode_args as _fq_encode
+except Exception:  # noqa: BLE001
+    _fq_encode = None
+
 logger = logging.getLogger("VideoEditor")
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -85,6 +90,22 @@ def _ensure_file(path: PathLike) -> Path:
         if not str(rp).startswith("/tmp"):
             raise VideoEditorError("لأسباب أمنية يُسمح فقط بملفات داخل المشروع أو /tmp")
     return rp
+
+
+
+def _quality_encode_tail(level: str = "high", extra_vf: str = "") -> List[str]:
+    """ذيل ترميز موحّد عالي الجودة."""
+    if _fq_encode is not None:
+        return _fq_encode(level=level, extra_vf=extra_vf)
+    args: List[str] = []
+    if extra_vf:
+        args += ["-vf", extra_vf]
+    args += [
+        "-c:v", "libx264", "-preset", "slow", "-crf", "17",
+        "-profile:v", "high", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart",
+    ]
+    return args
 
 
 def probe(path: PathLike) -> Dict[str, Any]:
@@ -167,11 +188,7 @@ def trim(
     if end is not None and end > start:
         cmd += ["-to", str(float(end))]
     if reencode:
-        cmd += [
-            "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-            "-c:a", "aac", "-b:a", "192k",
-            "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-        ]
+        cmd += _quality_encode_tail("high")
     else:
         cmd += ["-c", "copy"]
     cmd.append(str(out))
@@ -215,16 +232,14 @@ def concat(paths: Sequence[PathLike]) -> Path:
     filt = "".join(f"[{i}:v:0][{i}:a:0]" for i in range(n))
     filt += f"concat=n={n}:v=1:a=1[v][a]"
     cmd = [ffmpeg, "-y", *inputs, "-filter_complex", filt, "-map", "[v]", "-map", "[a]",
-           "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-           "-c:a", "aac", "-b:a", "192k",
-           "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out)]
+           *_quality_encode_tail("high"), str(out)]
     code, _, err = _run(cmd, timeout=600)
     if code != 0 or not out.is_file():
         # محاولة بدون صوت
         filt_v = "".join(f"[{i}:v:0]" for i in range(n)) + f"concat=n={n}:v=1:a=0[v]"
         cmd2 = [ffmpeg, "-y", *inputs, "-filter_complex", filt_v, "-map", "[v]",
-                "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-                "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out)]
+                "-c:v", "libx264", "-preset", "slow", "-crf", "17",
+                "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", str(out)]
         code2, _, err2 = _run(cmd2, timeout=600)
         if code2 != 0 or not out.is_file():
             raise VideoEditorError(f"فشل الدمج: {err[-300:]} | {err2[-300:]}")
@@ -296,10 +311,7 @@ def to_shorts_vertical(path: PathLike, width: int = 1080, height: int = 1920) ->
     )
     code, _, err = _run([
         ffmpeg, "-y", "-i", str(p),
-        "-vf", vf,
-        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-        "-c:a", "aac", "-b:a", "192k",
-        "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        *_quality_encode_tail("high", extra_vf=vf),
         str(out),
     ])
     if code != 0 or not out.is_file():
@@ -341,8 +353,8 @@ def change_speed(path: PathLike, factor: float = 1.25) -> Path:
         ffmpeg, "-y", "-i", str(p),
         "-filter_complex", f"[0:v]{vf}[v];[0:a]{af}[a]",
         "-map", "[v]", "-map", "[a]",
-        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-        "-c:a", "aac",
+        "-c:v", "libx264", "-preset", "slow", "-crf", "17",
+        "-c:a", "aac", "-b:a", "256k",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         str(out),
     ])
@@ -350,7 +362,7 @@ def change_speed(path: PathLike, factor: float = 1.25) -> Path:
         # video only
         code2, _, err2 = _run([
             ffmpeg, "-y", "-i", str(p), "-vf", vf, "-an",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+            "-c:v", "libx264", "-preset", "slow", "-crf", "17",
             "-pix_fmt", "yuv420p", str(out),
         ])
         if code2 != 0 or not out.is_file():
@@ -395,7 +407,27 @@ def thumbnail(path: PathLike, at_seconds: float = 1.0) -> Path:
 
 
 
+def quality_boost(path: PathLike, level: str = "high", visual: str = "soft") -> Path:
+    """إعادة ترميز بجودة ffmpeg أعلى + مرشح بصري اختياري."""
+    p = _ensure_file(path)
+    out = _out_path(prefix=f"qboost_{level}")
+    ffmpeg = _which_ffmpeg()
+    if not ffmpeg:
+        raise VideoEditorError("ffmpeg مطلوب لتحسين الجودة")
+    try:
+        from ai.ffmpeg_quality import QUALITY_VF
+        vf = QUALITY_VF.get(visual, QUALITY_VF["soft"])
+    except Exception:
+        vf = "unsharp=5:5:0.6:5:5:0.0,eq=contrast=1.05:saturation=1.05"
+    cmd = [ffmpeg, "-y", "-i", str(p), *_quality_encode_tail(level, extra_vf=vf), str(out)]
+    code, _, err = _run(cmd, timeout=600)
+    if code != 0 or not out.is_file():
+        raise VideoEditorError(f"فشل تحسين الجودة: {err[-400:]}")
+    return out
+
+
 def ai_enhance(
+
     path: PathLike,
     mode: str = "auto",
     crf: int = 17,

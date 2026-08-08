@@ -72,6 +72,7 @@ def render_video_editor():
         "العملية",
         [
             "✨ تحسين ذكي بالذكاء",
+            "🎯 إعادة ترميز عالية الجودة (ffmpeg)",
             "قص (trim)",
             "تحجيم عمودي 9:16",
             "كتم الصوت",
@@ -86,7 +87,30 @@ def render_video_editor():
 
     result_path = None
     try:
-        if op == "✨ تحسين ذكي بالذكاء":
+        if op == "🎯 إعادة ترميز عالية الجودة (ffmpeg)":
+            level = st.selectbox(
+                "مستوى الجودة",
+                ["archive", "high", "balanced"],
+                index=1,
+                format_func=lambda x: {
+                    "archive": "أرشفة (CRF 14, أبطأ)",
+                    "high": "عالية (CRF 16)",
+                    "balanced": "متوازنة (CRF 18)",
+                }[x],
+                key="vedit_q_level",
+            )
+            visual = st.selectbox(
+                "تحسين بصري",
+                ["soft", "strong", "none"],
+                index=0,
+                format_func=lambda x: {"soft": "خفيف", "strong": "قوي", "none": "ترميز فقط"}[x],
+                key="vedit_q_vis",
+            )
+            if st.button("تطبيق جودة ffmpeg", type="primary", key="vedit_qboost"):
+                with st.spinner("إعادة ترميز…"):
+                    result_path = ve.quality_boost(work_path, level=level, visual=visual)
+
+        elif op == "✨ تحسين ذكي بالذكاء":
             try:
                 from ai.video_ai_enhance import list_presets, format_presets_help
                 st.markdown(format_presets_help())

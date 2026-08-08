@@ -194,9 +194,9 @@ def _enhance_free_clip(src_path: str, dst_path: str) -> str:
     cmd = [
         ffmpeg, "-y", "-i", src_path,
         "-vf", vf,
-        "-c:v", "libx264", "-preset", "fast", "-crf", "17",
-        "-an",
-        "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        "-c:v", "libx264", "-preset", "slow", "-crf", "15",
+        "-profile:v", "high", "-pix_fmt", "yuv420p",
+        "-tune", "film", "-an", "-movflags", "+faststart",
         dst_path,
     ]
     try:
@@ -1267,18 +1267,19 @@ class VideoEngine:
                 fps=FPS,
                 codec="libx264",
                 audio_codec="aac",
-                audio_bitrate="320k" if getattr(self, "_professional_mode", False) else "192k",
+                audio_bitrate=locals().get("_abit") or (
+                    "320k" if getattr(self, "_professional_mode", False) else "192k"
+                ),
                 preset=preset,
                 ffmpeg_params=[
                     "-crf", crf,
                     "-profile:v", "high",
                     "-level", "4.2",
                     "-pix_fmt", "yuv420p",
+                    "-tune", "film",
                     "-movflags", "+faststart",
-                ] + (
-                    ["-x264-params", "aq-mode=3:ref=4"]
-                    if getattr(self, "_professional_mode", False) else []
-                ),
+                    "-x264-params", locals().get("_x264") or "aq-mode=3:ref=4",
+                ],
                 threads=cpu_threads,
                 logger=None,
             )
