@@ -47,7 +47,7 @@ def render_qa():
     )
     st.session_state["qa_question"] = question
 
-    opt_col1, opt_col2, opt_col3 = st.columns([1, 1, 3])
+    opt_col1, opt_col2, opt_col3, opt_col4 = st.columns([1, 1, 1, 2])
     with opt_col1:
         show_reasoning = st.checkbox(
             "🧠 اعرض لماذا هذه الإجابة",
@@ -61,6 +61,13 @@ def render_qa():
             key="qa_show_images",
         )
     with opt_col3:
+        check_faithfulness = st.checkbox(
+            "🛡️ فحص التأسيس على المصدر",
+            value=st.session_state.get("qa_check_faithfulness", False),
+            key="qa_check_faithfulness",
+            help="يتحقق أن الإجابة مبنية على الآيات/المفاهيم المسترجَعة (DeepEval أو مقياس معجمي محلي في الوضع المغلق).",
+        )
+    with opt_col4:
         if st.session_state["qa_conversation_history"]:
             st.caption(f"💬 سياق محادثة نشط ({len(st.session_state['qa_conversation_history'])} سؤال سابق)")
             if st.button("🗑️ مسح سياق المحادثة", key="qa_clear_context"):
@@ -90,6 +97,7 @@ def render_qa():
             top_k=st.session_state.get("yemeni_top_k", 50),
             include_reasoning_trace=show_reasoning,
             include_images=show_images,
+            include_faithfulness_check=check_faithfulness,
             conversation_history=st.session_state["qa_conversation_history"],
         )
 
@@ -173,6 +181,37 @@ def render_qa():
     st.markdown("")
     st.markdown(f"**درجة الثقة:** {confidence:.0%}")
     st.progress(confidence)
+
+    # ── فحص التأسيس على المصدر (اختياري) ──
+    _fc = result.get("faithfulness_check")
+    if _fc:
+        st.markdown("")
+        st.markdown('<div class="section-header">🛡️ فحص التأسيس على المصدر</div>', unsafe_allow_html=True)
+        if not _fc.get("available"):
+            st.caption(f"غير متاح: {_fc.get('reason', '')}")
+        else:
+            _score = _fc.get("score")
+            _faithful = _fc.get("faithful")
+            _method = _fc.get("method") or "—"
+            if _faithful is True:
+                st.success(
+                    f"مؤسَّسة على المصدر — الدرجة: {_score:.0%} "
+                    f"(طريقة: {_method})" if _score is not None
+                    else f"مؤسَّسة على المصدر (طريقة: {_method})"
+                )
+            elif _faithful is False:
+                st.warning(
+                    f"قد تحتوي على معلومات غير مدعومة بالمصدر — الدرجة: {_score:.0%} "
+                    f"(طريقة: {_method})" if _score is not None
+                    else f"قد تحتوي على معلومات غير مدعومة (طريقة: {_method})"
+                )
+            else:
+                st.info(_fc.get("reason") or "تعذّر إصدار حكم.")
+            if _fc.get("reason") and _faithful is not None:
+                with st.expander("تفاصيل الفحص"):
+                    st.caption(_fc["reason"])
+                    if _fc.get("lexical_detail"):
+                        st.json(_fc["lexical_detail"])
 
     # ── سياق RAG لهجي (حقن تلقائي عند اكتشاف لهجة يمنية) ──
     if result.get("dialect_rag_injected") or result.get("dialect_is_yemeni"):
