@@ -243,11 +243,18 @@ def upscale_video(
     path: PathLike,
     target: str = "1080p",
     crf: int = 16,
+    use_ai: bool = False,
 ) -> Path:
     """
     رفع دقة الفيديو بجودة عالية.
     target: 2x | 720p | 1080p | 1440p | shorts | 4k
+    use_ai: إن True يحاول نماذج Real-ESRGAN على إطارات الفيديوهات القصيرة.
     """
+    if use_ai:
+        try:
+            return upscale_video_with_ai(path, target=target, crf=crf)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("AI upscale failed (%s) — local fallback", exc)
     src = _ensure(path)
     target = (target or "1080p").lower().strip()
     out = _out(prefix=f"upscale_{target}")
@@ -295,16 +302,162 @@ def upscale_video(
     return out
 
 
-def try_hf_upscale(path: PathLike, timeout: int = 90) -> Optional[Path]:
-    """
-    محاولة اختيارية عبر مساحة HF مجانية لتحسين إطار/فيديو.
-    تُرجع None عند الفشل (الشبكة، الطابور، المكتبة).
-    حالياً: استخراج إطار أوسط → إن وُجدت مساحة غير مستقرة نتخطى.
-    """
-    # المسارات المجانية العامة غير مستقرة لتحديث الفيديو الكامل؛
-    # نبقي الواجهة جاهزة ونُفضّل المحلي الموثوق.
-    logger.info("HF upscale skipped — local enhance is preferred for reliability")
+# مساحات نماذج رفع الدقة (Real-ESRGAN) — مجانية وقد تتغيّر واجهتها
+_AI_UPSCALE_SPACES = [
+    {"space": "ai-forever/Real-ESRGAN", "api_name": "/predict"},
+    {"space": "akhaliq/Real-ESRGAN", "api_name": "/predict"},
+]
+
+
+def ai_upscale_image(image_path: PathLike, timeout: int = 120) -> Optional[Path]:
+    """رفع دقة صورة عبر نموذج Real-ESRGAN (Hugging Face Spaces)."""
+    src = _ensure(image_path)
+    try:
+        from gradio_client import Client, handle_file
+    except ImportError:
+        logger.info("gradio_client غير متاح")
+        return None
+
+    hf_token = os.getenv("HF_TOKEN", "").strip() or None
+    out = OUT_DIR / f"ai_realesrgan_{int(time.time())}_{uuid.uuid4().hex[:8]}{src.suffix or '.png'}"
+
+    for cand in _AI_UPSCALE_SPACES:
+        space = cand["space"]
+        try:
+            client = Client(space, token=hf_token, verbose=False)
+            import concurrent.futures
+
+            def _call():
+                return client.predict(handle_file(str(src)), api_name=cand["api_name"])
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                result = pool.submit(_call).result(timeout=timeout)
+            path_out = result[0] if isinstance(result, (list, tuple)) else result
+            if isinstance(path_out, dict):
+                path_out = path_out.get("path") or path_out.get("name")
+            if path_out and os.path.isfile(str(path_out)):
+                import shutil
+                shutil.copyfile(str(path_out), str(out))
+                if out.is_file():
+                    return out
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Real-ESRGAN space %s: %s", space, exc)
     return None
+
+
+def try_hf_upscale(path: PathLike, timeout: int = 90) -> Optional[Path]:
+    """استخراج إطار من فيديو وتحسينه بنموذج AI."""
+    src = _ensure(path)
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return None
+    import tempfile
+    frame = Path(tempfile.mkdtemp(prefix="nsm_aifr_")) / "mid.jpg"
+    try:
+        subprocess.run(
+            [ffmpeg, "-y", "-ss", "0.5", "-i", str(src), "-frames:v", "1", "-q:v", "2", str(frame)],
+            capture_output=True, timeout=30, check=False,
+        )
+        if frame.is_file():
+            return ai_upscale_image(frame, timeout=timeout)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("try_hf_upscale: %s", exc)
+    return None
+
+
+def upscale_video_with_ai(
+    path: PathLike,
+    target: str = "1080p",
+    max_frames: int = 32,
+    fps_sample: float = 3.0,
+    crf: int = 16,
+) -> Path:
+    """
+    نماذج AI على إطارات فيديو قصير (≤12ث) ثم تجميع.
+    أطول من ذلك أو عند فشل النموذج → Lanczos المحلي.
+    """
+    src = _ensure(path)
+    duration = 0.0
+    try:
+        from ai.video_editor import probe
+        duration = float(probe(src).get("duration") or 0)
+    except Exception:
+        pass
+    if duration <= 0 or duration > 12:
+        return upscale_video(src, target=target, crf=crf)
+
+    ffmpeg = _ffmpeg()
+    import tempfile
+    import shutil as sh
+    work = Path(tempfile.mkdtemp(prefix="nsm_ai_vid_"))
+    frames_dir = work / "frames"
+    frames_dir.mkdir()
+    subprocess.run(
+        [
+            ffmpeg, "-y", "-i", str(src),
+            "-vf", f"fps={fps_sample}",
+            "-frames:v", str(max_frames),
+            str(frames_dir / "f_%04d.png"),
+        ],
+        capture_output=True, timeout=120, check=False,
+    )
+    frames = sorted(frames_dir.glob("f_*.png"))
+    if len(frames) < 2:
+        return upscale_video(src, target=target, crf=crf)
+
+    enh = work / "enh"
+    enh.mkdir()
+    ok = 0
+    for i, fr in enumerate(frames):
+        dest = enh / f"e_{i:04d}.png"
+        ai_out = ai_upscale_image(fr, timeout=90)
+        if ai_out and ai_out.is_file():
+            sh.copyfile(ai_out, dest)
+            ok += 1
+        else:
+            subprocess.run(
+                [
+                    ffmpeg, "-y", "-i", str(fr),
+                    "-vf", "scale=iw*2:ih*2:flags=lanczos,unsharp=5:5:0.8:5:5:0.0",
+                    str(dest),
+                ],
+                capture_output=True, timeout=60, check=False,
+            )
+            if dest.is_file():
+                ok += 1
+    if ok < 2:
+        return upscale_video(src, target=target, crf=crf)
+
+    assembled = work / "assembled.mp4"
+    subprocess.run(
+        [
+            ffmpeg, "-y", "-framerate", str(fps_sample),
+            "-i", str(enh / "e_%04d.png"),
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "15", str(assembled),
+        ],
+        capture_output=True, timeout=180, check=False,
+    )
+    if not assembled.is_file():
+        return upscale_video(src, target=target, crf=crf)
+
+    out = _out(prefix="ai_model_upscale")
+    subprocess.run(
+        [
+            ffmpeg, "-y", "-i", str(assembled), "-i", str(src),
+            "-map", "0:v:0", "-map", "1:a:0?",
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "256k",
+            "-shortest", "-movflags", "+faststart", str(out),
+        ],
+        capture_output=True, timeout=120, check=False,
+    )
+    if out.is_file() and out.stat().st_size > 1000:
+        if target not in ("2x",):
+            try:
+                return upscale_video(out, target=target, crf=crf)
+            except Exception:
+                return out
+        return out
+    return upscale_video(src, target=target, crf=crf)
 
 
 def enhance_auto(
@@ -323,7 +476,7 @@ def enhance_auto(
     if prefer_hf:
         hf = try_hf_upscale(src)
         if hf is not None:
-            return {"path": str(hf), "backend": "hf", "preset": mode}
+            return {"path": str(hf), "backend": "ai-model", "preset": mode}
 
     if mode == "auto":
         # كشف بسيط من الأبعاد
@@ -346,8 +499,12 @@ def enhance_auto(
 
     if mode in ("2x", "720p", "1080p", "1440p", "4k", "shorts", "upscale"):
         target = "1080p" if mode == "upscale" else mode
-        out = upscale_video(src, target=target, crf=crf)
-        return {"path": str(out), "backend": backend, "preset": f"upscale:{target}"}
+        out = upscale_video(src, target=target, crf=crf, use_ai=prefer_hf)
+        return {
+            "path": str(out),
+            "backend": "ai-model" if prefer_hf else backend,
+            "preset": f"upscale:{target}",
+        }
 
     out = enhance_local(src, preset=mode, crf=crf)
     return {"path": str(out), "backend": backend, "preset": mode}
@@ -360,4 +517,5 @@ def format_presets_help() -> str:
     lines.append("- **احترافي** (`pro`): تنعيم ثم وضوح")
     lines.append("- **تلقائي** (`auto`): يختار حسب الأبعاد")
     lines.append("- **رفع دقة**: `2x` · `720p` · `1080p` · `1440p` · `4k` · `shorts`")
+    lines.append("- **نماذج AI**: Real-ESRGAN عبر Hugging Face (للفيديو ≤12ث أو الصور)")
     return "\n".join(lines)

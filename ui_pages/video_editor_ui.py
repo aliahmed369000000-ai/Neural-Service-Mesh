@@ -104,10 +104,23 @@ def render_video_editor():
                 key="vedit_up_target",
             )
             crf = st.slider("CRF (أقل = أوضح)", 14, 22, 16, key="vedit_up_crf")
-            st.caption("سلسلة: تنظيف خفيف → Lanczos دقيق → حدة — ترميز slow عالي الجودة")
+            use_ai = st.checkbox(
+                "استخدم نماذج AI (Real-ESRGAN مجاني عبر Hugging Face)",
+                value=False,
+                key="vedit_up_ai",
+                help="أفضل للفيديو القصير ≤12 ثانية. يحتاج شبكة وقد ينتظر طابور ZeroGPU. عند الفشل يتراجع لـ Lanczos تلقائياً.",
+            )
+            st.caption(
+                "محلي: تنظيف → Lanczos → حدة. "
+                "مع AI: Real-ESRGAN على الإطارات ثم تجميع (قصير فقط)."
+            )
             if st.button("رفع الدقة الآن", type="primary", key="vedit_up_run"):
-                with st.spinner("يرفع الدقة… قد يستغرق وقتاً حسب الطول"):
-                    result_path = ve.upscale(work_path, target=target, crf=crf)
+                with st.spinner(
+                    "يرفع الدقة بنماذج AI…" if use_ai else "يرفع الدقة محلياً…"
+                ):
+                    result_path = ve.upscale(
+                        work_path, target=target, crf=crf, use_ai=use_ai
+                    )
 
         elif op == "🎯 إعادة ترميز عالية الجودة (ffmpeg)":
             level = st.selectbox(
@@ -147,9 +160,16 @@ def render_video_editor():
             except Exception as e:
                 st.warning(str(e))
                 mode, crf = "clarity", 17
+            prefer_ai = st.checkbox(
+                "جرّب نموذج AI على إطار عيّنة (Real-ESRGAN)",
+                value=False,
+                key="vedit_ai_hf",
+            )
             if st.button("تطبيق التحسين الذكي", type="primary", key="vedit_ai_run"):
-                with st.spinner("يحسّن الفيديو محلياً…"):
-                    result_path = ve.ai_enhance(work_path, mode=mode, crf=crf)
+                with st.spinner("يحسّن الفيديو…"):
+                    result_path = ve.ai_enhance(
+                        work_path, mode=mode, crf=crf, prefer_hf=prefer_ai
+                    )
 
         elif op == "قص (trim)":
             c_a, c_b = st.columns(2)
