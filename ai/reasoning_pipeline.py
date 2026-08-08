@@ -628,9 +628,12 @@ class ReasoningPipeline:
         }
 
         # مزج عائلة الشبكات المعزولة: DeepRouting + DynamicWeight + NeuralWeight
+        # deep_routing_blend يحدّد الوزن الإجمالي المعطى لهذه العائلة (الباقي لـ NeuralCore).
+        # النسب النسبية الداخلية محفوظة (0.35 : 0.20 : 0.15) ثم تُعاد تطبيعها
+        # لتساوي deep_routing_blend الفعلي (مع سقف 0.85 لحماية الأساس).
         if getattr(self, "use_deep_routing", False):
             try:
-                ensemble = []  # (dict weights, blend coefficient)
+                ensemble = []  # (dict weights, relative coefficient)
                 # NeuralCore baseline already in weights — weight 1.0-b_total later
                 if getattr(self, "_deep_router", None) is not None:
                     try:
@@ -656,11 +659,16 @@ class ReasoningPipeline:
                     weights["_neural_weight_layer"] = 0.0
                 if ensemble:
                     keys = ("W_SEMANTIC", "W_SCORE", "W_MEMORY", "W_TOPOLOGY")
-                    b_sum = sum(b for _, b in ensemble)
-                    b_sum = min(0.85, max(0.1, b_sum))
+                    # احترم deep_routing_blend كهدف إجمالي لوزن العائلة
+                    target_blend = float(getattr(self, "deep_routing_blend", 0.45))
+                    target_blend = max(0.05, min(0.85, target_blend))
+                    rel_sum = sum(b for _, b in ensemble) or 1.0
+                    # أعد توزيع النسب النسبية لتساوي target_blend
+                    scaled = [(dw, target_blend * (b / rel_sum)) for dw, b in ensemble]
+                    b_sum = sum(b for _, b in scaled)
                     base_c = 1.0 - b_sum
                     merged = {k: base_c * float(weights.get(k, 0.0)) for k in keys}
-                    for dw, b in ensemble:
+                    for dw, b in scaled:
                         for k in keys:
                             if k in dw:
                                 merged[k] += b * float(dw[k])
@@ -668,7 +676,8 @@ class ReasoningPipeline:
                     for k in keys:
                         weights[k] = round(merged[k] / s, 6)
                     weights["_ensemble_routing"] = 1.0
-                    weights["_deep_routing"] = 1.0 if any(True for _ in ensemble) else 0.0
+                    weights["_deep_routing"] = 1.0
+                    weights["_deep_routing_blend_used"] = round(b_sum, 4)
             except Exception:
                 weights["_ensemble_routing"] = 0.0
 
