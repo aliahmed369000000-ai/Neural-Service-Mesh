@@ -489,6 +489,7 @@ class FableEngine:
         use_background_music: bool = False,
         music_volume: float = 0.10,
         wan_skip_spaces: Optional[set] = None,
+        professional_mode: bool = True,
     ) -> bytes:
         """يبني mp4 فعلي (نص متحرك + صوت سرد) من ExplainerScript. يستدعي
         render_audio() تلقائياً إن لم يكن الصوت مولَّداً بعد. يرجع bytes
@@ -533,12 +534,17 @@ class FableEngine:
             raise VideoEngineError("تعذّر توليد الصوت لكل المقاطع — لا يمكن رندر الفيديو.")
 
         try:
+            # Shorts: الوضع الاحترافي مفعّل افتراضياً (جودة ترميز أعلى +
+            # شريط تقدّم + بطاقة ختامية + انتقالات أنعم). يمكن تعطيله صراحة.
+            if professional_mode and use_background_music:
+                music_volume = max(music_volume, 0.08)
             return VideoEngine(
                 use_cinematic_backgrounds=use_cinematic_backgrounds,
                 cinematic_provider=cinematic_provider,
                 use_background_music=use_background_music,
                 music_volume=music_volume,
                 wan_skip_spaces=wan_skip_spaces,
+                professional_mode=professional_mode,
             ).render(script)
         except ImportError as exc:
             raise RuntimeError(

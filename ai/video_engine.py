@@ -422,7 +422,9 @@ def _fetch_stock_background_image(
         yy, xx = np.mgrid[0:FRAME_H, 0:FRAME_W]
         cx, cy = FRAME_W / 2.0, FRAME_H / 2.0
         dist = np.sqrt(((xx - cx) / cx) ** 2 + ((yy - cy) / cy) ** 2).astype(np.float32)
-        vignette = np.clip(1.0 - 0.30 * np.clip(dist - 0.55, 0, None), 0.62, 1.0)
+        strength = 0.42 if getattr(self, "_professional_mode", False) else 0.30
+        floor = 0.55 if getattr(self, "_professional_mode", False) else 0.62
+        vignette = np.clip(1.0 - strength * np.clip(dist - 0.50, 0, None), floor, 1.0)
         arr *= vignette[:, :, None]
         arr = np.clip(arr, 0, 255).astype(np.uint8)
         return Image.fromarray(arr, mode="RGB")
@@ -635,8 +637,12 @@ class VideoEngine:
         use_background_music: bool = False,
         music_volume: float = 0.10,
         wan_skip_spaces: Optional[set] = None,
+        professional_mode: bool = False,
     ) -> None:
         self._font_path = _resolve_arabic_font()
+        # وضع احترافي لـ Shorts: جودة ترميز أعلى، شريط تقدّم، انتقالات أنعم،
+        # تظليل vignette، وموسيقى محيطية خفيفة افتراضياً إن طُلب.
+        self._professional_mode = bool(professional_mode)
         # اختياري (opt-in) — راجع شرح الميزة في رأس الملف. لا يُفعَّل أبداً
         # ضمنياً حتى لا يستهلك رصيد Higgsfield المدفوع دون طلب صريح.
         self._use_cinematic_backgrounds = use_cinematic_backgrounds
@@ -666,6 +672,10 @@ class VideoEngine:
         self._use_background_music = use_background_music
         # نطاق آمن: منخفضة بما يكفي حتى لا تطغى على السرد الصوتي أبداً
         # (نمط "الدَك" duck تحت الصوت الرئيسي بالإنتاج الاحترافي).
+        if self._professional_mode:
+            # رفع جودة الإحساس البصري دون إجبار موسيقى أو مزوّد مدفوع
+            if use_stock_backgrounds:
+                self._use_stock_backgrounds = True
         self._music_volume = max(0.0, min(0.35, music_volume))
 
     # ── بناء صورة خلفية متدرّجة للمشهد رقم N ─────────────────────────
@@ -689,7 +699,9 @@ class VideoEngine:
         yy, xx = np.mgrid[0:FRAME_H, 0:FRAME_W]
         cx, cy = FRAME_W / 2.0, FRAME_H / 2.0
         dist = np.sqrt(((xx - cx) / cx) ** 2 + ((yy - cy) / cy) ** 2).astype(np.float32)
-        vignette = np.clip(1.0 - 0.30 * np.clip(dist - 0.55, 0, None), 0.62, 1.0)
+        strength = 0.42 if getattr(self, "_professional_mode", False) else 0.30
+        floor = 0.55 if getattr(self, "_professional_mode", False) else 0.62
+        vignette = np.clip(1.0 - strength * np.clip(dist - 0.50, 0, None), floor, 1.0)
         arr *= vignette[:, :, None]
 
         arr = np.clip(arr, 0, 255).astype(np.uint8)
@@ -961,6 +973,13 @@ class VideoEngine:
                 from PIL import Image
                 frame_img = Image.new("RGBA", (FRAME_W, FRAME_H), (0, 0, 0, 0))
             frame_img = self._draw_caption(frame_img, chunk_text, accent_color=accent)
+            if getattr(self, "_professional_mode", False):
+                # تقدّم المشهد داخل الشريط الكلي للفيديو
+                total = max(1, int(getattr(self, "_pro_total_segments", 1)))
+                seg_base = float(getattr(self, "_pro_segment_index", 0)) / total
+                seg_span = 1.0 / total
+                local = min(1.0, (elapsed + chunk_dur * 0.5) / max(0.01, duration))
+                frame_img = self._draw_progress_bar(frame_img, seg_base + seg_span * local)
             frame_array = np.array(frame_img)
 
             seg_progress_start = elapsed / duration
@@ -1017,10 +1036,77 @@ class VideoEngine:
             ).with_duration(duration)
 
         captioned = captioned.with_audio(audio_clip.with_duration(duration))
-        return captioned.with_effects([vfx.CrossFadeIn(0.2)])
+        fade = 0.35 if getattr(self, "_professional_mode", False) else 0.2
+        return captioned.with_effects([vfx.CrossFadeIn(fade)])
+
+    def _draw_progress_bar(self, img, progress: float):
+        """شريط تقدّم سفلي أنيق (أسلوب Reels/Shorts الاحترافي)."""
+        from PIL import ImageDraw
+        progress = max(0.0, min(1.0, float(progress)))
+        draw = ImageDraw.Draw(img, "RGBA") if img.mode == "RGBA" else ImageDraw.Draw(img)
+        bar_h = 10 if getattr(self, "_professional_mode", False) else 6
+        y0 = FRAME_H - 48
+        margin = 48
+        full_w = FRAME_W - margin * 2
+        # track
+        draw.rounded_rectangle(
+            [margin, y0, margin + full_w, y0 + bar_h],
+            radius=bar_h // 2,
+            fill=(255, 255, 255, 55) if img.mode == "RGBA" else (60, 60, 70),
+        )
+        fill_w = int(full_w * progress)
+        if fill_w > 4:
+            draw.rounded_rectangle(
+                [margin, y0, margin + fill_w, y0 + bar_h],
+                radius=bar_h // 2,
+                fill=(255, 210, 60) if not getattr(self, "_professional_mode", False) else (255, 199, 0),
+            )
+        return img
+
+    def _build_endcard_clip(self, title: str, duration: float = 2.2):
+        """بطاقة ختامية قصيرة باسم العمل — لمسة إنتاج احترافية."""
+        import numpy as np
+        from PIL import Image, ImageDraw, ImageFont
+        from moviepy import ImageClip
+
+        bg = self._build_background(0)
+        img = bg.convert("RGBA")
+        draw = ImageDraw.Draw(img)
+        # تظليل مركزي
+        overlay = Image.new("RGBA", (FRAME_W, FRAME_H), (0, 0, 0, 110))
+        img = Image.alpha_composite(img, overlay)
+        draw = ImageDraw.Draw(img)
+        text = (title or "NSM Shorts").strip()[:48]
+        try:
+            font = ImageFont.truetype(self._font_path, 64) if self._font_path else ImageFont.load_default()
+        except Exception:
+            font = ImageFont.load_default()
+        shaped = _shape_arabic(text)
+        bbox = draw.textbbox((0, 0), shaped, font=font, stroke_width=3)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        x = (FRAME_W - tw) // 2
+        y = (FRAME_H - th) // 2 - 40
+        draw.text((x, y), shaped, font=font, fill=(255, 255, 255), stroke_width=3, stroke_fill=(0, 0, 0))
+        sub = _shape_arabic("صُنع بـ Neural Service Mesh")
+        try:
+            font2 = ImageFont.truetype(self._font_path, 36) if self._font_path else font
+        except Exception:
+            font2 = font
+        bbox2 = draw.textbbox((0, 0), sub, font=font2)
+        tw2 = bbox2[2] - bbox2[0]
+        draw.text(((FRAME_W - tw2) // 2, y + th + 36), sub, font=font2, fill=(220, 220, 230))
+        arr = np.array(img.convert("RGB"))
+        clip = ImageClip(arr).with_duration(duration).with_fps(FPS)
+        try:
+            from moviepy import vfx
+            clip = clip.with_effects([vfx.CrossFadeIn(0.35), vfx.FadeOut(0.4)])
+        except Exception:
+            pass
+        return clip
 
     # ── الواجهة العامة: رندر الفيديو الكامل ──────────────────────────
     def render(self, script) -> bytes:
+
         """يبني mp4 فعلي من ExplainerScript (segments لازم تحتوي audio_bytes
         مسبقاً عبر FableEngine.render_audio). يُرجِع bytes الفيديو النهائي."""
         if not script.segments:
@@ -1033,11 +1119,19 @@ class VideoEngine:
         from moviepy import CompositeVideoClip, concatenate_videoclips
 
         with tempfile.TemporaryDirectory(prefix="nsm_video_") as tmp_dir:
-            clips = [
-                self._build_segment_clip(seg, i, tmp_dir)
-                for i, seg in enumerate(script.segments)
-            ]
-            final = concatenate_videoclips(clips, method="compose", padding=-0.15)
+            self._pro_total_segments = max(1, len(script.segments))
+            clips = []
+            for i, seg in enumerate(script.segments):
+                self._pro_segment_index = i
+                clips.append(self._build_segment_clip(seg, i, tmp_dir))
+            if getattr(self, "_professional_mode", False):
+                try:
+                    end = self._build_endcard_clip(getattr(script, "title", "") or "Shorts", 2.0)
+                    clips = list(clips) + [end]
+                except Exception as _ec:
+                    logger.debug("endcard skipped: %s", _ec)
+            pad = -0.08 if getattr(self, "_professional_mode", False) else -0.15
+            final = concatenate_videoclips(clips, method="compose", padding=pad)
             final = final.with_fps(FPS)
 
             out_path = os.path.join(tmp_dir, "output.mp4")
@@ -1099,14 +1193,18 @@ class VideoEngine:
                 fps=FPS,
                 codec="libx264",
                 audio_codec="aac",
-                audio_bitrate="192k",
+                audio_bitrate="320k" if getattr(self, "_professional_mode", False) else "192k",
                 preset=preset,
                 ffmpeg_params=[
                     "-crf", crf,
                     "-profile:v", "high",
+                    "-level", "4.2",
                     "-pix_fmt", "yuv420p",
                     "-movflags", "+faststart",
-                ],
+                ] + (
+                    ["-x264-params", "aq-mode=3:ref=4"]
+                    if getattr(self, "_professional_mode", False) else []
+                ),
                 threads=cpu_threads,
                 logger=None,
             )

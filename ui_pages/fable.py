@@ -584,6 +584,21 @@ def render_fable():
                 key="shorts_cinematic_bg_toggle",
                 help="يستبدل الخلفية المتدرّجة الافتراضية بخلفية فيديو حقيقية لكل مشهد.",
             )
+            pro_cols = st.columns(2)
+            with pro_cols[0]:
+                professional_mode = st.checkbox(
+                    "✨ جودة احترافية (موصى بها)",
+                    value=True,
+                    key="shorts_pro_mode",
+                    help="ترميز أعلى (CRF 14) · شريط تقدّم · بطاقة ختامية · انتقالات أنعم · صوت أوضح",
+                )
+            with pro_cols[1]:
+                use_bg_music = st.checkbox(
+                    "🎵 سجادة صوتية محيطية خفيفة",
+                    value=True,
+                    key="shorts_bg_music",
+                    help="نغمات محيطية مولَّدة محلياً تحت السرد (ليست أغنية). عطّلها إن فضّلت صمتاً تاماً.",
+                )
             cinematic_provider = "higgsfield"
             if use_cinematic_bg:
                 _shorts_provider_options = [
@@ -644,9 +659,12 @@ def render_fable():
                             use_cinematic_backgrounds=use_cinematic_bg,
                             cinematic_provider=cinematic_provider,
                             wan_skip_spaces=st.session_state.get("shorts_wan_dead_spaces"),
+                            professional_mode=professional_mode,
+                            use_background_music=use_bg_music if professional_mode else use_bg_music,
+                            music_volume=0.09 if use_bg_music else 0.0,
                         )
                     st.session_state.shorts_mp4 = mp4_bytes
-                    st.success("✅ تم إنتاج الفيديو")
+                    st.success("✅ تم إنتاج فيديو Shorts" + (" بجودة احترافية" if professional_mode else ""))
                 except Exception as e:  # noqa: BLE001
                     st.error(f"⚠️ فشل رندر الفيديو: {e}")
 
