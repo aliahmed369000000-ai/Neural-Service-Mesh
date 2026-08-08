@@ -88,19 +88,21 @@ bash scripts/setup_git_lfs.sh
 | NeuralCore | ~640K باراميتر | ✅ حي، متصل بالإجابة | `ai/neural_core.py` |
 | ArabicTransformer | ~40M باراميتر | ✅ حي، مدرَّب عصر واحد على CKG | `ai/arabic_transformer.py` |
 | ReasoningPipeline | — | ✅ نقطة الدمج الرئيسية | `ai/reasoning_pipeline.py` |
-| DeepRoutingNetwork | ~640K | ⚠️ مبني لكن **غير متصل** بالإجابة الحية | `ai/deep_routing_network.py` |
-| DynamicWeightLayer | متغير | ⚠️ مبني لكن **غير متصل** بالإجابة الحية | `ai/dynamic_weight_layer.py` |
-| NeuralWeightLayer | 784×784 | ⚠️ مبني لكن **غير متصل** بالإجابة الحية | `ai/neural_weights.py` |
+| DeepRoutingNetwork | ~640K | ✅ حي — ضمن ensemble التوجيه في ReasoningPipeline | `ai/deep_routing_network.py` |
+| DynamicWeightLayer | متغير | ✅ حي — ضمن ensemble التوجيه في ReasoningPipeline | `ai/dynamic_weight_layer.py` |
+| NeuralWeightLayer | 784×784 | ✅ حي — ضمن ensemble التوجيه في ReasoningPipeline | `ai/neural_weights.py` |
 | DeepCirculantPyramid | ~14.1M | 🧪 بحث معماري، غير مُفعّل | `ai/multimodal_network.py` |
 | LoRA Adapters | — | 🧪 جاهزة للاستخدام مستقبلاً | `ai/lora_adapter.py` |
 
-**ملاحظة صريحة:** `DeepRoutingNetwork` و`DynamicWeightLayer` و`NeuralWeightLayer`
-الثلاثة بيعملوا نفس الوظيفة تقريباً (شبكة توجيه قرار) بمنطق نمو مختلف لكل
-واحدة، ومتصلين بس بمسار قديم منفصل (`QuranContinuousTrainer` →
-`KnowledgeTrainer`) **غير مستخدم في التطبيق الحي حالياً**. تم إصلاح باغ
-حقيقي فيهم (`DeepRoutingNetwork.load()` كان بيقبل أبعاد قديمة غير متوافقة
-بصمت) لكن التوحيد الكامل لسه مؤجل (خطر أعلى من الفايدة حالياً لأنهم كود
-غير مستخدم).
+**ملاحظة عن عائلة شبكات التوجيه:** `DeepRoutingNetwork` و`DynamicWeightLayer`
+و`NeuralWeightLayer` تؤدّي وظيفة مشابهة (أوزان توجيه قرار: W_SEMANTIC /
+W_SCORE / W_MEMORY / W_TOPOLOGY) بمنطق نمو مختلف لكل واحدة. **هي متصلة
+حالياً بالمسار الحي** عبر مزج ensemble داخل `ReasoningPipeline` عندما
+`use_deep_routing=True` (الافتراضي). معامل `deep_routing_blend` (افتراضي
+0.45) يحدّد الوزن الإجمالي لهذه العائلة مقابل أساس NeuralCore، مع سقف
+0.85. لا يزال المسار القديم (`QuranContinuousTrainer` → `KnowledgeTrainer`)
+موجوداً كمرجع تاريخي. تم إصلاح باغ سابق في `DeepRoutingNetwork.load()`
+(قبول أبعاد قديمة غير متوافقة بصمت).
 
 ## التحقق من تأسيس الإجابات على المصدر (Faithfulness Verifier)
 
