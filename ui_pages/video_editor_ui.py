@@ -72,6 +72,7 @@ def render_video_editor():
         "العملية",
         [
             "✨ تحسين ذكي بالذكاء",
+            "📐 رفع الدقة (Upscale)",
             "🎯 إعادة ترميز عالية الجودة (ffmpeg)",
             "قص (trim)",
             "تحجيم عمودي 9:16",
@@ -87,7 +88,28 @@ def render_video_editor():
 
     result_path = None
     try:
-        if op == "🎯 إعادة ترميز عالية الجودة (ffmpeg)":
+        if op == "📐 رفع الدقة (Upscale)":
+            target = st.selectbox(
+                "الهدف",
+                ["1080p", "2x", "720p", "1440p", "4k", "shorts"],
+                index=0,
+                format_func=lambda x: {
+                    "2x": "مضاعفة ×2 (نسب أصلية)",
+                    "720p": "1280×720",
+                    "1080p": "Full HD 1920×1080",
+                    "1440p": "QHD 2560×1440",
+                    "4k": "4K 3840×2160",
+                    "shorts": "شورتس عمودي 1080×1920",
+                }[x],
+                key="vedit_up_target",
+            )
+            crf = st.slider("CRF (أقل = أوضح)", 14, 22, 16, key="vedit_up_crf")
+            st.caption("سلسلة: تنظيف خفيف → Lanczos دقيق → حدة — ترميز slow عالي الجودة")
+            if st.button("رفع الدقة الآن", type="primary", key="vedit_up_run"):
+                with st.spinner("يرفع الدقة… قد يستغرق وقتاً حسب الطول"):
+                    result_path = ve.upscale(work_path, target=target, crf=crf)
+
+        elif op == "🎯 إعادة ترميز عالية الجودة (ffmpeg)":
             level = st.selectbox(
                 "مستوى الجودة",
                 ["archive", "high", "balanced"],

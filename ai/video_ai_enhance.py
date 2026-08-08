@@ -76,23 +76,47 @@ PRESETS: Dict[str, Dict[str, str]] = {
         ),
     },
     "upscale_hd": {
-        "label": "رفع إلى HD",
-        "desc": "تكبير Lanczos إلى 1080p + حدة",
+        "label": "رفع إلى Full HD",
+        "desc": "تنظيف → Lanczos 1080p → حدة",
         "vf": (
-            "scale=1920:1080:flags=lanczos:force_original_aspect_ratio=decrease,"
-            "pad=1920:1080:(ow-iw)/2:(oh-ih)/2,"
+            "hqdn3d=1.2:1.2:2.4:2.4,"
+            "scale=1920:1080:flags=lanczos+accurate_rnd+full_chroma_int:"
+            "force_original_aspect_ratio=decrease,"
+            "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black,"
+            "unsharp=5:5:1.0:5:5:0.0,"
+            "eq=contrast=1.06:saturation=1.06"
+        ),
+    },
+    "upscale_2x": {
+        "label": "تكبير ×2",
+        "desc": "مضاعفة الأبعاد مع حدة متدرجة",
+        "vf": (
+            "hqdn3d=1.0:1.0:2:2,"
+            "scale=iw*2:ih*2:flags=lanczos+accurate_rnd+full_chroma_int,"
             "unsharp=5:5:0.9:5:5:0.0,"
-            "eq=contrast=1.05:saturation=1.05"
+            "eq=contrast=1.05:saturation=1.04"
+        ),
+    },
+    "upscale_qhd": {
+        "label": "رفع إلى 1440p",
+        "desc": "2K تقريبي مع Lanczos",
+        "vf": (
+            "hqdn3d=1.2:1.2:2.4:2.4,"
+            "scale=2560:1440:flags=lanczos+accurate_rnd+full_chroma_int:"
+            "force_original_aspect_ratio=decrease,"
+            "pad=2560:1440:(ow-iw)/2:(oh-ih)/2:color=black,"
+            "unsharp=5:5:1.0:5:5:0.0"
         ),
     },
     "upscale_shorts": {
         "label": "رفع لشورتس 9:16",
-        "desc": "1080×1920 مع حدة وألوان",
+        "desc": "1080×1920 cover + حدة وألوان",
         "vf": (
-            "scale=1080:1920:flags=lanczos:force_original_aspect_ratio=increase,"
-            "crop=1080:1920,"
             "hqdn3d=1.2:1.2:2.5:2.5,"
-            "unsharp=5:5:0.85:5:5:0.0,"
+            "scale=1080:1920:flags=lanczos+accurate_rnd+full_chroma_int:"
+            "force_original_aspect_ratio=increase,"
+            "crop=1080:1920,"
+            "unsharp=5:5:1.0:5:5:0.0,"
             "eq=contrast=1.10:saturation=1.12:brightness=0.02"
         ),
     },
@@ -189,6 +213,88 @@ def enhance_chain(
     return current
 
 
+
+UPSCALE_TARGETS = {
+    "2x": "upscale_2x",
+    "720p": None,  # dynamic
+    "1080p": "upscale_hd",
+    "1440p": "upscale_qhd",
+    "shorts": "upscale_shorts",
+}
+
+
+def _vf_target(width: int, height: int, mode: str = "fit") -> str:
+    """mode=fit يحافظ على النسبة مع pad، cover يقص للملء."""
+    flags = "lanczos+accurate_rnd+full_chroma_int"
+    pre = "hqdn3d=1.2:1.2:2.4:2.4,"
+    post = ",unsharp=5:5:1.0:5:5:0.0,eq=contrast=1.06:saturation=1.06"
+    if mode == "cover":
+        return (
+            f"{pre}scale={width}:{height}:flags={flags}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height}{post}"
+        )
+    return (
+        f"{pre}scale={width}:{height}:flags={flags}:force_original_aspect_ratio=decrease,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black{post}"
+    )
+
+
+def upscale_video(
+    path: PathLike,
+    target: str = "1080p",
+    crf: int = 16,
+) -> Path:
+    """
+    رفع دقة الفيديو بجودة عالية.
+    target: 2x | 720p | 1080p | 1440p | shorts | 4k
+    """
+    src = _ensure(path)
+    target = (target or "1080p").lower().strip()
+    out = _out(prefix=f"upscale_{target}")
+
+    if target == "2x":
+        vf = PRESETS["upscale_2x"]["vf"]
+    elif target == "720p":
+        vf = _vf_target(1280, 720, "fit")
+    elif target in ("1080p", "hd", "fhd"):
+        vf = PRESETS["upscale_hd"]["vf"]
+    elif target in ("1440p", "qhd", "2k"):
+        vf = PRESETS["upscale_qhd"]["vf"]
+    elif target in ("shorts", "9:16", "vertical"):
+        vf = PRESETS["upscale_shorts"]["vf"]
+    elif target in ("4k", "2160p"):
+        vf = _vf_target(3840, 2160, "fit")
+    else:
+        vf = PRESETS["upscale_hd"]["vf"]
+
+    crf = max(14, min(23, int(crf)))
+    try:
+        from ai.ffmpeg_quality import encode_args
+        tail = encode_args("archive" if crf <= 15 else "high", extra_vf=vf)
+        if "-crf" in tail:
+            i = tail.index("-crf")
+            tail[i + 1] = str(crf)
+        cmd = [_ffmpeg(), "-y", "-i", str(src), *tail, str(out)]
+    except Exception:
+        cmd = [
+            _ffmpeg(), "-y", "-i", str(src),
+            "-vf", vf,
+            "-c:v", "libx264", "-preset", "slow", "-crf", str(crf),
+            "-profile:v", "high", "-pix_fmt", "yuv420p",
+            "-tune", "film",
+            "-c:a", "aac", "-b:a", "256k",
+            "-movflags", "+faststart",
+            str(out),
+        ]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+    except subprocess.TimeoutExpired as e:
+        raise VideoAIEnhanceError("انتهت مهلة رفع الدقة") from e
+    if p.returncode != 0 or not out.is_file():
+        raise VideoAIEnhanceError(f"فشل الـ upscale: {(p.stderr or '')[-500:]}")
+    return out
+
+
 def try_hf_upscale(path: PathLike, timeout: int = 90) -> Optional[Path]:
     """
     محاولة اختيارية عبر مساحة HF مجانية لتحسين إطار/فيديو.
@@ -238,6 +344,11 @@ def enhance_auto(
         out = enhance_chain(src, ["denoise", "clarity"], crf=crf)
         return {"path": str(out), "backend": backend, "preset": "pro"}
 
+    if mode in ("2x", "720p", "1080p", "1440p", "4k", "shorts", "upscale"):
+        target = "1080p" if mode == "upscale" else mode
+        out = upscale_video(src, target=target, crf=crf)
+        return {"path": str(out), "backend": backend, "preset": f"upscale:{target}"}
+
     out = enhance_local(src, preset=mode, crf=crf)
     return {"path": str(out), "backend": backend, "preset": mode}
 
@@ -248,4 +359,5 @@ def format_presets_help() -> str:
         lines.append(f"- **{v['label']}** (`{k}`): {v['desc']}")
     lines.append("- **احترافي** (`pro`): تنعيم ثم وضوح")
     lines.append("- **تلقائي** (`auto`): يختار حسب الأبعاد")
+    lines.append("- **رفع دقة**: `2x` · `720p` · `1080p` · `1440p` · `4k` · `shorts`")
     return "\n".join(lines)

@@ -426,7 +426,17 @@ def quality_boost(path: PathLike, level: str = "high", visual: str = "soft") -> 
     return out
 
 
+def upscale(path: PathLike, target: str = "1080p", crf: int = 16) -> Path:
+    """رفع دقة الفيديو (2x / 720p / 1080p / 1440p / 4k / shorts)."""
+    try:
+        from ai.video_ai_enhance import upscale_video
+    except ImportError as e:
+        raise VideoEditorError("وحدة video_ai_enhance غير متاحة") from e
+    return upscale_video(path, target=target, crf=crf)
+
+
 def ai_enhance(
+
 
     path: PathLike,
     mode: str = "auto",
