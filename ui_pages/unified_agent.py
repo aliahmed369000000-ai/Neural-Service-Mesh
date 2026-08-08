@@ -101,22 +101,26 @@ def render_unified_agent():
         with st.expander("أوامر سريعة", expanded=False):
             st.markdown(
                 """
-- `فحص ckg` — جودة المعرفة  
-- `اسحب lfs` — حالة Git LFS  
-- `حالة التعلم المعزز`  
-- `ضبط معلمات تدريب`  
-- `ماذا بعد`
+**للمستخدم**
+- `مساعدة` — ماذا أستطيع؟
+- `كيف حال النظام` — لمحة سريعة
+- `صنّف: ...` — توجيه MoE
+- `افحص المشروع` / `شغّل الاختبارات`
+- `حالة نمو الوكيل`
+
+**للمطوّر**
+- `فحص ckg` · `ماذا بعد` · `حالة gpu`
                 """
             )
 
     # ── اقتراحات سريعة ──
     st.caption("اقتراحات")
     _suggestions = [
-        "فحص ckg",
-        "ماذا بعد",
-        "حالة التعلم المعزز",
-        "ما الأمانة؟",
-        "حالة gpu",
+        "مساعدة",
+        "كيف حال النظام",
+        "صنّف: ما حكم الصلاة؟",
+        "افحص المشروع",
+        "حالة نمو الوكيل",
     ]
     scols = st.columns(len(_suggestions))
     for i, q in enumerate(_suggestions):
@@ -181,7 +185,7 @@ def render_unified_agent():
     with c1:
         user_input = st.text_area(
             label="سؤالك",
-            placeholder="اسأل أو اكتب أمراً… مثال: فحص ckg",
+            placeholder="مثال: مساعدة · صنّف: ... · افحص المشروع — اسأل أو اكتب أمراً… مثال: فحص ckg",
             key="unified_agent_input",
             label_visibility="collapsed",
             height=90,

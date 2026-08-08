@@ -22,14 +22,32 @@ logger = logging.getLogger("AgentProjectBridge")
 def dispatch_agent_message(user_input: str) -> Optional[str]:
     text = (user_input or "").strip()
     if not text:
-        return None
+        try:
+            from ai.agent_user_assist import welcome_card
+            return welcome_card()
+        except Exception:
+            return None
+
+    # مساعدة ونوايا طبيعية للمستخدم
+    try:
+        from ai.agent_user_assist import handle_user_assist, suggest_after_bridge
+        r = handle_user_assist(text)
+        if r is not None:
+            return r
+    except Exception as e:
+        logger.warning("user assist: %s", e)
+        suggest_after_bridge = None  # type: ignore
 
     # دورة نمو الوكيل (تخطيط / تنفيذ آمن / ذاكرة) — قبل موزّع الأوامر
     try:
         from ai.agent_growth_loop import handle_growth_command
         r = handle_growth_command(text)
         if r is not None:
-            return r
+            try:
+                from ai.agent_user_assist import suggest_after_bridge as _sug
+                return _sug(r, text)
+            except Exception:
+                return r
     except Exception as e:
         logger.warning("growth dispatch: %s", e)
 
@@ -37,7 +55,11 @@ def dispatch_agent_message(user_input: str) -> Optional[str]:
         from ai.model_training_agent import handle_training_command
         r = handle_training_command(text)
         if r is not None:
-            return r
+            try:
+                from ai.agent_user_assist import suggest_after_bridge as _sug
+                return _sug(r, text)
+            except Exception:
+                return r
     except Exception as e:
         logger.warning("training dispatch: %s", e)
 
@@ -62,11 +84,27 @@ def dispatch_with_meta(user_input: str) -> Tuple[Optional[str], str]:
     """يعيد (الرد, شارة المصدر)."""
     text = (user_input or "").strip()
     if not text:
-        return None, ""
+        try:
+            from ai.agent_user_assist import welcome_card
+            return welcome_card(), "👋 مساعد"
+        except Exception:
+            return None, ""
+    try:
+        from ai.agent_user_assist import handle_user_assist, suggest_after_bridge
+        r = handle_user_assist(text)
+        if r is not None:
+            return r, "👋 مساعد"
+    except Exception as e:
+        logger.warning("user assist: %s", e)
     try:
         from ai.agent_growth_loop import handle_growth_command
         r = handle_growth_command(text)
         if r is not None:
+            try:
+                from ai.agent_user_assist import suggest_after_bridge as _sug
+                r = _sug(r, text)
+            except Exception:
+                pass
             return r, "🌱 Agent Growth"
     except Exception as e:
         logger.warning("growth dispatch: %s", e)

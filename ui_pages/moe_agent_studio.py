@@ -16,6 +16,9 @@ def render_moe_agent_studio():
     st.caption(
         "تصنيف هرمي · صحة الخبراء · دورة نمو آمنة (بدون shell حر أو نشر تلقائي)"
     )
+    st.info(
+        "💡 ابدأ بـ **تصنيف سؤال** أو **صحة MoE**. من الوكيل الموحّد اكتب: `مساعدة` أو `كيف حال النظام`."
+    )
 
     tab_moe, tab_growth, tab_help = st.tabs(
         ["🧩 Hierarchical MoE", "🌱 نمو الوكيل", "ℹ️ أوامر"]

@@ -436,6 +436,8 @@ def growth_status() -> str:
         "- `نفّذ بأمان: <هدف>` — تنفيذ خطوات آمنة + اختبارات محدودة",
         "- `خبرات الوكيل` — آخر الخبرات",
         "- `طوّر الوكيل` — دورة نمو افتراضية (فحص + اختبارات)",
+        "",
+        "💡 يمكنك أيضاً: `افحص المشروع` · `شغّل الاختبارات` · `مساعدة`",
     ]
     if mem:
         lines.append("\n### آخر خبرات")
@@ -502,5 +504,11 @@ def handle_growth_command(user_input: str) -> Optional[str]:
         # تخطيط فقط ما لم يُطلب التنفيذ
         execute = bool(re.search(r"نف[ّ]?ذ|execute", text, re.I))
         return run_safe_mission(goal, execute=execute)
+
+    # عبارات طبيعية قصيرة بدون بادئة رسمية
+    if re.search(r"^(افحص|فحص)\s*(المشروع|النظام|الكود)?$", text, re.I):
+        return run_safe_mission("افحص المشروع", execute=True)
+    if re.search(r"(شغ[ّ]?ل|run).{0,8}(اختبار|test)", text, re.I) and len(text) < 40:
+        return run_safe_mission("شغّل اختبارات آمنة", execute=True)
 
     return None
