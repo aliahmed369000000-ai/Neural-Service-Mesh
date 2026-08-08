@@ -5,6 +5,7 @@ Surah-Chain Network — نموذج لغوي (LLM-style) بوسط سوري
   [Input LLM] Embedding + موضع + LayerNorm + Adapter→7
   [SurahChain ×114] من شبكهه_114-1.xlsx
   [Output LLM] Adapter 7→d + LM Head مربوط (weight tying)
+  [Residual bypass] h += x @ W_skip  — حول اختناق البعد 7
 
 قدرات LM:
   - WordTokenizer (decode حقيقي) مع بناء قاموس من النصوص
@@ -200,6 +201,10 @@ class HybridExperimentModel:
         self.W_in = rng.uniform(-lim, lim, (CHAIN_WIDTH, self.d_model)).astype(np.float64)
         self.W_out = rng.uniform(-lim, lim, (self.d_model, CHAIN_WIDTH)).astype(np.float64)
         self.b_out = np.zeros(self.d_model, dtype=np.float64)
+        # مسار متبقٍّ حول السلسلة: يخفّف اختناق البعد 7 ويبقي تدرّج LM أقوى
+        lim_s = np.sqrt(6.0 / (self.d_model + self.d_model))
+        self.W_skip = rng.uniform(-lim_s, lim_s, (self.d_model, self.d_model)).astype(np.float64)
+        self.use_residual_bypass = True
         self._cache: dict = {}
 
     def build_tokenizer_from_texts(self, texts: Sequence[str], max_vocab: Optional[int] = None) -> int:
@@ -245,9 +250,12 @@ class HybridExperimentModel:
         h7 = self._to_chain(x)
         h7o = self.chain.forward(h7)
         h = self._from_chain(h7o)
+        if getattr(self, "use_residual_bypass", False):
+            h = h + x @ self.W_skip.T
+            self._cache["x_skip"] = x
         return self._lm_logits(h)
 
-    def train_step(self, text: str, max_len: int = 32) -> Optional[float]:
+    def train_step(self, text: str, max_len: int = 64) -> Optional[float]:
         ids = self.tokenizer.encode(text, max_len)
         if len(ids) < 2:
             return None
@@ -273,6 +281,15 @@ class HybridExperimentModel:
         np.clip(g_E, -1.0, 1.0, out=g_E)
         self.E -= self.lr * g_E
 
+        # تدرّج المسار المتبقّي (حول السلسلة)
+        g_x_skip = None
+        if getattr(self, "use_residual_bypass", False) and "x_skip" in self._cache:
+            x_skip = self._cache["x_skip"]
+            g_W_skip = g_h.T @ x_skip
+            np.clip(g_W_skip, -5.0, 5.0, out=g_W_skip)
+            self.W_skip -= self.lr * g_W_skip
+            g_x_skip = g_h @ self.W_skip
+
         h7 = self._cache["h7"]
         g_W_out = g_h.T @ h7
         g_b = g_h.sum(axis=0)
@@ -288,6 +305,8 @@ class HybridExperimentModel:
         np.clip(g_W_in, -5.0, 5.0, out=g_W_in)
         self.W_in -= self.lr * g_W_in
         g_x = g7 @ self.W_in
+        if g_x_skip is not None:
+            g_x = g_x + g_x_skip
 
         g_x = self.ln_in.backward(g_x, self.lr)
         for i, tid in enumerate(self._cache["ids"]):
@@ -298,7 +317,7 @@ class HybridExperimentModel:
     def train_batch(
         self,
         texts: Sequence[str],
-        max_len: int = 32,
+        max_len: int = 64,
         step: Optional[int] = None,
         total_steps: Optional[int] = None,
         warmup_steps: int = 0,
@@ -321,10 +340,10 @@ class HybridExperimentModel:
     def generate(
         self,
         prompt: str,
-        max_new_tokens: int = 24,
+        max_new_tokens: int = 32,
         temperature: float = 0.9,
         top_k: int = 40,
-        max_ctx: int = 48,
+        max_ctx: int = 96,
     ) -> str:
         """
         توليد سببي (autoregressive): يضيف رمزاً واحداً كل مرة حتى EOS أو الحد.
@@ -369,7 +388,7 @@ class HybridExperimentModel:
         return {
             "chain": self.chain.param_count(),
             "embedding_E": int(self.E.size),
-            "adapters": int(self.W_in.size + self.W_out.size + self.b_out.size),
+            "adapters": int(self.W_in.size + self.W_out.size + self.b_out.size + getattr(self, "W_skip", np.zeros(0)).size),
             "d_model": self.d_model,
             "vocab_size": self.vocab_size,
             "tokenizer": type(self.tokenizer).__name__,

@@ -73,3 +73,20 @@ python experiments/surah_chain_network/hybrid_experiment.py
 ```
 
 متغيرات اختيارية: `SCN_EPOCHS`, `SCN_BATCH`, `SCN_D_MODEL`, `SCN_LR`, `SCN_MAX_LEN`.
+
+
+## المسار نحو نموذج لغوي كامل (منفّذ تدريجياً)
+
+| الخطوة | الحالة |
+|--------|--------|
+| طرفا LLM + SurahChain وسط | ✅ |
+| WordTokenizer + generate + batch + cosine LR | ✅ |
+| **مسار متبقٍّ حول اختناق البعد 7** (`W_skip`) | ✅ |
+| سياق أطول (max_len 64، generate ctx 96) | ✅ |
+| **تدريب على جمل CKG** | ✅ `train_ckg_lm.py` |
+| انتباه / دمج NSM الحي | لاحقاً |
+
+```bash
+# تدريب على CKG (عيّنة قابلة للضبط)
+SCN_N=1500 SCN_EPOCHS=8 python experiments/surah_chain_network/train_ckg_lm.py
+```
