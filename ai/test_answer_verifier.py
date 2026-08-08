@@ -51,25 +51,40 @@ class TestBuildRetrievalContext:
 # verify_answer_faithfulness — مسارات التدهور الآمن (بلا استثناء أبداً)
 # ══════════════════════════════════════════════════════════════════════════
 class TestVerifyAnswerFaithfulnessGracefulDegradation:
-    def test_unavailable_when_deepeval_not_importable(self, monkeypatch):
+    def test_lexical_fallback_when_deepeval_not_importable(self, monkeypatch):
         monkeypatch.setattr(verifier, "_deepeval_importable", lambda: False)
         report = verifier.verify_answer_faithfulness(
-            "ما حكم الصبر؟", {"summary": "...", "verses": [{"surah": 2, "ayah": 1, "text": "..."}]},
+            "ما حكم الصبر؟",
+            {
+                "summary": "الصبر مطلوب في الصيام",
+                "verses": [{"surah": 2, "ayah": 183, "text": "يا أيها الذين آمنوا كتب عليكم الصيام"}],
+            },
         )
-        assert report["available"] is False
-        assert report["faithful"] is None
-        assert report["score"] is None
-        assert "deepeval" in report["reason"]
+        assert report["available"] is True
+        assert report.get("method") == "lexical"
+        assert report["score"] is not None
+        assert "معجمي" in report["reason"] or "lexical" in report["reason"].lower()
 
-    def test_unavailable_when_no_free_key(self, monkeypatch):
+    def test_lexical_fallback_when_no_free_key(self, monkeypatch):
         monkeypatch.setattr(verifier, "_deepeval_importable", lambda: True)
         for var in ("GROQ_API_KEY", "GOOGLE_API_KEY", "CF_API_TOKEN", "CF_ACCOUNT_ID"):
             monkeypatch.delenv(var, raising=False)
+        # has_any_free_key may still read env — force False via free_router if imported
+        import sys
+        class _FR:
+            @staticmethod
+            def has_any_free_key():
+                return False
+        monkeypatch.setitem(sys.modules, "ai.free_router", _FR)
         report = verifier.verify_answer_faithfulness(
-            "ما حكم الصبر؟", {"summary": "...", "verses": [{"surah": 2, "ayah": 1, "text": "..."}]},
+            "ما حكم الصبر؟",
+            {
+                "summary": "الصبر مطلوب في الصيام",
+                "verses": [{"surah": 2, "ayah": 183, "text": "يا أيها الذين آمنوا كتب عليكم الصيام"}],
+            },
         )
-        assert report["available"] is False
-        assert "مجاني" in report["reason"]
+        assert report["available"] is True
+        assert report.get("method") == "lexical"
 
     def test_no_exception_when_missing_context(self, monkeypatch):
         monkeypatch.setattr(verifier, "_deepeval_importable", lambda: True)
@@ -126,3 +141,23 @@ class TestQAEngineIntegration:
         )
         assert result["faithfulness_check"] is not None
         assert result["faithfulness_check"]["available"] is False
+
+
+class TestLexicalFaithfulness:
+    def test_high_overlap_when_summary_echoes_context(self):
+        summary = "كتب عليكم الصيام"
+        ctx = ["سورة 2 آية 183: يا أيها الذين آمنوا كتب عليكم الصيام"]
+        r = verifier._lexical_faithfulness_score(summary, ctx)
+        assert r["score"] is not None and r["score"] >= 0.5
+        assert r["overlap"] >= 2
+
+    def test_low_overlap_when_unrelated(self):
+        summary = "الجاذبية قانون فيزياء حديث"
+        ctx = ["سورة 2 آية 183: يا أيها الذين آمنوا كتب عليكم الصيام"]
+        r = verifier._lexical_faithfulness_score(summary, ctx)
+        assert r["score"] is not None and r["score"] < 0.3
+
+    def test_empty_summary(self):
+        r = verifier._lexical_faithfulness_score("", ["نص ما"])
+        assert r["score"] is None
+
