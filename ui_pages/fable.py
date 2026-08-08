@@ -579,7 +579,7 @@ def render_fable():
 
             _hf_key_present = bool(os.getenv("HIGGSFIELD_API_KEY", "").strip())
             use_cinematic_bg = st.checkbox(
-                "🎥 خلفيات سينمائية (يفضّل المجاني: Wan/LTX على ZeroGPU)",
+                "🎥 خلفيات سينمائية مجانية محسّنة (Wan/LTX + رفع جودة تلقائي)",
                 value=False,
                 key="shorts_cinematic_bg_toggle",
                 help="يولّد خلفيات فيديو حقيقية. المسار الافتراضي مجاني عبر Hugging Face ZeroGPU. المدفوع (Higgsfield) اختياري.",

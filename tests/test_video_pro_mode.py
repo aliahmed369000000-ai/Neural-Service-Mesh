@@ -34,3 +34,15 @@ def test_free_provider_alias():
     from ai.video_engine import VideoEngine
     eng = VideoEngine(cinematic_provider="free")
     assert eng._cinematic_provider == "wan_free"
+
+
+def test_enhance_free_clip_noop_missing():
+    from ai.video_engine import _enhance_free_clip
+    assert _enhance_free_clip("/tmp/no_such_clip.mp4", "/tmp/out_x.mp4") == "/tmp/no_such_clip.mp4"
+
+
+def test_negative_prompt_stronger():
+    from ai.video_engine import _wan_free_negative_prompt
+    n = _wan_free_negative_prompt()
+    assert "watermark" in n
+    assert "blurry" in n

@@ -46,6 +46,7 @@ import io
 import json
 import logging
 import os
+import subprocess
 import tempfile
 import textwrap
 import urllib.error
@@ -117,10 +118,12 @@ def _build_cinematic_prompt(narration: str, visual_notes: str) -> str:
     from ai.higgsfield_engine import _build_fallback_prompt
 
     base = _build_fallback_prompt(narration, visual_notes)
-    # تلميحات مناسبة لـ Shorts عمودي ولمزوّدات مجانية قصيرة المدة
+    # تلميحات جودة للمسار المجاني (ZeroGPU) + تكوين عمودي للشورتس
     return (
-        f"{base}. Vertical 9:16 smartphone framing, cinematic lighting, "
-        "smooth camera, high detail, no text overlay, no watermark"
+        f"{base}. Photorealistic cinematic short, vertical 9:16 framing, "
+        "shallow depth of field, natural volumetric light, rich color grade, "
+        "smooth stabilized camera, high detail texture, filmic contrast, "
+        "no text, no watermark, no logo, no subtitles"
     )
 
 
@@ -162,12 +165,48 @@ def _fetch_cinematic_clip(narration: str, visual_notes: str, tmp_dir: str, seg_i
 
 
 def _wan_free_negative_prompt() -> str:
-    """برومبت سلبي عام (إنجليزي) يقلّل عيوب توليد الفيديو الشائعة — نفس
-    الأسلوب المستخدم بمساحات Wan المجتمعية نفسها."""
+    """برومبت سلبي أقوى للمسار المجاني — يقلّل الضبابية والنص والتشوه."""
     return (
-        "blurry, low quality, watermark, text, subtitles, distorted, "
-        "extra limbs, deformed, static image, worst quality"
+        "blurry, low quality, worst quality, jpeg artifacts, noise, grain, "
+        "watermark, logo, text, subtitles, caption, title, letters, "
+        "distorted, deformed, mutated, disfigured, extra limbs, bad anatomy, "
+        "static image, still frame, frozen, slideshow, low resolution, "
+        "overexposed, underexposed, washed out, cartoonish (unless requested)"
     )
+
+
+
+def _enhance_free_clip(src_path: str, dst_path: str) -> str:
+    """رفع جودة مقطع مجاني بعد التوليد: تغطية 9:16 + حدة + ألوان + 30fps.
+    إن فشل ffmpeg يُعاد المسار الأصلي دون كسر المسار.
+    """
+    import shutil
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg or not src_path or not os.path.isfile(src_path):
+        return src_path
+    vf = (
+        f"scale={FRAME_W}:{FRAME_H}:force_original_aspect_ratio=increase,"
+        f"crop={FRAME_W}:{FRAME_H},"
+        "fps=30,"
+        "eq=contrast=1.10:saturation=1.15:brightness=0.03:gamma=1.02,"
+        "unsharp=5:5:0.7:5:5:0.0"
+    )
+    cmd = [
+        ffmpeg, "-y", "-i", src_path,
+        "-vf", vf,
+        "-c:v", "libx264", "-preset", "fast", "-crf", "17",
+        "-an",
+        "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        dst_path,
+    ]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if p.returncode == 0 and os.path.isfile(dst_path) and os.path.getsize(dst_path) > 1000:
+            return dst_path
+        logger.debug("enhance free clip failed: %s", (p.stderr or "")[-300:])
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("enhance free clip error: %s", exc)
+    return src_path
 
 
 # قائمة مساحات Hugging Face المجتمعية المجانية — بترتيب الأولوية (الأسرع
@@ -187,26 +226,28 @@ _WAN_FREE_CANDIDATES = [
         # API" بصفحة المساحة نفسها بعد أول رندر حي من Streamlit Cloud.
         "space": "Lightricks/ltx-video-distilled",
         "api_name": "/generate",
-        "timeout": 70,
+        "timeout": 100,
         # ترتيب المدخلات يطابق دالة generate() الفعلية: prompt,
         # negative_prompt, input_image_filepath, input_video_filepath,
         # height_ui, width_ui, mode, duration_ui, ui_frames_to_use,
         # seed_ui, randomize_seed, ui_guidance_scale, improve_texture_flag
+        # دقة أعلى قليلاً + improve_texture + guidance أقوى (ما زال ضمن حدود ZeroGPU)
         "build_args": lambda prompt: (
             prompt, _wan_free_negative_prompt(), None, None,
-            768, 448, "text-to-video", 3.0, 9, 0, True, 3.0, False,
+            768, 512, "text-to-video", 4.0, 12, 0, True, 4.5, True,
         ),
         "extract": lambda result: result[0] if isinstance(result, (list, tuple)) else result,
     },
     {
         "space": "KingNish/wan2-2-fast",
         "api_name": "/generate_video",
-        "timeout": 70,
+        "timeout": 100,
         # ترتيب المدخلات يطابق app.py الفعلي للمساحة (تحقّقنا منه):
         # image, prompt, height, width, negative_prompt, duration_seconds,
         # guidance_scale, steps, seed, randomize_seed
+        # خطوات أكثر + guidance معتدل لجودة أوضح مع بقاء الوقت مقبولاً
         "build_args": lambda prompt: (
-            None, prompt, 832, 480, _wan_free_negative_prompt(), 3.0, 0.0, 4, 0, True,
+            None, prompt, 832, 480, _wan_free_negative_prompt(), 4.0, 5.0, 10, 0, True,
         ),
         "extract": lambda result: result[0] if isinstance(result, (list, tuple)) else result,
     },
@@ -322,7 +363,8 @@ class _WanFreeProvider:
                 clip_path = os.path.join(tmp_dir, f"wan_bg_{seg_index}.mp4")
                 import shutil
                 shutil.copyfile(str(result_path), clip_path)
-                return clip_path
+                enhanced = os.path.join(tmp_dir, f"wan_bg_{seg_index}_hq.mp4")
+                return _enhance_free_clip(clip_path, enhanced)
             # لا استثناء لكن لا ملف صالح (مثلاً خرج فارغ) — لا نستبعد
             # المساحة نهائياً (قد ينجح مشهد آخر)، فقط نجرّب المساحة
             # التالية لهذا المشهد تحديداً.
