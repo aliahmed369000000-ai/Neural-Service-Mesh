@@ -26,6 +26,10 @@ CKPT_LATEST = CKPT_DIR / "latest_ckg_lm_torch.pt"
 VOCAB_PATH = _HERE / "tokenizer_vocab_strong.json"
 STATE_FILE = CKPT_DIR / "ckg_lm_torch_state.json"
 
+DATA_SOURCE = os.environ.get("SCN_DATA_SOURCE", "ckg")  # ckg | yemeni | combined
+YEMENI_ZIP = _REPO / "data" / "yemeni" / "Yemeni.zip"
+YEMENI_CACHE = _REPO / "data" / "yemeni" / "yemeni_sentences_cache.pkl"
+
 N = int(os.environ.get("SCN_N", "3000"))
 EPOCHS = int(os.environ.get("SCN_EPOCHS", "15"))
 BATCH = int(os.environ.get("SCN_BATCH", "32"))
@@ -67,12 +71,88 @@ def load_ckg_sentences(max_n: int) -> list:
     return out
 
 
+def load_yemeni_sentences(max_n: int) -> list:
+    """يبني جملاً من data/yemeni/Yemeni.zip (Lisan-Yemeni-dataset.csv)، بترتيب
+    الكلمات حسب wordPosition لكل sentenceId. يخزّن النتيجة في كاش pickle
+    (data/yemeni/yemeni_sentences_cache.pkl) لتفادي إعادة قراءة CSV الضخم
+    (~1M سطر) في كل تشغيل."""
+    if YEMENI_CACHE.exists():
+        with open(YEMENI_CACHE, "rb") as f:
+            all_s = pickle.load(f)
+    else:
+        if not YEMENI_ZIP.exists():
+            print("⚠️  data/yemeni/Yemeni.zip غير موجود — تخطّي البيانات اليمنية")
+            return []
+        import csv
+        import io
+        import zipfile
+
+        groups: dict = {}
+        with zipfile.ZipFile(YEMENI_ZIP) as z:
+            with z.open("Yemeni/Lisan-Yemeni-dataset.csv") as raw:
+                reader = csv.DictReader(io.TextIOWrapper(raw, encoding="utf-8"))
+                for row in reader:
+                    sid = row.get("sentenceId")
+                    tok = (row.get("rawToken") or "").strip()
+                    if not sid or not tok:
+                        continue
+                    try:
+                        pos = int(row.get("wordPosition") or 0)
+                    except ValueError:
+                        pos = 0
+                    groups.setdefault(sid, []).append((pos, tok))
+
+        all_s = []
+        for _sid, toks in groups.items():
+            toks.sort(key=lambda t: t[0])
+            s = " ".join(t for _, t in toks).strip()
+            if len(s) >= 8:
+                all_s.append(s)
+
+        YEMENI_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        with open(YEMENI_CACHE, "wb") as f:
+            pickle.dump(all_s, f)
+
+    random.Random(1).shuffle(all_s)
+    out, seen = [], set()
+    for s in all_s:
+        if s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+        if len(out) >= max_n:
+            break
+    return out
+
+
+def load_training_texts(max_n: int) -> list:
+    """يحمّل نصوص التدريب حسب SCN_DATA_SOURCE: ckg / yemeni / combined."""
+    texts: list = []
+    if DATA_SOURCE in ("ckg", "combined"):
+        ckg = load_ckg_sentences(max_n)
+        print(f"جمل CKG: {len(ckg)}")
+        texts += ckg
+    if DATA_SOURCE in ("yemeni", "combined"):
+        yem = load_yemeni_sentences(max_n)
+        print(f"جمل يمنية: {len(yem)}")
+        texts += yem
+
+    seen, out = set(), []
+    for s in texts:
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+    if DATA_SOURCE != "combined":
+        out = out[:max_n]
+    return out
+
+
 def main():
     CKPT_DIR.mkdir(parents=True, exist_ok=True)
-    texts = load_ckg_sentences(N)
+    texts = load_training_texts(N)
     if len(texts) < 10:
-        raise SystemExit("لا جمل CKG")
-    print(f"جمل CKG: {len(texts)}")
+        raise SystemExit("لا جمل تدريب متاحة — تحقق من SCN_DATA_SOURCE ووجود الملفات")
+    print(f"إجمالي جمل التدريب ({DATA_SOURCE}): {len(texts)}")
 
     m = HybridExperimentModelTorch(
         d_model=D_MODEL,
