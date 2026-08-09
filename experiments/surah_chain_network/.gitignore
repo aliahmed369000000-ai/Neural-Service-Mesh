@@ -1,2 +1,4 @@
 checkpoints/
-checkpoints/
+data/
+*.pt
+__pycache__/

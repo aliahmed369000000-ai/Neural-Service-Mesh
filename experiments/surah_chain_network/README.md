@@ -159,3 +159,27 @@ python experiments/surah_chain_network/train_ckg_lm_torch.py
 - `scaled_dot_product_attention` (سببي)
 - AdamW + grad clip
 - `SCN_COMPILE=1` لتفعيل torch.compile
+
+## Pre-training على بيانات عامة من الإنترنت (بدون CKG)
+
+مصدر البيانات: **Jr23xd23/ArabicText-Large** (Hugging Face) — ~244M كلمة، جودة عالية.
+
+```bash
+# 1) تثبيت مكتبة السحب (مرة واحدة)
+pip install datasets
+
+# 2) تحضير الكاش (يسحب من الإنترنت ويقسّم إلى مقاطع)
+python experiments/surah_chain_network/prepare_pretrain_data.py
+# أو: SCN_N=12000 python experiments/surah_chain_network/prepare_pretrain_data.py
+
+# 3) التدريب (نسخة جديدة مستقلة عن CKG)
+python experiments/surah_chain_network/train_pretrain_torch.py
+
+SCN_N=10000 SCN_EPOCHS=20 SCN_D_MODEL=256 SCN_BATCH=32 \
+  python experiments/surah_chain_network/train_pretrain_torch.py
+```
+
+- الكاش: `experiments/surah_chain_network/data/pretrain_sentences.pkl`
+- Checkpoints: `checkpoints/best_pretrain_torch.pt` / `latest_pretrain_torch.pt`
+- يدعم التوسيع الذاتي (Highway + LayerScale + expand_narrowest) عند توقف الـloss
+- متغيرات: `SCN_N`, `SCN_EPOCHS`, `SCN_EXPAND_PATIENCE`, `SCN_MAX_EXPANDS`, `SCN_HF_DATASET`
