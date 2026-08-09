@@ -51,16 +51,25 @@ def cosine_lr(step, total_steps, base_lr, warmup_steps=0, min_lr_ratio=0.1):
 
 
 class SurahChainLayer(nn.Module):
-    def __init__(self, d_in: int, d_out: int):
+    """طبقة سلسلة السور مع Highway gate + LayerScale للاستقرار في العمق 114."""
+
+    def __init__(self, d_in: int, d_out: int, layer_scale_init: float = 1e-2):
         super().__init__()
         self.fc = nn.Linear(d_in, d_out)
         self.ln = nn.LayerNorm(d_out)
+        # shortcut عند تغيّر الأبعاد
         self.shortcut = nn.Linear(d_in, d_out, bias=False) if d_in != d_out else None
+        # Highway gate: يقرر كم يمرّر من التحويل وكم من الإشارة الأصلية
+        self.gate = nn.Linear(d_in, d_out)
+        # LayerScale: يبدأ صغيراً ويكبر تدريجياً بالتدريب (يمنع تخريب الإشارة مبكراً)
+        self.layer_scale = nn.Parameter(torch.ones(d_out) * layer_scale_init)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         h = self.ln(F.gelu(self.fc(x)))
         sc = self.shortcut(x) if self.shortcut is not None else x
-        return h + sc
+        g = torch.sigmoid(self.gate(x))          # بوابة متعلّمة ∈ [0, 1]
+        h = self.layer_scale * h                 # مقياس الطبقة على فرع التحويل فقط
+        return g * h + (1.0 - g) * sc
 
 
 class SurahChainNetwork(nn.Module):
