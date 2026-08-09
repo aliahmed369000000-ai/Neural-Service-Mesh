@@ -51,25 +51,98 @@ def cosine_lr(step, total_steps, base_lr, warmup_steps=0, min_lr_ratio=0.1):
 
 
 class SurahChainLayer(nn.Module):
-    """طبقة سلسلة السور مع Highway gate + LayerScale للاستقرار في العمق 114."""
+    """طبقة سلسلة السور مع Highway gate + LayerScale + دعم التوسيع الذاتي."""
 
     def __init__(self, d_in: int, d_out: int, layer_scale_init: float = 1e-2):
         super().__init__()
+        self.d_in = int(d_in)
+        self.d_out = int(d_out)
         self.fc = nn.Linear(d_in, d_out)
         self.ln = nn.LayerNorm(d_out)
-        # shortcut عند تغيّر الأبعاد
         self.shortcut = nn.Linear(d_in, d_out, bias=False) if d_in != d_out else None
-        # Highway gate: يقرر كم يمرّر من التحويل وكم من الإشارة الأصلية
         self.gate = nn.Linear(d_in, d_out)
-        # LayerScale: يبدأ صغيراً ويكبر تدريجياً بالتدريب (يمنع تخريب الإشارة مبكراً)
         self.layer_scale = nn.Parameter(torch.ones(d_out) * layer_scale_init)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         h = self.ln(F.gelu(self.fc(x)))
         sc = self.shortcut(x) if self.shortcut is not None else x
-        g = torch.sigmoid(self.gate(x))          # بوابة متعلّمة ∈ [0, 1]
-        h = self.layer_scale * h                 # مقياس الطبقة على فرع التحويل فقط
+        g = torch.sigmoid(self.gate(x))
+        h = self.layer_scale * h
         return g * h + (1.0 - g) * sc
+
+    def expand_out(self, delta: int = 1, noise: float = 1e-4) -> None:
+        """يوسّع بُعد المخرج +delta (صف جديد)."""
+        if delta <= 0:
+            return
+        old_out = self.d_out
+        new_out = old_out + delta
+        device, dtype = self.fc.weight.device, self.fc.weight.dtype
+
+        def _expand_linear_out(lin: nn.Linear, has_bias: bool) -> nn.Linear:
+            new = nn.Linear(lin.in_features, new_out, bias=has_bias).to(device=device, dtype=dtype)
+            with torch.no_grad():
+                new.weight[:old_out] = lin.weight
+                new.weight[old_out:].normal_(0.0, noise)
+                if has_bias and lin.bias is not None:
+                    new.bias[:old_out] = lin.bias
+                    new.bias[old_out:].zero_()
+            return new
+
+        self.fc = _expand_linear_out(self.fc, True)
+        self.gate = _expand_linear_out(self.gate, True)
+        if self.shortcut is not None:
+            self.shortcut = _expand_linear_out(self.shortcut, False)
+        else:
+            self.shortcut = nn.Linear(self.d_in, new_out, bias=False).to(device=device, dtype=dtype)
+            with torch.no_grad():
+                self.shortcut.weight.zero_()
+                eye = min(self.d_in, old_out)
+                self.shortcut.weight[:eye, :eye] = torch.eye(eye, device=device, dtype=dtype)
+
+        new_ln = nn.LayerNorm(new_out).to(device=device, dtype=dtype)
+        with torch.no_grad():
+            new_ln.weight[:old_out] = self.ln.weight
+            new_ln.bias[:old_out] = self.ln.bias
+            new_ln.weight[old_out:].fill_(1.0)
+            new_ln.bias[old_out:].zero_()
+        self.ln = new_ln
+
+        new_ls = nn.Parameter(torch.ones(new_out, device=device, dtype=dtype) * 1e-2)
+        with torch.no_grad():
+            new_ls[:old_out] = self.layer_scale
+        self.layer_scale = new_ls
+        self.d_out = new_out
+
+    def expand_in(self, delta: int = 1, noise: float = 1e-4) -> None:
+        """يوسّع بُعد المدخل +delta (عمود جديد)."""
+        if delta <= 0:
+            return
+        old_in = self.d_in
+        new_in = old_in + delta
+        device, dtype = self.fc.weight.device, self.fc.weight.dtype
+
+        def _expand_linear_in(lin: nn.Linear) -> nn.Linear:
+            new = nn.Linear(new_in, lin.out_features, bias=lin.bias is not None).to(
+                device=device, dtype=dtype
+            )
+            with torch.no_grad():
+                new.weight[:, :old_in] = lin.weight
+                new.weight[:, old_in:].normal_(0.0, noise)
+                if lin.bias is not None:
+                    new.bias.copy_(lin.bias)
+            return new
+
+        self.fc = _expand_linear_in(self.fc)
+        self.gate = _expand_linear_in(self.gate)
+        if self.shortcut is not None:
+            self.shortcut = _expand_linear_in(self.shortcut)
+        else:
+            self.shortcut = nn.Linear(new_in, self.d_out, bias=False).to(device=device, dtype=dtype)
+            with torch.no_grad():
+                self.shortcut.weight.zero_()
+                eye = min(old_in, self.d_out)
+                self.shortcut.weight[:eye, :eye] = torch.eye(eye, device=device, dtype=dtype)
+        self.d_in = new_in
 
 
 class SurahChainNetwork(nn.Module):
@@ -77,11 +150,43 @@ class SurahChainNetwork(nn.Module):
         super().__init__()
         dims = layer_dims or LAYER_DIMS
         self.layers = nn.ModuleList([SurahChainLayer(int(a), int(b)) for a, b in dims])
+        self.layer_dims = [[int(a), int(b)] for a, b in dims]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         for layer in self.layers:
             x = layer(x)
         return x
+
+    def expand_narrowest(self, delta: int = 1) -> Optional[dict]:
+        """
+        عند توقف الـloss: يوسّع الأضيق تلقائياً (عمود + صف).
+        يختار الحافة الداخلية ذات أصغر سعة، يوسّع d_out للطبقة i
+        و d_in للطبقة i+1. لا يلمس مدخل/مخرج السلسلة (عرض 7) حفاظاً على W_in/W_out.
+        """
+        n = len(self.layers)
+        if n < 3:
+            return None
+        candidates = []
+        for i in range(1, n - 1):
+            d_in = self.layers[i].d_in
+            d_out = self.layers[i].d_out
+            capacity = min(d_in, d_out) * 1_000_000 + (d_in * d_out)
+            candidates.append((capacity, i, d_in, d_out))
+        if not candidates:
+            return None
+        candidates.sort()
+        _, idx, old_in, old_out = candidates[0]
+        self.layers[idx].expand_out(delta)
+        self.layers[idx + 1].expand_in(delta)
+        self.layer_dims[idx][1] += delta
+        self.layer_dims[idx + 1][0] += delta
+        return {
+            "layer_idx": idx,
+            "old": (old_in, old_out),
+            "new_out": self.layers[idx].d_out,
+            "next_new_in": self.layers[idx + 1].d_in,
+            "delta": delta,
+        }
 
 
 class CausalSelfAttention(nn.Module):
@@ -441,6 +546,22 @@ class HybridExperimentModelTorch:
         d["compiled"] = self._compiled
         d["tokenizer"] = "StrongTokenizer"
         return d
+
+    def expand_narrowest(self, delta: int = 1) -> Optional[dict]:
+        """
+        توسيع ذاتي: إذا توقف الـloss يُستدعى هذا لتوسيع الأضيق
+        في سلسلة السور (عمود + صف). يعيد بناء الـoptimizer لأن
+        شكل بعض المعاملات تغيّر.
+        """
+        core = getattr(self.model, "_orig_mod", self.model)
+        info = core.chain.expand_narrowest(delta=delta)
+        if info is None:
+            return None
+        # إعادة إنشاء الـoptimizer بعد تغيّر أشكال الأوزان
+        self.opt = torch.optim.AdamW(
+            self.model.parameters(), lr=self.lr, weight_decay=0.01, betas=(0.9, 0.95)
+        )
+        return info
 
     def save(self, path: str) -> None:
         core = getattr(self.model, "_orig_mod", self.model)
