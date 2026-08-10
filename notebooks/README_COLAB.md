@@ -55,3 +55,20 @@ exec(compile(efficient_nn_training_source("colab_local"), "t.py", "exec"))
 ```
 
 لا يوجد تحكم بمتصفح Colab من الخارج (سياسة المشروع + شروط Google).
+
+## SurahChain Pre-training (دفتر مخصص)
+
+الملف: `notebooks/SurahChain_Pretrain_Colab.ipynb`
+
+1. ارفع الدفتر إلى Colab أو افتحه من GitHub
+2. Runtime → GPU
+3. ضع `GITHUB_TOKEN` في خلية الإعدادات
+4. نفّذ الخلايا بالترتيب (تدريب ثم رفع تلقائي)
+
+بديل سكربت واحد بعد clone:
+
+```bash
+export GITHUB_TOKEN=ghp_xxx
+export SCN_N=30000 SCN_EPOCHS=10 SCN_D_MODEL=128 SCN_BATCH=32
+python experiments/surah_chain_network/colab_run_pretrain.py
+```
