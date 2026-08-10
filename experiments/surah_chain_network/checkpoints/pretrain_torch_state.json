@@ -1,0 +1,41 @@
+{
+  "data_source": "Jr23xd23/ArabicText-Large (pretrain)",
+  "n_sentences": 2000,
+  "epochs": 5,
+  "best_loss": 4.05441662979126,
+  "history": [
+    {
+      "epoch": 1,
+      "loss": 5.573145008087158,
+      "lr": 0.0009732898252027547
+    },
+    {
+      "epoch": 2,
+      "loss": 4.357165090560913,
+      "lr": 0.0007760874009065041
+    },
+    {
+      "epoch": 3,
+      "loss": 4.206379081726074,
+      "lr": 0.00047309616904452555
+    },
+    {
+      "epoch": 4,
+      "loss": 4.113290184020996,
+      "lr": 0.00020608909437749097
+    },
+    {
+      "epoch": 5,
+      "loss": 4.05441662979126,
+      "lr": 0.00010000175459519774
+    }
+  ],
+  "seconds": 5805.8,
+  "d_model": 128,
+  "device": "cpu",
+  "backend": "pytorch",
+  "real_batch": true,
+  "n_expands": 0,
+  "expand_log": [],
+  "no_ckg": true
+}
