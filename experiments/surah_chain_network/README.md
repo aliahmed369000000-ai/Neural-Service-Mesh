@@ -183,3 +183,21 @@ SCN_N=10000 SCN_EPOCHS=20 SCN_D_MODEL=256 SCN_BATCH=32 \
 - Checkpoints: `checkpoints/best_pretrain_torch.pt` / `latest_pretrain_torch.pt`
 - يدعم التوسيع الذاتي (Highway + LayerScale + expand_narrowest) عند توقف الـloss
 - متغيرات: `SCN_N`, `SCN_EPOCHS`, `SCN_EXPAND_PATIENCE`, `SCN_MAX_EXPANDS`, `SCN_HF_DATASET`
+
+### استكمال التدريب (Resume) — مهم لـ Termux
+
+```bash
+# توسيع البيانات إلى 30000 (يكمل على الكاش إن وُجد جزئياً)
+SCN_N=30000 python experiments/surah_chain_network/prepare_pretrain_data.py
+
+# استكمال تلقائي من latest_pretrain_torch.pt (+10 عصور إضافية)
+SCN_N=30000 SCN_EPOCHS=10 SCN_D_MODEL=128 SCN_BATCH=16 \
+  python experiments/surah_chain_network/train_pretrain_torch.py
+
+# بدء من الصفر
+SCN_FRESH=1 SCN_N=30000 SCN_EPOCHS=5 ...
+```
+
+- `SCN_EPOCHS` عند الاستكمال = **حقب إضافية** (ليس الإجمالي)
+- يُحفظ `latest` كل عصر + حالة الـoptimizer داخل الـcheckpoint
+- checkpoints القديمة بدون meta تُستكمل عبر `pretrain_torch_state.json`

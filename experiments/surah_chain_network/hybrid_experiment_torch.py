@@ -563,26 +563,34 @@ class HybridExperimentModelTorch:
         )
         return info
 
-    def save(self, path: str) -> None:
+    def save(self, path: str, train_meta: Optional[dict] = None) -> None:
+        """حفظ النموذج + الـoptimizer + بيانات الاستكمال (resume)."""
         core = getattr(self.model, "_orig_mod", self.model)
-        torch.save(
-            {
-                "model": core.state_dict(),
-                "vocab_size": self.vocab_size,
-                "d_model": core.d_model,
-                "n_heads": core.n_heads,
-                "n_pre": core.n_pre,
-                "n_post": core.n_post,
-                "tokenizer": {
-                    "word_to_id": self.tokenizer.word_to_id,
-                    "merges": self.tokenizer.merges,
-                    "vocab_size": self.tokenizer.vocab_size,
-                },
+        payload = {
+            "model": core.state_dict(),
+            "optimizer": self.opt.state_dict(),
+            "vocab_size": self.vocab_size,
+            "d_model": core.d_model,
+            "n_heads": core.n_heads,
+            "n_pre": core.n_pre,
+            "n_post": core.n_post,
+            "max_seq": getattr(core, "max_seq", DEFAULT_MAX_CTX),
+            "lr": self.lr,
+            "tokenizer": {
+                "word_to_id": self.tokenizer.word_to_id,
+                "merges": self.tokenizer.merges,
+                "vocab_size": self.tokenizer.vocab_size,
             },
-            path,
-        )
+        }
+        if train_meta:
+            payload["train_meta"] = train_meta
+        torch.save(payload, path)
 
-    def load(self, path: str) -> None:
+    def load(self, path: str, load_optimizer: bool = True) -> dict:
+        """
+        تحميل checkpoint. يعيد train_meta إن وُجدت.
+        إن اختلفت أبعاد النموذج في الـcheckpoint عن الحالي، يُعاد بناء النموذج.
+        """
         ckpt = torch.load(path, map_location=self.device, weights_only=False)
         self.vocab_size = int(ckpt.get("vocab_size", self.vocab_size))
         tok = ckpt.get("tokenizer")
@@ -591,9 +599,54 @@ class HybridExperimentModelTorch:
             self.tokenizer.id_to_word = {int(v): str(k) for k, v in self.tokenizer.word_to_id.items()}
             self.tokenizer.merges = [tuple(x) for x in tok.get("merges", [])]
             self.tokenizer.vocab_size = int(tok.get("vocab_size", self.vocab_size))
+
+        want_d = int(ckpt.get("d_model", self.model.d_model if hasattr(self.model, "d_model") else DEFAULT_D_MODEL))
+        want_h = int(ckpt.get("n_heads", DEFAULT_N_HEADS))
+        want_pre = int(ckpt.get("n_pre", DEFAULT_N_PRE))
+        want_post = int(ckpt.get("n_post", DEFAULT_N_POST))
+        want_max = int(ckpt.get("max_seq", DEFAULT_MAX_CTX))
         core = getattr(self.model, "_orig_mod", self.model)
-        core.load_state_dict(ckpt["model"])
+        need_rebuild = (
+            getattr(core, "d_model", None) != want_d
+            or getattr(core, "n_heads", None) != want_h
+            or getattr(core, "n_pre", None) != want_pre
+            or getattr(core, "n_post", None) != want_post
+            or core.tok_emb.num_embeddings < self.vocab_size
+        )
+        if need_rebuild:
+            self.model = SurahChainLM(
+                vocab_size=max(self.vocab_size, int(ckpt.get("vocab_size", 8192))),
+                d_model=want_d,
+                n_heads=want_h,
+                n_pre=want_pre,
+                n_post=want_post,
+                max_seq=want_max,
+            ).to(self.device)
+            self._compiled = False
+            self.opt = torch.optim.AdamW(
+                self.model.parameters(), lr=self.lr, weight_decay=0.01, betas=(0.9, 0.95)
+            )
+            core = self.model
+
+        # تحميل الأوزان (قد تفشل جزئياً إن توسّعت السلسلة — نحاول strict=False)
+        try:
+            core.load_state_dict(ckpt["model"], strict=True)
+        except RuntimeError:
+            missing, unexpected = core.load_state_dict(ckpt["model"], strict=False)
+            print(f"تحذير: تحميل جزئي (missing={len(missing)}, unexpected={len(unexpected)})")
         core.to(self.device)
+
+        if load_optimizer and "optimizer" in ckpt:
+            try:
+                self.opt.load_state_dict(ckpt["optimizer"])
+            except Exception as e:
+                print(f"تحذير: تعذّر تحميل حالة الـoptimizer ({e}) — يُتابع بأوزان فقط")
+                self.opt = torch.optim.AdamW(
+                    self.model.parameters(), lr=self.lr, weight_decay=0.01, betas=(0.9, 0.95)
+                )
+        if "lr" in ckpt:
+            self.set_lr(float(ckpt["lr"]))
+        return ckpt.get("train_meta") or {}
 
 
 HybridExperimentModel = HybridExperimentModelTorch

@@ -114,18 +114,38 @@ def load_and_prepare(max_n: int = N) -> list[str]:
 
 def main():
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    if CACHE_FILE.exists() and os.environ.get("SCN_FORCE_REBUILD", "0") != "1":
+    force = os.environ.get("SCN_FORCE_REBUILD", "0") == "1"
+    if CACHE_FILE.exists() and not force:
         with open(CACHE_FILE, "rb") as f:
             cached = pickle.load(f)
-        if isinstance(cached, list) and len(cached) >= min(N, 100):
-            print(f"كاش موجود مسبقاً: {CACHE_FILE} ({len(cached)} مقطع)")
+        if isinstance(cached, list) and len(cached) >= N:
+            print(f"كاش موجود مسبقاً: {CACHE_FILE} ({len(cached)} مقطع) — كافٍ لـ SCN_N={N}")
             print("لحذف الكاش وإعادة البناء: SCN_FORCE_REBUILD=1")
+            print("لتوسيع الكاش لعدد أكبر: SCN_N=30000 python .../prepare_pretrain_data.py")
             return
+        if isinstance(cached, list) and len(cached) > 0:
+            print(f"كاش جزئي ({len(cached)} < {N}) — سيتم التوسيع حتى {N} مقطع")
 
     sentences = load_and_prepare(N)
     if not sentences:
         print("لم يُستخرج أي نص — تحقق من اسم المجموعة أو الاتصال.")
         sys.exit(1)
+
+    # دمج مع كاش قديم إن وُجد (عند التوسيع)
+    if CACHE_FILE.exists() and not force:
+        try:
+            with open(CACHE_FILE, "rb") as f:
+                old = pickle.load(f)
+            if isinstance(old, list):
+                seen = set(sentences)
+                for s in old:
+                    if isinstance(s, str) and s not in seen:
+                        sentences.append(s)
+                        seen.add(s)
+                random.Random(SEED).shuffle(sentences)
+                sentences = sentences[:N]
+        except Exception:
+            pass
 
     with open(CACHE_FILE, "wb") as f:
         pickle.dump(sentences, f, protocol=pickle.HIGHEST_PROTOCOL)
