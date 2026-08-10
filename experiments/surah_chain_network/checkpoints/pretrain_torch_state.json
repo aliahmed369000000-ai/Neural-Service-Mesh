@@ -1,8 +1,9 @@
 {
   "data_source": "Jr23xd23/ArabicText-Large (pretrain)",
-  "n_sentences": 2000,
-  "epochs": 5,
-  "best_loss": 4.05441662979126,
+  "n_sentences": 30000,
+  "epochs_completed": 15,
+  "epochs_this_run": 10,
+  "best_loss": 3.0793788882969286,
   "history": [
     {
       "epoch": 1,
@@ -28,14 +29,67 @@
       "epoch": 5,
       "loss": 4.05441662979126,
       "lr": 0.00010000175459519774
+    },
+    {
+      "epoch": 6,
+      "loss": 3.7806420979469317,
+      "lr": 0.001
+    },
+    {
+      "epoch": 7,
+      "loss": 3.563627891194846,
+      "lr": 0.000972918925550038
+    },
+    {
+      "epoch": 8,
+      "loss": 3.4305977600215596,
+      "lr": 0.000894827618219729
+    },
+    {
+      "epoch": 9,
+      "loss": 3.3335542099308104,
+      "lr": 0.0007751450110184817
+    },
+    {
+      "epoch": 10,
+      "loss": 3.259081712663809,
+      "lr": 0.0006283065927019294
+    },
+    {
+      "epoch": 11,
+      "loss": 3.2009667069164673,
+      "lr": 0.00047202324362329994
+    },
+    {
+      "epoch": 12,
+      "loss": 3.1553119911567995,
+      "lr": 0.0003251450421780594
+    },
+    {
+      "epoch": 13,
+      "loss": 3.1199808415573544,
+      "lr": 0.0002053876671518915
+    },
+    {
+      "epoch": 14,
+      "loss": 3.0952849873601753,
+      "lr": 0.00012719562540357087
+    },
+    {
+      "epoch": 15,
+      "loss": 3.0793788882969286,
+      "lr": 0.00010000003115957768
     }
   ],
-  "seconds": 5805.8,
+  "seconds_this_run": 1241.6,
+  "total_seconds": 7047.4,
   "d_model": 128,
-  "device": "cpu",
+  "device": "cuda",
   "backend": "pytorch",
   "real_batch": true,
   "n_expands": 0,
   "expand_log": [],
-  "no_ckg": true
+  "no_ckg": true,
+  "resumed_from": "/content/Neural-Service-Mesh/experiments/surah_chain_network/checkpoints/latest_pretrain_torch.pt",
+  "global_step": 9380
 }
