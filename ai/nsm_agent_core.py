@@ -74,7 +74,28 @@ _IGNORED_DIRS = {
 # 1) هيكل المشروع الديناميكي
 # ══════════════════════════════════════════════════════════════════
 
+# 🆕 تحسين أداء: _get_project_tree() كانت تُشغَّل بالكامل (rglob + stat على
+# كل ملف — قياس فعلي: ~50ms لكل استدعاء على 749 ملفاً حالياً، وتكبر مع
+# نمو المشروع) في *كل* رسالة محادثة عبر _build_system_prompt()، حتى لو
+# كانت الرسالة سؤالاً بسيطاً لا يلمس أي ملف (action="answer"). هذه ذاكرة
+# تخزين مؤقت قصيرة العمر (TTL) تُلغى تلقائياً فور أي كتابة فعلية على القرص
+# (create_file/edit_file ناجحين — انظر _invalidate_tree_cache) حتى تبقى
+# الشجرة المعروضة للـLLM محدَّثة دائماً بلا مسح متكرر لا داعي له.
+_TREE_CACHE_TTL_SECONDS = 30.0
+_tree_cache: Dict[str, Any] = {"text": None, "ts": 0.0}
+
+
+def _invalidate_tree_cache() -> None:
+    """تُستدعى فور أي create_file/edit_file ناجح كي لا تُعرَض شجرة قديمة."""
+    _tree_cache["text"] = None
+    _tree_cache["ts"] = 0.0
+
+
 def _get_project_tree() -> str:
+    now = time.time()
+    if _tree_cache["text"] is not None and (now - _tree_cache["ts"]) < _TREE_CACHE_TTL_SECONDS:
+        return _tree_cache["text"]
+
     lines: List[str] = []
     try:
         for p in sorted(ROOT.rglob("*")):
@@ -86,7 +107,11 @@ def _get_project_tree() -> str:
                 lines.append(f"  {rel}  ({size:,} bytes)")
     except Exception:
         pass
-    return "\n".join(lines[:80])
+
+    text = "\n".join(lines[:80])
+    _tree_cache["text"] = text
+    _tree_cache["ts"] = now
+    return text
 
 
 def _read_file_safe(path: str, max_chars: int = _MAX_FILE_CHARS) -> Tuple[str, bool]:
@@ -460,6 +485,7 @@ def _run_step(step: Dict[str, Any]) -> str:
             f = ROOT / path
             f.parent.mkdir(parents=True, exist_ok=True)
             f.write_text(content, encoding="utf-8")
+            _invalidate_tree_cache()
             lines = content.count("\n") + 1
             return f"✅ أُنشئ `{path}` ({lines} سطر)"
         except Exception as e:
@@ -482,6 +508,7 @@ def _run_step(step: Dict[str, Any]) -> str:
                             f"💡 استخدم read_file أولاً لرؤية المحتوى الحالي")
             new_text = text.replace(old, new, 1)
             f.write_text(new_text, encoding="utf-8")
+            _invalidate_tree_cache()
             return f"✅ عُدِّل `{path}`"
         except Exception as e:
             return f"❌ خطأ في التعديل: {e}"
@@ -713,6 +740,7 @@ def _rollback_to_checkpoint(target: str = "") -> str:
                 return (f"❌ التراجع نُفِّذ لكن HEAD الفعلي ({new_head[:10]}) لا "
                         f"يطابق المطلوب ({commit_hash[:10]}) — تحقّق يدوياً.")
 
+        _invalidate_tree_cache()
         return (f"⏪ تم التراجع فعلياً إلى {source_note} "
                 f"(commit `{new_head[:10]}`). ملاحظة: هذا يعيد كتابة ملفات "
                 f"المشروع محلياً — إن كنت تريد رفع هذا التراجع لـ GitHub "
