@@ -91,6 +91,11 @@ artifacts/hierarchical_moe/hierarchical_moe.pt -filter -diff -merge
 artifacts/hierarchical_moe/moe_learnable_projector.pt -filter -diff -merge
 artifacts/hierarchical_moe/moe_projector.npy -filter -diff -merge
 
+# ── استثناء من LFS: مصفوفة الأوزان الابتدائية لـ NeuralWeightLayer ──────
+# (784×784 — نفس مصدر _NEURAL_CORE_WEIGHTS في ai/neural_core.py، ضرورية
+# لتشغيل RoutingEngine/get_default_layer بدون سحب LFS)
+ai/models/initial_weights.npy -filter -diff -merge
+
 # ── استثناء من LFS: جمل CKG (pkl) قابلة للسحب بدون LFS ───────────────────
 ckg_sentences.pkl -filter -diff -merge
 ckg_sentences_v2.pkl -filter -diff -merge
