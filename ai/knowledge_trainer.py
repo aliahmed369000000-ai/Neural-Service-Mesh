@@ -550,6 +550,47 @@ class KnowledgeTrainer:
             "db_stats":  self.db.stats(),
         }
 
+    def train_from_web(
+        self,
+        wiki_max: int = 40,
+        github_max: int = 50,
+    ) -> Dict[str, Any]:
+        """
+        يجلب معرفة حيّة من الإنترنت (ويكيبيديا العربية + GitHub) عبر
+        knowledge_sources/web_fetcher.py ويدرّب عليها مباشرة.
+
+        استدعاء صريح عند الطلب فقط (لا يُستدعى تلقائياً من مسار الدردشة
+        الحي ولا من أي خيط خلفي) — نفس مبدأ الفصل الموثَّق في
+        ai/learning_orchestrator.py: الوصل الحقيقي لمصادر كهذه قرار
+        تشغيلي (توقيت/تكرار/تكلفة شبكة) يستحق تفعيلاً واعياً من المستخدم،
+        لا تشغيلاً صامتاً.
+
+        ملاحظة شبكة: يتطلب وصولاً فعلياً لـ wikipedia.org و
+        api.github.com؛ في بيئات مقيّدة الشبكة يُرجع web_fetcher قوائم
+        فارغة بهدوء (بدون استثناء) بدل بيانات ملفّقة.
+
+        يُرجع نتيجة train_all() لكلا المصدرين، أو {"error": ...} إن لم
+        تتوفر وحدة web_fetcher أو مكتبة requests.
+        """
+        try:
+            from knowledge_sources.web_fetcher import fetch_all_web
+        except ImportError as e:
+            logger.warning(f"train_from_web: web_fetcher غير متاح — {e}")
+            return {"error": f"web_fetcher غير متاح: {e}"}
+
+        fetched = fetch_all_web(wiki_max=wiki_max, github_max=github_max)
+        domain_items = {
+            f"web:{source}": items for source, items in fetched.items() if items
+        }
+        if not domain_items:
+            logger.info("train_from_web: لا عناصر مجلوبة (شبكة غير متاحة أو لا نتائج)")
+            return {
+                "total_domains": 0, "total_items": 0, "total_steps": 0,
+                "overall_avg_loss": 0.0, "by_domain": {}, "db_stats": self.db.stats(),
+                "note": "لا عناصر مجلوبة — تحقق من الوصول للشبكة",
+            }
+        return self.train_all(domain_items)
+
     def stats(self) -> Dict[str, Any]:
         layer_info = {}
         if self._layer is not None:
