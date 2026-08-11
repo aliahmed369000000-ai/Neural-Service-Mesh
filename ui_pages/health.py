@@ -130,9 +130,15 @@ def render_health():
 
     st.markdown("")
     for icon, name, detail, ok in checks:
+        # 🩹 إصلاح تباين: كانت الخلفية/الحد بلون فاتح ثابت (#f0fdf4/#fef2f2)
+        # بينما النص أبيض تقريباً في الوضع الداكن (--text) → نص شبه غير
+        # مقروء فوق خلفية فاتحة. الآن نستخدم متغيرات السمة emerald/rose
+        # الموجودة أصلاً، فتتكيّف الخلفية والنص معاً مع الوضع الداكن/الفاتح.
+        _status_color = "var(--emerald)" if ok else "var(--rose)"
+        _status_bg = "var(--emerald-soft)" if ok else "var(--rose-soft)"
         st.markdown(f"""
-        <div style="padding: 0.6rem 1rem; margin: 0.3rem 0; background: {'#f0fdf4' if ok else '#fef2f2'};
-                    border-radius: 8px; border: 1px solid {'#bbf7d0' if ok else '#fecaca'};">
+        <div style="padding: 0.6rem 1rem; margin: 0.3rem 0; background: {_status_bg};
+                    border-radius: 8px; border: 1px solid {_status_color}; color: var(--text);">
             <span style="font-size:1.2rem">{icon}</span>
             &nbsp;<strong>{name}</strong>
             &nbsp;&nbsp;<small style="color:var(--text-muted)">{detail}</small>

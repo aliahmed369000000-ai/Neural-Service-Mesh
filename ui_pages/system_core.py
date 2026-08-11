@@ -497,7 +497,7 @@ def render_system_core():
                 st.markdown(f"""
                 <div style="background:var(--surface2);color:var(--text);border-radius:10px;
                             padding:1.2rem 1.5rem;direction:rtl;line-height:2.0;
-                            white-space:pre-wrap;font-size:0.95rem;border:1px solid #1e3a5f">
+                            white-space:pre-wrap;font-size:0.95rem;border:1px solid var(--border)">
                 {_ws_out}
                 </div>
                 """, unsafe_allow_html=True)

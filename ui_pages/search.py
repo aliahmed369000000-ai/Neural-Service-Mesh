@@ -232,7 +232,7 @@ def render_search():
             st.markdown(f"""
             <div style="background:var(--surface2);color:var(--text);border-radius:10px;
                         padding:1rem 1.4rem;direction:rtl;line-height:1.9;
-                        white-space:pre-wrap;font-size:0.93rem;border:1px solid #1e3a5f">
+                        white-space:pre-wrap;font-size:0.93rem;border:1px solid var(--border)">
             {_ws_result}
             </div>
             """, unsafe_allow_html=True)
