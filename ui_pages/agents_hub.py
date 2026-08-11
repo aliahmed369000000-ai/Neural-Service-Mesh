@@ -15,7 +15,7 @@ def render_agents_hub():
         st.error("⚠️ تعذّر تحميل وكلاء AI. تأكد من وجود ai/agent_categories.py.")
         return
 
-    st.markdown('<div class="nsm-section-title">🤖 وكلاء AI المتخصصون</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">🤖 وكلاء AI المتخصصون</div>', unsafe_allow_html=True)
     st.caption("كل فئة لها وكيل مستقل وذاكرة خاصة — للأوامر التنفيذية استخدم الوكيل الموحّد أو فئة تدريب النماذج.")
 
     # CSS مشترك لكل فقاعات المحادثة داخل هذا التبويب (نفس أسلوب تبويب المحادثة)

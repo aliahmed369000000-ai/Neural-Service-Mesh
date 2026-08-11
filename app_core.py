@@ -2112,18 +2112,13 @@ header[data-testid="stHeader"] {
     background: var(--gold);
 }
 
-/* عناوين أقسام موحّدة */
-.nsm-section-title {
-    font-family: 'IBM Plex Sans Arabic', Tajawal, sans-serif;
-    font-weight: 800;
-    font-size: 1.15rem;
-    color: var(--text);
-    margin: 0.4rem 0 0.75rem;
-    padding-bottom: 0.45rem;
-    border-bottom: 2px solid transparent;
-    border-image: linear-gradient(90deg, var(--gold), var(--emerald), transparent) 1;
-    direction: rtl;
-}
+/* 🆕 حُذفت .nsm-section-title من هنا: كانت نسخة ثانية من "عنوان قسم" بحجم
+   خط (1.15rem) وأسلوب حدّ سفلي (تدرّج شفاف) مختلفَين عن .section-header
+   المُعرَّف أعلى بهذا الملف (1.3rem، حدّ سفلي صلب + خط ذهبي 64px) رغم أنها
+   تُستخدم لنفس الغرض بالضبط (عنوان مجموعة/قسم). كل استخداماتها الأربعة
+   (عناوين المجموعات بـstreamlit_app.py وagents_hub.py) حُوّلت الآن إلى
+   .section-header — نفس الكلاس المستخدم فعلياً في 94+ مكاناً آخر بالتطبيق
+   — بدل الإبقاء على نمطين متنافسين لنفس الوظيفة. */
 .nsm-hero-panel {
     position: relative;
     overflow: hidden;

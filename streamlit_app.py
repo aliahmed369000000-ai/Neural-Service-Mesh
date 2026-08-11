@@ -62,7 +62,7 @@ def render_knowledge_hub():
 def render_agents_group():
     """🤖 الوكلاء: يجمع الوكيل الموحّد + وكلاء AI + منسّق الوكلاء + السرب الذكي."""
     st.markdown(
-        '<div class="nsm-section-title">🤖 مركز الوكلاء</div>',
+        '<div class="section-header">🤖 مركز الوكلاء</div>',
         unsafe_allow_html=True,
     )
     st.caption("الوكيل الموحّد للمحادثة اليومية · وكلاء متخصصون · منسّق · سرب")
@@ -104,7 +104,7 @@ def render_agents_group():
 def render_creative_hub():
     """🎨 المحتوى الإبداعي: يجمع إبداع (Fable) + Higgsfield + الوكيل الاجتماعي + الترجمة."""
     st.markdown(
-        '<div class="nsm-section-title">🎨 المحتوى الإبداعي</div>',
+        '<div class="section-header">🎨 المحتوى الإبداعي</div>',
         unsafe_allow_html=True,
     )
     st.caption("قصص وسيناريوهات · فيديو Higgsfield · نشر اجتماعي · ترجمة")
@@ -118,7 +118,7 @@ def render_creative_hub():
 def render_training_ops_hub():
     """🎓 التدريب والعمليات: يجمع التدريب + MoE والوكيل + AIaaS والاقتصاد + عمليات التدريب."""
     st.markdown(
-        '<div class="nsm-section-title">🎓 التدريب والعمليات</div>',
+        '<div class="section-header">🎓 التدريب والعمليات</div>',
         unsafe_allow_html=True,
     )
     st.caption("تدريب النماذج · خليط الخبراء ونمو الوكيل · AIaaS والاقتصاد · لوحة عمليات التدريب")
