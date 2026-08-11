@@ -10,14 +10,17 @@
     python experiments/surah_chain_network/train_pretrain_torch.py
 
   # أو يدوياً
-  SCN_N=60000 SCN_D_MODEL=256 SCN_CHAIN_SCALE=2 SCN_N_PRE=4 SCN_N_POST=4 \\
+  SCN_N=60000 SCN_D_MODEL=256 SCN_N_PRE=4 SCN_N_POST=4 \\
   SCN_FRESH=1 SCN_BATCH=16 \\
     python experiments/surah_chain_network/train_pretrain_torch.py
 
+قاعدة: شبكة الـ114 لا تُدمج ولا تُغيَّر أبعادها افتراضياً (من surah_layer_dims.json).
+التقوية عبر d_model + الانتباه قبل/بعد السلسلة فقط.
+
 presets:
-  small   → d=128, scale=1, pre/post=2   (التجربة السابقة)
-  medium  → d=256, scale=2, pre/post=4   (تقوية SurahChain)
-  large   → d=512, scale=2, pre/post=6   (يحتاج GPU ذاكرة أعلى)
+  small   → d=128, سلسلة 114 كما هي, pre/post=2
+  medium  → d=256, سلسلة 114 كما هي, pre/post=4
+  large   → d=512, سلسلة 114 كما هي, pre/post=6
 """
 from __future__ import annotations
 
@@ -66,13 +69,14 @@ if PRESET == "small":
     N = max(N, 30000)
 elif PRESET == "medium":
     D_MODEL, N_HEADS, N_PRE, N_POST = 256, 8, 4, 4
-    CHAIN_SCALE = float(os.environ.get("SCN_CHAIN_SCALE", "2"))
+    # سلسلة 114 كما في surah_layer_dims.json — لا دمج ولا تغيير أبعاد
+    CHAIN_SCALE = float(os.environ.get("SCN_CHAIN_SCALE", "1"))
     N = max(N, 60000)
     BATCH = int(os.environ.get("SCN_BATCH", "16"))
     BASE_LR = float(os.environ.get("SCN_LR", "5e-4"))
 elif PRESET == "large":
     D_MODEL, N_HEADS, N_PRE, N_POST = 512, 8, 6, 6
-    CHAIN_SCALE = float(os.environ.get("SCN_CHAIN_SCALE", "2"))
+    CHAIN_SCALE = float(os.environ.get("SCN_CHAIN_SCALE", "1"))
     N = max(N, 100000)
     BATCH = int(os.environ.get("SCN_BATCH", "8"))
     BASE_LR = float(os.environ.get("SCN_LR", "3e-4"))
