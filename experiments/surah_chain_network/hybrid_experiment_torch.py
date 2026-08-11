@@ -273,6 +273,55 @@ class CausalSelfAttention(nn.Module):
         y = y.transpose(1, 2).contiguous().reshape(B, S, D)
         return self.resid_drop(self.proj(y))
 
+    def forward_incremental(
+        self,
+        x: torch.Tensor,
+        past_kv: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+    ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        """
+        مسار توليد تدريجي (KV-cache) — يُستخدم فقط أثناء الاستدلال (eval،
+        بلا dropout). x يحمل فقط الرمز/الرموز الجديدة (S عادة 1)؛ past_kv
+        يحمل مفاتيح/قيم كل الرموز السابقة فتُلحَق بها الجديدة بدل إعادة
+        حسابها. لا تُستخدم مع padding (توليد دفعة واحدة B=1 عادة).
+        يُرجع (المخرج، (k الكاملة، v الكاملة)) ليُمرَّر past_kv للخطوة التالية.
+        """
+        B, S, D = x.shape
+        qkv = self.qkv(x).reshape(B, S, 3, self.n_heads, self.d_head)
+        qkv = qkv.permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]
+
+        if self.use_qk_norm:
+            q = self.q_norm(q)
+            k = self.k_norm(k)
+
+        if past_kv is not None:
+            past_k, past_v = past_kv
+            k_full = torch.cat([past_k, k], dim=2)
+            v_full = torch.cat([past_v, v], dim=2)
+        else:
+            k_full, v_full = k, v
+
+        T_past = k_full.shape[2] - S
+        if T_past > 0:
+            # الاستعلامات الجديدة تنتبه لكل الماضي بحرّية + سببياً فيما بينها
+            causal_new = torch.triu(torch.ones(S, S, device=x.device, dtype=torch.bool), diagonal=1)
+            allow_past = torch.zeros(S, T_past, device=x.device, dtype=torch.bool)
+            full_mask = torch.cat([allow_past, causal_new], dim=1)
+            attn_bias = torch.zeros(S, T_past + S, device=x.device, dtype=q.dtype)
+            attn_bias = attn_bias.masked_fill(full_mask, float("-inf"))
+            y = F.scaled_dot_product_attention(q, k_full, v_full, attn_mask=attn_bias, dropout_p=0.0)
+        else:
+            y = F.scaled_dot_product_attention(q, k_full, v_full, is_causal=True, dropout_p=0.0)
+
+        if self.use_gated_attn:
+            g = torch.sigmoid(self.attn_gate(x))
+            g = g.permute(0, 2, 1).unsqueeze(-1)
+            y = y * g
+
+        y = y.transpose(1, 2).contiguous().reshape(B, S, D)
+        out = self.resid_drop(self.proj(y))
+        return out, (k_full, v_full)
+
 
 class TransformerBlock(nn.Module):
     def __init__(
@@ -306,6 +355,16 @@ class TransformerBlock(nn.Module):
         x = x + self.attn(self.ln1(x), key_padding_mask=key_padding_mask)
         x = x + self.ffn(self.ln2(x))
         return x
+
+    def forward_incremental(
+        self,
+        x: torch.Tensor,
+        past_kv: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+    ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        attn_out, kv = self.attn.forward_incremental(self.ln1(x), past_kv=past_kv)
+        x = x + attn_out
+        x = x + self.ffn(self.ln2(x))
+        return x, kv
 
 
 class SurahChainLM(nn.Module):
@@ -430,6 +489,50 @@ class SurahChainLM(nn.Module):
         x = self.ln_f(x)
         return F.linear(x, self.tok_emb.weight)
 
+    def forward_step(
+        self,
+        idx_new: torch.Tensor,
+        pos_start: int,
+        cache: Optional[dict] = None,
+    ):
+        """
+        خطوة توليد تدريجية (KV-cache) — تُعالج فقط الرموز الجديدة idx_new
+        (S_new=1 عادة أثناء فك الترميز، أو طول الـprompt عند أول استدعاء)
+        بدل إعادة تشغيل التسلسل الكامل. سلسلة السور الـ114 حساب مستقل لكل
+        موضع (لا تفاعل بين المواضع)، لذا لا حاجة إطلاقاً لإعادة حسابها
+        للرموز القديمة — فقط الانتباه (pre/post_blocks) يحتاج KV-cache
+        لأنه الجزء الوحيد الذي "يرى" مواضع أخرى.
+        idx_new: (B, S_new). pos_start: الموضع المطلق للرمز الأول في idx_new.
+        cache: None عند أول استدعاء، أو dict مُرجَع من نداء سابق.
+        يُرجع (logits (B, S_new, vocab), cache جديد).
+        """
+        B, S_new = idx_new.shape
+        pos = torch.arange(pos_start, pos_start + S_new, device=idx_new.device).unsqueeze(0).expand(B, -1)
+        x = self.drop(self.tok_emb(idx_new) + self.pos_emb(pos))
+        x = self.ln_in(x)
+
+        pre_kv_in = (cache or {}).get("pre_kv") or [None] * len(self.pre_blocks)
+        new_pre_kv = []
+        for blk, past in zip(self.pre_blocks, pre_kv_in):
+            x, kv = blk.forward_incremental(x, past_kv=past)
+            new_pre_kv.append(kv)
+
+        h_c = self.W_in(x)
+        flat = h_c.reshape(B * S_new, self.chain_width)
+        flat = self.chain(flat)
+        h_chain = self.W_out(flat).reshape(B, S_new, self.d_model)
+        x = h_chain + self.W_skip(x)
+
+        post_kv_in = (cache or {}).get("post_kv") or [None] * len(self.post_blocks)
+        new_post_kv = []
+        for blk, past in zip(self.post_blocks, post_kv_in):
+            x, kv = blk.forward_incremental(x, past_kv=past)
+            new_post_kv.append(kv)
+
+        x = self.ln_f(x)
+        logits = F.linear(x, self.tok_emb.weight)
+        return logits, {"pre_kv": new_pre_kv, "post_kv": new_post_kv}
+
     def param_count(self) -> dict:
         return {
             "total": sum(p.numel() for p in self.parameters()),
@@ -498,9 +601,6 @@ class HybridExperimentModelTorch:
         n = self.tokenizer.build_from_texts(list(texts), max_vocab=max_vocab or self.vocab_size)
         self.vocab_size = max(self.vocab_size, int(n))
         need = self.vocab_size
-        emb = self.model.tok_emb if not self._compiled else self.model
-        # إن كبر القاموس أعد إنشاء النموذج
-        current_vs = self.model.vocab_size if hasattr(self.model, "vocab_size") else need
         # access underlying module if compiled
         core = getattr(self.model, "_orig_mod", self.model)
         if core.tok_emb.num_embeddings < need:
@@ -641,6 +741,80 @@ class HybridExperimentModelTorch:
             ids.append(nid)
             if nid == eos and step_i + 1 >= min_new_tokens:
                 break
+        return self.tokenizer.decode(ids, skip_special=True)
+
+    @torch.no_grad()
+    def generate_fast(
+        self,
+        prompt: str,
+        max_new_tokens: int = 48,
+        temperature: float = 0.85,
+        top_k: int = 50,
+        top_p: float = 0.92,
+        repetition_penalty: float = 1.15,
+        max_ctx: int = DEFAULT_MAX_CTX,
+        min_new_tokens: int = 1,
+    ) -> str:
+        """
+        نفس generate() منطقياً (نفس التوزيع الاحتمالي عند كل خطوة) لكن عبر
+        KV-cache تدريجي بدل إعادة تشغيل التسلسل الكامل عبر السلسلة الـ114
+        + الانتباه في كل خطوة. أسرع بشكل كبير خصوصاً مع نصوص مولَّدة طويلة
+        (زمن كل خطوة يبقى شبه ثابت بدل التزايد مع طول السياق).
+        """
+        self.model.eval()
+        core = getattr(self.model, "_orig_mod", self.model)
+        max_ctx = min(max_ctx, core.max_seq)
+        ids = list(self.tokenizer.encode(prompt, max_ctx))
+        eos, bos, pad = self.tokenizer.EOS, self.tokenizer.BOS, self.tokenizer.PAD
+        if ids and ids[-1] == eos:
+            ids = ids[:-1]
+        if not ids:
+            ids = [bos]
+        ids = ids[-max_ctx:]
+
+        # تعبئة أولى (prefill) بكامل الـprompt دفعة واحدة
+        prefill = torch.tensor([ids], dtype=torch.long, device=self.device)
+        logits, cache = core.forward_step(prefill, pos_start=0, cache=None)
+        pos = len(ids)
+        next_logits = logits[0, -1].float()
+
+        for step_i in range(max_new_tokens):
+            logits_i = next_logits.clone()
+            logits_i[pad] = -1e9
+            logits_i[bos] = -1e9
+            if step_i < min_new_tokens:
+                logits_i[eos] = -1e9
+            if repetition_penalty != 1.0:
+                for prev in set(ids):
+                    if logits_i[prev] > 0:
+                        logits_i[prev] /= repetition_penalty
+                    else:
+                        logits_i[prev] *= repetition_penalty
+            if top_k and top_k > 0:
+                v, _ = torch.topk(logits_i, min(top_k, logits_i.size(0)))
+                logits_i[logits_i < v[-1]] = -float("inf")
+            logits_i = logits_i / max(temperature, 1e-6)
+            probs = F.softmax(logits_i, dim=-1)
+            if top_p is not None and 0 < top_p < 1:
+                sorted_p, sorted_i = torch.sort(probs, descending=True)
+                cum = torch.cumsum(sorted_p, dim=0)
+                mask = cum > top_p
+                mask[0] = False
+                sorted_p = sorted_p.masked_fill(mask, 0.0)
+                sorted_p = sorted_p / sorted_p.sum()
+                choice = torch.multinomial(sorted_p, 1).item()
+                nid = int(sorted_i[choice].item())
+            else:
+                nid = int(torch.multinomial(probs, 1).item())
+            ids.append(nid)
+            if nid == eos and step_i + 1 >= min_new_tokens:
+                break
+            if pos >= max_ctx - 1:
+                break
+            step_in = torch.tensor([[nid]], dtype=torch.long, device=self.device)
+            logits, cache = core.forward_step(step_in, pos_start=pos, cache=cache)
+            pos += 1
+            next_logits = logits[0, -1].float()
         return self.tokenizer.decode(ids, skip_special=True)
 
     def param_count(self) -> dict:
