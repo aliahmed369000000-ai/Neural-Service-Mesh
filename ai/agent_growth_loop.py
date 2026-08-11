@@ -57,18 +57,59 @@ def _append_jsonl(path: Path, row: dict) -> None:
 
 
 def _read_jsonl(path: Path, limit: int = 100) -> List[dict]:
+    """🆕 أداء: كانت تقرأ الملف بالكامل من البداية (كل سطر مُسجَّل مدى حياة
+    المشروع) ثم تأخذ آخر `limit` فقط — تكلفة تكبر بلا حدود مع كل خبرة
+    جديدة تُسجَّل، رغم استخدام آخر عدد صغير محدود فقط. هذه تُستدعى عبر
+    format_experience_hints في *كل* رسالة محادثة (nsm_agent_core.py).
+
+    الآن: قراءة عكسية من نهاية الملف بمقاطع (byte chunks) تتوسع تدريجياً
+    حتى نجمع `limit` سطراً صالحاً على الأقل أو نصل بداية الملف — تكلفة
+    تقريبية O(limit) بدل O(حجم الملف الكامل)، مع نفس النتيجة تماماً (آخر
+    `limit` سطراً صالحاً بنفس الترتيب).
+    """
     if not path.is_file():
         return []
+
+    chunk_size = 8192
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        file_size = f.tell()
+        pos = file_size
+        buf = b""
+        while True:
+            read_size = min(chunk_size, pos)
+            pos -= read_size
+            f.seek(pos)
+            buf = f.read(read_size) + buf
+
+            # عدد الأسطر "المكتملة" داخل buf (نتجاهل أول سطر قد يكون مقطوعاً
+            # ما لم نكن قد وصلنا فعلياً لبداية الملف)
+            raw_lines = buf.split(b"\n")
+            complete = raw_lines if pos == 0 else raw_lines[1:]
+            valid_count = 0
+            for raw in complete:
+                s = raw.strip()
+                if not s:
+                    continue
+                try:
+                    json.loads(s)
+                    valid_count += 1
+                except Exception:
+                    pass
+
+            if valid_count >= limit or pos == 0:
+                break
+            chunk_size *= 2  # لم يكفِ المقطع — وسّع النافذة وأعد المحاولة
+
     rows: List[dict] = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rows.append(json.loads(line))
-            except Exception:
-                continue
+    for line in buf.decode("utf-8", errors="replace").split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except Exception:
+            continue
     return rows[-limit:]
 
 
