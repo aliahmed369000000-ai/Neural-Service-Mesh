@@ -57,6 +57,35 @@ def _layer_norm_fwd(x, g, b, eps=1e-6):
     v = x.var(-1, keepdims=True)
     return g * (x - m) / np.sqrt(v + eps) + b
 
+
+def checkpoint_dims_ready(weights_dir: str, vocab_size: int = VOCAB_SIZE,
+                           d_model: int = D_MODEL) -> bool:
+    """
+    فحص خفيف جداً (header الشكل فقط عبر mmap، بلا تحميل المصفوفة كاملة
+    وبلا استنشاء ArabicTransformer نفسه) للتأكد أن embedding.npy الموجود
+    في weights_dir يطابق فعلياً (vocab_size, d_model) الحاليين قبل أي
+    محاولة تحميل حقيقية.
+
+    هذا الفحص مشترك بين كل نقاط الدمج (qa_engine، reasoning_pipeline...)
+    لتفادي مشكلتين معروفتين حدثتا فعلياً بهذا المشروع:
+      1) OOM: استنشاء ArabicTransformer() يبني كل الطبقات بأوزان عشوائية
+         أولاً (~1 مليار معامل بالمعمارية الحالية) حتى لو لم يوجد
+         checkpoint متوافق إطلاقاً.
+      2) تحميل صامت لأوزان غير متوافقة الأبعاد (مثلاً من معمارية أقدم
+         بـ d_model مختلف) لأن TokenEmbedding.load() الأصلية كانت تستبدل
+         المصفوفة دون أي تحقق من الشكل.
+    """
+    try:
+        from pathlib import Path as _Path
+        emb_path = _Path(weights_dir) / "embedding.npy"
+        if not emb_path.exists():
+            return False
+        arr = np.load(str(emb_path), mmap_mode="r")
+        return tuple(arr.shape) == (vocab_size, d_model)
+    except Exception:
+        return False
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 1. Hash Tokenizer — لا يحفظ أي نص
 # ══════════════════════════════════════════════════════════════════════════════
@@ -292,7 +321,22 @@ class TokenEmbedding:
 
     def save(self, path: str): np.save(path, self.W)
     def load(self, path: str):
-        self.W = np.load(path).astype(np.float32)
+        """
+        يتحقق من تطابق الشكل (vocab_size, d_model) قبل الاستبدال — تحميل
+        checkpoint بمعمارية مختلفة (مثلاً d_model قديم) كان يستبدل self.W
+        بصمت بأبعاد خاطئة ويسبب فشلاً غامضاً لاحقاً في forward()، أو أسوأ
+        استمراراً صامتاً بترتيب غير صحيح للمفاهيم.
+        """
+        loaded = np.load(path)
+        if loaded.shape != self.W.shape:
+            raise ValueError(
+                f"[TokenEmbedding] عدم توافق الأبعاد عند التحميل من {path}: "
+                f"الملف بشكل {loaded.shape} لكن النموذج الحالي يتوقع "
+                f"{self.W.shape} — غالباً checkpoint من معمارية مختلفة "
+                f"(vocab_size/d_model). تم رفض التحميل بدلاً من استبدال "
+                f"صامت بأوزان غير متوافقة."
+            )
+        self.W = loaded.astype(np.float32)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

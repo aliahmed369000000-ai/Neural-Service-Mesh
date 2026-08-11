@@ -187,7 +187,7 @@ class ReasoningPipeline:
         autosave_every: int = 1,
         episode_store: Optional[EpisodeStore] = None,
         record_episodes: bool = True,
-        transformer_weights_path: Optional[str] = "models/transformer_ckg_v1",
+        transformer_weights_path: Optional[str] = "models/transformer_ckg_v3",
         use_deep_routing: bool = True,
         deep_routing_blend: float = 0.45,
         use_moe: bool = True,
@@ -245,12 +245,26 @@ class ReasoningPipeline:
         self.transformer = None
         if transformer_weights_path is not None:
             try:
-                from ai.arabic_transformer import ArabicTransformer
-                _t = ArabicTransformer()
-                _t.load(transformer_weights_path)
-                self.transformer = _t
-                logger.info(f"ArabicTransformer محمّل من {transformer_weights_path} "
-                            f"لتعزيز الترتيب الدلالي")
+                from ai.arabic_transformer import ArabicTransformer, checkpoint_dims_ready
+                # فحص خفيف (mmap على header الشكل فقط) قبل استنشاء
+                # ArabicTransformer، الذي يبني كل الطبقات بأوزان عشوائية
+                # أولاً (~1 مليار معامل بالمعمارية الحالية) حتى لو لم يوجد
+                # checkpoint متوافق إطلاقاً — بدون هذا الفحص كل إنشاء
+                # ReasoningPipeline() في بيئة محدودة الذاكرة (مثل Streamlit
+                # Community Cloud) يخاطر بـOOM لبناء نموذج لن يُحمَّل منه
+                # شيء أصلاً. نفس الفحص المستخدم في knowledge/qa_engine.py.
+                if checkpoint_dims_ready(transformer_weights_path):
+                    _t = ArabicTransformer()
+                    _t.load(transformer_weights_path)
+                    self.transformer = _t
+                    logger.info(f"ArabicTransformer محمّل من {transformer_weights_path} "
+                                f"لتعزيز الترتيب الدلالي")
+                else:
+                    logger.info(
+                        f"لا يوجد checkpoint متوافق لـArabicTransformer في "
+                        f"{transformer_weights_path} — تخطّي بأمان بلا استنشاء "
+                        f"نموذج بلا فائدة (النظام يعمل بدونه بشكل طبيعي)."
+                    )
             except Exception as e:
                 logger.warning(f"ArabicTransformer init failed (سيعمل النظام بدونه): {e}")
 

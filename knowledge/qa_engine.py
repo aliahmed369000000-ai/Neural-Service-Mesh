@@ -32,7 +32,7 @@ _NEURAL_BOOSTER = None       # ArabicTransformer المحمَّل، أو False �
 _NEURAL_BOOST_TRIED = False  # نحاول التحميل مرة واحدة فقط (لا نعيد المحاولة كل سؤال)
 
 
-def _neural_booster_checkpoint_ready(weights_dir: str = "models/transformer_ckg_v1") -> bool:
+def _neural_booster_checkpoint_ready(weights_dir: str = "models/transformer_ckg_v3") -> bool:
     """
     فحص خفيف جداً (لا يبني الشبكة، لا يحمّل الأوزان كاملة في الذاكرة) قبل
     استنشاء ArabicTransformer — الذي يخصّص فعلياً ~4-5GB بالمعمارية
@@ -40,13 +40,16 @@ def _neural_booster_checkpoint_ready(weights_dir: str = "models/transformer_ckg_
     checkpoint فعلي، لأن __init__ يبني كل الطبقات بأوزان عشوائية أولاً
     ثم يحاول load() لاحقاً.
 
-    اكتُشف فعلياً (تشغيل حقيقي): weights_dir الافتراضي غير موجود إطلاقاً
-    (نُقل مؤرشَفاً بمعمارية 40M قديمة مختلفة تماماً بعد تكبير النموذج
-    لمليار معامل)، وأقرب checkpoint حقيقي موجود بالمشروع
-    (models/pilot_general_ar_v1) مدرَّب بـ d_model=192 لا يطابق معمارية
-    ArabicTransformer الحالية — وLoad() الحالية لا تتحقق من توافق الأبعاد
-    إطلاقاً (بعكس الإصلاح المطبَّق على DeepRoutingNetwork)، فكانت ستحمّل
-    بصمت أوزاناً غير متوافقة أو تفشل لاحقاً بشكل غامض أثناء الاستدلال.
+    ملاحظة (تحديث): weights_dir الافتراضي كان يشير سابقاً إلى
+    models/transformer_ckg_v1 — مسار مؤرشَف من معمارية قديمة (40M) لا
+    علاقة له بمسار التدريب الفعلي الحالي. train_batch_v3.py يحفظ فعلياً
+    في models/transformer_ckg_v3 (WEIGHTS_DIR)، وهو نفس المسار الذي
+    يستثنيه .gitignore عمداً لأنه ينتج محلياً/عبر Kaggle، لذا صُحِّح
+    الافتراضي هنا ليطابق مخرجات التدريب الحقيقية بدل مسار لم يعد موجوداً.
+
+    الفحص الفعلي (توافق الأبعاد عبر mmap) منقول الآن إلى دالة مشتركة
+    ai.arabic_transformer.checkpoint_dims_ready() تُستخدم أيضاً من
+    reasoning_pipeline.py لتفادي ازدواج نفس المنطق الحرِج في مكانين.
 
     بدون هذا الفحص: أي استدعاء answer_question() في بيئة محدودة الذاكرة
     يتعرّض لخطر OOM حقيقي لبناء نموذج لن يُحمَّل منه شيء أصلاً، وحتى في
@@ -55,16 +58,8 @@ def _neural_booster_checkpoint_ready(weights_dir: str = "models/transformer_ckg_
     لا مجرد مشكلة أداء.
     """
     try:
-        import numpy as np
-        from pathlib import Path
-        from ai.arabic_transformer import VOCAB_SIZE, D_MODEL
-
-        emb_path = Path(weights_dir) / "embedding.npy"
-        if not emb_path.exists():
-            return False
-        # mmap_mode='r': يقرأ header الشكل فقط بدون تحميل المصفوفة كاملة
-        arr = np.load(str(emb_path), mmap_mode="r")
-        return tuple(arr.shape) == (VOCAB_SIZE, D_MODEL)
+        from ai.arabic_transformer import checkpoint_dims_ready
+        return checkpoint_dims_ready(weights_dir)
     except Exception:
         return False
 
@@ -79,14 +74,14 @@ def _get_neural_booster():
         _NEURAL_BOOSTER = False
         logger.info(
             "[qa_engine] لا يوجد checkpoint متوافق لـArabicTransformer "
-            "(models/transformer_ckg_v1) — تخطّي التعزيز العصبي بأمان "
+            "(models/transformer_ckg_v3) — تخطّي التعزيز العصبي بأمان "
             "(الترتيب الأساسي يبقى كما هو، بلا استنشاء نموذج بلا فائدة)."
         )
         return None
     try:
         from ai.arabic_transformer import ArabicTransformer
         t = ArabicTransformer()
-        t.load("models/transformer_ckg_v1")
+        t.load("models/transformer_ckg_v3")
         _NEURAL_BOOSTER = t
         logger.info("[qa_engine] طبقة التعزيز العصبي (ArabicTransformer) محمَّلة بنجاح")
     except Exception as e:
