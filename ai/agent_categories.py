@@ -455,13 +455,46 @@ def _format_pipeline_result(result) -> str:
     return "\n".join(l for l in lines if l is not None)
 
 
+# عبارات الاستعلام عن حالة مهمة صناعة محتوى شُغِّلت بالخلفية سابقاً.
+_CONTENT_STATUS_KEYWORDS = ("جاهز", "حالة المهمة", "حالة المقال",
+                            "انتهى المقال", "نتيجة المهمة", "نتيجة المقال")
+
+
+def _format_job_status(text: str) -> str:
+    """يبني رد حالة مهمة صناعة محتوى خلفية: قيد التشغيل / فشلت / جاهزة.
+    لو ذُكر معرّف مهمة صراحة (#3) يُستخدَم، وإلا فأحدث مهمة."""
+    from ai.content_job_manager import get_content_job_manager
+    mgr = get_content_job_manager()
+
+    id_match = re.search(r"#(\d+)", text)
+    job = mgr.get(int(id_match.group(1))) if id_match else None
+    if job is None and id_match is None:
+        jobs = mgr.list_jobs()
+        job = jobs[0] if jobs else None
+
+    if job is None:
+        return "ℹ️ لا توجد أي مهمة صناعة محتوى قيد التشغيل أو منتهية بعد. اطلب مقالاً جديداً أولاً."
+    if job.status == "running":
+        return f"⏳ المهمة #{job.job_id} لسه شغّالة بالخلفية — جرّب تسأل «جاهز؟» بعد شوي."
+    if job.status == "failed":
+        return f"❌ فشلت المهمة #{job.job_id}: {job.error}"
+    return f"✅ المهمة #{job.job_id} خلصت.\n\n" + _format_pipeline_result(job.result)
+
+
 def _handle_content_command(user_input: str) -> Optional[str]:
     """يتعرّف على أوامر صناعة المحتوى الحقيقية (اكتب/ابحث عن ترند/انشر
-    مقال) وينفّذها فعلياً عبر run_content_pipeline. يعيد None لو النص ليس
-    أمر محتوى معروفاً، فتتابع المحادثة بمسارها العادي (LLM حر)."""
+    مقال) وعلى استعلامات الحالة (جاهز؟)، وينفّذها فعلياً عبر
+    run_content_pipeline — لكن في خيط خلفية (ai/content_job_manager.py)
+    بدل تجميد واجهة Streamlit حتى انتهاء الخط (LLM + بحث ويب قد يأخذان
+    عشرات الثواني). يعيد None لو النص ليس أمر محتوى معروفاً، فتتابع
+    المحادثة بمسارها العادي (LLM حر)."""
     if not _CONTENT_OK or run_content_pipeline is None:
         return None
     text = user_input.strip()
+
+    if any(k in text for k in _CONTENT_STATUS_KEYWORDS):
+        return _format_job_status(text)
+
     if "مقال" not in text and "ترند" not in text and "رائج" not in text:
         return None
 
@@ -470,10 +503,17 @@ def _handle_content_command(user_input: str) -> Optional[str]:
     platforms = _detect_platforms(text)
 
     try:
-        result = run_content_pipeline(topic=topic or None, platforms=platforms)
+        from ai.content_job_manager import get_content_job_manager
+        job_id = get_content_job_manager().start(topic=topic or None, platforms=platforms)
     except Exception as e:
-        return f"❌ تعذّر تنفيذ خط أنابيب صناعة المحتوى: {e}"
-    return _format_pipeline_result(result)
+        return f"❌ تعذّر بدء خط أنابيب صناعة المحتوى: {e}"
+
+    plat_txt = f" ونشره/جدولته على {', '.join(platforms)}" if platforms else ""
+    return (
+        f"🚀 بدأ تنفيذ خط أنابيب صناعة المحتوى بالخلفية{plat_txt} "
+        f"(معرّف المهمة #{job_id}) — تقدر تكمّل استخدام الواجهة عادي بدون انتظار.\n"
+        f"اسأل «جاهز؟» لاحقاً لمتابعة النتيجة."
+    )
 
 
 # ══════════════════════════════════════════════════════════════════
