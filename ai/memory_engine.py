@@ -13,6 +13,7 @@ from __future__ import annotations
 import sqlite3
 import json
 import logging
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional, TYPE_CHECKING
 from datetime import datetime
@@ -145,6 +146,8 @@ class MemoryEngine:
         self._routes: Dict[str, RouteMemory] = {}
         self._nodes: Dict[str, NodeMemory] = {}
         self._knowledge = None   # KnowledgeStore — injected via set_knowledge_store()
+        self._conn_lock = threading.Lock()
+        self._shared_conn: Optional[sqlite3.Connection] = None
         self._init_schema()
         self._load()
         logger.info("MemoryEngine initialised (Phase 3)")
@@ -157,14 +160,28 @@ class MemoryEngine:
     # ── Schema ─────────────────────────────────────────────────────────────
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        return conn
+        """يعيد استخدام اتصال SQLite واحد بدل فتح اتصال جديد في كل استدعاء
+        (تحسين أداء: connection pooling بسيط + آمن للخيوط عبر قفل)."""
+        if self._shared_conn is None:
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(self._db_path, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            self._shared_conn = conn
+        return self._shared_conn
+
+    def close(self) -> None:
+        """يغلق الاتصال المشترك صراحة (اختياري عند إيقاف التشغيل)."""
+        with self._conn_lock:
+            if self._shared_conn is not None:
+                try:
+                    self._shared_conn.close()
+                finally:
+                    self._shared_conn = None
 
     def _init_schema(self):
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._conn() as conn:
+        with self._conn_lock, self._conn() as conn:
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS route_memory (
                     path_key        TEXT PRIMARY KEY,
@@ -194,7 +211,7 @@ class MemoryEngine:
 
     def _load(self):
         try:
-            with self._conn() as conn:
+            with self._conn_lock, self._conn() as conn:
                 for row in conn.execute("SELECT * FROM route_memory").fetchall():
                     rm = RouteMemory(row["path_key"], json.loads(row["path_json"]))
                     rm.runs = row["runs"]
@@ -277,7 +294,7 @@ class MemoryEngine:
 
     def _persist_route(self, rm: RouteMemory):
         try:
-            with self._conn() as conn:
+            with self._conn_lock, self._conn() as conn:
                 conn.execute("""
                     INSERT INTO route_memory
                         (path_key, path_json, runs, successes, failures,
@@ -300,7 +317,7 @@ class MemoryEngine:
 
     def _persist_node(self, nm: NodeMemory):
         try:
-            with self._conn() as conn:
+            with self._conn_lock, self._conn() as conn:
                 conn.execute("""
                     INSERT INTO node_memory
                         (node_id, name, executions, successes, failures,

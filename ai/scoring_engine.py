@@ -8,6 +8,7 @@ import sqlite3
 import json
 import logging
 import math
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
@@ -110,6 +111,8 @@ class ScoringEngine:
     def __init__(self, db_path: str = "./data/mesh.db"):
         self._db_path = Path(db_path)
         self._scores: Dict[Tuple[str, str], ConnectionScore] = {}
+        self._conn_lock = threading.Lock()
+        self._shared_conn: Optional[sqlite3.Connection] = None
         self._init_schema()
         self._load_from_db()
         logger.info("ScoringEngine initialised (Phase 3)")
@@ -117,14 +120,28 @@ class ScoringEngine:
     # ── Schema / persistence ───────────────────────────────────────────────
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        return conn
+        """يعيد استخدام اتصال SQLite واحد بدل فتح اتصال جديد في كل استدعاء
+        (تحسين أداء: connection pooling بسيط + آمن للخيوط عبر قفل)."""
+        if self._shared_conn is None:
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(self._db_path, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            self._shared_conn = conn
+        return self._shared_conn
+
+    def close(self) -> None:
+        """يغلق الاتصال المشترك صراحة (اختياري عند إيقاف التشغيل)."""
+        with self._conn_lock:
+            if self._shared_conn is not None:
+                try:
+                    self._shared_conn.close()
+                finally:
+                    self._shared_conn = None
 
     def _init_schema(self):
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._conn() as conn:
+        with self._conn_lock, self._conn() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS connection_scores (
                     source_id       TEXT NOT NULL,
@@ -141,7 +158,7 @@ class ScoringEngine:
 
     def _load_from_db(self):
         try:
-            with self._conn() as conn:
+            with self._conn_lock, self._conn() as conn:
                 rows = conn.execute("SELECT * FROM connection_scores").fetchall()
             for row in rows:
                 key = (row["source_id"], row["target_id"])
@@ -159,7 +176,7 @@ class ScoringEngine:
 
     def _persist_score(self, cs: ConnectionScore):
         try:
-            with self._conn() as conn:
+            with self._conn_lock, self._conn() as conn:
                 conn.execute("""
                     INSERT INTO connection_scores
                         (source_id, target_id, total_runs, successful_runs,
