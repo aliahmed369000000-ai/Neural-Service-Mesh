@@ -75,7 +75,11 @@ def _render_moe_panel():
         st.markdown(st.session_state["_moe_ui_stats"])
 
     st.markdown("---")
-    st.subheader("🏷️ صنّف سؤالاً")
+    # 🆕 كان st.subheader (عنوان Streamlit الافتراضي بلا CSS الثيم المخصص —
+    # لا يقع تحت محدّد .stMarkdown h3 المُوحَّد لبقية عناوين المستوى الفرعي
+    # بالتطبيق، فيظهر بحجم/خط مختلفَين). استبدلته بنفس صياغة "### " المستخدمة
+    # لعناوين المستوى نفسه بصفحات أخرى (مثال: aiaas_console.py، ultraplinian.py).
+    st.markdown("### 🏷️ صنّف سؤالاً")
     q = st.text_input(
         "نص السؤال",
         placeholder="مثال: ما حكم الصلاة في المذهب الشافعي؟",
