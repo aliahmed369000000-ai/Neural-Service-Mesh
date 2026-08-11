@@ -125,7 +125,7 @@ def render_translate():
                 key="tr_download_btn",
             )
 
-    st.markdown("")
+    st.markdown("---")
     st.markdown('<div class="section-header">🕘 آخر الترجمات</div>', unsafe_allow_html=True)
     try:
         from ai.translation_history import get_history

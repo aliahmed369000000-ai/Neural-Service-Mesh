@@ -48,7 +48,7 @@ def render_product_info():
         unsafe_allow_html=True,
     )
 
-    st.markdown("")
+    st.markdown("---")
     st.markdown('<div class="section-header" style="font-size:1.05rem">🔗 روابط</div>', unsafe_allow_html=True)
     st.markdown(
         """

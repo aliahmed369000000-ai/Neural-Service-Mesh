@@ -102,7 +102,7 @@ def render_memory():
             st.markdown(badges, unsafe_allow_html=True)
 
     # حالة قاعدة البيانات
-    st.markdown("")
+    st.markdown("---")
     st.markdown('<div class="section-header">💾 حالة قواعد البيانات</div>', unsafe_allow_html=True)
     db_path = MEMORY_DIR / "episodic.db"
     if db_path.exists():
@@ -112,7 +112,7 @@ def render_memory():
         st.markdown('<span class="health-err">❌ قاعدة الذاكرة التجريبية: غير موجودة</span>', unsafe_allow_html=True)
 
     # ── إحصاءات الذاكرة التجريبية للأسئلة والأجوبة ──────────────────────
-    st.markdown("")
+    st.markdown("---")
     st.markdown('<div class="section-header">📊 إحصاءات ذاكرة الأسئلة والأجوبة</div>', unsafe_allow_html=True)
 
     try:
@@ -148,7 +148,7 @@ def render_memory():
             """, unsafe_allow_html=True)
 
         # ── التوحيد (Consolidation) ──
-        st.markdown("")
+        st.markdown("---")
         st.markdown('<div class="section-header">🧬 توحيد الذاكرة (Consolidation)</div>', unsafe_allow_html=True)
         st.markdown(
             '<p style="color:var(--text-muted)">يستخرج هذا الإجراء أزواج المفاهيم المتكررة في الأسئلة السابقة، '
@@ -225,7 +225,7 @@ def render_memory():
                 st.caption(f"لا توجد قوانين بعد — يحتاج نمط للتكرار {_consolidator._threshold} مرات على الأقل.")
 
     # ── سجل المحادثات المحفوظة (nsm_memory.py — SQLite) ──────────────────
-    st.markdown("")
+    st.markdown("---")
     st.markdown('<div class="section-header">📜 سجل المحادثات المحفوظة</div>', unsafe_allow_html=True)
     try:
         from nsm_memory import _LongTermStore as _NSMLongTermStore

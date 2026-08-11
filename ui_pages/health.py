@@ -146,7 +146,7 @@ def render_health():
         """, unsafe_allow_html=True)
 
     # ── نماذج Anthropic المتاحة (من That.md) ────────────────────────────
-    st.markdown("")
+    st.markdown("---")
     st.markdown('<div class="section-header">🤖 نماذج Anthropic المتاحة</div>', unsafe_allow_html=True)
     try:
         from ai.llm_fallback import ANTHROPIC_MODELS
@@ -174,7 +174,7 @@ def render_health():
         st.info(f"تعذّر تحميل قائمة النماذج: {_me}")
 
     # ── جاهزية المشروع (تحليل ثابت للكود، لا يحتاج بيانات تشغيل حيّة) ────
-    st.markdown("")
+    st.markdown("---")
     st.markdown('<div class="section-header">🩺 جاهزية المشروع (تحليل الكود)</div>', unsafe_allow_html=True)
     try:
         from ai.validator import Phase6Validator
@@ -205,7 +205,7 @@ def render_health():
         st.info(f"تعذّر تحميل تقرير الجاهزية: {_ve}")
 
     # ── GitHub Push ───────────────────────────────────────────────────────
-    st.markdown("")
+    st.markdown("---")
     st.markdown('<div class="section-header">🚀 رفع إلى GitHub</div>', unsafe_allow_html=True)
 
     _gh_token = os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN", "").strip()
@@ -295,7 +295,7 @@ def render_health():
             pass
 
     # أزرار الإجراءات
-    st.markdown("")
+    st.markdown("---")
     st.markdown('<div class="section-header">⚙️ إجراءات</div>', unsafe_allow_html=True)
     col_r1, col_r2 = st.columns(2)
     with col_r1:
@@ -312,7 +312,7 @@ def render_health():
     # ── رقابة/تدقيق تفاعلات الوكلاء (Observability) ──
     # سجل مستقل تماماً عن CKG (القرآن) — يتتبّع فقط استدعاءات وكلاء AI
     # (ai/agent_categories.py) من "hub" أو "orchestrator" لأغراض التشخيص.
-    st.markdown("")
+    st.markdown("---")
     st.markdown('<div class="section-header">🔎 رقابة وكلاء AI (Observability)</div>', unsafe_allow_html=True)
     try:
         from ai.agent_audit import get_default_audit_log

@@ -239,7 +239,7 @@ def render_search():
             _copy_button(_ws_result, key="search_web_result")
 
     # ── بحث حقيقي عن الصور (Unsplash) ───────────────────────────────────
-    st.markdown("")
+    st.markdown("---")
     st.markdown('<div class="section-header">🖼️ بحث عن الصور</div>', unsafe_allow_html=True)
     try:
         from ai.image_search_tool import image_search_safe as _img_search
