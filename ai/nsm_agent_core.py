@@ -648,6 +648,30 @@ def _run_step(step: Dict[str, Any]) -> str:
 # 🆕 المرحلة 6 من خطة "المراحل المقترحة" — Checkpoints/Rollback
 # ══════════════════════════════════════════════════════════════════
 
+_git_identity_configured = False  # 🆕 أداء: تجنّب إعادة ضبط git config في كل مهمة ناجحة
+
+
+def _ensure_git_identity_once() -> None:
+    """يضبط هوية git محلياً مرة واحدة فقط للعملية (وليس في كل checkpoint).
+
+    كانت _local_checkpoint_commit تُشغّل `git config` مرتين (subprocess
+    منفصلة، ~2ms لكل واحدة قياساً فعلياً) في كل مهمة ناجحة ضمن أي خطة
+    متعددة المهام — رغم أن الهوية لا تتغيّر إلا مرة واحدة بالجلسة. هذا
+    يضبطها أول مرة فقط ويتخطاها في كل استدعاء لاحق.
+    """
+    global _git_identity_configured
+    if _git_identity_configured:
+        return
+    for cfg in [
+        ["git", "-C", str(ROOT), "config", "--local",
+         "user.email", "nsm-bot@users.noreply.github.com"],
+        ["git", "-C", str(ROOT), "config", "--local",
+         "user.name", "NSM Bot"],
+    ]:
+        subprocess.run(cfg, capture_output=True)
+    _git_identity_configured = True
+
+
 def _local_checkpoint_commit(message: str) -> Optional[str]:
     """
     كوميت محلي فقط (بلا push) — نقطة استرجاع بعد نجاح مهمة واحدة فعلياً،
@@ -656,13 +680,7 @@ def _local_checkpoint_commit(message: str) -> Optional[str]:
     record_checkpoint) أو None إن لم توجد تغييرات فعلية أو فشل الكوميت.
     """
     try:
-        for cfg in [
-            ["git", "-C", str(ROOT), "config", "--local",
-             "user.email", "nsm-bot@users.noreply.github.com"],
-            ["git", "-C", str(ROOT), "config", "--local",
-             "user.name", "NSM Bot"],
-        ]:
-            subprocess.run(cfg, capture_output=True)
+        _ensure_git_identity_once()
 
         r_add = subprocess.run(
             ["git", "-C", str(ROOT), "add", "-A"], capture_output=True, text=True,
