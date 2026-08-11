@@ -145,6 +145,41 @@ def render_health():
         </div>
         """, unsafe_allow_html=True)
 
+    # ── فحص تشخيصي: كل وحدة اختيارية يستوردها app_core.py ضمن try/except
+    #    صامت — يعيد المحاولة بشكل مستقل ويعرض سبب الفشل الحقيقي بدل
+    #    اختفائه بصمت (هذا بالضبط ما أخفى عطل NSM Router Bridge سابقاً).
+    st.markdown("")
+    st.markdown('<div class="section-header">🔬 فحص تشخيصي للوحدات الاختيارية</div>', unsafe_allow_html=True)
+    try:
+        from ai.module_health import run_module_health_checks
+        _mh_results = run_module_health_checks()
+        _mh_ok = sum(1 for r in _mh_results if r.ok)
+        _mh_total = len(_mh_results)
+
+        if _mh_ok == _mh_total:
+            st.success(f"✅ كل الوحدات الاختيارية تعمل ({_mh_ok}/{_mh_total})")
+        else:
+            _mh_failed = [r for r in _mh_results if not r.ok]
+            st.error(f"❌ {len(_mh_failed)} وحدة معطّلة صامتاً — لولا هذا الفحص لما ظهر السبب")
+            for r in _mh_failed:
+                st.markdown(f"""
+                <div style="padding: 0.6rem 1rem; margin: 0.3rem 0; background: var(--rose-soft);
+                            border-radius: 8px; border: 1px solid var(--rose); color: var(--text);">
+                    <span style="font-size:1.2rem">❌</span>
+                    &nbsp;<strong>{r.label}</strong>
+                    &nbsp;<code style="font-size:0.75rem">{r.module}</code><br/>
+                    <small style="color:var(--text-muted)">{r.reason}</small>
+                </div>
+                """, unsafe_allow_html=True)
+
+        with st.expander(f"📋 التفاصيل الكاملة ({_mh_total} وحدة)"):
+            for r in _mh_results:
+                icon = "✅" if r.ok else "❌"
+                extra = f" — {r.reason}" if not r.ok else (f" — {r.note}" if r.note else "")
+                st.caption(f"{icon} **{r.label}** (`{r.module}`){extra}")
+    except Exception as _mh_err:
+        st.caption(f"الفحص التشخيصي غير متاح: {_mh_err}")
+
     # ── نماذج Anthropic المتاحة (من That.md) ────────────────────────────
     st.markdown("---")
     st.markdown('<div class="section-header">🤖 نماذج Anthropic المتاحة</div>', unsafe_allow_html=True)
