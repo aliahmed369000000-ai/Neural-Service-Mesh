@@ -5,6 +5,7 @@ edge-tts==7.2.8
 fastapi==0.141.1
 gTTS==2.5.4
 gradio_client==2.6.0
+huggingface_hub==1.27.0
 imageio-ffmpeg==0.6.0
 librosa==0.11.0
 llvmlite==0.48.0

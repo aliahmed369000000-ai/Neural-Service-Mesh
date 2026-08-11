@@ -34,6 +34,20 @@ ROOT = Path(__file__).resolve().parent.parent
 ARTIFACTS = ROOT / "artifacts" / "model_training"
 ARTIFACTS.mkdir(parents=True, exist_ok=True)
 
+# مزامنة اختيارية للـ checkpoints مع تخزين خارجي (معطّلة افتراضياً — راجع
+# ai/checkpoint_storage.py). لا تكسر الوكيل إن تعذّر الاستيراد.
+try:
+    from ai.checkpoint_storage import (
+        sync_checkpoint_after_save as _ckpt_sync_after_save,
+        restore_checkpoint_if_missing as _ckpt_restore_if_missing,
+    )
+except Exception:  # pragma: no cover
+    def _ckpt_sync_after_save(run_id, files):
+        return []
+
+    def _ckpt_restore_if_missing(run_id, checkpoint_dir, which="latest"):
+        return False
+
 # Sandbox / Guardrails (اختياري — لا يكسر الوكيل إن تعذّر الاستيراد)
 try:
     from ai.training_sandbox import (
@@ -1483,11 +1497,29 @@ def _save_checkpoint(
     except Exception:
         pass
 
+    # مزامنة اختيارية مع تخزين خارجي (best-effort، لا تؤثر على التدريب المحلي)
+    files_to_sync = [d / "latest.pt"]
+    if is_best:
+        files_to_sync.append(d / "best.pt")
+    try:
+        _ckpt_sync_after_save(run_id, files_to_sync)
+    except Exception as e:
+        logger.warning(f"sync خارجي فشل (يُهمَل، التدريب المحلي سليم): {e}")
+
 
 def _load_checkpoint(run_id: str, which: str = "latest") -> Optional[dict]:
     import torch
 
-    p = _checkpoint_dir(run_id) / f"{which}.pt"
+    d = _checkpoint_dir(run_id)
+    p = d / f"{which}.pt"
+    if not p.is_file():
+        # قد يكون الملف المحلي مفقوداً لأن القرص لا يبقى بين الجلسات
+        # (مثلاً على Streamlit Community Cloud) — نحاول استرجاعه من
+        # التخزين الخارجي إن كان مفعّلاً قبل التسليم بعدم وجوده.
+        try:
+            _ckpt_restore_if_missing(run_id, d, which)
+        except Exception as e:
+            logger.warning(f"restore خارجي فشل (يُهمَل): {e}")
     if not p.is_file():
         return None
     try:
