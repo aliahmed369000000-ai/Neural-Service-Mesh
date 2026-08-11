@@ -97,3 +97,8 @@ ckg_sentences_v2.pkl -filter -diff -merge
 ckg_sentences_v3.pkl -filter -diff -merge
 ckg_sentences_general_ar.pkl -filter -diff -merge
 
+# ── استثناء من LFS: بيانات عينات صغيرة (demo/test fixtures) ──────────────
+# مطلوبة لعمل الاختبارات وميزة "وكيل تدريب النماذج" في أي بيئة بدون LFS
+# (منها بيئة Streamlit Community Cloud التي لا تُشغّل git-lfs smudge تلقائياً)
+data/samples/**.csv -filter -diff -merge
+

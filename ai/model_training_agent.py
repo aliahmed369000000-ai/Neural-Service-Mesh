@@ -1243,6 +1243,15 @@ def _load_csv_table(path: Path, max_rows: int = 5000):
     import csv as _csv
 
     with open(path, encoding="utf-8", errors="replace", newline="") as f:
+        first_line = f.readline()
+        if first_line.startswith("version https://git-lfs.github.com/spec/v1"):
+            raise ValueError(
+                f"الملف `{path.name}` هو مؤشر Git LFS (pointer) وليس البيانات الفعلية — "
+                "لم يتم سحب محتوى LFS في هذه البيئة. شغّل `git lfs pull` محلياً، "
+                "أو استثنِ هذا الملف من LFS في .gitattributes إن كان صغيراً بما يكفي "
+                "ليعمل كملف Git عادي (كما تم مع بيانات data/samples/)."
+            )
+        f.seek(0)
         reader = _csv.reader(f)
         rows = list(reader)
     if not rows:
