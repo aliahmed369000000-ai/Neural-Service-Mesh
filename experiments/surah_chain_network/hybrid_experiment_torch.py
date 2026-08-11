@@ -34,6 +34,18 @@ DEFAULT_MAX_CTX = 256
 DEFAULT_MAX_LEN = 128
 
 
+def scale_surah_dims(dims: List[List[int]], scale: float) -> List[List[int]]:
+    """
+    يوسّع أبعاد سلسلة السور بنسبة scale مع الحفاظ على نسب السور وتواصل الطبقات.
+    scale=1 → الأبعاد الأصلية | scale=2 → سعة أعلى مع نفس البنية.
+    """
+    if scale is None or scale <= 1.0:
+        return [[int(a), int(b)] for a, b in dims]
+    widths = [int(dims[0][0])] + [int(b) for _, b in dims]
+    widths = [max(1, int(round(w * float(scale)))) for w in widths]
+    return [[widths[i], widths[i + 1]] for i in range(len(widths) - 1)]
+
+
 def get_device() -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -308,6 +320,7 @@ class SurahChainLM(nn.Module):
         max_seq: int = DEFAULT_MAX_CTX,
         use_qk_norm: bool = True,
         use_gated_attn: bool = True,
+        chain_scale: float = 1.0,
     ):
         super().__init__()
         if d_model % n_heads != 0:
@@ -320,6 +333,7 @@ class SurahChainLM(nn.Module):
         self.n_post = n_post
         self.use_qk_norm = use_qk_norm
         self.use_gated_attn = use_gated_attn
+        self.chain_scale = float(chain_scale) if chain_scale else 1.0
 
         self.tok_emb = nn.Embedding(vocab_size, d_model, padding_idx=0)
         self.pos_emb = nn.Embedding(max_seq, d_model)
@@ -340,9 +354,11 @@ class SurahChainLM(nn.Module):
                 for _ in range(n_pre)
             ]
         )
-        self.chain = SurahChainNetwork(LAYER_DIMS)
-        self.W_in = nn.Linear(d_model, CHAIN_WIDTH)
-        self.W_out = nn.Linear(CHAIN_WIDTH, d_model)
+        scaled_dims = scale_surah_dims(LAYER_DIMS, self.chain_scale)
+        self.chain_width = int(scaled_dims[0][0])
+        self.chain = SurahChainNetwork(scaled_dims)
+        self.W_in = nn.Linear(d_model, self.chain_width)
+        self.W_out = nn.Linear(self.chain_width, d_model)
         self.W_skip = nn.Linear(d_model, d_model, bias=False)
         self.post_blocks = nn.ModuleList(
             [
@@ -403,8 +419,8 @@ class SurahChainLM(nn.Module):
         for blk in self.pre_blocks:
             x = blk(x, key_padding_mask=key_padding_mask)
 
-        h7 = self.W_in(x)
-        flat = h7.reshape(B * S, CHAIN_WIDTH)
+        h_c = self.W_in(x)
+        flat = h_c.reshape(B * S, self.chain_width)
         flat = self.chain(flat)
         h_chain = self.W_out(flat).reshape(B, S, self.d_model)
         x = h_chain + self.W_skip(x)
@@ -420,6 +436,10 @@ class SurahChainLM(nn.Module):
             "chain": sum(p.numel() for p in self.chain.parameters()),
             "d_model": self.d_model,
             "vocab_size": self.vocab_size,
+            "chain_width": getattr(self, "chain_width", CHAIN_WIDTH),
+            "chain_scale": getattr(self, "chain_scale", 1.0),
+            "use_qk_norm": getattr(self, "use_qk_norm", False),
+            "use_gated_attn": getattr(self, "use_gated_attn", False),
         }
 
 
@@ -439,6 +459,7 @@ class HybridExperimentModelTorch:
         compile_model: bool = False,
         use_qk_norm: bool = True,
         use_gated_attn: bool = True,
+        chain_scale: float = 1.0,
     ):
         self.device = torch.device(device) if device else get_device()
         self.base_lr = lr
@@ -446,6 +467,7 @@ class HybridExperimentModelTorch:
         self.vocab_size = vocab_size
         self.use_qk_norm = use_qk_norm
         self.use_gated_attn = use_gated_attn
+        self.chain_scale = float(chain_scale) if chain_scale else 1.0
         self.tokenizer = StrongTokenizer(vocab_size)
         self.model = SurahChainLM(
             vocab_size=vocab_size,
@@ -456,6 +478,7 @@ class HybridExperimentModelTorch:
             max_seq=max_seq,
             use_qk_norm=use_qk_norm,
             use_gated_attn=use_gated_attn,
+            chain_scale=self.chain_scale,
         ).to(self.device)
 
         if compile_model and hasattr(torch, "compile"):
@@ -490,6 +513,7 @@ class HybridExperimentModelTorch:
                 max_seq=core.max_seq,
                 use_qk_norm=getattr(core, "use_qk_norm", self.use_qk_norm),
                 use_gated_attn=getattr(core, "use_gated_attn", self.use_gated_attn),
+                chain_scale=getattr(core, "chain_scale", self.chain_scale),
             )
             self.model = SurahChainLM(**cfg).to(self.device)
             self._compiled = False
@@ -657,6 +681,7 @@ class HybridExperimentModelTorch:
             "max_seq": getattr(core, "max_seq", DEFAULT_MAX_CTX),
             "use_qk_norm": bool(getattr(core, "use_qk_norm", True)),
             "use_gated_attn": bool(getattr(core, "use_gated_attn", True)),
+            "chain_scale": float(getattr(core, "chain_scale", 1.0)),
             "lr": self.lr,
             "tokenizer": {
                 "word_to_id": self.tokenizer.word_to_id,
@@ -702,8 +727,10 @@ class HybridExperimentModelTorch:
             want_qk = True
         if self.use_gated_attn and not want_gate:
             want_gate = True
+        want_scale = float(ckpt.get("chain_scale", getattr(self, "chain_scale", 1.0)))
         self.use_qk_norm = want_qk
         self.use_gated_attn = want_gate
+        self.chain_scale = want_scale
 
         core = getattr(self.model, "_orig_mod", self.model)
         need_rebuild = (
@@ -714,6 +741,7 @@ class HybridExperimentModelTorch:
             or core.tok_emb.num_embeddings < self.vocab_size
             or bool(getattr(core, "use_qk_norm", False)) != want_qk
             or bool(getattr(core, "use_gated_attn", False)) != want_gate
+            or abs(float(getattr(core, "chain_scale", 1.0)) - want_scale) > 1e-6
         )
         if need_rebuild:
             self.model = SurahChainLM(
@@ -725,6 +753,7 @@ class HybridExperimentModelTorch:
                 max_seq=want_max,
                 use_qk_norm=want_qk,
                 use_gated_attn=want_gate,
+                chain_scale=want_scale,
             ).to(self.device)
             self._compiled = False
             self.opt = torch.optim.AdamW(

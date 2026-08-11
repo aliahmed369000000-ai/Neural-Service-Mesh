@@ -5,26 +5,19 @@
 المصدر: Jr23xd23/ArabicText-Large عبر prepare_pretrain_data.py
 
 الاستخدام:
-  # 1) تحضير البيانات
-  pip install datasets
-  SCN_N=30000 python experiments/surah_chain_network/prepare_pretrain_data.py
-
-  # 2) تدريب جديد
-  SCN_N=30000 SCN_EPOCHS=10 SCN_D_MODEL=128 SCN_BATCH=16 \\
+  # سعة أكبر (موصى به للتقوية)
+  SCN_PRESET=medium SCN_FRESH=1 \\
     python experiments/surah_chain_network/train_pretrain_torch.py
 
-  # 3) استكمال من آخر checkpoint (افتراضي إن وُجد latest)
-  SCN_N=30000 SCN_EPOCHS=10 \\
+  # أو يدوياً
+  SCN_N=60000 SCN_D_MODEL=256 SCN_CHAIN_SCALE=2 SCN_N_PRE=4 SCN_N_POST=4 \\
+  SCN_FRESH=1 SCN_BATCH=16 \\
     python experiments/surah_chain_network/train_pretrain_torch.py
 
-  # بدء من الصفر رغم وجود checkpoint
-  SCN_FRESH=1 SCN_N=30000 SCN_EPOCHS=5 \\
-    python experiments/surah_chain_network/train_pretrain_torch.py
-
-ملاحظات Termux:
-  - SCN_EPOCHS = عدد الحقب الإضافية عند الاستكمال (وليس الإجمالي)
-  - عند الاستكمال يُحافظ على الأوزان + الـoptimizer + التاريخ
-  - يُحفظ checkpoint كل عصر (latest) وأفضل loss (best)
+presets:
+  small   → d=128, scale=1, pre/post=2   (التجربة السابقة)
+  medium  → d=256, scale=2, pre/post=4   (تقوية SurahChain)
+  large   → d=512, scale=2, pre/post=6   (يحتاج GPU ذاكرة أعلى)
 """
 from __future__ import annotations
 
@@ -43,13 +36,7 @@ sys.path.insert(0, str(_HERE))
 
 from hybrid_experiment_torch import HybridExperimentModelTorch
 
-CKPT_DIR = _HERE / "checkpoints"
-CKPT_BEST = CKPT_DIR / "best_pretrain_torch.pt"
-CKPT_LATEST = CKPT_DIR / "latest_pretrain_torch.pt"
-VOCAB_PATH = _HERE / "tokenizer_vocab_pretrain.json"
-STATE_FILE = CKPT_DIR / "pretrain_torch_state.json"
-PRETRAIN_CACHE = _HERE / "data" / "pretrain_sentences.pkl"
-
+# ----- إعدادات أساسية -----
 N = int(os.environ.get("SCN_N", "8000"))
 EPOCHS = int(os.environ.get("SCN_EPOCHS", "15"))
 BATCH = int(os.environ.get("SCN_BATCH", "16"))
@@ -60,23 +47,63 @@ N_POST = int(os.environ.get("SCN_N_POST", "2"))
 BASE_LR = float(os.environ.get("SCN_LR", "1e-3"))
 MAX_LEN = int(os.environ.get("SCN_MAX_LEN", "96"))
 COMPILE = os.environ.get("SCN_COMPILE", "0") == "1"
-# تحسينات الانتباه (لا تمس سلسلة السور)
 USE_QK_NORM = os.environ.get("SCN_QK_NORM", "1") == "1"
 USE_GATED_ATTN = os.environ.get("SCN_GATED_ATTN", "1") == "1"
+CHAIN_SCALE = float(os.environ.get("SCN_CHAIN_SCALE", "1"))
 WARMUP_RATIO = 0.1
 PATIENCE = int(os.environ.get("SCN_EXPAND_PATIENCE", "2"))
-MAX_EXPANDS = int(os.environ.get("SCN_MAX_EXPANDS", "5"))
-# إيقاف عند استقرار الـloss (بدون تحسّن لهذا العدد من العصور)
-STOP_PATIENCE = int(os.environ.get("SCN_STOP_PATIENCE", "0"))  # 0 = معطّل
-# وضع «حتى النهاية»: حد أقصى عالٍ + إيقاف تلقائي عند الاستقرار
+MAX_EXPANDS = int(os.environ.get("SCN_MAX_EXPANDS", "8"))
+STOP_PATIENCE = int(os.environ.get("SCN_STOP_PATIENCE", "0"))
 UNTIL_END = os.environ.get("SCN_UNTIL_END", "0") == "1"
+FRESH = os.environ.get("SCN_FRESH", "0") == "1"
+RESUME_PATH = os.environ.get("SCN_RESUME_PATH", "").strip()
+
+# ----- presets للسعة -----
+PRESET = os.environ.get("SCN_PRESET", "").strip().lower()
+if PRESET == "small":
+    D_MODEL, N_HEADS, N_PRE, N_POST = 128, 8, 2, 2
+    CHAIN_SCALE = 1.0
+    N = max(N, 30000)
+elif PRESET == "medium":
+    D_MODEL, N_HEADS, N_PRE, N_POST = 256, 8, 4, 4
+    CHAIN_SCALE = float(os.environ.get("SCN_CHAIN_SCALE", "2"))
+    N = max(N, 60000)
+    BATCH = int(os.environ.get("SCN_BATCH", "16"))
+    BASE_LR = float(os.environ.get("SCN_LR", "5e-4"))
+elif PRESET == "large":
+    D_MODEL, N_HEADS, N_PRE, N_POST = 512, 8, 6, 6
+    CHAIN_SCALE = float(os.environ.get("SCN_CHAIN_SCALE", "2"))
+    N = max(N, 100000)
+    BATCH = int(os.environ.get("SCN_BATCH", "8"))
+    BASE_LR = float(os.environ.get("SCN_LR", "3e-4"))
+    MAX_LEN = int(os.environ.get("SCN_MAX_LEN", "128"))
+
 if UNTIL_END:
     EPOCHS = max(EPOCHS, int(os.environ.get("SCN_MAX_EPOCHS", "80")))
     if STOP_PATIENCE <= 0:
         STOP_PATIENCE = int(os.environ.get("SCN_STOP_PATIENCE", "6"))
-# SCN_FRESH=1 يجبر البدء من الصفر؛ غير ذلك يستكمل إن وُجد latest
-FRESH = os.environ.get("SCN_FRESH", "0") == "1"
-RESUME_PATH = os.environ.get("SCN_RESUME_PATH", "").strip()
+
+# checkpoints منفصلة لكل سعة حتى لا تُOverwrite تجربة d=128
+TAG = os.environ.get("SCN_TAG", "").strip()
+if not TAG:
+    TAG = f"d{D_MODEL}_s{str(CHAIN_SCALE).replace('.', 'p')}"
+CKPT_DIR = _HERE / "checkpoints"
+CKPT_BEST = CKPT_DIR / f"best_pretrain_{TAG}.pt"
+CKPT_LATEST = CKPT_DIR / f"latest_pretrain_{TAG}.pt"
+VOCAB_PATH = _HERE / f"tokenizer_vocab_pretrain_{TAG}.json"
+STATE_FILE = CKPT_DIR / f"pretrain_state_{TAG}.json"
+PRETRAIN_CACHE = _HERE / "data" / "pretrain_sentences.pkl"
+# توافق مع الملفات القديمة عند small/d128
+if TAG in ("d128_s1", "d128_s1p0") or (D_MODEL == 128 and CHAIN_SCALE == 1.0 and not os.environ.get("SCN_TAG")):
+    if not os.environ.get("SCN_TAG"):
+        # ابقِ الأسماء القديمة لـ d128 الافتراضي إن وُجدت
+        _old_best = CKPT_DIR / "best_pretrain_torch.pt"
+        _old_latest = CKPT_DIR / "latest_pretrain_torch.pt"
+        if _old_latest.exists() or _old_best.exists():
+            CKPT_BEST = _old_best
+            CKPT_LATEST = _old_latest
+            STATE_FILE = CKPT_DIR / "pretrain_torch_state.json"
+            VOCAB_PATH = _HERE / "tokenizer_vocab_pretrain.json"
 
 
 def load_pretrain_sentences(max_n: int) -> list:
@@ -152,6 +179,11 @@ def main():
     expand_log = []
     total_seconds_prev = 0.0
 
+    print(
+        f"preset={PRESET or '-'} | tag={TAG} | d_model={D_MODEL} | "
+        f"chain_scale={CHAIN_SCALE} | pre/post={N_PRE}/{N_POST} | N={N}"
+    )
+    print(f"checkpoints: {CKPT_LATEST.name} / {CKPT_BEST.name}")
     m = HybridExperimentModelTorch(
         d_model=D_MODEL,
         vocab_size=8192,
@@ -162,6 +194,7 @@ def main():
         compile_model=COMPILE,
         use_qk_norm=USE_QK_NORM,
         use_gated_attn=USE_GATED_ATTN,
+        chain_scale=CHAIN_SCALE,
     )
     print(f"QK-Norm={USE_QK_NORM} | Gated-Attention={USE_GATED_ATTN}")
 
@@ -312,6 +345,12 @@ def main():
         "seconds_this_run": round(elapsed, 1),
         "total_seconds": round(total_seconds_prev + elapsed, 1),
         "d_model": D_MODEL,
+        "n_heads": N_HEADS,
+        "n_pre": N_PRE,
+        "n_post": N_POST,
+        "chain_scale": CHAIN_SCALE,
+        "preset": PRESET or None,
+        "tag": TAG,
         "device": str(m.device),
         "backend": "pytorch",
         "real_batch": True,
@@ -323,6 +362,7 @@ def main():
         "stopped_early": stopped_early,
         "until_end": UNTIL_END,
         "stop_patience": STOP_PATIENCE,
+        "params": m.param_count(),
     }
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2))
     print("-" * 50)

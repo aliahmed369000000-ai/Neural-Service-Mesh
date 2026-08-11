@@ -216,3 +216,27 @@ SCN_FRESH=1 SCN_N=30000 SCN_EPOCHS=5 ...
 SCN_N=30000 SCN_EPOCHS=10 SCN_QK_NORM=1 SCN_GATED_ATTN=1 \
   python experiments/surah_chain_network/train_pretrain_torch.py
 ```
+
+## تقوية السعة (SurahChain Capacity)
+
+| Preset | d_model | chain_scale | pre/post | معاملات تقريبية |
+|--------|---------|-------------|----------|------------------|
+| small | 128 | 1 | 2/2 | ~2.5M–4M |
+| **medium** | **256** | **2** | **4/4** | **~13M+** |
+| large | 512 | 2 | 6/6 | أعلى (GPU ذاكرة أكبر) |
+
+```bash
+# تحضير بيانات أكبر
+SCN_N=60000 python experiments/surah_chain_network/prepare_pretrain_data.py
+
+# تدريب سعة متوسطة (بداية جديدة — لا تخلط مع checkpoint d=128)
+SCN_PRESET=medium SCN_FRESH=1 SCN_EPOCHS=20 SCN_BATCH=16 \
+  python experiments/surah_chain_network/train_pretrain_torch.py
+
+# استكمال لاحقاً
+SCN_PRESET=medium SCN_EPOCHS=20 \
+  python experiments/surah_chain_network/train_pretrain_torch.py
+```
+
+- `chain_scale=2` يضاعف أبعاد سلسلة السور مع الإبقاء على نسب السور الـ114
+- checkpoints منفصلة: `best_pretrain_d256_s2p0.pt` فلا تُمس تجربة d128
