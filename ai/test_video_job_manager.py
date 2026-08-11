@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import threading
 import time
 import unittest
 
@@ -54,6 +55,52 @@ class TestVideoJobManagerBackground(unittest.TestCase):
     def test_get_unknown_job_returns_none(self):
         mgr = VideoJobManager()
         self.assertIsNone(mgr.get(999999))
+
+    def test_prune_evicts_oldest_finished_jobs_keeps_running(self):
+        from ai.video_job_manager import MAX_JOBS
+
+        mgr = VideoJobManager()
+
+        def _fast(path):
+            return path
+
+        # نملأ حتى السقف بمهام تنتهي فوراً
+        ids = []
+        for i in range(MAX_JOBS):
+            jid = mgr.start(_fast, "قص", path=f"f{i}.mp4")
+            ids.append(jid)
+        for _ in range(200):
+            if all(mgr.get(j).status != "running" for j in ids):
+                break
+            time.sleep(0.01)
+
+        # مهمة إضافية طويلة تبقى running أثناء الفحص
+        started = threading.Event()
+        release = threading.Event()
+
+        def _slow(path):
+            started.set()
+            release.wait(2)
+            return path
+
+        running_id = mgr.start(_slow, "بطيئة", path="slow.mp4")
+        started.wait(1)
+
+        # مهمة أخيرة تتجاوز السقف — يجب أن تُقلَّم أقدم مهمة منتهية
+        overflow_id = mgr.start(_fast, "قص", path="overflow.mp4")
+        for _ in range(200):
+            if mgr.get(overflow_id).status != "running":
+                break
+            time.sleep(0.01)
+
+        with mgr._lock:
+            total = len(mgr._jobs)
+        self.assertLessEqual(total, MAX_JOBS + 1)  # +1 للمهمة الـrunning غير القابلة للحذف
+        self.assertIsNotNone(mgr.get(running_id))
+        self.assertEqual(mgr.get(running_id).status, "running")
+        self.assertIsNone(mgr.get(ids[0]), "أقدم مهمة منتهية يجب أن تُحذف عند تجاوز MAX_JOBS")
+
+        release.set()
 
     def test_list_jobs_filtered_by_ids_newest_first(self):
         mgr = VideoJobManager()

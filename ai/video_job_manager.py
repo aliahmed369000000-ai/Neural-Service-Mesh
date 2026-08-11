@@ -14,6 +14,11 @@ ai/content_job_manager.py.
 (threading.Thread, daemon=True) مستقل لكل استدعاء، مع قاموس حالة محمي
 بقفل. عام (generic) هنا بدل مخصص لدالة واحدة لأن محرر الفيديو له أكثر
 من 10 عمليات مختلفة (trim/concat/mute/upscale/...).
+
+🆕 نفس تسريب الذاكرة المُصلَح في ai/content_job_manager.py: `_jobs` كان
+يكبر بلا حد أعلى على عملية Streamlit Cloud طويلة العمر. يُقلَّم الآن
+إلى MAX_JOBS بعد كل مهمة جديدة، بحذف المهام المنتهية (done/failed)
+الأقدم أولاً فقط — لا تُحذف أي مهمة running.
 """
 from __future__ import annotations
 
@@ -27,6 +32,8 @@ from typing import Any, Callable, Dict, List, Optional
 logger = logging.getLogger("VideoJobManager")
 
 _JOB_ID_COUNTER = itertools.count(1)
+
+MAX_JOBS = 300  # سقف الاحتفاظ لمنع نمو الذاكرة بلا حدود على عملية طويلة العمر
 
 
 @dataclass
@@ -66,6 +73,7 @@ class VideoJobManager:
         job = VideoJob(job_id=job_id, label=label)
         with self._lock:
             self._jobs[job_id] = job
+            self._prune_locked()
 
         def _run() -> None:
             try:
@@ -84,6 +92,19 @@ class VideoJobManager:
         threading.Thread(target=_run, daemon=True,
                           name=f"video-job-{job_id}").start()
         return job_id
+
+    def _prune_locked(self) -> None:
+        """يُستدعى تحت self._lock فقط. يحذف أقدم المهام المنتهية
+        (done/failed) حتى يعود العدد إلى MAX_JOBS، دون المساس بأي مهمة
+        لا تزال running (حتى لو تجاوز العدد الإجمالي السقف مؤقتاً)."""
+        overflow = len(self._jobs) - MAX_JOBS
+        if overflow <= 0:
+            return
+        finished_ids = sorted(
+            (jid for jid, j in self._jobs.items() if j.status != "running"),
+        )
+        for jid in finished_ids[:overflow]:
+            del self._jobs[jid]
 
     def get(self, job_id: int) -> Optional[VideoJob]:
         with self._lock:

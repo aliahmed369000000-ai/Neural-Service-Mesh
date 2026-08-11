@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -87,6 +88,50 @@ class TestContentJobManagerBackground(unittest.TestCase):
     def test_get_unknown_job_returns_none(self):
         mgr = ContentJobManager()
         self.assertIsNone(mgr.get(999999))
+
+    def test_prune_evicts_oldest_finished_jobs_keeps_running(self):
+        """على عملية Streamlit Cloud طويلة العمر، _jobs يجب ألا ينمو بلا
+        حدود. عند تجاوز MAX_JOBS يُحذف أقدم المهام المنتهية فقط، وتبقى
+        أي مهمة running بلا مساس."""
+        from ai.content_job_manager import MAX_JOBS
+
+        mgr = ContentJobManager()
+
+        def _fast(**kwargs):
+            return _FakeResult()
+
+        with patch("ai.content_agent.run_content_pipeline", side_effect=_fast):
+            ids = [mgr.start(topic=f"t{i}") for i in range(MAX_JOBS)]
+            for _ in range(200):
+                if all(mgr.get(j).status != "running" for j in ids):
+                    break
+                time.sleep(0.01)
+
+            started = threading.Event()
+            release = threading.Event()
+
+            def _slow(**kwargs):
+                started.set()
+                release.wait(2)
+                return _FakeResult()
+
+            with patch("ai.content_agent.run_content_pipeline", side_effect=_slow):
+                running_id = mgr.start(topic="بطيئة")
+            started.wait(1)
+
+            overflow_id = mgr.start(topic="فائضة")
+            for _ in range(200):
+                if mgr.get(overflow_id).status != "running":
+                    break
+                time.sleep(0.01)
+
+        with mgr._lock:
+            total = len(mgr._jobs)
+        self.assertLessEqual(total, MAX_JOBS + 1)
+        self.assertEqual(mgr.get(running_id).status, "running")
+        self.assertIsNone(mgr.get(ids[0]), "أقدم مهمة منتهية يجب أن تُحذف عند تجاوز MAX_JOBS")
+
+        release.set()
 
 
 class TestAgentCategoriesContentDispatch(unittest.TestCase):

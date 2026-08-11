@@ -13,6 +13,12 @@ ai/content_job_manager.py
 (threading.Thread, daemon=True) مستقل لكل مهمة، مع قاموس حالة محمي
 بقفل (threading.Lock) بدل حظر الطلب الرئيسي. المستخدم يستمر باستخدام
 الواجهة فوراً، ويستعلم عن النتيجة لاحقاً بمعرّف المهمة.
+
+🆕 تسريب ذاكرة طويل المدى: عملية Streamlit Cloud تبقى حيّة لأيام/أسابيع
+(reboot نادر)، و`_jobs` كان يكبر بلا حد أعلى — كل مقال يُطلب (حتى لو
+فشل أو انتهى منذ أشهر) يبقى في الذاكرة للأبد. الآن يُقلَّم القاموس بعد
+كل مهمة جديدة إلى MAX_JOBS، مع حذف المهام المنتهية (done/failed) الأقدم
+أولاً، وعدم لمس أي مهمة لا تزال running (نفس منطق task_manager.py).
 """
 from __future__ import annotations
 
@@ -26,6 +32,8 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger("ContentJobManager")
 
 _JOB_ID_COUNTER = itertools.count(1)
+
+MAX_JOBS = 300  # سقف الاحتفاظ لمنع نمو الذاكرة بلا حدود على عملية طويلة العمر
 
 
 @dataclass
@@ -65,6 +73,7 @@ class ContentJobManager:
         job = ContentJob(job_id=job_id, kwargs=pipeline_kwargs)
         with self._lock:
             self._jobs[job_id] = job
+            self._prune_locked()
 
         def _run() -> None:
             from ai.content_agent import run_content_pipeline
@@ -84,6 +93,19 @@ class ContentJobManager:
         threading.Thread(target=_run, daemon=True,
                           name=f"content-job-{job_id}").start()
         return job_id
+
+    def _prune_locked(self) -> None:
+        """يُستدعى تحت self._lock فقط. يحذف أقدم المهام المنتهية
+        (done/failed) حتى يعود العدد إلى MAX_JOBS، دون المساس بأي مهمة
+        لا تزال running (حتى لو تجاوز العدد الإجمالي السقف مؤقتاً)."""
+        overflow = len(self._jobs) - MAX_JOBS
+        if overflow <= 0:
+            return
+        finished_ids = sorted(
+            (jid for jid, j in self._jobs.items() if j.status != "running"),
+        )
+        for jid in finished_ids[:overflow]:
+            del self._jobs[jid]
 
     def get(self, job_id: int) -> Optional[ContentJob]:
         with self._lock:
