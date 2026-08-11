@@ -3,9 +3,42 @@ ui_pages/video_editor_ui.py — واجهة أدوات تعديل الفيديو
 """
 from __future__ import annotations
 
+import time
 from pathlib import Path
+from typing import List, Optional
 
 from app_core import *  # noqa: F401,F403
+
+
+def _render_jobs_panel(mgr) -> Optional[Path]:
+    """يعرض مهام الجلسة الحالية (قيد التشغيل/منتهية/فاشلة) ويرجع مسار
+    آخر نتيجة جاهزة إن وُجدت، ليعرضها الاستدعاء بنفس شكل السابق."""
+    job_ids: List[int] = st.session_state.setdefault("vedit_job_ids", [])
+    if not job_ids:
+        return None
+
+    jobs = mgr.list_jobs(job_ids=job_ids)
+    running = [j for j in jobs if j.status == "running"]
+
+    st.markdown("---")
+    st.markdown("**⏳ مهام الفيديو بالخلفية (هذه الجلسة)**")
+    if running:
+        st.caption(f"{len(running)} مهمة قيد التشغيل — تقدر تكمّل استخدام الواجهة بدون انتظار.")
+    if st.button("🔄 تحديث الحالة", key="vedit_refresh_jobs"):
+        st.rerun()
+
+    latest_done_path: Optional[Path] = None
+    for j in jobs:
+        elapsed = (j.finished_at or time.time()) - j.started_at
+        if j.status == "running":
+            st.info(f"⏳ #{j.job_id} — {j.label} — جارية منذ {elapsed:.0f} ث")
+        elif j.status == "failed":
+            st.error(f"❌ #{j.job_id} — {j.label} — فشلت: {j.error}")
+        else:
+            st.success(f"✅ #{j.job_id} — {j.label} — جاهزة ({elapsed:.0f} ث)")
+            if latest_done_path is None and j.result and Path(j.result).is_file():
+                latest_done_path = Path(j.result)
+    return latest_done_path
 
 
 def render_video_editor():
@@ -15,7 +48,7 @@ def render_video_editor():
     )
     st.caption(
         "قص · دمج · كتم · استخراج صوت · 9:16 للشورتس · سرعة · ضغط · صورة مصغّرة — "
-        "بدون أوامر shell حرة."
+        "بدون أوامر shell حرة. العمليات تشتغل بالخلفية فلا تُجمَّد الواجهة."
     )
 
     try:
@@ -23,6 +56,9 @@ def render_video_editor():
     except Exception as e:
         st.error(f"تعذّر تحميل ai/video_editor.py: {e}")
         return
+
+    from ai.video_job_manager import get_video_job_manager
+    mgr = get_video_job_manager()
 
     tools = ve.available_tools()
     c1, c2, c3 = st.columns(3)
@@ -86,6 +122,14 @@ def render_video_editor():
         key="vedit_op",
     )
 
+    def _start(fn, label: str, **kwargs) -> None:
+        """يبدأ عملية ffmpeg/AI في خيط خلفية بدل تجميد الواجهة، ويسجّل
+        معرّف المهمة في جلسة المستخدم ليظهر بلوحة المهام بالأسفل."""
+        job_id = mgr.start(fn, label, **kwargs)
+        st.session_state.setdefault("vedit_job_ids", []).append(job_id)
+        st.toast(f"⏳ بدأت المهمة #{job_id} ({label}) بالخلفية", icon="⏳")
+        st.rerun()
+
     result_path = None
     try:
         if op == "📐 رفع الدقة (Upscale)":
@@ -115,12 +159,8 @@ def render_video_editor():
                 "مع AI: Real-ESRGAN على الإطارات ثم تجميع (قصير فقط)."
             )
             if st.button("رفع الدقة الآن", type="primary", key="vedit_up_run"):
-                with st.spinner(
-                    "يرفع الدقة بنماذج AI…" if use_ai else "يرفع الدقة محلياً…"
-                ):
-                    result_path = ve.upscale(
-                        work_path, target=target, crf=crf, use_ai=use_ai
-                    )
+                _start(ve.upscale, "رفع الدقة", path=work_path, target=target,
+                       crf=crf, use_ai=use_ai)
 
         elif op == "🎯 إعادة ترميز عالية الجودة (ffmpeg)":
             level = st.selectbox(
@@ -142,8 +182,8 @@ def render_video_editor():
                 key="vedit_q_vis",
             )
             if st.button("تطبيق جودة ffmpeg", type="primary", key="vedit_qboost"):
-                with st.spinner("إعادة ترميز…"):
-                    result_path = ve.quality_boost(work_path, level=level, visual=visual)
+                _start(ve.quality_boost, "إعادة ترميز عالية الجودة",
+                       path=work_path, level=level, visual=visual)
 
         elif op == "✨ تحسين ذكي بالذكاء":
             try:
@@ -166,10 +206,8 @@ def render_video_editor():
                 key="vedit_ai_hf",
             )
             if st.button("تطبيق التحسين الذكي", type="primary", key="vedit_ai_run"):
-                with st.spinner("يحسّن الفيديو…"):
-                    result_path = ve.ai_enhance(
-                        work_path, mode=mode, crf=crf, prefer_hf=prefer_ai
-                    )
+                _start(ve.ai_enhance, "تحسين ذكي بالذكاء", path=work_path,
+                       mode=mode, crf=crf, prefer_hf=prefer_ai)
 
         elif op == "قص (trim)":
             c_a, c_b = st.columns(2)
@@ -178,54 +216,51 @@ def render_video_editor():
             with c_b:
                 end = st.number_input("إلى (ث)", min_value=0.0, value=5.0, step=0.5)
             if st.button("تطبيق القص", type="primary"):
-                with st.spinner("قص…"):
-                    result_path = ve.trim(work_path, start=start, end=end if end > start else None)
+                _start(ve.trim, "قص", path=work_path, start=start,
+                       end=end if end > start else None)
 
         elif op == "تحجيم عمودي 9:16":
             if st.button("تحويل للشورتس 1080×1920", type="primary"):
-                with st.spinner("تحجيم…"):
-                    result_path = ve.to_shorts_vertical(work_path)
+                _start(ve.to_shorts_vertical, "تحجيم عمودي 9:16", path=work_path)
 
         elif op == "كتم الصوت":
             if st.button("كتم", type="primary"):
-                with st.spinner("كتم…"):
-                    result_path = ve.mute(work_path)
+                _start(ve.mute, "كتم الصوت", path=work_path)
 
         elif op == "استخراج صوت":
             fmt = st.selectbox("الصيغة", ["mp3", "wav", "m4a"])
             if st.button("استخراج", type="primary"):
-                with st.spinner("استخراج…"):
-                    result_path = ve.extract_audio(work_path, fmt=fmt)
+                _start(ve.extract_audio, "استخراج صوت", path=work_path, fmt=fmt)
 
         elif op == "تغيير السرعة":
             factor = st.slider("المعامل", 0.5, 2.0, 1.25, 0.05)
             if st.button("تطبيق السرعة", type="primary"):
-                with st.spinner("معالجة…"):
-                    result_path = ve.change_speed(work_path, factor=factor)
+                _start(ve.change_speed, "تغيير السرعة", path=work_path, factor=factor)
 
         elif op == "ضغط":
             crf = st.slider("CRF (أعلى = أصغر حجماً)", 18, 32, 28)
             if st.button("ضغط", type="primary"):
-                with st.spinner("ضغط…"):
-                    result_path = ve.compress(work_path, crf=crf)
+                _start(ve.compress, "ضغط", path=work_path, crf=crf)
 
         elif op == "صورة مصغّرة":
             at = st.number_input("عند الثانية", min_value=0.0, value=1.0, step=0.5)
             if st.button("استخراج إطار", type="primary"):
-                with st.spinner("إطار…"):
-                    result_path = ve.thumbnail(work_path, at_seconds=at)
+                _start(ve.thumbnail, "صورة مصغّرة", path=work_path, at_seconds=at)
 
         elif op == "دمج مع فيديو ثانٍ":
             up2 = st.file_uploader("الفيديو الثاني", type=["mp4", "mov", "webm"], key="vedit_up2")
             if up2 and st.button("دمج", type="primary"):
                 p2 = Path("/tmp") / f"nsm_upload2_{up2.name}"
                 p2.write_bytes(up2.getvalue())
-                with st.spinner("دمج…"):
-                    result_path = ve.concat([work_path, p2])
+                _start(ve.concat, "دمج فيديوهين", paths=[work_path, p2])
 
     except Exception as e:
         st.error(f"فشلت العملية: {e}")
         result_path = None
+
+    jobs_result_path = _render_jobs_panel(mgr)
+    if result_path is None:
+        result_path = jobs_result_path
 
     if result_path is not None and Path(result_path).is_file():
         st.success(f"✅ تم: `{result_path}`")
