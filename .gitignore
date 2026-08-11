@@ -89,5 +89,11 @@ artifacts/model_training/economic/
 artifacts/model_training/commercial/
 artifacts/model_training/civilization/
 
+# نقاط استئناف التدريب (checkpoints) وسجلات التشغيل والنماذج المُولَّدة محلياً
+artifacts/model_training/checkpoints/
+artifacts/model_training/training_runs.jsonl
+artifacts/model_training/*.pt
+artifacts/model_training/*.pkl
+
 .tools/
 

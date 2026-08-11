@@ -1362,6 +1362,8 @@ def _text_to_bow(texts: List[str], vocab_size: int = 512) -> np.ndarray:
 # ═══════════════════════════════════════════════════════════════════════════
 
 TRAINING_RUNS_LOG = ARTIFACTS / "training_runs.jsonl"
+CHECKPOINTS_DIR = ARTIFACTS / "checkpoints"
+CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
 _ALLOWED_DATA_ROOTS = (
     ROOT / "data",
     ROOT / "artifacts",
@@ -1430,6 +1432,183 @@ def _read_training_runs(limit: int = 30) -> List[dict]:
             except Exception:
                 continue
     return rows[-limit:]
+
+
+# ── Checkpoints / استئناف بعد الفشل / rollback ──────────────────────────────
+
+def _checkpoint_dir(run_id: str) -> Path:
+    d = CHECKPOINTS_DIR / run_id
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _save_checkpoint(
+    run_id: str,
+    epoch: int,
+    model,
+    optimizer,
+    val_loss: Optional[float],
+    best_val_loss: float,
+    history: List[float],
+    val_history: List[float],
+    task: str,
+    n_features: int,
+    batch_size: int,
+    is_best: bool = False,
+) -> None:
+    """يحفظ حالة التدريب الحالية (latest) وأفضل نسخة (best) بشكل منفصل."""
+    import torch
+
+    d = _checkpoint_dir(run_id)
+    payload = {
+        "epoch": int(epoch),
+        "model_state": model.state_dict(),
+        "optimizer_state": optimizer.state_dict(),
+        "val_loss": val_loss,
+        "best_val_loss": float(best_val_loss),
+        "history": list(history),
+        "val_history": list(val_history),
+        "task": task,
+        "n_features": int(n_features),
+        "batch_size": int(batch_size),
+        "ts": time.time(),
+    }
+    torch.save(payload, d / "latest.pt")
+    if is_best:
+        torch.save(payload, d / "best.pt")
+    meta = {k: v for k, v in payload.items() if k not in ("model_state", "optimizer_state")}
+    try:
+        with open(d / "meta.json", "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, default=str)
+    except Exception:
+        pass
+
+
+def _load_checkpoint(run_id: str, which: str = "latest") -> Optional[dict]:
+    import torch
+
+    p = _checkpoint_dir(run_id) / f"{which}.pt"
+    if not p.is_file():
+        return None
+    try:
+        return torch.load(p, map_location="cpu", weights_only=False)
+    except TypeError:
+        # إصدارات torch أقدم لا تدعم weights_only
+        return torch.load(p, map_location="cpu")
+    except Exception:
+        return None
+
+
+def find_resumable_run(path_str: Optional[str] = None, target_col: Optional[str] = None) -> Optional[str]:
+    """يبحث عن آخر مهمة (failed أو غير مكتملة) عندها checkpoint قابل للاستئناف."""
+    rows = _read_training_runs(limit=200)
+    for r in reversed(rows):
+        if path_str and r.get("path") != path_str:
+            continue
+        if target_col and r.get("target") != target_col:
+            continue
+        run_id = r.get("id")
+        if not run_id:
+            continue
+        if (_checkpoint_dir(run_id) / "latest.pt").is_file():
+            return run_id
+    return None
+
+
+def resume_training_mission(
+    path_str: Optional[str] = None,
+    target_col: Optional[str] = None,
+    epochs: int = 15,
+    run_id: Optional[str] = None,
+) -> str:
+    """
+    يستأنف آخر مهمة تدريب فاشلة/متوقفة من آخر checkpoint محفوظ،
+    بدل إعادة التدريب من الصفر.
+    """
+    if not run_id:
+        run_id = find_resumable_run(path_str=path_str, target_col=target_col)
+    if not run_id:
+        return (
+            "## ⚠️ لا يوجد ما يُستأنف\n\n"
+            "ما لقيت أي مهمة تدريب سابقة عندها checkpoint محفوظ "
+            "(الاستئناف مدعوم حالياً لمسار Torch MLP).\n"
+            "جرّب: `مهمة تدريب <ملف.csv> الهدف=<العمود> نفّذ` أولاً."
+        )
+    rows = _read_training_runs(limit=200)
+    src = next((r for r in reversed(rows) if r.get("id") == run_id), None)
+    if src is None:
+        return f"## ⚠️ لم يُعثر على سجل للمهمة `{run_id}` رغم وجود checkpoint."
+
+    ck_meta = _load_checkpoint(run_id, "latest") or {}
+    prev_epoch = int(ck_meta.get("epoch", 0))
+
+    resumed = dict(src)
+    resumed["status"] = "running"
+    resumed["ts"] = time.time()
+    resumed["resumed_from_epoch"] = prev_epoch
+    _append_training_run(resumed)
+
+    path_used = src.get("path")
+    target_used = src.get("target")
+    plan = src.get("plan") or {}
+    prefer = plan.get("engine") if plan.get("engine") in ("torch",) else "torch"
+
+    try:
+        path = _safe_resolve_data_path(path_used)
+        header, data = _load_csv_table(path)
+        bundle = _infer_target_and_matrix(header, data, target_col=target_used)
+        if bundle["feature_mode"] == "text":
+            raise ValueError("الاستئناف غير مدعوم بعد لبيانات نصية")
+        X = bundle["X"]
+        mu = X.mean(axis=0)
+        sig = X.std(axis=0) + 1e-8
+        X = (X - mu) / sig
+        y = bundle["y"]
+        result = train_torch_on_arrays(
+            X, y, bundle["task"], epochs=epochs, run_id=run_id, resume=True
+        )
+        done = dict(resumed)
+        done.update({"status": "completed", "ts": time.time(), "result_preview": (result or "")[:500]})
+        _append_training_run(done)
+        return (
+            f"## ▶️ استئناف مهمة `{run_id}` من الحقبة {prev_epoch}\n\n"
+            f"- الملف: `{path_used}` | الهدف: `{target_used}`\n\n---\n{result}"
+        )
+    except Exception as e:
+        fail = dict(resumed)
+        fail.update({"status": "failed", "ts": time.time(), "error": f"{type(e).__name__}: {e}"})
+        _append_training_run(fail)
+        return f"## ❌ فشل الاستئناف\n\n{type(e).__name__}: {e}"
+
+
+def rollback_to_best(run_id: Optional[str] = None) -> str:
+    """
+    يستعيد أفضل نسخة محفوظة (أقل val_loss) من آخر مهمة تدريب،
+    ويجعلها النموذج النهائي المحفوظ في قائمة النماذج المحفوظة.
+    """
+    import torch
+
+    if not run_id:
+        rows = _read_training_runs(limit=200)
+        for r in reversed(rows):
+            rid = r.get("id")
+            if rid and (_checkpoint_dir(rid) / "best.pt").is_file():
+                run_id = rid
+                break
+    if not run_id:
+        return "## ⚠️ لا توجد نسخة `best` محفوظة للرجوع إليها بعد."
+
+    best = _load_checkpoint(run_id, "best")
+    if best is None:
+        return f"## ⚠️ لا توجد نسخة `best` محفوظة للمهمة `{run_id}`."
+
+    outp = ARTIFACTS / f"rollback_best_{run_id}_{int(time.time())}.pt"
+    torch.save(best, outp)
+    return (
+        f"## ⏪ تم الرجوع لأفضل نسخة من المهمة `{run_id}`\n\n"
+        f"- أفضل val_loss: **{best.get('best_val_loss')}** عند الحقبة {best.get('epoch')}\n"
+        f"- محفوظة الآن كنموذج نهائي: `{outp.relative_to(ROOT)}`"
+    )
 
 
 def inspect_training_data(path_str: str, target_col: Optional[str] = None) -> dict:
@@ -1564,21 +1743,35 @@ def run_training_mission(
             target_col=info["target"],
             epochs=epochs,
             prefer=eng if eng in ("sklearn", "torch", "text", "cnn") else "auto",
+            run_id=run_id,
         )
         done = dict(base)
+        has_ckpt = (_checkpoint_dir(run_id) / "latest.pt").is_file()
         done.update({
             "status": "completed",
             "ts": time.time(),
             "engine": eng,
             "result_preview": (result or "")[:500],
+            "has_checkpoint": has_ckpt,
         })
         _append_training_run(done)
         return plan_txt + "\n\n---\n" + result
     except Exception as e:
         fail = dict(base)
-        fail.update({"status": "failed", "ts": time.time(), "error": f"{type(e).__name__}: {e}"})
+        has_ckpt = (_checkpoint_dir(run_id) / "latest.pt").is_file()
+        fail.update({
+            "status": "failed",
+            "ts": time.time(),
+            "error": f"{type(e).__name__}: {e}",
+            "has_checkpoint": has_ckpt,
+        })
         _append_training_run(fail)
-        return plan_txt + f"\n\n## ❌ فشل التنفيذ\n\n{type(e).__name__}: {e}"
+        note = (
+            f"\n\n> 💾 يوجد checkpoint محفوظ لهذه المهمة (`{run_id}`) — "
+            f"استخدم **استأنف التدريب** بدل البدء من الصفر."
+            if has_ckpt else ""
+        )
+        return plan_txt + f"\n\n## ❌ فشل التنفيذ\n\n{type(e).__name__}: {e}" + note
 
 
 def list_training_runs(limit: int = 15) -> str:
@@ -1613,6 +1806,8 @@ def train_from_csv(
     target_col: Optional[str] = None,
     epochs: int = 30,
     prefer: str = "auto",
+    run_id: Optional[str] = None,
+    resume: bool = False,
 ) -> str:
     """تدريب على ملف CSV من القرص (مسار نسبي أو مطلق داخل المشروع)."""
     try:
@@ -1702,8 +1897,12 @@ def train_from_csv(
                     )
                 )
             else:
-                # MLP على المصفوفة
-                results.append(train_torch_on_arrays(X, y, task, epochs=epochs))
+                # MLP على المصفوفة (يدعم checkpoint/استئناف عبر run_id)
+                results.append(
+                    train_torch_on_arrays(
+                        X, y, task, epochs=epochs, run_id=run_id, resume=resume
+                    )
+                )
         except Exception as e:
             results.append(f"torch فشل: {e}")
     elif use_torch and not _TORCH_OK:
@@ -1727,11 +1926,15 @@ def train_torch_on_arrays(
     y: np.ndarray,
     task: str,
     epochs: int = 25,
+    run_id: Optional[str] = None,
+    checkpoint_every: int = 5,
+    resume: bool = False,
 ) -> str:
     import torch
     import torch.nn as nn
 
     epochs = _sb_clamp_epochs(max(3, min(int(epochs), 120)))
+    checkpoint_every = max(1, int(checkpoint_every))
     device, dev_info = _gpu_torch_device()
     n_samples, n_features = int(X.shape[0]), int(X.shape[1])
     free_v = getattr(dev_info, "free_vram_gb", None) if dev_info else None
@@ -1759,8 +1962,8 @@ def train_torch_on_arrays(
             nn.Linear(32, n_out),
         ).to(device)
         opt = torch.optim.Adam(model.parameters(), lr=1e-3)
-        hist = []
-        val_hist = []
+        hist: List[float] = []
+        val_hist: List[float] = []
         stopped_early = False
         es = None
         if _SANDBOX_OK:
@@ -1771,10 +1974,28 @@ def train_torch_on_arrays(
                     es = EarlyStopping.from_config()
             except Exception:
                 es = _EarlyStopping.from_config() if _SANDBOX_OK else None
+
+        start_epoch = 0
+        best_val = float("inf")
+        resume_note = ""
+        if resume and run_id:
+            ck = _load_checkpoint(run_id, "latest")
+            if ck is not None and int(ck.get("n_features", -1)) == n_features and ck.get("task") == task:
+                try:
+                    model.load_state_dict(ck["model_state"])
+                    opt.load_state_dict(ck["optimizer_state"])
+                    start_epoch = int(ck.get("epoch", 0))
+                    hist = list(ck.get("history") or [])
+                    val_hist = list(ck.get("val_history") or [])
+                    best_val = float(ck.get("best_val_loss", float("inf")))
+                    resume_note = f" | استؤنف من الحقبة {start_epoch}"
+                except Exception:
+                    start_epoch = 0
+
         model.train()
-        actual_epochs = 0
+        actual_epochs = start_epoch
         tr_idx = tr
-        for ep in range(epochs):
+        for ep in range(start_epoch, start_epoch + epochs):
             model.train()
             # mini-batches
             perm = np.random.permutation(tr_idx)
@@ -1800,9 +2021,30 @@ def train_torch_on_arrays(
                 v_loss = float(loss_fn(v_out, y_t[te]).item())
             model.train()
             val_hist.append(v_loss)
+            is_best = v_loss < best_val
+            if is_best:
+                best_val = v_loss
+            if run_id and (actual_epochs % checkpoint_every == 0 or is_best):
+                try:
+                    _save_checkpoint(
+                        run_id, actual_epochs, model, opt, v_loss, best_val,
+                        hist, val_hist, task, n_features, batch_size, is_best=is_best,
+                    )
+                except Exception:
+                    pass
             if es is not None and es.step(v_loss):
                 stopped_early = True
                 break
+        if run_id:
+            try:
+                last_v = val_hist[-1] if val_hist else None
+                _save_checkpoint(
+                    run_id, actual_epochs, model, opt, last_v, best_val,
+                    hist, val_hist, task, n_features, batch_size,
+                    is_best=(last_v is not None and last_v <= best_val),
+                )
+            except Exception:
+                pass
         model.eval()
         with torch.no_grad():
             out = model(X_t[te])
@@ -1837,11 +2079,13 @@ def train_torch_on_arrays(
         dev_note = f" | device={device}"
         if dev_info is not None:
             dev_note += f" ({getattr(dev_info, 'reason', '')})"
+        ckpt_note = f" | checkpoint كل {checkpoint_every} حقب → `{run_id}`" if run_id else ""
         return (
             f"## ✅ Torch MLP على بيانات حقيقية\n"
-            f"- {mname}={metric:.4f} | planned={epochs}{es_note} | features={n_features} | batch={batch_size}{dev_note}\n"
+            f"- {mname}={metric:.4f} | planned={epochs}{es_note}{resume_note} | features={n_features} | batch={batch_size}{dev_note}\n"
             f"- train loss: {', '.join(f'{x:.4f}' for x in hist[-5:])}\n"
             f"- val loss: {', '.join(f'{x:.4f}' for x in val_hist[-5:])}\n"
+            f"- best val_loss حتى الآن: **{best_val:.4f}**{ckpt_note}\n"
             f"- `{outp.relative_to(ROOT)}`"
         )
 
@@ -2536,6 +2780,36 @@ def handle_training_command(user_input: str) -> Optional[str]:
         re.I,
     ):
         return list_training_runs()
+
+    # استئناف التدريب من آخر checkpoint بعد فشل
+    if re.search(
+        r"(استأنف|استكمل|أكمل)\s*(ال)?تدريب|resume\s*training|continue\s*training",
+        text,
+        re.I,
+    ):
+        target = None
+        mt = re.search(r"(?:هدف|target|label)\s*[=:]\s*([\w\u0600-\u06FF]+)", text, re.I)
+        if mt:
+            target = mt.group(1)
+        path_csv = None
+        mp = re.search(r"((?:[\w./\\-]+/)*[\w.-]+\.csv)", text, re.I)
+        if mp:
+            path_csv = mp.group(1)
+        epochs = 15
+        me = re.search(r"(\d+)\s*(حقب|epochs?)", text, re.I)
+        if me:
+            epochs = int(me.group(1))
+        return resume_training_mission(path_str=path_csv, target_col=target, epochs=epochs)
+
+    # الرجوع لأفضل نسخة محفوظة (rollback)
+    if re.search(
+        r"(ارجع|استرجع|رجّع)\s*(ل|إلى)?\s*أفضل\s*(نموذج|نسخة)|rollback\s*(to\s*)?best|"
+        r"استعد\s*أفضل",
+        text,
+        re.I,
+    ):
+        m_run = re.search(r"run_\d+", text)
+        return rollback_to_best(run_id=m_run.group(0) if m_run else None)
 
     # مهمة تدريب موحّدة (معاينة افتراضياً)
     m_mission = re.search(
