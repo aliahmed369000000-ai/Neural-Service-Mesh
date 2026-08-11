@@ -47,6 +47,21 @@ def render_agent_orchestrator():
         key="orch_manual_agents",
     )
 
+    # 🆕 كان أقصى عدد وكلاء للتوجيه التلقائي مثبَّتاً في الكود (max_agents=2)،
+    # فأي مهمة مركّبة تحتاج فعلياً 3+ وكلاء (مثال: بحث + تحليل + برمجة) كانت
+    # تُقتَص تلقائياً لوكيلين فقط دون أي طريقة للمستخدم للتحكم بذلك. الآن
+    # قابل للتعديل (1 إلى إجمالي عدد الفئات المتاحة)، ويُعطَّل تلقائياً عند
+    # الاختيار اليدوي لأنه غير ذي صلة في تلك الحالة.
+    max_agents = st.slider(
+        "🎚️ أقصى عدد وكلاء للتوجيه التلقائي:",
+        min_value=1,
+        max_value=len(CATEGORY_ORDER),
+        value=2,
+        key="orch_max_agents",
+        disabled=bool(manual),
+        help="يُستخدَم فقط عند التوجيه التلقائي (بدون اختيار يدوي أعلاه). ارفعه للمهام المركّبة التي تحتاج أكثر من وكيلين.",
+    )
+
     task = st.text_area(
         "المهمة أو السؤال:",
         placeholder="مثال: راجع خطة إطلاق ميزة جديدة من ناحية الأتمتة والتحليل والمخاطر",
@@ -74,11 +89,12 @@ def render_agent_orchestrator():
     )
 
     if st.button("🚀 نفّذ عبر الوكلاء", type="primary", key="orch_run") and task.strip():
+        _route_scores: Dict[str, int] = {}
         if manual:
             selected, route_method = manual, "manual"
         else:
             selected, route_method, _route_scores = route_query_verbose(
-                task.strip(), AGENT_CATEGORIES, max_agents=2
+                task.strip(), AGENT_CATEGORIES, max_agents=max_agents
             )
         if not selected:
             st.warning("لم يتم تحديد أي وكيل مناسب تلقائياً. اختر وكلاء يدوياً من القائمة أعلاه.")
@@ -96,6 +112,21 @@ def render_agent_orchestrator():
                     f"{AGENT_CATEGORIES[k].emoji} {AGENT_CATEGORIES[k].title}" for k in selected
                 )
             )
+            # 🆕 شفافية التوجيه: route_query_verbose كان أصلاً يُرجِع نقاط تطابق
+            # الكلمات المفتاحية لكل فئة (_route_scores) لكن الواجهة لم تكن تعرضها
+            # إطلاقاً — المستخدم لا يعرف لماذا اختير وكيل معيّن أو مدى قرب/بُعد
+            # المنافسين. تُعرض هنا فقط عند التوجيه التلقائي (لا معنى لها يدوياً).
+            if route_method in ("keyword", "llm", "default") and _route_scores:
+                _sorted_scores = sorted(
+                    _route_scores.items(), key=lambda kv: kv[1], reverse=True
+                )
+                with st.expander("🔎 تفصيل نقاط التوجيه", expanded=False):
+                    for _sk, _sv in _sorted_scores:
+                        _mark = "✅" if _sk in selected else "▫️"
+                        st.caption(
+                            f"{_mark} {AGENT_CATEGORIES[_sk].emoji} "
+                            f"{AGENT_CATEGORIES[_sk].title} — {_sv} تطابق"
+                        )
             responses: Dict[str, str] = {}
             failed_keys: set = set()
             final_answer: Optional[str] = None
