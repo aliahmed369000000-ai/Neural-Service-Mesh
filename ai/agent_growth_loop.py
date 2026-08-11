@@ -37,6 +37,7 @@ SAFE_TOOLS = {
     "moe_health",
     "read_key_files",
     "integration_status",
+    "orphan_scan",  # 🆕 فحص وحدات ai/*.py غير المُشار إليها من بقية المشروع
 }
 
 _DANGEROUS = re.compile(
@@ -230,6 +231,9 @@ def decompose_goal(goal: str) -> Dict[str, Any]:
     if re.search(r"دمج|bridge|وكيل|agent", g, re.I):
         steps.append("حالة تكامل الوكلاء")
         tools.append("integration_status")
+    if re.search(r"يتيم|orphan|غير\s*مستخدمة|غير\s*موصولة|وحدات\s*ميتة|dead\s*code", g, re.I):
+        steps.append("فحص وحدات ai/*.py اليتيمة (غير المُشار إليها)")
+        tools.append("orphan_scan")
     if not tools:
         tools.append("inspect_project")
         steps.append("تقرير حالة عامة")
@@ -377,6 +381,97 @@ def _tool_read_key_files() -> str:
     return "\n".join(lines)
 
 
+# ── 🆕 فحص الوحدات اليتيمة (orphan modules) ─────────────────────────────────
+# أتمتة لعملية كانت تُجرى يدوياً سابقاً (تحليل AST/نصي لاكتشاف وحدات ai/*.py
+# غير موصولة بأي مكان في المشروع). فحص إرشادي (heuristic) وليس حاسماً — قراءة
+# فقط، لا يحذف أو يعدّل أي شيء، ولا يقرر بنفسه أن وحدة "ميتة"؛ فقط يرشّح
+# مرشّحات تحتاج مراجعة بشرية (بعض الوحدات "مرجع متعمَّد" أو "خامل عمداً" رغم
+# عدم استيرادها الآن، كما هو موثّق في المشروع لوحدات معيّنة).
+_ORPHAN_SCAN_DIRS = ("ai", "ui_pages", "knowledge", "tests", "mcp_server")
+_ORPHAN_SCAN_ROOT_FILES = ("streamlit_app.py", "nsm_chat.py")
+_ORPHAN_IGNORED_DIRS = {"__pycache__", ".git"}
+
+
+def _tool_orphan_scan() -> str:
+    ai_dir = ROOT / "ai"
+    if not ai_dir.is_dir():
+        return "لا يوجد مجلد ai/"
+
+    # اجمع كل ملفات .py ذات الصلة في المشروع مرة واحدة (وليس لكل وحدة على
+    # حدة) لتفادي إعادة قراءة نفس الملفات مئات المرات.
+    scan_files: List[Path] = []
+    for d in _ORPHAN_SCAN_DIRS:
+        base = ROOT / d
+        if base.is_dir():
+            scan_files.extend(
+                p for p in base.rglob("*.py")
+                if not any(part in _ORPHAN_IGNORED_DIRS for part in p.parts)
+            )
+    # كل ملفات .py في جذر المشروع مباشرة (وليس فقط قائمة ثابتة) — كان
+    # app_core.py مثلاً مفقوداً من المسح رغم أنه يستورد وحدات ai/ فعلياً،
+    # ما سبّب نتائج إيجابية كاذبة (وحدة مُشار إليها من app_core.py تُصنَّف
+    # يتيمة خطأً لأننا لم نفحص app_core.py أصلاً).
+    for p in ROOT.glob("*.py"):
+        if p not in scan_files:
+            scan_files.append(p)
+
+    # اقرأ كل ملف مرة واحدة فقط
+    texts: Dict[Path, str] = {}
+    for p in scan_files:
+        try:
+            texts[p] = p.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            texts[p] = ""
+
+    # 🆕 ملفات test_*.py داخل ai/ تُكتشف وتُشغَّل عبر pytest مباشرة (discovery
+    # بالاسم)، وليس عبر import من وحدة أخرى — عدم استيرادها طبيعي ومتوقَّع
+    # وليس مؤشر يُتم؛ استبعادها يمنع تقريراً مضلِّلاً بالكامل.
+    ai_modules = sorted(
+        p for p in ai_dir.glob("*.py")
+        if p.name != "__init__.py" and not p.name.startswith("test_")
+    )
+
+    orphans: List[str] = []
+    for mod_path in ai_modules:
+        mod_name = mod_path.stem
+        dotted = f"ai.{mod_name}"
+        # نبحث عن: استيراد نقطي مباشر (ai.module)، أو الاسم كسلسلة نصية
+        # (يلتقط الاستيراد الديناميكي عبر __import__ أو جداول أسماء، وهو
+        # نمط موجود فعلياً في هذا المشروع — انظر agent_integration_status)
+        needles = (dotted, f'"{mod_name}"', f"'{mod_name}'")
+        referenced = False
+        for other_path, text in texts.items():
+            if other_path == mod_path:
+                continue
+            if any(n in text for n in needles):
+                referenced = True
+                break
+        if not referenced:
+            orphans.append(mod_name)
+
+    lines = [
+        "## 🔍 فحص الوحدات اليتيمة (ai/*.py)",
+        "",
+        f"- وحدات مفحوصة: **{len(ai_modules)}**",
+        f"- مرشّحة كـ«يتيمة»: **{len(orphans)}**",
+        "",
+    ]
+    if orphans:
+        lines.append("### مرشّحات (تحتاج مراجعة يدوية قبل أي قرار):")
+        for o in orphans:
+            lines.append(f"- `ai/{o}.py`")
+        lines.append("")
+        lines.append(
+            "⚠️ فحص نصي/استيراد ثابت (static) — لا يلتقط كل أنماط الاستيراد "
+            "الديناميكي المعقّد (مثل بناء اسم الوحدة من متغيّر وقت التشغيل)، "
+            "وبعض الوحدات قد تكون خاملة أو مرجعية عمداً. **لا تحذف أي ملف "
+            "بناءً على هذا التقرير وحده.**"
+        )
+    else:
+        lines.append("✅ لا مرشّحات — كل وحدات ai/*.py مُشار إليها من مكان ما في المشروع.")
+    return "\n".join(lines)
+
+
 def execute_tool(name: str) -> Tuple[bool, str]:
     if name not in SAFE_TOOLS:
         return False, f"أداة غير مسموحة: {name}"
@@ -396,7 +491,9 @@ def execute_tool(name: str) -> Tuple[bool, str]:
         return True, _tool_integration_status()
     if name == "read_key_files":
         return True, _tool_read_key_files()
-    return False, f"غير منفَّذ: {name}"
+    if name == "orphan_scan":
+        return True, _tool_orphan_scan()
+    return False, f"غير منفَّذ: {name}"
 
 
 def evaluate_mission(results: List[Tuple[str, bool, str]]) -> Dict[str, Any]:
@@ -477,6 +574,7 @@ def growth_status() -> str:
         "- `نفّذ بأمان: <هدف>` — تنفيذ خطوات آمنة + اختبارات محدودة",
         "- `خبرات الوكيل` — آخر الخبرات",
         "- `طوّر الوكيل` — دورة نمو افتراضية (فحص + اختبارات)",
+        "- `افحص الوحدات اليتيمة` — 🆕 وحدات ai/*.py غير مُشار إليها من أي مكان",
         "",
         "💡 يمكنك أيضاً: `افحص المشروع` · `شغّل الاختبارات` · `مساعدة`",
     ]
@@ -551,5 +649,11 @@ def handle_growth_command(user_input: str) -> Optional[str]:
         return run_safe_mission("افحص المشروع", execute=True)
     if re.search(r"(شغ[ّ]?ل|run).{0,8}(اختبار|test)", text, re.I) and len(text) < 40:
         return run_safe_mission("شغّل اختبارات آمنة", execute=True)
+    # 🆕 أمر مباشر لفحص الوحدات اليتيمة
+    if (
+        re.search(r"^(افحص|فحص)?\s*(الوحدات\s*اليتيمة|الملفات\s*اليتيمة|orphan\s*(scan|modules)?)$", text, re.I)
+        and len(text) < 40
+    ):
+        return run_safe_mission("افحص الوحدات اليتيمة في ai", execute=True)
 
     return None
