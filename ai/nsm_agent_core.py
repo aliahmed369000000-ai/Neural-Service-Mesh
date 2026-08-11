@@ -1311,12 +1311,20 @@ def _stream_steps(
                 # هذا التنبيه لا يُسند إلى result عمداً كي لا يُشعِل
                 # self-healing (تعديل الكود لن يُضيف السرّ الناقص).
                 if not _is_failure(result):
-                    try:
-                        _env_after_content = (ROOT / _step_path).read_text(
-                            encoding="utf-8", errors="replace"
-                        )
-                    except Exception:
-                        _env_after_content = ""
+                    # 🆕 أداء: لـ create_file المحتوى الفعلي المكتوب على القرص
+                    # موجود أصلاً في step["content"] (نفس ما كُتب حرفياً) —
+                    # إعادة قراءته من القرش هنا كانت I/O مكرراً بلا فائدة.
+                    # edit_file فقط يحتاج القراءة (لا نملك النص الكامل الجديد
+                    # في الذاكرة، فقط old/new الجزئيين).
+                    if _step_action == "create_file":
+                        _env_after_content = step.get("content", "")
+                    else:
+                        try:
+                            _env_after_content = (ROOT / _step_path).read_text(
+                                encoding="utf-8", errors="replace"
+                            )
+                        except Exception:
+                            _env_after_content = ""
                     _env_warning = _detect_missing_env_vars(
                         _step_path, _env_before_content, _env_after_content
                     )
