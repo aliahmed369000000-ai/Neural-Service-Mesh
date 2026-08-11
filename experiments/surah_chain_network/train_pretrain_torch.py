@@ -60,6 +60,9 @@ N_POST = int(os.environ.get("SCN_N_POST", "2"))
 BASE_LR = float(os.environ.get("SCN_LR", "1e-3"))
 MAX_LEN = int(os.environ.get("SCN_MAX_LEN", "96"))
 COMPILE = os.environ.get("SCN_COMPILE", "0") == "1"
+# تحسينات الانتباه (لا تمس سلسلة السور)
+USE_QK_NORM = os.environ.get("SCN_QK_NORM", "1") == "1"
+USE_GATED_ATTN = os.environ.get("SCN_GATED_ATTN", "1") == "1"
 WARMUP_RATIO = 0.1
 PATIENCE = int(os.environ.get("SCN_EXPAND_PATIENCE", "2"))
 MAX_EXPANDS = int(os.environ.get("SCN_MAX_EXPANDS", "5"))
@@ -157,7 +160,10 @@ def main():
         n_pre=N_PRE,
         n_post=N_POST,
         compile_model=COMPILE,
+        use_qk_norm=USE_QK_NORM,
+        use_gated_attn=USE_GATED_ATTN,
     )
+    print(f"QK-Norm={USE_QK_NORM} | Gated-Attention={USE_GATED_ATTN}")
 
     if resume_path is not None:
         print(f"استكمال من: {resume_path}")

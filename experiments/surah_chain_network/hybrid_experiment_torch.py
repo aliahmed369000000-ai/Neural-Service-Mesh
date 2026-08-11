@@ -190,39 +190,60 @@ class SurahChainNetwork(nn.Module):
 
 
 class CausalSelfAttention(nn.Module):
-    """انتباه سببي عبر scaled_dot_product_attention (أسرع)."""
+    """
+    انتباه سببي عبر SDPA مع تحسينات اختيارية:
+      - QK-Norm: تطبيع Q و K لكل رأس (استقرار)
+      - Gated Attention (NeurIPS 2025): بوابة sigmoid بعد SDPA لكل رأس
+    لا تمس سلسلة السور — فقط مسار الانتباه.
+    """
 
-    def __init__(self, d_model: int, n_heads: int, dropout: float = 0.1):
+    def __init__(
+        self,
+        d_model: int,
+        n_heads: int,
+        dropout: float = 0.1,
+        use_qk_norm: bool = True,
+        use_gated_attn: bool = True,
+    ):
         super().__init__()
         assert d_model % n_heads == 0
         self.n_heads = n_heads
         self.d_head = d_model // n_heads
+        self.use_qk_norm = use_qk_norm
+        self.use_gated_attn = use_gated_attn
         self.qkv = nn.Linear(d_model, 3 * d_model, bias=False)
         self.proj = nn.Linear(d_model, d_model, bias=False)
         self.dropout = dropout
         self.resid_drop = nn.Dropout(dropout)
 
+        if use_qk_norm:
+            if hasattr(nn, "RMSNorm"):
+                self.q_norm = nn.RMSNorm(self.d_head)
+                self.k_norm = nn.RMSNorm(self.d_head)
+            else:
+                self.q_norm = nn.LayerNorm(self.d_head)
+                self.k_norm = nn.LayerNorm(self.d_head)
+
+        if use_gated_attn:
+            # bias=+2 ⇒ sigmoid≈0.88 عند البداية (قريب من السلوك القديم)
+            self.attn_gate = nn.Linear(d_model, n_heads, bias=True)
+            nn.init.zeros_(self.attn_gate.weight)
+            nn.init.constant_(self.attn_gate.bias, 2.0)
+
     def forward(self, x: torch.Tensor, key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        # x: (B, S, D)  key_padding_mask: (B, S) True = PAD
         B, S, D = x.shape
         qkv = self.qkv(x).reshape(B, S, 3, self.n_heads, self.d_head)
         qkv = qkv.permute(2, 0, 3, 1, 4)  # (3, B, H, S, dh)
         q, k, v = qkv[0], qkv[1], qkv[2]
 
-        # SDPA: is_causal=True أسرع من mask يدوي
+        if self.use_qk_norm:
+            q = self.q_norm(q)
+            k = self.k_norm(k)
+
         drop_p = self.dropout if self.training else 0.0
-        # attn_mask for padding: True means "ignore" in SDPA float mask convention differs;
-        # use key padding by setting k/v positions - we use additive mask
         if key_padding_mask is not None:
-            # (B, S) True=pad -> (B, 1, 1, S)
             pad = key_padding_mask[:, None, None, :]
-            # float mask: -inf where pad
-            attn_bias = torch.zeros(B, 1, 1, S, device=x.device, dtype=q.dtype)
-            attn_bias = attn_bias.masked_fill(pad, float("-inf"))
-            # combine with causal via is_causal only when no pad is tricky;
-            # build full causal+pad mask
             causal = torch.triu(torch.ones(S, S, device=x.device, dtype=torch.bool), diagonal=1)
-            # (1, 1, S, S)
             full = causal[None, None, :, :]
             bias = torch.zeros(B, 1, S, S, device=x.device, dtype=q.dtype)
             bias = bias.masked_fill(full, float("-inf"))
@@ -231,15 +252,35 @@ class CausalSelfAttention(nn.Module):
         else:
             y = F.scaled_dot_product_attention(q, k, v, is_causal=True, dropout_p=drop_p)
 
+        # y: (B, H, S, dh)
+        if self.use_gated_attn:
+            g = torch.sigmoid(self.attn_gate(x))  # (B, S, H)
+            g = g.permute(0, 2, 1).unsqueeze(-1)  # (B, H, S, 1)
+            y = y * g
+
         y = y.transpose(1, 2).contiguous().reshape(B, S, D)
         return self.resid_drop(self.proj(y))
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, d_model: int, n_heads: int, d_ff: int, dropout: float = 0.1):
+    def __init__(
+        self,
+        d_model: int,
+        n_heads: int,
+        d_ff: int,
+        dropout: float = 0.1,
+        use_qk_norm: bool = True,
+        use_gated_attn: bool = True,
+    ):
         super().__init__()
         self.ln1 = nn.LayerNorm(d_model)
-        self.attn = CausalSelfAttention(d_model, n_heads, dropout)
+        self.attn = CausalSelfAttention(
+            d_model,
+            n_heads,
+            dropout,
+            use_qk_norm=use_qk_norm,
+            use_gated_attn=use_gated_attn,
+        )
         self.ln2 = nn.LayerNorm(d_model)
         self.ffn = nn.Sequential(
             nn.Linear(d_model, d_ff),
@@ -265,6 +306,8 @@ class SurahChainLM(nn.Module):
         n_post: int = DEFAULT_N_POST,
         dropout: float = 0.1,
         max_seq: int = DEFAULT_MAX_CTX,
+        use_qk_norm: bool = True,
+        use_gated_attn: bool = True,
     ):
         super().__init__()
         if d_model % n_heads != 0:
@@ -275,6 +318,8 @@ class SurahChainLM(nn.Module):
         self.n_heads = n_heads
         self.n_pre = n_pre
         self.n_post = n_post
+        self.use_qk_norm = use_qk_norm
+        self.use_gated_attn = use_gated_attn
 
         self.tok_emb = nn.Embedding(vocab_size, d_model, padding_idx=0)
         self.pos_emb = nn.Embedding(max_seq, d_model)
@@ -283,17 +328,44 @@ class SurahChainLM(nn.Module):
 
         d_ff = d_model * 4
         self.pre_blocks = nn.ModuleList(
-            [TransformerBlock(d_model, n_heads, d_ff, dropout) for _ in range(n_pre)]
+            [
+                TransformerBlock(
+                    d_model,
+                    n_heads,
+                    d_ff,
+                    dropout,
+                    use_qk_norm=use_qk_norm,
+                    use_gated_attn=use_gated_attn,
+                )
+                for _ in range(n_pre)
+            ]
         )
         self.chain = SurahChainNetwork(LAYER_DIMS)
         self.W_in = nn.Linear(d_model, CHAIN_WIDTH)
         self.W_out = nn.Linear(CHAIN_WIDTH, d_model)
         self.W_skip = nn.Linear(d_model, d_model, bias=False)
         self.post_blocks = nn.ModuleList(
-            [TransformerBlock(d_model, n_heads, d_ff, dropout) for _ in range(n_post)]
+            [
+                TransformerBlock(
+                    d_model,
+                    n_heads,
+                    d_ff,
+                    dropout,
+                    use_qk_norm=use_qk_norm,
+                    use_gated_attn=use_gated_attn,
+                )
+                for _ in range(n_post)
+            ]
         )
         self.ln_f = nn.LayerNorm(d_model)
         self.apply(self._init_weights)
+        # أعد تهيئة بوابات الانتباه بعد apply (حتى لا يصفّر _init_weights الـbias)
+        if use_gated_attn:
+            for blk in list(self.pre_blocks) + list(self.post_blocks):
+                gate = getattr(blk.attn, "attn_gate", None)
+                if gate is not None:
+                    nn.init.zeros_(gate.weight)
+                    nn.init.constant_(gate.bias, 2.0)
 
     @staticmethod
     def _init_weights(m):
@@ -365,11 +437,15 @@ class HybridExperimentModelTorch:
         device: Optional[Union[str, torch.device]] = None,
         max_seq: int = DEFAULT_MAX_CTX,
         compile_model: bool = False,
+        use_qk_norm: bool = True,
+        use_gated_attn: bool = True,
     ):
         self.device = torch.device(device) if device else get_device()
         self.base_lr = lr
         self.lr = lr
         self.vocab_size = vocab_size
+        self.use_qk_norm = use_qk_norm
+        self.use_gated_attn = use_gated_attn
         self.tokenizer = StrongTokenizer(vocab_size)
         self.model = SurahChainLM(
             vocab_size=vocab_size,
@@ -378,6 +454,8 @@ class HybridExperimentModelTorch:
             n_pre=n_pre,
             n_post=n_post,
             max_seq=max_seq,
+            use_qk_norm=use_qk_norm,
+            use_gated_attn=use_gated_attn,
         ).to(self.device)
 
         if compile_model and hasattr(torch, "compile"):
@@ -410,6 +488,8 @@ class HybridExperimentModelTorch:
                 n_pre=core.n_pre,
                 n_post=core.n_post,
                 max_seq=core.max_seq,
+                use_qk_norm=getattr(core, "use_qk_norm", self.use_qk_norm),
+                use_gated_attn=getattr(core, "use_gated_attn", self.use_gated_attn),
             )
             self.model = SurahChainLM(**cfg).to(self.device)
             self._compiled = False
@@ -575,6 +655,8 @@ class HybridExperimentModelTorch:
             "n_pre": core.n_pre,
             "n_post": core.n_post,
             "max_seq": getattr(core, "max_seq", DEFAULT_MAX_CTX),
+            "use_qk_norm": bool(getattr(core, "use_qk_norm", True)),
+            "use_gated_attn": bool(getattr(core, "use_gated_attn", True)),
             "lr": self.lr,
             "tokenizer": {
                 "word_to_id": self.tokenizer.word_to_id,
@@ -605,6 +687,24 @@ class HybridExperimentModelTorch:
         want_pre = int(ckpt.get("n_pre", DEFAULT_N_PRE))
         want_post = int(ckpt.get("n_post", DEFAULT_N_POST))
         want_max = int(ckpt.get("max_seq", DEFAULT_MAX_CTX))
+        sd = ckpt.get("model") or {}
+        # اكتشاف الميزات من الـcheckpoint (توافق مع أوزان قديمة بدون QK-Norm/Gated)
+        if "use_qk_norm" in ckpt:
+            want_qk = bool(ckpt["use_qk_norm"])
+        else:
+            want_qk = any("q_norm" in k for k in sd)
+        if "use_gated_attn" in ckpt:
+            want_gate = bool(ckpt["use_gated_attn"])
+        else:
+            want_gate = any("attn_gate" in k for k in sd)
+        # إن طُلبت الميزات الجديدة عبر الكائن الحالي رغم غيابها في ckpt → ترقية جزئية
+        if self.use_qk_norm and not want_qk:
+            want_qk = True
+        if self.use_gated_attn and not want_gate:
+            want_gate = True
+        self.use_qk_norm = want_qk
+        self.use_gated_attn = want_gate
+
         core = getattr(self.model, "_orig_mod", self.model)
         need_rebuild = (
             getattr(core, "d_model", None) != want_d
@@ -612,6 +712,8 @@ class HybridExperimentModelTorch:
             or getattr(core, "n_pre", None) != want_pre
             or getattr(core, "n_post", None) != want_post
             or core.tok_emb.num_embeddings < self.vocab_size
+            or bool(getattr(core, "use_qk_norm", False)) != want_qk
+            or bool(getattr(core, "use_gated_attn", False)) != want_gate
         )
         if need_rebuild:
             self.model = SurahChainLM(
@@ -621,6 +723,8 @@ class HybridExperimentModelTorch:
                 n_pre=want_pre,
                 n_post=want_post,
                 max_seq=want_max,
+                use_qk_norm=want_qk,
+                use_gated_attn=want_gate,
             ).to(self.device)
             self._compiled = False
             self.opt = torch.optim.AdamW(
@@ -628,12 +732,15 @@ class HybridExperimentModelTorch:
             )
             core = self.model
 
-        # تحميل الأوزان (قد تفشل جزئياً إن توسّعت السلسلة — نحاول strict=False)
+        # تحميل الأوزان (جزئي مقبول عند ترقية QK-Norm/Gated أو توسيع السلسلة)
         try:
             core.load_state_dict(ckpt["model"], strict=True)
         except RuntimeError:
             missing, unexpected = core.load_state_dict(ckpt["model"], strict=False)
-            print(f"تحذير: تحميل جزئي (missing={len(missing)}, unexpected={len(unexpected)})")
+            print(
+                f"تحذير: تحميل جزئي (missing={len(missing)}, unexpected={len(unexpected)}) "
+                f"— طبيعي عند تفعيل QK-Norm/Gated Attention لأول مرة"
+            )
         core.to(self.device)
 
         if load_optimizer and "optimizer" in ckpt:

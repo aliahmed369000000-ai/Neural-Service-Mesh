@@ -201,3 +201,18 @@ SCN_FRESH=1 SCN_N=30000 SCN_EPOCHS=5 ...
 - `SCN_EPOCHS` عند الاستكمال = **حقب إضافية** (ليس الإجمالي)
 - يُحفظ `latest` كل عصر + حالة الـoptimizer داخل الـcheckpoint
 - checkpoints القديمة بدون meta تُستكمل عبر `pretrain_torch_state.json`
+
+### تحسينات الانتباه (2026)
+
+بدون المساس بسلسلة السور:
+
+| المتغير | الافتراضي | المعنى |
+|---------|-----------|--------|
+| `SCN_QK_NORM=1` | مفعّل | تطبيع Q و K داخل الانتباه |
+| `SCN_GATED_ATTN=1` | مفعّل | Gated Attention (NeurIPS 2025) بعد SDPA |
+
+```bash
+# استكمال مع التحسينات الجديدة (تحميل جزئي للأوزان القديمة طبيعي)
+SCN_N=30000 SCN_EPOCHS=10 SCN_QK_NORM=1 SCN_GATED_ATTN=1 \
+  python experiments/surah_chain_network/train_pretrain_torch.py
+```
