@@ -45,7 +45,8 @@ from ui_pages.swarm_studio import render_swarm_studio
 # ═══════════════════════════════════════════════════════════════════════════
 # 🆕 دوال تجميع التبويبات — تدمج تبويبات متشابهة عبر تبويبات فرعية (sub-tabs)
 # بدون حذف أي وظيفة أصلية؛ كل دالة render_ القديمة تبقى كما هي وتُستدعى
-# من الداخل فقط، لتقليل عدد التبويبات الرئيسية من 21 إلى 12.
+# من الداخل فقط، لتقليل عدد التبويبات الرئيسية من 21 إلى 6 (+ ℹ️ عن NSM
+# وتبويبَي المالك ⚙️ النظام/🧪 أدوات متقدمة الظاهرين فقط بعد فتح وضع المالك).
 # ═══════════════════════════════════════════════════════════════════════════
 
 def render_knowledge_hub():
@@ -72,6 +73,34 @@ def render_agents_group():
     with sub[3]: render_swarm_studio()
 
 
+
+
+def render_creative_hub():
+    """🎨 المحتوى الإبداعي: يجمع إبداع (Fable) + Higgsfield + الوكيل الاجتماعي + الترجمة."""
+    st.markdown(
+        '<div class="nsm-section-title">🎨 المحتوى الإبداعي</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption("قصص وسيناريوهات · فيديو Higgsfield · نشر اجتماعي · ترجمة")
+    sub = st.tabs(["🎭 إبداع", "🎬 Higgsfield", "📡 الوكيل الاجتماعي", "🌐 ترجمة"])
+    with sub[0]: render_fable()
+    with sub[1]: render_higgsfield()
+    with sub[2]: render_social_agent()
+    with sub[3]: render_translate()
+
+
+def render_training_ops_hub():
+    """🎓 التدريب والعمليات: يجمع التدريب + MoE والوكيل + AIaaS والاقتصاد + عمليات التدريب."""
+    st.markdown(
+        '<div class="nsm-section-title">🎓 التدريب والعمليات</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption("تدريب النماذج · خليط الخبراء ونمو الوكيل · AIaaS والاقتصاد · لوحة عمليات التدريب")
+    sub = st.tabs(["🎓 التدريب", "🧩 MoE والوكيل", "☁️ AIaaS والاقتصاد", "📡 عمليات التدريب"])
+    with sub[0]: render_training()
+    with sub[1]: render_moe_agent_studio()
+    with sub[2]: render_aiaas_economy_hub()
+    with sub[3]: render_training_ops_dashboard()
 
 
 def render_system_group():
@@ -218,7 +247,7 @@ def main():
             ("📚 المعرفة", "📚 المعرفة"),
             ("💬 المحادثة", "💬 المحادثة"),
             ("🤖 الوكلاء", "🤖 الوكلاء"),
-            ("🎭 إبداع", "🎭 إبداع"),
+            ("🎨 إبداع", "🎨 المحتوى الإبداعي"),
         ]
         _nav_cols = st.columns(2)
         for _ni, (_nlabel, _ntarget) in enumerate(_nav_items):
@@ -430,14 +459,8 @@ def main():
         ("📚 المعرفة", render_knowledge_hub),
         ("💬 المحادثة", render_chat),
         ("🤖 الوكلاء", render_agents_group),
-        ("🎭 إبداع", render_fable),
-        ("🌐 ترجمة", render_translate),
-        ("🎬 Higgsfield", render_higgsfield),
-        ("📡 الوكيل الاجتماعي", render_social_agent),
-        ("🎓 التدريب", render_training),
-        ("🧩 MoE والوكيل", render_moe_agent_studio),
-        ("☁️ AIaaS والاقتصاد", render_aiaas_economy_hub),
-        ("📡 عمليات التدريب", render_training_ops_dashboard),
+        ("🎨 المحتوى الإبداعي", render_creative_hub),
+        ("🎓 التدريب والعمليات", render_training_ops_hub),
     ]
     if st.session_state.get("_dev_console_unlocked", False):
         _tab_defs.append(("⚙️ النظام", render_system_group))
