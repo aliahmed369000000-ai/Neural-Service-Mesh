@@ -123,3 +123,23 @@ print(multi_gpu_training_snippet())
 ```
 
 الكود: `ai/remote_training_orchestrator.py` — تدريب فعّال (AMP + DataParallel + AdamW + early stop).
+
+## SurahChain Pre-train ليلي على Kaggle
+
+الملف: `notebooks/SurahChain_Pretrain_Kaggle.ipynb`
+
+1. New Notebook → File → Import هذا الدفتر (أو انسخ الخلايا)
+2. Accelerator: **GPU T4** (أو Dual T4)
+3. Internet: **ON**
+4. Secrets: أضف `GITHUB_TOKEN`
+5. **Save Version → Save & Run All** ثم أغلق المتصفح
+
+```text
+SCN_PRESET=medium   # d=256 + انتباه أقوى
+SCN_CHAIN_SCALE=1   # سلسلة 114 دون تغيير
+SCN_COMPILE=1       # تسريع
+SCN_BATCH=24–32
+SCN_FRESH=1         # أول جولة medium فقط
+```
+
+بعد الاستيقاظ: `SCN_FRESH=False` في الدفتر وأعد Save & Run All للاستكمال.
