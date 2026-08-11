@@ -269,11 +269,16 @@ def main():
         # يعتمد على نفس آلية _nsm_home_jump_target المستخدمة في الرئيسية
         # (حقن سكربت ينقر التبويب المطلوب). إضافة UX فقط.
         st.markdown("### 🚀 تنقّل سريع")
+        # 🆕 القائمة الآن تغطي كل الأقسام الرئيسية الستة (كانت 4 فقط وتنقص
+        # الرئيسية والتدريب) — بنفس ترتيب ظهورها في شريط التبويبات تماماً،
+        # حتى يطابق الشريط الجانبي ما يراه المستخدم أعلى الصفحة بلا مفاجآت.
         _nav_items = [
+            ("🏠 الرئيسية", "🏠 الرئيسية"),
             ("📚 المعرفة", "📚 المعرفة"),
             ("💬 المحادثة", "💬 المحادثة"),
             ("🤖 الوكلاء", "🤖 الوكلاء"),
             ("🎨 إبداع", "🎨 المحتوى الإبداعي"),
+            ("🎓 التدريب", "🎓 التدريب والعمليات"),
         ]
         _nav_cols = st.columns(2)
         for _ni, (_nlabel, _ntarget) in enumerate(_nav_items):
@@ -286,55 +291,66 @@ def main():
         st.markdown("---")
 
         # ── 👤 الحساب (تسجيل دخول / إنشاء حساب) ─────────────────────────
-        st.markdown("### 👤 الحساب")
+        # 🆕 مطوي داخل expander (نفس نمط «الإعدادات المتقدمة» أدناه) بدل
+        # الظهور الدائم المفتوح — نموذجا الدخول/التسجيل يشغلان مساحة كبيرة
+        # في أعلى الشريط الجانبي لا يحتاجها أغلب الزوار في كل مرة، وتفريغ
+        # هذه المساحة يقرّب «تنقّل سريع» بصرياً من أعلى الشريط. عند تسجيل
+        # الدخول فعلاً يبقى عنوان الـexpander نفسه يعرض اسم المستخدم مباشرة
+        # دون الحاجة لفتحه.
         try:
             from ai.accounts import create_user as _acc_create, verify_login as _acc_login, AccountError as _AccErr
             _accounts_module_ok = True
         except Exception:
             _accounts_module_ok = False
 
-        if not _accounts_module_ok:
-            st.caption("نظام الحسابات غير متاح حالياً")
-        elif st.session_state.get("_account"):
-            _acc = st.session_state["_account"]
-            st.success(f"مسجّل الدخول: {_acc['username']}")
-            if st.button("🚪 تسجيل خروج", key="account_logout_btn", use_container_width=True):
-                del st.session_state["_account"]
-                st.rerun()
-        else:
-            _acc_tab_login, _acc_tab_register = st.tabs(["دخول", "حساب جديد"])
-            with _acc_tab_login:
-                with st.form(key="account_login_form", clear_on_submit=False):
-                    _li_user = st.text_input("اسم المستخدم", key="account_login_username")
-                    _li_pass = st.text_input("كلمة المرور", type="password", key="account_login_password")
-                    _li_submit = st.form_submit_button("دخول 🔐", use_container_width=True)
-                if _li_submit:
-                    try:
-                        _user = _acc_login(_li_user, _li_pass) if _li_user and _li_pass else None
-                        if _user:
-                            st.session_state["_account"] = _user
-                            st.rerun()
-                        else:
-                            st.error("اسم المستخدم أو كلمة المرور غير صحيحة")
-                    except _AccErr as _e:
-                        st.error(str(_e))
-            with _acc_tab_register:
-                with st.form(key="account_register_form", clear_on_submit=False):
-                    _reg_user = st.text_input("اسم المستخدم", key="account_reg_username")
-                    _reg_pass = st.text_input("كلمة المرور", type="password", key="account_reg_password")
-                    _reg_phone = st.text_input(
-                        "رقم الهاتف (اختياري — لربط واتساب لاحقاً)",
-                        key="account_reg_phone", placeholder="+9677xxxxxxxx",
-                    )
-                    _reg_submit = st.form_submit_button("إنشاء حساب ✨", use_container_width=True)
-                if _reg_submit:
-                    try:
-                        _acc_create(_reg_user, _reg_pass, phone_number=_reg_phone or None)
-                        st.success("تم إنشاء الحساب! سجّل دخولك من تبويب «دخول»")
-                    except _AccErr as _e:
-                        st.error(str(_e))
-                    except Exception:
-                        st.error("تعذّر إنشاء الحساب")
+        _acc_logged_in = bool(st.session_state.get("_account"))
+        _acc_label = (
+            f"👤 {st.session_state['_account']['username']} (مسجّل الدخول)"
+            if _acc_logged_in else "👤 الحساب (دخول / تسجيل)"
+        )
+        with st.expander(_acc_label, expanded=False):
+            if not _accounts_module_ok:
+                st.caption("نظام الحسابات غير متاح حالياً")
+            elif _acc_logged_in:
+                _acc = st.session_state["_account"]
+                st.success(f"مسجّل الدخول: {_acc['username']}")
+                if st.button("🚪 تسجيل خروج", key="account_logout_btn", use_container_width=True):
+                    del st.session_state["_account"]
+                    st.rerun()
+            else:
+                _acc_tab_login, _acc_tab_register = st.tabs(["دخول", "حساب جديد"])
+                with _acc_tab_login:
+                    with st.form(key="account_login_form", clear_on_submit=False):
+                        _li_user = st.text_input("اسم المستخدم", key="account_login_username")
+                        _li_pass = st.text_input("كلمة المرور", type="password", key="account_login_password")
+                        _li_submit = st.form_submit_button("دخول 🔐", use_container_width=True)
+                    if _li_submit:
+                        try:
+                            _user = _acc_login(_li_user, _li_pass) if _li_user and _li_pass else None
+                            if _user:
+                                st.session_state["_account"] = _user
+                                st.rerun()
+                            else:
+                                st.error("اسم المستخدم أو كلمة المرور غير صحيحة")
+                        except _AccErr as _e:
+                            st.error(str(_e))
+                with _acc_tab_register:
+                    with st.form(key="account_register_form", clear_on_submit=False):
+                        _reg_user = st.text_input("اسم المستخدم", key="account_reg_username")
+                        _reg_pass = st.text_input("كلمة المرور", type="password", key="account_reg_password")
+                        _reg_phone = st.text_input(
+                            "رقم الهاتف (اختياري — لربط واتساب لاحقاً)",
+                            key="account_reg_phone", placeholder="+9677xxxxxxxx",
+                        )
+                        _reg_submit = st.form_submit_button("إنشاء حساب ✨", use_container_width=True)
+                    if _reg_submit:
+                        try:
+                            _acc_create(_reg_user, _reg_pass, phone_number=_reg_phone or None)
+                            st.success("تم إنشاء الحساب! سجّل دخولك من تبويب «دخول»")
+                        except _AccErr as _e:
+                            st.error(str(_e))
+                        except Exception:
+                            st.error("تعذّر إنشاء الحساب")
 
         st.markdown("---")
 
