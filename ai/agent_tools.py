@@ -331,4 +331,54 @@ def handle_tool_command(user_input: str) -> Optional[str]:
             "| `ابحث <نص>` | بحث ويب |\n"
         )
 
+
+    # مواضيع رائجة
+    if re.match(r"^(رائج|trending|مواضيع\s*رائجة)$", t, re.I):
+        try:
+            from ai.web_search_tool import format_trending
+            return format_trending(geo="SA")
+        except Exception as e:
+            return f"❌ رائج: {e}"
+
+    # أخبار
+    m = re.match(r"^(أخبار|news)\s+(.+)$", t, re.I)
+    if m:
+        try:
+            from ai.web_search_tool import search_news
+            import json
+            items = search_news(m.group(2).strip())
+            return "## 📰 أخبار\n```json\n" + json.dumps(items, ensure_ascii=False, indent=2) + "\n```"
+        except Exception as e:
+            return f"❌ أخبار: {e}"
+
+    # بحث عميق من أدوات عامة
+    m = re.match(r"^(بحث\s*عميق|deep\s*research)\s+(.+)$", t, re.I)
+    if m:
+        try:
+            from ai.web_search_tool import deep_research
+            import json
+            res = deep_research(m.group(2).strip())
+            slim = {k: res.get(k) for k in ("ok", "query", "count", "msg", "angles")}
+            slim["results_preview"] = [
+                {"title": r.get("title"), "source": r.get("source"), "url": r.get("url")}
+                for r in (res.get("results") or [])[:8]
+            ]
+            return "## 🔬 بحث عميق\n```json\n" + json.dumps(slim, ensure_ascii=False, indent=2) + "\n```"
+        except Exception as e:
+            return f"❌ deep_research: {e}"
+
     return None
+
+
+# ── واجهات بحث وتعلّم موسّعة ─────────────────────────────────────────────
+def web_research(query: str, deep: bool = False) -> Dict[str, Any]:
+    from ai.web_search_tool import deep_research, web_search_structured
+    if deep:
+        return deep_research(query)
+    return web_search_structured(query, max_results=10, include_news=True)
+
+
+def trending(geo: str = "SA") -> Dict[str, Any]:
+    from ai.web_search_tool import get_trending_topics
+    items = get_trending_topics(geo=geo, max_results=12)
+    return {"ok": bool(items), "geo": geo, "items": items}

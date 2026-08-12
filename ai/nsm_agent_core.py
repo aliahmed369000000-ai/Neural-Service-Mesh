@@ -50,7 +50,7 @@ def _is_admin_unlocked() -> bool:
 # الخادم. كل ما عداها (قراءة/كتابة/تعديل ملفات، تشغيل أوامر shell،
 # git push، إنشاء واجهة تفاعلية مشتركة، استدعاء API عام) يتطلب فتح
 # وضع المالك أولاً.
-_PUBLIC_SAFE_ACTIONS = {"answer", "web_search", "image_search", "system_info", "fetch_url"}
+_PUBLIC_SAFE_ACTIONS = {"answer", "web_search", "image_search", "system_info", "fetch_url", "deep_research", "trending"}
 import urllib.error
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Tuple
@@ -205,7 +205,7 @@ def _build_system_prompt() -> str:
   "thinking": "تحليلك للطلب خطوة بخطوة",
   "steps": [
     {{
-      "action": "read_file | create_file | edit_file | run_file | run_tests | git_push | git_lfs | git_info | search_code | find_files | py_compile | fetch_url | system_info | run_safe | rollback | web_search | image_search | create_artifact | api_call | preview_check | answer",
+      "action": "read_file | create_file | edit_file | run_file | run_tests | git_push | git_lfs | git_info | search_code | find_files | py_compile | fetch_url | system_info | run_safe | rollback | web_search | deep_research | self_learn | ingest_knowledge | trending | image_search | create_artifact | api_call | preview_check | answer",
       "path": "المسار النسبي من جذر المشروع",
       "content": "محتوى الملف الكامل (لـ create_file) أو كود HTML/SVG كامل (لـ create_artifact)",
       "old": "النص القديم المراد استبداله (لـ edit_file) — يجب أن يكون موجوداً حرفياً",
@@ -243,6 +243,8 @@ def _build_system_prompt() -> str:
 14. 🆕 لحالة المستودع استخدم git_info (status/log/diff) بدل التخمين.
 15. 🆕 لجلب صفحات عامة fetch_url؛ للأخبار/المعرفة الحديثة web_search.
 16. 🆕 لا تخمّن بنية المشروع: find_files أو search_code أو read_file أولاً.
+17. 🆕 للمعرفة الحديثة أو الناقصة: deep_research ثم self_learn لتخزينها.
+18. 🆕 يُسمح بالبحث الحر (web_search/deep_research/trending) لتغذية نفسك؛ self_learn/ingest_knowledge لحفظ ما تعلّمته مع ذكر المصادر.
 8. ⚠️ "action" يجب أن يكون **كلمة واحدة فقط** من القائمة (مثل "read_file")
    — لا تكتب القائمة كاملة مفصولة بـ | كما هي في الوصف أعلاه، هذا خطأ.
 9. ⚠️ عند طلب "افحص/اقرأ المشروع": لا تقرأ كل الملفات — اختر فقط 5-8 ملفات
@@ -463,7 +465,8 @@ def _run_step(step: Dict[str, Any]) -> str:
         "read_file", "create_file", "edit_file",
         "run_file", "run_tests", "git_push", "git_lfs", "git_info",
         "search_code", "find_files", "py_compile", "fetch_url",
-        "system_info", "run_safe", "web_search",
+        "system_info", "run_safe", "web_search", "deep_research",
+        "self_learn", "ingest_knowledge", "trending",
         "image_search", "create_artifact", "api_call", "answer",
         "preview_check", "rollback",
     }
@@ -652,6 +655,65 @@ def _run_step(step: Dict[str, Any]) -> str:
     # ── rollback ── 🆕 المرحلة 6: Checkpoints/Rollback
     if action == "rollback":
         return _rollback_to_checkpoint(step.get("commit", ""))
+
+    # ── deep_research ── 🆕 بحث متعدد الزوايا والمصادر
+    if action == "deep_research":
+        q = query or step.get("topic") or ""
+        if not q:
+            return "❌ deep_research: مطلوب query"
+        try:
+            from ai.web_search_tool import deep_research as _dr
+            import json as _json
+            res = _dr(q)
+            preview = [
+                {"title": r.get("title"), "source": r.get("source"), "url": r.get("url")}
+                for r in (res.get("results") or [])[:10]
+            ]
+            out = {k: res.get(k) for k in ("ok", "query", "count", "msg", "angles")}
+            out["results_preview"] = preview
+            return "## 🔬 deep_research\n```json\n" + _json.dumps(out, ensure_ascii=False, indent=2) + "\n```"
+        except Exception as e:
+            return f"❌ deep_research: {e}"
+
+    # ── trending ──
+    if action == "trending":
+        try:
+            from ai.web_search_tool import format_trending, get_trending_topics
+            geo = step.get("geo") or "SA"
+            return format_trending(geo=geo)
+        except Exception as e:
+            return f"❌ trending: {e}"
+
+    # ── self_learn ── 🆕 تعلّم ذاتي من الويب + حفظ
+    if action == "self_learn":
+        try:
+            from ai.self_feed_learner import learn_from_web, self_learn_cycle
+            import json as _json
+            topic = query or step.get("topic") or ""
+            if topic:
+                res = learn_from_web(topic, deep=True)
+            else:
+                res = self_learn_cycle(limit=int(step.get("limit") or 3))
+            return "## 🧠 self_learn\n```json\n" + _json.dumps(res, ensure_ascii=False, indent=2) + "\n```"
+        except Exception as e:
+            return f"❌ self_learn: {e}"
+
+    # ── ingest_knowledge ──
+    if action == "ingest_knowledge":
+        try:
+            from ai.self_feed_learner import ingest_text
+            import json as _json
+            topic = step.get("topic") or query or "بدون عنوان"
+            content = step.get("content") or ""
+            if not content:
+                return "❌ ingest_knowledge: مطلوب content"
+            sources = step.get("sources") or []
+            if isinstance(sources, str):
+                sources = [s.strip() for s in sources.split(",") if s.strip()]
+            res = ingest_text(topic, content, sources=sources, origin="agent")
+            return "## 📥 ingest_knowledge\n```json\n" + _json.dumps(res, ensure_ascii=False, indent=2) + "\n```"
+        except Exception as e:
+            return f"❌ ingest_knowledge: {e}"
 
     # ── web_search ── 🆕
     if action == "web_search":

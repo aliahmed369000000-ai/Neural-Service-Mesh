@@ -208,6 +208,15 @@ def _handle_code_command(user_input: str) -> str | None:
     except Exception:
         pass
 
+    # 🆕 تعلّم ذاتي وتغذية من الويب
+    try:
+        from ai.self_feed_learner import handle_learn_command
+        learn_reply = handle_learn_command(user_input)
+        if learn_reply is not None:
+            return learn_reply
+    except Exception:
+        pass
+
     if not _HAS_AGENT:
         return None
     t = user_input.strip()

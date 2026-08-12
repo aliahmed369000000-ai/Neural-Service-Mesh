@@ -1,22 +1,23 @@
 """
-NSM Web Search Tool — ai/web_search_tool.py
-=============================================
-أداة بحث حقيقية في الإنترنت بدون الحاجة لأي مفتاح API.
-مصدر واحد مشترك يُستخدم من:
-  - ai/nsm_agent_core.py   (action: "web_search" داخل حلقة الوكيل الرئيسية)
-  - ai/code_agent.py       (أمر: "ابحث <نص>" في nsm_chat.py)
+NSM Web Search Tool — ai/web_search_tool.py (v2 موسّع)
+======================================================
+بحث حقيقي متعدد المصادر بدون مفتاح API إجباري.
 
-الإستراتيجية (بالترتيب، بدون مفتاح API لأي منها):
-  1) DuckDuckGo HTML Lite            → نتائج ويب حقيقية (عنوان + رابط + مقتطف)
-  2) Wikipedia (عربي ثم إنجليزي)     → 🆕 موثوق جداً من سيرفرات الاستضافة
-     السحابية (DuckDuckGo أحياناً يحظر/يبطئ IPs الاستضافة السحابية) —
-     ممتاز لأسئلة الحقائق المباشرة (أشخاص، دول، مفاهيم، تواريخ)
-  3) DuckDuckGo Instant Answer API   → احتياطي أخير JSON رسمي
+المصادر (بالترتيب / التجميع):
+  1) DuckDuckGo HTML Lite
+  2) Wikipedia (ar ثم en) + ملخصات
+  3) DuckDuckGo Instant Answer
+  4) Google News RSS (أخبار)
+  5) Wikidata search (كيانات)
+  6) arXiv API (علمي)
+  7) Google Trends RSS (رائج)
 
-⚠️ ملاحظة صادقة: الخيار (1) يعتمد على هيكل صفحة DuckDuckGo الحالية.
-لو غيّروا تصميم الصفحة مستقبلاً، _parse_lite_html() قد تحتاج تحديث بسيط
-(هذا حال أي scraping بدون مفتاح API — لا يوجد طريقة مجانية مضمونة للأبد).
-الدالة لا تُرجع أبداً "نجاح" وهمي: لو فشلت كل المصادر تُرجع رسالة خطأ صريحة.
+واجهة:
+  web_search(query)              → نص منسّق (متوافق مع القديم)
+  web_search_structured(query)   → قائمة dict للوكلاء
+  deep_research(query)           → بحث متعدد الزوايا + تجميع
+  get_trending_topics(geo)       → مواضيع رائجة
+  search_news(query)             → أخبار
 """
 from __future__ import annotations
 
@@ -27,34 +28,38 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from typing import Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
-from ai.offline_mode import is_offline, offline_message
+try:
+    from ai.offline_mode import is_offline, offline_message
+except Exception:  # pragma: no cover
+    def is_offline() -> bool:
+        return False
 
-_TIMEOUT = 10
+    def offline_message(what: str = "") -> str:
+        return f"وضع عدم اتصال — {what} غير متاح"
+
+_TIMEOUT = 12
 _UA = (
-    "Mozilla/5.0 (compatible; NSMAgent/1.0; "
+    "Mozilla/5.0 (compatible; NSMAgent/2.0; "
     "+https://github.com/aliahmed369000000-ai/Neural-Service-Mesh)"
 )
 
 
-def _fetch(url: str) -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": _UA})
-    with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+def _fetch(url: str, timeout: int = _TIMEOUT) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": _UA, "Accept": "*/*"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.read().decode("utf-8", errors="ignore")
 
 
 def _parse_lite_html(html_text: str, max_results: int) -> List[Dict[str, str]]:
-    """يستخرج (عنوان، رابط، مقتطف) من صفحة lite.duckduckgo.com/lite/"""
     results: List[Dict[str, str]] = []
     link_pattern = re.compile(
         r'<a[^>]+rel="nofollow"[^>]+href="([^"]+)"[^>]*>(.*?)</a>', re.S
     )
     snippet_pattern = re.compile(r'<td class="result-snippet"[^>]*>(.*?)</td>', re.S)
-
     links = link_pattern.findall(html_text)
     snippets = snippet_pattern.findall(html_text)
-
     for i, (url, title) in enumerate(links):
         if not url.startswith("http"):
             continue
@@ -64,7 +69,7 @@ def _parse_lite_html(html_text: str, max_results: int) -> List[Dict[str, str]]:
         snippet = ""
         if i < len(snippets):
             snippet = html.unescape(re.sub(r"<[^>]+>", "", snippets[i])).strip()
-        results.append({"title": title_clean, "url": url, "snippet": snippet})
+        results.append({"title": title_clean, "url": url, "snippet": snippet, "source": "duckduckgo"})
         if len(results) >= max_results:
             break
     return results
@@ -73,17 +78,13 @@ def _parse_lite_html(html_text: str, max_results: int) -> List[Dict[str, str]]:
 def _search_duckduckgo_lite(query: str, max_results: int) -> List[Dict[str, str]]:
     q = urllib.parse.quote_plus(query)
     url = f"https://lite.duckduckgo.com/lite/?q={q}"
-    html_text = _fetch(url)
-    return _parse_lite_html(html_text, max_results)
+    return _parse_lite_html(_fetch(url), max_results)
 
 
 def _search_instant_answer(query: str) -> List[Dict[str, str]]:
-    """احتياطي: DuckDuckGo Instant Answer API (JSON رسمي، بدون مفتاح، نتائج محدودة)."""
     q = urllib.parse.quote_plus(query)
     url = f"https://api.duckduckgo.com/?q={q}&format=json&no_html=1&skip_disambig=1"
-    raw = _fetch(url)
-    data = json.loads(raw)
-
+    data = json.loads(_fetch(url))
     results: List[Dict[str, str]] = []
     abstract = (data.get("AbstractText") or "").strip()
     if abstract:
@@ -91,34 +92,37 @@ def _search_instant_answer(query: str) -> List[Dict[str, str]]:
             "title": data.get("Heading") or query,
             "url": data.get("AbstractURL") or "",
             "snippet": abstract,
+            "source": "ddg_instant",
         })
-    for topic in data.get("RelatedTopics", [])[:5]:
+    for topic in data.get("RelatedTopics", [])[:6]:
         if isinstance(topic, dict) and topic.get("Text"):
             results.append({
-                "title": (topic.get("Text") or "")[:80],
+                "title": (topic.get("Text") or "")[:100],
                 "url": topic.get("FirstURL") or "",
                 "snippet": topic.get("Text") or "",
+                "source": "ddg_instant",
             })
+        elif isinstance(topic, dict) and "Topics" in topic:
+            for sub in topic.get("Topics", [])[:3]:
+                if isinstance(sub, dict) and sub.get("Text"):
+                    results.append({
+                        "title": (sub.get("Text") or "")[:100],
+                        "url": sub.get("FirstURL") or "",
+                        "snippet": sub.get("Text") or "",
+                        "source": "ddg_instant",
+                    })
     return results
 
 
 def _search_wikipedia(query: str, max_results: int, lang: str = "ar") -> List[Dict[str, str]]:
-    """
-    🆕 بحث عبر Wikipedia REST API (opensearch + summary).
-    موثوق جداً من سيرفرات الاستضافة السحابية (غالباً لا يحظر IPs
-    بعكس DuckDuckGo HTML scraping) — ممتاز لأسئلة الحقائق المباشرة
-    (أشخاص، دول، مفاهيم). يُجرَّب العربي أولاً، ثم الإنجليزي احتياطياً.
-    """
     q = urllib.parse.quote(query)
     search_url = (
         f"https://{lang}.wikipedia.org/w/api.php"
         f"?action=opensearch&search={q}&limit={max_results}&format=json"
     )
-    raw = _fetch(search_url)
-    data = json.loads(raw)
+    data = json.loads(_fetch(search_url))
     titles: List[str] = data[1] if len(data) > 1 else []
-    urls:   List[str] = data[3] if len(data) > 3 else []
-
+    urls: List[str] = data[3] if len(data) > 3 else []
     results: List[Dict[str, str]] = []
     for i, title in enumerate(titles[:max_results]):
         snippet = ""
@@ -127,8 +131,7 @@ def _search_wikipedia(query: str, max_results: int, lang: str = "ar") -> List[Di
                 f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/"
                 f"{urllib.parse.quote(title)}"
             )
-            summary_raw = _fetch(summary_url)
-            summary = json.loads(summary_raw)
+            summary = json.loads(_fetch(summary_url))
             snippet = (summary.get("extract") or "").strip()
         except Exception:
             pass
@@ -136,96 +139,116 @@ def _search_wikipedia(query: str, max_results: int, lang: str = "ar") -> List[Di
             "title": title,
             "url": urls[i] if i < len(urls) else "",
             "snippet": snippet,
+            "source": f"wikipedia_{lang}",
         })
     return results
 
 
-def _format_results(query: str, results: List[Dict[str, str]], source: str) -> str:
-    lines = [f"🔍 نتائج البحث عن: **{query}** (المصدر: {source})\n"]
-    for i, r in enumerate(results, 1):
-        lines.append(f"{i}. **{r['title']}**")
-        if r.get("url"):
-            lines.append(f"   {r['url']}")
-        if r.get("snippet"):
-            snippet = r["snippet"]
-            if len(snippet) > 220:
-                snippet = snippet[:220] + "..."
-            lines.append(f"   {snippet}")
-        lines.append("")
-    return "\n".join(lines).strip()
-
-
-def web_search(query: str, max_results: int = 5) -> str:
-    """
-    بحث حقيقي في الإنترنت بدون مفتاح API.
-    يُرجع نصاً منسقاً بالنتائج، أو رسالة خطأ صريحة لو فشلت كل المصادر
-    (لا يختلق نتيجة وهمية أبداً).
-    """
-    query = (query or "").strip()
-    if not query:
-        return "❌ web_search: مطلوب query (نص البحث)"
-
-    if is_offline():
-        return offline_message("بحث الويب")
-
-    max_results = max(1, min(int(max_results or 5), 10))
-    errors: List[str] = []
-
+def _search_wikidata(query: str, max_results: int = 5) -> List[Dict[str, str]]:
+    q = urllib.parse.quote(query)
+    url = (
+        "https://www.wikidata.org/w/api.php"
+        f"?action=wbsearchentities&search={q}&language=ar&uselang=ar"
+        f"&format=json&limit={max_results}"
+    )
     try:
-        results = _search_duckduckgo_lite(query, max_results)
-        if results:
-            return _format_results(query, results, source="DuckDuckGo")
-    except Exception as e:
-        errors.append(f"DuckDuckGo HTML: {e}")
+        data = json.loads(_fetch(url))
+    except Exception:
+        url = (
+            "https://www.wikidata.org/w/api.php"
+            f"?action=wbsearchentities&search={q}&language=en&uselang=en"
+            f"&format=json&limit={max_results}"
+        )
+        data = json.loads(_fetch(url))
+    results: List[Dict[str, str]] = []
+    for item in data.get("search", [])[:max_results]:
+        results.append({
+            "title": item.get("label") or query,
+            "url": item.get("concepturi") or f"https://www.wikidata.org/wiki/{item.get('id', '')}",
+            "snippet": item.get("description") or "",
+            "source": "wikidata",
+        })
+    return results
 
-    # 🆕 Wikipedia (عربي ثم إنجليزي) — بديل موثوق قبل الاستسلام،
-    # خصوصاً لأسئلة الحقائق المباشرة (أشخاص/دول/مفاهيم) التي غالباً
-    # ما تُطلَب هنا، وأقل عرضة لحظر IPs الاستضافة السحابية.
-    for lang in ("ar", "en"):
-        try:
-            results = _search_wikipedia(query, max_results, lang=lang)
-            if results:
-                return _format_results(query, results, source=f"Wikipedia ({lang})")
-        except Exception as e:
-            errors.append(f"Wikipedia ({lang}): {e}")
 
+def _search_news_rss(query: str, max_results: int = 5) -> List[Dict[str, str]]:
+    """أخبار عبر Google News RSS (بدون مفتاح)."""
+    q = urllib.parse.quote_plus(query)
+    url = f"https://news.google.com/rss/search?q={q}&hl=ar&gl=SA&ceid=SA:ar"
+    raw = _fetch(url)
+    results: List[Dict[str, str]] = []
     try:
-        results = _search_instant_answer(query)
-        if results:
-            return _format_results(query, results[:max_results], source="DuckDuckGo Instant Answer")
-    except Exception as e:
-        errors.append(f"Instant Answer API: {e}")
+        root = ET.fromstring(raw)
+    except ET.ParseError:
+        return results
+    for item in root.findall(".//item")[:max_results]:
+        title_el = item.find("title")
+        link_el = item.find("link")
+        desc_el = item.find("description")
+        title = (title_el.text or "").strip() if title_el is not None else ""
+        link = (link_el.text or "").strip() if link_el is not None else ""
+        desc = (desc_el.text or "").strip() if desc_el is not None else ""
+        desc = re.sub(r"<[^>]+>", "", desc)
+        if title:
+            results.append({
+                "title": title,
+                "url": link,
+                "snippet": desc[:300],
+                "source": "google_news",
+            })
+    return results
 
-    detail = " | ".join(errors) if errors else "لا نتائج مطابقة"
-    return f"❌ فشل البحث عن '{query}': {detail}"
 
+def _search_arxiv(query: str, max_results: int = 5) -> List[Dict[str, str]]:
+    q = urllib.parse.quote_plus(query)
+    url = (
+        "http://export.arxiv.org/api/query"
+        f"?search_query=all:{q}&start=0&max_results={max_results}"
+    )
+    raw = _fetch(url)
+    results: List[Dict[str, str]] = []
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError:
+        return results
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    for entry in root.findall("a:entry", ns)[:max_results]:
+        title = (entry.findtext("a:title", default="", namespaces=ns) or "").strip()
+        title = re.sub(r"\s+", " ", title)
+        summary = (entry.findtext("a:summary", default="", namespaces=ns) or "").strip()
+        summary = re.sub(r"\s+", " ", summary)[:280]
+        link = ""
+        for l in entry.findall("a:link", ns):
+            if l.attrib.get("type") == "text/html" or l.attrib.get("rel") == "alternate":
+                link = l.attrib.get("href", "")
+                break
+        if not link:
+            link = entry.findtext("a:id", default="", namespaces=ns) or ""
+        if title:
+            results.append({
+                "title": title,
+                "url": link,
+                "snippet": summary,
+                "source": "arxiv",
+            })
+    return results
 
-# ═════════════════════════════════════════════════════════════════════════════
-# المواضيع الرائجة (Trending Topics) — لوكيل صناعة المحتوى
-# ═════════════════════════════════════════════════════════════════════════════
-# مصدر حقيقي بدون مفتاح API: Google Trends RSS (يومي، حسب الدولة).
-# نفس فلسفة web_search أعلاه: لا نتيجة وهمية أبداً — فشل المصدر = رسالة
-# خطأ صريحة، وليس بيانات ملفّقة.
 
 _TRENDS_NS = {"ht": "https://trends.google.com/trends/trendingsearches/daily"}
 
 
 def _fetch_google_trends_rss(geo: str) -> List[Dict[str, str]]:
-    """يجلب المواضيع الرائجة اليوم من Google Trends RSS لدولة معيّنة."""
     url = f"https://trends.google.com/trends/trendingsearches/daily/rss?geo={geo}"
     raw = _fetch(url)
     root = ET.fromstring(raw)
-
     results: List[Dict[str, str]] = []
     for item in root.findall(".//item"):
         title_el = item.find("title")
         title = (title_el.text or "").strip() if title_el is not None else ""
         if not title:
             continue
-
         traffic_el = item.find("ht:approx_traffic", _TRENDS_NS)
         traffic = (traffic_el.text or "").strip() if traffic_el is not None else ""
-
         news_item = item.find("ht:news_item", _TRENDS_NS)
         news_title, news_url = "", ""
         if news_item is not None:
@@ -233,53 +256,205 @@ def _fetch_google_trends_rss(geo: str) -> List[Dict[str, str]]:
             nu = news_item.find("ht:news_item_url", _TRENDS_NS)
             news_title = (nt.text or "").strip() if nt is not None else ""
             news_url = (nu.text or "").strip() if nu is not None else ""
-
         results.append({
             "title": title,
             "traffic": traffic,
             "news_title": news_title,
             "news_url": news_url,
+            "source": "google_trends",
         })
     return results
 
 
 def get_trending_topics(geo: str = "SA", max_results: int = 10) -> List[Dict[str, str]]:
-    """
-    يُرجع المواضيع الرائجة فعلياً اليوم كبيانات مُهيكلة (للاستخدام البرمجي
-    من وكلاء آخرين، مثل وكيل كتابة المقالات القادم).
-    geo: رمز الدولة (SA، EG، AE، ...). القيمة الافتراضية SA.
-    يرفع Exception صراحة عند الفشل — لا يُرجع قائمة فارغة صامتة ولا بيانات
-    ملفّقة، حتى يستطيع المستدعي (البرمجي) التمييز بين "لا نتائج" و"فشل الجلب".
-    """
-    geo = (geo or "SA").strip().upper() or "SA"
-    max_results = max(1, min(int(max_results or 10), 20))
-    if is_offline():
-        raise Exception(offline_message("المواضيع الرائجة"))
-    results = _fetch_google_trends_rss(geo)
-    return results[:max_results]
-
-
-def trending_topics_report(geo: str = "SA", max_results: int = 10) -> str:
-    """
-    نفس get_trending_topics لكن بصيغة نص منسّق جاهز للعرض المباشر
-    (مطابقة لأسلوب web_search أعلاه) — تُستخدم من واجهة المحادثة/الوكلاء.
-    """
-    geo = (geo or "SA").strip().upper() or "SA"
+    geo = (geo or "SA").upper()
     try:
-        results = get_trending_topics(geo, max_results)
-    except Exception as e:
-        return f"❌ فشل جلب المواضيع الرائجة لـ '{geo}': {e}"
+        items = _fetch_google_trends_rss(geo)
+        return items[:max_results]
+    except Exception:
+        for fallback in ("EG", "AE", "US"):
+            try:
+                items = _fetch_google_trends_rss(fallback)
+                return items[:max_results]
+            except Exception:
+                continue
+    return []
 
-    if not results:
-        return f"❌ لا توجد مواضيع رائجة متاحة حالياً للمنطقة '{geo}'"
 
-    lines = [f"📈 المواضيع الرائجة الآن ({geo}) — المصدر: Google Trends\n"]
+def search_news(query: str, max_results: int = 8) -> List[Dict[str, str]]:
+    query = (query or "").strip()
+    if not query:
+        return []
+    try:
+        return _search_news_rss(query, max_results)
+    except Exception:
+        return []
+
+
+def _dedupe(results: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    seen = set()
+    out: List[Dict[str, str]] = []
+    for r in results:
+        key = (r.get("url") or r.get("title") or "").strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
+    return out
+
+
+def web_search_structured(
+    query: str,
+    max_results: int = 8,
+    include_news: bool = True,
+    include_wiki: bool = True,
+    include_arxiv: bool = False,
+) -> Dict[str, Any]:
+    """نتائج منظمة للوكلاء — لا تختلق نتائج."""
+    query = (query or "").strip()
+    if not query:
+        return {"ok": False, "query": query, "results": [], "msg": "query فارغ"}
+    if is_offline():
+        return {"ok": False, "query": query, "results": [], "msg": offline_message("بحث الويب")}
+
+    max_results = max(1, min(int(max_results or 8), 15))
+    errors: List[str] = []
+    collected: List[Dict[str, str]] = []
+
+    for name, fn in (
+        ("duckduckgo", lambda: _search_duckduckgo_lite(query, max_results)),
+        ("ddg_instant", lambda: _search_instant_answer(query)),
+    ):
+        try:
+            collected.extend(fn())
+        except Exception as e:
+            errors.append(f"{name}: {e}")
+
+    if include_wiki:
+        for lang in ("ar", "en"):
+            try:
+                collected.extend(_search_wikipedia(query, min(5, max_results), lang=lang))
+            except Exception as e:
+                errors.append(f"wikipedia_{lang}: {e}")
+        try:
+            collected.extend(_search_wikidata(query, 4))
+        except Exception as e:
+            errors.append(f"wikidata: {e}")
+
+    if include_news:
+        try:
+            collected.extend(_search_news_rss(query, min(5, max_results)))
+        except Exception as e:
+            errors.append(f"news: {e}")
+
+    # arXiv تلقائياً لأسئلة علمية أو بطلب صريح
+    sci_hints = ("arxiv", "بحث علمي", "ورقة", "paper", "neural", "transformer", "llm", "algorithm")
+    if include_arxiv or any(h in query.lower() for h in sci_hints):
+        try:
+            collected.extend(_search_arxiv(query, 4))
+        except Exception as e:
+            errors.append(f"arxiv: {e}")
+
+    results = _dedupe(collected)[:max_results]
+    return {
+        "ok": bool(results),
+        "query": query,
+        "count": len(results),
+        "results": results,
+        "errors": errors[:8] if not results else [],
+        "msg": "OK" if results else (" | ".join(errors) if errors else "لا نتائج"),
+    }
+
+
+def deep_research(query: str, max_per_angle: int = 4) -> Dict[str, Any]:
+    """
+    بحث عميق: يقسم السؤال لعدة زوايا (تعريف، أخبار، خلفية، تطبيقات)
+    ويجمع النتائج — مناسب لتغذية التعلّم الذاتي.
+    """
+    query = (query or "").strip()
+    if not query:
+        return {"ok": False, "msg": "query فارغ", "angles": {}}
+    if is_offline():
+        return {"ok": False, "msg": offline_message("بحث عميق"), "angles": {}}
+
+    angles = {
+        "تعريف": f"{query} تعريف شرح",
+        "أخبار": f"{query} أخبار أحدث",
+        "خلفية": f"{query} تاريخ خلفية",
+        "تطبيقات": f"{query} استخدامات تطبيقات",
+    }
+    # إنجليزي إضافي للموضوعات التقنية
+    if re.search(r"[A-Za-z]{3,}", query):
+        angles["english"] = query
+
+    angle_results: Dict[str, Any] = {}
+    all_hits: List[Dict[str, str]] = []
+    for name, q in angles.items():
+        res = web_search_structured(
+            q,
+            max_results=max_per_angle,
+            include_news=(name == "أخبار"),
+            include_wiki=True,
+            include_arxiv=("neural" in query.lower() or "ai" in query.lower() or name == "english"),
+        )
+        angle_results[name] = res
+        all_hits.extend(res.get("results") or [])
+
+    merged = _dedupe(all_hits)[:20]
+    return {
+        "ok": bool(merged),
+        "query": query,
+        "angles": {k: {"count": v.get("count", 0), "ok": v.get("ok")} for k, v in angle_results.items()},
+        "results": merged,
+        "count": len(merged),
+        "msg": "OK" if merged else "تعذّر جمع نتائج كافية",
+    }
+
+
+def _format_results(query: str, results: List[Dict[str, str]], source: str) -> str:
+    lines = [f"🔍 نتائج البحث عن: **{query}** (المصدر: {source})\n"]
     for i, r in enumerate(results, 1):
-        traffic_part = f" (بحث تقريبي: {r['traffic']})" if r.get("traffic") else ""
-        lines.append(f"{i}. **{r['title']}**{traffic_part}")
-        if r.get("news_title"):
-            lines.append(f"   خبر ذو صلة: {r['news_title']}")
-        if r.get("news_url"):
-            lines.append(f"   {r['news_url']}")
+        lines.append(f"{i}. **{r.get('title', '')}**")
+        if r.get("url"):
+            lines.append(f"   {r['url']}")
+        if r.get("snippet"):
+            snippet = r["snippet"]
+            if len(snippet) > 240:
+                snippet = snippet[:240] + "..."
+            lines.append(f"   {snippet}")
+        if r.get("source"):
+            lines.append(f"   _(source: {r['source']})_")
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
+def web_search(query: str, max_results: int = 5) -> str:
+    """واجهة متوافقة مع السابق — نص منسّق."""
+    query = (query or "").strip()
+    if not query:
+        return "❌ web_search: مطلوب query (نص البحث)"
+    if is_offline():
+        return offline_message("بحث الويب")
+
+    max_results = max(1, min(int(max_results or 5), 12))
+    structured = web_search_structured(query, max_results=max_results, include_news=True)
+    if structured.get("ok") and structured.get("results"):
+        sources = sorted({r.get("source", "?") for r in structured["results"]})
+        return _format_results(query, structured["results"], source="+".join(sources))
+    return f"❌ فشل البحث عن '{query}': {structured.get('msg', 'لا نتائج')}"
+
+
+def format_trending(geo: str = "SA", max_results: int = 10) -> str:
+    items = get_trending_topics(geo=geo, max_results=max_results)
+    if not items:
+        return f"❌ تعذّر جلب المواضيع الرائجة لـ {geo}"
+    lines = [f"📈 المواضيع الرائجة ({geo}):\n"]
+    for i, t in enumerate(items, 1):
+        traffic = f" — {t.get('traffic')}" if t.get("traffic") else ""
+        lines.append(f"{i}. **{t.get('title', '')}**{traffic}")
+        if t.get("news_title"):
+            lines.append(f"   {t['news_title']}")
+        if t.get("news_url"):
+            lines.append(f"   {t['news_url']}")
         lines.append("")
     return "\n".join(lines).strip()
