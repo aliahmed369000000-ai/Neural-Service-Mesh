@@ -181,7 +181,7 @@ def _surahchain_kaggle_cells() -> List[Cell]:
 
                 ## في NSM Notebook (محلي / Streamlit)
                 - نفّذ الخلايا بالترتيب (▶ أو Run All)
-                - للتدريب الثقيل: صدّر `.ipynb` وارفعه لـ Kaggle أو استخدم المزوّد `kaggle`
+                - خلية التدريب تشغّل `run_train_then_push.py`: **تدريب ثم رفع تلقائي** عند النجاح\n                - للتدريب الثقيل على GPU: Kaggle Save & Run All بنفس السكربت
                 - **لا تضع مفاتيح في الخلايا** — استخدم Secrets / متغيرات البيئة
                 """
             ),
@@ -257,6 +257,8 @@ def _surahchain_kaggle_cells() -> List[Cell]:
             source=textwrap.dedent(
                 """                import os
                 # اضبط من خلية الإعدادات يدوياً أو عبر globals إن نُفذت في نفس الجلسة
+                import subprocess, sys
+                from pathlib import Path as _P
                 for k, v in {
                     "SCN_PRESET": "medium",
                     "SCN_N": "60000",
@@ -267,11 +269,21 @@ def _surahchain_kaggle_cells() -> List[Cell]:
                     "SCN_QK_NORM": "1",
                     "SCN_GATED_ATTN": "1",
                     "SCN_CHAIN_SCALE": "1",
+                    "AUTO_PUSH": "1",
                 }.items():
                     os.environ.setdefault(k, v)
-                print("بدء التدريب...", os.environ.get("SCN_PRESET"))
-                print("شغّل على Kaggle: python experiments/surah_chain_network/train_pretrain_torch.py")
-                print("(محلياً قد يكون ثقيلاً بدون GPU)")
+                for name in ("SCN_PRESET", "SCN_N", "SCN_EPOCHS", "SCN_BATCH", "SCN_FRESH", "AUTO_PUSH"):
+                    if name in globals():
+                        val = globals()[name]
+                        os.environ[name] = ("1" if val else "0") if isinstance(val, bool) else str(val)
+                print("▶ تدريب ثم رفع تلقائي | AUTO_PUSH=", os.environ.get("AUTO_PUSH"))
+                script = _P("experiments/surah_chain_network/run_train_then_push.py")
+                # على Kaggle: قد تحتاج --skip-prepare إن نُفّذت خلية التحضير
+                r = subprocess.run([sys.executable, str(script)], cwd=str(_P(".").resolve()))
+                print("exit", r.returncode)
+                if r.returncode != 0:
+                    raise SystemExit(r.returncode)
+                print("✅ انتهى التدريب والرفع التلقائي")
                 """
             ),
             metadata={"type_hint": "train"},

@@ -449,5 +449,20 @@ def main():
         print(f"  generate({prompt!r}) → {m.generate(prompt, max_new_tokens=24)}")
 
 
+
+
+def _maybe_auto_push_after_train() -> None:
+    """إن AUTO_PUSH=1 ارفع النتائج بعد انتهاء main بنجاح."""
+    import os
+    if os.environ.get("AUTO_PUSH", "").strip().lower() not in ("1", "true", "yes"):
+        return
+    try:
+        from experiments.surah_chain_network.run_train_then_push import push_artifacts
+        print("--- AUTO_PUSH: رفع النتائج ---")
+        print(push_artifacts())
+    except Exception as e:
+        print("AUTO_PUSH failed:", e)
+
 if __name__ == "__main__":
     main()
+    _maybe_auto_push_after_train()
