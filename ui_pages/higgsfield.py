@@ -277,51 +277,76 @@ def _render_hf_result(script):
             help="منخفض = بالكاد يُلاحَظ تحت السرد. مرتفع = أوضح لكن قد يزاحم الصوت.",
         )
 
+    from ai.video_job_manager import get_video_job_manager
+    _hf_video_mgr = get_video_job_manager()
+    _hf_job_ids: list = st.session_state.setdefault("hf_video_job_ids", [])
+
     if st.button("🎬 أنشئ الفيديو الآن", type="primary", key="hf_render_video_btn"):
-        try:
-            _hf_spinner_msg = (
-                "⏳ يولّد السرد الصوتي والخلفيات السينمائية ثم يركّب الفيديو... "
-                "قد يستغرق عدة دقائق"
-                if _hf_use_cinematic_bg else
-                "⏳ يولّد السرد الصوتي ثم يركّب الفيديو... قد يستغرق دقيقة"
-            )
-            with st.spinner(_hf_spinner_msg):
-                engine = st.session_state.hf_fable_engine
-                mp4_bytes = engine.render_video(
+        # نلتقط كل القيم اللازمة هنا في الخيط الرئيسي (بما فيها قراءة
+        # session_state) قبل بدء خيط الخلفية — القراءة من session_state
+        # داخل خيط غير خيط Streamlit الرئيسي غير مضمونة، فنمرّرها كمتغيرات
+        # محلية ملتقطة (closure) بدل الوصول لـst.* من داخل الخيط.
+        _hf_engine = st.session_state.hf_fable_engine
+        _hf_wan_skip_spaces = st.session_state.get("hf_explainer_wan_dead_spaces")
+
+        def _hf_render_job():
+            try:
+                return _hf_engine.render_video(
                     script, voice=_hf_voice,
                     use_cinematic_backgrounds=_hf_use_cinematic_bg,
                     cinematic_provider=_hf_cinematic_provider,
                     use_background_music=_hf_use_music,
                     music_volume=_hf_music_volume,
-                    wan_skip_spaces=st.session_state.get("hf_explainer_wan_dead_spaces"),
+                    wan_skip_spaces=_hf_wan_skip_spaces,
                 )
-            st.session_state.hf_mp4 = mp4_bytes
-            st.success("✅ تم إنتاج الفيديو")
-        except MemoryError:
-            # لا نسجّل traceback هنا عمداً — العملية غالباً تكون بالفعل
-            # بذاكرة شبه ممتلئة، وتسجيل traceback ثقيل إضافي قد يزيد
-            # الضغط سوءاً في هذه اللحظة تحديداً.
-            st.error(
-                "⚠️ نفدت الذاكرة أثناء الرندر — جرّب مدة أقصر (دقيقتين-3 "
-                "بدل 10) أو عطّل «الخلفيات السينمائية الحقيقية» إن كانت مفعّلة."
-            )
-        except Exception as e:  # noqa: BLE001
-            # نسجّل التتبّع الكامل بسجلات السيرفر (يظهر بلوحة Streamlit
-            # Cloud logs) — سابقاً كان يُعرَض str(e) فقط للمستخدم وتُفقَد
-            # بقية تفاصيل الخطأ نهائياً، ما يصعّب تشخيص أعطال الإنتاج.
-            logger.exception("فشل رندر فيديو Higgsfield Explainer: %s", e)
-            _err_name = type(e).__name__
-            if "Timeout" in _err_name or "timed out" in str(e).lower():
-                st.error(
-                    "⚠️ انتهت مهلة الانتظار أثناء الرندر (غالباً بسبب جلب "
-                    "خلفية سينمائية/صورة خارجية بطيئة الاستجابة) — جرّب "
-                    "مرة أخرى، أو عطّل «الخلفيات السينمائية الحقيقية»."
-                )
-            else:
-                st.error(
-                    f"⚠️ فشل رندر الفيديو ({_err_name}) — تم تسجيل تفاصيل "
+            except MemoryError:
+                # لا نسجّل traceback هنا عمداً — العملية غالباً تكون بالفعل
+                # بذاكرة شبه ممتلئة، وتسجيل traceback ثقيل إضافي قد يزيد
+                # الضغط سوءاً في هذه اللحظة تحديداً.
+                raise RuntimeError(
+                    "نفدت الذاكرة أثناء الرندر — جرّب مدة أقصر (دقيقتين-3 "
+                    "بدل 10) أو عطّل «الخلفيات السينمائية الحقيقية» إن كانت مفعّلة."
+                ) from None
+            except Exception as e:  # noqa: BLE001
+                # نسجّل التتبّع الكامل بسجلات السيرفر (يظهر بلوحة Streamlit
+                # Cloud logs) — ونحوّل الرسالة لنص عربي واضح يُخزَّن في
+                # job.error ليعرضه لوحة المهام أدناه.
+                logger.exception("فشل رندر فيديو Higgsfield Explainer: %s", e)
+                _err_name = type(e).__name__
+                if "Timeout" in _err_name or "timed out" in str(e).lower():
+                    raise RuntimeError(
+                        "انتهت مهلة الانتظار أثناء الرندر (غالباً بسبب جلب "
+                        "خلفية سينمائية/صورة خارجية بطيئة الاستجابة) — جرّب "
+                        "مرة أخرى، أو عطّل «الخلفيات السينمائية الحقيقية»."
+                    ) from None
+                raise RuntimeError(
+                    f"فشل رندر الفيديو ({_err_name}) — تم تسجيل تفاصيل "
                     f"الخطأ. جرّب مرة أخرى أو بمدة أقصر. (رسالة تقنية: {e})"
-                )
+                ) from None
+
+        job_id = _hf_video_mgr.start(_hf_render_job, "رندر فيديو Higgsfield Explainer")
+        _hf_job_ids.append(job_id)
+        st.toast(f"⏳ بدأ رندر الفيديو بالخلفية (مهمة #{job_id}) — تقدر تكمّل تصفّح الصفحة.", icon="⏳")
+        st.rerun()
+
+    # ── متابعة مهام الرندر بالخلفية (لا تحظر الواجهة) ──
+    if _hf_job_ids:
+        _hf_jobs = _hf_video_mgr.list_jobs(job_ids=_hf_job_ids)
+        _hf_running = [j for j in _hf_jobs if j.status == "running"]
+        if _hf_running:
+            st.info(
+                f"⏳ رندر الفيديو قيد التشغيل بالخلفية — قد يستغرق دقيقة إلى "
+                f"عدة دقائق (حسب الخلفيات السينمائية). تقدر تكمّل تصفّح "
+                f"الصفحة، ثم اضغط تحديث."
+            )
+            if st.button("🔄 تحديث حالة الرندر", key="hf_video_refresh_jobs"):
+                st.rerun()
+        for j in _hf_jobs:
+            if j.status == "failed":
+                st.error(f"⚠️ فشلت مهمة الرندر: {j.error}")
+            elif j.status == "done" and j.result:
+                st.session_state.hf_mp4 = j.result
+
 
     mp4_bytes = st.session_state.get("hf_mp4")
     if mp4_bytes:
@@ -380,17 +405,17 @@ def _render_hf_result(script):
                         key="hf_yt_upload_privacy",
                     )
                     if st.button("▶️ ارفع على يوتيوب", key="hf_yt_upload_btn", use_container_width=True):
-                        try:
-                            with st.spinner("⏳ يرفع الفيديو على يوتيوب (Resumable Upload)..."):
-                                video_id = yt.upload_video(
-                                    mp4_bytes,
-                                    title=yt_title,
-                                    description=script.full_narration[:4500],
-                                    privacy_status=yt_privacy,
-                                )
-                            st.success(f"✅ تم الرفع! الرابط: https://youtu.be/{video_id}")
-                        except Exception as e:  # noqa: BLE001
-                            st.error(f"⚠️ فشل الرفع على يوتيوب: {e}")
+                        job_id = _hf_video_mgr.start(
+                            yt.upload_video, "رفع يوتيوب",
+                            video_bytes=mp4_bytes, title=yt_title,
+                            description=script.full_narration[:4500],
+                            privacy_status=yt_privacy,
+                        )
+                        st.session_state.setdefault("hf_upload_job_ids", []).append(
+                            {"job_id": job_id, "platform": "يوتيوب"}
+                        )
+                        st.toast(f"⏳ بدأ الرفع على يوتيوب بالخلفية (مهمة #{job_id})", icon="⏳")
+                        st.rerun()
 
             with share_cols[1]:
                 st.markdown("**🎵 TikTok**")
@@ -406,12 +431,41 @@ def _render_hf_result(script):
                         "العنوان:", value=script.title[:150], key="hf_tk_upload_title"
                     )
                     if st.button("🎵 ارفع على تيك توك", key="hf_tk_upload_btn", use_container_width=True):
-                        try:
-                            with st.spinner("⏳ يرفع الفيديو على تيك توك..."):
-                                publish_id = tk.upload_video(mp4_bytes, title=tk_title)
-                            st.success(
-                                f"✅ تم إرسال الفيديو (publish_id: {publish_id}) — "
-                                "افتح تطبيق TikTok للتأكد من ظهوره ضمن المسودات/المنشورات."
-                            )
-                        except Exception as e:  # noqa: BLE001
-                            st.error(f"⚠️ فشل الرفع على تيك توك: {e}")
+                        job_id = _hf_video_mgr.start(
+                            tk.upload_video, "رفع تيك توك",
+                            video_bytes=mp4_bytes, title=tk_title,
+                        )
+                        st.session_state.setdefault("hf_upload_job_ids", []).append(
+                            {"job_id": job_id, "platform": "تيك توك"}
+                        )
+                        st.toast(f"⏳ بدأ الرفع على تيك توك بالخلفية (مهمة #{job_id})", icon="⏳")
+                        st.rerun()
+
+            # ── متابعة مهام الرفع بالخلفية (يوتيوب/تيك توك لا تحظر الواجهة) ──
+            _hf_upload_jobs = st.session_state.get("hf_upload_job_ids", [])
+            for _entry in list(_hf_upload_jobs):
+                _uj = _hf_video_mgr.get(_entry["job_id"])
+                _plat = _entry["platform"]
+                if _uj is None:
+                    continue
+                if _uj.status == "running":
+                    st.info(f"⏳ الرفع على {_plat} قيد التشغيل بالخلفية...")
+                elif _uj.status == "failed":
+                    st.error(f"⚠️ فشل الرفع على {_plat}: {_uj.error}")
+                    _hf_upload_jobs.remove(_entry)
+                elif _uj.status == "done":
+                    if _plat == "يوتيوب":
+                        st.success(f"✅ تم الرفع على يوتيوب! الرابط: https://youtu.be/{_uj.result}")
+                    else:
+                        st.success(
+                            f"✅ تم إرسال الفيديو لتيك توك (publish_id: {_uj.result}) — "
+                            "افتح تطبيق TikTok للتأكد من ظهوره ضمن المسودات/المنشورات."
+                        )
+                    _hf_upload_jobs.remove(_entry)
+            if _hf_upload_jobs and any(
+                _hf_video_mgr.get(e["job_id"]) and _hf_video_mgr.get(e["job_id"]).status == "running"
+                for e in _hf_upload_jobs
+            ):
+                if st.button("🔄 تحديث حالة الرفع", key="hf_upload_refresh_jobs"):
+                    st.rerun()
+
