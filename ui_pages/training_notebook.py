@@ -100,6 +100,76 @@ def render_training_notebook():
     nb.provider = provider
     save_notebook(nb)
 
+
+    # ── بدء التدريب عبر Kaggle API ──
+    st.markdown("### 🚀 بدء التدريب (Kaggle API)")
+    st.caption(
+        "من هذا التبويب: يُجهَّز kernel ويُدفع عبر API ليشتغل على GPU. "
+        "بعد الانتهاء يُرفع لـ GitHub إن وُجد GITHUB_TOKEN في Kaggle Secrets."
+    )
+    ac1, ac2, ac3, ac4 = st.columns(4)
+    with ac1:
+        scn_preset = st.selectbox("preset", ["small", "medium", "large"], index=1, key="scn_api_preset")
+    with ac2:
+        scn_epochs = st.number_input("epochs", 1, 200, 30, key="scn_api_epochs")
+    with ac3:
+        scn_n = st.number_input("N مقاطع", 1000, 500000, 60000, step=1000, key="scn_api_n")
+    with ac4:
+        scn_batch = st.number_input("batch", 4, 128, 24, key="scn_api_batch")
+    scn_fresh = st.checkbox("FRESH (من الصفر)", value=True, key="scn_api_fresh")
+    scn_autopush = st.checkbox("AUTO_PUSH بعد التدريب", value=True, key="scn_api_autopush")
+    b1, b2 = st.columns(2)
+    with b1:
+        if st.button("▶ ابدأ التدريب على Kaggle الآن", type="primary", use_container_width=True, key="scn_start_api"):
+            with st.spinner("تجهيز ودفع الـkernel عبر Kaggle API…"):
+                try:
+                    from ai.kaggle_provider import start_surahchain_training_api
+                    res = start_surahchain_training_api(
+                        preset=str(scn_preset),
+                        n=int(scn_n),
+                        epochs=int(scn_epochs),
+                        batch=int(scn_batch),
+                        fresh=bool(scn_fresh),
+                        auto_push=bool(scn_autopush),
+                    )
+                    st.session_state["scn_last_api_result"] = res
+                except Exception as e:
+                    st.session_state["scn_last_api_result"] = {"ok": False, "error": str(e)}
+            st.rerun()
+    with b2:
+        if st.button("📋 حالة آخر مهمة", use_container_width=True, key="scn_status_api"):
+            last = st.session_state.get("scn_last_api_result") or {}
+            jid = last.get("job_id")
+            if jid:
+                try:
+                    from ai.kaggle_provider import status_kaggle_kernel
+                    st.session_state["scn_last_status"] = status_kaggle_kernel(jid)
+                except Exception as e:
+                    st.session_state["scn_last_status"] = {"ok": False, "error": str(e)}
+            else:
+                st.session_state["scn_last_status"] = {"ok": False, "error": "لا job_id بعد"}
+            st.rerun()
+    if st.session_state.get("scn_last_api_result"):
+        res = st.session_state["scn_last_api_result"]
+        if res.get("ok"):
+            st.success(res.get("msg_ar") or "تم الدفع")
+            if res.get("kernel_url"):
+                st.markdown(f"[افتح على Kaggle]({res['kernel_url']})")
+        else:
+            st.error(str(res.get("error") or res.get("msg_ar") or "فشل"))
+            if res.get("need"):
+                st.code(str(res.get("need")))
+            pout = (res.get("push") or {}).get("output") or (res.get("push") or {}).get("error")
+            if pout:
+                st.code(str(pout)[:2000])
+        with st.expander("تفاصيل API", expanded=False):
+            st.json(res)
+    if st.session_state.get("scn_last_status"):
+        st.markdown("**حالة المهمة**")
+        st.json(st.session_state["scn_last_status"])
+    st.markdown("---")
+
+
     # حالة Kaggle API (من البيئة فقط — لا نقرأ ملفات أسرار إلى الواجهة)
     try:
         import os

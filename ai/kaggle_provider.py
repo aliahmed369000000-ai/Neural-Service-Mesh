@@ -975,3 +975,226 @@ def handle_kaggle_command(user_input: str) -> Optional[str]:
         return kaggle_notebook_status_report()
 
     return None
+
+
+# ─── SurahChain: بدء التدريب عبر Kaggle API من تبويب Notebook ─────────────
+
+def generate_surahchain_kernel_script(
+    job_id: str,
+    preset: str = "medium",
+    n: int = 60000,
+    epochs: int = 30,
+    batch: int = 24,
+    fresh: bool = True,
+    auto_push: bool = True,
+    repo: str = "aliahmed369000000-ai/Neural-Service-Mesh",
+    branch: str = "main",
+) -> str:
+    """سكربت Kaggle يشغّل run_train_then_push (تدريب ثم رفع لـ GitHub)."""
+    fresh_s = "1" if fresh else "0"
+    push_s = "1" if auto_push else "0"
+    return textwrap.dedent(
+        f"""
+        #!/usr/bin/env python3
+        \"\"\"NSM SurahChain Kaggle Kernel — job {job_id}\"\"\"
+        from __future__ import annotations
+        import os, sys, subprocess
+        from pathlib import Path
+
+        REPO = "{repo}"
+        BRANCH = "{branch}"
+        PRESET = "{preset}"
+        SCN_N = "{n}"
+        SCN_EPOCHS = "{epochs}"
+        SCN_BATCH = "{batch}"
+        SCN_FRESH = "{fresh_s}"
+        AUTO_PUSH = "{push_s}"
+
+        def secret(name, default=""):
+            try:
+                from kaggle_secrets import UserSecretsClient
+                return UserSecretsClient().get_secret(name) or default
+            except Exception:
+                return os.environ.get(name, default)
+
+        token = secret("GITHUB_TOKEN") or secret("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
+        work = Path("/kaggle/working/Neural-Service-Mesh")
+        print("CUDA check…")
+        try:
+            import torch
+            print("torch", torch.__version__, "cuda", torch.cuda.is_available(), "gpus", torch.cuda.device_count())
+        except Exception as e:
+            print("torch:", e)
+
+        if not token:
+            print("⚠ لا GITHUB_TOKEN في Kaggle Secrets — استنساخ عام / قد يفشل الرفع")
+            url = f"https://github.com/{{REPO}}.git"
+        else:
+            url = f"https://x-access-token:{{token}}@github.com/{{REPO}}.git"
+            os.environ["GITHUB_TOKEN"] = token
+            os.environ["AUTO_PUSH"] = AUTO_PUSH
+
+        if work.exists():
+            subprocess.run(["git", "remote", "set-url", "origin", url], cwd=str(work), check=False)
+            subprocess.run(["git", "pull", "origin", BRANCH], cwd=str(work), check=False)
+        else:
+            subprocess.run(["git", "clone", "--depth", "1", "-b", BRANCH, url, str(work)], check=True)
+
+        os.chdir(work)
+        env = os.environ.copy()
+        env.update({{
+            "SCN_PRESET": PRESET,
+            "SCN_N": SCN_N,
+            "SCN_EPOCHS": SCN_EPOCHS,
+            "SCN_BATCH": SCN_BATCH,
+            "SCN_FRESH": SCN_FRESH,
+            "AUTO_PUSH": AUTO_PUSH,
+            "PYTHONUNBUFFERED": "1",
+        }})
+        script = work / "experiments/surah_chain_network/run_train_then_push.py"
+        print("▶", script)
+        r = subprocess.run([sys.executable, str(script)], cwd=str(work), env=env)
+        print("exit", r.returncode)
+        raise SystemExit(r.returncode)
+        """
+    )
+
+
+def prepare_surahchain_kaggle_job(
+    preset: str = "medium",
+    n: int = 60000,
+    epochs: int = 30,
+    batch: int = 24,
+    fresh: bool = True,
+    auto_push: bool = True,
+    title: Optional[str] = None,
+) -> Dict[str, Any]:
+    """يجهّز kernel SurahChain جاهز للرفع عبر API."""
+    job_id = f"scn_{uuid.uuid4().hex[:10]}"
+    job_dir = KAGGLE_DIR / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    user = (
+        os.environ.get("KAGGLE_USERNAME")
+        or os.environ.get("KAGGLE_USER")
+        or "nsm-agent"
+    )
+    try:
+        for cand in (
+            Path.home() / ".kaggle" / "kaggle.json",
+            Path(os.environ.get("KAGGLE_CONFIG_DIR") or "") / "kaggle.json",
+        ):
+            if cand.is_file():
+                data = json.loads(cand.read_text(encoding="utf-8"))
+                user = data.get("username") or user
+                break
+    except Exception:
+        pass
+
+    slug = _safe_slug(title or f"nsm-surahchain-{job_id}")
+    effective_title = slug.replace("-", " ")
+    script = generate_surahchain_kernel_script(
+        job_id, preset=preset, n=n, epochs=epochs, batch=batch, fresh=fresh, auto_push=auto_push
+    )
+    meta = generate_kernel_metadata(
+        job_id,
+        username=user,
+        title=effective_title,
+        enable_gpu=True,
+        accelerator="NvidiaTeslaT4",
+    )
+    meta["id"] = f"{user}/{slug}"
+    meta["enable_internet"] = True
+    meta["is_private"] = True
+
+    (job_dir / "nsm_train.py").write_text(script, encoding="utf-8")
+    nb = {
+        "nbformat": 4,
+        "nbformat_minor": 5,
+        "metadata": {
+            "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
+            "accelerator": "GPU",
+        },
+        "cells": [
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "source": ["%run nsm_train.py\\n"],
+                "outputs": [],
+                "execution_count": None,
+            }
+        ],
+    }
+    (job_dir / "nsm_train.ipynb").write_text(json.dumps(nb, indent=2), encoding="utf-8")
+    meta["code_file"] = "nsm_train.ipynb"
+    meta["language"] = "python"
+    meta["kernel_type"] = "notebook"
+    (job_dir / "kernel-metadata.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+    job = {
+        "job_id": job_id,
+        "type": "surahchain",
+        "title": effective_title,
+        "slug": f"{user}/{slug}",
+        "preset": preset,
+        "n": n,
+        "epochs": epochs,
+        "batch": batch,
+        "fresh": fresh,
+        "auto_push": auto_push,
+        "status": "prepared",
+        "created_at": _now(),
+        "job_dir": str(job_dir.relative_to(ROOT)),
+    }
+    (job_dir / "job.json").write_text(json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, **job}
+
+
+def start_surahchain_training_api(
+    preset: str = "medium",
+    n: int = 60000,
+    epochs: int = 30,
+    batch: int = 24,
+    fresh: bool = True,
+    auto_push: bool = True,
+) -> Dict[str, Any]:
+    """
+    من تبويب Notebook: جهّز + ادفع kernel عبر Kaggle API ليبدأ التدريب على GPU.
+    يتطلب: KAGGLE_USERNAME + KAGGLE_KEY و pip install kaggle
+    وعلى حساب Kaggle: Secret باسم GITHUB_TOKEN للرفع بعد التدريب.
+    """
+    ok_cred, msg = ensure_kaggle_env()
+    if not ok_cred:
+        return {
+            "ok": False,
+            "error": msg,
+            "need": ["KAGGLE_USERNAME", "KAGGLE_KEY", "pip install kaggle"],
+            "hint_ar": "ضع المفاتيح في Streamlit Secrets ثم أعد التشغيل",
+        }
+    if not _kaggle_cli_available() and not _kaggle_py_available():
+        return {
+            "ok": False,
+            "error": "حزمة/أداة kaggle غير مثبتة",
+            "need": ["pip install kaggle"],
+        }
+
+    prep = prepare_surahchain_kaggle_job(
+        preset=preset, n=n, epochs=epochs, batch=batch, fresh=fresh, auto_push=auto_push
+    )
+    if not prep.get("ok"):
+        return prep
+    job_id = prep["job_id"]
+    push = push_kaggle_kernel(job_id)
+    return {
+        "ok": bool(push.get("ok")),
+        "job_id": job_id,
+        "prepare": {k: prep[k] for k in prep if k != "ok"},
+        "push": push,
+        "kernel_url": push.get("kernel_url"),
+        "msg_ar": (
+            "تم دفع الـkernel — راقب التشغيل على Kaggle. "
+            "بعد انتهاء التدريب يُرفع تلقائياً إن وُجد GITHUB_TOKEN في Kaggle Secrets."
+            if push.get("ok")
+            else "فشل الدفع — راجع تفاصيل push"
+        ),
+    }
