@@ -63,17 +63,38 @@ def cosine_lr(step, total_steps, base_lr, warmup_steps=0, min_lr_ratio=0.1):
 
 
 class SurahChainLayer(nn.Module):
-    """طبقة سلسلة السور مع Highway gate + LayerScale + دعم التوسيع الذاتي."""
+    """طبقة سلسلة السور مع Highway gate + LayerScale + دعم التوسيع الذاتي.
 
-    def __init__(self, d_in: int, d_out: int, layer_scale_init: float = 1e-2):
+    ملاحظة تهيئة (fix): مسار الـshortcut غير مُطبَّع (بدون LayerNorm)، فتكرار
+    ضربه بمصفوفة عشوائية عبر 114 طبقة يُنتج انكماشاً أُسّياً للإشارة (تحقّق
+    مُختبر: RMS المخرج يهبط لـ~1e-107 بعد 113 طبقة عند التهيئة العشوائية
+    الافتراضية). لذلك يُهيَّأ الـshortcut هنا identity-like (نفس نمط eye()
+    المستخدم أصلاً في expand_out/expand_in) بدل عشوائي بالكامل، مع رفع
+    layer_scale_init الافتراضي من 1e-2 إلى 1.0 — تحقّق numpy مستقل أظهر أن
+    هذا يبقي RMS المخرج مستقراً (~1 إلى ~50) عبر كل الطبقات الـ114 بدل
+    الانهيار لصفر عملياً."""
+
+    def __init__(self, d_in: int, d_out: int, layer_scale_init: float = 1.0):
         super().__init__()
         self.d_in = int(d_in)
         self.d_out = int(d_out)
         self.fc = nn.Linear(d_in, d_out)
         self.ln = nn.LayerNorm(d_out)
         self.shortcut = nn.Linear(d_in, d_out, bias=False) if d_in != d_out else None
+        if self.shortcut is not None:
+            self._init_shortcut_identity()
         self.gate = nn.Linear(d_in, d_out)
         self.layer_scale = nn.Parameter(torch.ones(d_out) * layer_scale_init)
+
+    def _init_shortcut_identity(self) -> None:
+        """يهيّئ self.shortcut.weight إلى مصفوفة شبه-وحدة (identity-like) بدل
+        عشوائية بالكامل، للحفاظ على مقياس الإشارة عبر السلسلة الطويلة."""
+        with torch.no_grad():
+            self.shortcut.weight.zero_()
+            eye = min(self.d_in, self.d_out)
+            self.shortcut.weight[:eye, :eye] = torch.eye(
+                eye, device=self.shortcut.weight.device, dtype=self.shortcut.weight.dtype
+            )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         h = self.ln(F.gelu(self.fc(x)))
@@ -168,6 +189,16 @@ class SurahChainNetwork(nn.Module):
         for layer in self.layers:
             x = layer(x)
         return x
+
+    def reinit_shortcuts_identity(self) -> None:
+        """يعيد تهيئة كل مصفوفات shortcut للسلسلة identity-like. ضروري لأن
+        SurahChainLM.__init__ يستدعي self.apply(self._init_weights) على كامل
+        النموذج بعد بناء السلسلة، وهو يُعيد كتابة shortcut.weight بتهيئة
+        عشوائية normal(0, 0.02) فتُلغي تهيئة identity الأصلية. يُستدعى بعد
+        self.apply() تماماً كما تُعاد تهيئة بوابات الانتباه هناك."""
+        for layer in self.layers:
+            if layer.shortcut is not None:
+                layer._init_shortcut_identity()
 
     def expand_narrowest(self, delta: int = 1) -> Optional[dict]:
         """
@@ -441,6 +472,11 @@ class SurahChainLM(nn.Module):
                 if gate is not None:
                     nn.init.zeros_(gate.weight)
                     nn.init.constant_(gate.bias, 2.0)
+        # أعد تهيئة shortcut سلسلة السور identity-like بعد apply (نفس السبب:
+        # self.apply(self._init_weights) يستبدل تهيئة identity الأصلية
+        # بتهيئة عشوائية normal(0, 0.02) — راجع SurahChainLayer._init_shortcut_identity
+        # وتوثيق المشكلة/الإصلاح في SurahChainLayer).
+        self.chain.reinit_shortcuts_identity()
 
     @staticmethod
     def _init_weights(m):
