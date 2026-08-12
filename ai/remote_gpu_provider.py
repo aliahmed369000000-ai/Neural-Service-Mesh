@@ -396,3 +396,15 @@ def handle_remote_gpu_command(user_input: str) -> Optional[str]:
             + (job.get("result_preview") or job.get("error") or "")[:2000]
         )
     return None
+
+
+def list_available_providers() -> Dict[str, Any]:
+    """ملخص المزوّدين المحليين + كتالوج GPU المجاني."""
+    out: Dict[str, Any] = {"local": LocalGPUProvider().status()}
+    try:
+        from ai.free_gpu_providers import list_free_gpu_providers, provider_env_status
+        out["free_catalog"] = list_free_gpu_providers()
+        out["api_keys"] = provider_env_status()
+    except Exception as e:
+        out["free_catalog_error"] = str(e)
+    return out

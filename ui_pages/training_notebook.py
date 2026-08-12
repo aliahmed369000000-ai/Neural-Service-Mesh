@@ -76,7 +76,17 @@ def render_training_notebook():
     with c3:
         provider = st.selectbox(
             "المزوّد",
-            ["local", "kaggle", "colab", "runpod", "vast", "generic_gpu"],
+            [
+                "local",
+                "kaggle",
+                "modal",
+                "lightning",
+                "huggingface",
+                "colab",
+                "runpod",
+                "vast",
+                "generic_gpu",
+            ],
             key="nsm_nb_provider",
         )
     with c4:
@@ -87,16 +97,37 @@ def render_training_notebook():
     save_notebook(nb)
 
     # ── حالة الحوسبة ──
-    with st.expander("🖥️ الحوسبة والمزوّدات", expanded=False):
+    with st.expander("🖥️ الحوسبة ومزوّدو GPU المجاني", expanded=True):
+        try:
+            from ai.free_gpu_providers import (
+                list_free_gpu_providers,
+                provider_env_status,
+                recommended_stack_ar,
+                plan_for_provider,
+            )
+            st.markdown(recommended_stack_ar())
+            st.markdown("#### حالة مفاتيح API في البيئة")
+            st.json(provider_env_status())
+            st.markdown("#### الكتالوج")
+            for row in list_free_gpu_providers(include_paid=True):
+                keys = ", ".join(row.get("api_key_env") or ["—"])
+                st.markdown(
+                    f"- **{row['name']}** (`{row['id']}`) · {row.get('gpu')} · "
+                    f"حصة: {row.get('quota_ar')} · مفاتيح: `{keys}` · "
+                    f"[تسجيل]({row.get('signup_url')})"
+                )
+        except Exception as e:
+            st.warning(f"كتالوج GPU: {e}")
         compute = detect_compute()
-        st.json(compute)
+        with st.expander("تفاصيل detect_compute", expanded=False):
+            st.json(compute)
         plan = plan_remote_run(nb, provider)
         st.markdown("**خطة التشغيل على المزوّد المختار**")
         st.json(plan)
         if provider != "local":
             st.info(
-                "التنفيذ الثقيل على المزوّد الخارجي يتطلب مفاتيح API في Secrets. "
-                "الخلايا هنا تُنفَّذ محلياً؛ الخطة أعلاه للربط مع Kaggle/GPU دون انقطاع Colab المجاني."
+                "ضع المفاتيح في **Streamlit Secrets**. "
+                "التدريب الطويل: Kaggle أو Modal/Lightning أفضل من Colab المجاني (أقل انقطاعاً)."
             )
 
     # ── أدوات الدفتر ──

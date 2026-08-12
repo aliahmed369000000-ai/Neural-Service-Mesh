@@ -67,7 +67,7 @@ class Notebook:
     updated_at: str = field(default_factory=_now)
     metadata: Dict[str, Any] = field(default_factory=dict)
     kernel: str = "python3"
-    provider: str = "local"  # local | kaggle | colab | runpod | vast | generic_gpu
+    provider: str = "local"  # local | kaggle | colab | modal | lightning | huggingface | runpod | vast | generic_gpu
 
     def to_dict(self) -> dict:
         return {
@@ -193,10 +193,13 @@ def create_notebook(name: str = "NSM Training Lab", template: str = "training") 
                     "### 🚀 مزوّدو GPU\n"
                     "| مزوّد | الاستخدام |\n|------|----------|\n"
                     "| local | تنفيذ هنا |\n"
-                    "| kaggle | `ai/kaggle_provider` + notebooks |\n"
-                    "| colab | دفاتر `notebooks/*Colab*` |\n"
-                    "| runpod / vast / generic | `ai/remote_gpu_provider` |\n\n"
-                    "الجلسة المستمرة = حفظ الدفتر على القرص + تشغيل على مزوّد لا يقطع مثل Colab المجاني."
+                    "| **kaggle** | مجاني ~30س/أسبوع + API |\n"
+                    "| **modal** | رصيد مجاني + API tokens |\n"
+                    "| **lightning** | رصيد شهري + API |\n"
+                    "| **huggingface** | HF_TOKEN |\n"
+                    "| colab | سريع وقد ينقطع |\n"
+                    "| runpod / vast | مستقر (مدفوع غالباً) |\n\n"
+                    "كتالوج كامل: `ai/free_gpu_providers.py` — مفاتيح في Streamlit Secrets."
                 ),
             ),
         ]
@@ -309,17 +312,23 @@ def detect_compute() -> Dict[str, Any]:
         }
     except Exception as e:
         info["local"] = {"error": str(e), "cuda": False}
-    # remote providers availability (import only)
     for mod, key in (
         ("ai.kaggle_provider", "kaggle"),
         ("ai.remote_gpu_provider", "remote_gpu"),
         ("connectors.kaggle_training_connector", "kaggle_connector"),
+        ("ai.free_gpu_providers", "free_gpu_catalog"),
     ):
         try:
             __import__(mod)
             info["providers"][key] = {"available": True, "module": mod}
         except Exception as e:
             info["providers"][key] = {"available": False, "error": str(e)[:120]}
+    try:
+        from ai.free_gpu_providers import list_free_gpu_providers, provider_env_status
+        info["free_gpu_catalog"] = list_free_gpu_providers(include_paid=True)
+        info["api_keys_status"] = provider_env_status()
+    except Exception as e:
+        info["free_gpu_catalog_error"] = str(e)
     return info
 
 
@@ -359,6 +368,18 @@ def plan_remote_run(nb: Notebook, provider: str) -> Dict[str, Any]:
             "scripts/colab_bootstrap.py لربط المستودع",
             "Colab قد ينقطع — للديمومة استخدم Kaggle أو RunPod/Vast",
         ]
+    elif provider in ("modal", "lightning", "huggingface", "hf"):
+        try:
+            from ai.free_gpu_providers import plan_for_provider
+            pid = "huggingface" if provider == "hf" else provider
+            detailed = plan_for_provider(pid, notebook_id=nb.id)
+            plan["steps"] = detailed.get("steps") or []
+            plan["env"] = detailed.get("env")
+            plan["ready_to_submit"] = detailed.get("ready_to_submit")
+            plan["provider_meta"] = detailed.get("provider")
+        except Exception as e:
+            plan["ok"] = False
+            plan["error"] = str(e)
     elif provider in ("runpod", "vast", "generic_gpu", "remote"):
         plan["steps"] = [
             "اضبط مفاتيح المزوّد في Secrets",
@@ -372,9 +393,27 @@ def plan_remote_run(nb: Notebook, provider: str) -> Dict[str, Any]:
         except Exception as e:
             plan["module_ok"] = False
             plan["error"] = str(e)
+        try:
+            from ai.free_gpu_providers import plan_for_provider
+            plan["catalog"] = plan_for_provider(provider if provider in ("runpod", "vast") else "runpod", notebook_id=nb.id)
+        except Exception:
+            pass
     else:
-        plan["ok"] = False
-        plan["error"] = f"مزوّد غير معروف: {provider}"
+        # أي id من الكتالوج
+        try:
+            from ai.free_gpu_providers import plan_for_provider
+            detailed = plan_for_provider(provider, notebook_id=nb.id)
+            if detailed.get("ok"):
+                plan["steps"] = detailed.get("steps") or []
+                plan["env"] = detailed.get("env")
+                plan["ready_to_submit"] = detailed.get("ready_to_submit")
+                plan["provider_meta"] = detailed.get("provider")
+            else:
+                plan["ok"] = False
+                plan["error"] = detailed.get("error") or f"مزوّد غير معروف: {provider}"
+        except Exception as e:
+            plan["ok"] = False
+            plan["error"] = f"مزوّد غير معروف: {provider} ({e})"
     return plan
 
 
