@@ -174,6 +174,14 @@ class SwarmCoordinator:
         self._knowledge = knowledge_store
         self._history: List[SwarmResult] = []
         self._lock = threading.Lock()
+        # 🆕 تخزين دائم لنتائج السرب (SQLite) — self._history وحدها كانت
+        # في الذاكرة فقط وتُمسح بإعادة تشغيل الحاوية. انظر ai/swarm_history_store.py
+        try:
+            from ai.swarm_history_store import get_default_swarm_store
+            self._store = get_default_swarm_store()
+        except Exception as exc:
+            logger.warning(f"تعذّر تفعيل تخزين تاريخ السرب الدائم: {exc}")
+            self._store = None
         logger.info(f"SwarmCoordinator initialised (max_agents={max_agents})")
 
     # ── Main execution ────────────────────────────────────────────────────
@@ -221,6 +229,7 @@ class SwarmCoordinator:
             result.status = "failed"
             result.finished_at = datetime.now(timezone.utc).isoformat()
             self._history.append(result)
+            self._persist_result(result)
             return result
 
         # 2. Sort by priority
@@ -281,6 +290,7 @@ class SwarmCoordinator:
 
         with self._lock:
             self._history.append(result)
+        self._persist_result(result)
 
         logger.info(
             f"Swarm {swarm_id} finished: "
@@ -544,10 +554,44 @@ class SwarmCoordinator:
 
     # ── Public helpers ────────────────────────────────────────────────────
 
+    def _persist_result(self, result: "SwarmResult") -> None:
+        """يحفظ نتيجة swarm في SQLite (memory/swarm_history.db) كي تبقى
+        بعد إعادة تشغيل الحاوية. لا يرفع استثناء أبداً — التخزين الدائم
+        لا يجب أن يُعطّل تنفيذ السرب."""
+        if self._store is None:
+            return
+        try:
+            self._store.log_result(result.to_dict())
+        except Exception as exc:
+            logger.warning(f"تعذّر حفظ نتيجة السرب {result.swarm_id} بشكل دائم: {exc}")
+
     def history(self, limit: int = 20) -> List[dict]:
+        """يُفضّل التاريخ الدائم (SQLite) إن كان متاحاً — يشمل عمليات
+        السرب من قبل إعادة تشغيل الحاوية الأخيرة، لا فقط الجلسة الحالية."""
+        if self._store is not None:
+            try:
+                persisted = self._store.get_recent(limit)
+                if persisted:
+                    return persisted
+            except Exception as exc:
+                logger.warning(f"تعذّر قراءة تاريخ السرب الدائم: {exc}")
         return [r.to_dict() for r in self._history[-limit:]]
 
     def summary(self) -> dict:
+        if self._store is not None:
+            try:
+                base = self._store.summary()
+                return {
+                    "total_swarms": base["total_swarms"],
+                    "done": base["done"],
+                    "partial": base["partial"],
+                    "failed": base["failed"],
+                    "max_agents": self._max_agents,
+                    "active_agents": len(self._factory.list_active()),
+                }
+            except Exception as exc:
+                logger.warning(f"تعذّر قراءة ملخص السرب الدائم: {exc}")
+
         total = len(self._history)
         done = sum(1 for r in self._history if r.status == "done")
         partial = sum(1 for r in self._history if r.status == "partial")
