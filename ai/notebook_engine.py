@@ -129,6 +129,197 @@ def save_notebook(nb: Notebook) -> Path:
     return path
 
 
+
+def import_ipynb(path: str | Path, name: Optional[str] = None) -> Notebook:
+    """استيراد دفتر Jupyter/Kaggle (.ipynb) إلى مختبر NSM."""
+    path = Path(path)
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    cells: List[Cell] = []
+    for c in raw.get("cells") or []:
+        src = c.get("source") or ""
+        if isinstance(src, list):
+            src = "".join(src)
+        ctype = c.get("cell_type") or "code"
+        if ctype == "markdown":
+            ntype = "markdown"
+        else:
+            # كشف bash / train تقريبي
+            if src.lstrip().startswith("!") or "subprocess" in src[:200]:
+                ntype = "code"  # نبقي code لأن ! لا يعمل محلياً كما في IPython
+            else:
+                ntype = "code"
+        cell = Cell(
+            id=uuid.uuid4().hex[:8],
+            type=ntype,
+            source=src,
+            execution_count=c.get("execution_count"),
+            metadata={"from_ipynb": True, **(c.get("metadata") or {})},
+        )
+        # لا ننسخ مخرجات ضخمة
+        cells.append(cell)
+    title = name or (raw.get("metadata") or {}).get("nsm", {}).get("name") or path.stem
+    nb = Notebook(id=uuid.uuid4().hex[:10], name=title, cells=cells, provider="kaggle")
+    save_notebook(nb)
+    return nb
+
+
+def _surahchain_kaggle_cells() -> List[Cell]:
+    """نفس منطق دفتر Kaggle notebookf207055113 — بدون توكنات مضمّنة."""
+    return [
+        Cell(
+            id=uuid.uuid4().hex[:8],
+            type="markdown",
+            source=textwrap.dedent(
+                """                # SurahChain 114 — تدريب (نمط Kaggle)
+
+                ## قبل التشغيل على Kaggle
+                1. **Settings → Accelerator → GPU T4** (أو Dual T4)
+                2. **Settings → Internet → ON**
+                3. **Add-ons → Secrets** → `GITHUB_TOKEN` (صلاحية repo)
+                4. عدّل خلية **الإعدادات**
+                5. **Save Version → Save & Run All** — يكمل في الخلفية
+
+                ## في NSM Notebook (محلي / Streamlit)
+                - نفّذ الخلايا بالترتيب (▶ أو Run All)
+                - للتدريب الثقيل: صدّر `.ipynb` وارفعه لـ Kaggle أو استخدم المزوّد `kaggle`
+                - **لا تضع مفاتيح في الخلايا** — استخدم Secrets / متغيرات البيئة
+                """
+            ),
+        ),
+        Cell(
+            id=uuid.uuid4().hex[:8],
+            type="code",
+            source=textwrap.dedent(
+                """                # =========================
+                # إعدادات — عدّل هنا فقط
+                # =========================
+                SCN_PRESET = "medium"   # small | medium | large
+                SCN_N = 60000
+                SCN_EPOCHS = 30
+                SCN_BATCH = 24           # إن نفدت الذاكرة: 16 أو 8
+                SCN_FRESH = True
+                SCN_COMPILE = True
+                SCN_QK_NORM = True
+                SCN_GATED_ATTN = True
+                AUTO_PUSH = True
+
+                REPO = "aliahmed369000000-ai/Neural-Service-Mesh"
+                BRANCH = "main"
+
+                print("=" * 50)
+                print("preset:", SCN_PRESET, "N:", SCN_N, "epochs:", SCN_EPOCHS)
+                print("batch:", SCN_BATCH, "fresh:", SCN_FRESH)
+                print("=" * 50)
+                """
+            ),
+        ),
+        Cell(
+            id=uuid.uuid4().hex[:8],
+            type="code",
+            source=textwrap.dedent(
+                """                import sys, torch
+                print("Python:", sys.version.split()[0])
+                print("torch:", torch.__version__)
+                print("CUDA:", torch.cuda.is_available(), "| GPUs:", torch.cuda.device_count())
+                if torch.cuda.is_available():
+                    for i in range(torch.cuda.device_count()):
+                        print(f"  GPU{i}:", torch.cuda.get_device_name(i))
+                else:
+                    print("تحذير: لا GPU محلياً — على Kaggle فعّل Accelerator")
+                """
+            ),
+        ),
+        Cell(
+            id=uuid.uuid4().hex[:8],
+            type="code",
+            source=textwrap.dedent(
+                """                import os
+                # التوكن من البيئة فقط — لا تكتب ghp_ هنا
+                GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
+                if not GITHUB_TOKEN:
+                    print("⚠ لا GITHUB_TOKEN في البيئة — الاستنساخ الخاص قد يفشل")
+                else:
+                    print("✓ GITHUB_TOKEN موجود (مخفي)")
+                print("REPO ready for clone on Kaggle working dir")
+                print("CWD tip: on Kaggle use /kaggle/working/")
+                """
+            ),
+        ),
+        Cell(
+            id=uuid.uuid4().hex[:8],
+            type="bash",
+            source="python experiments/surah_chain_network/prepare_pretrain_data.py 2>&1 | tail -30",
+            metadata={"note": "تحضير بيانات — يحتاج SCN_N في البيئة"},
+        ),
+        Cell(
+            id=uuid.uuid4().hex[:8],
+            type="code",
+            source=textwrap.dedent(
+                """                import os
+                # اضبط من خلية الإعدادات يدوياً أو عبر globals إن نُفذت في نفس الجلسة
+                for k, v in {
+                    "SCN_PRESET": "medium",
+                    "SCN_N": "60000",
+                    "SCN_EPOCHS": "30",
+                    "SCN_BATCH": "24",
+                    "SCN_FRESH": "1",
+                    "SCN_COMPILE": "1",
+                    "SCN_QK_NORM": "1",
+                    "SCN_GATED_ATTN": "1",
+                    "SCN_CHAIN_SCALE": "1",
+                }.items():
+                    os.environ.setdefault(k, v)
+                print("بدء التدريب...", os.environ.get("SCN_PRESET"))
+                print("شغّل على Kaggle: python experiments/surah_chain_network/train_pretrain_torch.py")
+                print("(محلياً قد يكون ثقيلاً بدون GPU)")
+                """
+            ),
+            metadata={"type_hint": "train"},
+        ),
+        Cell(
+            id=uuid.uuid4().hex[:8],
+            type="code",
+            source=textwrap.dedent(
+                """                from pathlib import Path
+                import json
+                exp = Path("experiments/surah_chain_network")
+                ckpt = exp / "checkpoints"
+                print("--- الملفات ---")
+                if ckpt.is_dir():
+                    for p in sorted(ckpt.glob("*")):
+                        if p.is_file():
+                            print(f"  {p.name}: {p.stat().st_size/1e6:.2f} MB")
+                    for state in list(ckpt.glob("pretrain_state_*.json")) + list(ckpt.glob("pretrain_torch_state.json")):
+                        try:
+                            d = json.loads(state.read_text(encoding="utf-8"))
+                            print(f"\n[{state.name}]")
+                            for k in ("best_loss", "epochs_completed", "preset", "step"):
+                                if k in d:
+                                    print(f"  {k}:", d[k])
+                        except Exception as e:
+                            print(state, e)
+                else:
+                    print("لا مجلد checkpoints بعد")
+                """
+            ),
+        ),
+        Cell(
+            id=uuid.uuid4().hex[:8],
+            type="markdown",
+            source=textwrap.dedent(
+                """                ## بعد الاستيقاظ (Kaggle)
+                1. تأكد أن Version حالتها **Success**
+                2. على GitHub راجع `best_loss` في `pretrain_state_*.json`
+                3. للاستكمال: `SCN_FRESH = False` ثم Save & Run All
+
+                هذه الجولة تشغّل بنية **114** وتقيس الـloss (هدف بحثي).
+                """
+            ),
+        ),
+    ]
+
+
+
 def create_notebook(name: str = "NSM Training Lab", template: str = "training") -> Notebook:
     nb = Notebook(id=uuid.uuid4().hex[:10], name=name)
     if template == "training":
@@ -203,6 +394,10 @@ def create_notebook(name: str = "NSM Training Lab", template: str = "training") 
                 ),
             ),
         ]
+    elif template in ("surahchain", "kaggle_surahchain", "notebookf207055113"):
+        nb.cells = _surahchain_kaggle_cells()
+        nb.provider = "kaggle"
+        nb.metadata["source_notebook"] = "aliahmedmo/notebookf207055113"
     else:
         nb.cells = [Cell(id=uuid.uuid4().hex[:8], type="code", source="print('hello NSM')")]
     save_notebook(nb)

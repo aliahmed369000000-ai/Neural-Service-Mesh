@@ -73,6 +73,10 @@ def render_training_notebook():
             nb = create_notebook("NSM Lab " + st.session_state.get("nsm_nb_id", "")[:4], template="training")
             st.session_state.nsm_nb_id = nb.id
             st.rerun()
+        if st.button("📖 SurahChain Kaggle", use_container_width=True, key="nb_surah"):
+            nb = create_notebook("SurahChain Kaggle Lab", template="surahchain")
+            st.session_state.nsm_nb_id = nb.id
+            st.rerun()
     with c3:
         provider = st.selectbox(
             "المزوّد",
@@ -95,6 +99,22 @@ def render_training_notebook():
     nb = _ensure_nb()
     nb.provider = provider
     save_notebook(nb)
+
+    # حالة Kaggle API (من البيئة فقط — لا نقرأ ملفات أسرار إلى الواجهة)
+    try:
+        import os
+        ku = bool(os.environ.get("KAGGLE_USERNAME") or os.environ.get("KAGGLE_USER"))
+        kk = bool(os.environ.get("KAGGLE_KEY"))
+        if ku and kk:
+            st.success("🔑 Kaggle API: المفاتيح موجودة في البيئة")
+        else:
+            st.caption(
+                "Kaggle API: ضع في Streamlit Secrets: "
+                "`KAGGLE_USERNAME` و `KAGGLE_KEY` (من kaggle.json) — لا ترفع الملف للمستودع."
+            )
+    except Exception:
+        pass
+
 
     # ── حالة الحوسبة ──
     with st.expander("🖥️ الحوسبة ومزوّدو GPU المجاني", expanded=True):
