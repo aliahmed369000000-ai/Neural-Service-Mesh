@@ -347,3 +347,16 @@ def summarize_file(path: str) -> str:
         return "\n".join(out)
     except Exception as e:
         return f"❌ خطأ: {e}"
+
+
+# ══════════════════════════════════════════════════════════════════
+# 9. أدوات موسّعة (إعادة تصدير من agent_tools)
+# ══════════════════════════════════════════════════════════════════
+try:
+    from ai.agent_tools import (
+        search_code, find_files, git_info, py_compile_check,
+        fetch_url, system_info, run_safe_cmd, handle_tool_command,
+    )
+except Exception:  # pragma: no cover
+    search_code = find_files = git_info = py_compile_check = None  # type: ignore
+    fetch_url = system_info = run_safe_cmd = handle_tool_command = None  # type: ignore

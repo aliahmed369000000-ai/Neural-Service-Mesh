@@ -199,6 +199,15 @@ def _handle_code_command(user_input: str) -> str | None:
     except Exception:
         pass
 
+    # 🆕 أدوات تشغيلية موسّعة (بحث كود، git، py_compile، جلب روابط، …)
+    try:
+        from ai.agent_tools import handle_tool_command
+        tool_reply = handle_tool_command(user_input)
+        if tool_reply is not None:
+            return tool_reply
+    except Exception:
+        pass
+
     if not _HAS_AGENT:
         return None
     t = user_input.strip()

@@ -50,7 +50,7 @@ def _is_admin_unlocked() -> bool:
 # الخادم. كل ما عداها (قراءة/كتابة/تعديل ملفات، تشغيل أوامر shell،
 # git push، إنشاء واجهة تفاعلية مشتركة، استدعاء API عام) يتطلب فتح
 # وضع المالك أولاً.
-_PUBLIC_SAFE_ACTIONS = {"answer", "web_search", "image_search"}
+_PUBLIC_SAFE_ACTIONS = {"answer", "web_search", "image_search", "system_info", "fetch_url"}
 import urllib.error
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Tuple
@@ -205,7 +205,7 @@ def _build_system_prompt() -> str:
   "thinking": "تحليلك للطلب خطوة بخطوة",
   "steps": [
     {{
-      "action": "read_file | create_file | edit_file | run_file | run_tests | git_push | git_lfs | rollback | web_search | image_search | create_artifact | api_call | preview_check | answer",
+      "action": "read_file | create_file | edit_file | run_file | run_tests | git_push | git_lfs | git_info | search_code | find_files | py_compile | fetch_url | system_info | run_safe | rollback | web_search | image_search | create_artifact | api_call | preview_check | answer",
       "path": "المسار النسبي من جذر المشروع",
       "content": "محتوى الملف الكامل (لـ create_file) أو كود HTML/SVG كامل (لـ create_artifact)",
       "old": "النص القديم المراد استبداله (لـ edit_file) — يجب أن يكون موجوداً حرفياً",
@@ -214,6 +214,9 @@ def _build_system_prompt() -> str:
       "message": "رسالة commit (لـ git_push)",
       "lfs_op": "عملية LFS: status|install|pull|push|track|ls|migrate|prune (لـ git_lfs)",
       "patterns": "أنماط تتبع اختيارية مفصولة بفاصلة (لـ git_lfs track)",
+      "pattern": "نمط بحث regex أو نص (لـ search_code)",
+      "glob": "نمط ملفات مثل *.py (لـ search_code أو find_files)",
+      "what": "status|log|diff|branch|remote (لـ git_info)",
       "commit": "commit hash محدَّد للتراجع إليه (لـ rollback، اختياري — بدونه يُستخدم آخر checkpoint مسجَّل تلقائياً)",
       "query": "نص البحث (لـ web_search أو image_search)",
       "title": "عنوان الواجهة التفاعلية (لـ create_artifact)",
@@ -235,6 +238,11 @@ def _build_system_prompt() -> str:
 5. عند create_file: اكتب الكود كاملاً مع docstring
 6. رد بالعربية في thinking وreply
 7. إذا فشل run_file: أصلح الخطأ وأعد المحاولة تلقائياً
+13. 🆕 منهجية العمل: قبل أي تعديل جوهري اقرأ الملف (read_file) أو ابحث (search_code).
+    بعد التعديل: py_compile ثم run_file/run_tests إن أمكن، وgit_push فقط إذا طُلب صراحة.
+14. 🆕 لحالة المستودع استخدم git_info (status/log/diff) بدل التخمين.
+15. 🆕 لجلب صفحات عامة fetch_url؛ للأخبار/المعرفة الحديثة web_search.
+16. 🆕 لا تخمّن بنية المشروع: find_files أو search_code أو read_file أولاً.
 8. ⚠️ "action" يجب أن يكون **كلمة واحدة فقط** من القائمة (مثل "read_file")
    — لا تكتب القائمة كاملة مفصولة بـ | كما هي في الوصف أعلاه، هذا خطأ.
 9. ⚠️ عند طلب "افحص/اقرأ المشروع": لا تقرأ كل الملفات — اختر فقط 5-8 ملفات
@@ -453,7 +461,9 @@ def _run_step(step: Dict[str, Any]) -> str:
     # صراحة كخطأ قابل للاكتشاف عبر _is_failure() ليُعاد المحاولة تلقائياً.
     _VALID_ACTIONS = {
         "read_file", "create_file", "edit_file",
-        "run_file", "run_tests", "git_push", "git_lfs", "web_search",
+        "run_file", "run_tests", "git_push", "git_lfs", "git_info",
+        "search_code", "find_files", "py_compile", "fetch_url",
+        "system_info", "run_safe", "web_search",
         "image_search", "create_artifact", "api_call", "answer",
         "preview_check", "rollback",
     }
@@ -461,6 +471,7 @@ def _run_step(step: Dict[str, Any]) -> str:
         return (f"❌ فعل غير صالح من النموذج: '{action}'\n"
                 f"💡 يجب اختيار فعل واحد بالضبط من: "
                 f"read_file, create_file, edit_file, run_file, run_tests, git_push, git_lfs, "
+                f"git_info, search_code, find_files, py_compile, fetch_url, system_info, run_safe, "
                 f"web_search, image_search, create_artifact, api_call, answer")
 
     # ── 🔒 حماية: الأفعال الخطرة (ملفات/تنفيذ/push/API عام) للمالك فقط ──
@@ -559,6 +570,76 @@ def _run_step(step: Dict[str, Any]) -> str:
             return check_streamlit_boots(entry)
         except Exception as e:
             return f"❌ خطأ في المعاينة الحيّة: {e}"
+
+    # ── search_code ── 🆕 بحث في كود المشروع
+    if action == "search_code":
+        try:
+            from ai.agent_tools import search_code as _sc, format_tool_result
+            pat = step.get("pattern") or step.get("query") or ""
+            if not pat:
+                return "❌ search_code: مطلوب pattern أو query"
+            res = _sc(pat, path=path or ".", glob=step.get("glob") or "*.py")
+            return format_tool_result("🔎 search_code", res)
+        except Exception as e:
+            return f"❌ search_code: {e}"
+
+    # ── find_files ──
+    if action == "find_files":
+        try:
+            from ai.agent_tools import find_files as _ff, format_tool_result
+            res = _ff(step.get("glob") or step.get("pattern") or "*.py", path=path or ".")
+            return format_tool_result("📁 find_files", res)
+        except Exception as e:
+            return f"❌ find_files: {e}"
+
+    # ── git_info ──
+    if action == "git_info":
+        try:
+            from ai.agent_tools import git_info as _gi, format_tool_result
+            res = _gi(step.get("what") or step.get("cmd") or "status")
+            return format_tool_result("🌿 git_info", res)
+        except Exception as e:
+            return f"❌ git_info: {e}"
+
+    # ── py_compile ──
+    if action == "py_compile":
+        try:
+            from ai.agent_tools import py_compile_check, format_tool_result
+            if not path:
+                return "❌ py_compile: مطلوب path"
+            return format_tool_result("🧪 py_compile", py_compile_check(path))
+        except Exception as e:
+            return f"❌ py_compile: {e}"
+
+    # ── fetch_url ──
+    if action == "fetch_url":
+        try:
+            from ai.agent_tools import fetch_url as _fu, format_tool_result
+            u = step.get("url") or query or ""
+            if not u:
+                return "❌ fetch_url: مطلوب url"
+            return format_tool_result("🌐 fetch_url", _fu(u))
+        except Exception as e:
+            return f"❌ fetch_url: {e}"
+
+    # ── system_info ──
+    if action == "system_info":
+        try:
+            from ai.agent_tools import system_info as _si, format_tool_result
+            return format_tool_result("🖥️ system_info", _si())
+        except Exception as e:
+            return f"❌ system_info: {e}"
+
+    # ── run_safe ──
+    if action == "run_safe":
+        try:
+            from ai.agent_tools import run_safe_cmd, format_tool_result
+            c = step.get("cmd") or ""
+            if not c:
+                return "❌ run_safe: مطلوب cmd"
+            return format_tool_result("⚙️ run_safe", run_safe_cmd(c))
+        except Exception as e:
+            return f"❌ run_safe: {e}"
 
     # ── git_lfs ── 🆕 قدرات Git LFS كاملة
     if action == "git_lfs":
