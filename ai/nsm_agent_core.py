@@ -205,7 +205,7 @@ def _build_system_prompt() -> str:
   "thinking": "تحليلك للطلب خطوة بخطوة",
   "steps": [
     {{
-      "action": "read_file | create_file | edit_file | run_file | run_tests | git_push | git_lfs | git_info | search_code | find_files | py_compile | fetch_url | system_info | run_safe | rollback | web_search | deep_research | self_learn | ingest_knowledge | trending | will_status | will_tick | image_search | create_artifact | api_call | preview_check | answer",
+      "action": "read_file | create_file | edit_file | run_file | run_tests | git_push | git_lfs | git_info | search_code | find_files | py_compile | fetch_url | system_info | run_safe | rollback | web_search | deep_research | self_learn | ingest_knowledge | trending | will_status | will_tick | terminal | image_search | create_artifact | api_call | preview_check | answer",
       "path": "المسار النسبي من جذر المشروع",
       "content": "محتوى الملف الكامل (لـ create_file) أو كود HTML/SVG كامل (لـ create_artifact)",
       "old": "النص القديم المراد استبداله (لـ edit_file) — يجب أن يكون موجوداً حرفياً",
@@ -466,7 +466,7 @@ def _run_step(step: Dict[str, Any]) -> str:
         "run_file", "run_tests", "git_push", "git_lfs", "git_info",
         "search_code", "find_files", "py_compile", "fetch_url",
         "system_info", "run_safe", "web_search", "deep_research",
-        "self_learn", "ingest_knowledge", "trending", "will_status", "will_tick",
+        "self_learn", "ingest_knowledge", "trending", "will_status", "will_tick", "terminal",
         "image_search", "create_artifact", "api_call", "answer",
         "preview_check", "rollback",
     }
@@ -655,6 +655,23 @@ def _run_step(step: Dict[str, Any]) -> str:
     # ── rollback ── 🆕 المرحلة 6: Checkpoints/Rollback
     if action == "rollback":
         return _rollback_to_checkpoint(step.get("commit", ""))
+
+    # ── terminal ── 🆕 طرفية NSM للوكلاء
+    if action == "terminal":
+        try:
+            from ai.nsm_terminal import get_terminal
+            c = step.get("cmd") or step.get("command") or ""
+            if not c:
+                return "❌ terminal: مطلوب cmd"
+            mode = step.get("mode") or "safe"
+            # الوكلاء الافتراضي safe؛ admin فقط مع وضع المالك
+            if mode == "admin" and not _is_admin_unlocked():
+                mode = "safe"
+            timeout = int(step.get("timeout") or 45)
+            r = get_terminal().run(c, mode=mode, timeout=timeout)
+            return f"## 💻 terminal\n```\n{r.formatted()}\n```"
+        except Exception as e:
+            return f"❌ terminal: {e}"
 
     # ── will_status / will_tick ── إرادة ذاتية
     if action == "will_status":

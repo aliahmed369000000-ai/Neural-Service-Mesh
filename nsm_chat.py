@@ -226,6 +226,15 @@ def _handle_code_command(user_input: str) -> str | None:
     except Exception:
         pass
 
+    # 🆕 طرفية مشتركة للوكلاء
+    try:
+        from ai.nsm_terminal import handle_terminal_command
+        term_reply = handle_terminal_command(user_input)
+        if term_reply is not None:
+            return term_reply
+    except Exception:
+        pass
+
     if not _HAS_AGENT:
         return None
     t = user_input.strip()

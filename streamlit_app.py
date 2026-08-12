@@ -27,6 +27,7 @@ from ui_pages.health import render_health
 from ui_pages.advanced_api import render_advanced_api
 from ui_pages.artifacts_studio import render_artifacts_studio
 from ui_pages.dev_console import render_dev_console
+from ui_pages.nsm_terminal import render_nsm_terminal
 from ui_pages.product_info import render_product_info
 from ui_pages.ultraplinian import render_ultraplinian
 from ui_pages.fable import render_fable
@@ -150,12 +151,13 @@ def render_system_group():
             st.rerun()
 
     sub = st.tabs(["🧠 الذاكرة", "🏥 صحة النظام", "🔬 API متقدمة",
-                   "⚙️ النظام الداخلي", "🖥️ لوحة المطوّر"])
+                   "⚙️ النظام الداخلي", "🖥️ لوحة المطوّر", "💻 Terminal"])
     with sub[0]: render_memory()
     with sub[1]: render_health()
     with sub[2]: render_advanced_api()
     with sub[3]: render_system_core()
     with sub[4]: render_dev_console()
+    with sub[5]: render_nsm_terminal()
 
 
 
@@ -169,6 +171,7 @@ def render_advanced_tools_group():
     _tool_tab_defs = [("⚡ ULTRAPLINIAN", render_ultraplinian)]
     if st.session_state.get("_dev_console_unlocked", False):
         _tool_tab_defs.append(("🧩 الواجهات التفاعلية", render_artifacts_studio))
+        _tool_tab_defs.append(("💻 Terminal", render_nsm_terminal))
 
     sub = st.tabs([_label for _label, _fn in _tool_tab_defs])
     for _tab, (_label, _fn) in zip(sub, _tool_tab_defs):
