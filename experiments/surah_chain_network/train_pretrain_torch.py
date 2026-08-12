@@ -10,7 +10,7 @@
     python experiments/surah_chain_network/train_pretrain_torch.py
 
   # أو يدوياً
-  SCN_N=60000 SCN_D_MODEL=256 SCN_N_PRE=4 SCN_N_POST=4 \\
+  SCN_N=30000 SCN_D_MODEL=128 SCN_N_PRE=2 SCN_N_POST=2 \\
   SCN_FRESH=1 SCN_BATCH=16 \\
     python experiments/surah_chain_network/train_pretrain_torch.py
 

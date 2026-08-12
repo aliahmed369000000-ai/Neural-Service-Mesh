@@ -26,7 +26,7 @@ _HERE = Path(__file__).resolve().parent
 LAYER_DIMS: List[List[int]] = json.loads((_HERE / "surah_layer_dims.json").read_text())
 CHAIN_WIDTH = int(LAYER_DIMS[0][0])
 
-DEFAULT_D_MODEL = 256
+DEFAULT_D_MODEL = 128
 DEFAULT_N_HEADS = 8
 DEFAULT_N_PRE = 2
 DEFAULT_N_POST = 2
