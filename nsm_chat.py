@@ -243,6 +243,14 @@ def _handle_code_command(user_input: str) -> str | None:
     except Exception:
         pass
 
+    try:
+        from ai.continuous_training_agent import handle_continuous_command
+        cont_reply = handle_continuous_command(user_input)
+        if cont_reply is not None:
+            return cont_reply
+    except Exception:
+        pass
+
     if not _HAS_AGENT:
         return None
     t = user_input.strip()
@@ -543,6 +551,11 @@ def main():
 
 
 # ── إقلاع التشغيل التلقائي (إرادة + فحص + تعلّم) — بدون انتظار أمر ──
+try:
+    from ai.continuous_training_agent import enable_continuous_learning
+    enable_continuous_learning(True)
+except Exception:
+    pass
 try:
     from ai.auto_runtime import get_auto_runtime
     get_auto_runtime(start=True)

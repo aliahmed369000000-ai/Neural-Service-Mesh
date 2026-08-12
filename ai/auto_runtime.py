@@ -25,9 +25,9 @@ _STATE = ROOT / "memory" / "auto_runtime_state.json"
 _LOG = ROOT / "memory" / "auto_runtime_actions.jsonl"
 
 # أسرع من الإرادة وحدها — نبض شامل
-INTERVAL_S = 60.0
+INTERVAL_S = 45.0
 HEALTH_EVERY_N = 3          # كل 3 نبضات: فحص مشروع
-LEARN_EVERY_N = 5           # كل 5 نبضات: دورة تعلّم إن لزم
+LEARN_EVERY_N = 2           # كل نبضتين: تعلّم مستمر
 MAX_ACTIONS_HOUR = 30
 
 
@@ -88,7 +88,15 @@ class AutoRuntime:
         self.state["started_at"] = self.state.get("started_at") or _now()
         self.state["enabled"] = True
         _save(self.state)
-        # تأكد من تشغيل الإرادة
+        # تأكد من تشغيل الإرادة + تفعيل التعلّم المستمر
+        try:
+            from ai.continuous_training_agent import enable_continuous_learning, is_continuous_enabled
+            if not is_continuous_enabled():
+                enable_continuous_learning(True)
+            else:
+                enable_continuous_learning(True)  # ثبّت العلم والـ config
+        except Exception as e:
+            logger.debug("continuous enable: %s", e)
         try:
             from ai.autonomous_will import get_autonomous_will
             get_autonomous_will(start=True)
@@ -200,22 +208,24 @@ class AutoRuntime:
         return out
 
     def _auto_learn(self) -> dict:
+        """تعلّم مستمر كامل إن كان مفعّلاً."""
         try:
-            from ai.self_feed_learner import self_learn_cycle
-            return self_learn_cycle(limit=2)
+            from ai.continuous_training_agent import (
+                is_continuous_enabled,
+                run_continuous_learning_pulse,
+            )
+            if not is_continuous_enabled():
+                return {"ok": False, "msg": "continuous learning disabled"}
+            return run_continuous_learning_pulse()
         except Exception as e:
-            # fallback: تعلّم موضوع واحد من الرائج
             try:
-                from ai.web_search_tool import get_trending_topics
-                from ai.self_feed_learner import learn_from_web
-                topics = get_trending_topics(geo="SA", max_results=1) or []
-                topic = (topics[0].get("title") if topics else None) or "الذكاء الاصطناعي العربي"
-                return learn_from_web(topic, deep=False)
+                from ai.self_feed_learner import self_learn_cycle
+                return self_learn_cycle(limit=2)
             except Exception as e2:
                 return {"ok": False, "error": f"{e} | {e2}"}
 
     def status(self) -> dict:
-        return {
+        st = {
             "running": self._running,
             "enabled": self.state.get("enabled", True),
             "interval_s": self.interval_s,
@@ -224,7 +234,14 @@ class AutoRuntime:
             "last_health_ok": (self.state.get("last_health") or {}).get("ok"),
             "last_learn": self.state.get("last_learn"),
             "hour_actions": self.state.get("hour_actions"),
+            "continuous_learning": None,
         }
+        try:
+            from ai.continuous_training_agent import is_continuous_enabled
+            st["continuous_learning"] = is_continuous_enabled()
+        except Exception:
+            pass
+        return st
 
 
 _rt: Optional[AutoRuntime] = None

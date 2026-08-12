@@ -140,21 +140,133 @@ def continuous_status() -> str:
     return "\n".join(lines)
 
 
+
+# ── تفعيل مستمر ───────────────────────────────────────────────────────────
+_CFG = ROOT / "config" / "continuous_learning.json"
+_FLAG = CT_DIR / "enabled.flag"
+
+
+def is_continuous_enabled() -> bool:
+    if _FLAG.is_file():
+        return _FLAG.read_text(encoding="utf-8").strip() != "0"
+    if _CFG.is_file():
+        try:
+            return bool(json.loads(_CFG.read_text(encoding="utf-8")).get("enabled", True))
+        except Exception:
+            pass
+    return True
+
+
+def enable_continuous_learning(enabled: bool = True) -> Dict[str, Any]:
+    """تفعيل/إيقاف التعلّم المستمر بشكل دائم."""
+    CT_DIR.mkdir(parents=True, exist_ok=True)
+    _FLAG.write_text("1" if enabled else "0", encoding="utf-8")
+    cfg = {
+        "enabled": bool(enabled),
+        "mode": "continuous" if enabled else "paused",
+        "web_self_feed": bool(enabled),
+        "quality_monitor": bool(enabled),
+        "active_retrain_plans": bool(enabled),
+        "updated_at": _now(),
+    }
+    try:
+        _CFG.parent.mkdir(parents=True, exist_ok=True)
+        if _CFG.is_file():
+            old = json.loads(_CFG.read_text(encoding="utf-8"))
+            old.update(cfg)
+            cfg = old
+        _CFG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+    _append({"event": "enable_toggle", "enabled": bool(enabled)})
+    # اربط العلم مع AutoRuntime دون حلقة إقلاع ثقيلة
+    try:
+        from ai.auto_runtime import get_auto_runtime
+        rt = get_auto_runtime(start=False)
+        # لا نوقف كل AutoRuntime عند إيقاف التعلّم فقط — نتركه يعمل للفحوصات
+        if enabled and not getattr(rt, "_running", False):
+            rt.enable(True)
+            rt.start()
+    except Exception:
+        pass
+    return {"ok": True, "enabled": bool(enabled), "config": cfg}
+
+
+def run_continuous_learning_pulse() -> Dict[str, Any]:
+    """نبضة تعلّم مستمر كاملة: جودة + تغذية ويب + خطة فجوات."""
+    if not is_continuous_enabled():
+        return {"ok": False, "msg": "التعلّم المستمر متوقف", "enabled": False}
+    out: Dict[str, Any] = {"ok": True, "enabled": True, "phases": {}}
+    # 1) مراقبة جودة / خطة تدريب
+    try:
+        out["phases"]["quality_cycle"] = run_continuous_cycle(prefer_remote=False)
+    except Exception as e:
+        out["phases"]["quality_cycle"] = {"error": str(e)}
+    # 2) تغذية من الويب
+    try:
+        from ai.self_feed_learner import self_learn_cycle
+        out["phases"]["self_feed"] = self_learn_cycle(limit=2)
+    except Exception as e:
+        out["phases"]["self_feed"] = {"error": str(e)}
+    # 3) حصاد فجوات → خطة إعادة تدريب (بدون استبدال أوزان تلقائي)
+    try:
+        from ai.active_retrain_loop import harvest_gaps, plan_retrain
+        gaps = harvest_gaps()
+        plan = plan_retrain(epochs=15)
+        out["phases"]["active_retrain"] = {"gaps_n": gaps.get("n"), "plan_action": plan.get("action") if isinstance(plan, dict) else None}
+        # احفظ الخطة إن وُجد مسار
+        try:
+            from ai.active_retrain_loop import OUT as AR_OUT
+            AR_OUT.mkdir(parents=True, exist_ok=True)
+            (AR_OUT / "last_auto_plan.json").write_text(
+                json.dumps({"gaps": gaps, "plan": plan, "at": _now()}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+    except Exception as e:
+        out["phases"]["active_retrain"] = {"error": str(e)}
+    _append({"event": "learning_pulse", "summary": {k: bool(v) for k, v in out["phases"].items()}})
+    return out
+
+
 def handle_continuous_command(user_input: str) -> Optional[str]:
     import re
     text = (user_input or "").strip()
     if not text:
         return None
-    if re.search(r"(حالة|status|سجل).{0,12}(تدريب\s*مستمر|continuous)", text, re.I) or re.search(
-        r"(تدريب\s*مستمر).{0,8}(حالة|status|سجل)", text, re.I
+    # تفعيل / إيقاف
+    _learn_kw = r"(?:ال)?تعل[ّ]?م\s*(?:ال)?مستمر|continuous\s*learn(?:ing)?|تدريب\s*مستمر"
+    if re.search(rf"(تفعيل|شغ[ّل]?ل|enable).{{0,24}}({_learn_kw})", text, re.I) \
+            or re.search(rf"({_learn_kw}).{{0,16}}(تفعيل|شغ[ّل]?ل|enable)", text, re.I) \
+            or re.search(r"^(تفعيل|enable)\s*(ال)?تعل", text, re.I):
+        res = enable_continuous_learning(True)
+        return (
+            "## ✅ تم تفعيل التعلّم المستمر\n\n"
+            "يعمل تلقائياً مع **AutoRuntime** (نبضات دورية: جودة + تغذية ويب + خطط فجوات).\n\n"
+            "```json\n"
+            + json.dumps(res, ensure_ascii=False, indent=2)[:2000]
+            + "\n```\n\n"
+            "للنبضة الفورية: `نبضة تعلّم` — للحالة: `حالة تدريب مستمر`"
+        )
+    if re.search(r"(إيقاف|عط[ّل]ل|disable|pause).{0,20}(تعل[ّم]م\s*مستمر|التعل[ّم]م\s*المستمر|continuous\s*learn|تدريب\s*مستمر)", text, re.I):
+        res = enable_continuous_learning(False)
+        return "## ⏸ أُوقف التعلّم المستمر\n```json\n" + json.dumps(res, ensure_ascii=False, indent=2) + "\n```"
+    if re.search(r"(حالة|status|سجل).{0,12}(تدريب\s*مستمر|continuous|تعل[ّم]م\s*مستمر)", text, re.I) or re.search(
+        r"(تدريب\s*مستمر|تعل[ّم]م\s*مستمر).{0,8}(حالة|status|سجل)", text, re.I
     ):
-        return continuous_status()
+        st = continuous_status()
+        return st + f"\n\n- مفعّل الآن: **{is_continuous_enabled()}**"
     if not re.search(
-        r"(تدريب\s*مستمر|continuous\s*train|صيان[ةه]\s*تدريب|راقب\s*جود[ةه]|اعادة\s*تدريب\s*ذاتي)",
+        r"(تدريب\s*مستمر|continuous\s*train|صيان[ةه]\s*تدريب|راقب\s*جود[ةه]|اعادة\s*تدريب\s*ذاتي|"
+        r"تعل[ّم]م\s*مستمر|نبضة\s*تعل[ّم]م)",
         text,
         re.I,
     ):
         return None
+    if re.search(r"نبضة\s*تعل[ّم]م|learning\s*pulse", text, re.I):
+        pulse = run_continuous_learning_pulse()
+        return "## 🔄 نبضة تعلّم مستمر\n```json\n" + json.dumps(pulse, ensure_ascii=False, indent=2)[:4000] + "\n```"
     ev = run_continuous_cycle(prefer_remote=bool(re.search(r"kaggle|بعيد", text, re.I)))
     return (
         "## 🔄 وكيل التدريب الذاتي المستمر\n\n```json\n"

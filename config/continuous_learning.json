@@ -1,0 +1,12 @@
+{
+  "enabled": true,
+  "mode": "continuous",
+  "web_self_feed": true,
+  "quality_monitor": true,
+  "active_retrain_plans": true,
+  "learn_every_n_ticks": 2,
+  "health_every_n_ticks": 3,
+  "auto_runtime_interval_s": 45,
+  "notes_ar": "التعلّم المستمر مفعّل افتراضياً — يعمل مع AutoRuntime بدون أمر مستخدم.",
+  "updated_at": "2026-08-12T23:09:46.395560+00:00"
+}
