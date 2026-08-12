@@ -2781,8 +2781,10 @@ def _get_self_narrative():
 
 @st.cache_resource(show_spinner=False)
 def _get_autonomous_will():
-    """إرادة ذاتية: بحث وتعلّم وتطوير بدون أمر مستخدم."""
+    """إرادة + تشغيل تلقائي: بحث وتعلّم وفحص بدون أمر."""
     try:
+        from ai.auto_runtime import get_auto_runtime
+        get_auto_runtime(start=True)
         from ai.autonomous_will import get_autonomous_will
         will = get_autonomous_will(start=True)
         # ربط DriveEngine إن وُجد لاحقاً

@@ -235,6 +235,14 @@ def _handle_code_command(user_input: str) -> str | None:
     except Exception:
         pass
 
+    try:
+        from ai.auto_runtime import handle_auto_command
+        auto_reply = handle_auto_command(user_input)
+        if auto_reply is not None:
+            return auto_reply
+    except Exception:
+        pass
+
     if not _HAS_AGENT:
         return None
     t = user_input.strip()
@@ -534,12 +542,16 @@ def main():
         print(f"\nNSM: {bot.chat(u)}\n")
 
 
-# ── إقلاع إرادة ذاتية في الخلفية (مرة واحدة لكل عملية) ────────────────
+# ── إقلاع التشغيل التلقائي (إرادة + فحص + تعلّم) — بدون انتظار أمر ──
 try:
-    from ai.autonomous_will import get_autonomous_will
-    get_autonomous_will(start=True)  # AutonomousWill auto-start
+    from ai.auto_runtime import get_auto_runtime
+    get_auto_runtime(start=True)
 except Exception:
-    pass
+    try:
+        from ai.autonomous_will import get_autonomous_will
+        get_autonomous_will(start=True)
+    except Exception:
+        pass
 
 if __name__ == "__main__":
     main()

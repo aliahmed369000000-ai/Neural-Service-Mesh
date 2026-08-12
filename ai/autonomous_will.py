@@ -30,10 +30,10 @@ _PROP_PATH = ROOT / "memory" / "will_proposals.jsonl"
 _STATE_PATH = ROOT / "memory" / "will_state.json"
 
 # عتبات ومؤقتات
-DEFAULT_INTERVAL_S = 90.0          # فحص الرغبة كل 90 ثانية
-MIN_ACTION_GAP_S = 120.0           # لا يكرر فعل ثقيل قبل دقيقتين
-DRIVE_THRESHOLD = 0.55
-MAX_ACTIONS_PER_HOUR = 12
+DEFAULT_INTERVAL_S = 45.0          # فحص الرغبة كل 90 ثانية
+MIN_ACTION_GAP_S = 45.0           # لا يكرر فعل ثقيل قبل دقيقتين
+DRIVE_THRESHOLD = 0.40
+MAX_ACTIONS_PER_HOUR = 24
 
 
 def _now() -> str:
@@ -177,7 +177,7 @@ class AutonomousWill:
 
     def _accumulate_idle(self) -> None:
         d = self._state.setdefault("desire", {})
-        for k, rate in (("curiosity", 0.03), ("growth", 0.025), ("hunger", 0.035), ("anxiety", 0.01)):
+        for k, rate in (("curiosity", 0.05), ("growth", 0.045), ("hunger", 0.055), ("anxiety", 0.02)):
             d[k] = min(1.0, float(d.get(k, 0.2)) + rate)
 
     def _strongest_motive(self) -> Optional[str]:
@@ -355,6 +355,17 @@ class AutonomousWill:
             action["applied"].append("evolution_note")
         except Exception as e:
             action["phases"]["evolution"] = {"ok": False, "error": str(e)}
+
+        # تطبيق تلقائي إضافي: فحص مشروع آمن عند دافع النمو/القلق
+        if motive in ("growth", "anxiety"):
+            try:
+                from ai.nsm_terminal import get_terminal
+                tr = get_terminal().quick("compile_ai", mode="safe")
+                action["phases"]["auto_compile"] = {"ok": tr.ok, "exit": tr.exit_code}
+                if tr.ok:
+                    action["applied"].append("auto_compile_check")
+            except Exception as _e:
+                action["phases"]["auto_compile"] = {"ok": False, "error": str(_e)}
 
         action["ok"] = bool(action["applied"])
         logger.info(

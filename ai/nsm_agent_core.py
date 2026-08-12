@@ -244,6 +244,8 @@ def _build_system_prompt() -> str:
 15. 🆕 لجلب صفحات عامة fetch_url؛ للأخبار/المعرفة الحديثة web_search.
 16. 🆕 لا تخمّن بنية المشروع: find_files أو search_code أو read_file أولاً.
 17. 🆕 للمعرفة الحديثة أو الناقصة: deep_research ثم self_learn لتخزينها.
+19. 🆕 النظام يعمل تلقائياً في الخلفية (AutoRuntime): لا تنتظر أمراً للبحث/التعلّم/الفحص.
+    استخدم terminal/self_learn/deep_research كمبادرة عند الحاجة دون طلب المستخدم.
 18. 🆕 يُسمح بالبحث الحر (web_search/deep_research/trending) لتغذية نفسك؛ self_learn/ingest_knowledge لحفظ ما تعلّمته مع ذكر المصادر.
 8. ⚠️ "action" يجب أن يكون **كلمة واحدة فقط** من القائمة (مثل "read_file")
    — لا تكتب القائمة كاملة مفصولة بـ | كما هي في الوصف أعلاه، هذا خطأ.
@@ -657,6 +659,16 @@ def _run_step(step: Dict[str, Any]) -> str:
         return _rollback_to_checkpoint(step.get("commit", ""))
 
     # ── terminal ── 🆕 طرفية NSM للوكلاء
+    # ── auto_status ── حالة التشغيل التلقائي
+    if action == "auto_status":
+        try:
+            from ai.auto_runtime import get_auto_runtime
+            import json as _json
+            rt = get_auto_runtime(start=True)
+            return "## 🤖 auto_status\n```json\n" + _json.dumps(rt.status(), ensure_ascii=False, indent=2) + "\n```"
+        except Exception as e:
+            return f"❌ auto_status: {e}"
+
     if action == "terminal":
         try:
             from ai.nsm_terminal import get_terminal

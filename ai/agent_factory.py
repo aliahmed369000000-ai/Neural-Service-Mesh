@@ -120,7 +120,7 @@ AGENT_CATALOGUE: Dict[str, dict] = {
     # role_prompt مختلف يوجّهه لتخصصه المحدد بدل السلوك البرمجي العام.
     "CodingAgent": {
         "description": "Autonomous coding agent: plans, writes, tests, and debugs code using a real LLM engine (NSMAgent)",
-        "capabilities": ["plan", "write_code", "run_file", "run_tests", "debug", "web_search", "deep_research", "self_learn", "autonomous_will", "terminal", "git_push", "git_lfs", "search_code", "git_info", "py_compile", "fetch_url", "trending"],
+        "capabilities": ["plan", "write_code", "run_file", "run_tests", "debug", "web_search", "deep_research", "self_learn", "autonomous_will", "auto_runtime", "terminal", "git_push", "git_lfs", "search_code", "git_info", "py_compile", "fetch_url", "trending"],
         "input_schema": {"task": "str"},
         "output_schema": {"result": "str", "success": "bool"},
         "tags": ["coding", "engineering", "automation"],
