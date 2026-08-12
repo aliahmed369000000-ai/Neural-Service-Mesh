@@ -2777,6 +2777,24 @@ def _get_self_narrative():
         return None
 
 
+
+
+@st.cache_resource(show_spinner=False)
+def _get_autonomous_will():
+    """إرادة ذاتية: بحث وتعلّم وتطوير بدون أمر مستخدم."""
+    try:
+        from ai.autonomous_will import get_autonomous_will
+        will = get_autonomous_will(start=True)
+        # ربط DriveEngine إن وُجد لاحقاً
+        try:
+            from ai.drive_engine import DriveEngine
+            # لا يُنشأ هنا إلزاماً؛ يُربط عند توفر mesh
+        except Exception:
+            pass
+        return will
+    except Exception:
+        return None
+
 @st.cache_resource(show_spinner=False)
 def _get_world_feed():
     """singleton لعملية Streamlit كاملة. ai/world_feed.py + ai/quality_engine.py +

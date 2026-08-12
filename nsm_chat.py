@@ -217,6 +217,15 @@ def _handle_code_command(user_input: str) -> str | None:
     except Exception:
         pass
 
+    # 🆕 إرادة ذاتية (حالة/تحكم — الحلقة تعمل حتى بدون أمر)
+    try:
+        from ai.autonomous_will import handle_will_command
+        will_reply = handle_will_command(user_input)
+        if will_reply is not None:
+            return will_reply
+    except Exception:
+        pass
+
     if not _HAS_AGENT:
         return None
     t = user_input.strip()
@@ -515,6 +524,13 @@ def main():
             break
         print(f"\nNSM: {bot.chat(u)}\n")
 
+
+# ── إقلاع إرادة ذاتية في الخلفية (مرة واحدة لكل عملية) ────────────────
+try:
+    from ai.autonomous_will import get_autonomous_will
+    get_autonomous_will(start=True)  # AutonomousWill auto-start
+except Exception:
+    pass
 
 if __name__ == "__main__":
     main()

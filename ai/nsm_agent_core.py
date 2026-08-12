@@ -50,7 +50,7 @@ def _is_admin_unlocked() -> bool:
 # الخادم. كل ما عداها (قراءة/كتابة/تعديل ملفات، تشغيل أوامر shell،
 # git push، إنشاء واجهة تفاعلية مشتركة، استدعاء API عام) يتطلب فتح
 # وضع المالك أولاً.
-_PUBLIC_SAFE_ACTIONS = {"answer", "web_search", "image_search", "system_info", "fetch_url", "deep_research", "trending"}
+_PUBLIC_SAFE_ACTIONS = {"answer", "web_search", "image_search", "system_info", "fetch_url", "deep_research", "trending", "will_status"}
 import urllib.error
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Tuple
@@ -205,7 +205,7 @@ def _build_system_prompt() -> str:
   "thinking": "تحليلك للطلب خطوة بخطوة",
   "steps": [
     {{
-      "action": "read_file | create_file | edit_file | run_file | run_tests | git_push | git_lfs | git_info | search_code | find_files | py_compile | fetch_url | system_info | run_safe | rollback | web_search | deep_research | self_learn | ingest_knowledge | trending | image_search | create_artifact | api_call | preview_check | answer",
+      "action": "read_file | create_file | edit_file | run_file | run_tests | git_push | git_lfs | git_info | search_code | find_files | py_compile | fetch_url | system_info | run_safe | rollback | web_search | deep_research | self_learn | ingest_knowledge | trending | will_status | will_tick | image_search | create_artifact | api_call | preview_check | answer",
       "path": "المسار النسبي من جذر المشروع",
       "content": "محتوى الملف الكامل (لـ create_file) أو كود HTML/SVG كامل (لـ create_artifact)",
       "old": "النص القديم المراد استبداله (لـ edit_file) — يجب أن يكون موجوداً حرفياً",
@@ -466,7 +466,7 @@ def _run_step(step: Dict[str, Any]) -> str:
         "run_file", "run_tests", "git_push", "git_lfs", "git_info",
         "search_code", "find_files", "py_compile", "fetch_url",
         "system_info", "run_safe", "web_search", "deep_research",
-        "self_learn", "ingest_knowledge", "trending",
+        "self_learn", "ingest_knowledge", "trending", "will_status", "will_tick",
         "image_search", "create_artifact", "api_call", "answer",
         "preview_check", "rollback",
     }
@@ -655,6 +655,26 @@ def _run_step(step: Dict[str, Any]) -> str:
     # ── rollback ── 🆕 المرحلة 6: Checkpoints/Rollback
     if action == "rollback":
         return _rollback_to_checkpoint(step.get("commit", ""))
+
+    # ── will_status / will_tick ── إرادة ذاتية
+    if action == "will_status":
+        try:
+            from ai.autonomous_will import get_autonomous_will
+            import json as _json
+            w = get_autonomous_will(start=True)
+            return "## 🧬 will_status\n```json\n" + _json.dumps({"status": w.status(), "recent": w.recent_actions(5)}, ensure_ascii=False, indent=2) + "\n```"
+        except Exception as e:
+            return f"❌ will_status: {e}"
+
+    if action == "will_tick":
+        try:
+            from ai.autonomous_will import get_autonomous_will
+            import json as _json
+            w = get_autonomous_will(start=True)
+            res = w.tick()
+            return "## ⚡ will_tick\n```json\n" + _json.dumps(res or {"msg": "لا دافع فوق العتبة"}, ensure_ascii=False, indent=2) + "\n```"
+        except Exception as e:
+            return f"❌ will_tick: {e}"
 
     # ── deep_research ── 🆕 بحث متعدد الزوايا والمصادر
     if action == "deep_research":
