@@ -18,6 +18,7 @@ from ui_pages.quran import render_quran
 from ui_pages.qa import render_qa
 from ui_pages.higgsfield import render_higgsfield, _render_hf_result
 from ui_pages.training import render_training, render_nsm_routing
+from ui_pages.training_notebook import render_training_notebook
 from ui_pages.aiaas_console import render_aiaas_console
 from ui_pages.economic_engine import render_economic_engine, render_aiaas_economy_hub
 from ui_pages.training_ops_dashboard import render_training_ops_dashboard
@@ -123,11 +124,12 @@ def render_training_ops_hub():
         unsafe_allow_html=True,
     )
     st.caption("تدريب النماذج · خليط الخبراء ونمو الوكيل · AIaaS والاقتصاد · لوحة عمليات التدريب")
-    sub = st.tabs(["🎓 التدريب", "🧩 MoE والوكيل", "☁️ AIaaS والاقتصاد", "📡 عمليات التدريب"])
+    sub = st.tabs(["🎓 التدريب", "📓 Notebook", "🧩 MoE والوكيل", "☁️ AIaaS والاقتصاد", "📡 عمليات التدريب"])
     with sub[0]: render_training()
-    with sub[1]: render_moe_agent_studio()
-    with sub[2]: render_aiaas_economy_hub()
-    with sub[3]: render_training_ops_dashboard()
+    with sub[1]: render_training_notebook()
+    with sub[2]: render_moe_agent_studio()
+    with sub[3]: render_aiaas_economy_hub()
+    with sub[4]: render_training_ops_dashboard()
 
 
 def render_system_group():
