@@ -190,6 +190,15 @@ _AGENT_TRIGGERS = (
 
 def _handle_code_command(user_input: str) -> str | None:
     """يعالج أوامر Code Agent — يُرجع رداً أو None إذا لم يكن أمراً."""
+    # 🆕 أوامر Git LFS (تعمل حتى لو Code Agent غير محمّل)
+    try:
+        from ai.git_lfs_helper import handle_lfs_command
+        lfs_reply = handle_lfs_command(user_input)
+        if lfs_reply is not None:
+            return lfs_reply
+    except Exception:
+        pass
+
     if not _HAS_AGENT:
         return None
     t = user_input.strip()

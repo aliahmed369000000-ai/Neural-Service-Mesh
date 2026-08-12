@@ -68,6 +68,11 @@ def _token_remote() -> str | None:
     return remote
 
 
+def get_authenticated_remote() -> str | None:
+    """واجهة عامة يستخدمها nsm_agent_core._git_push وغيره."""
+    return _token_remote()
+
+
 def push_now(tag: str = "") -> dict:
     """
     Commit every tracked/untracked change and push to GitHub.
@@ -96,6 +101,17 @@ def push_now(tag: str = "") -> dict:
 
         code, out = _run(["git", "push", remote, "main"])
         ok = code == 0
+
+        try:
+            from ai.git_lfs_helper import has_git_lfs, lfs_push
+            if has_git_lfs():
+                lfs_res = lfs_push(remote="origin", branch="main")
+                if not lfs_res.get("ok"):
+                    logger.warning(f"[GitHubSync] git lfs push: {lfs_res.get('msg', '')[:150]}")
+                else:
+                    logger.info("[GitHubSync] git lfs push OK")
+        except Exception as _lfs_exc:
+            logger.debug(f"[GitHubSync] LFS push skipped: {_lfs_exc}")
 
         _push_count   += 1
         _last_push_ts  = ts

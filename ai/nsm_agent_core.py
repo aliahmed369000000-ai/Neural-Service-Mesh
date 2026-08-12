@@ -205,13 +205,15 @@ def _build_system_prompt() -> str:
   "thinking": "تحليلك للطلب خطوة بخطوة",
   "steps": [
     {{
-      "action": "read_file | create_file | edit_file | run_file | run_tests | git_push | rollback | web_search | image_search | create_artifact | api_call | preview_check | answer",
+      "action": "read_file | create_file | edit_file | run_file | run_tests | git_push | git_lfs | rollback | web_search | image_search | create_artifact | api_call | preview_check | answer",
       "path": "المسار النسبي من جذر المشروع",
       "content": "محتوى الملف الكامل (لـ create_file) أو كود HTML/SVG كامل (لـ create_artifact)",
       "old": "النص القديم المراد استبداله (لـ edit_file) — يجب أن يكون موجوداً حرفياً",
       "new": "النص الجديد البديل (لـ edit_file)",
       "cmd": "أمر bash للتشغيل (لـ run_file)",
       "message": "رسالة commit (لـ git_push)",
+      "lfs_op": "عملية LFS: status|install|pull|push|track|ls|migrate|prune (لـ git_lfs)",
+      "patterns": "أنماط تتبع اختيارية مفصولة بفاصلة (لـ git_lfs track)",
       "commit": "commit hash محدَّد للتراجع إليه (لـ rollback، اختياري — بدونه يُستخدم آخر checkpoint مسجَّل تلقائياً)",
       "query": "نص البحث (لـ web_search أو image_search)",
       "title": "عنوان الواجهة التفاعلية (لـ create_artifact)",
@@ -451,14 +453,14 @@ def _run_step(step: Dict[str, Any]) -> str:
     # صراحة كخطأ قابل للاكتشاف عبر _is_failure() ليُعاد المحاولة تلقائياً.
     _VALID_ACTIONS = {
         "read_file", "create_file", "edit_file",
-        "run_file", "run_tests", "git_push", "web_search",
+        "run_file", "run_tests", "git_push", "git_lfs", "web_search",
         "image_search", "create_artifact", "api_call", "answer",
         "preview_check", "rollback",
     }
     if action not in _VALID_ACTIONS:
         return (f"❌ فعل غير صالح من النموذج: '{action}'\n"
                 f"💡 يجب اختيار فعل واحد بالضبط من: "
-                f"read_file, create_file, edit_file, run_file, run_tests, git_push, "
+                f"read_file, create_file, edit_file, run_file, run_tests, git_push, git_lfs, "
                 f"web_search, image_search, create_artifact, api_call, answer")
 
     # ── 🔒 حماية: الأفعال الخطرة (ملفات/تنفيذ/push/API عام) للمالك فقط ──
@@ -557,6 +559,10 @@ def _run_step(step: Dict[str, Any]) -> str:
             return check_streamlit_boots(entry)
         except Exception as e:
             return f"❌ خطأ في المعاينة الحيّة: {e}"
+
+    # ── git_lfs ── 🆕 قدرات Git LFS كاملة
+    if action == "git_lfs":
+        return _git_lfs_action(step)
 
     # ── git_push ──
     if action == "git_push":
@@ -767,6 +773,55 @@ def _rollback_to_checkpoint(target: str = "") -> str:
         return f"❌ خطأ في التراجع: {e}"
 
 
+
+def _git_lfs_action(step: dict) -> str:
+    """تنفيذ عمليات Git LFS من وكيل NSM."""
+    import json
+    try:
+        from ai import git_lfs_helper as lfs
+    except Exception as e:
+        return f"❌ تعذّر تحميل git_lfs_helper: {e}"
+
+    op = (step.get("lfs_op") or step.get("op") or step.get("cmd") or "status").strip().lower()
+    patterns_raw = step.get("patterns") or step.get("include") or ""
+    patterns = [p.strip() for p in str(patterns_raw).split(",") if p.strip()] if patterns_raw else None
+
+    try:
+        if op in ("status", "حالة", "env"):
+            res = lfs.lfs_status(detailed=True)
+        elif op in ("install", "setup", "تفعيل", "تثبيت"):
+            res = lfs.install_lfs()
+        elif op in ("pull", "اسحب", "fetch"):
+            res = lfs.lfs_pull()
+        elif op in ("push", "رفع"):
+            res = lfs.lfs_push()
+        elif op in ("track", "تتبع"):
+            res = lfs.lfs_track(patterns)
+        elif op in ("untrack",):
+            res = lfs.lfs_untrack(patterns or [])
+        elif op in ("ls", "ls-files", "ملفات", "list"):
+            res = lfs.lfs_ls_files()
+        elif op in ("migrate", "هجرة"):
+            res = lfs.lfs_migrate_import(
+                include=",".join(patterns) if patterns else "*.pkl,*.npy,*.pt,*.pth,*.bin,*.h5,*.onnx,*.safetensors",
+                everything=bool(step.get("everything")),
+            )
+        elif op in ("prune",):
+            res = lfs.lfs_prune()
+        else:
+            return (
+                f"❌ عملية LFS غير معروفة: {op}\n"
+                "المدعوم: status, install, pull, push, track, untrack, ls, migrate, prune"
+            )
+        return (
+            f"## 📦 Git LFS — `{op}`\n```json\n"
+            + json.dumps(res, ensure_ascii=False, indent=2)
+            + "\n```"
+        )
+    except Exception as e:
+        return f"❌ خطأ git_lfs ({op}): {e}"
+
+
 def _git_push(message: str) -> str:
     try:
         for cfg in [
@@ -808,7 +863,18 @@ def _git_push(message: str) -> str:
                 return (f"❌ git: {out}\n"
                         f"💡 أضف GITHUB_TOKEN و GITHUB_USER و GITHUB_REMOTE في Secrets ليعمل الرفع.")
             return f"❌ git: {out}"
-        return "📤 رُفع لـ GitHub ✅"
+        lfs_note = ""
+        try:
+            from ai.git_lfs_helper import has_git_lfs, lfs_push
+            if has_git_lfs():
+                lr = lfs_push()
+                if lr.get("ok"):
+                    lfs_note = " + LFS"
+                elif lr.get("msg"):
+                    lfs_note = f" (LFS: {str(lr.get('msg'))[:60]})"
+        except Exception:
+            pass
+        return f"📤 رُفع لـ GitHub ✅{lfs_note}"
     except Exception as e:
         return f"❌ خطأ git: {e}"
 

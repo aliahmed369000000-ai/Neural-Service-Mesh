@@ -132,21 +132,72 @@ def create_file(path: str, content: str) -> str:
 # 5. رفع لـ GitHub
 # ══════════════════════════════════════════════════════════════════
 def git_push(message: str = "NSM auto-commit") -> str:
+    """رفع التغييرات لـ GitHub مع دعم Git LFS."""
     try:
-        cmds = [
-            ["git", "-C", str(ROOT), "add", "-A"],
-            ["git", "-C", str(ROOT), "commit", "-m", message],
-            ["git", "-C", str(ROOT), "push"],
-        ]
-        for cmd in cmds:
-            r = subprocess.run(cmd, capture_output=True, text=True)
-            if r.returncode != 0:
-                if "nothing to commit" in r.stdout + r.stderr:
-                    return "ℹ️ لا توجد تغييرات للرفع"
-                return f"❌ خطأ: {r.stderr.strip()}"
-        return "✅ رُفع بنجاح لـ GitHub"
+        for cfg in [
+            ["git", "-C", str(ROOT), "config", "--local", "user.email", "nsm-bot@users.noreply.github.com"],
+            ["git", "-C", str(ROOT), "config", "--local", "user.name", "NSM Bot"],
+        ]:
+            subprocess.run(cfg, capture_output=True)
+
+        r = subprocess.run(["git", "-C", str(ROOT), "add", "-A"], capture_output=True, text=True)
+        if r.returncode != 0:
+            return f"❌ git add: {(r.stderr or r.stdout).strip()}"
+
+        r = subprocess.run(["git", "-C", str(ROOT), "commit", "-m", message], capture_output=True, text=True)
+        out = ((r.stdout or "") + (r.stderr or "")).strip()
+        if r.returncode != 0 and "nothing to commit" not in out:
+            return f"❌ git commit: {out}"
+
+        auth_remote = None
+        try:
+            from ai.github_sync import get_authenticated_remote
+            auth_remote = get_authenticated_remote()
+        except Exception:
+            pass
+
+        push_cmd = ["git", "-C", str(ROOT), "push"]
+        if auth_remote:
+            push_cmd = ["git", "-C", str(ROOT), "push", auth_remote, "HEAD:main"]
+
+        r = subprocess.run(push_cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            err = ((r.stdout or "") + (r.stderr or "")).strip()
+            if not auth_remote:
+                return (f"❌ git push: {err}\n💡 أضف GITHUB_TOKEN و GITHUB_USER و GITHUB_REMOTE في Secrets.")
+            return f"❌ git push: {err}"
+
+        lfs_note = ""
+        try:
+            from ai.git_lfs_helper import has_git_lfs, lfs_push
+            if has_git_lfs():
+                lr = lfs_push()
+                lfs_note = " + Git LFS" if lr.get("ok") else f" (تحذير LFS: {lr.get('msg', '')[:80]})"
+        except Exception:
+            pass
+        return f"✅ رُفع بنجاح لـ GitHub{lfs_note}"
     except Exception as e:
         return f"❌ خطأ في git: {e}"
+
+
+def git_lfs_status() -> str:
+    try:
+        from ai.git_lfs_helper import lfs_status
+        import json
+        return "## 📦 Git LFS\n```json\n" + json.dumps(lfs_status(detailed=True), ensure_ascii=False, indent=2) + "\n```"
+    except Exception as e:
+        return f"❌ LFS status: {e}"
+
+
+def git_lfs_pull() -> str:
+    try:
+        from ai.git_lfs_helper import lfs_pull, lfs_status
+        import json
+        res = lfs_pull()
+        st = lfs_status(detailed=False)
+        return "## 📥 LFS Pull\n```json\n" + json.dumps({"pull": res, "status": st}, ensure_ascii=False, indent=2) + "\n```"
+    except Exception as e:
+        return f"❌ LFS pull: {e}"
 
 
 # ══════════════════════════════════════════════════════════════════
