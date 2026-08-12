@@ -15,6 +15,7 @@ SOCIAL AGENT — الوكيل الاجتماعي الموحد
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import sqlite3
@@ -491,6 +492,10 @@ class SocialAgentManager:
             pid: PlatformStatus(pid, a.is_configured(), a.missing_env())
             for pid, a in self.adapters.items()
         }
+        # ── مهام نشر يدوية بالخلفية (النشر الفوري من واجهة Streamlit) ──
+        self._publish_jobs_lock = threading.Lock()
+        self._publish_jobs: Dict[int, dict] = {}
+        self._publish_job_counter = itertools.count(1)
 
     @classmethod
     def instance(cls) -> "SocialAgentManager":
@@ -763,6 +768,36 @@ class SocialAgentManager:
                         log_event(pid, "publish", "agent", per_platform_text.get(pid, text),
                                   reply_content=err, ok=False)
         return results
+
+    def publish_async(self, platforms: List[str], text: str,
+                       per_platform_text: Optional[Dict[str, str]] = None) -> int:
+        """نفس publish_to لكن بالخلفية: يبدأ خيطاً منفصلاً ويرجع job_id فوراً
+        دون انتظار انتهاء النشر على أي منصة — يحل تجميد واجهة Streamlit
+        (زر «نشر الآن») لمدة قد تصل لمهلة publish_to الداخلية (45s لكل
+        منصة). النتيجة تُستعلَم لاحقاً عبر get_publish_job(job_id)."""
+        job_id = next(self._publish_job_counter)
+        with self._publish_jobs_lock:
+            self._publish_jobs[job_id] = {"status": "running", "results": None,
+                                           "error": None, "platforms": list(platforms)}
+
+        def _run():
+            try:
+                results = self.publish_to(platforms, text, per_platform_text=per_platform_text)
+                with self._publish_jobs_lock:
+                    self._publish_jobs[job_id]["status"] = "done"
+                    self._publish_jobs[job_id]["results"] = results
+            except Exception as e:  # noqa: BLE001
+                with self._publish_jobs_lock:
+                    self._publish_jobs[job_id]["status"] = "failed"
+                    self._publish_jobs[job_id]["error"] = str(e)
+
+        threading.Thread(target=_run, daemon=True, name=f"publish-job-{job_id}").start()
+        return job_id
+
+    def get_publish_job(self, job_id: int) -> Optional[dict]:
+        with self._publish_jobs_lock:
+            job = self._publish_jobs.get(job_id)
+            return dict(job) if job is not None else None
 
 
 def get_manager() -> SocialAgentManager:

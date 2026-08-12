@@ -213,16 +213,38 @@ def render_social_agent():
             elif not publish_platforms:
                 st.warning("اختر منصة واحدة على الأقل.")
             else:
-                with st.spinner("⟳ ينشر..."):
-                    results = mgr.publish_to(publish_platforms, publish_text.strip())
+                # نشر بالخلفية بدل انتظار متزامن (publish_to قد يأخذ حتى
+                # 45 ثانية لكل منصة) — الزر يرجع فوراً ولا يجمّد الواجهة.
+                job_id = mgr.publish_async(publish_platforms, publish_text.strip())
+                st.session_state["social_publish_job_id"] = job_id
+                st.toast("🚀 بدأ النشر بالخلفية — تقدر تكمّل استخدام الصفحة.", icon="🚀")
+                st.rerun()
+
+        # ── متابعة آخر مهمة نشر بدأت بالخلفية (لا تحظر الواجهة) ──
+        _pub_job_id = st.session_state.get("social_publish_job_id")
+        if _pub_job_id is not None:
+            _pub_job = mgr.get_publish_job(_pub_job_id)
+            if _pub_job is None:
+                st.session_state.pop("social_publish_job_id", None)
+            elif _pub_job["status"] == "running":
+                st.info(f"⏳ مهمة النشر #{_pub_job_id} لسه شغّالة بالخلفية على "
+                        f"{', '.join(PLATFORM_LABELS_AR.get(p, p) for p in _pub_job['platforms'])}...")
+                if st.button("🔄 تحديث الحالة", key="social_publish_status_refresh"):
+                    st.rerun()
+            elif _pub_job["status"] == "failed":
+                st.error(f"❌ فشلت مهمة النشر #{_pub_job_id}: {_pub_job['error']}")
+                st.session_state.pop("social_publish_job_id", None)
+            else:  # done
+                results = _pub_job["results"] or {}
                 _pub_ok = sum(1 for r in results.values() if not str(r).startswith("ERROR"))
-                st.toast(f"🚀 تم النشر على {_pub_ok}/{len(results)} منصة", icon="🚀")
+                st.success(f"✅ اكتملت مهمة النشر #{_pub_job_id}: {_pub_ok}/{len(results)} منصة نجحت")
                 for pid, res in results.items():
                     label = PLATFORM_LABELS_AR.get(pid, pid)
                     if str(res).startswith("ERROR"):
                         st.error(f"{label}: {res}")
                     else:
                         st.success(f"{label}: ✅ {res}")
+                st.session_state.pop("social_publish_job_id", None)
 
         st.markdown("---")
         st.markdown("#### 📅 جدولة المنشورات (تقويم المحتوى)")
