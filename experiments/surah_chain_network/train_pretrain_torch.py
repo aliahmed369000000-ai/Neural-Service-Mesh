@@ -54,8 +54,17 @@ USE_QK_NORM = os.environ.get("SCN_QK_NORM", "1") == "1"
 USE_GATED_ATTN = os.environ.get("SCN_GATED_ATTN", "1") == "1"
 CHAIN_SCALE = float(os.environ.get("SCN_CHAIN_SCALE", "1"))
 WARMUP_RATIO = 0.1
-PATIENCE = int(os.environ.get("SCN_EXPAND_PATIENCE", "2"))
-MAX_EXPANDS = int(os.environ.get("SCN_MAX_EXPANDS", "8"))
+# توسيع احترافي (غير عشوائي):
+# - صبر أطول قبل اعتبار الهضبة
+# - لا توسيع في بداية الجولة (بعد resume/قفزة LR)
+# - تهدئة بين كل توسيعين
+# - شرط «هضبة حقيقية» على نافذة عصور وليس مجرد أسوأ من best مرة أو مرتين
+PATIENCE = int(os.environ.get("SCN_EXPAND_PATIENCE", "6"))
+MAX_EXPANDS = int(os.environ.get("SCN_MAX_EXPANDS", "3"))
+EXPAND_MIN_EPOCH = int(os.environ.get("SCN_EXPAND_MIN_EPOCH", "12"))  # عمر النموذج الأدنى
+EXPAND_COOLDOWN = int(os.environ.get("SCN_EXPAND_COOLDOWN", "8"))  # عصور بين توسيعين
+EXPAND_WARMUP_RUN = int(os.environ.get("SCN_EXPAND_WARMUP_RUN", "4"))  # عصور بعد بدء الجولة
+EXPAND_FLAT_REL = float(os.environ.get("SCN_EXPAND_FLAT_REL", "0.015"))  # هضبة: تذبذب نسبي صغير
 STOP_PATIENCE = int(os.environ.get("SCN_STOP_PATIENCE", "0"))
 UNTIL_END = os.environ.get("SCN_UNTIL_END", "0") == "1"
 FRESH = os.environ.get("SCN_FRESH", "0") == "1"
@@ -241,8 +250,19 @@ def main():
     print("params:", m.param_count())
 
     steps_per_epoch = max(1, (len(texts) + BATCH - 1) // BATCH)
-    total_steps = max(global_step + EPOCHS * steps_per_epoch, 1)
-    warmup = max(1, int((EPOCHS * steps_per_epoch) * WARMUP_RATIO))
+    remaining = max(1, EPOCHS * steps_per_epoch)
+    if global_step > 0:
+        # استكمال: بدون warmup، وcosine على المتبقي فقط من LR الحالي (لا قفزة لـ base_lr الكامل)
+        warmup = 0
+        total_steps = remaining
+        # اضبط base_lr إلى آخر lr محفوظ إن وُجد حتى لا يرتفع فجأة
+        if getattr(m, "lr", None) and m.lr < m.base_lr:
+            m.base_lr = max(m.lr, m.base_lr * 0.1)
+    else:
+        total_steps = remaining
+        warmup = max(1, int(remaining * WARMUP_RATIO))
+
+    step0_for_lr = global_step
     print(
         f"epochs=+{EPOCHS} (من {start_epoch}) batch={BATCH} "
         f"steps_per_ep={steps_per_epoch} device={m.device}"
@@ -266,10 +286,15 @@ def main():
         ep_losses = []
         for i in range(0, len(order), BATCH):
             batch = order[i : i + BATCH]
+            # step نسبي للجولة عند الاستكمال حتى لا يُحسب progress على أفق قديم/جديد بشكل يرفع LR
+            if global_step > 0 and warmup == 0:
+                run_step = global_step - step0_for_lr
+            else:
+                run_step = global_step
             loss = m.train_batch(
                 batch,
                 max_len=MAX_LEN,
-                step=global_step,
+                step=run_step,
                 total_steps=total_steps,
                 warmup_steps=warmup,
             )
@@ -299,8 +324,32 @@ def main():
             no_improve = 0
         else:
             no_improve += 1
-            # توسيع ذاتي اختياري عند هضبة قصيرة
-            if no_improve >= PATIENCE and n_expands < MAX_EXPANDS:
+            # --- توسيع احترافي عند هضبة حقيقية فقط ---
+            epochs_into_run = ep - start_epoch
+            last_expand_ep = expand_log[-1]["epoch"] if expand_log else -10**9
+            since_expand = ep - last_expand_ep
+            # نافذة أخيرة: هل الـloss مستقر (هضبة) أم ما زال يتذبذب نازلاً؟
+            window = [h["loss"] for h in history[-PATIENCE:]]
+            flat = False
+            if len(window) >= max(3, PATIENCE // 2):
+                w_mean = sum(window) / len(window)
+                w_span = max(window) - min(window)
+                flat = (w_mean > 0 and (w_span / w_mean) <= EXPAND_FLAT_REL)
+            # تحسّن ضعيف جداً عبر النافذة (ليس هبوطاً واضحاً)
+            weak_trend = False
+            if len(window) >= 3:
+                weak_trend = window[-1] > window[0] - 1e-3  # لم ينخفض بوضوح من أول النافذة لآخرها
+
+            can_expand = (
+                n_expands < MAX_EXPANDS
+                and no_improve >= PATIENCE
+                and ep >= EXPAND_MIN_EPOCH
+                and epochs_into_run >= EXPAND_WARMUP_RUN
+                and since_expand >= EXPAND_COOLDOWN
+                and flat
+                and weak_trend
+            )
+            if can_expand:
                 info = m.expand_narrowest(delta=1)
                 if info is not None:
                     n_expands += 1
@@ -313,10 +362,27 @@ def main():
                         f"{info['old']}→out{info['new_out']}*"
                     )
                     print(
-                        f"  → توسيع ذاتي: طبقة {info['layer_idx']} "
+                        f"  → توسيع مدروس: طبقة {info['layer_idx']} "
                         f"{info['old']} → out={info['new_out']} "
-                        f"next_in={info['next_new_in']}"
+                        f"next_in={info['next_new_in']} "
+                        f"(no_improve={PATIENCE}, flat_window=OK)"
                     )
+            elif no_improve >= PATIENCE and n_expands < MAX_EXPANDS:
+                # تشخيص: لماذا لم يتوسع؟
+                reasons = []
+                if ep < EXPAND_MIN_EPOCH:
+                    reasons.append(f"min_epoch({EXPAND_MIN_EPOCH})")
+                if epochs_into_run < EXPAND_WARMUP_RUN:
+                    reasons.append(f"run_warmup({EXPAND_WARMUP_RUN})")
+                if since_expand < EXPAND_COOLDOWN:
+                    reasons.append(f"cooldown({EXPAND_COOLDOWN})")
+                if not flat:
+                    reasons.append("not_flat")
+                if not weak_trend:
+                    reasons.append("still_trending_down")
+                if reasons and (no_improve == PATIENCE or no_improve % 5 == 0):
+                    print(f"  · لا توسيع بعد: {', '.join(reasons)}")
+
             # إيقاف عند استقرار الـloss (نهاية التدريب)
             if STOP_PATIENCE > 0 and no_improve >= STOP_PATIENCE:
                 mark += " *early-stop*"
