@@ -556,6 +556,16 @@ def _build_pre_task_plan(goal, skills=None, top_k=3):  # type: ignore[misc]
         raise RuntimeError("التخطيط الاستباقي غير متاح")
     return fn(goal, skills=skills, top_k=top_k)
 
+# ── 🆕 التفكير ما قبل الفعل (Pre-Action Reasoning) ──
+def _PAR_OK() -> bool:  # type: ignore[misc]
+    return bool(getattr(_app_core_for_lht, "_PAR_OK", False))
+
+def _par_reason_task(task_id, goal, plan_steps, role=""):  # type: ignore[misc]
+    fn = getattr(_app_core_for_lht, "_reason_task", None)
+    if fn is None:
+        raise RuntimeError("التفكير ما قبل الفعل غير متاح")
+    return fn(task_id, goal, plan_steps=plan_steps, role=role)
+
 _MIN_CONFIDENCE = 0.3
 
 
@@ -648,6 +658,16 @@ def _run_task(manager: "LongHorizonTaskManager", task: LHTask) -> None:
                     task._pp_plan = _build_pre_task_plan(task.goal)
             except Exception:
                 pass
+            # ── 🆕 تفكير ما قبل الفعل: جلسة تفكير مسجلة قبل الإتمام ──
+            try:
+                if _PAR_OK():
+                    _par_steps = ([p.get("title", "") for p in task.plan]
+                                  if task.plan else None)
+                    task._par = _par_reason_task(
+                        task.task_id, task.goal, _par_steps,
+                        role="long_horizon")
+            except Exception:
+                pass
             task.status = STATUS_DONE if ok else STATUS_FAILED
             _record_lht_experience(manager, task, [])
             return
@@ -661,6 +681,15 @@ def _run_task(manager: "LongHorizonTaskManager", task: LHTask) -> None:
         try:
             if _PP_OK():
                 task._pp_plan = _build_pre_task_plan(task.goal)
+        except Exception:
+            pass
+        # ── 🆕 تفكير ما قبل الفعل: خطوات متوقعة + مخاطر + حكم قبل التنفيذ ──
+        try:
+            if _PAR_OK():
+                task._par = _par_reason_task(
+                    task.task_id, task.goal,
+                    [p.get("title", "") for p in task.plan],
+                    role="long_horizon")
         except Exception:
             pass
         if not task.plan:

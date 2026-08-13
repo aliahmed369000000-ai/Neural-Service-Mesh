@@ -435,6 +435,15 @@ def _build_pre_task_plan(goal, skills=None, top_k=3):  # type: ignore[misc]
         raise RuntimeError("التخطيط الاستباقي غير متاح")
     return fn(goal, skills=skills, top_k=top_k)
 
+# ── 🆕 التفكير ما قبل الفعل (Pre-Action Reasoning) ──
+def _PAR_OK() -> bool:  # type: ignore[misc]
+    return bool(getattr(_app_core_for_tem, "_PAR_OK", False))
+def _par_reason_task(task_id, goal, plan_steps, role=""):  # type: ignore[misc]
+    fn = getattr(_app_core_for_tem, "_reason_task", None)
+    if fn is None:
+        raise RuntimeError("التفكير ما قبل الفعل غير متاح")
+    return fn(task_id, goal, plan_steps=plan_steps, role=role)
+
 def _share_role_finding(task_id: str, role_name: str, text: str,
                         tool: str, source: str, index: int) -> None:
     """يشارك الدور نتيجته في الناقل المشترك (فشل صامت = لا شيء)."""
@@ -734,6 +743,13 @@ def _run_collaborative_task(manager: "CollaborativeManager",
     with contextlib.suppress(Exception):
         if _PP_OK():
             task._pp_plan = _build_pre_task_plan(task.goal)
+    # ── 🆕 تفكير ما قبل الفعل: جلسة تفكير على مستوى المهمة قبل الأدوار ──
+    with contextlib.suppress(Exception):
+        if _PAR_OK():
+            _par_steps = ([sg for sg in task.subgoals if sg]
+                          or [task.goal] if task.goal else None)
+            task._par = _par_reason_task(
+                task.task_id, task.goal, _par_steps, role="collaborative")
     try:
         task.assign_roles()
         # مساحات معزولة لكل دور

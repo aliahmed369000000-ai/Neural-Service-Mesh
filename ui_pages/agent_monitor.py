@@ -126,6 +126,7 @@ def render_agent_monitor() -> None:
     render_skb_panel()
     render_tem_panel()
     render_ltg_panel()
+    render_par_panel()
 
 
 DELEGATION_EVENTS = ("delegation_requested", "delegation_rejected", "delegation_started", "delegation_resolved")
@@ -1488,3 +1489,43 @@ def render_ltg_panel() -> None:
     else:
         st.caption("لا أهداف مؤسسية بعد — الفريق لا يعمل على أهداف "
                    "تراكمية. تبدأ هنا عند أول مهمة طويلة الأمد.")
+
+
+def render_par_panel() -> None:
+    """لوحة التفكير ما قبل الفعل: جلسات التفكير المسجلة وحكمها وثقتها."""
+    try:
+        from app_core import _PAR_OK, _par_stats, _par_latest
+    except Exception:
+        return
+    st.markdown("---")
+    st.subheader("🧠 التفكير ما قبل الفعل")
+    st.caption(
+        "قبل كل مهمة طويلة الأمد أو تعاونية يفكر الفريق أولًا: خطوات متوقعة، "
+        "مخاطر كل خطوة، بدائل أمان، ودرجة ثقة — ثم يُصدِر حكمًا بـ\"نفذ\" "
+        "أو \"راجع\". التحليل نمطي محلي بلا أي API خارجي، وتتراكم الجلسات "
+        "في قاعدة محلية.")
+    if not _PAR_OK:
+        st.info("وحدة التفكير ما قبل الفعل غير متاحة — الفريق يعمل دون "
+                "جلسات تفكير مسبقة (سلوك سابق).")
+        return
+    try:
+        _stats = _par_stats()
+    except Exception:
+        st.info("تعذر فتح سجل التفكير — العمل مستمر دون جلسات تفكير "
+                "مسبقة.")
+        return
+    _cards = st.columns(4)
+    _cards[0].metric("🧠 جلسات تفكير",
+                     _stats.get("reasoned", 0))
+    _cards[1].metric("✓ نُفّذ بلا تعديل",
+                     _stats.get("proceeded", 0))
+    _cards[2].metric("⟳ عُدّل وخفّف",
+                     _stats.get("revised", 0))
+    _cards[3].metric("📊 متوسط الثقة",
+                     round((_stats.get("avg_confidence", 0) or 0), 2))
+    st.caption(
+        "تُخزَّن كل جلسة تفكير مع مهمتها — تظهر تفاصيل آخر جلسة في تقرير "
+        "المهمة نفسها بلوحة المهام الطويلة والتعاونية (حقل التفكير المسبق).")
+
+
+

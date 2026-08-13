@@ -474,6 +474,30 @@ except Exception:
         return []
     def _ltg_evaluate():
         return {"evaluated_at": 0.0, "goals_updated": 0}
+# ── 🆕 التفكير ما قبل الفعل (Pre-Action Reasoning) ──────────────────────
+# قبل كل "فعل" (خطوة مهمة طويلة الأمد أو دور في مهمة تعاونية) يفكر الوكيل
+# أولًا: خطوات متوقعة + مخاطر متوقعة لكل خطوة + بدائل أمان + ثقة + حكم
+# (proceed / revise) — تحليل نمطي محلي 100% بلا أي API خارجي، ويُسجَّل
+# كل تفكير في قاعدة SQLite محلية (data/pre_action_reasoning.db) تتراكم.
+try:
+    from ai.pre_action_reasoning import (
+        get_pre_action_reasoner as _get_par_reasoner,
+        reason_task as _reason_task,
+        par_stats as _par_stats,
+        par_latest as _par_latest,
+    )
+    _PAR_OK = True
+except Exception:
+    _PAR_OK = False
+    def _get_par_reasoner():  # احتياطي آمن
+        raise RuntimeError("التفكير ما قبل الفعل غير متاح")
+    def _reason_task(*a, **kw):
+        return None
+    def _par_stats():
+        return {"reasoned": 0, "proceeded": 0, "revised": 0,
+                "avg_confidence": 0.0}
+    def _par_latest(*a, **kw):
+        return None
 # ── طبقة فحص أمان أولى (regex، بدون تكلفة API) ────────────────────────────
 try:
     from ai.harm_classifier import classify_prompt as _classify_harm, get_domain_label as _harm_label
