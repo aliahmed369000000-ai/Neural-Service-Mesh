@@ -24,6 +24,30 @@ ROOT = Path(__file__).resolve().parent.parent
 NB_DIR = ROOT / "artifacts" / "model_training" / "notebooks"
 NB_DIR.mkdir(parents=True, exist_ok=True)
 
+# ───────────────────────────────────────────────────────────────────────────
+# 🆕 محرك kernel حقيقي (Colab/Kaggle style): kernel واحد دائم لكل دفتر،
+# تتشارك خلاياه نفس الذاكرة (متغيرات/استيرادات/figures). يُحمَّل كسولًا؛
+# فشله يعود للآلية القديمة (subprocess) تلقائيًا دون كسر أي سلوك موجود.
+# ───────────────────────────────────────────────────────────────────────────
+_NSK = {
+    "run_cell_kernel": None,
+    "restart_kernel": None,
+    "shutdown_session": None,
+    "kernel_health": None,
+}
+try:
+    from ai.nb_kernel import (  # noqa: E402
+        kernel_health as _kh,
+        restart_kernel as _rk,
+        run_cell_kernel as _rck,
+        shutdown_session as _ss,
+    )
+    _NSK.update({"run_cell_kernel": _rck, "restart_kernel": _rk,
+                 "shutdown_session": _ss, "kernel_health": _kh})
+except Exception:  # ipykernel غير متوفر — نبقى على الآلية القديمة
+    pass
+
+
 _MAX_OUTPUT = 50_000
 _DEFAULT_TIMEOUT = 120
 
@@ -634,6 +658,14 @@ def plan_remote_run(nb: Notebook, provider: str) -> Dict[str, Any]:
 
 
 def run_cell(nb: Notebook, cell_id: str, timeout: int = _DEFAULT_TIMEOUT) -> Cell:
+    """يشغّل خلية واحدة.
+
+    🆕 المسار الجديد (provider=local + ipykernel متوفر): kernel حقيقي دائم
+    للدفتر — الخلايا تتشارك نفس الذاكرة (متغيرات/استيرادات/figures) مثل
+    Colab/Kaggle، والمخرجات تُحفظ بصيغة ipynb-native قابلة للتصدير.
+    المسار القديم (fallback): subprocess منفصل لكل خلية — يبقى متاحًا عبر
+    provider!=local أو عند عدم توفر ipykernel.
+    """
     cell = next((c for c in nb.cells if c.id == cell_id), None)
     if not cell:
         raise KeyError(cell_id)
@@ -649,21 +681,78 @@ def run_cell(nb: Notebook, cell_id: str, timeout: int = _DEFAULT_TIMEOUT) -> Cel
 
     if cell.type == "bash":
         res = _exec_bash(cell.source, timeout)
-    else:
-        # code + train
-        res = _exec_python(cell.source, timeout)
+        cell.execution_count = (cell.execution_count or 0) + 1
+        cell.status = "ok" if res.get("ok") else "error"
+        cell.outputs = [{
+            "type": "stream",
+            "stdout": res.get("stdout", ""),
+            "stderr": res.get("stderr", ""),
+            "exit_code": res.get("exit_code"),
+            "duration_ms": res.get("duration_ms"),
+        }]
+        save_notebook(nb)
+        return cell
 
-    cell.execution_count = (cell.execution_count or 0) + 1
-    cell.status = "ok" if res.get("ok") else "error"
-    cell.outputs = [{
-        "type": "stream",
-        "stdout": res.get("stdout", ""),
-        "stderr": res.get("stderr", ""),
-        "exit_code": res.get("exit_code"),
-        "duration_ms": res.get("duration_ms"),
-    }]
+    # code + train — kernel الحقيقي أولًا
+    res = None
+    kr = _NSK.get("run_cell_kernel")
+    if kr is not None and (nb.provider or "local") == "local":
+        try:
+            res = kr(nb.id, cell.source, timeout=timeout)
+        except Exception:
+            res = None
+    if res is None:
+        # fallback للآلية القديمة (subprocess منفصل)
+        res = _exec_python(cell.source, timeout)
+        cell.execution_count = (cell.execution_count or 0) + 1
+        cell.status = "ok" if res.get("ok") else "error"
+        cell.outputs = [{
+            "type": "stream",
+            "stdout": res.get("stdout", ""),
+            "stderr": res.get("stderr", ""),
+            "exit_code": res.get("exit_code"),
+            "duration_ms": res.get("duration_ms"),
+        }]
+    else:
+        # مخرجات kernel بصيغة ipynb-native (stream|display_data|execute_result|error)
+        cell.execution_count = res.get("execution_count") or (cell.execution_count or 0) + 1
+        cell.status = "ok" if res.get("ok") else "error"
+        cell.outputs = list(res.get("outputs") or [])
     save_notebook(nb)
     return cell
+
+
+def restart_kernel_session(nb_id: str) -> Dict[str, Any]:
+    """🆕 يعيد تشغيل kernel الدفتر — ذاكرة صافية مثل Reset في Colab/Kaggle.
+    غير مؤثرة في الدفاتر التي تعمل بالآلية القديمة (subprocess)."""
+    if _NSK.get("restart_kernel") is None:
+        return {"ok": False, "error": "محرك kernel غير متوفر في هذه البيئة"}
+    try:
+        return _NSK["restart_kernel"](nb_id)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def kill_kernel_session(nb_id: str) -> bool:
+    """🆕 يغلق kernel الدفتر كليًا (تنظيف الموارد عند حذف الدفتر)."""
+    if _NSK.get("shutdown_session") is None:
+        return False
+    try:
+        return _NSK["shutdown_session"](nb_id)
+    except Exception:
+        return False
+
+
+def nb_kernel_health() -> Dict[str, Any]:
+    """🆕 حالة محرك kernel: توفر ipykernel، الجلسات النشطة، الباك إند الفعلي."""
+    if _NSK.get("kernel_health") is None:
+        return {"ipykernel_available": False, "active_sessions": 0,
+                "sessions": [], "backend": "subprocess"}
+    try:
+        return _NSK["kernel_health"]()
+    except Exception:
+        return {"ipykernel_available": False, "active_sessions": 0,
+                "sessions": [], "backend": "subprocess"}
 
 
 def run_all(nb: Notebook, timeout: int = _DEFAULT_TIMEOUT, stop_on_error: bool = True) -> List[dict]:
@@ -699,14 +788,64 @@ def export_ipynb(nb: Notebook) -> dict:
                 "execution_count": c.execution_count,
                 "metadata": {"nsm_type": c.type, **(c.metadata or {})},
                 "source": c.source.splitlines(keepends=True) or [""],
-                "outputs": [],
+                "outputs": _export_cell_outputs(c.outputs),
             })
     return {
         "nbformat": 4,
         "nbformat_minor": 5,
         "metadata": {
             "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
+            "language_info": {"name": "python", "version": "3.12"},
             "nsm": {"id": nb.id, "provider": nb.provider, "name": nb.name},
         },
         "cells": cells_out,
     }
+
+
+def _export_cell_outputs(outputs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """🆕 تحويل مخرجات kernel إلى صيغة nbformat 4 القابلة للاستيراد في
+    Colab/Kaggle. المخرجات القديمة (subprocess stream dict) تُحوَّل أيضًا."""
+    out: List[Dict[str, Any]] = []
+    for o in outputs or []:
+        otype = o.get("type", "")
+        if otype == "markdown":
+            continue
+        if otype == "stream":
+            if "stdout" in o or "stderr" in o:
+                # البنية القديمة من subprocess
+                if o.get("stdout"):
+                    out.append({"output_type": "stream", "name": "stdout",
+                                "text": o["stdout"].splitlines(keepends=True)})
+                if o.get("stderr"):
+                    out.append({"output_type": "stream", "name": "stderr",
+                                "text": o["stderr"].splitlines(keepends=True)})
+            else:
+                # البنية ipynb-native من kernel
+                out.append({"output_type": "stream", "name": o.get("name", "stdout"),
+                            "text": (o.get("text") or "").splitlines(keepends=True)})
+        elif otype in ("display_data", "execute_result"):
+            data = o.get("data") or {}
+            if not data:
+                continue
+            payload: Dict[str, Any] = {
+                "output_type": otype,
+                "metadata": dict(o.get("metadata") or {}),
+                "data": {},
+            }
+            for mime, val in data.items():
+                if isinstance(val, str):
+                    payload["data"][mime] = val.splitlines(keepends=True)
+                else:
+                    payload["data"][mime] = val
+            if "execution_count" in o and o["execution_count"] is not None:
+                payload["execution_count"] = o["execution_count"]
+            out.append(payload)
+        elif otype == "error":
+            out.append({
+                "output_type": "error",
+                "ename": o.get("ename", "Error"),
+                "evalue": o.get("evalue", ""),
+                "traceback": list(o.get("traceback") or []),
+            })
+        # أي بنية غير معروفة تُتجاهل بأمان
+    return out

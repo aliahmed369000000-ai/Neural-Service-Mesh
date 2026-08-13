@@ -25,6 +25,15 @@ def _ensure_nb():
     return nb
 
 
+def nb_kernel_summary(nb_id: str):
+    """🆕 معلومات مختصرة عن جلسة kernel الدفتر."""
+    try:
+        from ai.nb_kernel import session_summary
+        return session_summary(nb_id)
+    except Exception:
+        return None
+
+
 def _badge(ok: bool, yes: str = "جاهز", no: str = "غير جاهز") -> str:
     return f"{'🟢' if ok else '🔴'} {yes if ok else no}"
 
@@ -67,6 +76,45 @@ def _latest_job_banner():
         if j.get("error"):
             st.caption(f"⚠️ {str(j['error'])[:200]}")
         st.markdown("---")
+
+
+def _render_cell_outputs(outputs):
+    """🆕 عرض مخرجات kernel بصيغة ipynb-native (stream/display/execute_result/
+    error) مع بقاء التوافق مع البنية القديمة (stdout/stderr/exit_code)."""
+    for out in outputs or []:
+        otype = out.get("type", "")
+        # البنية القديمة من subprocess
+        if out.get("stdout"):
+            st.code(out["stdout"], language="text")
+        if out.get("stderr"):
+            st.error(out["stderr"][:3000])
+        if out.get("exit_code") is not None:
+            st.caption(f"exit={out.get('exit_code')} · {out.get('duration_ms', 0)}ms")
+        # البنية ipynb-native من kernel الحقيقي
+        if otype == "stream":
+            text = out.get("text", "")
+            if text and not out.get("stdout"):
+                st.code(text, language="text")
+        elif otype == "display_data":
+            data = out.get("data") or {}
+            if "image/png" in data:
+                import base64
+                st.image(base64.b64decode(data["image/png"]))
+            if "text/html" in data:
+                st.markdown("".join(data["text/html"]), unsafe_allow_html=True)
+            elif "text/plain" in data and "image/png" not in data and "text/html" not in data:
+                st.text("".join(data["text/plain"]))
+        elif otype == "execute_result":
+            data = out.get("data") or {}
+            if "image/png" in data:
+                import base64
+                st.image(base64.b64decode(data["image/png"]))
+            elif "text/html" in data:
+                st.markdown("".join(data["text/html"]), unsafe_allow_html=True)
+            else:
+                st.text("".join(data.get("text/plain") or [""]))
+        elif otype == "error":
+            st.error("\n".join(out.get("traceback") or [out.get("evalue", "")]))
 
 
 def render_training_notebook():
@@ -320,10 +368,38 @@ def render_training_notebook():
                 key="dl_ipynb2",
             )
 
-        st.markdown(
-            f"**{nb.name}** · `{nb.id}` · خلايا **{len(nb.cells)}** · "
-            f"حُفظ `{nb.updated_at[:19] if nb.updated_at else '—'}`"
-        )
+        # 🆕 شريط حالة kernel (Colab/Kaggle style): ذاكرة مستمرة بين الخلايا
+        try:
+            from ai.notebook_engine import nb_kernel_health, restart_kernel_session
+            kbh = nb_kernel_health()
+        except Exception:
+            kbh = {"ipykernel_available": False, "backend": "subprocess", "active_sessions": 0}
+        kernel_ok = kbh.get("backend") == "kernel"
+        sess = nb_kernel_summary(nb.id) if kernel_ok else None
+        status_cols = st.columns([4, 1.4, 1.2])
+        with status_cols[0]:
+            st.markdown(
+                f"**{nb.name}** · `{nb.id}` · خلايا **{len(nb.cells)}** · "
+                f"حُفظ `{nb.updated_at[:19] if nb.updated_at else '—'}`"
+            )
+        with status_cols[1]:
+            if kernel_ok:
+                alive = sess.get("alive") if sess else False
+                st.caption(
+                    f"⚡ kernel حي: {'نعم' if alive else 'لا'} · "
+                    f"ذاكرة مشتركة بين الخلايا {'🟢' if alive else '🟡'}"
+                )
+            else:
+                st.caption("⚙️ وضع subprocess (ipykernel غير متوفر) — بدون ذاكرة مشتركة")
+        with status_cols[2]:
+            if kernel_ok and st.button("🔄 إعادة kernel", use_container_width=True, key="nb_restart_kernel"):
+                with st.spinner("إعادة تشغيل kernel…"):
+                    res = restart_kernel_session(nb.id)
+                if res.get("ok"):
+                    st.toast("ذاكرة kernel صُفّرت — مثل Reset في Colab", icon="✅")
+                else:
+                    st.toast(str(res.get("error")), icon="❌")
+                st.rerun()
 
         for i, cell in enumerate(list(nb.cells)):
             badge = {"markdown": "📝", "code": "🐍", "bash": "💻", "train": "🏋️"}.get(cell.type, "•")
@@ -365,13 +441,8 @@ def render_training_notebook():
                     save_notebook(nb)
                 if cell.type == "markdown":
                     st.markdown(cell.source)
-                for out in cell.outputs or []:
-                    if out.get("stdout"):
-                        st.code(out["stdout"], language="text")
-                    if out.get("stderr"):
-                        st.error(out["stderr"][:3000])
-                    if out.get("exit_code") is not None:
-                        st.caption(f"exit={out.get('exit_code')} · {out.get('duration_ms', 0)}ms")
+                else:
+                    _render_cell_outputs(cell.outputs)
                 st.markdown("---")
 
     # ═══════════ 3) المهام ═══════════

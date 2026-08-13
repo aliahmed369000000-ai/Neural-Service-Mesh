@@ -25,3 +25,4 @@ requests_oauthlib==2.0.0
 scikit-learn==1.9.0
 streamlit==1.60.0
 uvicorn==0.52.0
+ipykernel>=6.29.0

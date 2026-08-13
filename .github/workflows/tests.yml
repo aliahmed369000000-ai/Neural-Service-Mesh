@@ -40,7 +40,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: تثبيت اعتماديات خفيفة
-        run: pip install -q pytest numpy requests scikit-learn
+        run: pip install -q pytest numpy requests scikit-learn ipykernel
       - name: تشغيل pytest
         run: python3 -m pytest -q --tb=line
         continue-on-error: true
