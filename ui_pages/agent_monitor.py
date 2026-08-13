@@ -13,9 +13,23 @@ def _status_label(status: str) -> str:
     }.get(status, status or "—")
 
 
+def _severity_label(severity: str) -> str:
+    return {
+        "critical": "🚨 حرج",
+        "warning": "⚠️ تحذير",
+        "info": "ℹ️ معلومات",
+    }.get(severity, severity or "تنبيه")
+
+
 def render_agent_monitor() -> None:
     """يعرض آخر حالة معروفة لكل وكيل وسجل الأحداث الزمني للجلسة."""
-    from ai.agent_event_bus import clear_events, current_agent_states, get_events
+    from ai.agent_event_bus import (
+        analyze_alerts,
+        clear_events,
+        current_agent_states,
+        get_events,
+        performance_summary,
+    )
 
     st.markdown(
         """
@@ -39,18 +53,50 @@ def render_agent_monitor() -> None:
             st.rerun()
     with col_limit:
         limit = st.slider("عدد الأحداث", 10, 120, 50, key="agent_monitor_limit")
+    threshold_cols = st.columns(2)
+    with threshold_cols[0]:
+        slow_threshold_ms = st.number_input(
+            "عتبة البطء (مللي ثانية)", min_value=1000, max_value=120000,
+            value=12000, step=1000, key="agent_slow_threshold_ms",
+        )
+    with threshold_cols[1]:
+        stale_threshold_s = st.number_input(
+            "عتبة الاختناق (ثانية)", min_value=5, max_value=600,
+            value=45, step=5, key="agent_stale_threshold_s",
+        )
 
     events = get_events(limit)
     states = current_agent_states(events)
     running = sum(1 for row in states.values() if row.get("status") == "running")
     completed = sum(1 for row in states.values() if row.get("status") == "done")
     failures = sum(1 for row in events if row.get("status") == "error")
+    alerts = analyze_alerts(
+        events,
+        slow_threshold_ms=float(slow_threshold_ms),
+        stale_threshold_s=float(stale_threshold_s),
+    )
+    performance = performance_summary(events)
 
-    metric_cols = st.columns(4)
+    if alerts:
+        st.markdown("#### 🚨 التنبيهات الفورية")
+        for alert in reversed(alerts[-8:]):
+            message = f"**{_severity_label(alert['severity'])}: {alert['title']}** — {alert['detail']}"
+            if alert["severity"] == "critical":
+                st.error(message)
+            elif alert["severity"] == "warning":
+                st.warning(message)
+            else:
+                st.info(message)
+    else:
+        st.success("✅ لا توجد أخطاء أو اختناقات تتجاوز العتبات الحالية.")
+
+    metric_cols = st.columns(6)
     metric_cols[0].metric("الأحداث", len(events))
     metric_cols[1].metric("وكلاء نشطون", running)
     metric_cols[2].metric("مكتملة", completed)
     metric_cols[3].metric("أخطاء", failures, delta_color="inverse")
+    metric_cols[4].metric("متوسط الزمن", f"{performance['avg_ms']:.0f} ms")
+    metric_cols[5].metric("أقصى زمن", f"{performance['max_ms']:.0f} ms")
 
     if not events:
         st.info("لا توجد أحداث بعد. نفّذ مهمة من تبويب «منسّق الوكلاء» أو «الوكيل الموحّد» لتظهر هنا.")
@@ -73,6 +119,7 @@ def render_agent_monitor() -> None:
             "الحدث": row.get("event_type", "—"),
             "الوكيل": row.get("title") or row.get("agent_id") or "المدير",
             "الحالة": _status_label(row.get("status", "")),
+            "زمن التنفيذ": f"{row['duration_ms']:.0f} ms" if row.get("duration_ms") is not None else "—",
             "التفاصيل": row.get("detail", ""),
         })
     st.dataframe(table, use_container_width=True, hide_index=True)
@@ -80,7 +127,7 @@ def render_agent_monitor() -> None:
 
 def render_agent_live_trace(target) -> None:
     """يرسم نسخة مختصرة داخل مسار التنفيذ وتُحدّث بعد كل مرحلة."""
-    from ai.agent_event_bus import get_events
+    from ai.agent_event_bus import analyze_alerts, get_events
 
     events = get_events(24)
     with target.container():
@@ -88,6 +135,13 @@ def render_agent_live_trace(target) -> None:
         if not events:
             st.caption("بانتظار بدء الأحداث...")
             return
+        live_alerts = analyze_alerts(events, slow_threshold_ms=12000, stale_threshold_s=45)
+        for alert in reversed(live_alerts[-3:]):
+            text = f"{_severity_label(alert['severity'])}: {alert['title']} — {alert['detail']}"
+            if alert["severity"] == "critical":
+                st.error(text)
+            else:
+                st.warning(text)
         for row in reversed(events[-10:]):
             status = _status_label(row.get("status", ""))
             title = row.get("title") or row.get("agent_id") or "المدير"
