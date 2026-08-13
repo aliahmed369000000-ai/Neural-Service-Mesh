@@ -115,6 +115,7 @@ def render_agent_monitor() -> None:
     render_collective_memory_panel()
     render_background_tasks_panel()
     render_shared_analytics_panel()
+    render_adaptive_swarm_panel()
 
 
 DELEGATION_EVENTS = ("delegation_requested", "delegation_rejected", "delegation_started", "delegation_resolved")
@@ -192,6 +193,7 @@ def render_delegation_chain(events) -> None:
 
 
 DEBATE_EVENTS = ("debate_started", "debate_argument", "debate_round_done", "debate_consensus", "debate_abandoned")
+ADAPTIVE_EVENTS = ("adaptive_ranked", "adaptive_excluded", "adaptive_reweighted")
 
 STANCE_BADGES = {
     "agree": "#86efac",
@@ -462,6 +464,80 @@ def render_shared_analytics_panel() -> None:
         mem = report.get("memory", {})
         st.metric("الدروس الجماعية", mem.get("total_lessons", 0))
         st.caption(f"متوسط الجودة: {mem.get('avg_lesson_quality', 0):.2f}")
+
+
+def render_adaptive_swarm_panel() -> None:
+    """لوحة السرب الذكي المتعلم: ترتيب الوكلاء ديناميكيًا حسب أدائهم التاريخي."""
+    from ai.adaptive_swarm import (
+        ADAPTIVE_EVENTS as _ADAPTIVE_EVENTS,
+        agent_profiles,
+        exclude_agents,
+        excluded_agents,
+        rank_agents,
+    )
+
+    events = get_events(100)
+    profiles = agent_profiles(events)
+    render_section_header(
+        "السرب المتعلم",
+        f"ترتيب ديناميكي حسب الأداء التاريخي — {len(profiles)} وكيلًا في ملف الأداء",
+        live=True,
+    )
+    if not profiles:
+        st.caption(
+            "لا توجد بيانات أداء كافية بعد. يُبنى ملف الأداء من الأحداث التاريخية "
+            "(النجاح 70% + السرعة 20% + الاستقرار 10%)، وكلما نفّذ الوكلاء مهامًا أكثر "
+            "أصبح الترتيب والاستبعاد أدق."
+        )
+    else:
+        try:
+            all_agents = list(profiles.keys())
+            ordered = rank_agents(all_agents, events)
+            _scols = st.columns(min(len(ordered), 4))
+            for i, key in enumerate(ordered[:4]):
+                with _scols[i]:
+                    p = profiles.get(key, {})
+                    st.metric(f"{i + 1}. {key}", f"{p.get('score', 0):.0f}/100",
+                              delta=f"{p.get('tasks', 0)} مهمة")
+        except Exception:
+            pass
+        rows = []
+        for key, p in profiles.items():
+            rows.append({
+                "الوكيل": key,
+                "الدرجة": f"{p.get('score', 0):.0f}/100",
+                "المهام": int(p.get("tasks", 0) or 0),
+                "نسبة النجاح": f"{p.get('success_rate', 0) * 100:.0f}%",
+                "متوسط المدة (ms)": round(p.get("avg_duration_ms", 0) or 0, 0),
+            })
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+        try:
+            _sel = list(profiles.keys())
+            _new_selected = exclude_agents(_sel, events)
+            _exc_keys = [k for k in _sel if k not in _new_selected]
+        except Exception:
+            _new_selected = _sel
+            _exc_keys = []
+        if _exc_keys:
+            exc_rows = []
+            for key in _exc_keys:
+                prof = profiles.get(key, {})
+                tasks = prof.get("tasks", 0)
+                rate = prof.get("errors", 0) / (tasks + 0.0) if tasks else 0.0
+                exc_rows.append({"الوكيل المستبعد": key,
+                                 "نسبة الفشل": f"{rate * 100:.0f}%",
+                                 "المهام": int(tasks or 0),
+                                 "السبب": "استبعاد مؤقت حتى يحسّن الأداء"})
+            st.warning("⛔ وكلاء مستبعدون مؤقتًا من السرب")
+            st.dataframe(exc_rows, use_container_width=True, hide_index=True)
+        if _new_selected and len(_new_selected) != len(_sel):
+            st.caption(
+                f"التطبيق الحالي للاستبعاد: يبقى {len(_new_selected)} "
+                f"وكيلًا نشطًا من أصل {len(_sel)} بعد تطبيق الاستبعاد المؤقت."
+            )
+    adaptive = [e for e in get_events(100) if e.get("event_type") in _ADAPTIVE_EVENTS]
+    if adaptive:
+        st.caption(f"آخر تحديث من السرب المتعلم: {adaptive[-1].get('event_type', '')} — {adaptive[-1].get('timestamp', '')}")
 
 
 def render_agent_live_trace(target) -> None:

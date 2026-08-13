@@ -811,21 +811,55 @@ class UnifiedAgentChat:
         # أسئلة طويلة أو تحتوي أكثر من مؤشر تعقيد
         return hits >= 1 or (len(t) > 120 and ("و" in t or "ثم" in t or "و" in low))
 
-    def _synthesize(self, task: str, agent_replies: Dict[str, str]) -> str:
+    def _synthesize(self, task: str, agent_replies: Dict[str, str], adaptive_events=None) -> str:
         """يولّف ردود الوكلاء الفرعية في إجابة واحدة نهائية تحت مسؤولية المدير."""
+        from ai.agent_event_bus import emit_event as _sy_emit, get_events as _sy_get_events
+        _get_events_local = _sy_get_events
         if not agent_replies:
             return "لم أستطع جمع ردود من الوكلاء الفرعيين."
         if len(agent_replies) == 1:
             return next(iter(agent_replies.values()))
 
-        parts = []
-        for key, reply in agent_replies.items():
-            cat = AGENT_CATEGORIES.get(key)
-            title = cat.title if cat else key
-            emoji = cat.emoji if cat else "•"
-            parts.append(f"[{emoji} {title}]\n{reply.strip()}")
-
-        combined = "\n\n───\n\n".join(parts)
+        # 🆕 السرب المتعلم: ترتيب التقارير في البرومبت حسب أداء كل وكيل التاريخي
+        _ad_events = adaptive_events
+        _ordered = list(agent_replies)
+        if _ad_events is None:
+            try:
+                _ad_events = _get_events_local(250)
+            except Exception:
+                _ad_events = []
+        if _ad_events:
+            try:
+                from ai.adaptive_swarm import rank_agents, weighted_synth_prompt
+                _ad_titles = {
+                    k: (AGENT_CATEGORIES[k].title if k in AGENT_CATEGORIES else k)
+                    for k in agent_replies
+                }
+                _ord = rank_agents(list(agent_replies), _ad_events)
+                if _ord != list(agent_replies):
+                    _ordered = _ord
+                    from ai.adaptive_swarm import announce_adaptive_reweight
+                    _ad_profiles = None
+                    try:
+                        from ai.adaptive_swarm import agent_profiles
+                        _ad_profiles = agent_profiles(_ad_events)
+                    except Exception:
+                        pass
+                    announce_adaptive_reweight(_sy_emit, _ord, _ad_profiles, parent_task_id="synthesis")
+                # weighted_synth_prompt يعيد نصًا كاملًا (ردود مرتبة بترجيح)
+                combined = weighted_synth_prompt(task, agent_replies, _ad_events, _ad_titles)
+            except Exception:
+                combined = None
+        else:
+            combined = None
+        if combined is None:
+            parts = []
+            for key, reply in agent_replies.items():
+                cat = AGENT_CATEGORIES.get(key)
+                title = cat.title if cat else key
+                emoji = cat.emoji if cat else "•"
+                parts.append(f"[{emoji} {title}]\n{reply.strip()}")
+            combined = "\n\n───\n\n".join(parts)
 
         # ── الذاكرة الجماعية: دروس مستفادة من مهام سابقة ذات صلة ──────
         _cm_lessons = ""
@@ -894,7 +928,7 @@ class UnifiedAgentChat:
 
     def chat(self, user_input: str, force_web: "bool | None" = None) -> "Tuple[str, dict]":
         """الواجهة الرئيسية: أقرر، أفوّض، أجمع، وأتحمل المسؤولية النهائية."""
-        from ai.agent_event_bus import emit_event
+        from ai.agent_event_bus import emit_event, get_events
         emit_event(
             "task_started",
             agent_id="master_orchestrator",
@@ -937,13 +971,43 @@ class UnifiedAgentChat:
         if not selected:
             selected = ["assistant"] if "assistant" in AGENT_CATEGORIES else [next(iter(AGENT_CATEGORIES))]
             route_method = "default"
+
+        # 🆕 السرب المتعلم: ترتيب الوكلاء حسب أدائهم التاريخي عبر ناقل الأحداث
+        _adaptive_events = get_events(250)
+        try:
+            from ai.adaptive_swarm import (
+                adaptive_max_agents,
+                announce_adaptive_exclusion,
+                announce_adaptive_ranking,
+                excluded_agents,
+                rank_agents,
+            )
+            _adaptive_max = adaptive_max_agents(max_agents, _adaptive_events)
+            selected = list(selected)[:_adaptive_max]
+            _ordered = rank_agents(selected, _adaptive_events)
+            if _ordered != list(selected):
+                selected = _ordered
+                _profiles = agent_profiles(_adaptive_events)
+                announce_adaptive_ranking(emit_event, selected, _profiles, parent_task_id=f"multi:{route_method}")
+            _excluded = excluded_agents(selected, _adaptive_events)
+            if _excluded:
+                from ai.adaptive_swarm import exclude_agents as _excl
+                _kept = _excl(selected, _adaptive_events)
+                if len(_kept) < len(selected):
+                    announce_adaptive_exclusion(emit_event, _excluded, _kept, parent_task_id=f"multi:{route_method}")
+                    selected = _kept
+            max_agents = _adaptive_max
+        except Exception as _ad_err:
+            # الوضع المتعلم اختياري: فشل التحليل لا يعطّل اختيار الوكلاء
+            import logging as _ad_log
+            _ad_log.getLogger("adaptive_swarm").warning("adaptive_swarm: تعطّل التحليل — يعمل النظام كالعادة: %s", _ad_err)
         emit_event(
             "route_selected",
             agent_id="master_orchestrator",
             title="المدير الموحّد",
             status="running",
-            detail=f"التوجيه: {route_method} · الوكلاء: {', '.join(selected)}",
-            metadata={"route_method": route_method, "selected": list(selected)},
+            detail=f"التوجيه: {route_method} · الوكلاء: {', '.join(selected)} · سقف تكيّفي: {max_agents}",
+            metadata={"route_method": route_method, "selected": list(selected), "adaptive_max": max_agents},
         )
 
         # 3) حالة وكيل واحد فقط → نفس السلوك السابق (سريع ودقيق)
@@ -1121,7 +1185,11 @@ class UnifiedAgentChat:
                     _delegation.mark_result(_dkey, "rejected", str(_del_err)[:150])
 
         emit_event("synthesis_started", agent_id="master_orchestrator", title="المدير الموحّد", status="running", detail="توليف ردود الفريق")
-        final = self._synthesize(user_input, {k: strip_delegation_tags(v or "") for k, v in agent_replies.items() if k not in failed})
+        final = self._synthesize(
+            user_input,
+            {k: strip_delegation_tags(v or "") for k, v in agent_replies.items() if k not in failed},
+            adaptive_events=locals().get("_adaptive_events"),
+        )
         emit_event("synthesis_done", agent_id="master_orchestrator", title="المدير الموحّد", status="done", detail="اكتملت الإجابة الموحّدة")
 
         # وصف الشفافية للمستخدم (بدون إضعاف دور المدير)

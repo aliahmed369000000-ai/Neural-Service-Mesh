@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 EVENTS_KEY = "_nsm_agent_live_events"
 AGENT_STARTS_KEY = "_nsm_agent_live_starts"
 MAX_EVENTS = 250
-START_EVENTS = {"agent_started", "task_started", "synthesis_started", "delegation_started", "debate_started", "bg_task_started", "bg_task_running"}
+START_EVENTS = {"agent_started", "task_started", "synthesis_started", "delegation_started", "debate_started", "bg_task_started", "bg_task_running", "adaptive_ranked", "adaptive_excluded", "adaptive_reweighted"}
 END_EVENTS = {"agent_done", "agent_error", "task_done", "task_error", "synthesis_done", "delegation_resolved", "debate_consensus", "debate_abandoned"}
 
 
