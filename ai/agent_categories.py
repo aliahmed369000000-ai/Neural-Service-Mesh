@@ -862,6 +862,14 @@ class UnifiedAgentChat:
 
     def chat(self, user_input: str, force_web: "bool | None" = None) -> "Tuple[str, dict]":
         """الواجهة الرئيسية: أقرر، أفوّض، أجمع، وأتحمل المسؤولية النهائية."""
+        from ai.agent_event_bus import emit_event
+        emit_event(
+            "task_started",
+            agent_id="master_orchestrator",
+            title="المدير الموحّد",
+            status="running",
+            detail="استلام مهمة جديدة",
+        )
         if not user_input.strip():
             return "الرجاء كتابة سؤالك أو هدفك.", {}
 
@@ -897,14 +905,29 @@ class UnifiedAgentChat:
         if not selected:
             selected = ["assistant"] if "assistant" in AGENT_CATEGORIES else [next(iter(AGENT_CATEGORIES))]
             route_method = "default"
+        emit_event(
+            "route_selected",
+            agent_id="master_orchestrator",
+            title="المدير الموحّد",
+            status="running",
+            detail=f"التوجيه: {route_method} · الوكلاء: {', '.join(selected)}",
+            metadata={"route_method": route_method, "selected": list(selected)},
+        )
 
         # 3) حالة وكيل واحد فقط → نفس السلوك السابق (سريع ودقيق)
         if len(selected) == 1:
             key = selected[0]
             bot = self._get_bot(key)
-            bot.history = list(self.shared_history[-4:])
-            response = bot.chat(user_input, force_web=force_web, source="unified")
             cat = AGENT_CATEGORIES[key]
+            emit_event("agent_started", agent_id=key, title=cat.title, status="running", detail="تنفيذ المهمة")
+            bot.history = list(self.shared_history[-4:])
+            try:
+                response = bot.chat(user_input, force_web=force_web, source="unified")
+                emit_event("agent_done", agent_id=key, title=cat.title, status="done", detail="اكتمل الرد")
+            except Exception as exc:
+                emit_event("agent_error", agent_id=key, title=cat.title, status="error", detail=str(exc)[:180])
+                emit_event("task_error", agent_id="master_orchestrator", title="المدير الموحّد", status="error", detail="فشل الوكيل الوحيد")
+                raise
             meta = {
                 "category_key": key,
                 "category_title": cat.title,
@@ -916,6 +939,13 @@ class UnifiedAgentChat:
             }
             self.shared_history.append((user_input, response))
             self.turns_meta.append(meta)
+            emit_event(
+                "task_done",
+                agent_id="master_orchestrator",
+                title="المدير الموحّد",
+                status="done",
+                detail="اكتملت المهمة عبر وكيل متخصص واحد",
+            )
             return response, meta
 
         # 4) تفويض متعدد: أشغّل الوكلاء وأولّف النتيجة بنفسي
@@ -924,12 +954,27 @@ class UnifiedAgentChat:
         badges: List[str] = []
 
         for key in selected:
+            cat = AGENT_CATEGORIES.get(key)
+            emit_event(
+                "agent_started",
+                agent_id=key,
+                title=cat.title if cat else key,
+                status="running",
+                detail="بدأ الوكيل المتخصص العمل",
+            )
             try:
                 bot = self._get_bot(key)
                 # سياق مشترك مختصر
                 bot.history = list(self.shared_history[-3:])
                 resp = bot.chat(user_input, force_web=force_web, source="unified_multi")
                 agent_replies[key] = resp
+                emit_event(
+                    "agent_done",
+                    agent_id=key,
+                    title=cat.title if cat else key,
+                    status="done",
+                    detail="اكتمل رد الوكيل",
+                )
                 try:
                     badges.append(bot.last_provider_badge() or "")
                 except Exception:
@@ -937,8 +982,17 @@ class UnifiedAgentChat:
             except Exception as e:
                 failed.append(key)
                 agent_replies[key] = f"⚠️ تعذّر الحصول على رد من هذا الوكيل: {e}"
+                emit_event(
+                    "agent_error",
+                    agent_id=key,
+                    title=cat.title if cat else key,
+                    status="error",
+                    detail=str(e)[:180],
+                )
 
+        emit_event("synthesis_started", agent_id="master_orchestrator", title="المدير الموحّد", status="running", detail="توليف ردود الفريق")
         final = self._synthesize(user_input, {k: v for k, v in agent_replies.items() if k not in failed})
+        emit_event("synthesis_done", agent_id="master_orchestrator", title="المدير الموحّد", status="done", detail="اكتملت الإجابة الموحّدة")
 
         # وصف الشفافية للمستخدم (بدون إضعاف دور المدير)
         team_label = " + ".join(
@@ -956,6 +1010,13 @@ class UnifiedAgentChat:
         }
         self.shared_history.append((user_input, final))
         self.turns_meta.append(meta)
+        emit_event(
+            "task_done",
+            agent_id="master_orchestrator",
+            title="المدير الموحّد",
+            status="done",
+            detail=f"اكتملت المهمة مع {len(selected) - len(failed)} وكيل فعال",
+        )
         return final, meta
 
     def clear_history(self) -> None:

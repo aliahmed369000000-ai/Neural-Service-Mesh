@@ -39,6 +39,7 @@ from ui_pages.unified_agent import render_unified_agent
 from ui_pages.agents_hub import render_agents_hub, _render_agent_page
 from ui_pages.system_core import render_system_core
 from ui_pages.agent_orchestrator import render_agent_orchestrator
+from ui_pages.agent_monitor import render_agent_monitor
 from ui_pages.swarm_studio import render_swarm_studio
 
 
@@ -68,7 +69,7 @@ def render_agents_group():
         unsafe_allow_html=True,
     )
     st.caption("الوكيل الموحّد للمحادثة اليومية · وكلاء متخصصون · منسّق · سرب")
-    sub = st.tabs(["🎯 الوكيل الموحّد", "🤖 وكلاء AI", "🤝 منسّق الوكلاء", "🐝 السرب الذكي"])
+    sub = st.tabs(["🎯 الوكيل الموحّد", "🤖 وكلاء AI", "🤝 منسّق الوكلاء", "📡 مراقبة حيّة", "🐝 السرب الذكي"])
     # 🆕 توضيح مختصر أعلى كل تبويب فرعي — الأربعة تبدو متشابهة لأول وهلة
     # (كلها "وكلاء")، فهذا يفرّق فوراً متى يُستخدم كل واحد بدون قراءة الكود.
     with sub[0]:
@@ -92,6 +93,8 @@ def render_agents_group():
         )
         render_agent_orchestrator()
     with sub[3]:
+        render_agent_monitor()
+    with sub[4]:
         st.info(
             "🐝 **لهدف معقّد متعدد الخطوات**: يفكّك الهدف تلقائياً إلى أدوار "
             "(بحث، ترجمة، مراجعة، برمجة...) وينفّذها بالتسلسل — للمهام الكبيرة "

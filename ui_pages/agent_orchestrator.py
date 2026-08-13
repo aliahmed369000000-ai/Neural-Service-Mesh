@@ -5,7 +5,8 @@ ui_pages/agent_orchestrator.py
 from __future__ import annotations
 
 from app_core import *  # noqa: F401,F403 — إعادة تصدير كل الاستيرادات والدوال المساعدة المشتركة
-
+from ai.agent_event_bus import emit_event
+from ui_pages.agent_monitor import render_agent_live_trace
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -89,6 +90,15 @@ def render_agent_orchestrator():
     )
 
     if st.button("🚀 نفّذ عبر الوكلاء", type="primary", key="orch_run") and task.strip():
+        _live_trace = st.empty()
+        emit_event(
+            "task_started",
+            agent_id="agent_orchestrator",
+            title="منسّق الوكلاء",
+            status="running",
+            detail="بدأ تنفيذ المهمة من الواجهة",
+        )
+        render_agent_live_trace(_live_trace)
         _route_scores: Dict[str, int] = {}
         if manual:
             selected, route_method = manual, "manual"
@@ -112,6 +122,15 @@ def render_agent_orchestrator():
                     f"{AGENT_CATEGORIES[k].emoji} {AGENT_CATEGORIES[k].title}" for k in selected
                 )
             )
+            emit_event(
+                "route_selected",
+                agent_id="agent_orchestrator",
+                title="منسّق الوكلاء",
+                status="running",
+                detail=f"{route_label} · تم اختيار {len(selected)} وكيل",
+                metadata={"selected": list(selected), "route_method": route_method},
+            )
+            render_agent_live_trace(_live_trace)
             # 🆕 شفافية التوجيه: route_query_verbose كان أصلاً يُرجِع نقاط تطابق
             # الكلمات المفتاحية لكل فئة (_route_scores) لكن الواجهة لم تكن تعرضها
             # إطلاقاً — المستخدم لا يعرف لماذا اختير وكيل معيّن أو مدى قرب/بُعد
@@ -154,6 +173,14 @@ def render_agent_orchestrator():
                 else:
                     agent_input = task.strip()
 
+                emit_event(
+                    "agent_started",
+                    agent_id=cat.key,
+                    title=cat.title,
+                    status="running",
+                    detail="بدأ الوكيل تنفيذ المهمة",
+                )
+                render_agent_live_trace(_live_trace)
                 _orch_skel_ph = st.empty()
                 with _orch_skel_ph.container():
                     st.caption(f"⟳ {cat.title} يعمل على المهمة...")
@@ -171,8 +198,12 @@ def render_agent_orchestrator():
                         resp = f"⚠️ خطأ: {_orch_err}"
                 if not _ok:
                     failed_keys.add(key)
+                    emit_event("agent_error", agent_id=cat.key, title=cat.title, status="error", detail=str(resp)[:180])
+                else:
+                    emit_event("agent_done", agent_id=cat.key, title=cat.title, status="done", detail="اكتمل رد الوكيل")
                 _orch_skel_ph.empty()
                 responses[key] = resp
+                render_agent_live_trace(_live_trace)
                 # 🆕 شارة جودة موحّدة لكل رد وكيل (نفس ميزة تبويب "🤖 وكلاء AI"
                 # ووحدة إعادة التوليد التلقائي المدمجة الآن في CategoryAgentChat).
                 _q_label = ""
@@ -194,6 +225,14 @@ def render_agent_orchestrator():
                     combined_input = "\n\n".join(
                         f"[{AGENT_CATEGORIES[k].title}]\n{v}" for k, v in valid_responses.items()
                     )
+                    emit_event(
+                        "synthesis_started",
+                        agent_id="agent_orchestrator",
+                        title="منسّق الوكلاء",
+                        status="running",
+                        detail="يولّف الردود في إجابة واحدة",
+                    )
+                    render_agent_live_trace(_live_trace)
                     _synth_skel_ph = st.empty()
                     with _synth_skel_ph.container():
                         st.caption("⟳ يجري توليف الإجابة النهائية...")
@@ -209,6 +248,21 @@ def render_agent_orchestrator():
                     except Exception as _synth_err:
                         final = f"⚠️ تعذّر التوليف: {_synth_err}"
                     final_answer = final
+                    emit_event(
+                        "synthesis_done",
+                        agent_id="agent_orchestrator",
+                        title="منسّق الوكلاء",
+                        status="done",
+                        detail="اكتمل التوليف النهائي",
+                    )
+                    emit_event(
+                        "task_done",
+                        agent_id="agent_orchestrator",
+                        title="منسّق الوكلاء",
+                        status="done",
+                        detail="اكتملت المهمة من الواجهة",
+                    )
+                    render_agent_live_trace(_live_trace)
                     _synth_skel_ph.empty()
                     if failed_keys:
                         st.caption(
