@@ -811,7 +811,7 @@ class UnifiedAgentChat:
         # أسئلة طويلة أو تحتوي أكثر من مؤشر تعقيد
         return hits >= 1 or (len(t) > 120 and ("و" in t or "ثم" in t or "و" in low))
 
-    def _synthesize(self, task: str, agent_replies: Dict[str, str], adaptive_events=None) -> str:
+    def _synthesize(self, task: str, agent_replies: Dict[str, str], adaptive_events=None, failure_warnings="") -> str:
         """يولّف ردود الوكلاء الفرعية في إجابة واحدة نهائية تحت مسؤولية المدير."""
         from ai.agent_event_bus import emit_event as _sy_emit, get_events as _sy_get_events
         _get_events_local = _sy_get_events
@@ -900,6 +900,12 @@ class UnifiedAgentChat:
                 "\n\n📚 دروس مستفادة من ذاكرة النظام الجماعية (استخدمها إن كانت ذات صلة، "
                 "ولا تُبرزها إذا لم تكن مهمة):\n"
                 + _cm_lessons
+            )
+        if failure_warnings:
+            synth_prompt += (
+                "\n\n⚠️ تحذيرات من أخطاء وكلاء سابقين في هذا المجال "
+                "(انتبه لها أثناء التوليف):\n"
+                + failure_warnings
             )
         try:
             _llm = LLMFallback()
@@ -1184,11 +1190,23 @@ class UnifiedAgentChat:
                     )
                     _delegation.mark_result(_dkey, "rejected", str(_del_err)[:150])
 
+        # 🆕 تعلّم الأخطاء الجماعي: تسجيل دروس فشل هذه المهمة للذاكرة الجماعية
+        _failure_warnings_text = ""
+        try:
+            from ai.failure_learning import sync_and_warn
+            _failure_warnings_text = sync_and_warn(
+                get_events(250), user_input, top_k=3)
+        except Exception as _fl_err:
+            import logging as _fl_log
+            _fl_log.getLogger("failure_learning").warning(
+                "failure_learning: تعطّل — يعمل النظام كالعادة: %s", _fl_err)
+
         emit_event("synthesis_started", agent_id="master_orchestrator", title="المدير الموحّد", status="running", detail="توليف ردود الفريق")
         final = self._synthesize(
             user_input,
             {k: strip_delegation_tags(v or "") for k, v in agent_replies.items() if k not in failed},
             adaptive_events=locals().get("_adaptive_events"),
+            failure_warnings=_failure_warnings_text,
         )
         emit_event("synthesis_done", agent_id="master_orchestrator", title="المدير الموحّد", status="done", detail="اكتملت الإجابة الموحّدة")
 

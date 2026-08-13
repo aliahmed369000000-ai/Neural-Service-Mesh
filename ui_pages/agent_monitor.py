@@ -116,6 +116,7 @@ def render_agent_monitor() -> None:
     render_background_tasks_panel()
     render_shared_analytics_panel()
     render_adaptive_swarm_panel()
+    render_failure_learning_panel()
 
 
 DELEGATION_EVENTS = ("delegation_requested", "delegation_rejected", "delegation_started", "delegation_resolved")
@@ -553,6 +554,50 @@ def render_adaptive_swarm_panel() -> None:
         )
     except Exception:
         pass
+
+
+def render_failure_learning_panel() -> None:
+    """لوحة تعلّم الأخطاء الجماعي: دروس الفشل المحفوظة وآخر أحداث التسجيل."""
+    from ai.failure_learning import FAILURE_LEARNING_EVENTS as _FL_EVENTS
+    from ai.agent_event_bus import get_events
+
+    events = get_events(100)
+    render_section_header(
+        "تعلّم الأخطاء",
+        "دروس تحذيرية من أخطاء الوكلاء — يستفيد منها الجميع",
+        live=True,
+    )
+    # الدروس التحذيرية من الذاكرة الجماعية
+    _memory_rows = []
+    _memory = None
+    try:
+        from ai.collective_memory import get_collective_memory
+        _memory = get_collective_memory()
+        for w in _memory.lessons_list(limit=10):
+            if (w.get("quality") or 0.0) < 0.0:
+                _memory_rows.append({
+                    "المجال": w.get("domain", "عام"),
+                    "الدرس": w.get("lesson", "")[:160],
+                    "الوكيل المصدر": w.get("source_agent") or "—",
+                    "الجودة": f"{w.get('quality', 0):.2f}",
+                    "مرات الفشل": int(w.get("task_fails", 0) or 0),
+                })
+    except Exception:
+        pass
+    if not _memory_rows:
+        st.caption(
+            "لا توجد دروس تحذيرية بعد. عند فشل وكيل، يُصنَّف الخطأ نمطيًا "
+            "(انتهاء مهلة، حد استخدام، خطأ برمجي...) ويُخزَّن كدرس تحذيري "
+            "في الذاكرة الجماعية، فيُحقَن قبل توليف مهام لاحقة في نفس المجال."
+        )
+    else:
+        st.dataframe(_memory_rows, use_container_width=True, hide_index=True)
+    fl_events = [e for e in events if e.get("event_type") in _FL_EVENTS]
+    if fl_events:
+        st.caption(
+            f"آخر نشاط من تعلّم الأخطاء: {fl_events[-1].get('event_type', '')}"
+            f" — {fl_events[-1].get('timestamp', '')}"
+        )
 
 
 def render_agent_live_trace(target) -> None:
