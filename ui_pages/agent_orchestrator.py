@@ -185,17 +185,33 @@ def render_agent_orchestrator():
                 with _orch_skel_ph.container():
                     st.caption(f"⟳ {cat.title} يعمل على المهمة...")
                     _skeleton(lines=3)
-                # 🆕 إعادة محاولة واحدة عند فشل الاستدعاء الأول (فشل عابر:
-                # مزوّد LLM بطيء، تحميل أول مرة، إلخ) — بنفس روح إعادة
-                # المحاولة المضافة أصلاً للسرب الذكي (SwarmCoordinator).
+                # 🆕 نظام التقييم الذاتي (Self-Reflection): يراجع فشل الوكيل
+                # ويصنّف سببه ويعيد المحاولة باستراتيجية مصححة تلقائياً حتى
+                # استنفاد دورات التقييم — بنفس الروح المضافة في UnifiedAgentChat.
+                from ai.agent_reflection import ReflectionContext, reflecting_call
+                _orch_ref_ctx = ReflectionContext()
                 resp, _ok = None, False
-                for _attempt in range(2):
-                    try:
-                        resp = bot.chat(agent_input, source="orchestrator")
-                        _ok = True
-                        break
-                    except Exception as _orch_err:
-                        resp = f"⚠️ خطأ: {_orch_err}"
+                try:
+                    def _orch_call() -> str:
+                        return bot.chat(agent_input, source="orchestrator")
+                    def _orch_retry(_att: int, info: dict) -> None:
+                        _strategy_note = {
+                            "retry_with_backoff": "إعادة المحاولة بعد انتظار قصير",
+                            "switch_provider_hint": "محاولة عبر مسار مزوّد بديل",
+                            "simplify_prompt": "تبسيط الطلب وإعادة المحاولة",
+                        }.get(info.get("strategy", ""), "إعادة المحاولة")
+                        emit_event(
+                            "agent_started",
+                            agent_id=cat.key,
+                            title=cat.title,
+                            status="running",
+                            detail=f"إعادة محاولة ذاتية: {_strategy_note}",
+                        )
+                        render_agent_live_trace(_live_trace)
+                    resp = reflecting_call(cat.key, cat.title, _orch_call, _orch_ref_ctx, on_retry=_orch_retry)
+                    _ok = True
+                except Exception as _orch_err:
+                    resp = f"⚠️ خطأ: {_orch_err}"
                 if not _ok:
                     failed_keys.add(key)
                     emit_event("agent_error", agent_id=cat.key, title=cat.title, status="error", detail=str(resp)[:180])

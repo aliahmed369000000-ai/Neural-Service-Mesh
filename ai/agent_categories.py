@@ -919,10 +919,21 @@ class UnifiedAgentChat:
             key = selected[0]
             bot = self._get_bot(key)
             cat = AGENT_CATEGORIES[key]
-            emit_event("agent_started", agent_id=key, title=cat.title, status="running", detail="تنفيذ المهمة")
             bot.history = list(self.shared_history[-4:])
+            from ai.agent_reflection import ReflectionContext, reflecting_call
+            _ref_ctx_single = ReflectionContext()
             try:
-                response = bot.chat(user_input, force_web=force_web, source="unified")
+                def _single_call() -> str:
+                    emit_event("agent_started", agent_id=key, title=cat.title, status="running", detail="تنفيذ المهمة")
+                    return bot.chat(user_input, force_web=force_web, source="unified")
+                def _single_retry(_att: int, info: dict) -> None:
+                    _strategy_note = {
+                        "retry_with_backoff": "إعادة المحاولة بعد انتظار قصير",
+                        "switch_provider_hint": "محاولة عبر مسار مزوّد بديل",
+                        "simplify_prompt": "تبسيط الطلب وإعادة المحاولة",
+                    }.get(info.get("strategy", ""), "إعادة المحاولة")
+                    emit_event("agent_started", agent_id=key, title=cat.title, status="running", detail=f"إعادة محاولة: {_strategy_note}")
+                response = reflecting_call(key, cat.title, _single_call, _ref_ctx_single, on_retry=_single_retry)
                 emit_event("agent_done", agent_id=key, title=cat.title, status="done", detail="اكتمل الرد")
             except Exception as exc:
                 emit_event("agent_error", agent_id=key, title=cat.title, status="error", detail=str(exc)[:180])
@@ -962,16 +973,29 @@ class UnifiedAgentChat:
                 status="running",
                 detail="بدأ الوكيل المتخصص العمل",
             )
+            from ai.agent_reflection import ReflectionContext, reflecting_call
+            _ref_ctx_team = ReflectionContext()
+            _agent_title = cat.title if cat else key
             try:
                 bot = self._get_bot(key)
                 # سياق مشترك مختصر
                 bot.history = list(self.shared_history[-3:])
-                resp = bot.chat(user_input, force_web=force_web, source="unified_multi")
+                def _team_call() -> str:
+                    emit_event("agent_started", agent_id=key, title=_agent_title, status="running", detail="بدأ الوكيل المتخصص العمل")
+                    return bot.chat(user_input, force_web=force_web, source="unified_multi")
+                def _team_retry(_att: int, info: dict) -> None:
+                    _strategy_note = {
+                        "retry_with_backoff": "إعادة المحاولة بعد انتظار قصير",
+                        "switch_provider_hint": "محاولة عبر مسار مزوّد بديل",
+                        "simplify_prompt": "تبسيط الطلب وإعادة المحاولة",
+                    }.get(info.get("strategy", ""), "إعادة المحاولة")
+                    emit_event("agent_started", agent_id=key, title=_agent_title, status="running", detail=f"إعادة محاولة: {_strategy_note}")
+                resp = reflecting_call(key, _agent_title, _team_call, _ref_ctx_team, on_retry=_team_retry)
                 agent_replies[key] = resp
                 emit_event(
                     "agent_done",
                     agent_id=key,
-                    title=cat.title if cat else key,
+                    title=_agent_title,
                     status="done",
                     detail="اكتمل رد الوكيل",
                 )
@@ -985,7 +1009,7 @@ class UnifiedAgentChat:
                 emit_event(
                     "agent_error",
                     agent_id=key,
-                    title=cat.title if cat else key,
+                    title=_agent_title,
                     status="error",
                     detail=str(e)[:180],
                 )
