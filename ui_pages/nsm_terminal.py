@@ -196,6 +196,29 @@ def render_nsm_terminal():
                 term.quick(key, session_id=sid, mode="admin")
                 st.rerun()
 
+    # 🆕 إعادة تشغيل أمر سابق من السجل بضغطة واحدة (بدل إعادة كتابته يدوياً)
+    recent_cmds: list = []
+    for h in reversed(sess.history):
+        c = (h.get("cmd") or "").strip()
+        if c and c not in recent_cmds:
+            recent_cmds.append(c)
+        if len(recent_cmds) >= 15:
+            break
+    if recent_cmds:
+        rc1, rc2 = st.columns([4, 1])
+        with rc1:
+            picked = st.selectbox(
+                "↺ إعادة تشغيل أمر سابق",
+                options=["—"] + recent_cmds,
+                key="nsm_term_recall",
+                label_visibility="collapsed",
+            )
+        with rc2:
+            if st.button("▶️ تشغيل", key="nsm_term_recall_run", use_container_width=True, disabled=(picked == "—")):
+                with st.spinner("running…"):
+                    term.run(picked, session_id=sid, mode="admin", timeout=int(timeout))
+                st.rerun()
+
     # terminal screen
     html_body = _render_history_html(sess.history)
     st.markdown(

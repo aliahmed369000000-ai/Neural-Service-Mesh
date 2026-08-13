@@ -171,12 +171,38 @@ class NSMTerminal:
             return [s.to_dict() for s in self._sessions.values()]
 
     def _is_safe_command(self, cmd: str) -> Tuple[bool, str]:
+        """يتحقق من أمان الأمر بالكامل، بما فيه أي أجزاء مسلسلة (&&, ;, |, ||).
+
+        🔒 إصلاح أمني: الفحص القديم كان يتحقق فقط من بادئة السلسلة الكاملة،
+        فأمر مثل "git status && rm -rf ai" أو "echo hi | bash" كان يمرّ لأن
+        بادئته "git status"/"echo " مسموحة — بينما ينفَّذ عبر shell=True بكامل
+        السلسلة. الآن نمنع رموز الاستبدال/التوجيه/الخلفية كلياً في الوضع الآمن،
+        ونقسّم أي تسلسل (&&, ||, ;, |) ونتحقق من كل جزء منه بشكل مستقل.
+        """
         c = cmd.strip()
+        for bad in _BLOCKED:
+            if bad in c.lower():
+                return False, f"أمر محظور: {bad.strip()}"
+        if "$(" in c or "`" in c:
+            return False, "استبدال أوامر ($() أو `) غير مسموح في الوضع الآمن — استخدم mode=admin"
+        if ">" in c or "<" in c:
+            return False, "إعادة توجيه (> أو <) غير مسموحة في الوضع الآمن — استخدم mode=admin"
+        if "&" in c.replace("&&", ""):
+            return False, "تشغيل بالخلفية (&) غير مسموح في الوضع الآمن — استخدم mode=admin"
+        segments = [s.strip() for s in re.split(r"\|\||&&|;|\|", c) if s.strip()]
+        if len(segments) > 1:
+            for seg in segments:
+                ok, reason = self._is_single_command_safe(seg)
+                if not ok:
+                    return False, f"جزء غير آمن ضمن السلسلة: '{seg}' — {reason}"
+            return True, ""
+        return self._is_single_command_safe(c)
+
+    def _is_single_command_safe(self, c: str) -> Tuple[bool, str]:
         low = c.lower()
         for bad in _BLOCKED:
             if bad in low:
                 return False, f"أمر محظور: {bad.strip()}"
-        # cd special
         if low == "cd" or low.startswith("cd "):
             return True, ""
         if low.startswith("python -m ") or low.startswith("python3 -m "):
