@@ -11,6 +11,7 @@ Streamlit front-end لمشروع النظام المعرفي العربي.
 from __future__ import annotations
 
 from app_core import *  # noqa: F401,F403 — كل الثوابت والدوال المساعدة المشتركة
+from ui_components import inject_design_system, render_brand_bar
 
 from ui_pages.home import render_home
 from ui_pages.search import render_search
@@ -227,6 +228,7 @@ def _show_help_dialog():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def main():
+    inject_design_system()
     # ── قابلية الوصول + أنماط التركيز — إضافة فقط، لا تغيّر أي سلوك قائم ──
     # render_focus_styles: يحقن CSS لإطار تركيز مرئي + تنسيق أصناف الحالة
     #   الفارغة وشريط KPI (الدوال الجديدة في app_core).
@@ -240,7 +242,7 @@ def main():
 
     # ── الشريط الجانبي — OpenRouter ───────────────────────────────────────
     with st.sidebar:
-        st.markdown("## 🌐 Neural Service Mesh")
+        render_brand_bar("الذكاء العربي · مركز التحكم")
 
         # مبدّل السمة: داكن (بنفسجي/فيروزي) / فاتح
         st.markdown('<div class="theme-toggle-caption">🎨 المظهر</div>', unsafe_allow_html=True)

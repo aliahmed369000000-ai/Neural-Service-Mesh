@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from app_core import *  # noqa: F401,F403
+from ui_components import render_agent_cards, render_alert_cards, render_kpi_cards, render_section_header
 
 
 def _status_label(status: str) -> str:
@@ -31,17 +32,12 @@ def render_agent_monitor() -> None:
         performance_summary,
     )
 
-    st.markdown(
-        """
-        <div style="text-align:center;padding:1rem 0 0.5rem">
-            <div style="font-size:1.6rem;font-weight:900;color:var(--gold)">📡 مراقبة الوكلاء لحظة بلحظة</div>
-            <div style="color:var(--text-muted);font-size:.86rem;direction:rtl">
-                تتبع التوجيه، التفويض، تشغيل الوكلاء، التوليف، والأخطاء داخل جلسة المحادثة الحالية.
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    render_section_header(
+        "مراقبة الوكلاء لحظة بلحظة",
+        "التوجيه · التفويض · التنفيذ · التوليف",
+        live=True,
     )
+    st.caption("تتبّع حالة الشبكة العصبية داخل جلسة المحادثة الحالية بوضوح وفي الوقت الفعلي.")
 
     col_refresh, col_clear, col_limit = st.columns([1, 1, 1.4])
     with col_refresh:
@@ -77,41 +73,29 @@ def render_agent_monitor() -> None:
     )
     performance = performance_summary(events)
 
+    render_section_header("صحة الشبكة", "مؤشرات مباشرة من ناقل الأحداث")
     if alerts:
-        st.markdown("#### 🚨 التنبيهات الفورية")
-        for alert in reversed(alerts[-8:]):
-            message = f"**{_severity_label(alert['severity'])}: {alert['title']}** — {alert['detail']}"
-            if alert["severity"] == "critical":
-                st.error(message)
-            elif alert["severity"] == "warning":
-                st.warning(message)
-            else:
-                st.info(message)
+        render_alert_cards(alerts)
     else:
-        st.success("✅ لا توجد أخطاء أو اختناقات تتجاوز العتبات الحالية.")
+        st.success("لا توجد أخطاء أو اختناقات تتجاوز العتبات الحالية.")
 
-    metric_cols = st.columns(6)
-    metric_cols[0].metric("الأحداث", len(events))
-    metric_cols[1].metric("وكلاء نشطون", running)
-    metric_cols[2].metric("مكتملة", completed)
-    metric_cols[3].metric("أخطاء", failures, delta_color="inverse")
-    metric_cols[4].metric("متوسط الزمن", f"{performance['avg_ms']:.0f} ms")
-    metric_cols[5].metric("أقصى زمن", f"{performance['max_ms']:.0f} ms")
+    render_kpi_cards([
+        {"label": "الأحداث", "value": len(events), "note": "في السجل الحالي", "accent": "var(--nsm-indigo)"},
+        {"label": "وكلاء نشطون", "value": running, "note": "قيد التنفيذ", "accent": "var(--nsm-cyan)"},
+        {"label": "مكتملة", "value": completed, "note": "دورات ناجحة", "accent": "#86efac"},
+        {"label": "أخطاء", "value": failures, "note": "تحتاج مراجعة", "accent": "var(--nsm-danger)"},
+        {"label": "متوسط الزمن", "value": f"{performance['avg_ms']:.0f} ms", "note": "زمن الاستجابة", "accent": "var(--nsm-amber)"},
+        {"label": "أقصى زمن", "value": f"{performance['max_ms']:.0f} ms", "note": "أبطأ دورة", "accent": "#c084fc"},
+    ])
 
     if not events:
         st.info("لا توجد أحداث بعد. نفّذ مهمة من تبويب «منسّق الوكلاء» أو «الوكيل الموحّد» لتظهر هنا.")
         return
 
-    st.markdown("#### الحالة الحالية لكل وكيل")
-    cards = st.columns(min(4, max(1, len(states))))
-    for card, (agent_id, row) in zip(cards, states.items()):
-        with card:
-            title = row.get("title") or agent_id
-            st.markdown(f"**{title}**")
-            st.caption(f"`{agent_id}` · {_status_label(row.get('status', ''))}")
-            st.caption(f"آخر تحديث: {row.get('timestamp', '—')}")
+    render_section_header("الحالة الحالية لكل وكيل", f"{len(states)} عقدة متصلة")
+    render_agent_cards(states)
 
-    st.markdown("#### السجل الزمني للتفاعل")
+    render_section_header("السجل الزمني للتفاعل", "آخر الأحداث بالترتيب العكسي")
     table = []
     for row in reversed(events):
         table.append({
@@ -131,17 +115,13 @@ def render_agent_live_trace(target) -> None:
 
     events = get_events(24)
     with target.container():
-        st.markdown("#### 📡 التنفيذ الحي")
+        render_section_header("التنفيذ الحي", "تحديثات مرحلية داخل المهمة", live=True)
         if not events:
             st.caption("بانتظار بدء الأحداث...")
             return
         live_alerts = analyze_alerts(events, slow_threshold_ms=12000, stale_threshold_s=45)
-        for alert in reversed(live_alerts[-3:]):
-            text = f"{_severity_label(alert['severity'])}: {alert['title']} — {alert['detail']}"
-            if alert["severity"] == "critical":
-                st.error(text)
-            else:
-                st.warning(text)
+        if live_alerts:
+            render_alert_cards(live_alerts, limit=3)
         for row in reversed(events[-10:]):
             status = _status_label(row.get("status", ""))
             title = row.get("title") or row.get("agent_id") or "المدير"
