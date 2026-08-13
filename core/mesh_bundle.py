@@ -300,6 +300,20 @@ class MeshBundle:
                 }
                 self.scoring_engine.record_run(run_result)
                 self.memory_engine.learn_from_run(run_result)
+                # ── الذاكرة الجماعية: درس دائم من كل مهمة فرعية ──────────
+                try:
+                    from ai.collective_memory import get_collective_memory
+                    get_collective_memory().record_task_result(
+                        task=(task.result or {}).get("task") if task.result else "",
+                        success=success,
+                        duration_ms=latency,
+                        agent_id=agent_id or "",
+                        run_id=getattr(task, "task_id", "") or "",
+                        output_hint=(task.result or {}).get("result_text")
+                        if task.result else "",
+                    )
+                except Exception as _cm_err:
+                    logger.warning("MeshBundle: collective memory failed: %s", _cm_err)
 
             try:
                 self.dna.snapshot(
@@ -312,10 +326,17 @@ class MeshBundle:
                 logger.warning("MeshBundle: DNA snapshot failed: %s", e)
 
     def summary(self) -> dict:
+        _cm_summary = {}
+        try:
+            from ai.collective_memory import get_collective_memory
+            _cm_summary = get_collective_memory().summary()
+        except Exception:
+            pass
         return {
             "nodes": self.registry.count(),
             "scoring": self.scoring_engine.summary(),
             "memory": self.memory_engine.summary(),
+            "collective_memory": _cm_summary,
             "reputation": self.reputation_engine.summary(),
             "dna_versions": len(self.dna.history(limit=1000)),
             "exec_log": self.exec_log.db_stats(),

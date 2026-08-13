@@ -826,6 +826,32 @@ class UnifiedAgentChat:
             parts.append(f"[{emoji} {title}]\n{reply.strip()}")
 
         combined = "\n\n───\n\n".join(parts)
+
+        # ── الذاكرة الجماعية: دروس مستفادة من مهام سابقة ذات صلة ──────
+        _cm_lessons = ""
+        try:
+            from ai.agent_event_bus import emit_event as _cm_emit
+            from ai.collective_memory import get_collective_memory
+            _recalled = get_collective_memory().recall(task, top_k=3)
+            if _recalled:
+                _cm_lessons = "\n\n".join(
+                    f"• {lesson['lesson']}"
+                    for lesson in _recalled if lesson.get("lesson")
+                )
+                try:
+                    _cm_emit(
+                        "lesson_recalled",
+                        agent_id="master_orchestrator",
+                        title="المدير الموحّد",
+                        status="done",
+                        detail=f"استرجعت {len(_recalled)} دروسًا جماعية",
+                        metadata={"count": len(_recalled)},
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         synth_prompt = (
             "أنت المدير الأعلى (Master Orchestrator) في نظام NSM.\n"
             "الوكلاء المتخصصون أرسلوا لك التقارير التالية حول مهمة المستخدم.\n"
@@ -835,6 +861,12 @@ class UnifiedAgentChat:
             f"مهمة المستخدم:\n{task.strip()}\n\n"
             f"تقارير الوكلاء:\n{combined}"
         )
+        if _cm_lessons:
+            synth_prompt += (
+                "\n\n📚 دروس مستفادة من ذاكرة النظام الجماعية (استخدمها إن كانت ذات صلة، "
+                "ولا تُبرزها إذا لم تكن مهمة):\n"
+                + _cm_lessons
+            )
         try:
             _llm = LLMFallback()
             if getattr(_llm, "available", False):

@@ -112,6 +112,7 @@ def render_agent_monitor() -> None:
 
     render_delegation_chain(events)
     render_debate_journal(events)
+    render_collective_memory_panel()
 
 
 DELEGATION_EVENTS = ("delegation_requested", "delegation_rejected", "delegation_started", "delegation_resolved")
@@ -270,6 +271,57 @@ def render_debate_journal(events) -> None:
             )
         else:
             st.caption(f"`{e.get('timestamp', '—')}` {_debate_icon(e.get('event_type', ''))} {e.get('title', '')} · {e.get('status', '')}")
+
+
+def render_collective_memory_panel() -> None:
+    """لوحة الدروس المستفادة جماعيًا بين الوكلاء عبر الجلسات (ذاكرة دائمة)."""
+    from ai.collective_memory import get_collective_memory
+
+    try:
+        _cm = get_collective_memory()
+        summary = _cm.summary()
+        lessons = _cm.lessons_list(limit=20)
+    except Exception:
+        st.caption("الذاكرة الجماعية غير متاحة حاليًا (فشل التحميل).")
+        return
+
+    total = summary.get("total_lessons", 0)
+    render_section_header(
+        "الذاكرة الجماعية",
+        f"{total} درسًا مستفادًا — يتشاركها الوكلاء بين الجلسات",
+        live=False,
+    )
+    if total == 0:
+        st.caption(
+            "لا توجد دروس مستفادة بعد. تُسجّل تلقائيًا من نتائج مهام "
+            "السرب الناجحة والفاشلة، ثم تُحقن ضمن برومبت المدير الموحّد "
+            "عند المهام الجديدة ذات الصلة."
+        )
+        return
+
+    col1, col2 = st.columns(2)
+    with col1:
+        _top = summary.get("top_lessons", []) or []
+        if _top:
+            for t in _top[:3]:
+                st.success(f"📗 {t.get('lesson', '')}")
+        _domains = summary.get("domains", {}) or {}
+        if _domains:
+            st.caption("**المجالات:** " + " · ".join(
+                f"{d} ({c})" for d, c in _domains.items()
+            ))
+    with col2:
+        render_section_header("أحدث الدروس", f"{min(len(lessons), 10)} دروس")
+        for lesson in lessons[:10]:
+            q = lesson.get("quality", 0) or 0
+            hits = lesson.get("task_hits", 0) or 0
+            fails = lesson.get("task_fails", 0) or 0
+            bar = "✅" * max(0, min(5, int((q + 1) / 2 * 5))) or "·"
+            st.caption(
+                f"`[{lesson.get('domain', 'عام')}]` "
+                f'<span style="color:var(--text-muted)">{bar}</span> '
+                f"({hits} نجاح / {fails} فشل) — {str(lesson.get('lesson', ''))[:110]}"
+            )
 
 
 def render_agent_live_trace(target) -> None:
