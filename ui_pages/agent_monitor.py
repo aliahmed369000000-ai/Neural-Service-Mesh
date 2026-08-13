@@ -123,6 +123,7 @@ def render_agent_monitor() -> None:
     render_swarm_runner_panel()
     render_long_horizon_panel()
     render_collaborative_panel()
+    render_skb_panel()
 
 
 DELEGATION_EVENTS = ("delegation_requested", "delegation_rejected", "delegation_started", "delegation_resolved")
@@ -1314,3 +1315,67 @@ def render_collaborative_panel() -> None:
             )
             if status == "done" and t.get("synthesis"):
                 st.markdown((t.get("synthesis") or "")[:3500])
+
+
+# ══════════════════════════════════════════════════════════════════
+# لوحة المعرفة المشتركة (ناقل Qdrant)
+# ══════════════════════════════════════════════════════════════════
+
+def render_skb_panel() -> None:
+    """لوحة ناقل المعرفة المشترك: إحصاءات وأحدث المعارف المتبادلة."""
+    try:
+        from app_core import _SKB_OK, _get_skb
+        from ai.shared_knowledge import skb_latest
+    except Exception:
+        return
+    st.markdown("---")
+    st.subheader("🧠 المعرفة المشتركة (ناقل الفريق)")
+    st.caption(
+        "يتقاسم أدوار الفريق التعاوني نتائجهم لحظيًا: كل بحث/جلب ناجح يُشارك "
+        "في الناقل، ويستحضر كل دور ما وجده الزملاء قبل بحثه — بحث دلالي "
+        "عربي (bge-m3) عبر Qdrant، أو ناقل محلي احتياطي عند عدم توفره."
+    )
+    if not _SKB_OK:
+        st.info("وحدة ناقل المعرفة غير متاحة — تعاون الفريق يعمل دون "
+                "تبادل دلالي (كل دور يعمل على نتائجه فقط).")
+        return
+    try:
+        _skb = _get_skb()
+        _stats = _skb.stats()
+        _recent = skb_latest(10)
+    except Exception:
+        st.info("تعذر الاتصال بناقل المعرفة — العمل مستمر بالفallback المحلي.")
+        return
+    # بطاقات الإحصاءات
+    _q_active = bool(_stats.get("qdrant_active"))
+    _cards = st.columns(4)
+    _cards[0].metric("🌐 Qdrant",
+                     "نشط" if _q_active else "محلي احتياطي")
+    _cards[1].metric("📦 نقاط Qdrant",
+                     _stats.get("qdrant_points") if _q_active else "—")
+    _cards[2].metric("🗄️ العناصر المحلية",
+                     _stats.get("local_count", 0))
+    _cards[3].metric("🔠 التضمين العربي",
+                     "جاهز" if _stats.get("embedder_available") else "—")
+    if not _q_active:
+        st.caption(
+            "نقطة Qdrant المضبوطة حاليًا غير متاحة (404) — النظام يعمل "
+            "بناقل محلي SQLite كامل الوظائف، ويستبدل تلقائيًا بـQdrant "
+            "فور ضبط نقطة صالحة."
+        )
+    # أحدث المعارف المتبادلة
+    if _recent:
+        with st.expander("📨 أحدث المعارف المتبادلة", expanded=False):
+            _rows = []
+            for r in _recent:
+                _rows.append({
+                    "المهمة": r.get("task_id", "—"),
+                    "الدور": r.get("role", "—"),
+                    "الأداة": r.get("tool", "—"),
+                    "الوقت": r.get("timestamp", "—")[:19],
+                    "المعرفة": (r.get("text") or "")[:160],
+                })
+            st.dataframe(_rows, use_container_width=True, hide_index=True)
+    else:
+        st.caption("لا معارف متبادلة بعد — ستظهر هنا نتائج أدوار الفريق "
+                   "حال بدء مهمة تعاونية.")

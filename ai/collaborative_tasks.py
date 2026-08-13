@@ -393,6 +393,44 @@ def _set_collab_role_hook(fn: Optional[Any]) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════
+# ناقل المعرفة المشترك (تكامل مع ai/shared_knowledge.py)
+# ══════════════════════════════════════════════════════════════════
+
+def _share_role_finding(task_id: str, role_name: str, text: str,
+                        tool: str, source: str, index: int) -> None:
+    """يشارك الدور نتيجته في الناقل المشترك (فشل صامت = لا شيء)."""
+    try:
+        if _SKB_OK:
+            _get_skb().share_finding(task_id, role_name, text, tool,
+                                     source, index)
+    except Exception:
+        pass
+
+
+def _share_peer_knowledge(role: CollabRole, task_id: str,
+                          target: str) -> None:
+    """يستحضر ما وجده الزملاء عن الهدف ويثبّته في سجل الدور كخطوة تمهيدية.
+
+    بهذا يجد كل دور معرفة زملائه قبل بحثه — تعاون فعلي لا عمل منعزل."""
+    try:
+        if not _SKB_OK:
+            return
+        peers = _get_skb().query_knowledge(target, task_id=task_id, k=4)
+        peers = [p for p in peers
+                 if p.get("role") != role.name and p.get("text")]
+        if peers:
+            lines = ["ما وجده الزملاء في الناقل المشترك:"]
+            for j, p in enumerate(peers[:4]):
+                lines.append(f"[{p.get('role', '?')} — "
+                             f"{p.get('tool', '')}]: "
+                             f"{(p.get('text') or '')[:300]}")
+            role.log(len(role.steps), "done", "skb_peer_lookup",
+                     target, "\n".join(lines))
+    except Exception:
+        pass
+
+
+# ══════════════════════════════════════════════════════════════════
 # محرك تنفيذ الدور (التعاون الفعلي)
 # ══════════════════════════════════════════════════════════════════
 
@@ -422,12 +460,19 @@ def _run_role(manager: "CollaborativeManager", task: CollaborativeTask,
             if i >= MAX_ROLE_STEPS:
                 break
             found = 0
+            # ── استحضار ما شاركه الزملاء في الناقل المشترك ──
+            _share_peer_knowledge(role, task.task_id, target)
             out = role_web_search(role_ws, target, max_results=4,
                                   fetch_state=role.fetch_state)
             result_text = out.get("text", "")
             success = bool(out.get("ok")) and bool(out.get("count", 0))
             role.log(i, "done" if success else "partial",
                      "web_search", target, result_text)
+            if success:
+                # ── مشاركة النتيجة في الناقل المشترك ──
+                _share_role_finding(task.task_id, role.name,
+                                    result_text, "web_search",
+                                    role.steps[-1].get("source", ""), i)
             if success:
                 found += 1
             # جلب أهم نتيجة
@@ -439,6 +484,11 @@ def _run_role(manager: "CollaborativeManager", task: CollaborativeTask,
                     role.log(i + 1, "done" if fp.get("ok") else "partial",
                              "fetch_page", m.group(0)[:100],
                              fp.get("text", "")[:600])
+                    if fp.get("ok") and fp.get("text"):
+                        _share_role_finding(
+                            task.task_id, role.name,
+                            fp.get("text", "")[:1800], "fetch_page",
+                            m.group(0), i + 1)
             # توثيق نتائج الدور في ملفه المعزول
             doc = f"# {role.name}\nالهدف: {role.goal}\n\n{result_text[:2500]}\n"
             role_write_file(role_ws, f"role_{role.name}_{i}.md", doc)
@@ -481,6 +531,23 @@ def _synthesize(task: CollaborativeTask) -> str:
     ]
     done_roles = [r for r in task.roles if r.status == ROLE_DONE]
     failed_roles = [r for r in task.roles if r.status == ROLE_FAILED]
+    # ── مخرجات الناقل المشترك: ما تبادله الفريق فعليًا ──
+    shared_findings: List[Dict[str, Any]] = []
+    with contextlib.suppress(Exception):
+        if _SKB_OK:
+            shared_findings = _get_skb().query_knowledge(
+                task.goal[:150], task_id=task.task_id, k=8)
+    if shared_findings:
+        lines.append("## المعارف المشتركة في ناقل الفريق")
+        lines.append("")
+        lines.append("نتائج تبادلها الأدوار عبر الناقل المشترك لحظيًا "
+                     "(بحث دلالي عربي):")
+        lines.append("")
+        for f in shared_findings:
+            lines.append(
+                f"- **{f.get('role', '?')}** ({f.get('tool', '')}): "
+                f"{(f.get('text') or '').strip()[:400]}")
+        lines.append("")
     for role in done_roles:
         lines.append(f"## {role.name} — {role.goal}")
         lines.append("")

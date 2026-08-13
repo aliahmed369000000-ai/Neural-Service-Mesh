@@ -382,6 +382,20 @@ except Exception:
     _COOP_OK = False
     def _get_collab_manager():  # احتياطي آمن
         raise RuntimeError("وحدة التعاون غير متاحة")
+# ── 🆕 ناقل المعرفة المشترك (Shared Knowledge Base — Qdrant) ──────
+# يتقاسم فيه أدوار فريق المهمة التعاونية نتائجهم لحظيًا: كل بحث/جلب
+# ناجح يُشارك في الناقل، وكل دور يستحضر ما وجده الزملاء قبل بحثه
+# (بحث دلالي عربي bge-m3 عبر Qdrant + fallback محلي SQLite صامت).
+# أي فشل في Qdrant أو المكتبة يتحول للطبقة المحلية دون أي انقطاع.
+try:
+    from ai.shared_knowledge import (
+        get_skb as _get_skb,
+    )
+    _SKB_OK = True
+except Exception:
+    _SKB_OK = False
+    def _get_skb():  # احتياطي آمن
+        raise RuntimeError("ناقل المعرفة المشترك غير متاح")
 # ── طبقة فحص أمان أولى (regex، بدون تكلفة API) ────────────────────────────
 try:
     from ai.harm_classifier import classify_prompt as _classify_harm, get_domain_label as _harm_label
