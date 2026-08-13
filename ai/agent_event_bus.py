@@ -13,8 +13,8 @@ from typing import Any, Dict, List, Optional
 EVENTS_KEY = "_nsm_agent_live_events"
 AGENT_STARTS_KEY = "_nsm_agent_live_starts"
 MAX_EVENTS = 250
-START_EVENTS = {"agent_started", "task_started", "synthesis_started", "delegation_started"}
-END_EVENTS = {"agent_done", "agent_error", "task_done", "task_error", "synthesis_done", "delegation_resolved"}
+START_EVENTS = {"agent_started", "task_started", "synthesis_started", "delegation_started", "debate_started"}
+END_EVENTS = {"agent_done", "agent_error", "task_done", "task_error", "synthesis_done", "delegation_resolved", "debate_consensus", "debate_abandoned"}
 
 
 def _state():
@@ -62,6 +62,8 @@ def emit_event(
                 del starts[event["agent_id"]]
         events.append(event)
         # القصّ يحدث عند الكتابة فقط بدل إعادة بناء القائمة عند كل حدث.
+        # ومهم: كتابة السجل في session_state تتم دائماً بعد الإضافة —
+        # بدونها تبقى الأحداث في قائمة محلية وحدها ولا تظهر على الواجهة.
         if len(events) > MAX_EVENTS:
             state[EVENTS_KEY] = events[-MAX_EVENTS:]
             # تنظيف الفهرس من وكلاء طوابع تشغيلهم قصّها السجل لضمان عدم حساب مدة خاطئة.
@@ -69,6 +71,8 @@ def emit_event(
             kept = {e["agent_id"] for e in events[-MAX_EVENTS:] if e["event_type"] in START_EVENTS}
             for agent_id in [aid for aid in starts if aid not in kept]:
                 del starts[agent_id]
+        else:
+            state[EVENTS_KEY] = events
     return event
 
 

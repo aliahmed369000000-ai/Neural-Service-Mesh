@@ -80,6 +80,7 @@ class SwarmResult:
         self.finished_at: Optional[str] = None
         self.tasks: List[SwarmTask] = []
         self.merged_output: Optional[dict] = None
+        self.debates: List[dict] = []
         self.status = "running"
 
     @property
@@ -107,6 +108,7 @@ class SwarmResult:
             "failed_count": self.failed_count,
             "merged_output": self.merged_output,
             "tasks": [t.to_dict() for t in self.tasks],
+            "debates": self.debates,
         }
 
 
@@ -194,6 +196,7 @@ class SwarmCoordinator:
         use_planner: bool = True,
         retry_failed: bool = True,
         synthesize: bool = False,
+        debate: bool = False,
     ) -> SwarmResult:
         """
         Execute a goal using the swarm.
@@ -216,6 +219,13 @@ class SwarmCoordinator:
                           "🤝 منسّق الوكلاء")، وتُخزَّن في
                           result.merged_output["synthesis"]. False افتراضياً
                           حفاظاً على التوافق الخلفي (سلوك سابق دون توليف).
+            debate:     🆕 إذا True وكان عدد المهام الناجحة ≥ 2، تدخل النتائج
+                          جولات نقاش بين الوكلاء (Swarm Debate — ai.swarm_debate)
+                          حيث يراجع كل وكيل نتائج زملائه (تأييد/اعتراض/إثراء)
+                          حتى 3 جولات كحد أقصى، ثم يُلخَّص الإجماع ويُخزَّن
+                          في result.debates وتُغني مساهمات النقاش التوليف النهائي
+                          إن فُعّل synthesize أيضاً. False افتراضياً
+                          حفاظاً على التوافق الخلفي.
         """
         swarm_id = f"swarm_{str(uuid.uuid4())[:8]}"
         result = SwarmResult(swarm_id, goal)
@@ -282,7 +292,17 @@ class SwarmCoordinator:
         # 5. Merge results (بعد إعادة المحاولة، حتى تعكس الحالة النهائية)
         merged = self._merge_results(goal, tasks, task_outputs)
 
-        # 6. 🆕 توليف اختياري لكل النتائج الناجحة في إجابة واحدة موحّدة
+        # 6. 🆕 سرب المناقشة: جولات نقاش بين الوكلاء حول نتائج بعضهم
+        #    قبل التوليف والإنهاء — لا يُعطّل السرب عند الفشل أبداً.
+        if debate:
+            debate_report = self._run_debate(goal, tasks, task_outputs)
+            if debate_report and debate_report.get("transcript"):
+                result.debates.append(debate_report)
+                # مساهمات النقاش تُغني التوليف النهائي إن فُعّل لاحقاً
+                merged["debates"] = debate_report
+                merged["consensus"] = debate_report.get("consensus")
+
+        # 7. 🆕 توليف اختياري لكل النتائج الناجحة في إجابة واحدة موحّدة
         if synthesize:
             merged["synthesis"] = self._synthesize(goal, tasks, task_outputs)
 
@@ -537,6 +557,27 @@ class SwarmCoordinator:
         except Exception as exc:
             logger.warning(f"تعذّر توليف نتائج السرب: {exc}")
             return None
+
+    def _run_debate(
+        self, goal: str, tasks: List[SwarmTask], task_outputs: Dict[str, dict]
+    ) -> Optional[dict]:
+        """🆕 يدير جولات نقاش (Swarm Debate) حول نتائج المهام الناجحة عبر
+        ai.swarm_debate.run_debate() — يعيد تقرير النقاش (transcript +
+        consensus) أو None عند الإلغاء/الفشل دون رفع أي استثناء."""
+        try:
+            from ai.swarm_debate import MAX_DEBATE_ROUNDS, run_debate
+        except Exception as exc:
+            logger.warning(f"تعذّر تحميل وحدة سرب المناقشة: {exc}")
+            return None
+        results = [o for o in task_outputs.values() if o.get("success")]
+        if len(results) < 2:
+            return None
+        try:
+            report = run_debate(goal, results, max_rounds=MAX_DEBATE_ROUNDS)
+        except Exception as exc:
+            logger.warning(f"فشل تشغيل سرب المناقشة للهدف «{goal}»: {exc}")
+            return None
+        return report
 
     def _merge_results(
         self,

@@ -88,6 +88,12 @@ def render_swarm_studio():
             value=True,
             key="swarm_synthesize",
         )
+    debate = st.toggle(
+        "💬 سرب المناقشة — جولات نقاش بين الوكلاء حول نتائج بعضهم قبل التوليف"
+        " (تأييد / اعتراض / إثراء، حتى 3 جولات، وتتطلب مهمتين ناجحتين أو أكثر)",
+        value=False,
+        key="swarm_debate",
+    )
 
     if st.button("🚀 نفّذ عبر السرب", type="primary", key="swarm_run") and goal.strip():
         data = {"content": extra_context.strip()} if extra_context.strip() else {}
@@ -102,6 +108,7 @@ def render_swarm_studio():
             use_planner=use_planner,
             retry_failed=retry_failed,
             synthesize=synthesize,
+            debate=debate,
         )
         _swarm_skeleton_ph.empty()
 
@@ -150,6 +157,38 @@ def render_swarm_studio():
                     st.warning(task.error)
                 else:
                     st.caption("لا توجد نتيجة (لم يُسنَد وكيل لهذه المهمة).")
+
+        _debates = getattr(result, "debates", None) or (result.merged_output or {}).get("debates")
+        if _debates:
+            _consensus = (_debates.get("consensus") or {}) if isinstance(_debates, dict) else {}
+            _rounds = _debates.get("rounds", []) if isinstance(_debates, dict) else []
+            _transcript = _debates.get("transcript", []) if isinstance(_debates, dict) else []
+            st.markdown(
+                '<div class="section-header">💬 جلسة سرب المناقشة</div>',
+                unsafe_allow_html=True,
+            )
+            if _consensus:
+                st.success(
+                    f"🤝 **القرار الموحّد:** {_consensus.get('verdict', '—')}  \n"
+                    f"**نقاط الاتفاق:** {_consensus.get('agreed', '—')}  \n"
+                    f"**نقاط الخلاف المفتوحة:** {_consensus.get('disagreed', '—')}"
+                )
+            for _ri, _rd in enumerate(_rounds):
+                _rd_contribs = [t for t in _transcript if t.get("round_index") == _ri]
+                _rd_label = f"الجولة {_ri + 1} — {_rd_contribs} مساهمة" if isinstance(_rd.get("contributions"), int) else f"الجولة {_ri + 1}"
+                with st.expander(f"📝 {_rd_label}", expanded=(_rd_contribs and True)):
+                    for _t in _rd_contribs:
+                        _stance_color = {"agree": "#86efac", "disagree": "var(--nsm-danger)",
+                                         "enhance": "var(--nsm-cyan)", "partial": "var(--nsm-amber)"}.get(_t.get("stance", ""), "var(--text-muted)")
+                        st.markdown(
+                            f"<span style='display:inline-block;padding:.1rem .45rem;border-radius:999px;"
+                            f"font-size:.68rem;font-weight:700;color:#fff;background:{_stance_color}'>"
+                            f"{_t.get('stance', '')}</span> **{_t.get('agent_id', '')}** "
+                            f"— {_t.get('argument', '')}",
+                            unsafe_allow_html=True,
+                        )
+        elif debate:
+            st.info("💬 بدأ السرب المناقشة لكن لم يُسجَّل أي نقاش (لا توجد مساهمات في الجولات، أو أُلغي النقاش لأسباب أمان).")
 
         _synthesis = (result.merged_output or {}).get("synthesis")
         if _synthesis:

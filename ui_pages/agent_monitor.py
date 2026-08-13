@@ -111,6 +111,7 @@ def render_agent_monitor() -> None:
     st.dataframe(table, use_container_width=True, hide_index=True)
 
     render_delegation_chain(events)
+    render_debate_journal(events)
 
 
 DELEGATION_EVENTS = ("delegation_requested", "delegation_rejected", "delegation_started", "delegation_resolved")
@@ -185,6 +186,90 @@ def render_delegation_chain(events) -> None:
         parties = f"{delegator} {arrow} {dk}" if delegator and dk else (e.get("title") or e.get("agent_id", ""))
         detail = f" — {e['detail']}" if e.get("detail") else ""
         st.caption(f"`{e.get('timestamp', '—')}` {_delegation_icon(e.get('event_type', ''))} **{parties}** · {e.get('status', '')}{detail}")
+
+
+DEBATE_EVENTS = ("debate_started", "debate_argument", "debate_round_done", "debate_consensus", "debate_abandoned")
+
+STANCE_BADGES = {
+    "agree": "#86efac",
+    "disagree": "var(--nsm-danger)",
+    "enhance": "var(--nsm-cyan)",
+    "partial": "var(--nsm-amber)",
+}
+
+
+def _debate_status_label(status: str) -> str:
+    return {
+        "running": "⏳ نقاش جارٍ",
+        "done": "✅ اكتمل",
+        "error": "❌ مُلغي",
+        "agreed": "✅ مؤيد",
+        "disagreed": "❌ معترض",
+        "enhanced": "💡 مُثرٍ",
+    }.get(status, status or "—")
+
+
+def _debate_icon(event_type: str) -> str:
+    return {
+        "debate_started": "💬",
+        "debate_argument": "✍️",
+        "debate_round_done": "🔚",
+        "debate_consensus": "🤝",
+        "debate_abandoned": "🚫",
+    }.get(event_type, "💬")
+
+
+def render_debate_journal(events) -> None:
+    """يعرض جلسات سرب المناقشة: من ساهم، بموقفه، وفي أي جولة."""
+    journal = [e for e in events if e.get("event_type") in DEBATE_EVENTS]
+    render_section_header("سرب المناقشة", f"{len(journal)} حدث من جولات النقاش بين الوكلاء")
+    if not journal:
+        st.caption("لا توجد جلسات نقاش في السجل الحالي. النقاش يظهر عند تفعيل «سرب المناقشة» في تبويب «🐝 السرب الذكي» مع مهمتين ناجحتين أو أكثر.")
+        return
+    table = []
+    for e in reversed(journal):
+        meta = e.get("metadata", {}) or {}
+        stance = meta.get("stance", "")
+        stance_label = meta.get("stance_label", "")
+        badge_html = ""
+        if stance:
+            color = STANCE_BADGES.get(stance, "var(--text-muted)")
+            label = stance_label or meta.get("stance", "")
+            badge_html = (f'<span style="display:inline-block;padding:.15rem .5rem;'
+                          f'border-radius:999px;font-size:.7rem;font-weight:700;'
+                          f'color:#fff;background:{color}">{label}</span>')
+        table.append({
+            "الوقت": e.get("timestamp", "—"),
+            "الحدث": _debate_icon(e.get("event_type", "")) + " " + e.get("event_type", "—").replace("debate_", ""),
+            "الوكيل": e.get("title") or e.get("agent_id") or "—",
+            "الجولة": meta.get("round_index", "—") if isinstance(meta.get("round_index"), int) else "—",
+            "الموقف": badge_html or "—",
+            "التفاصيل": (e.get("detail") or "")[:140],
+        })
+    st.dataframe(table, use_container_width=True, hide_index=True)
+    started = next((e for e in journal if e.get("event_type") == "debate_started"), None)
+    consensus = next((e for e in journal if e.get("event_type") == "debate_consensus"), None)
+    if consensus:
+        c = (consensus.get("metadata", {}) or {}).get("consensus", {}) or {}
+        st.success(f"🤝 **القرار الموحّد:** {c.get('verdict', '—')}")
+    elif started:
+        st.warning("💬 المناقشة بدأت لكن لم يُعتمد قرار موحّد بعد (قد تكون قيد التنفيذ أو أُلغيت).")
+    for e in reversed(journal):
+        meta = e.get("metadata", {}) or {}
+        if e.get("event_type") == "debate_argument":
+            stance = meta.get("stance", "")
+            label = meta.get("stance_label", stance)
+            target = meta.get("target_agent", "")
+            color = STANCE_BADGES.get(stance, "var(--text-muted)")
+            target_txt = f" ➜ {target}" if target else ""
+            st.caption(
+                f"`{e.get('timestamp', '—')}` ✍️ **{e.get('agent_id', '')}** "
+                f'<span style="display:inline-block;padding:.1rem .45rem;border-radius:999px;'
+                f'font-size:.68rem;font-weight:700;color:#fff;background:{color}">{label}</span>'
+                f"{target_txt} · {e.get('detail', '')}"
+            )
+        else:
+            st.caption(f"`{e.get('timestamp', '—')}` {_debate_icon(e.get('event_type', ''))} {e.get('title', '')} · {e.get('status', '')}")
 
 
 def render_agent_live_trace(target) -> None:
