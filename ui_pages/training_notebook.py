@@ -84,6 +84,7 @@ def render_training_notebook():
         add_cell,
         create_notebook,
         delete_cell,
+        delete_notebook,
         detect_compute,
         export_ipynb,
         list_notebooks,
@@ -253,6 +254,23 @@ def render_training_notebook():
             if st.button("📖 SurahChain", use_container_width=True, key="nb_surah"):
                 nb = create_notebook("SurahChain Kaggle Lab", template="surahchain")
                 st.session_state.nsm_nb_id = nb.id
+                st.rerun()
+            cur_id = st.session_state.get("nsm_nb_id")
+            if st.session_state.get("nb_confirm_delete") == cur_id:
+                st.warning("حذف الدفتر نهائي — تأكيد؟")
+                dc1, dc2 = st.columns(2)
+                with dc1:
+                    if st.button("✅ احذف", use_container_width=True, key="nb_delete_confirm"):
+                        delete_notebook(cur_id)
+                        st.session_state.pop("nb_confirm_delete", None)
+                        st.session_state.pop("nsm_nb_id", None)
+                        st.rerun()
+                with dc2:
+                    if st.button("إلغاء", use_container_width=True, key="nb_delete_cancel"):
+                        st.session_state.pop("nb_confirm_delete", None)
+                        st.rerun()
+            elif st.button("🗑 حذف الدفتر الحالي", use_container_width=True, key="nb_delete_ask"):
+                st.session_state["nb_confirm_delete"] = cur_id
                 st.rerun()
         with c3:
             provider = st.selectbox(

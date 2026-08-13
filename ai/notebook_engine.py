@@ -129,6 +129,15 @@ def save_notebook(nb: Notebook) -> Path:
     return path
 
 
+def delete_notebook(nb_id: str) -> bool:
+    """يحذف دفتراً نهائياً من القرص. يُرجع True عند النجاح، False إن لم يوجد."""
+    p = NB_DIR / f"{nb_id}.json"
+    if not p.is_file():
+        return False
+    p.unlink()
+    return True
+
+
 
 def import_ipynb(path: str | Path, name: Optional[str] = None) -> Notebook:
     """استيراد دفتر Jupyter/Kaggle (.ipynb) إلى مختبر NSM."""
