@@ -118,6 +118,7 @@ def render_agent_monitor() -> None:
     render_adaptive_swarm_panel()
     render_failure_learning_panel()
     render_custom_alerts_panel()
+    render_auto_actions_panel()
     render_swarm_runner_panel()
 
 
@@ -706,6 +707,130 @@ def render_swarm_runner_panel() -> None:
             route = (msg.get("meta") or {}).get("route_method", "")
             if route:
                 st.caption(f"طريقة التوجيه: {route}")
+
+
+def render_auto_actions_panel() -> None:
+    """لوحة الإجراءات التلقائية للتنبيهات وتشخيص الوكلاء الفاشلين: تفعيل/
+    تعطيل الإجراءات، فترة تبريدها، سجل الإجراءات التنفيذي، والوكلاء
+    المستبعدون تلقائيًا مؤقتًا."""
+    from ai.alert_auto_actions import (
+        DEFAULT_ACTIONS,
+        auto_excluded_agents,
+        auto_unexclude,
+        clear_action_log,
+        execute_auto_actions,
+        get_action_log,
+        get_alert_log,
+        load_actions_config,
+        save_actions_config,
+    )
+
+    render_section_header(
+        "الإجراءات التلقائية",
+        "استجابة آلية للتنبيهات: تشخيص نمطي واستبعاد تلقائي ودروس مسجلة",
+        live=True,
+    )
+    actions = load_actions_config()
+
+    # ── التحكم بالإجراءات ───────────────────────────────────────────────
+    with st.expander("⚙️ تخصيص الإجراءات التلقائية", expanded=False):
+        st.caption(
+            "كل قاعدة تنبيه لها إجراء تلقائي قابل للتفعيل. فترة التبريد تمنع "
+            "تكرار نفس الإجراء خلال النافذة الزمنية."
+        )
+        _aa_cols = st.columns(2)
+        toggle_states: Dict[str, bool] = {}
+        cd_states: Dict[str, int] = {}
+        for i, (name, cfg) in enumerate(list(actions.items())):
+            with _aa_cols[i % 2]:
+                enabled = st.toggle(
+                    cfg.get("description", name),
+                    value=bool(cfg.get("enabled")),
+                    key=f"autoact_{name}",
+                )
+                toggle_states[name] = enabled
+                cd_states[name] = st.number_input(
+                    f"تبريد ({cfg.get('description', name)[:28]}…)",
+                    min_value=0, max_value=240, step=5,
+                    value=int(cfg.get("cooldown_minutes", 15)),
+                    key=f"autoact_cd_{name}",
+                )
+        if st.button("💾 حفظ إعدادات الإجراءات التلقائية", use_container_width=True):
+            custom = {
+                name: {
+                    "enabled": toggle_states[name],
+                    "cooldown_minutes": cd_states[name],
+                }
+                for name in DEFAULT_ACTIONS
+            }
+            if save_actions_config(custom):
+                st.success("حُفظت إعدادات الإجراءات التلقائية وسينعكس تنفيذها على التنبيهات القادمة.")
+            else:
+                st.error("تعذر حفظ إعدادات الإجراءات — تبقى القيم الافتراضية سارية.")
+
+    # ── الوكلاء المستبعدون تلقائيًا ─────────────────────────────────────
+    excluded_map = auto_excluded_agents()
+    if excluded_map:
+        st.markdown("**🚫 مستبعدون تلقائيًا مؤقتًا**")
+        _ex_rows = [
+            {
+                "الوكيل": aid,
+                "استُبعد عند": info.get("excluded_at", "—"),
+                "القاعدة": info.get("rule", "—"),
+                "النمط": (info.get("diagnosis") or {}).get("category", "—"),
+            }
+            for aid, info in excluded_map.items()
+        ]
+        st.dataframe(_ex_rows, use_container_width=True, hide_index=True)
+        _ex_cols = st.columns([1, 4])
+        with _ex_cols[0]:
+            if st.button("↩️ إعادة إدراج المستبعدين", key="autoact_reinclude"):
+                for aid in list(excluded_map.keys()):
+                    auto_unexclude(aid)
+                st.rerun()
+    else:
+        st.caption(
+            "لا يوجد وكلاء مستبعدون تلقائيًا حاليًا — عند تكرار فشل وكيلٍ "
+            "مع تفعيل إجراء الاستبعاد التلقائي سيُضاف هنا مؤقتًا (١٥ دقيقة)."
+        )
+
+    # ── سجل الإجراءات ──────────────────────────────────────────────────
+    st.markdown("**📋 سجل الإجراءات التلقائية**")
+    _aa_log_rows = [
+        {
+            "#": r.get("action_id", ""),
+            "الوقت": r.get("timestamp", "—"),
+            "الإجراء": _ACTION_TYPE_LABEL.get(r.get("action_type", ""), ""),
+            "القاعدة": r.get("rule", ""),
+            "الوكيل": r.get("agent_id", "—"),
+            "الحالة": r.get("status", "—"),
+            "التشخيص": (r.get("diagnosis") or {}).get("diagnosis", "—")[:60],
+        }
+        for r in get_action_log(15)
+    ]
+    if not _aa_log_rows:
+        st.caption(
+            "السجل فارغ — تُضاف الإجراءات هنا عند إطلاق تنبيه مخصص مع إجراء "
+            "مفعّل. جرّب تشغيل مهمة تُفشل وكيلًا لترى التشخيص التلقائي."
+        )
+    else:
+        st.dataframe(_aa_log_rows, use_container_width=True, hide_index=True)
+        _log_cols = st.columns([1, 4])
+        with _log_cols[0]:
+            if st.button("🧹 مسح سجل الإجراءات", key="autoact_log_clear"):
+                clear_action_log()
+                st.rerun()
+
+
+_ACTION_TYPE_LABEL = {
+    "diagnose": "تشخيص",
+    "diagnose_and_lesson": "تشخيص + درس",
+    "auto_exclude_and_diagnose": "استبعاد تلقائي + تشخيص",
+    "lesson_and_escalate": "درس جماعي + تصعيد",
+    "performance_lesson": "درس أداء",
+    "exclude_followup": "متابعة استبعاد",
+    "throttle_hint": "تلميح تخفيف",
+}
 
 
 def render_custom_alerts_panel() -> None:

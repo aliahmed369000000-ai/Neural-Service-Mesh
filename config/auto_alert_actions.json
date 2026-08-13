@@ -1,0 +1,44 @@
+{
+  "agent_degraded": {
+    "enabled": true,
+    "action_type": "diagnose_and_lesson",
+    "cooldown_minutes": 60,
+    "description": "تشخيص نمطي للوكيل المتدهور وتسجيل درس في الذاكرة الجماعية"
+  },
+  "repeated_errors": {
+    "enabled": true,
+    "action_type": "auto_exclude_and_diagnose",
+    "cooldown_minutes": 30,
+    "description": "استبعاد تلقائي مؤقت للوكيل الفاشل المتكرر مع تشخيص وسبب"
+  },
+  "failure_direct": {
+    "enabled": true,
+    "action_type": "diagnose",
+    "cooldown_minutes": 10,
+    "description": "تشخيص نمطي فوري لخطأ الوكيل المباشر"
+  },
+  "swarm_failure_rate": {
+    "enabled": true,
+    "action_type": "lesson_and_escalate",
+    "cooldown_minutes": 45,
+    "description": "تسجيل درس جماعي عن فشل السرب وتصعيد للإشراف"
+  },
+  "slow_response": {
+    "enabled": true,
+    "action_type": "performance_lesson",
+    "cooldown_minutes": 30,
+    "description": "تسجيل درس أداء لبطء الاستجابة لتفاديه مستقبلاً"
+  },
+  "swarm_excluded": {
+    "enabled": false,
+    "action_type": "exclude_followup",
+    "cooldown_minutes": 60,
+    "description": "إشعار متابعة بعد استبعاد وكيل من السرب"
+  },
+  "congestion": {
+    "enabled": false,
+    "action_type": "throttle_hint",
+    "cooldown_minutes": 10,
+    "description": "اقتراح تخفيف الازدحام عند تجاوز الحد المتزامن"
+  }
+}
