@@ -140,6 +140,7 @@ class TerminalSession:
     history: List[dict] = field(default_factory=list)
     created_at: str = field(default_factory=_now)
     last_active_ts: float = field(default_factory=time.time)
+    env: Dict[str, str] = field(default_factory=dict)  # 🆕 متغيرات export مستمرة داخل الجلسة
 
     def to_dict(self) -> dict:
         return {
@@ -148,8 +149,70 @@ class TerminalSession:
             "mode": self.mode,
             "history_len": len(self.history),
             "created_at": self.created_at,
+            "env": dict(self.env),
             "last": self.history[-1] if self.history else None,
         }
+
+
+@dataclass
+class BackgroundJob:
+    id: str
+    cmd: str
+    session_id: str
+    cwd: str
+    mode: str
+    status: str = "running"  # running | done | killed | error
+    started_at: str = field(default_factory=_now)
+    finished_at: str = ""
+    exit_code: Optional[int] = None
+    stdout: str = ""
+    stderr: str = ""
+    error: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id, "cmd": self.cmd, "session_id": self.session_id, "cwd": self.cwd,
+            "mode": self.mode, "status": self.status, "started_at": self.started_at,
+            "finished_at": self.finished_at, "exit_code": self.exit_code,
+            "stdout": self.stdout, "stderr": self.stderr, "error": self.error,
+        }
+
+
+def _mask_quotes(s: str) -> str:
+    """يستبدل محتوى أي مقطع مقتبس (' أو ") برمز محايد 'Q' بنفس الطول، حتى لا
+    تُكتشف عوامل السلسلة/التوجيه بالخطأ داخل نصوص حرفية مثل:
+    python3 -c "import time; time.sleep(1)"  — الفاصلة المنقوطة هنا جزء من
+    الكود الممرَّر لبايثون، وليست عامل تسلسل shell."""
+    out = []
+    i, n = 0, len(s)
+    while i < n:
+        ch = s[i]
+        if ch in ("'", '"'):
+            q = ch
+            out.append("Q")
+            i += 1
+            while i < n and s[i] != q:
+                out.append("Q")
+                i += 1
+            if i < n:
+                out.append("Q")
+                i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _split_shell_segments(cmd: str) -> List[str]:
+    """يقسّم الأمر عند &&, ||, ;, | خارج أي نص مقتبس فقط."""
+    masked = _mask_quotes(cmd)
+    pattern = re.compile(r"\|\||&&|;|\|")
+    segments, last = [], 0
+    for m in pattern.finditer(masked):
+        segments.append(cmd[last:m.start()])
+        last = m.end()
+    segments.append(cmd[last:])
+    return [seg.strip() for seg in segments if seg.strip()]
 
 
 class NSMTerminal:
@@ -159,6 +222,9 @@ class NSMTerminal:
         self.root = Path(root or ROOT).resolve()
         self._sessions: Dict[str, TerminalSession] = {}
         self._lock = threading.Lock()
+        self._jobs: Dict[str, BackgroundJob] = {}
+        self._procs: Dict[str, subprocess.Popen] = {}
+        self._jobs_lock = threading.Lock()
         self._default_id: Optional[str] = None  # يُضبط بعد إنشاء الجلسة الافتراضية أدناه
         self._default_id = self.create_session(mode="safe").id
 
@@ -230,13 +296,14 @@ class NSMTerminal:
         for bad in _BLOCKED:
             if bad in c.lower():
                 return False, f"أمر محظور: {bad.strip()}"
-        if "$(" in c or "`" in c:
+        masked = _mask_quotes(c)
+        if "$(" in masked or "`" in masked:
             return False, "استبدال أوامر ($() أو `) غير مسموح في الوضع الآمن — استخدم mode=admin"
-        if ">" in c or "<" in c:
+        if ">" in masked or "<" in masked:
             return False, "إعادة توجيه (> أو <) غير مسموحة في الوضع الآمن — استخدم mode=admin"
-        if "&" in c.replace("&&", ""):
+        if "&" in masked.replace("&&", ""):
             return False, "تشغيل بالخلفية (&) غير مسموح في الوضع الآمن — استخدم mode=admin"
-        segments = [s.strip() for s in re.split(r"\|\||&&|;|\|", c) if s.strip()]
+        segments = _split_shell_segments(c)
         if len(segments) > 1:
             for seg in segments:
                 ok, reason = self._is_single_command_safe(seg)
@@ -261,6 +328,43 @@ class NSMTerminal:
         if re.match(r"^(python3?|pytest)\s+\S+\.py(\s|$)", low):
             return True, ""
         return False, "الأمر خارج القائمة الآمنة — استخدم mode=admin من وضع المالك"
+
+    def _handle_export(self, sess: TerminalSession, cmd: str) -> CommandResult:
+        """export KEY=VALUE [KEY2=VALUE2 ...] — يحفظ المتغيرات في بيئة الجلسة
+        فتصبح متاحة لكل الأوامر التالية ضمن نفس الجلسة (سلوك طرفية حقيقية،
+        بخلاف subprocess عادي حيث تُفقد متغيرات export بعد كل أمر)."""
+        try:
+            tokens = shlex.split(cmd)[1:]
+        except ValueError as e:
+            return CommandResult(ok=False, cmd=cmd, cwd=sess.cwd, exit_code=1,
+                                  stdout="", stderr="", duration_ms=0, mode=sess.mode, error=str(e))
+        if not tokens:
+            lines = [f"{k}={v}" for k, v in sess.env.items()]
+            return CommandResult(ok=True, cmd=cmd, cwd=sess.cwd, exit_code=0,
+                                  stdout="\n".join(lines), stderr="", duration_ms=0, mode=sess.mode)
+        set_names = []
+        for tok in tokens:
+            if "=" not in tok:
+                return CommandResult(ok=False, cmd=cmd, cwd=sess.cwd, exit_code=1,
+                                      stdout="", stderr="", duration_ms=0, mode=sess.mode,
+                                      error=f"صيغة غير صحيحة: {tok} — استخدم KEY=VALUE")
+            key, _, val = tok.partition("=")
+            if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", key):
+                return CommandResult(ok=False, cmd=cmd, cwd=sess.cwd, exit_code=1,
+                                      stdout="", stderr="", duration_ms=0, mode=sess.mode,
+                                      error=f"اسم متغير غير صالح: {key}")
+            sess.env[key] = val
+            set_names.append(key)
+        return CommandResult(ok=True, cmd=cmd, cwd=sess.cwd, exit_code=0,
+                              stdout=f"exported: {', '.join(set_names)}", stderr="",
+                              duration_ms=0, mode=sess.mode)
+
+    def _handle_unset(self, sess: TerminalSession, cmd: str) -> CommandResult:
+        tokens = shlex.split(cmd)[1:]
+        removed = [k for k in tokens if sess.env.pop(k, None) is not None]
+        return CommandResult(ok=True, cmd=cmd, cwd=sess.cwd, exit_code=0,
+                              stdout=f"unset: {', '.join(removed) or '(none)'}", stderr="",
+                              duration_ms=0, mode=sess.mode)
 
     def _handle_cd(self, sess: TerminalSession, cmd: str) -> CommandResult:
         parts = shlex.split(cmd)
@@ -326,6 +430,14 @@ class NSMTerminal:
             r = self._handle_cd(sess, cmd)
             self._push_history(sess, r)
             return r
+        if cmd == "export" or cmd.startswith("export "):
+            r = self._handle_export(sess, cmd)
+            self._push_history(sess, r)
+            return r
+        if cmd == "unset" or cmd.startswith("unset "):
+            r = self._handle_unset(sess, cmd)
+            self._push_history(sess, r)
+            return r
 
         if sess.mode != "admin":
             ok, reason = self._is_safe_command(cmd)
@@ -340,6 +452,7 @@ class NSMTerminal:
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
         env["TERM"] = "xterm-256color"
+        env.update(sess.env)  # 🆕 متغيرات export المستمرة الخاصة بالجلسة
         # strip tokens from child env display risk — keep for git if needed but redact output
         if env_extra:
             env.update(env_extra)
@@ -389,6 +502,112 @@ class NSMTerminal:
     def run_safe(self, cmd: str, **kwargs) -> CommandResult:
         kwargs["mode"] = "safe"
         return self.run(cmd, **kwargs)
+
+    # ---------------- 🆕 تشغيل خلفي (background jobs) ----------------
+    # التنفيذ الحالي عبر run() متزامن بالكامل: يحجب حتى انتهاء الأمر أو
+    # انتهاء المهلة، فلا توجد وسيلة لمراقبة أمر طويل (تدريب، بناء...) أو
+    # إيقافه أثناء عمله. الطبقة التالية تضيف تنفيذاً حقيقياً بخيط منفصل
+    # مع مقبض Popen فعلي يمكن استعلامه أو قتله في أي لحظة.
+    def start_background(
+        self, cmd: str, session_id: Optional[str] = None,
+        mode: Optional[str] = None, env_extra: Optional[Dict[str, str]] = None,
+    ) -> BackgroundJob:
+        cmd = (cmd or "").strip()
+        sess = self.get_session(session_id)
+        if mode in ("safe", "admin"):
+            sess.mode = mode
+        job_id = uuid.uuid4().hex[:10]
+        job = BackgroundJob(id=job_id, cmd=cmd, session_id=sess.id, cwd=sess.cwd, mode=sess.mode)
+
+        if not cmd:
+            job.status, job.error = "error", "أمر فارغ"
+            with self._jobs_lock:
+                self._jobs[job_id] = job
+            return job
+        if sess.mode != "admin":
+            ok, reason = self._is_safe_command(cmd)
+            if not ok:
+                job.status, job.error = "error", reason
+                with self._jobs_lock:
+                    self._jobs[job_id] = job
+                return job
+
+        with self._jobs_lock:
+            self._jobs[job_id] = job
+
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+        env["TERM"] = "xterm-256color"
+        env.update(sess.env)
+        if env_extra:
+            env.update(env_extra)
+
+        def _worker():
+            t0 = time.time()
+            try:
+                proc = subprocess.Popen(
+                    cmd, shell=True, cwd=sess.cwd, env=env,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                )
+                with self._jobs_lock:
+                    self._procs[job_id] = proc
+                out, err = proc.communicate()
+                with self._jobs_lock:
+                    j = self._jobs.get(job_id)
+                    if j:
+                        j.exit_code = proc.returncode
+                        j.stdout = redact(out or "")[:_MAX_OUTPUT]
+                        j.stderr = redact(err or "")[:_MAX_OUTPUT]
+                        if j.status == "running":  # لم يُقتل يدوياً أثناء التنفيذ
+                            j.status = "done"
+                        j.finished_at = j.finished_at or _now()
+                    self._procs.pop(job_id, None)
+            except Exception as e:
+                with self._jobs_lock:
+                    j = self._jobs.get(job_id)
+                    if j:
+                        j.status, j.error, j.finished_at = "error", str(e), _now()
+                    self._procs.pop(job_id, None)
+            finally:
+                r = CommandResult(
+                    ok=(self._jobs.get(job_id).exit_code == 0) if self._jobs.get(job_id) else False,
+                    cmd=cmd, cwd=sess.cwd, exit_code=self._jobs[job_id].exit_code or 0,
+                    stdout=self._jobs[job_id].stdout, stderr=self._jobs[job_id].stderr,
+                    duration_ms=int((time.time() - t0) * 1000), mode=sess.mode,
+                    error=self._jobs[job_id].error,
+                )
+                self._push_history(sess, r)
+
+        threading.Thread(target=_worker, daemon=True).start()
+        return job
+
+    def job_status(self, job_id: str) -> Optional[dict]:
+        with self._jobs_lock:
+            job = self._jobs.get(job_id)
+            return job.to_dict() if job else None
+
+    def list_jobs(self, session_id: Optional[str] = None) -> List[dict]:
+        with self._jobs_lock:
+            jobs = list(self._jobs.values())
+        if session_id:
+            jobs = [j for j in jobs if j.session_id == session_id]
+        return [j.to_dict() for j in sorted(jobs, key=lambda j: j.started_at, reverse=True)]
+
+    def kill_job(self, job_id: str) -> bool:
+        """يقتل مهمة خلفية فعلياً (SIGKILL عبر Popen.kill)، وليس مجرد تعليم حالة."""
+        with self._jobs_lock:
+            proc = self._procs.get(job_id)
+            job = self._jobs.get(job_id)
+            if not job or job.status != "running":
+                return False
+            job.status = "killed"
+            job.finished_at = _now()
+        if proc is not None:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        return True
 
     def _push_history(self, sess: TerminalSession, result: CommandResult) -> None:
         entry = result.to_dict()

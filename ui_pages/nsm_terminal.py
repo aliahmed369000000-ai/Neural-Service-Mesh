@@ -265,15 +265,49 @@ def render_nsm_terminal():
             label_visibility="collapsed",
             key="nsm_term_input",
         )
-        submitted = st.form_submit_button("Run ↵", use_container_width=True)
+        fc1, fc2 = st.columns([1, 3])
+        with fc1:
+            bg = st.checkbox("⏱️ خلفية", key="nsm_term_bg", help="تشغيل بدون حجب — لأوامر التدريب/البناء الطويلة")
+        with fc2:
+            submitted = st.form_submit_button("Run ↵", use_container_width=True)
         if submitted and cmd.strip():
-            with st.spinner("running…"):
-                r = term.run(cmd.strip(), session_id=sid, mode="admin", timeout=int(timeout))
-            if r.ok:
-                st.toast(f"exit {r.exit_code} · {r.duration_ms}ms", icon="✅")
+            if bg:
+                job = term.start_background(cmd.strip(), session_id=sid, mode="admin")
+                if job.status == "error":
+                    st.toast(f"رُفضت: {job.error}", icon="⚠️")
+                else:
+                    st.toast(f"بدأت مهمة خلفية {job.id}", icon="🚀")
             else:
-                st.toast(f"exit {r.exit_code}", icon="⚠️")
+                with st.spinner("running…"):
+                    r = term.run(cmd.strip(), session_id=sid, mode="admin", timeout=int(timeout))
+                if r.ok:
+                    st.toast(f"exit {r.exit_code} · {r.duration_ms}ms", icon="✅")
+                else:
+                    st.toast(f"exit {r.exit_code}", icon="⚠️")
             st.rerun()
+
+    # 🆕 لوحة المهام الخلفية — عرض حي + قتل فعلي لأي مهمة قيد التشغيل
+    jobs = term.list_jobs(session_id=sid)
+    if jobs:
+        with st.expander(f"🧵 مهام خلفية ({sum(1 for j in jobs if j['status']=='running')} تعمل الآن)", expanded=any(j["status"] == "running" for j in jobs)):
+            for j in jobs:
+                jc1, jc2 = st.columns([5, 1])
+                with jc1:
+                    icon = {"running": "🟡", "done": "🟢", "killed": "🔴", "error": "⚫"}.get(j["status"], "⚪")
+                    st.markdown(f"{icon} `{j['id']}` **{j['status']}** — `{_esc(j['cmd'])}`")
+                    if j["status"] in ("done", "error") and (j.get("stdout") or j.get("stderr") or j.get("error")):
+                        with st.expander("مخرجات", expanded=False):
+                            if j.get("stdout"):
+                                st.code(j["stdout"], language="text")
+                            if j.get("stderr"):
+                                st.code(j["stderr"], language="text")
+                            if j.get("error"):
+                                st.caption(f"خطأ: {j['error']}")
+                with jc2:
+                    if j["status"] == "running":
+                        if st.button("⛔ قتل", key=f"nsm_term_kill_{j['id']}", use_container_width=True):
+                            term.kill_job(j["id"])
+                            st.rerun()
 
     with st.expander("Agent API / أمثلة ربط الوكلاء"):
         st.code(
@@ -282,7 +316,10 @@ def render_nsm_terminal():
             "Chat:\n"
             "طرفية git status\n"
             "طرفية !status\n"
-            "terminal python3 --version",
+            "terminal python3 --version\n\n"
+            "export/unset (مستمر داخل الجلسة):\n"
+            "export MY_VAR=value\n"
+            "unset MY_VAR",
             language="text",
         )
         st.caption("الوضع safe للوكلاء يقيّد الأوامر الخطرة تلقائياً. وضع المالك هنا = admin.")
