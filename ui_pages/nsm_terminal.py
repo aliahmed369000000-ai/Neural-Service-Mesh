@@ -146,6 +146,13 @@ def render_nsm_terminal():
         sid = chosen
         sess = term.get_session(sid)
         sess.mode = "admin"
+        # 🆕 إغلاق الجلسة الحالية (تنظيف يدوي، لا يمكن إغلاق الجلسة الافتراضية)
+        if st.button("🗑️ إغلاق هذه الجلسة", key="nsm_term_close"):
+            if term.close_session(sid):
+                st.session_state.nsm_term_session_id = term._default_id
+                st.rerun()
+            else:
+                st.warning("لا يمكن إغلاق الجلسة الافتراضية.")
 
     # controls
     c1, c2, c3, c4, c5 = st.columns([2, 1, 1, 1, 1])
@@ -219,8 +226,22 @@ def render_nsm_terminal():
                     term.run(picked, session_id=sid, mode="admin", timeout=int(timeout))
                 st.rerun()
 
+    # 🆕 بحث/تصفية داخل سجل الطرفية (بالأمر أو المخرجات)
+    search_q = st.text_input(
+        "🔎 بحث في السجل", key="nsm_term_search", placeholder="فلترة حسب الأمر أو المخرجات…"
+    )
+    display_history = sess.history
+    if search_q.strip():
+        q = search_q.strip().lower()
+        display_history = [
+            h for h in sess.history
+            if q in (h.get("cmd") or "").lower()
+            or q in (h.get("stdout") or "").lower()
+            or q in (h.get("stderr") or "").lower()
+        ]
+
     # terminal screen
-    html_body = _render_history_html(sess.history)
+    html_body = _render_history_html(display_history)
     st.markdown(
         f"""
         <div class="nsm-term-wrap">

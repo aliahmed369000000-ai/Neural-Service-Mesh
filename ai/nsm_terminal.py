@@ -59,6 +59,11 @@ _BLOCKED = (
 )
 
 
+_MAX_LOG_BYTES = 2_000_000  # 2MB — تدوير تلقائي لمنع نمو غير محدود
+_MAX_SESSIONS = 40  # حد أقصى للجلسات المتزامنة — إخلاء الأقدم نشاطاً عند التجاوز
+_SESSION_TTL_SECONDS = 6 * 3600  # جلسات خاملة أكثر من 6 ساعات تُخلى تلقائياً
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -82,6 +87,15 @@ def _append_log(entry: dict) -> None:
     try:
         _LOG.parent.mkdir(parents=True, exist_ok=True)
         import json
+        # 🆕 تدوير السجل: إن تجاوز الحجم الأقصى، أبقِ فقط النصف الأحدث لتفادي
+        # نمو غير محدود لملف terminal_sessions.jsonl مع كثرة الاستخدام.
+        if _LOG.exists() and _LOG.stat().st_size > _MAX_LOG_BYTES:
+            try:
+                lines = _LOG.read_text(encoding="utf-8").splitlines()
+                keep = lines[len(lines) // 2:]
+                _LOG.write_text("\n".join(keep) + "\n", encoding="utf-8")
+            except Exception:
+                pass
         with _LOG.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except Exception:
@@ -125,6 +139,7 @@ class TerminalSession:
     mode: str = "safe"  # safe | admin
     history: List[dict] = field(default_factory=list)
     created_at: str = field(default_factory=_now)
+    last_active_ts: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict:
         return {
@@ -144,6 +159,7 @@ class NSMTerminal:
         self.root = Path(root or ROOT).resolve()
         self._sessions: Dict[str, TerminalSession] = {}
         self._lock = threading.Lock()
+        self._default_id: Optional[str] = None  # يُضبط بعد إنشاء الجلسة الافتراضية أدناه
         self._default_id = self.create_session(mode="safe").id
 
     def create_session(self, mode: str = "safe", cwd: Optional[str] = None) -> TerminalSession:
@@ -156,6 +172,7 @@ class NSMTerminal:
         sess = TerminalSession(id=sid, cwd=str(start), mode=mode if mode in ("safe", "admin") else "safe")
         with self._lock:
             self._sessions[sid] = sess
+            self._evict_stale_locked()
         return sess
 
     def get_session(self, session_id: Optional[str] = None) -> TerminalSession:
@@ -164,11 +181,41 @@ class NSMTerminal:
             if sid not in self._sessions:
                 sess = TerminalSession(id=sid, cwd=str(self.root), mode="safe")
                 self._sessions[sid] = sess
+            self._sessions[sid].last_active_ts = time.time()
             return self._sessions[sid]
 
     def list_sessions(self) -> List[dict]:
         with self._lock:
             return [s.to_dict() for s in self._sessions.values()]
+
+    def close_session(self, session_id: str) -> bool:
+        """يُخلي جلسة يدوياً (لا يمكن إخلاء الجلسة الافتراضية)."""
+        with self._lock:
+            if session_id == self._default_id or session_id not in self._sessions:
+                return False
+            del self._sessions[session_id]
+            return True
+
+    def _evict_stale_locked(self) -> None:
+        """🆕 يمنع تسرّب الذاكرة: يخلي الجلسات الخاملة أكثر من TTL، وإذا تجاوز
+        عدد الجلسات الحد الأقصى يُخلي الأقدم نشاطاً (باستثناء الجلسة الافتراضية).
+        يُستدعى دوماً داخل self._lock — لا يُستدعى مباشرة من الخارج.
+        """
+        now = time.time()
+        stale = [
+            sid for sid, s in self._sessions.items()
+            if sid != self._default_id and (now - s.last_active_ts) > _SESSION_TTL_SECONDS
+        ]
+        for sid in stale:
+            del self._sessions[sid]
+        if len(self._sessions) > _MAX_SESSIONS:
+            ordered = sorted(
+                (s for sid, s in self._sessions.items() if sid != self._default_id),
+                key=lambda s: s.last_active_ts,
+            )
+            overflow = len(self._sessions) - _MAX_SESSIONS
+            for s in ordered[:overflow]:
+                self._sessions.pop(s.id, None)
 
     def _is_safe_command(self, cmd: str) -> Tuple[bool, str]:
         """يتحقق من أمان الأمر بالكامل، بما فيه أي أجزاء مسلسلة (&&, ;, |, ||).
@@ -255,6 +302,7 @@ class NSMTerminal:
     ) -> CommandResult:
         cmd = (cmd or "").strip()
         sess = self.get_session(session_id)
+        sess.last_active_ts = time.time()
         if mode in ("safe", "admin"):
             sess.mode = mode
         if not cmd:
