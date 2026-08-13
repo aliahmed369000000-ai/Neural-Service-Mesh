@@ -114,6 +114,7 @@ def render_agent_monitor() -> None:
     render_debate_journal(events)
     render_collective_memory_panel()
     render_background_tasks_panel()
+    render_shared_analytics_panel()
 
 
 DELEGATION_EVENTS = ("delegation_requested", "delegation_rejected", "delegation_started", "delegation_resolved")
@@ -376,6 +377,91 @@ def render_background_tasks_panel() -> None:
             "المدة (ms)": round(t.get("duration_ms", 0) or 0, 1),
         })
     st.dataframe(table, use_container_width=True, hide_index=True)
+
+
+def render_shared_analytics_panel() -> None:
+    """لوحة التحليلات التشاركية: تقرير أداء شامل مع درجة عامة وتوصيات تلقائية."""
+    try:
+        from ai.shared_analytics import get_shared_analytics_reporter
+        report = get_shared_analytics_reporter().report()
+    except Exception:
+        st.caption("التحليلات التشاركية غير متاحة حاليًا (فشل التحميل).")
+        return
+
+    score = report.get("score", {})
+    render_section_header(
+        "التحليلات التشاركية",
+        f"الدرجة الإجمالية: {score.get('total', 0)}/100 — {score.get('grade', '—')} · "
+        f"أُحدِثت: {report.get('generated_at', '—')}",
+        live=True,
+    )
+    components = score.get("components", {})
+    _cols = st.columns(5)
+    with _cols[0]:
+        st.metric("الوكلاء (40%)", f"{components.get('agents', 0):.0f}/100")
+    with _cols[1]:
+        st.metric("السرب (25%)", f"{components.get('swarm', 0):.0f}/100")
+    with _cols[2]:
+        st.metric("التوجيه (20%)", f"{components.get('routing', 0):.0f}/100")
+    with _cols[3]:
+        st.metric("الخلفية (10%)", f"{components.get('background', 0):.0f}/100")
+    with _cols[4]:
+        st.metric("الذاكرة (5%)", f"{components.get('memory', 0):.0f}/100")
+
+    # توصيات التحسين
+    recs = report.get("recommendations", [])
+    if recs:
+        st.subheader("🔧 توصيات التحسين")
+        render_alert_cards(
+            [
+                {
+                    "severity": r.get("severity", "info"),
+                    "title": r.get("title", ""),
+                    "detail": r.get("detail", ""),
+                    "timestamp": "",
+                }
+                for r in recs
+            ],
+            limit=8,
+        )
+
+    # أداء الوكلاء
+    agents = report.get("agents", {}).get("agents", [])
+    if agents:
+        st.subheader("أداء الوكلاء")
+        agent_table = [
+            {
+                "الوكيل": a.get("title", a.get("agent_id", "—")),
+                "المهام": a.get("tasks", 0),
+                "اكتملت": a.get("done", 0),
+                "فشلت": a.get("errors", 0),
+                "إعادة محاولة": a.get("retries", 0),
+                "متوسط المدة (ms)": a.get("avg_ms", 0),
+                "أعلى مدة (ms)": a.get("max_ms", 0),
+                "نسبة الفشل": f"{a.get('failure_rate', 0) * 100:.0f}%",
+            }
+            for a in agents
+        ]
+        st.dataframe(agent_table, use_container_width=True, hide_index=True)
+
+    # ملخصات المصادر
+    _dcols = st.columns(4)
+    with _dcols[0]:
+        sw = report.get("swarm", {})
+        st.metric("السرب (إجمالي)", sw.get("total_swarms", 0))
+        st.caption(f"نسبة نجاح المهام الفرعية: {sw.get('average_task_success_rate', 0) * 100:.0f}%")
+    with _dcols[1]:
+        rt = report.get("routing", {})
+        st.metric("سجل التوجيه", rt.get("sample", 0))
+        st.caption(f"متوسط المدة: {rt.get('avg_latency_ms', 0):.0f}ms · الفشل البديل: {rt.get('failover_rate', 0) * 100:.0f}%")
+    with _dcols[2]:
+        bg = report.get("background", {})
+        st.metric("الخلفية مكتملة", bg.get("done", 0))
+        st.caption(f"فشلت: {bg.get('failed', 0)}")
+    with _dcols[3]:
+        mem = report.get("memory", {})
+        st.metric("الدروس الجماعية", mem.get("total_lessons", 0))
+        st.caption(f"متوسط الجودة: {mem.get('avg_lesson_quality', 0):.2f}")
 
 
 def render_agent_live_trace(target) -> None:
