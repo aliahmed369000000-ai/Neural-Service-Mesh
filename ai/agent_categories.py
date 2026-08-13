@@ -1014,8 +1014,82 @@ class UnifiedAgentChat:
                     detail=str(e)[:180],
                 )
 
+        # 🆕 مرحلة التعاون المتقدمة: تنفيذ طلبات التفويض بين الوكلاء
+        from ai.agent_delegation import (
+            DelegationTracker,
+            announce_delegation_rejected,
+            announce_delegation_requested,
+            announce_delegation_resolved,
+            announce_delegation_started,
+            parse_delegation_requests,
+            strip_delegation_tags,
+        )
+        _delegation = DelegationTracker()
+        _category_titles = {k: c.title for k, c in AGENT_CATEGORIES.items()}
+        _running_delegates = {k: (AGENT_CATEGORIES[k].title if k in AGENT_CATEGORIES else k)
+                              for k in selected}
+        for key in selected:
+            _raw = agent_replies.get(key, "") or ""
+            _cat = AGENT_CATEGORIES.get(key)
+            _reqs = parse_delegation_requests(_raw)
+            for _dkey, _subtask in _reqs:
+                _dcat = AGENT_CATEGORIES.get(_dkey)
+                announce_delegation_requested(
+                    delegator_key=key, delegator_title=(_cat.title if _cat else key),
+                    delegate_key=_dkey, delegate_title=(_dcat.title if _dcat else _dkey),
+                    subtask=_subtask, parent_task_id=f"multi:{route_method}",
+                )
+                _reject = _delegation.is_allowed(
+                    key, _dkey, (_dcat.title if _dcat else _dkey),
+                    _category_titles, _running_delegates,
+                )
+                if _reject:
+                    announce_delegation_rejected(
+                        key, (_cat.title if _cat else key), _dkey, _reject,
+                    )
+                    _delegation.register_request(
+                        key, (_cat.title if _cat else key),
+                        _dkey, (_dcat.title if _dcat else _dkey), _subtask,
+                    )
+                    _delegation.mark_result(_dkey, "rejected", _reject)
+                    continue
+                announce_delegation_started(
+                    _dkey, (_dcat.title if _dcat else _dkey), key, _subtask,
+                )
+                _delegation.register_request(
+                    key, (_cat.title if _cat else key),
+                    _dkey, (_dcat.title if _dcat else _dkey), _subtask,
+                )
+                try:
+                    from ai.agent_reflection import ReflectionContext, reflecting_call
+                    _del_ctx = ReflectionContext()
+                    _del_title = _dcat.title if _dcat else _dkey
+                    def _del_call(_dsub: str = _subtask) -> str:
+                        _del_bot = self._get_bot(_dkey)
+                        _del_bot.history = []
+                        return _del_bot.chat(
+                            f"مهمة فرعية مفوّضة إليك من زميلك:\n{_dsub.strip()}",
+                            force_web=force_web, source="delegation",
+                        )
+                    _del_resp = reflecting_call(_dkey, _del_title, _del_call, _del_ctx)
+                    agent_replies[key] = (
+                        strip_delegation_tags(_raw or "")
+                        + (f"\n\n[نتيجة التفويض من {_del_title}]\n{_del_resp}" if _del_resp else "")
+                    )
+                    announce_delegation_resolved(
+                        _dkey, _del_title, key, "done",
+                        f"اكتملت المهمة الفرعية المفوّضة (≈{len(_del_resp or '')} حرف)",
+                    )
+                    _delegation.mark_result(_dkey, "resolved")
+                except Exception as _del_err:
+                    announce_delegation_resolved(
+                        _dkey, (_dcat.title if _dcat else _dkey), key, "fail",
+                        f"فشلت المهمة الفرعية المفوّضة: {_del_err}",
+                    )
+                    _delegation.mark_result(_dkey, "rejected", str(_del_err)[:150])
+
         emit_event("synthesis_started", agent_id="master_orchestrator", title="المدير الموحّد", status="running", detail="توليف ردود الفريق")
-        final = self._synthesize(user_input, {k: v for k, v in agent_replies.items() if k not in failed})
+        final = self._synthesize(user_input, {k: strip_delegation_tags(v or "") for k, v in agent_replies.items() if k not in failed})
         emit_event("synthesis_done", agent_id="master_orchestrator", title="المدير الموحّد", status="done", detail="اكتملت الإجابة الموحّدة")
 
         # وصف الشفافية للمستخدم (بدون إضعاف دور المدير)

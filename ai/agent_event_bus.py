@@ -13,8 +13,8 @@ from typing import Any, Dict, List, Optional
 EVENTS_KEY = "_nsm_agent_live_events"
 AGENT_STARTS_KEY = "_nsm_agent_live_starts"
 MAX_EVENTS = 250
-START_EVENTS = {"agent_started", "task_started", "synthesis_started"}
-END_EVENTS = {"agent_done", "agent_error", "task_done", "task_error", "synthesis_done"}
+START_EVENTS = {"agent_started", "task_started", "synthesis_started", "delegation_started"}
+END_EVENTS = {"agent_done", "agent_error", "task_done", "task_error", "synthesis_done", "delegation_resolved"}
 
 
 def _state():
