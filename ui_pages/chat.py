@@ -1111,6 +1111,20 @@ def render_chat():
                 _ctx_summary = build_chat_memory_summary(st.session_state.nsm_messages[:-1])
                 if _ctx_summary:
                     history_msgs.insert(0, {"role": "system", "content": _ctx_summary})
+                # 🆕 التفكير متعدد الخطوات: للسؤال المعقد (مقارنة، سببية،
+                # عملية، تعداد، تحليل، مركّب...) يُبنى مخطط تفكيك حتمي بلا
+                # API ويُلحق كرسالة نظام توجه النموذج للإجابة وفق خطة
+                # مرتبة من خطوات — يُحقن قبل النافذة الأخيرة والنموذج هو
+                # من ينفذ الإجابة فعليًا. أي فشل أو سؤال بسيط يعيد السلوك
+                # الأصلي (سؤال واحد → رد واحد).
+                _msr_plan = None
+                if _MSR_OK:
+                    try:
+                        _msr_plan = _plan_system_prompt(text.strip()) if _plan_system_prompt else None
+                    except Exception:
+                        _msr_plan = None
+                if _msr_plan:
+                    history_msgs.insert(0, {"role": "system", "content": _msr_plan})
                 api_messages = history_msgs + [{"role": "user", "content": user_content}]
 
                 _af_params  = dict(_AF_NEUTRAL_PARAMS) if _AUTOTUNE_OK else {"temperature": 0.7, "top_p": 0.9}
@@ -1145,6 +1159,8 @@ def render_chat():
                 _response  = full_response
                 _ctx_tag   = ""
                 _src_badge = f"🌐 OpenRouter · {_or_model_p.split('/')[-1]}"
+                if _msr_plan:
+                    _src_badge += " · 🧭 مخططة عبر خطوات"
 
             elif _selected_node == "nsm:agent" and _agent and _agent.available:
                 # ── مسار NSM Agent — Streaming ──────────────────────────

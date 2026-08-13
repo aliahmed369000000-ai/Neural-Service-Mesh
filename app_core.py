@@ -338,7 +338,22 @@ try:
     _LTM_OK = True
 except Exception:
     _LTM_OK = False
-
+# ── 🆕 التفكير متعدد الخطوات (Multi-Step Reasoning) ─────────────────────
+# يصنّف الأسئلة المعقدة حتميًا (بلا API)، يفكّكها إلى خطة خطوات مرتبة
+# (مقارنة / سببية / عملية / تعداد / تحليل)، ويجمّعها في رد مخطط يُلحق
+# كرسالة نظام قبل النافذة الأخيرة لمسار OpenRouter. كل فشل يُبتلَع
+# بصمت — الأسئلة البسيطة وبقية المسارات لا تتأثر إطلاقًا.
+try:
+    from ai.multi_step_reasoner import (
+        plan_system_prompt as _plan_system_prompt,
+        is_complex_question as _is_complex_question,
+    )
+    _MSR_OK = True
+except Exception:
+    _MSR_OK = False
+    _plan_system_prompt = None
+    def _is_complex_question(t: str) -> bool:  # احتياطي آمن
+        return False
 # ── طبقة فحص أمان أولى (regex، بدون تكلفة API) ────────────────────────────
 try:
     from ai.harm_classifier import classify_prompt as _classify_harm, get_domain_label as _harm_label
