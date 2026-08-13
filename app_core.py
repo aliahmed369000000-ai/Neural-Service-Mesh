@@ -382,6 +382,15 @@ except Exception:
             return fn
         return decorator
 
+# ── وحدة التحميل الكسول والفهارس المحوسبة لـ CKG ─────────────────────────
+try:
+    from ai.ckg_loader import get_indices, search_ckg_query as _ckg_search_via_indices
+    _CKG_LOADER_OK = True
+except Exception:
+    _CKG_LOADER_OK = False
+    def _ckg_search_via_indices(q_norm):
+        return {"concept_data": None, "ckg_related": [], "ckg_relations": [], "found": False}
+
 try:
     from ai.episodic_memory import EpisodicMemoryEngine
     _EPISODIC_OK = True
@@ -2646,6 +2655,14 @@ def load_ckg_stats() -> Dict[str, int]:
     """أعداد سريعة عن الشبكة المعرفية (مفاهيم/علاقات/جذور/عناقيد) لعرضها
     كبطاقات إحصاء بالصفحة الرئيسية. تُشتق من load_ckg() المخزَّن مسبقاً
     بالكاش — لا نحمّل أو نحتفظ بنسخة إضافية من الملف (~40MB) بالذاكرة."""
+    # عبر الفهارس المحوسبة (أسرع: لا مرّة على 7,300+ مفهوم).
+    if _CKG_LOADER_OK:
+        try:
+            _s = get_indices().summary()
+            if _s:
+                return _s
+        except Exception:
+            pass
     data = load_ckg()
     concepts_map = (data or {}).get("concepts") or {}
     if not concepts_map:
@@ -3158,8 +3175,12 @@ def find_related_concepts_from_roots(query: str, roots: Dict, top_k: int = 8) ->
 
 
 @measure_latency("search_knowledge")
-def search_knowledge(query: str) -> Dict:
-    """البحث الشامل في قاعدة المعرفة."""
+def search_knowledge(query: str, force_legacy_ckg: bool = False) -> Dict:
+    """البحث الشامل في قاعدة المعرفة.
+
+    `force_legacy_ckg` (اختباري) يُعطّل الفهارس المحوسبة ويرجع للسلوك القديم
+    — يُستخدم في اختبارات التوافق للتأكد من أن الفهارس تعطي نفس النتائج.
+    """
     roots   = load_arabic_roots()
     ayat    = load_all_quran_ayat()
     ckg     = load_ckg()
@@ -3173,24 +3194,33 @@ def search_knowledge(query: str) -> Dict:
     ckg_related  = []
     ckg_relations = []
 
-    # بحث مباشر
-    for cname, cdata in concepts_db.items():
-        if normalize_arabic(cname) == q_norm or q_norm in normalize_arabic(cname):
-            concept_data = {"name": cname, **cdata}
-            break
+    # بحث مباشر — عبر الفهارس المحوسبة (ai.ckg_loader) إن كانت متاحة،
+    # وإلا فبالسلوك القديم (حلقات normalize على كل المفاهيم والعلاقات).
+    if _CKG_LOADER_OK and not force_legacy_ckg:
+        try:
+            _idx_result = _ckg_search_via_indices(q_norm)
+            concept_data = _idx_result.get("concept_data")
+            ckg_related = list(_idx_result.get("ckg_related") or [])
+            ckg_relations = list(_idx_result.get("ckg_relations") or [])
+        except Exception:
+            concept_data, ckg_related, ckg_relations = None, [], []
+    if not _CKG_LOADER_OK or force_legacy_ckg:
+        for cname, cdata in concepts_db.items():
+            if normalize_arabic(cname) == q_norm or q_norm in normalize_arabic(cname):
+                concept_data = {"name": cname, **cdata}
+                break
 
-    if concept_data:
-        cname = concept_data["name"]
-        for rel_key, rel_data in relations_db.items():
-            src = rel_data.get("source", "")
-            tgt = rel_data.get("target", "")
-            if normalize_arabic(src) == q_norm:
-                ckg_related.append(tgt)
-                ckg_relations.append({"target": tgt, "type": rel_data.get("relation_type", ""), "weight": rel_data.get("weight", 0)})
-            elif normalize_arabic(tgt) == q_norm:
-                ckg_related.append(src)
-                ckg_relations.append({"target": src, "type": rel_data.get("relation_type", ""), "weight": rel_data.get("weight", 0)})
-
+        if concept_data:
+            cname = concept_data["name"]
+            for rel_key, rel_data in relations_db.items():
+                src = rel_data.get("source", "")
+                tgt = rel_data.get("target", "")
+                if normalize_arabic(src) == q_norm:
+                    ckg_related.append(tgt)
+                    ckg_relations.append({"target": tgt, "type": rel_data.get("relation_type", ""), "weight": rel_data.get("weight", 0)})
+                elif normalize_arabic(tgt) == q_norm:
+                    ckg_related.append(src)
+                    ckg_relations.append({"target": src, "type": rel_data.get("relation_type", ""), "weight": rel_data.get("weight", 0)})
     # ── 2. البحث في الجذور العربية ───────────────────────────────────────
     root_matches = find_related_concepts_from_roots(query, roots, top_k=8)
 
