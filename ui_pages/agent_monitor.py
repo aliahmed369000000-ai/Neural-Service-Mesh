@@ -117,6 +117,7 @@ def render_agent_monitor() -> None:
     render_shared_analytics_panel()
     render_adaptive_swarm_panel()
     render_failure_learning_panel()
+    render_custom_alerts_panel()
     render_swarm_runner_panel()
 
 
@@ -705,6 +706,176 @@ def render_swarm_runner_panel() -> None:
             route = (msg.get("meta") or {}).get("route_method", "")
             if route:
                 st.caption(f"طريقة التوجيه: {route}")
+
+
+def render_custom_alerts_panel() -> None:
+    """لوحة التنبيهات القابلة للتخصيص: عتبات يمكن للمستخدم تعديلها وحفظها
+    في ملف التكوين، مع سجل تنبيهات مركزي وسجل مباشر من آخر الأحداث."""
+    from ai.alert_config import (
+        DEFAULT_RULES,
+        check_alert_rules,
+        clear_alert_log,
+        get_alert_log,
+        get_rules,
+        reset_rules_cache,
+        save_custom_rules,
+    )
+
+    events = get_events(120)
+    render_section_header(
+        "التنبيهات المخصصة",
+        "عتبات تنبيه يحددها المستخدم مع سجل تنبيهات مركزي",
+        live=True,
+    )
+    rules = get_rules()
+
+    # ── تعديل العتبات وحفظها ────────────────────────────────────────────
+    with st.expander("⚙️ تخصيص عتبات التنبيه", expanded=False):
+        st.caption(
+            "عدّل أي قيمة ثم اضغط حفظ — تُخزَّن في config/alert_rules.json "
+            "وتُطبق فورًا على التحليل القادم. يُمنع تكرار نفس التنبيه خلال "
+            "فترة التبريد الخاصة به."
+        )
+        _ed_cols = st.columns(2)
+        slow_rule = rules.get("slow_response", DEFAULT_RULES["slow_response"])
+        with _ed_cols[0]:
+            ed_slow = st.number_input(
+                "عتبة البطء (مللي ثانية)",
+                min_value=1000, max_value=300000, step=1000,
+                value=int(float(slow_rule.get("threshold_ms", 12000))),
+                key="alert_ed_slow_ms",
+            )
+            ed_slow_cd = st.number_input(
+                "تبريد البطء (دقيقة)",
+                min_value=0, max_value=240, step=5,
+                value=int(slow_rule.get("cooldown_minutes", 15)),
+                key="alert_ed_slow_cd",
+            )
+        rep_rule = rules.get("repeated_errors", DEFAULT_RULES["repeated_errors"])
+        with _ed_cols[1]:
+            ed_rep = st.number_input(
+                "أخطاء متتالية للتنبيه",
+                min_value=1, max_value=20, step=1,
+                value=int(rep_rule.get("min_errors", 2)),
+                key="alert_ed_rep",
+            )
+            ed_rep_cd = st.number_input(
+                "تبريد الأخطاء المتكررة (دقيقة)",
+                min_value=0, max_value=240, step=5,
+                value=int(rep_rule.get("cooldown_minutes", 30)),
+                key="alert_ed_rep_cd",
+            )
+        swarm_rule = rules.get(
+            "swarm_failure_rate", DEFAULT_RULES["swarm_failure_rate"]
+        )
+        deg_rule = rules.get("agent_degraded", DEFAULT_RULES["agent_degraded"])
+        _ed_cols2 = st.columns(3)
+        with _ed_cols2[0]:
+            ed_swarm = st.slider(
+                "نسبة فشل السرب (التنبيه)",
+                min_value=0.1, max_value=1.0, step=0.05,
+                value=float(swarm_rule.get("failure_rate_threshold", 0.5)),
+                key="alert_ed_swarm",
+            )
+            ed_swarm_tasks = st.number_input(
+                "حد أدنى لمهام السرب",
+                min_value=1, max_value=20, step=1,
+                value=int(swarm_rule.get("min_tasks", 3)),
+                key="alert_ed_swarm_tasks",
+            )
+        with _ed_cols2[1]:
+            ed_deg = st.slider(
+                "نسبة فشل الوكيل (تدهور)",
+                min_value=0.1, max_value=1.0, step=0.05,
+                value=float(deg_rule.get("failure_rate_threshold", 0.75)),
+                key="alert_ed_deg",
+            )
+            ed_deg_tasks = st.number_input(
+                "حد أدنى لمهام الوكيل",
+                min_value=1, max_value=20, step=1,
+                value=int(deg_rule.get("min_tasks", 2)),
+                key="alert_ed_deg_tasks",
+            )
+        cong_rule = rules.get("congestion", DEFAULT_RULES["congestion"])
+        with _ed_cols2[2]:
+            ed_cong = st.number_input(
+                "ازدحام (وكلاء متزامنون)",
+                min_value=1, max_value=12, step=1,
+                value=int(cong_rule.get("max_concurrent", 3)),
+                key="alert_ed_cong",
+            )
+            ed_cong_cd = st.number_input(
+                "تبريد الازدحام (دقيقة)",
+                min_value=0, max_value=240, step=5,
+                value=int(cong_rule.get("cooldown_minutes", 10)),
+                key="alert_ed_cong_cd",
+            )
+        if st.button("💾 حفظ تخصيص التنبيهات", use_container_width=True):
+            custom = {
+                "slow_response": {
+                    "threshold_ms": ed_slow, "cooldown_minutes": ed_slow_cd
+                },
+                "repeated_errors": {
+                    "min_errors": ed_rep, "cooldown_minutes": ed_rep_cd
+                },
+                "swarm_failure_rate": {
+                    "failure_rate_threshold": ed_swarm,
+                    "min_tasks": ed_swarm_tasks,
+                },
+                "agent_degraded": {
+                    "failure_rate_threshold": ed_deg, "min_tasks": ed_deg_tasks
+                },
+                "congestion": {
+                    "max_concurrent": ed_cong, "cooldown_minutes": ed_cong_cd
+                },
+            }
+            if save_custom_rules(custom):
+                reset_rules_cache()
+                st.success("حُفظ التخصيص وأُعيد تحميل القواعد — ستنعكس على التحليل التالي.")
+            else:
+                st.error("تعذر حفظ التخصيص — تبقى القيم الافتراضية سارية.")
+
+    # ── التحليل بالقواعد المخصصة ────────────────────────────────────────
+    excluded = []
+    try:
+        from ai.adaptive_swarm import excluded_agents as _excluded_agents
+        from ai.agent_event_bus import current_agent_states as _states
+        _states_map = _states(events)
+        _agent_ids = list(_states_map.keys())
+        excluded = _excluded_agents(_agent_ids, events)
+    except Exception:
+        pass
+    custom_alerts = check_alert_rules(events, excluded_agents=excluded)
+    if custom_alerts:
+        render_alert_cards(custom_alerts, limit=6)
+    else:
+        st.caption(
+            "لا توجد تنبيهات مخصصة حاليًا — جميع الأحداث داخل العتبات "
+            "المحددة. عدّل العتبات أعلاه لتناسب سلوك شبكتك."
+        )
+
+    # ── سجل التنبيهات المركزي ───────────────────────────────────────────
+    st.markdown("**🗂 سجل التنبيهات**")
+    _log_rows = [
+        {
+            "#": a.get("log_id", ""),
+            "الوقت": a.get("timestamp", "—"),
+            "الشدة": a.get("severity", ""),
+            "القاعدة": a.get("rule", ""),
+            "العنوان": a.get("title", "")[:70],
+            "التفاصيل": a.get("detail", "")[:100],
+        }
+        for a in get_alert_log(20)
+    ]
+    if not _log_rows:
+        st.caption("السجل فارغ — تُضاف التنبيهات هنا عند تجاوز القواعد المخصصة.")
+    else:
+        st.dataframe(_log_rows, use_container_width=True, hide_index=True)
+        _log_cols = st.columns([1, 4])
+        with _log_cols[0]:
+            if st.button("🧹 مسح السجل", key="alert_log_clear"):
+                clear_alert_log()
+                st.rerun()
 
 
 def render_agent_live_trace(target) -> None:

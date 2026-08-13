@@ -1,0 +1,59 @@
+{
+  "failure_direct": {
+    "enabled": true,
+    "severity": "critical",
+    "cooldown_minutes": 5,
+    "message": "فشل مباشر لدى الوكيل: {agent}",
+    "detail_tpl": "{detail}"
+  },
+  "slow_response": {
+    "enabled": true,
+    "severity": "warning",
+    "cooldown_minutes": 15,
+    "threshold_ms": 12000.0,
+    "critical_multiplier": 2.0,
+    "message": "استجابة بطيئة من الوكيل: {agent} ({ms:.0f} مللي ثانية)",
+    "detail_tpl": "زمن التنفيذ {ms:.0f} مللي ثانية (العتبة {threshold:.0f})"
+  },
+  "repeated_errors": {
+    "enabled": true,
+    "severity": "critical",
+    "cooldown_minutes": 30,
+    "min_errors": 2,
+    "message": "تكرار أخطاء لدى الوكيل: {agent} ({count} خطأ)",
+    "detail_tpl": "سُجلت {count} أخطاء متتالية في السجل الحالي"
+  },
+  "swarm_failure_rate": {
+    "enabled": true,
+    "severity": "critical",
+    "cooldown_minutes": 20,
+    "failure_rate_threshold": 0.5,
+    "min_tasks": 3,
+    "message": "نسبة فشل السرب مرتفعة ({rate:.0%})",
+    "detail_tpl": "{failures} فشل من {tasks} مهمة في آخر {window} حدثًا"
+  },
+  "agent_degraded": {
+    "enabled": true,
+    "severity": "warning",
+    "cooldown_minutes": 60,
+    "failure_rate_threshold": 0.75,
+    "min_tasks": 2,
+    "message": "أداء وكيل حرج: {agent} (نسبة فشل {rate:.0%})",
+    "detail_tpl": "فشل في {failures} من {tasks} مهمة — مرشح للاستبعاد"
+  },
+  "swarm_excluded": {
+    "enabled": true,
+    "severity": "info",
+    "cooldown_minutes": 60,
+    "message": "استبعاد مؤقت للوكيل: {agent}",
+    "detail_tpl": "استُبعد من التوجيه بسبب تكرار الفشل"
+  },
+  "congestion": {
+    "enabled": true,
+    "severity": "warning",
+    "cooldown_minutes": 10,
+    "max_concurrent": 3,
+    "message": "ازدحام في التنفيذ ({count} وكلاء متزامنين)",
+    "detail_tpl": "{count} وكلاء في حالة تشغيل متزامنة"
+  }
+}
