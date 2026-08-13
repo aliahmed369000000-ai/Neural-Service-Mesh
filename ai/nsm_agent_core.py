@@ -1784,6 +1784,10 @@ class NSMAgent:
         self.available = self._check_available()
         self.history: List[Dict] = []
         self._llm_fallback = None
+        # مدير الفريق يُبنى عند الحاجة فقط حتى لا يضيف كلفة أو استيرادات
+        # جانبية إلى الطلبات المباشرة والمهام البرمجية.
+        self._team_orchestrator = None
+        self.last_orchestration: Dict[str, Any] = {}
 
     @staticmethod
     def _check_available() -> bool:
@@ -1817,6 +1821,18 @@ class NSMAgent:
                 self._autonomous_core = None
                 return None
         return core
+
+    def _run_team_orchestrator(self, user_input: str) -> Tuple[str, Dict[str, Any]]:
+        """يفوض الطلب المركب إلى المدير الموحّد والوكلاء المتخصصين."""
+        from ai.agent_orchestrator import delegate_to_unified_chat
+        if self._team_orchestrator is None:
+            from ai.agent_categories import UnifiedAgentChat
+            self._team_orchestrator = UnifiedAgentChat()
+        response, meta = delegate_to_unified_chat(
+            user_input, orchestrator=self._team_orchestrator
+        )
+        self.last_orchestration = meta
+        return response, meta
 
     # ══════════════════════════════════════════════════════════════
     # 🆕 v3: run_stream — Streaming Generator
@@ -1882,6 +1898,26 @@ class NSMAgent:
                 return
         except ImportError:
             pass  # إذا لم يكن الـ Planner موجوداً، تابع عادياً
+
+        # مدير الفريق: الطلبات التحليلية المركبة تُفكك إلى أدوار متخصصة
+        # ثم تُولّف في جواب واحد. المهام البرمجية لا تمر هنا حتى تبقى أدوات
+        # NSMAgent التنفيذية (read/edit/test/git) هي المسؤولة عنها.
+        try:
+            from ai.agent_orchestrator import should_delegate_request
+            if should_delegate_request(user_input):
+                yield "🎯 *أفكك المهمة وأجمع وجهات نظر الوكلاء المتخصصين...*\n\n"
+                team_response, team_meta = self._run_team_orchestrator(user_input)
+                if team_response:
+                    delegated = team_meta.get("delegated_agents", [])
+                    if delegated:
+                        names = ", ".join(str(item) for item in delegated)
+                        yield f"📌 *الفريق المكلّف: {names}*\n\n"
+                    yield team_response
+                    return
+        except Exception:
+            # فشل طبقة التفويض لا يمنع المساعد العام من متابعة الطلب عبر
+            # مسار LLM المركزي؛ العزل هنا مقصود لضمان التوافق الرجعي.
+            self.last_orchestration = {"route_method": "fallback_after_orchestration_error"}
 
         # بناء رسائل API (+ تلميح خبرات مشابهة إن وُجدت)
         system   = _build_system_prompt()
