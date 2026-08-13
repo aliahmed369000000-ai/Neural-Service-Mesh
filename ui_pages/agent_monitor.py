@@ -121,6 +121,7 @@ def render_agent_monitor() -> None:
     render_auto_actions_panel()
     render_perf_panel()
     render_swarm_runner_panel()
+    render_long_horizon_panel()
 
 
 DELEGATION_EVENTS = ("delegation_requested", "delegation_rejected", "delegation_started", "delegation_resolved")
@@ -1077,3 +1078,107 @@ def render_agent_live_trace(target) -> None:
             title = row.get("title") or row.get("agent_id") or "المدير"
             detail = f" — {row['detail']}" if row.get("detail") else ""
             st.caption(f"`{row.get('timestamp', '—')}` {status} **{title}** · {row.get('event_type', 'event')}{detail}")
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 🆕 لوحة المهام طويلة الأمد (Long-Horizon Tasks)
+# ─────────────────────────────────────────────────────────────────────
+
+def render_long_horizon_panel() -> None:
+    """لوحة المهام طويلة الأمد: إرسال طلب بحثي معمّق من اللوحة مباشرة،
+    تتبع التقدم اللحظي وسجل الخطوات، وإيقاف مهمة قيد التنفيذ.
+    الوصول للإنترنت متوفر لكل المهام (بحث + جلب صفحات + ملفات + بايثون محمي)."""
+    try:
+        from app_core import _LHT_OK, _get_lht_manager
+        if not _LHT_OK:
+            return
+        _lht_mgr = _get_lht_manager()
+    except Exception:
+        return
+
+    render_section_header(
+        "المهام طويلة الأمد",
+        "مهام بحثية معمّقة متعددة الخطوات مع وصول الإنترنت — تعمل في الخلفية",
+        live=True,
+    )
+
+    # ── إرسال مهمة جديدة ────────────────────────────────
+    col_goal, col_btn = st.columns([5, 1])
+    with col_goal:
+        goal = st.text_input(
+            "🌐 أرسل مهمة بحثية طويلة",
+            placeholder=(
+                "مثال: أعدّ تقرير بحث معمّقًا عن تطورات الذكاء الاصطناعي في 2026 "
+                "وإسهاماته في تعليم اللغة العربية"
+            ),
+            key="lht_goal_input",
+        )
+    with col_btn:
+        submit_btn = st.button("📤 تنفيذ", key="lht_submit_btn", use_container_width=True)
+
+    if submit_btn and (goal or "").strip():
+        task = _lht_mgr.submit((goal or "").strip())
+        if task is None:
+            st.warning(
+                "طابور المهام ممتلئ (٢ متزامنة / ٦ معلقة كحد أقصى) — "
+                "أعد المحاولة بعد اكتمال مهمة أو أوقف واحدة أدناه."
+            )
+        else:
+            st.session_state.setdefault("_lht_last_task", task.task_id)
+            st.success(f"🧵 بدأت المهمة «{task.title}» (`{task.task_id}`)")
+        st.rerun()
+
+    # ── قائمة المهام ────────────────────────────────────
+    try:
+        tasks = _lht_mgr.list_tasks(limit=25)
+    except Exception:
+        st.caption("تعذّر تحميل المهام.")
+        return
+
+    if not tasks:
+        st.caption(
+            "لا توجد مهام طويلة بعد. اكتب موضوعًا أعلاه وادفع «📤 تنفيذ» — "
+            "المهمة تُنفَّذ في الخلفية عبر خطوات: خطة ← بحث إنترنت ← جلب "
+            "صفحات ← تجميع الأدلة ← تقرير نهائي مع المصادر."
+        )
+        return
+
+    for t in tasks:
+        status = t.get("status", "pending")
+        prog = t.get("progress", 0.0) or 0.0
+        label = {
+            "running": "⚙️ قيد التنفيذ",
+            "done": "✅ اكتملت",
+            "failed": "❌ فشلت",
+            "cancelled": "⛔ أُلغيت",
+            "pending": "⏳ في الطابور",
+        }.get(status, status)
+        with st.expander(
+            f"{label} · {t.get('title', '—')} (`{t.get('task_id', '')}`) "
+            f"· {int(prog * 100)}% · خطوات: {len(t.get('steps', []))}",
+            expanded=(status == "running"),
+        ):
+            if status == "running":
+                st.progress(prog)
+            _steps = t.get("steps", []) or []
+            _cols = st.columns([4, 1])
+            with _cols[0]:
+                for s in _steps:
+                    icon = {"running": "🔄", "done": "✅", "failed": "❌"}.get(
+                        s.get("status", ""), "⬜")
+                    st.caption(
+                        f"{icon} {s.get('tool', '—')} — "
+                        f"{(s.get('result') or '').strip()[:140].replace(chr(10), ' ')}"
+                    )
+            with _cols[1]:
+                if status == "running":
+                    if st.button("⛔ أوقف", key=f"lht_stop_{t.get('task_id')}"):
+                        _lht_mgr.cancel(t.get("task_id"))
+                        st.rerun()
+            _meta = t.get("metadata") or {}
+            st.caption(
+                f"طلبات ويب: {_meta.get('fetch_count', 0)} · ملفّات كتبها الوكيل: "
+                f"{_meta.get('files_written', 0)} · مدة: {t.get('elapsed_s', '—')}"
+            )
+            if status == "done" and t.get("result"):
+                st.markdown(t["result"][:3000])

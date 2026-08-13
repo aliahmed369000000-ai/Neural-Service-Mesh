@@ -354,6 +354,21 @@ except Exception:
     _plan_system_prompt = None
     def _is_complex_question(t: str) -> bool:  # احتياطي آمن
         return False
+# ── 🆕 المهام طويلة الأمد (Long-Horizon Tasks) ──────────────────────
+# منظّم مهام بحثية/تقريرية متعددة الخطوات يعمل في خيوط خلفية (daemon)
+# مع أدوات إنترنت آمنة (بحث متعدد المصادر / جلب صفحات / كتابة وقراءة
+# ملفات في مساحة معزولة / بايثون محمي)، وخطة حتمية بلا API وحوكمة
+# صارمة (سقف خطوات/طلبات/مدة/ملفات). كل فشل يُبتلَع بصمت — المحادثة
+# وبقية المسارات لا تتأثر إطلاقًا.
+try:
+    from ai.long_horizon_tasks import (
+        get_long_horizon_manager as _get_lht_manager,
+    )
+    _LHT_OK = True
+except Exception:
+    _LHT_OK = False
+    def _get_lht_manager():  # احتياطي آمن
+        raise RuntimeError("وحدة المهام طويلة الأمد غير متاحة")
 # ── طبقة فحص أمان أولى (regex، بدون تكلفة API) ────────────────────────────
 try:
     from ai.harm_classifier import classify_prompt as _classify_harm, get_domain_label as _harm_label

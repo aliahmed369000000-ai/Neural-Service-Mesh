@@ -1889,6 +1889,33 @@ class NSMAgent:
         except Exception:
             format_experience_hints = None  # type: ignore
 
+        # 🆕 المهام طويلة الأمد — بحث معمّق/تقرير عبر خطوات مع وصول الإنترنت
+        # (يُكتشف حتميًا دون API). يسبق Planning Engine لأن بناء التطبيقات
+        # يذهب للمنسّق بينما المهام البحثية/التقريرية لها منظّمها الخاص.
+        try:
+            from ai.long_horizon_tasks import get_long_horizon_manager as _ghm
+            _lht_goal = _ghm().detect_long_horizon_request(user_input)
+            if _lht_goal is not None:
+                _lht_mgr = _ghm()
+                _lht_task = _lht_mgr.submit(_lht_goal)
+                if _lht_task is None:
+                    yield (
+                        "⚠️ طابور المهام الطويلة ممتلئ (٢ متزامنة / "
+                        "٦ معلقة كحد أقصى) — راقب لوحة «المهام طويلة "
+                        "الأمد» في «📡 مراقبة حيّة» وأعد المحاولة بعد "
+                        "اكتمال واحدة.\n"
+                    )
+                else:
+                    yield (
+                        f"🧵 **قبلت المهمة:** {_lht_task.title}\n\n"
+                        f"المعرّف: `{_lht_task.task_id}` — تنفَّذ في الخلفية "
+                        f"عبر خطوات (خطة ← بحث ← جلب صفحات ← تجميع ← "
+                        f"تقرير)، وستجد التقدم اللحظي وسجل الخطوات في لوحة "
+                        f"«المهام طويلة الأمد» داخل تبويب «📡 مراقبة حيّة».\n"
+                    )
+                return
+        except Exception:
+            pass  # أي فشل يعيد السلوك الأصلي
         # 🆕 Planning Engine — يكشف طلبات بناء التطبيقات
         try:
             from ai.nsm_planner import NSMPlanner, is_planning_request
