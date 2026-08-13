@@ -473,7 +473,9 @@ def render_adaptive_swarm_panel() -> None:
         agent_profiles,
         exclude_agents,
         excluded_agents,
+        format_recency,
         rank_agents,
+        decay_curve_summary,
     )
 
     events = get_events(100)
@@ -506,9 +508,10 @@ def render_adaptive_swarm_panel() -> None:
             rows.append({
                 "الوكيل": key,
                 "الدرجة": f"{p.get('score', 0):.0f}/100",
-                "المهام": int(p.get("tasks", 0) or 0),
+                "المهام": int(p.get('tasks', 0) or 0),
                 "نسبة النجاح": f"{p.get('success_rate', 0) * 100:.0f}%",
                 "متوسط المدة (ms)": round(p.get("avg_duration_ms", 0) or 0, 0),
+                "عمر السجل": format_recency(p.get("recency_age_s", 0) or 0),
             })
         st.dataframe(rows, use_container_width=True, hide_index=True)
         try:
@@ -538,6 +541,18 @@ def render_adaptive_swarm_panel() -> None:
     adaptive = [e for e in get_events(100) if e.get("event_type") in _ADAPTIVE_EVENTS]
     if adaptive:
         st.caption(f"آخر تحديث من السرب المتعلم: {adaptive[-1].get('event_type', '')} — {adaptive[-1].get('timestamp', '')}")
+    try:
+        curve = decay_curve_summary()
+        weights_note = " · ".join(
+            f"@{h:.0f}h={w:.2f}" for h, w in curve.get("weights_by_age_hours", {}).items())
+        activity_hint = " (توهين نشاطي مفعّل)" if curve.get("activity_decay") else ""
+        st.caption(
+            f"صيغة التوهين النشطة: {curve.get('mode', 'exponential')}"
+            f" — نصف العمر {curve.get('half_life_hours', 48):.0f} ساعة"
+            f"{activity_hint} · الأوزان النموذجية: {weights_note}"
+        )
+    except Exception:
+        pass
 
 
 def render_agent_live_trace(target) -> None:

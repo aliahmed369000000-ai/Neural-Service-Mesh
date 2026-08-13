@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "half_life_hours": 48,
+  "decay_mode": "exponential",
+  "strict_window_hours": 72,
+  "recent_boost_hours": 24,
+  "recent_boost_factor": 2.0,
+  "activity_decay": false,
+  "activity_window_hours": 72,
+  "activity_half_life_hours": 24,
+  "bucket_minutes": 0,
+  "notes_ar": "تكوين التوهين الزمني للسرب المتعلم: half_life_hours نصف عمر الوزن الزمني، decay_mode أحد (exponential|window|sigmoid|blended)، recent_boost يعزز أحداث آخر recent_boost_hours بعامل recent_boost_factor، activity_decay يجعل سجلات الوكيل النشط تفقد وزنها أسرع، bucket_minutes يجمع الأحداث في شرائح زمنية لتخفيف التكلفة وتثبيت النتائج.",
+  "updated_at": "2026-08-13T10:15:00+00:00"
+}
