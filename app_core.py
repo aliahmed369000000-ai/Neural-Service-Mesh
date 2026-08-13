@@ -21,6 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Tuple
 from urllib.parse import quote
+import sys
 
 import streamlit as st
 
@@ -410,6 +411,69 @@ except Exception:
     _TEM_OK = False
     def _get_experience_log():  # احتياطي آمن
         raise RuntimeError("سجل الخبرات الجماعية غير متاح")
+# ── 🆕 نظام المكافآت الذاتية للأدوار (Role Rewards / XP) ─────────────────
+# نقاط خبرة ومهارات متراكمة لكل دور عبر المهام: نجاح يرفع نقاطَه ويرقّي
+# مهاراتَه، والفشل يخفض. الوحدات الأخرى تستحضر «أفضل دور لمهارة» فيوجَّه
+# اختيار الأدوار تلقائيًا نحو الأنسب — سجل دائم عبر الجلسات.
+try:
+    from ai.role_rewards import (
+        get_role_rewards as _get_role_rewards,
+    )
+    _RR_OK = True
+except Exception:
+    _RR_OK = False
+    def _get_role_rewards():  # احتياطي آمن
+        raise RuntimeError("نظام المكافآت غير متاح")
+# ── 🆕 التخطيط الجماعي الاستباقي (Proactive Planning) ────────────────────
+# قبل أي مهمة جديدة: يستحضر ما يشبهها من سجل الخبرات ويجمع أفضل الأدوار
+# للمهارات المطلوبة، فيخرج خطة استباقية (توصيات + محاذير) تُحقن في
+# المهمة التعاونية والمهام الطويلة قبل تخصيص الأدوار أو بناء الخطة.
+try:
+    import ai.proactive_planning as _pp_mod  # noqa: F401
+    from ai.proactive_planning import (
+        build_pre_task_plan as _build_pre_task_plan,
+        plan_summary_text as _plan_summary_text,
+    )
+    _pp_mod._set_app_core(sys.modules[__name__])
+    _PP_OK = True
+except Exception:
+    _PP_OK = False
+    def _build_pre_task_plan(*a, **kw):  # احتياطي آمن
+        raise RuntimeError("التخطيط الاستباقي غير متاح")
+    def _plan_summary_text(*a, **kw):  # احتياطي آمن
+        return ""
+# ── 🆕 الأهداف المؤسسية طويلة الأمد (Long-Term Goals) ────────────────────
+# سجل أهداف استراتيجية يتراكم عبر كل الجلسات: التقدم يتجدد عند كل إنجاز
+# يُسجَّل ضدها، وخيط خلفية يقيّم الأهداف النشطة دوريًا (كل 24 ساعة)
+# فيرفع تقدمها تلقائيًا بوتيرة بطيئة — مراقبة مسار المشروع نحو الذكاء العام.
+try:
+    from ai.long_term_goals import (
+        get_long_term_goals as _get_long_term_goals,
+        ltg_stats as _ltg_stats,
+        ltg_list as _ltg_list,
+        ltg_evaluate as _ltg_evaluate,
+    )
+    _LTG_OK = True
+    # المقيّم الدوري لا يبدأ تلقائيًا عند التحميل (قد يتعارض مع ضبط فترة
+    # الاختبار) — يمكن تشغيله صراحة عبر _start_ltg_evaluator من الواجهة.
+    def _start_ltg_evaluator(period_hours=None):
+        try:
+            _ltg = _get_long_term_goals()
+            if period_hours:
+                _ltg.set_eval_period(period_hours * 3600)
+            _ltg.start_evaluator()
+        except Exception:
+            pass
+except Exception:
+    _LTG_OK = False
+    def _get_long_term_goals():  # احتياطي آمن
+        raise RuntimeError("الأهداف طويلة الأمد غير متاحة")
+    def _ltg_stats():
+        return {"active": 0, "achieved": 0, "avg_progress": 0.0}
+    def _ltg_list(*a, **kw):
+        return []
+    def _ltg_evaluate():
+        return {"evaluated_at": 0.0, "goals_updated": 0}
 # ── طبقة فحص أمان أولى (regex، بدون تكلفة API) ────────────────────────────
 try:
     from ai.harm_classifier import classify_prompt as _classify_harm, get_domain_label as _harm_label

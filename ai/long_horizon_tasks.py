@@ -536,6 +536,26 @@ def _get_experience_log():  # type: ignore[misc]
         raise RuntimeError("سجل الخبرات الجماعية غير متاح")
     return fn()
 
+# ── 🆕 نظام المكافآت الذاتية للأدوار (Role Rewards / XP) ──
+def _RR_OK() -> bool:  # type: ignore[misc]
+    return bool(getattr(_app_core_for_lht, "_RR_OK", False))
+
+def _get_role_rewards():  # type: ignore[misc]
+    fn = getattr(_app_core_for_lht, "_get_role_rewards", None)
+    if fn is None:
+        raise RuntimeError("نظام المكافآت غير متاح")
+    return fn()
+
+# ── 🆕 التخطيط الجماعي الاستباقي (Proactive Planning) ──
+def _PP_OK() -> bool:  # type: ignore[misc]
+    return bool(getattr(_app_core_for_lht, "_PP_OK", False))
+
+def _build_pre_task_plan(goal, skills=None, top_k=3):  # type: ignore[misc]
+    fn = getattr(_app_core_for_lht, "_build_pre_task_plan", None)
+    if fn is None:
+        raise RuntimeError("التخطيط الاستباقي غير متاح")
+    return fn(goal, skills=skills, top_k=top_k)
+
 _MIN_CONFIDENCE = 0.3
 
 
@@ -622,6 +642,12 @@ def _run_task(manager: "LongHorizonTaskManager", task: LHTask) -> None:
                 task.error = "الخطاف المزيف فشل"
             # ── استحضار الخبرات الجماعية قبل الخروج (كل المسارات) ──
             _advise_task_from_experience(task)
+            # ── 🆕 خطة استباقية لكل المسارات (مزيف/حتمي) ──
+            try:
+                if _PP_OK():
+                    task._pp_plan = _build_pre_task_plan(task.goal)
+            except Exception:
+                pass
             task.status = STATUS_DONE if ok else STATUS_FAILED
             _record_lht_experience(manager, task, [])
             return
@@ -631,6 +657,12 @@ def _run_task(manager: "LongHorizonTaskManager", task: LHTask) -> None:
             task.plan = _build_plan(task.goal)
         # ── استحضار الخبرات الجماعية المتراكمة وتعديل عناوين الخطة ──
         _advise_task_from_experience(task)
+        # ── 🆕 خطة استباقية من سجل الخبرات قبل التنفيذ ──
+        try:
+            if _PP_OK():
+                task._pp_plan = _build_pre_task_plan(task.goal)
+        except Exception:
+            pass
         if not task.plan:
             task.status = STATUS_FAILED
             task.error = "لا يمكن بناء خطة من هدف فارغ"
@@ -794,6 +826,18 @@ def _run_task(manager: "LongHorizonTaskManager", task: LHTask) -> None:
                 _record_lht_experience(manager, task, results_context)
         except Exception:
             pass
+        # ── 🆕 نقاط خبرة لوكيل المهام الطويلة (يُسجَّل بعد الخبرات) ──
+        try:
+            if _RR_OK():
+                done_n = sum(1 for s in task.steps if s.get("status") == "done")
+                outcome = ("success" if done_n else "failure")
+                _get_role_rewards().award(
+                    role="long_horizon",
+                    outcome=outcome,
+                    role_type="long_horizon",
+                    task_id=task.task_id)
+        except Exception:
+            pass
         if task.status == STATUS_RUNNING:
             task.status = STATUS_DONE
         manager._emit(
@@ -818,6 +862,16 @@ def _run_task(manager: "LongHorizonTaskManager", task: LHTask) -> None:
                     confidence=0.5,
                     task_id=task.task_id,
                     agents="long_horizon")
+        except Exception:
+            pass
+        # ── 🆕 نقاط خبرة لفشل وكيل المهام الطويلة ──
+        try:
+            if _RR_OK():
+                _get_role_rewards().award(
+                    role="long_horizon",
+                    outcome="failure",
+                    role_type="long_horizon",
+                    task_id=task.task_id)
         except Exception:
             pass
         manager._emit("lht_failed", task, detail=f"فشل المهمة: {task.error}")

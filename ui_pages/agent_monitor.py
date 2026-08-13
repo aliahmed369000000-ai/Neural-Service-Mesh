@@ -125,6 +125,7 @@ def render_agent_monitor() -> None:
     render_collaborative_panel()
     render_skb_panel()
     render_tem_panel()
+    render_ltg_panel()
 
 
 DELEGATION_EVENTS = ("delegation_requested", "delegation_rejected", "delegation_started", "delegation_resolved")
@@ -1436,3 +1437,54 @@ def render_tem_panel() -> None:
     else:
         st.caption("لا خبرات متراكمة بعد — ستظهر هنا نتائج المهام "
                    "التعاونية وطويلة الأمد حال انتهائها.")
+
+
+def render_ltg_panel() -> None:
+    """لوحة الأهداف المؤسسية طويلة الأمد: الأهداف الجارية وتقدمها وتقييمها الدوري."""
+    try:
+        from app_core import _LTG_OK, _get_long_term_goals
+    except Exception:
+        return
+    st.markdown("---")
+    st.subheader("🎯 الأهداف طويلة الأمد")
+    st.caption(
+        "أهداف مؤسسية تتراكم عبر الجلسات: يقيّم النظام دوريًا (كل 24 ساعة) "
+        "تقدم كل هدف تلقائيًا من سجل الخبرات المتراكمة، ويمكن تعديل التقدم "
+        "يدويًا أو أرشفة الأهداف المحققة."
+    )
+    if not _LTG_OK:
+        st.info("وحدة الأهداف طويلة الأمد غير متاحة — الفريق يعمل دون "
+                "أهداف مؤسسية (سلوك سابق).")
+        return
+    try:
+        _ltg = _get_long_term_goals()
+        _goals = _ltg.list_goals()
+        _stats = _ltg.stats()
+    except Exception:
+        st.info("تعذر فتح سجل الأهداف — العمل مستمر دون أهداف مؤسسية.")
+        return
+    # بطاقات الإحصاءات
+    _cards = st.columns(3)
+    _cards[0].metric("🎯 أهداف نشطة",
+                     _stats.get("active", 0))
+    _cards[1].metric("✓ محققة",
+                     _stats.get("achieved", 0))
+    _cards[2].metric("📊 متوسط التقدم %",
+                     round(100 * (_stats.get("avg_progress", 0) or 0)))
+    if _goals:
+        with st.expander("📋 قائمة الأهداف", expanded=False):
+            _rows = []
+            for g in _goals:
+                _st_mark = {"achieved": "✓", "archived": "📦"}.get(
+                    g.get("status", ""), "🎯")
+                _rows.append({
+                    "الهدف": (g.get("title") or "—")[:60],
+                    "الحالة": f"{_st_mark} {g.get('status', '')}",
+                    "التقدم %": round(100 * (g.get("progress", 0) or 0)),
+                    "الفئة": g.get("category", "—"),
+                    "المحدث": (g.get("updated_at") or "—")[:19],
+                })
+            st.dataframe(_rows, use_container_width=True, hide_index=True)
+    else:
+        st.caption("لا أهداف مؤسسية بعد — الفريق لا يعمل على أهداف "
+                   "تراكمية. تبدأ هنا عند أول مهمة طويلة الأمد.")

@@ -100,3 +100,4 @@ artifacts/model_training/*.pkl
 
 # جلسات الدفاتر التفاعلية المُولَّدة وقت التشغيل (لا تُرفع — بيانات المستخدم المحلية)
 artifacts/model_training/notebooks/
+logs/

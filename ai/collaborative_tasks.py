@@ -411,12 +411,29 @@ def _get_skb():  # type: ignore[misc]
 
 def _TEM_OK() -> bool:  # type: ignore[misc]
     return bool(getattr(_app_core_for_tem, "_TEM_OK", False))
-
 def _get_experience_log():  # type: ignore[misc]
     fn = getattr(_app_core_for_tem, "_get_experience_log", None)
     if fn is None:
         raise RuntimeError("سجل الخبرات الجماعية غير متاح")
     return fn()
+
+# ── 🆕 نظام المكافآت الذاتية للأدوار (Role Rewards / XP) ──
+def _RR_OK() -> bool:  # type: ignore[misc]
+    return bool(getattr(_app_core_for_tem, "_RR_OK", False))
+def _get_role_rewards():  # type: ignore[misc]
+    fn = getattr(_app_core_for_tem, "_get_role_rewards", None)
+    if fn is None:
+        raise RuntimeError("نظام المكافآت غير متاح")
+    return fn()
+
+# ── 🆕 التخطيط الجماعي الاستباقي (Proactive Planning) ──
+def _PP_OK() -> bool:  # type: ignore[misc]
+    return bool(getattr(_app_core_for_tem, "_PP_OK", False))
+def _build_pre_task_plan(goal, skills=None, top_k=3):  # type: ignore[misc]
+    fn = getattr(_app_core_for_tem, "_build_pre_task_plan", None)
+    if fn is None:
+        raise RuntimeError("التخطيط الاستباقي غير متاح")
+    return fn(goal, skills=skills, top_k=top_k)
 
 def _share_role_finding(task_id: str, role_name: str, text: str,
                         tool: str, source: str, index: int) -> None:
@@ -581,6 +598,17 @@ def _record_role_experience(task: CollaborativeTask, role: CollabRole,
             confidence=0.6 if outcome == "success" else 0.5,
             task_id=task.task_id,
             agents=role.name)
+        # 🆕 نقاط خبرة ومهارات متراكمة للدور (نجاح يرفع — فشل يخفض)
+        if _RR_OK():
+            try:
+                _get_role_rewards().award(
+                    role=role.name,
+                    outcome=outcome,
+                    role_type="collaborative",
+                    task_id=task.task_id,
+                    skills=[tool] if tool else None)
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -702,6 +730,10 @@ def _run_collaborative_task(manager: "CollaborativeManager",
     with contextlib.suppress(Exception):
         if _TEM_OK():
             _advise_roles_from_experience(task)
+    # ── 🆕 خطة استباقية جماعية قبل تخصيص الأدوار ──
+    with contextlib.suppress(Exception):
+        if _PP_OK():
+            task._pp_plan = _build_pre_task_plan(task.goal)
     try:
         task.assign_roles()
         # مساحات معزولة لكل دور
