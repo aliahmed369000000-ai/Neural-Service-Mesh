@@ -29,6 +29,46 @@ def _badge(ok: bool, yes: str = "جاهز", no: str = "غير جاهز") -> str:
     return f"{'🟢' if ok else '🔴'} {yes if ok else no}"
 
 
+def _latest_job_banner():
+    """شريط حالة مختصر لآخر مهمة تدريب — يظهر أعلى الواجهة بغض النظر عن
+    التبويب المفتوح، بدل ما المستخدم يضطر يفتح تبويب «المهام» ليكتشف
+    إن كانت آخر مهمة نجحت أو لسه شغّالة."""
+    from ai.notebook_lab_service import list_jobs, refresh_job_status
+
+    jobs = list_jobs(1)
+    if not jobs:
+        return
+    j = jobs[0]
+    job_id = j.get("job_id")
+    ok = j.get("ok")
+    title = j.get("preset_key") or j.get("type") or "مهمة"
+    icon = "✅" if ok else ("❌" if ok is False else "🟡")
+
+    with st.container():
+        b1, b2, b3 = st.columns([4, 1.3, 1.3])
+        with b1:
+            st.markdown(
+                f"{icon} **آخر مهمة:** {title} · `{job_id or '—'}` · "
+                f"{(j.get('recorded_at') or '')[:19]}"
+            )
+        with b2:
+            if job_id and st.button("🔄 تحديث الحالة", key="banner_job_refresh", use_container_width=True):
+                st.session_state["lab_job_status"] = refresh_job_status(job_id)
+                st.rerun()
+        with b3:
+            if j.get("kernel_url"):
+                st.markdown(f"[↗ فتح على Kaggle]({j['kernel_url']})")
+
+        live = st.session_state.get("lab_job_status")
+        if live and live.get("job_id") == job_id:
+            status_text = live.get("status") or live.get("cli_status") or live.get("raw")
+            if status_text:
+                st.caption(f"الحالة الحية: {str(status_text)[:200]}")
+        if j.get("error"):
+            st.caption(f"⚠️ {str(j['error'])[:200]}")
+        st.markdown("---")
+
+
 def render_training_notebook():
     """مختبر تدريب متكامل — سهل الاستخدام واحترافي."""
     st.markdown(
@@ -62,6 +102,8 @@ def render_training_notebook():
         list_jobs,
         refresh_job_status,
     )
+
+    _latest_job_banner()
 
     # ── تبويبات فرعية للمختبر ──
     lab_tabs = st.tabs(
@@ -344,7 +386,30 @@ def render_training_notebook():
     with lab_tabs[3]:
         st.markdown("### صحة البيئة")
         h = lab_health()
-        st.json(h)
+        checks = h.get("checks", {})
+        kaggle_creds = checks.get("kaggle_creds") or {}
+        local_gpu = checks.get("local_gpu") or {}
+        api_keys = checks.get("api_keys") or {}
+
+        e1, e2, e3 = st.columns(3)
+        with e1:
+            st.markdown(_badge(bool(kaggle_creds.get("ready")), "بيانات اعتماد Kaggle", "ناقصة"))
+            st.markdown(_badge(bool(checks.get("kaggle_cli")), "Kaggle CLI", "غير مثبّت"))
+        with e2:
+            st.markdown(
+                f"{'🟢' if local_gpu.get('cuda') else '🟡'} GPU محلي: "
+                f"{local_gpu.get('name') or ('نعم' if local_gpu.get('cuda') else 'لا يوجد')}"
+            )
+            st.markdown(_badge(h.get("ready_to_launch_kaggle", False), "جاهز للإطلاق على Kaggle", "أضف Secrets"))
+        with e3:
+            ready_keys = [k for k, v in api_keys.items() if isinstance(v, dict) and v.get("ready")]
+            st.markdown(f"🔑 مزوّدون بمفاتيح جاهزة: **{len(ready_keys)}** / {len(api_keys) or 0}")
+            if ready_keys:
+                st.caption(", ".join(ready_keys))
+
+        with st.expander("📄 تفاصيل خام (JSON)"):
+            st.json(h)
+
         st.markdown("### 📊 مراقبة GPU")
         if st.button("التقاط لقطة GPU الآن", key="gpu_snap_btn"):
             try:
