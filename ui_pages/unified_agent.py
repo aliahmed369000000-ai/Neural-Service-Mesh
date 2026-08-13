@@ -181,6 +181,14 @@ def render_unified_agent():
         height=0,
     )
 
+    # ── وضع الخلفية ────────────────────────────────────────────────
+    if "_bg_task_manager_ok" not in st.session_state:
+        try:
+            from ai.background_tasks import get_background_task_manager  # noqa: F401
+            st.session_state["_bg_task_manager_ok"] = True
+        except Exception:
+            st.session_state["_bg_task_manager_ok"] = False
+
     # ── إدخال ──
     c1, c2 = st.columns([5, 1.15], gap="small")
     with c1:
@@ -194,6 +202,15 @@ def render_unified_agent():
     with c2:
         send = st.button("➤ إرسال", key="unified_agent_send", use_container_width=True, type="primary")
 
+    bg_toggle = False
+    if st.session_state.get("_bg_task_manager_ok"):
+        bg_toggle = st.toggle(
+            "⚡ تنفيذ في الخلفية",
+            value=False,
+            key="unified_agent_bg",
+            help="المهمة تُنفَّذ دون حجز الواجهة، وستظهر النتيجة فور اكتمالها مع إشعار في لوحة المراقبة.",
+        )
+
     def _process(text: str, add_user: bool = True) -> None:
         text = (text or "").strip()
         if not text:
@@ -202,9 +219,16 @@ def render_unified_agent():
             st.session_state.unified_agent_msgs.append(
                 ("user", text, "", datetime.now().strftime("%H:%M"))
             )
+        if bg_toggle and st.session_state.get("_bg_task_manager_ok"):
+            _submit_background(text)
+            return
         with st.spinner("⟳ أفكر وأختار الفريق المناسب…"):
             response, meta = bot.chat(text, force_web=web_toggle)
-        # شارة المدير الموحّد أو وكيل المشروع تأخذ الأولوية
+        _append_bot(response, meta)
+        st.session_state.unified_agent_count += 1
+        st.rerun()
+
+    def _append_bot(response: str, meta: dict) -> None:
         route = meta.get("route_method") or ""
         if route == "project_bridge" or meta.get("category_key") == "master_orchestrator":
             badge = meta.get("provider_badge") or f"{meta.get('category_emoji', '🎯')} {meta.get('category_title', 'المدير الموحّد')}"
@@ -216,8 +240,61 @@ def render_unified_agent():
         st.session_state.unified_agent_msgs.append(
             ("bot", response, badge, datetime.now().strftime("%H:%M"))
         )
+
+    def _submit_background(text: str) -> None:
+        from ai.background_tasks import get_background_task_manager
+        mgr = get_background_task_manager()
+        existing = st.session_state.setdefault("_ua_bg_done", [])
+        seen_ids = st.session_state.setdefault("_ua_bg_seen", set())
+        task = mgr.submit(text)
+        if task is None:
+            st.session_state.unified_agent_msgs.append(
+                ("bot", "⚠️ تعذّر جدولة المهمة: الطابور ممتلئ أو المهمة قيد التنفيذ بالفعل. جرّب بعد لحظات.",
+                 "🕐 مدير الخلفية", datetime.now().strftime("%H:%M"))
+            )
+            st.session_state.unified_agent_count += 1
+            st.rerun()
+            return
+        st.session_state.unified_agent_msgs.append(
+            ("bot", f"⏳ تسلمتها — مهمة خلفية ({task.task_id}) تُنفَّذ الآن دون حجز الواجهة. ستظهر النتيجة هنا وعند اكتمالها.",
+             "🕐 مدير الخلفية", datetime.now().strftime("%H:%M"))
+        )
         st.session_state.unified_agent_count += 1
+        # متابعة غير معرقلة: فحص دوري لاكتشاف اكتمال المهمة ثم عرض النتيجة.
+        st.session_state.setdefault("_ua_bg_running", []).append(task.task_id)
         st.rerun()
+
+    # ── متابعة المهام الخلفية قيد التنفيذ ─────────────────────────
+    if st.session_state.get("_bg_task_manager_ok"):
+        from ai.background_tasks import get_background_task_manager as _bg_mgr
+        _bg_running = st.session_state.setdefault("_ua_bg_running", [])
+        if _bg_running:
+            _mgr = _bg_mgr()
+            for _tid in list(_bg_running):
+                _rec = _mgr.get(_tid)
+                if _rec is None:
+                    _bg_running.remove(_tid)
+                    continue
+                if _rec.status in ("done", "failed"):
+                    _bg_running.remove(_tid)
+                    if _rec.status == "done":
+                        _append_bot(_rec.response, {"category_emoji": "🕐", "category_title": "نتيجة الخلفية"})
+                        st.session_state.unified_agent_count += 1
+                        # إشعار إنجاز في لوحة المراقبة
+                        try:
+                            from ai.agent_event_bus import emit_event
+                            emit_event("bg_task_done", "background", _rec.title, "done",
+                                       f"اكتملت المهمة {_rec.task_id}: {_rec.title}",
+                                       {"task_id": _rec.task_id, "duration_ms": _rec.duration_ms})
+                        except Exception:
+                            pass
+                    else:
+                        st.session_state.unified_agent_msgs.append(
+                            ("bot", f"⚠️ فشلت مهمة الخلفية {_rec.task_id}: {_rec.error[:120]}",
+                             "🕐 نتيجة الخلفية", datetime.now().strftime("%H:%M"))
+                        )
+                        st.session_state.unified_agent_count += 1
+                    st.rerun()
 
     if send and user_input.strip():
         _process(user_input)

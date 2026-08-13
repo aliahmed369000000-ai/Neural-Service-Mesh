@@ -113,6 +113,7 @@ def render_agent_monitor() -> None:
     render_delegation_chain(events)
     render_debate_journal(events)
     render_collective_memory_panel()
+    render_background_tasks_panel()
 
 
 DELEGATION_EVENTS = ("delegation_requested", "delegation_rejected", "delegation_started", "delegation_resolved")
@@ -322,6 +323,59 @@ def render_collective_memory_panel() -> None:
                 f'<span style="color:var(--text-muted)">{bar}</span> '
                 f"({hits} نجاح / {fails} فشل) — {str(lesson.get('lesson', ''))[:110]}"
             )
+
+
+def render_background_tasks_panel() -> None:
+    """لوحة مهام الخلفية: تتبع المهام الثقيلة دون حجز الواجهة."""
+    try:
+        from ai.background_tasks import get_background_task_manager
+        _btm = get_background_task_manager()
+        status = _btm.status()
+        tasks = _btm.list_tasks(limit=30)
+    except Exception:
+        st.caption("مهام الخلفية غير متاحة حاليًا (فشل التحميل).")
+        return
+    total = status.get("total", 0)
+    render_section_header(
+        "مهام الخلفية",
+        f"{total} مهمة — تُنفَّذ دون حجز الواجهة مع إشعارات فورية",
+        live=True,
+    )
+    if total == 0:
+        st.caption(
+            "لا توجد مهام خلفية بعد. فعّل «⚡ تنفيذ في الخلفية» في الوكيل الموحّد "
+            "لتنفيذ المهام الثقيلة دون انتظار."
+        )
+        return
+    _scols = st.columns(4)
+    with _scols[0]:
+        st.metric("✅ مكتملة", status.get("done", 0))
+    with _scols[1]:
+        st.metric("⏳ قيد التنفيذ", status.get("running", 0))
+    with _scols[2]:
+        st.metric("📥 معلقة", status.get("pending", 0))
+    with _scols[3]:
+        st.metric("❌ فشلت", status.get("failed", 0))
+    if not tasks:
+        return
+    table = []
+    for t in tasks:
+        table.append({
+            "المهمة": t.get("title", ""),
+            "المعرف": t.get("task_id", ""),
+            "المسار": t.get("route", "—") or "—",
+            "الحالة": {
+                "pending": "📥 معلقة",
+                "running": "⏳ قيد التنفيذ",
+                "done": "✅ اكتملت",
+                "failed": "❌ فشلت",
+                "cancelled": "🚫 أُلغيت",
+            }.get(t.get("status"), t.get("status", "—")),
+            "بدأت": t.get("started_at", t.get("created_at", "—")),
+            "انتهت": t.get("finished_at", "—") or "—",
+            "المدة (ms)": round(t.get("duration_ms", 0) or 0, 1),
+        })
+    st.dataframe(table, use_container_width=True, hide_index=True)
 
 
 def render_agent_live_trace(target) -> None:
