@@ -369,6 +369,45 @@ def render_chat():
                     f'<div style="color:var(--text-muted);margin-top:0.5rem">{_ms_safe}</div>'
                     f'</details>'
                 )
+        # 🆕 شريط الذكريات المستحضرة (الذاكرة الطويلة): عند وجود آخر سؤال
+        # مستخدم، تستحضر المنصة ذكرياتها ذات الصلة (أسئلة سابقة مشابهة،
+        # تصويبات، ودروس جماعية متعلقة) وتعرضها كسياق مساعد فوق المحادثة —
+        # لا يُحذف شيء ولا يتضخم التوكنز؛ عرض مساعد فقط.
+        _last_user_question = ""
+        for _lm in reversed(st.session_state.nsm_messages):
+            if _lm[0] == "user" and _lm[1].strip():
+                _last_user_question = _lm[1].strip()
+                break
+        if (not _search_active and _LTM_OK and _last_user_question):
+            try:
+                _ltm = _get_ltm()
+                _ltm_memories = _ltm.recall(_last_user_question)
+                if _ltm_memories:
+                    import html as _ltm_html
+                    _mtype_icons = {"question": "💬", "correction": "✏️", "preference": "⚙️", "lesson": "📖", "fact": "🔖"}
+                    _mem_parts = []
+                    for _mem in _ltm_memories:
+                        _m_icon = _mtype_icons.get(_mem["memory_type"], "🧠")
+                        _m_safe = _ltm_html.escape(_mem["topic"] or "").replace("\n", "<br>")
+                        _i_safe = _ltm_html.escape((_mem["insight"] or "")[:95]).replace("\n", "<br>")
+                        _mem_parts.append(
+                            f'<div style="margin:0.2rem 0;padding:0.25rem 0">'
+                            f'<span>{_m_icon} <b>{_m_safe}</b></span> '
+                            f'<span style="color:var(--text-muted)">{_i_safe}</span></div>'
+                        )
+                    _mems_joined = "".join(_mem_parts)
+                    html += (
+                        f'<div style="margin:0.3rem 0.7rem 0.5rem;padding:0.7rem 0.9rem;'
+                        f'border-radius:12px;border:1px solid var(--emerald-soft, #34d39940);'
+                        f'background:linear-gradient(135deg, var(--gold-tint, #fef3c740) 0%, var(--bg-soft) 100%);'
+                        f'font-size:0.8rem;line-height:1.7">'
+                        f'<details><summary style="cursor:pointer;font-weight:700;color:var(--emerald, #34d399)">'
+                        f'🧠 ذكريات مستحضرة — استرجعت {len(_ltm_memories)} ذاكرة ذات صلة</summary>'
+                        f'<div style="color:var(--text);margin-top:0.5rem">{_mems_joined}</div>'
+                        f'</details></div>'
+                    )
+            except Exception:
+                pass  # فشل استحضار الذكريات لا يمنع عرض المحادثة إطلاقًا
         if _chat_search_query:
             _q_low = _chat_search_query.lower()
             _all_msgs_indexed = [
@@ -1200,6 +1239,24 @@ def render_chat():
         # ════════════════════════════════════════════════════════════════════
         _source_key = "chat_openrouter" if "openrouter" in _final_node else "chat_nsm_agent"
         _record_chat_episode(text.strip(), _response, source=_source_key)
+        # 🆕 التعلّم الذاتي المستمر: كل رد ناجح يُسجَّل ذكرى في الذاكرة
+        # الطويلة (سؤال + جوابه) — عند تكرار السؤال تستحضره المنصة لاحقًا.
+        # تصويب/رفض الرد (جودة منخفضة) يسجّل ذكرى weak لتجنّب نفس النمط.
+        # + مزامنة نادرة (كل 25 ردًا ناجحًا) لأفضل الدروس الجماعية + تآكل.
+        if _LTM_OK and _attempt_success:
+            try:
+                _ltm_turns = st.session_state.setdefault("_ltm_turns", 0) + 1
+                st.session_state["_ltm_turns"] = _ltm_turns
+                _ltm_learn = _get_ltm()
+                _q_type = "correction" if (_quality.get("score") or 0.0) < 0.4 else "question"
+                _ltm_learn.learn(text.strip(), _response[:400], memory_type=_q_type,
+                                 quality=0.8 if _q_type == "correction" else 0.5)
+                if _ltm_turns % 25 == 0:
+                    _ltm_learn.ingest_collective_lessons()
+                if _ltm_turns % 10 == 0:
+                    _ltm_learn.decay()
+            except Exception:
+                pass  # فشل التعلّم لا يمنع عرض الرد إطلاقًا
         st.session_state.nsm_messages.append((
             "nsm", _response, _ctx_tag, _src_badge, datetime.now().strftime("%H:%M")
         ))

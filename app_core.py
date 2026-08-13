@@ -329,6 +329,15 @@ try:
     _TTS_OK = True
 except Exception:
     _TTS_OK = False
+# ── 🆕 الذاكرة الذاتية المستمرة (Long-Term Memory) ───────────────────────
+# طبقة تعلّم تلقائي من المحادثات: تسجّل الأسئلة والأجوبة كذكريات طويلة
+# المدى، وتستحضر الذكريات ذات الصلة عند الإجابة لاحقًا. كل فشل يُبتلَع
+# بتحذير مسجّل فقط — لا يؤثر على تدفق المحادثة إطلاقًا.
+try:
+    from ai.long_term_memory import get_ltm as _get_ltm, reset_ltm_cache as _reset_ltm_cache
+    _LTM_OK = True
+except Exception:
+    _LTM_OK = False
 
 # ── طبقة فحص أمان أولى (regex، بدون تكلفة API) ────────────────────────────
 try:
