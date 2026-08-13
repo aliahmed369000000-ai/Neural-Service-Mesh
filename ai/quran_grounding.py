@@ -4,7 +4,7 @@ Quran Grounding — تثبيت الاستشهادات القرآنية على ا
 المشكلة التي يعالجها هذا الملف:
   مسار المحادثة الحالي (nsm_chat.py) يرسل سؤال المستخدم مباشرة إلى
   LLM خارجي دون أي تحقق، رغم وجود نص القرآن الكريم الكامل والموثّق
-  (knowledge_sources/quran/data/quran.json) داخل المشروع نفسه.
+  داخل المشروع نفسه (knowledge/quran_chunk_*.json).
   نتيجة ذلك: أي آية يذكرها النموذج تأتي من "ذاكرته" الاحتمالية، بلا
   ضمان لمطابقتها للنص الفعلي — وهذا خطر مباشر في تطبيق متخصص
   بالمعرفة الإسلامية (نص مُختلَق أو معزوّ لسورة/رقم خطأ).
@@ -15,8 +15,16 @@ Quran Grounding — تثبيت الاستشهادات القرآنية على ا
   الأصلي الموثوق (trust_score=1.0) ليُرفَق مع سؤال المستخدم قبل
   إرساله للـLLM، مع تعليمات صريحة بعدم تجاوز هذا النص عند الاقتباس.
 
-  لا يُعدَّل نص القرآن نفسه أبداً هنا (قراءة فقط) — يتوافق مع مبدأ
-  المشروع القائم في quran_source.py (raw_content محمي/read-only).
+  لا يُعدَّل نص القرآن نفسه أبداً هنا (قراءة فقط).
+
+  ملاحظة (13 أغسطس 2026): كان هذا الملف يقرأ من
+  knowledge_sources/quran/data/quran.json، وهو مسار لا يزال LFS
+  pointer stub (132 بايت نصي، ليس JSON فعلي) — ما يعني أن _load()
+  كانت تفشل بصمت (except Exception: return) وميزة التحقق من الآيات
+  كانت معطّلة كلياً منذ إضافتها دون أي خطأ ظاهر. تم تحويل المصدر إلى
+  knowledge/quran_chunk_*.json، وهي بيانات القرآن الكاملة الفعلية
+  المسحوبة والمستثناة من LFS أصلاً (نفس المصدر المستخدم في
+  ui_pages/quran.py وknowledge/knowledge_store.py).
 """
 from __future__ import annotations
 
@@ -25,7 +33,13 @@ import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-_DATA_PATH = Path(__file__).parent.parent / "knowledge_sources" / "quran" / "data" / "quran.json"
+_KNOWLEDGE_DIR = Path(__file__).parent.parent / "knowledge"
+_INDEX_PATH = _KNOWLEDGE_DIR / "quran_index.json"
+
+try:
+    from knowledge_sources.quran.quran_source import _SURAH_NAMES
+except Exception:
+    _SURAH_NAMES: List[str] = []
 
 # عربي-هندي أرقام → لدعم "٢:٢٥٥" بجانب "2:255"
 _ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
@@ -64,21 +78,22 @@ class QuranIndex:
         return cls._instance
 
     def _load(self) -> None:
-        if not _DATA_PATH.exists():
+        if not _INDEX_PATH.exists():
             return
         try:
-            with open(_DATA_PATH, encoding="utf-8") as f:
-                data = json.load(f)
+            with open(_INDEX_PATH, encoding="utf-8") as f:
+                index = json.load(f)
         except Exception:
             return
 
-        raw_surahs = data.get("surahs", [])
-        surahs = raw_surahs.get("references", []) if isinstance(raw_surahs, dict) else raw_surahs
-
-        for surah in surahs:
-            num = surah.get("number", 0)
-            name = (surah.get("name") or "").strip()
-            self.surahs.append(surah)
+        surah_index = index.get("surah_index", {})
+        for num_str in surah_index:
+            try:
+                num = int(num_str)
+            except (TypeError, ValueError):
+                continue
+            name = _SURAH_NAMES[num] if 0 < num < len(_SURAH_NAMES) else ""
+            self.surahs.append({"number": num, "name": name})
             if name:
                 # الاسم كما ورد، وبصيغة مبسّطة بلا "سُورَةُ" وبلا تشكيل
                 self.surah_name_to_num[_strip_tashkeel(name)] = num
@@ -86,13 +101,23 @@ class QuranIndex:
                 if simple:
                     self.surah_name_to_num[simple] = num
 
-            for ayah in surah.get("ayahs", []):
+        total_chunks = index.get("total_chunks", 0)
+        for i in range(total_chunks):
+            chunk_path = _KNOWLEDGE_DIR / f"quran_chunk_{i:04d}.json"
+            try:
+                with open(chunk_path, encoding="utf-8") as f:
+                    chunk = json.load(f)
+            except Exception:
+                continue
+            for ayah in chunk:
                 text = (ayah.get("text") or "").strip()
                 if not text:
                     continue
-                self._flat.append((num, ayah.get("numberInSurah", 0), text, _strip_tashkeel(text)))
+                self._flat.append(
+                    (ayah.get("surah", 0), ayah.get("ayah", 0), text, _strip_tashkeel(text))
+                )
 
-        self._loaded = True
+        self._loaded = bool(self._flat)
 
     @property
     def available(self) -> bool:
@@ -100,12 +125,12 @@ class QuranIndex:
 
     def get_ayah(self, surah_num: int, ayah_num: int) -> Optional[Tuple[str, str]]:
         """يُرجع (النص، اسم السورة) لآية محددة، أو None إن لم توجد."""
-        for surah in self.surahs:
-            if surah.get("number") == surah_num:
-                surah_name = (surah.get("name") or "").strip()
-                for ayah in surah.get("ayahs", []):
-                    if ayah.get("numberInSurah") == ayah_num:
-                        return (ayah.get("text") or "").strip(), surah_name
+        for s, a, text, _norm in self._flat:
+            if s == surah_num and a == ayah_num:
+                surah_name = next(
+                    (sd.get("name", "") for sd in self.surahs if sd.get("number") == surah_num), ""
+                )
+                return text, surah_name
         return None
 
     def search_keywords(self, query: str, max_results: int = 3, min_word_len: int = 4) -> List[Tuple[int, int, str]]:
