@@ -481,7 +481,7 @@ def render_adaptive_swarm_panel() -> None:
         rank_agents,
         decay_curve_summary,
     )
-
+    from ai.agent_event_bus import get_events
     events = get_events(100)
     profiles = agent_profiles(events)
     render_section_header(
@@ -720,7 +720,6 @@ def render_auto_actions_panel() -> None:
         clear_action_log,
         execute_auto_actions,
         get_action_log,
-        get_alert_log,
         load_actions_config,
         save_actions_config,
     )
@@ -845,7 +844,7 @@ def render_custom_alerts_panel() -> None:
         reset_rules_cache,
         save_custom_rules,
     )
-
+    from ai.agent_event_bus import get_events
     events = get_events(120)
     render_section_header(
         "التنبيهات المخصصة",
