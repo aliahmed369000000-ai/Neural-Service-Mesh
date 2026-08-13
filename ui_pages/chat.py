@@ -329,6 +329,46 @@ def render_chat():
         # نحافظ على الفهرس الحقيقي _i (وليس فهرس القائمة المقصوصة) كي تبقى
         # مطابقة _nsm_audio_cache (المُخزَّن بفهرس الرسالة الأصلي) صحيحة.
         _all_msgs_indexed = list(enumerate(st.session_state.nsm_messages))
+        # 🆕 حد عرض متدرج (virtual scroll): سقف محفوظ في session_state
+        # (`_nsm_chat_display_ceil`) يبدأ من NSM_CHAT_DISPLAY_LIMIT ويرتفع
+        # تدريجياً عبر زر «⬆️ تحميل المزيد» — ويعاد ضبطه إلى
+        # NSM_CHAT_DISPLAY_LIMIT عند وصول رسالة جديدة. البحث والمفضلة
+        # يتجاوزانه تلقائياً لعرض كل النتائج.
+        _search_active = bool(_chat_search_query) or st.session_state.get("nsm_filter_bookmarks", False)
+        _display_ceil = st.session_state.setdefault(
+            "_nsm_chat_display_ceil", NSM_CHAT_DISPLAY_LIMIT
+        )
+        _active_limit = (
+            len(_all_msgs_indexed)
+            if _search_active
+            else min(_display_ceil, len(_all_msgs_indexed))
+        )
+        _hidden_count = max(0, len(_all_msgs_indexed) - _active_limit)
+        # 🆕 الملخص السياقي التلقائي: عند تجاوز NSM_CHAT_MEMORY_SUMMARY_AT
+        # رسالة، يُعرض ملخص مضغوط للجزء الأقدم فوق السجل (السجل الكامل
+        # يبقى محفوظاً في nsm_messages وchat_history_store بلا حذف).
+        # الملخص مخزّن في session_state فلا يعاد بناؤه في كل rerun.
+        if (not _search_active
+                and len(st.session_state.nsm_messages) > NSM_CHAT_MEMORY_SUMMARY_AT):
+            _memory_summary = st.session_state.get("_nsm_chat_summary", "")
+            if not _memory_summary:
+                _memory_summary = build_chat_memory_summary(st.session_state.nsm_messages)
+                st.session_state["_nsm_chat_summary"] = _memory_summary
+            if _memory_summary:
+                import html as _html_esc_ms
+                _ms_safe = _html_esc_ms.escape(_memory_summary).replace("\n", "<br>")
+                html += (
+                    f'<details style="margin:0.3rem 0.7rem 0.5rem;padding:0.7rem 0.9rem;'
+                    f'border-radius:12px;border:1px solid var(--gold-soft);'
+                    f'background:linear-gradient(135deg, var(--gold-tint) 0%, var(--bg-soft) 100%);'
+                    f'font-size:0.8rem;line-height:1.7">'
+                    f'<summary style="cursor:pointer;font-weight:700;color:var(--text);">'
+                    f'📜 ملخص ذاكرة المحادثة الطويلة '
+                    f'(أقدم {len(st.session_state.nsm_messages) - NSM_CHAT_MEMORY_SUMMARY_AT} رسالة '
+                    f'— الملخص التلقائي، النص الكامل محفوظ)</summary>'
+                    f'<div style="color:var(--text-muted);margin-top:0.5rem">{_ms_safe}</div>'
+                    f'</details>'
+                )
         if _chat_search_query:
             _q_low = _chat_search_query.lower()
             _all_msgs_indexed = [
@@ -420,6 +460,24 @@ def render_chat():
         <button class="scroll-bottom-btn" id="nsm-scroll-bottom" title="النزول لآخر رسالة" aria-label="النزول لآخر رسالة">↓</button>
     </div>'''
     st.markdown(html, unsafe_allow_html=True)
+    # 🆕 زر «تحميل المزيد» الحقيقي (virtual scroll): يرفع سقف العرض تدريجيًا
+    # (40 → 80 → 120…) بدلًا من رسالة سلبية «رسالة مخفية». السقف محفوظ في
+    # session_state (`_nsm_chat_display_ceil`) ويعاد إلى NSM_CHAT_DISPLAY_LIMIT
+    # تلقائياً عند وصول رسالة جديدة، أما البحث والمفضلة فيتجاوزانه لعرض كل النتائج.
+    if _hidden_count and not _search_active:
+        st.caption(f"💾 {_hidden_count} رسالة أقدم محفوظة — السجل الكامل غير محذوف")
+        _lm_cols = st.columns([1, 2.5, 1])
+        with _lm_cols[1]:
+            if st.button(
+                "⬆️ تحميل المزيد",
+                key="nsm_chat_load_more",
+                help=f"عرض {_hidden_count} رسالة أقدم إضافية تدريجيًا (السجل الكامل يبقى محفوظًا)",
+            ):
+                st.session_state["_nsm_chat_display_ceil"] = min(
+                    _display_ceil + NSM_CHAT_DISPLAY_INCREMENT,
+                    len(_all_msgs_indexed),
+                )
+                st.rerun()
     st.components.v1.html("""
     <script>
     (function() {
@@ -874,6 +932,10 @@ def render_chat():
         if add_user_msg:
             st.session_state.nsm_messages.append(("user", display_text, "", "", _ts))
             _persist_chat_message(st.session_state.nsm_chat_session_id, "user", display_text)
+            # 🆕 رسالة جديدة تعني النزول للأسفل — نعيد سقف العرض المتدرج
+            # إلى NSM_CHAT_DISPLAY_LIMIT حتى لا تظهر رسالة الأحدث وسط
+            # السجل القديم الموسّع (مثل تمرير المحادثات الحديثة).
+            st.session_state["_nsm_chat_display_ceil"] = NSM_CHAT_DISPLAY_LIMIT
 
         # ── فحص أمان أولي (regex محلي، بدون تكلفة API) ──
         _safety_msg = _nsm_safety_gate(text.strip())
@@ -1003,6 +1065,13 @@ def render_chat():
                 for m in st.session_state.nsm_messages[:-1][-NSM_CHAT_DISPLAY_LIMIT:]:
                     role = "user" if m[0] == "user" else "assistant"
                     history_msgs.append({"role": role, "content": m[1]})
+                # 🆕 ذاكرة المحادثة الطويلة: عند تجاوز NSM_CHAT_MEMORY_SUMMARY_AT
+                # رسالة، يُلحق الملخص السياقي للأقدم كرسالة system إضافية قبل
+                # النافذة الأخيرة — يحفظ خيوط الموضوع بلا نمو توكنات بلا حدود.
+                # السجل الكامل يبقى محفوظاً في nsm_messages وchat_history_store.
+                _ctx_summary = build_chat_memory_summary(st.session_state.nsm_messages[:-1])
+                if _ctx_summary:
+                    history_msgs.insert(0, {"role": "system", "content": _ctx_summary})
                 api_messages = history_msgs + [{"role": "user", "content": user_content}]
 
                 _af_params  = dict(_AF_NEUTRAL_PARAMS) if _AUTOTUNE_OK else {"temperature": 0.7, "top_p": 0.9}

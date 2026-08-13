@@ -69,6 +69,57 @@ OPENROUTER_MODEL_OPTIONS = {
 # يبقى محفوظاً في nsm_messages بلا حذف — هذا سقف عرض/سياق فقط، وليس حذفاً.
 NSM_CHAT_DISPLAY_LIMIT = 40
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ذاكرة المحادثة الطويلة — حد عرض متدرج + تلخيص سياقي تلقائي
+# ═══════════════════════════════════════════════════════════════════════════
+# 🆕 حد عرض متدرج (virtual scroll): بدلًا من ملاحظة سلبية «رسالة مخفية»,
+# يظهر زر «⬆️ تحميل المزيد» يرفع سقف العرض تدريجيًا (40 → 80 → 120 ...).
+# السقف محفوظ في session_state (`_nsm_chat_display_ceil`) ويُعاد إلى
+# NSM_CHAT_DISPLAY_LIMIT تلقائيًا عند وصول رسالة جديدة (scroll للأسفل).
+NSM_CHAT_DISPLAY_INCREMENT = 40
+
+# 🆕 تلخيص سياقي تلقائي: عند تجاوز هذا العدد من الرسائل يُولَّد ملخص مضغوط
+# للجزء الأقدم (دون حذف أي شيء — السجل الكامل يبقى في nsm_messages
+# وchat_history_store). الملخص يعرض أعلى المحادثة ويقدم السياق للنموذج
+# بدل السجل القديم الغائب، فيحافظ على خيوط الموضوع بلا نمو توكنات بلا حدود.
+NSM_CHAT_MEMORY_SUMMARY_AT = 200
+NSM_CHAT_SUMMARY_CHARS_PER_MSG = 60
+NSM_CHAT_SUMMARY_MAX_CHARS = 3000
+
+
+def summarize_chat_segment(segments: list) -> str:
+    """يحوّل قطعًا من المحادثة إلى ملخص نصي مضغوط (بدون LLM).
+
+    لكل رسالة: [المستخدم/NSM] + أول NSM_CHAT_SUMMARY_CHARS_PER_MSG حرفًا + «...».
+    لا يحذف أي بيانات — ينتج فقط تمثيلًا مقروءًا لأقدم جزء.
+    """
+    if not segments:
+        return ""
+    lines = []
+    for _seg in segments:
+        role = _seg[0] if len(_seg) > 0 else "nsm"
+        text = _seg[1] if len(_seg) > 1 else ""
+        head = (text or "").strip().replace("\n", " ")[:NSM_CHAT_SUMMARY_CHARS_PER_MSG]
+        label = "المستخدم" if str(role) == "user" else "NSM"
+        tail = "..." if len((text or "").strip()) > NSM_CHAT_SUMMARY_CHARS_PER_MSG else ""
+        lines.append(f"[{label}]: {head}{tail}")
+    joined = " \u2022 ".join(lines)
+    if len(joined) > NSM_CHAT_SUMMARY_MAX_CHARS:
+        joined = joined[:NSM_CHAT_SUMMARY_MAX_CHARS] + "..."
+    return joined
+
+
+def build_chat_memory_summary(messages: list) -> str:
+    """ملخص تراكمي للأقدم من المحادثة عند تجاوز NSM_CHAT_MEMORY_SUMMARY_AT.
+
+    الجزء الأقدم (من 0 حتى total - SUMMARY_AT) يلخص؛ السجل كامل يبقى محفوظًا.
+    """
+    total = len(messages)
+    if total <= NSM_CHAT_MEMORY_SUMMARY_AT:
+        return ""
+    cutoff = total - NSM_CHAT_MEMORY_SUMMARY_AT
+    return summarize_chat_segment(messages[:cutoff])
+
 NSM_SYSTEM_PROMPT = """أنت NSM Agent، المساعد الذكي لمنصة Neural Service Mesh (NSM) — نظام عربي متخصص في الذكاء الاصطناعي والمعرفة الإسلامية.
 
 ## الهوية والصدق
@@ -1359,6 +1410,30 @@ hr { border-color: var(--border) !important; }
     color: var(--gold);
 }
 .nsm-copy-btn:active { transform: scale(0.96); }
+
+/* ── ⬆️ زر «تحميل المزيد» — حد العرض المتدرج للذاكرة الطويلة ── */
+.nsm-load-more-btn,
+button[data-testid="stBaseButton-secondary"][aria-label="⬆️ تحميل المزيد"] {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: linear-gradient(135deg, var(--gold-tint), var(--surface2));
+    color: var(--text);
+    border: 1px solid var(--gold-soft);
+    border-radius: 10px;
+    padding: 0.45rem 1.1rem;
+    font-size: 0.82rem;
+    font-family: 'IBM Plex Sans Arabic', sans-serif;
+    font-weight: 600;
+    cursor: pointer;
+    direction: rtl;
+    transition: border-color .15s ease, transform .1s ease, box-shadow .15s ease;
+}
+.nsm-load-more-btn:hover {
+    border-color: var(--gold);
+    box-shadow: 0 4px 16px var(--shadow);
+}
+.nsm-load-more-btn:active { transform: scale(0.97); }
 
 /* ── 💀 Skeleton loading — حالة تحميل أنيقة بدل الدوارة العادية ── */
 .skeleton-line, .skeleton-block {
