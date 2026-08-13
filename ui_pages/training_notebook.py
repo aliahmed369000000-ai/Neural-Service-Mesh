@@ -345,6 +345,21 @@ def render_training_notebook():
         st.markdown("### صحة البيئة")
         h = lab_health()
         st.json(h)
+        st.markdown("### 📊 مراقبة GPU")
+        if st.button("التقاط لقطة GPU الآن", key="gpu_snap_btn"):
+            try:
+                from ai.gpu_runtime import gpu_monitor_snapshot, device_report_md
+                snap = gpu_monitor_snapshot()
+                st.session_state["gpu_snap"] = snap
+                st.markdown(device_report_md())
+            except Exception as e:
+                st.error(str(e))
+        if st.session_state.get("gpu_snap"):
+            snap = st.session_state["gpu_snap"]
+            st.code(str(snap.get("nvidia_smi_csv") or "—"), language="text")
+            st.json({k: snap[k] for k in snap if k != "tips_ar"})
+            for tip in snap.get("tips_ar") or []:
+                st.caption("• " + tip)
         with st.expander("detect_compute / خطة المزوّد"):
             nb = _ensure_nb()
             st.json(detect_compute())

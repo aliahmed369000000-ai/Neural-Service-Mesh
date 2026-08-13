@@ -1019,10 +1019,21 @@ def generate_surahchain_kernel_script(
 
         token = secret("GITHUB_TOKEN") or secret("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
         work = Path("/kaggle/working/Neural-Service-Mesh")
-        print("CUDA check…")
+        print("CUDA check…")\n        # monitor defined below after torch import
         try:
             import torch
             print("torch", torch.__version__, "cuda", torch.cuda.is_available(), "gpus", torch.cuda.device_count())
+            # لقطة GPU
+            try:
+                for _i in range(torch.cuda.device_count() if torch.cuda.is_available() else 0):
+                    print(f"  GPU{_i} mem_alloc={torch.cuda.memory_allocated(_i)/1e9:.2f}G name={torch.cuda.get_device_name(_i)}")
+            except Exception as _me:
+                print("gpu mem:", _me)
+            try:
+                import subprocess as _sp
+                print(_sp.check_output(["nvidia-smi","--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu","--format=csv,noheader"], text=True, timeout=10).strip())
+            except Exception as _se:
+                print("smi:", _se)
         except Exception as e:
             print("torch:", e)
 

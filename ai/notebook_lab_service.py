@@ -198,4 +198,5 @@ def feature_list_ar() -> List[str]:
         "AUTO_PUSH بعد نجاح التدريب (يتطلب GITHUB_TOKEN على Kaggle)",
         "كشف GPU المحلي + كتالوج مزوّدين مجانيين",
         "Run All مع إيقاف عند أول خطأ",
+        "مراقبة GPU: nvidia-smi + VRAM snapshot من تبويب البيئة",
     ]

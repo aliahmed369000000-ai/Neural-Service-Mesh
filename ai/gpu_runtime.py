@@ -242,3 +242,82 @@ def device_report_md() -> str:
         "لتفعيل GPU حتى مع prefer_cpu_for_toy: `NSM_ALLOW_GPU=1`",
     ]
     return "\n".join(lines)
+
+
+
+def nvidia_smi_text(query: bool = True) -> str:
+    """مخرجات nvidia-smi (نص) أو رسالة إن تعذّر."""
+    import shutil
+    import subprocess
+    if not shutil.which("nvidia-smi"):
+        return "nvidia-smi غير متاح على هذا الجهاز"
+    try:
+        if query:
+            r = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=index,name,utilization.gpu,utilization.memory,"
+                    "memory.used,memory.total,temperature.gpu,power.draw",
+                    "--format=csv",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            out = (r.stdout or r.stderr or "").strip()
+            if out:
+                return out
+        r = subprocess.run(["nvidia-smi"], capture_output=True, text=True, timeout=15)
+        return ((r.stdout or "") + (r.stderr or "")).strip()[-4000:] or "لا مخرجات"
+    except Exception as e:
+        return f"nvidia-smi error: {e}"
+
+
+def gpu_monitor_snapshot() -> Dict[str, Any]:
+    """لقطة موحّدة: torch VRAM + nvidia-smi + اقتراح batch."""
+    from datetime import datetime, timezone
+    snap = vram_snapshot()
+    smi = nvidia_smi_text(query=True)
+    try:
+        suggested = suggest_batch_size(base_batch=16, model_size_hint="medium")
+    except Exception:
+        suggested = None
+    return {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "vram": snap,
+        "nvidia_smi_csv": smi,
+        "suggested_batch": suggested,
+        "tips_ar": [
+            "Utilization منخفض جداً أثناء Running = غالباً تحميل بيانات أو عنق CPU",
+            "memory.used ≈ total → خفّض BATCH",
+            "Dual T4: تأكد أن التدريب يرى gpus>=2",
+        ],
+    }
+
+
+def kaggle_gpu_monitor_snippet() -> str:
+    """مقطع Python لمراقبة GPU داخل نواة Kaggle."""
+    lines = [
+        "def _nsm_gpu_monitor(tag=''):",
+        "    import subprocess",
+        "    try:",
+        "        import torch",
+        "        n = torch.cuda.device_count() if torch.cuda.is_available() else 0",
+        "        print(f'[GPU {tag}] cuda={torch.cuda.is_available()} n={n}')",
+        "        if torch.cuda.is_available():",
+        "            for i in range(n):",
+        "                a = torch.cuda.memory_allocated(i) / 1e9",
+        "                r = torch.cuda.memory_reserved(i) / 1e9",
+        "                print(f'  dev{i} alloc={a:.2f}GB reserved={r:.2f}GB name={torch.cuda.get_device_name(i)}')",
+        "    except Exception as e:",
+        "        print('torch monitor:', e)",
+        "    try:",
+        "        print(subprocess.check_output([",
+        "            'nvidia-smi',",
+        "            '--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu',",
+        "            '--format=csv,noheader',",
+        "        ], text=True, timeout=10).strip())",
+        "    except Exception as e:",
+        "        print('smi:', e)",
+    ]
+    return "\n".join(lines) + "\n"
