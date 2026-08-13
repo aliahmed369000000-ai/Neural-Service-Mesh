@@ -521,6 +521,86 @@ _LHT_PLAN_HOOK = None  # fn(task) -> bool (يجب أن يملأ task.plan)
 _LHT_EXECUTE_HOOK = None  # fn(manager, task, goal_label) -> bool
 _LHT_EXECUTE_HOOK_TOOL = None  # fn(tool_input) -> {"ok": bool, "text": str}
 
+# ── تكامل سجل الخبرات الجماعية (TEM) ─────────────────────────────
+# استيراد متأخر (late import) لتجنب circular import:
+# app_core يستورد هذه الوحدة سطر 364 — قبل أن يُعرّف _TEM_OK سطر 391+
+# لذا نجلب الأسماء عند الحاجة عبر getattr على module object.
+import app_core as _app_core_for_lht  # noqa: E402
+
+def _TEM_OK() -> bool:  # type: ignore[misc]
+    return bool(getattr(_app_core_for_lht, "_TEM_OK", False))
+
+def _get_experience_log():  # type: ignore[misc]
+    fn = getattr(_app_core_for_lht, "_get_experience_log", None)
+    if fn is None:
+        raise RuntimeError("سجل الخبرات الجماعية غير متاح")
+    return fn()
+
+_MIN_CONFIDENCE = 0.3
+
+
+def _advise_task_from_experience(task: LHTask) -> None:
+    """استحضار الخبرات الجماعية وتعديل عنوان الخطوة الأولى (مساعد مشترك).
+    إلحاق مستخلص غير ملزم لا يغيّر المنطق الحتمي."""
+    try:
+        if _TEM_OK() and task.plan:
+            recalled = _get_experience_log().recall(
+                task.goal[:200], top_k=4, min_confidence=_MIN_CONFIDENCE)
+            if recalled:
+                task._tem_recall = recalled  # type: ignore[attr-defined]
+                _advice = ("\n".join(
+                    f"• {e.get('decision', '')[:90]}" for e in recalled[:3]
+                ))[:300]
+                first = task.plan[0].get("title", "")
+                task.plan[0]["title"] = (first + " | " + _advice)[:320]
+    except Exception:
+        pass
+def _record_lht_experience(manager: "LongHorizonTaskManager",
+                           task: LHTask,
+                           results_context: List[str]) -> None:
+    """تسجيل خبرات خطوات المهمة الطويلة في السجل الجماعي عند الإتمام.
+
+    خبرة عامة عن النتيجة (success/partial/failure حسب نسبة النجاح) +
+    خبرات الأدوات الأكثر استخدامًا (success إذا نجحت ≥60%، failure ≤30%)."""
+    if not _TEM_OK():
+        return
+    done_n = sum(1 for s in task.steps if s.get("status") == "done")
+    fail_n = sum(1 for s in task.steps if s.get("status") == "partial")
+    outcome = ("success" if done_n > fail_n
+               else "partial" if done_n else "failure")
+    _get_experience_log().record(
+        context=f"مهمة طويلة الأمد: {task.goal[:100]}",
+        decision=(f"خطة «{task.title[:60]}» ({len(task.plan)} خطوة): "
+                  f"{done_n} ناجحة / {fail_n} جزئية"),
+        outcome=outcome,
+        category="plan_strategy",
+        confidence=0.6 if done_n else 0.5,
+        task_id=task.task_id,
+        agents="long_horizon")
+    # خبرة لكل أداة استخدمت مرتين أو أكثر (حسب معدل نجاحها)
+    tool_counts: Dict[str, int] = {}
+    tool_success: Dict[str, int] = {}
+    for s in task.steps:
+        t = s.get("tool") or "unknown"
+        tool_counts[t] = tool_counts.get(t, 0) + 1
+        if s.get("status") == "done":
+            tool_success[t] = tool_success.get(t, 0) + 1
+    for t, cnt in sorted(tool_counts.items(), key=lambda kv: -kv[1])[:3]:
+        if cnt < 2:
+            continue
+        rate = tool_success.get(t, 0) / cnt
+        _get_experience_log().record(
+            context=f"أداة {t} في مهمة: {task.goal[:80]}",
+            decision=(f"الأداة «{t}» نجحت {tool_success.get(t, 0)} من "
+                      f"{cnt} مرات في مهمة طويلة الأمد"),
+            outcome=("success" if rate >= 0.6
+                     else "failure" if rate <= 0.3
+                     else "partial"),
+            category="search_method",
+            confidence=0.5 + 0.2 * abs(rate - 0.5),
+            task_id=task.task_id,
+            agents="long_horizon")
+
 def _run_task(manager: "LongHorizonTaskManager", task: LHTask) -> None:
     """تنفيذ المهمة خطوة خطوة في خيط daemon."""
     task._t0 = time.time()
@@ -540,11 +620,17 @@ def _run_task(manager: "LongHorizonTaskManager", task: LHTask) -> None:
             elif not ok:
                 task.status = STATUS_FAILED
                 task.error = "الخطاف المزيف فشل"
+            # ── استحضار الخبرات الجماعية قبل الخروج (كل المسارات) ──
+            _advise_task_from_experience(task)
+            task.status = STATUS_DONE if ok else STATUS_FAILED
+            _record_lht_experience(manager, task, [])
             return
         if _LHT_PLAN_HOOK is not None and _LHT_PLAN_HOOK(task):
             pass  # اختبار: خطاف يملأ الخطة فقط ثم يكمل التنفيذ الحتمي
         else:
             task.plan = _build_plan(task.goal)
+        # ── استحضار الخبرات الجماعية المتراكمة وتعديل عناوين الخطة ──
+        _advise_task_from_experience(task)
         if not task.plan:
             task.status = STATUS_FAILED
             task.error = "لا يمكن بناء خطة من هدف فارغ"
@@ -702,6 +788,12 @@ def _run_task(manager: "LongHorizonTaskManager", task: LHTask) -> None:
         with contextlib.suppress(Exception):
             tool_write_file(report_title, final)
         task._final_report = final[:12000]
+        # ── تسجيل خبرات الخطوات في السجل الجماعي ──
+        try:
+            if _TEM_OK():
+                _record_lht_experience(manager, task, results_context)
+        except Exception:
+            pass
         if task.status == STATUS_RUNNING:
             task.status = STATUS_DONE
         manager._emit(
@@ -714,13 +806,25 @@ def _run_task(manager: "LongHorizonTaskManager", task: LHTask) -> None:
         logger.error("lht: فشل %s: %s", task.task_id, exc)
         task.status = STATUS_FAILED
         task.error = str(exc)[:300]
+        # ── تسجيل خبرة فشل المهمة كاملة في السجل الجماعي ──
+        try:
+            if _TEM_OK():
+                _get_experience_log().record(
+                    context=f"مهمة طويلة الأمد: {task.goal[:100]}",
+                    decision=(f"خطة «{task.title[:60]}» "
+                              f"({len(task.plan)} خطوة) فشلت بالكامل"),
+                    outcome="failure",
+                    category="plan_strategy",
+                    confidence=0.5,
+                    task_id=task.task_id,
+                    agents="long_horizon")
+        except Exception:
+            pass
         manager._emit("lht_failed", task, detail=f"فشل المهمة: {task.error}")
     finally:
         task.finished_at = _now_iso()
         manager._persist_task(task)
         manager._prune()
-
-
 # ══════════════════════════════════════════════════════════════════
 # المدير (singleton)
 # ══════════════════════════════════════════════════════════════════

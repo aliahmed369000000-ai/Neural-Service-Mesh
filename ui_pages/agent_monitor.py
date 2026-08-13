@@ -124,6 +124,7 @@ def render_agent_monitor() -> None:
     render_long_horizon_panel()
     render_collaborative_panel()
     render_skb_panel()
+    render_tem_panel()
 
 
 DELEGATION_EVENTS = ("delegation_requested", "delegation_rejected", "delegation_started", "delegation_resolved")
@@ -1379,3 +1380,59 @@ def render_skb_panel() -> None:
     else:
         st.caption("لا معارف متبادلة بعد — ستظهر هنا نتائج أدوار الفريق "
                    "حال بدء مهمة تعاونية.")
+
+
+# ══════════════════════════════════════════════════════════════════
+# لوحة الخبرة الجماعية (سجل الخبرات المتراكم)
+# ══════════════════════════════════════════════════════════════════
+
+def render_tem_panel() -> None:
+    """لوحة الخبرة الجماعية المتراكمة: إحصاءات وأحدث الخبرات المستحضرَة."""
+    try:
+        from app_core import _TEM_OK, _get_experience_log
+        from ai.team_experience import tem_latest
+    except Exception:
+        return
+    st.markdown("---")
+    st.subheader("📚 الخبرة الجماعية المتراكمة")
+    st.caption(
+        "ذاكرة ذاتية جماعية مستمرة: كل مهمة تعاونية/طويلة الأمد تُسجِّل "
+        "خبراتها (قرار + نتيجته الفعلية) في سجل متراكم — تستحضر الأدوار "
+        "الخبرات ذات الصلة قبل التخطيط فتتجه نحو الأنجح وتتجنب الفاشل."
+    )
+    if not _TEM_OK:
+        st.info("وحدة سجل الخبرات غير متاحة — الفريق يعمل دون ذاكرة "
+                "تراكمية (سلوك سابق).")
+        return
+    try:
+        _log = _get_experience_log()
+        _stats = _log.stats()
+        _recent = tem_latest(10)
+    except Exception:
+        st.info("تعذر فتح سجل الخبرات — العمل مستمر دون تراكم.")
+        return
+    # بطاقات الإحصاءات
+    _cards = st.columns(4)
+    _cards[0].metric("📝 إجمالي الخبرات",
+                     _stats.get("total", 0))
+    _cards[1].metric("✓ نجاح", _stats.get("success", 0))
+    _cards[2].metric("~ جزئي", _stats.get("partial", 0))
+    _cards[3].metric("✗ فشل", _stats.get("failure", 0))
+    if _recent:
+        with st.expander("📜 أحدث الخبرات المتراكمة", expanded=False):
+            _rows = []
+            for r in _recent:
+                _mark = ({"success": "✓", "failure": "✗"}.get(
+                    r.get("outcome", ""), "~"))
+                _rows.append({
+                    "الفئة": r.get("category", "—"),
+                    "القرار": (r.get("decision") or "")[:180],
+                    "النتيجة": f"{_mark} {r.get('outcome', '')}",
+                    "الثقة": round(r.get("confidence", 0), 2),
+                    "التكرار": r.get("hits", 0),
+                    "الوقت": r.get("timestamp", "—")[:19],
+                })
+            st.dataframe(_rows, use_container_width=True, hide_index=True)
+    else:
+        st.caption("لا خبرات متراكمة بعد — ستظهر هنا نتائج المهام "
+                   "التعاونية وطويلة الأمد حال انتهائها.")

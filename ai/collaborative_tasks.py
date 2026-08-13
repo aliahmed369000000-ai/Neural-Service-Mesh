@@ -393,14 +393,36 @@ def _set_collab_role_hook(fn: Optional[Any]) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════
-# ناقل المعرفة المشترك (تكامل مع ai/shared_knowledge.py)
+# تكامل مع app_core: ناقل المعرفة المشترك (SKB) + سجل الخبرات (TEM)
+# globals آمنة مع fallback — أي فشل استيراد يعيد السلوك الأصلي بلا
+# NameError صامت (كان الـtry السابق يبتلع NameError دون تشغيل فعلي).
 # ══════════════════════════════════════════════════════════════════
+# استيراد متأخر (late import) لتجنب circular import:
+# app_core يستورد هذه الوحدة سطر 377 — قبل أن يُعرّف _SKB_OK/_TEM_OK
+# (سطور 391-412). لذا نجلب الأسماء عند الحاجة داخل دالة واحدة.
+import app_core as _app_core_for_tem  # noqa: E402
+
+def _SKB_OK() -> bool:  # type: ignore[misc]
+    return bool(getattr(_app_core_for_tem, "_SKB_OK", False))
+
+def _get_skb():  # type: ignore[misc]
+    return getattr(_app_core_for_tem, "_get_skb", lambda: (_ for _ in ()).throw(
+        RuntimeError("ناقل المعرفة المشترك غير متاح")))()
+
+def _TEM_OK() -> bool:  # type: ignore[misc]
+    return bool(getattr(_app_core_for_tem, "_TEM_OK", False))
+
+def _get_experience_log():  # type: ignore[misc]
+    fn = getattr(_app_core_for_tem, "_get_experience_log", None)
+    if fn is None:
+        raise RuntimeError("سجل الخبرات الجماعية غير متاح")
+    return fn()
 
 def _share_role_finding(task_id: str, role_name: str, text: str,
                         tool: str, source: str, index: int) -> None:
     """يشارك الدور نتيجته في الناقل المشترك (فشل صامت = لا شيء)."""
     try:
-        if _SKB_OK:
+        if _SKB_OK():
             _get_skb().share_finding(task_id, role_name, text, tool,
                                      source, index)
     except Exception:
@@ -413,7 +435,7 @@ def _share_peer_knowledge(role: CollabRole, task_id: str,
 
     بهذا يجد كل دور معرفة زملائه قبل بحثه — تعاون فعلي لا عمل منعزل."""
     try:
-        if not _SKB_OK:
+        if not _SKB_OK():
             return
         peers = _get_skb().query_knowledge(target, task_id=task_id, k=4)
         peers = [p for p in peers
@@ -473,6 +495,10 @@ def _run_role(manager: "CollaborativeManager", task: CollaborativeTask,
                 _share_role_finding(task.task_id, role.name,
                                     result_text, "web_search",
                                     role.steps[-1].get("source", ""), i)
+                # ── تسجيل خبرة: أسلوب البحث نجح على هذا الهدف ──
+                _record_role_experience(task, role, i,
+                                        "web_search", "success",
+                                        result_text[:180])
             if success:
                 found += 1
             # جلب أهم نتيجة
@@ -496,6 +522,19 @@ def _run_role(manager: "CollaborativeManager", task: CollaborativeTask,
     except Exception as exc:
         role.status = ROLE_FAILED
         role.error = str(exc)[:300]
+        # ── تسجيل خبرة: الدور فشل — تحذير للمستقبل ──
+        with contextlib.suppress(Exception):
+            if _TEM_OK():
+                _get_experience_log().record(
+                    context=(f"مهمة تعاونية: {task.goal[:100]} "
+                             f"(دور: {role.name})"),
+                    decision=(f"أُضيف دور «{role.name}» وهدفه "
+                              f"({role.goal[:80]}) وفشل التنفيذ"),
+                    outcome="failure",
+                    category="role_assign",
+                    confidence=0.5,
+                    task_id=task.task_id,
+                    agents=role.name)
     finally:
         role.finished_at = _now_iso()
         manager._emit(
@@ -503,6 +542,50 @@ def _run_role(manager: "CollaborativeManager", task: CollaborativeTask,
             detail=f"أنجز {role.name} ({len([s for s in role.steps if s.get('status') == 'done'])} خطوة)",
         )
         manager._persist_collab(task)
+
+
+def _advise_roles_from_experience(task: CollaborativeTask) -> None:
+    """استحضار الخبرات الجماعية المرتبطة بهدف المهمة قبل التخطيط.
+
+    تُحفظ في task._tem_recall ليستخدمها توليف التقرير، ولا تغيّر
+    المنطق الحتمي (إلحاق مستخلص غير مُلزم لأهداف الأدوار اللاحقة)."""
+    recalled = _get_experience_log().recall(
+        task.goal[:200], top_k=5, min_confidence=_MIN_CONFIDENCE)
+    task._tem_recall = recalled  # type: ignore[attr-defined]
+    if recalled:
+        _summary = "\n".join(
+            f"• {e.get('decision', '')[:120]}" for e in recalled[:5])
+        # توصية عامة تُوثق في المهمة (لا تُعدّل subgoals الحتمي)
+        task._tem_advice = (  # type: ignore[attr-defined]
+            "توصيات من الخبرات الجماعية السابقة:\n" + _summary)[:500]
+
+
+def _record_role_experience(task: CollaborativeTask, role: CollabRole,
+                            step_index: int, tool: str,
+                            outcome: str, detail: str) -> None:
+    """تسجيل خبرة خطوة ناجحة/فاشلة لزيادة رصيد المعرفة الجماعية."""
+    try:
+        if not _TEM_OK():
+            return
+        if step_index >= _STEP_MAX:
+            return
+        _get_experience_log().record(
+            context=f"مهمة تعاونية: {task.goal[:100]}",
+            decision=(f"دور «{role.name}»: {tool} على الهدف "
+                      f"({(role.goal or task.goal)[:80]}) — "
+                      f"{detail[:120]}"),
+            outcome=outcome,
+            category=("search_method" if "search" in tool
+                      else "verification" if "verify" in tool
+                      else "general"),
+            confidence=0.6 if outcome == "success" else 0.5,
+            task_id=task.task_id,
+            agents=role.name)
+    except Exception:
+        pass
+
+_MIN_CONFIDENCE = 0.3
+_STEP_MAX = 25
 
 
 def _extract_role_targets(goal: str) -> List[str]:
@@ -534,9 +617,30 @@ def _synthesize(task: CollaborativeTask) -> str:
     # ── مخرجات الناقل المشترك: ما تبادله الفريق فعليًا ──
     shared_findings: List[Dict[str, Any]] = []
     with contextlib.suppress(Exception):
-        if _SKB_OK:
+        if _SKB_OK():
             shared_findings = _get_skb().query_knowledge(
                 task.goal[:150], task_id=task.task_id, k=8)
+    # ── الخبرات الجماعية التي استُحضرت قبل التخطيط ──
+    with contextlib.suppress(Exception):
+        if _TEM_OK():
+            recalled: List[Dict[str, Any]] = getattr(
+                task, "_tem_recall", [])
+            if recalled:
+                lines.append("## خبرات جماعية مستحضرَة قبل التخطيط")
+                lines.append("")
+                lines.append("خبرات متراكمة من مهام سابقة ذات صلة "
+                             "استُحضرت في مرحلة التخطيط:")
+                lines.append("")
+                for exp in recalled[:5]:
+                    mark = ("✓" if exp.get("outcome") == "success"
+                            else "✗" if exp.get("outcome") == "failure"
+                            else "~")
+                    lines.append(
+                        f"- {mark} [{exp.get('category', '')}] "
+                        f"{exp.get('decision', '')[:140]} "
+                        f"(نتيجة: {exp.get('outcome', '')}، "
+                        f"تكرار {exp.get('hits', 0)})")
+                lines.append("")
     if shared_findings:
         lines.append("## المعارف المشتركة في ناقل الفريق")
         lines.append("")
@@ -594,6 +698,10 @@ def _run_collaborative_task(manager: "CollaborativeManager",
     manager._emit("collab_started", task,
                   detail=f"مهمة تعاونية: {task.title} "
                          f"({len(task.roles)} أدوار)")
+    # ── استحضار الخبرات الجماعية المتراكمة قبل التخطيط ──
+    with contextlib.suppress(Exception):
+        if _TEM_OK():
+            _advise_roles_from_experience(task)
     try:
         task.assign_roles()
         # مساحات معزولة لكل دور

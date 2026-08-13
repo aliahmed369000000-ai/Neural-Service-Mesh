@@ -396,6 +396,20 @@ except Exception:
     _SKB_OK = False
     def _get_skb():  # احتياطي آمن
         raise RuntimeError("ناقل المعرفة المشترك غير متاح")
+# ── 🆕 سجل الخبرات والقرارات الجماعية المتراكم (Team Experience Memory) ──
+# ذاكرة ذاتية جماعية مستمرة: كل مهمة تعاونية/طويلة الأمد تُسجَّل فيها
+# خبرات (قرار + نتيجته الفعلية success/partial/failure) تُستحضر قبل
+# التخطيط للمهام المماثلة فتوجه الوكلاء نحو الأنجح وتتجنب الفاشل.
+# استيراد اختياري (_TEM_OK) — أي فشل يعيد السلوك الأصلي بلا انقطاع.
+try:
+    from ai.team_experience import (
+        get_experience_log as _get_experience_log,
+    )
+    _TEM_OK = True
+except Exception:
+    _TEM_OK = False
+    def _get_experience_log():  # احتياطي آمن
+        raise RuntimeError("سجل الخبرات الجماعية غير متاح")
 # ── طبقة فحص أمان أولى (regex، بدون تكلفة API) ────────────────────────────
 try:
     from ai.harm_classifier import classify_prompt as _classify_harm, get_domain_label as _harm_label
