@@ -158,6 +158,8 @@ def render_training_notebook():
         x1, x2 = st.columns(2)
         with x1:
             fresh = st.checkbox("من الصفر (FRESH)", value=True, key="lab_fresh")
+            if fresh:
+                st.caption("⚠️ سيبدأ التدريب من الصفر ويتجاوز أي checkpoint سابق محفوظ.")
         with x2:
             auto_push = st.checkbox("رفع تلقائي بعد النجاح", value=True, key="lab_autopush")
 
