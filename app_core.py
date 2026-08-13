@@ -374,6 +374,15 @@ except Exception:
     _ARABIC_NLP_OK = False
 
 try:
+    from ai.perf_profiler import measure_latency
+except Exception:
+    # التزيين بدون وحدة القياس: دالة محايدة تعيد الوظيفة الأصلية بلا قياس.
+    def measure_latency(label):
+        def decorator(fn):
+            return fn
+        return decorator
+
+try:
     from ai.episodic_memory import EpisodicMemoryEngine
     _EPISODIC_OK = True
 except Exception:
@@ -2556,6 +2565,7 @@ def load_json(path: Path) -> Any:
 
 
 @st.cache_data(ttl=60)
+@measure_latency("load_arabic_roots")
 def load_arabic_roots() -> Dict:
     data = load_json(KNOWLEDGE_DIR / "arabic_roots_index.json")
     return data or {}
@@ -2568,12 +2578,14 @@ def load_graph_metrics() -> Dict:
 
 
 @st.cache_data(ttl=60)
+@measure_latency("load_quran_index")
 def load_quran_index() -> Dict:
     data = load_json(KNOWLEDGE_DIR / "quran_index.json")
     return data or {}
 
 
 @st.cache_data(ttl=300)
+@measure_latency("load_all_quran_ayat")
 def load_all_quran_ayat() -> List[Dict]:
     """تحميل كل آيات القرآن من الـ chunks."""
     ayat: List[Dict] = []
@@ -3145,6 +3157,7 @@ def find_related_concepts_from_roots(query: str, roots: Dict, top_k: int = 8) ->
     return [(m[0], m[1]) for m in matches[:top_k]]
 
 
+@measure_latency("search_knowledge")
 def search_knowledge(query: str) -> Dict:
     """البحث الشامل في قاعدة المعرفة."""
     roots   = load_arabic_roots()

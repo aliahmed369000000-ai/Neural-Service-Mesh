@@ -119,6 +119,7 @@ def render_agent_monitor() -> None:
     render_failure_learning_panel()
     render_custom_alerts_panel()
     render_auto_actions_panel()
+    render_perf_panel()
     render_swarm_runner_panel()
 
 
@@ -1000,6 +1001,62 @@ def render_custom_alerts_panel() -> None:
             if st.button("🧹 مسح السجل", key="alert_log_clear"):
                 clear_alert_log()
                 st.rerun()
+
+
+def render_perf_panel() -> None:
+    """لوحة قياس زمن الاستجابة: إحصاءات p50/p90/p95 لكل دالة مقاسة
+    مع مرتبة أبطأ الدوال — البيانات من ai.perf_profiler (محلي بالكامل)."""
+    from ai.perf_profiler import clear_perf_samples, perf_slowest, perf_stats
+    render_section_header(
+        "قياس الأداء",
+        "زمن تنفيذ الدوال الأثقل (p50/p90/p95) — محلي بالكامل",
+        live=True,
+    )
+    stats = perf_stats()
+    col_perf_refresh, col_perf_clear = st.columns([1, 1])
+    with col_perf_refresh:
+        if st.button("🔄 تحديث القياسات", key="perf_refresh", use_container_width=True):
+            st.rerun()
+    with col_perf_clear:
+        if st.button("🧹 مسح عينات القياس", key="perf_clear", use_container_width=True):
+            clear_perf_samples()
+            st.rerun()
+    if stats["sample_count"] == 0:
+        st.info(
+            "لا توجد عينات قياس بعد. نفّذ بحثًا في المعرفة أو افتح التبويبات "
+            "المعرفية لتظهر قياسات الدوال الأثقل هنا — وتُضاف كل عينة إلى "
+            "المراقبة الحية كحدث perf_sample."
+        )
+        return
+    render_kpi_cards([
+        {"label": "عينات", "value": stats["sample_count"], "note": "في الجلسة الحالية", "accent": "var(--nsm-indigo)"},
+        {"label": "متوسط", "value": f"{stats['avg_ms']:.0f} ms", "note": "لجميع الدوال", "accent": "var(--nsm-cyan)"},
+        {"label": "P50", "value": f"{stats['p50_ms']:.0f} ms", "note": "الوسيط", "accent": "#86efac"},
+        {"label": "P90", "value": f"{stats['p90_ms']:.0f} ms", "note": "ذيل الأداء", "accent": "var(--nsm-amber)"},
+        {"label": "P95", "value": f"{stats['p95_ms']:.0f} ms", "note": "أسوأ 5%", "accent": "#c084fc"},
+        {"label": "أقصى", "value": f"{stats['max_ms']:.0f} ms", "note": "أبطأ عينة", "accent": "var(--nsm-danger)"},
+    ])
+    st.subheader("الأداء لكل دالة")
+    _perf_table = []
+    for row in stats["by_func"]:
+        _perf_table.append({
+            "الدالة": row["func"],
+            "عينات": row["count"],
+            "متوسط ms": row["avg_ms"],
+            "P50 ms": row["p50_ms"],
+            "P90 ms": row["p90_ms"],
+            "P95 ms": row["p95_ms"],
+            "أقصى ms": row["max_ms"],
+        })
+    st.dataframe(_perf_table, use_container_width=True, hide_index=True)
+    slow = perf_slowest(3)
+    if slow:
+        st.subheader("🐢 الأبطأ أداءً (حسب P95)")
+        for row in slow:
+            st.warning(
+                f"**{row['func']}** — P95: {row['p95_ms']:.0f} ms من {row['count']} عينة"
+                f" (متوسط {row['avg_ms']:.0f} ms)"
+            )
 
 
 def render_agent_live_trace(target) -> None:
