@@ -122,7 +122,7 @@ def main():
             print(f"كاش موجود مسبقاً: {CACHE_FILE} ({len(cached)} مقطع) — كافٍ لـ SCN_N={N}")
             print("لحذف الكاش وإعادة البناء: SCN_FORCE_REBUILD=1")
             print("لتوسيع الكاش لعدد أكبر: SCN_N=30000 python .../prepare_pretrain_data.py")
-            return
+            return 0
         if isinstance(cached, list) and len(cached) > 0:
             print(f"كاش جزئي ({len(cached)} < {N}) — سيتم التوسيع حتى {N} مقطع")
 
@@ -150,7 +150,32 @@ def main():
     with open(CACHE_FILE, "wb") as f:
         pickle.dump(sentences, f, protocol=pickle.HIGHEST_PROTOCOL)
     print(f"حُفظ الكاش النهائي: {CACHE_FILE} ({len(sentences)} مقطع)")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    # تقليل أعطال إغلاق datasets/pyarrow على Kaggle (PyGILState_Release)
+    import os as _os
+    _os.environ.setdefault("HF_DATASETS_NUM_PROC", "1")
+    _os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+    try:
+        rc = main()
+        raise SystemExit(0 if rc is None else int(rc))
+    except SystemExit:
+        raise
+    except Exception as e:
+        print("prepare failed:", e)
+        # إن وُجد كاش كافٍ اعتبر النجاح
+        try:
+            if CACHE_FILE.exists():
+                import pickle as _pkl
+                with open(CACHE_FILE, "rb") as f:
+                    c = _pkl.load(f)
+                if isinstance(c, list) and len(c) >= int(_os.environ.get("SCN_N", "8000")):
+                    print(f"كاش كافٍ موجود ({len(c)}) رغم الخطأ — exit 0")
+                    raise SystemExit(0)
+        except SystemExit:
+            raise
+        except Exception:
+            pass
+        raise SystemExit(1)

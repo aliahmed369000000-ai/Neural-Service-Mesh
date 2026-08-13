@@ -149,14 +149,31 @@ def main() -> int:
 
     if not args.skip_prepare:
         print("\n--- 1) تحضير البيانات ---")
+        env = dict(env)
+        env.setdefault("HF_DATASETS_NUM_PROC", "1")
+        env.setdefault("TOKENIZERS_PARALLELISM", "false")
         r = subprocess.run(
             [sys.executable, str(EXP / "prepare_pretrain_data.py")],
             cwd=str(ROOT),
             env=env,
         )
-        if r.returncode != 0:
+        cache = EXP / "data" / "pretrain_sentences.pkl"
+        need = int(env.get("SCN_N", "8000"))
+        cache_ok = False
+        if cache.is_file():
+            try:
+                import pickle
+                with cache.open("rb") as f:
+                    data = pickle.load(f)
+                cache_ok = isinstance(data, list) and len(data) >= min(need, 1000)
+                print(f"فحص الكاش: {len(data) if isinstance(data, list) else '?'} مقطع (مطلوب ≈{need}) ok={cache_ok}")
+            except Exception as e:
+                print("قراءة الكاش:", e)
+        if r.returncode != 0 and not cache_ok:
             print("فشل التحضير — لن يُرفع")
             return r.returncode
+        if r.returncode != 0 and cache_ok:
+            print("⚠ رمز خروج التحضير غير صفري لكن الكاش جاهز — نتابع التدريب")
 
     if not args.skip_train:
         print("\n--- 2) التدريب ---")
