@@ -595,7 +595,7 @@ def push_kaggle_kernel(job_id: str) -> Dict[str, Any]:
             cmd,
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=100,
             cwd=str(job_dir),
         )
         out = (proc.stdout or "") + "\n" + (proc.stderr or "")
@@ -723,7 +723,7 @@ def download_kaggle_output(job_id: str) -> Dict[str, Any]:
             ["kaggle", "kernels", "output", kernel_id, "-p", str(out_dir)],
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=100,
         )
         out = (proc.stdout or "") + "\n" + (proc.stderr or "")
         files = [p.name for p in out_dir.iterdir() if p.is_file()] if out_dir.is_dir() else []
@@ -1108,21 +1108,32 @@ def prepare_surahchain_kaggle_job(
     meta["is_private"] = True
 
     (job_dir / "nsm_train.py").write_text(script, encoding="utf-8")
+    # الخلية تحتوي السكربت كاملاً — لا %run (كان يسبب file not found)
+    src_lines = [ln + "\n" for ln in script.splitlines()]
     nb = {
         "nbformat": 4,
         "nbformat_minor": 5,
         "metadata": {
             "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
+            "language_info": {"name": "python"},
             "accelerator": "GPU",
         },
         "cells": [
             {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [
+                    "# NSM SurahChain training\n",
+                    "clone + train + auto-push\n",
+                ],
+            },
+            {
                 "cell_type": "code",
                 "metadata": {},
-                "source": ["%run nsm_train.py\\n"],
+                "source": src_lines,
                 "outputs": [],
                 "execution_count": None,
-            }
+            },
         ],
     }
     (job_dir / "nsm_train.ipynb").write_text(json.dumps(nb, indent=2), encoding="utf-8")
