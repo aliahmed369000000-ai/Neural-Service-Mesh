@@ -117,6 +117,7 @@ def render_agent_monitor() -> None:
     render_shared_analytics_panel()
     render_adaptive_swarm_panel()
     render_failure_learning_panel()
+    render_swarm_runner_panel()
 
 
 DELEGATION_EVENTS = ("delegation_requested", "delegation_rejected", "delegation_started", "delegation_resolved")
@@ -598,6 +599,112 @@ def render_failure_learning_panel() -> None:
             f"آخر نشاط من تعلّم الأخطاء: {fl_events[-1].get('event_type', '')}"
             f" — {fl_events[-1].get('timestamp', '')}"
         )
+
+
+def render_swarm_runner_panel() -> None:
+    """واجهة تشغيل السرب مباشرة من لوحة المراقبة: سؤال نصه
+    وتشغيل حقيقي لوكيل السرب مع عرض الإجابة وآخر الأحداث حوله."""
+    _bot = None
+    try:
+        from ai.agent_categories import UnifiedAgentChat
+        _bot = UnifiedAgentChat
+    except Exception:
+        _bot = None
+    if "swarm_runner_bot" not in st.session_state:
+        try:
+            st.session_state["swarm_runner_bot"] = UnifiedAgentChat()
+        except Exception:
+            st.session_state["swarm_runner_bot"] = None
+    if "swarm_runner_msgs" not in st.session_state:
+        st.session_state["swarm_runner_msgs"] = []
+
+    render_section_header(
+        "تشغيل السرب",
+        "جرّب السرب مباشرة — الترتيب والاستبعاد والتوليف أمامك",
+        live=True,
+    )
+    st.caption(
+        "اكتب سؤالًا وسيرشّد المدير الموحّد الوكلاء بالترتيب الأذكى، يستبعد "
+        "الفاشلين المتكررين، ويولّف إجاباتهم في جواب واحد — كل خطوة تُطلق على "
+        "الناقل وتظهر في لوحات المراقبة أعلاه."
+    )
+
+    if _bot is None:
+        st.caption(
+            "⚠️ لم تُحمَّل وحدة الوكلاء الموحدة — تشغيل السرب غير متاح في هذه "
+            "الجلسة."
+        )
+        return
+
+    # ── الاقتراحات السريعة ──────────────────────────────────────────────
+    _run_suggestions = [
+        "ما هي أعلى قمم الجبال في العالم؟",
+        "اشرح لي مفهوم الشبكات العصبية ببساطة",
+        "ما أهم فوائد الذكاء الاصطناعي؟",
+        "لخّص لي قصة كفاح طويلة",
+    ]
+    sug_cols = st.columns(min(len(_run_suggestions), 4))
+    for i, q in enumerate(_run_suggestions):
+        with sug_cols[i]:
+            if st.button(q, key=f"swarm_run_sug_{i}", use_container_width=True):
+                st.session_state["_swarm_runner_pending"] = q
+
+    # ── صندوق الإدخال ──────────────────────────────────────────────────
+    run_q = st.text_input(
+        "سؤالك للسرب",
+        placeholder="اكتب سؤالًا وشغّل — ستشاهد السرب يعمل خطوة بخطوة",
+        key="swarm_runner_input",
+        label_visibility="collapsed",
+    )
+    col_run, col_hist = st.columns([1, 4])
+    with col_run:
+        run_clicked = st.button(
+            "▶ شغّل السرب", key="swarm_runner_go", use_container_width=True
+        )
+        if run_clicked:
+            st.session_state["_swarm_runner_pending"] = run_q.strip()
+    with col_hist:
+        if st.button("🧹 مسح السجل", key="swarm_runner_clear",
+                     use_container_width=True):
+            st.session_state["swarm_runner_msgs"] = []
+
+    pending = st.session_state.pop("_swarm_runner_pending", None)
+    if pending:
+        bot = st.session_state.get("swarm_runner_bot")
+        if bot is None:
+            st.caption("الوكيل غير متاح — أعد تحميل الصفحة.")
+            st.rerun()
+        with st.spinner("السرب يعمل الآن..."):
+            try:
+                answer, meta = bot.chat(str(pending))
+                meta = meta or {}
+            except Exception as exc:
+                answer = f"فشل التشغيل: {exc}"
+                meta = {}
+            st.session_state["swarm_runner_msgs"].append({
+                "q": str(pending),
+                "a": answer,
+                "meta": meta,
+            })
+        st.rerun()
+
+    # ── سجل الجلسات ────────────────────────────────────────────────────
+    for i, msg in enumerate(
+        st.session_state.get("swarm_runner_msgs", []) or []
+    ):
+        with st.expander(
+            f"❓ {msg.get('q', '')[:80]}",
+            expanded=(i == (len(st.session_state.get('swarm_runner_msgs', [])) - 1)),
+        ):
+            st.markdown(msg.get("a", "") or "(بدون إجابة)")
+            delegated = (msg.get("meta") or {}).get("delegated_agents", [])
+            if delegated:
+                st.caption(
+                    "الوكلاء المشاركون: " + " · ".join(str(a) for a in delegated)
+                )
+            route = (msg.get("meta") or {}).get("route_method", "")
+            if route:
+                st.caption(f"طريقة التوجيه: {route}")
 
 
 def render_agent_live_trace(target) -> None:
