@@ -125,8 +125,30 @@ def render_nsm_terminal():
     sess = term.get_session(sid)
     sess.mode = "admin"  # owner tab
 
+    # 🆕 مبدّل الجلسات — يسمح بالتنقل بين كل الجلسات المفتوحة (وليس فقط إنشاء جلسة جديدة)
+    all_sessions = term.list_sessions()
+    if len(all_sessions) > 1:
+        sid_options = [s["id"] for s in all_sessions]
+        _labels = {
+            s["id"]: f'{s["id"]} · {(s["cwd"].rstrip("/").split("/")[-1] or "/")} · {s["history_len"]} أوامر'
+            for s in all_sessions
+        }
+        chosen = st.selectbox(
+            "🗂️ الجلسة النشطة",
+            options=sid_options,
+            index=sid_options.index(sid) if sid in sid_options else 0,
+            format_func=lambda x: _labels.get(x, x),
+            key="nsm_term_session_picker",
+        )
+        if chosen != sid:
+            st.session_state.nsm_term_session_id = chosen
+            st.rerun()
+        sid = chosen
+        sess = term.get_session(sid)
+        sess.mode = "admin"
+
     # controls
-    c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
+    c1, c2, c3, c4, c5 = st.columns([2, 1, 1, 1, 1])
     with c1:
         st.markdown(f"**session** `{sid}` · **cwd** `{sess.cwd}` · **mode** `{sess.mode}`")
     with c2:
@@ -139,11 +161,22 @@ def render_nsm_terminal():
             st.session_state.nsm_term_session_id = news.id
             st.rerun()
     with c4:
+        # 🆕 تنزيل سجل الجلسة الحالية كـ JSON (سجل تدقيق / مشاركة)
+        import json as _json_dl
+        st.download_button(
+            "⬇️ السجل",
+            data=_json_dl.dumps(sess.history, ensure_ascii=False, indent=2),
+            file_name=f"nsm_terminal_{sid}.json",
+            mime="application/json",
+            use_container_width=True,
+            disabled=not sess.history,
+            key="nsm_term_download",
+        )
+    with c5:
         timeout = st.number_input("timeout s", min_value=5, max_value=300, value=45, key="nsm_term_timeout")
 
-    # quick actions
+    # quick actions — 🆕 عرض كل الـ presets العشرة المتوفرة فعلياً في المحرك (كانت 6 من 10 فقط)
     st.markdown("**Quick**")
-    qcols = st.columns(6)
     presets = [
         ("git status", "status"),
         ("git log", "log"),
@@ -151,9 +184,14 @@ def render_nsm_terminal():
         ("pytest", "pytest"),
         ("compile ai", "compile_ai"),
         ("ls", "tree"),
+        ("disk", "disk"),
+        ("python -V", "python"),
+        ("branch -vv", "branch"),
+        ("lfs files", "lfs"),
     ]
-    for col, (label, key) in zip(qcols, presets):
-        with col:
+    qcols = st.columns(5)
+    for i, (label, key) in enumerate(presets):
+        with qcols[i % 5]:
             if st.button(label, key=f"nsm_term_q_{key}", use_container_width=True):
                 term.quick(key, session_id=sid, mode="admin")
                 st.rerun()
