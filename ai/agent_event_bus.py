@@ -11,7 +11,10 @@ from collections import Counter
 from typing import Any, Dict, List, Optional
 
 EVENTS_KEY = "_nsm_agent_live_events"
+AGENT_STARTS_KEY = "_nsm_agent_live_starts"
 MAX_EVENTS = 250
+START_EVENTS = {"agent_started", "task_started", "synthesis_started"}
+END_EVENTS = {"agent_done", "agent_error", "task_done", "task_error", "synthesis_done"}
 
 
 def _state():
@@ -46,32 +49,44 @@ def emit_event(
     }
     state = _state()
     if state is not None:
-        events = list(state.get(EVENTS_KEY, []))
-        if event_type in {"agent_done", "agent_error", "task_done", "task_error", "synthesis_done"}:
-            for previous in reversed(events):
-                if (
-                    previous.get("agent_id") == event["agent_id"]
-                    and previous.get("event_type") in {"agent_started", "task_started", "synthesis_started"}
-                    and previous.get("ts") is not None
-                ):
-                    event["duration_ms"] = round(max(0.0, now - float(previous["ts"])) * 1000, 1)
-                    break
+        events = state.get(EVENTS_KEY, [])
+        if event_type in START_EVENTS:
+            # فهرس تشغيل لكل وكيل O(1) — يلغي المسح الخطي العكسي O(n) عند كل حدث منتهٍ.
+            starts = state.setdefault(AGENT_STARTS_KEY, {})
+            starts[event["agent_id"]] = now
+        elif event_type in END_EVENTS:
+            starts = state.get(AGENT_STARTS_KEY, {})
+            start_ts = starts.get(event["agent_id"])
+            if start_ts is not None:
+                event["duration_ms"] = round(max(0.0, now - float(start_ts)) * 1000, 1)
+                del starts[event["agent_id"]]
         events.append(event)
-        state[EVENTS_KEY] = events[-MAX_EVENTS:]
+        # القصّ يحدث عند الكتابة فقط بدل إعادة بناء القائمة عند كل حدث.
+        if len(events) > MAX_EVENTS:
+            state[EVENTS_KEY] = events[-MAX_EVENTS:]
+            # تنظيف الفهرس من وكلاء طوابع تشغيلهم قصّها السجل لضمان عدم حساب مدة خاطئة.
+            starts = state.get(AGENT_STARTS_KEY, {})
+            kept = {e["agent_id"] for e in events[-MAX_EVENTS:] if e["event_type"] in START_EVENTS}
+            for agent_id in [aid for aid in starts if aid not in kept]:
+                del starts[agent_id]
     return event
 
 
 def get_events(limit: int = 80) -> List[Dict[str, Any]]:
+    """يقرأ شريحة السجل الأخيرة دون نسخ السجل كاملاً (يُقصّر القراءة المتكررة من المراقبة الحية)."""
     state = _state()
     if state is None:
         return []
-    return list(state.get(EVENTS_KEY, []))[-max(1, int(limit)):]
+    events = state.get(EVENTS_KEY, [])
+    limit = max(1, int(limit))
+    return events[-limit:] if limit < len(events) else list(events)
 
 
 def clear_events() -> None:
     state = _state()
     if state is not None:
         state[EVENTS_KEY] = []
+        state.pop(AGENT_STARTS_KEY, None)
 
 
 def analyze_alerts(
@@ -115,7 +130,7 @@ def analyze_alerts(
 
 
 def performance_summary(events: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
-    rows = list(events if events is not None else get_events(250))
+    rows = events if events is not None else get_events(250)
     durations = [float(r["duration_ms"]) for r in rows if r.get("duration_ms") is not None]
     return {
         "count": len(durations),
@@ -128,7 +143,7 @@ def performance_summary(events: Optional[List[Dict[str, Any]]] = None) -> Dict[s
 def current_agent_states(events: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Dict[str, Any]]:
     """يبني آخر حالة معروفة لكل وكيل من سجل الأحداث."""
     states: Dict[str, Dict[str, Any]] = {}
-    for event in events if events is not None else get_events():
+    for event in (events if events is not None else get_events()):
         agent_id = event.get("agent_id") or "orchestrator"
         states[agent_id] = event
     return states

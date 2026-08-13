@@ -74,6 +74,13 @@ class RouteMemory:
         else:
             self.failures += 1
         self.last_seen = datetime.utcnow().isoformat()
+        self._path_json = None  # إعادة تجهيز نص path المُجمّد بعد التحديث
+
+    def path_json(self) -> str:
+        """نص JSON المُجمّد للمسار — يُعاد بناؤه مرة واحدة بعد كل تحديث."""
+        if self._path_json is None:
+            self._path_json = json.dumps(self.path)
+        return self._path_json
 
     def to_dict(self) -> dict:
         return {
@@ -148,6 +155,12 @@ class MemoryEngine:
         self._knowledge = None   # KnowledgeStore — injected via set_knowledge_store()
         self._conn_lock = threading.Lock()
         self._shared_conn: Optional[sqlite3.Connection] = None
+        # دفتر ملاحظات لتجميع الكتابات في دفقة واحدة (batch flush) —
+        # بدل قفل SQLite وكتابة منفصلة لكل خطوة في كل تنفيذ.
+        self._dirty_routes: Dict[str, RouteMemory] = {}
+        self._dirty_nodes: Dict[str, NodeMemory] = {}
+        self._flush_timer: Optional[threading.Timer] = None
+        self._flush_interval: float = 2.0
         self._init_schema()
         self._load()
         logger.info("MemoryEngine initialised (Phase 3)")
@@ -171,7 +184,14 @@ class MemoryEngine:
         return self._shared_conn
 
     def close(self) -> None:
-        """يغلق الاتصال المشترك صراحة (اختياري عند إيقاف التشغيل)."""
+        """يغلق الاتصال المشترك صراحة (اختياري عند إيقاف التشغيل) بعد تفريغ الدفقات."""
+        try:
+            self.flush()
+        except Exception:
+            pass
+        if self._flush_timer is not None:
+            self._flush_timer.cancel()
+            self._flush_timer = None
         with self._conn_lock:
             if self._shared_conn is not None:
                 try:
@@ -252,9 +272,9 @@ class MemoryEngine:
         if path_key not in self._routes:
             self._routes[path_key] = RouteMemory(path_key, path)
         self._routes[path_key].record(success, total_ms)
-        self._persist_route(self._routes[path_key])
+        self._dirty_routes[path_key] = self._routes[path_key]
 
-        # Update node memory from steps
+        # Update node memory from steps — تجميع في الدفتر بدل الكتابة الفورية لكل خطوة.
         for step in run_result.get("steps", []):
             nid = step.get("node_id")
             nname = step.get("node_name", "unknown")
@@ -265,7 +285,9 @@ class MemoryEngine:
             step_ok = step.get("status") == "success"
             step_ms = step.get("duration_ms") or 0.0
             self._nodes[nid].record(step_ok, step_ms)
-            self._persist_node(self._nodes[nid])
+            self._dirty_nodes[nid] = self._nodes[nid]
+
+        self._schedule_flush()
 
         logger.debug(f"MemoryEngine learned from run {run_result.get('run_id','?')[:8]}")
 
@@ -293,6 +315,7 @@ class MemoryEngine:
                     logger.warning(f"MemoryEngine: knowledge node stats write failed: {ke}")
 
     def _persist_route(self, rm: RouteMemory):
+        """كتابة فورية لمسار واحد (تُستخدم عند الترقية/الإلغاء يدوياً)."""
         try:
             with self._conn_lock, self._conn() as conn:
                 conn.execute("""
@@ -307,7 +330,7 @@ class MemoryEngine:
                         is_promoted=excluded.is_promoted,
                         last_seen=excluded.last_seen
                 """, (
-                    rm.path_key, json.dumps(rm.path),
+                    rm.path_key, rm.path_json(),
                     rm.runs, rm.successes, rm.failures,
                     rm.total_latency_ms, int(rm.is_promoted),
                     rm.first_seen, rm.last_seen,
@@ -316,6 +339,7 @@ class MemoryEngine:
             logger.error(f"MemoryEngine persist_route error: {e}")
 
     def _persist_node(self, nm: NodeMemory):
+        """كتابة فورية لعقدة واحدة (تُستخدم عند الحاجة للضمان الفوري)."""
         try:
             with self._conn_lock, self._conn() as conn:
                 conn.execute("""
@@ -336,6 +360,65 @@ class MemoryEngine:
                 ))
         except Exception as e:
             logger.error(f"MemoryEngine persist_node error: {e}")
+
+    # ── Batched flush — تجميع الكتابات في دفقة واحدة ─────────────────────
+
+    def _schedule_flush(self) -> None:
+        """يحدد دفقة مجمّعة قادمة؛ الكتابة الفعلية تتم مرة واحدة لكل نافذة زمنية."""
+        if self._flush_timer is not None:
+            return
+        self._flush_timer = threading.Timer(self._flush_interval, self.flush)
+        self._flush_timer.daemon = True
+        self._flush_timer.start()
+
+    def flush(self) -> None:
+        """يكتب كل المسارات والعقد المتسخة دفعة واحدة داخل قفل واحد."""
+        try:
+            with self._conn_lock:
+                routes = self._dirty_routes
+                nodes = self._dirty_nodes
+                self._dirty_routes = {}
+                self._dirty_nodes = {}
+                conn = self._conn()
+                if routes:
+                    conn.executemany("""
+                        INSERT INTO route_memory
+                            (path_key, path_json, runs, successes, failures,
+                             total_latency_ms, is_promoted, first_seen, last_seen)
+                        VALUES (?,?,?,?,?,?,?,?,?)
+                        ON CONFLICT(path_key) DO UPDATE SET
+                            runs=excluded.runs, successes=excluded.successes,
+                            failures=excluded.failures,
+                            total_latency_ms=excluded.total_latency_ms,
+                            is_promoted=excluded.is_promoted,
+                            last_seen=excluded.last_seen
+                    """, (
+                        (rm.path_key, rm.path_json(), rm.runs, rm.successes, rm.failures,
+                         rm.total_latency_ms, int(rm.is_promoted), rm.first_seen, rm.last_seen)
+                        for rm in routes.values()
+                    ))
+                if nodes:
+                    conn.executemany("""
+                        INSERT INTO node_memory
+                            (node_id, name, executions, successes, failures,
+                             total_latency_ms, last_executed)
+                        VALUES (?,?,?,?,?,?,?)
+                        ON CONFLICT(node_id) DO UPDATE SET
+                            executions=excluded.executions,
+                            successes=excluded.successes,
+                            failures=excluded.failures,
+                            total_latency_ms=excluded.total_latency_ms,
+                            last_executed=excluded.last_executed
+                    """, (
+                        (nm.node_id, nm.name, nm.executions, nm.successes, nm.failures,
+                         nm.total_latency_ms, nm.last_executed)
+                        for nm in nodes.values()
+                    ))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"MemoryEngine flush error: {e}")
+        finally:
+            self._flush_timer = None
 
     # ── Recall API ─────────────────────────────────────────────────────────
 
