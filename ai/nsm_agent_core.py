@@ -1889,6 +1889,40 @@ class NSMAgent:
         except Exception:
             format_experience_hints = None  # type: ignore
 
+        # 🆕 المهام التعاونية — مهمة مركّبة (بحث/مقارنة/تحليل متعدّد الأوجه)
+        # تُفكّك إلى أدوار وكلاء متوازية (باحثون + مدقق) عبر ناقل الأحداث
+        # المشترك، ثم يُولّف المنسّق تقريرًا موحدًا. يسبق المهام الفردية
+        # لأن المهمات المركّبة ذات الأوجه المتعددة تستحق فريقًا كاملًا.
+        try:
+            from ai.collaborative_tasks import (
+                detect_collaborative_request as _det_coop,
+                get_collaborative_manager as _gcm,
+            )
+            _coop_subgoals = _det_coop(user_input)
+            if _coop_subgoals is not None:
+                _coop_mgr = _gcm()
+                _coop_task = _coop_mgr.submit(user_input, _coop_subgoals)
+                if _coop_task is None:
+                    yield (
+                        "⚠️ طابور المهام التعاونية ممتلئ (مهمتان متزامنتان كحد "
+                        "أقصى) — راقب لوحة «التعاون» في «📡 مراقبة حيّة» "
+                        "وأعد المحاولة بعد اكتمال مهمة.\n"
+                    )
+                else:
+                    _roles = ", ".join(_coop_subgoals)
+                    yield (
+                        "🤝 **قبلت المهمة التعاونية** — فريق من الأدوار "
+                        "المتوازية سيعمل عليها عبر الإنترنت:\n\n"
+                        f"الهدف: {_coop_task.title}\n"
+                        f"الأدوار ({len(_coop_subgoals)}): {_roles}\n\n"
+                        f"المعرّف: `{_coop_task.task_id}` — تنفَّذ في "
+                        "الخلفية (بحث ← مدقق نتائج ← تجميع النتائج ← تقرير "
+                        "موحد)، وستجد التقدم اللحظي في لوحة «التعاون» "
+                        "داخل تبويب «📡 مراقبة حيّة».\n"
+                    )
+                return
+        except Exception:
+            pass  # أي فشل يعيد السلوك الأصلي
         # 🆕 المهام طويلة الأمد — بحث معمّق/تقرير عبر خطوات مع وصول الإنترنت
         # (يُكتشف حتميًا دون API). يسبق Planning Engine لأن بناء التطبيقات
         # يذهب للمنسّق بينما المهام البحثية/التقريرية لها منظّمها الخاص.

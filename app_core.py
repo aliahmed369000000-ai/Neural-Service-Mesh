@@ -369,6 +369,19 @@ except Exception:
     _LHT_OK = False
     def _get_lht_manager():  # احتياطي آمن
         raise RuntimeError("وحدة المهام طويلة الأمد غير متاحة")
+# ── 🆕 التعاون في المهام الطويلة (Collaborative Tasks) ─────────────────
+# فريق أدوار وكلاء متوازية (باحثون + مدقق نتائج) ينفّذ مهمة مركّبة ثم يُولّف
+# المنسّق تقريرًا موحدًا من مخرجات الجميع عبر ناقل الأحداث المشترك. حتمي
+# ومقصور (سقف أدوار/خطوات/تزامن/مدة) وكل فشل يُبتلَع بصمت.
+try:
+    from ai.collaborative_tasks import (
+        get_collaborative_manager as _get_collab_manager,
+    )
+    _COOP_OK = True
+except Exception:
+    _COOP_OK = False
+    def _get_collab_manager():  # احتياطي آمن
+        raise RuntimeError("وحدة التعاون غير متاحة")
 # ── طبقة فحص أمان أولى (regex، بدون تكلفة API) ────────────────────────────
 try:
     from ai.harm_classifier import classify_prompt as _classify_harm, get_domain_label as _harm_label

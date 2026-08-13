@@ -122,6 +122,7 @@ def render_agent_monitor() -> None:
     render_perf_panel()
     render_swarm_runner_panel()
     render_long_horizon_panel()
+    render_collaborative_panel()
 
 
 DELEGATION_EVENTS = ("delegation_requested", "delegation_rejected", "delegation_started", "delegation_resolved")
@@ -1182,3 +1183,134 @@ def render_long_horizon_panel() -> None:
             )
             if status == "done" and t.get("result"):
                 st.markdown(t["result"][:3000])
+
+
+def render_collaborative_panel() -> None:
+    """لوحة التعاون في المهام طويلة الأمد: إرسال مهمة مركّبة تُفكّك إلى أدوار
+    وكلاء متوازية (باحثون + مدقق نتائج) عبر ناقل الأحداث المشترك، تتبع تقدم
+    كل دور لحظيًا وعرض التقرير الموحد الذي يولّفه المنسّق."""
+    try:
+        from app_core import _COOP_OK, _get_collab_manager
+        if not _COOP_OK:
+            return
+        _coop_mgr = _get_collab_manager()
+    except Exception:
+        return
+    render_section_header(
+        "التعاون في المهام الطويلة",
+        "مهمة مركّبة ← فريق أدوار متوازية عبر الإنترنت ← مدقق نتائج ← تقرير موحد",
+        live=True,
+    )
+    # ── إرسال مهمة تعاونية جديدة ──────────────────────────
+    col_goal, col_btn = st.columns([5, 1])
+    with col_goal:
+        goal = st.text_input(
+            "🤝 أرسل مهمة تعاونية مركّبة",
+            placeholder=(
+                "مثال: قارن بين الخوارزمي وابن الهيثم من حيث الإسهامات، "
+                "وعدّ تقريرًا عن أثرهما على العلوم الحديثة"
+            ),
+            key="coop_goal_input",
+        )
+    with col_btn:
+        submit_btn = st.button("📤 أنشئ فريقًا", key="coop_submit_btn", use_container_width=True)
+    if submit_btn and (goal or "").strip():
+        from ai.collaborative_tasks import detect_collaborative_request as _coop_detect
+        subgoals = _coop_detect((goal or "").strip())
+        if subgoals is None:
+            st.warning(
+                "الطلب ليس مركّبًا بما يكفي لتشكيل فريق — صُغ المهمة بوجهين "
+                "أو أكثر (مثل: «قارن بين X و Y» أو «تقرير عن X ثم Y»)."
+            )
+        else:
+            task = _coop_mgr.submit((goal or "").strip(), subgoals)
+            if task is None:
+                st.warning(
+                    "طابور المهام التعاونية ممتلئ (مهمتان متزامنتان كحد أقصى) — "
+                    "أعد المحاولة بعد اكتمال مهمة أو أوقف واحدة أدناه."
+                )
+            else:
+                st.success(
+                    f"🤝 بدأت المهمة التعاونية «{task.title}» "
+                    f"(`{task.task_id}`) — الأدوار: {', '.join(subgoals)}"
+                )
+            st.rerun()
+    # ── قائمة المهام التعاونية ──────────────────────────────
+    try:
+        tasks = _coop_mgr.list_tasks(limit=20)
+    except Exception:
+        st.caption("تعذّر تحميل المهام التعاونية.")
+        return
+    if not tasks:
+        st.caption(
+            "لا توجد مهام تعاونية بعد. اكتب مهمة مركّبة أعلاه (وجهان أو أكثر) "
+            "وادفع «📤 أنشئ فريقًا» — سيُشكّل فريقًا من الأدوار المتوازية، "
+            "ويتبادلون النتائج عبر ناقل الأحداث حتى التقرير الموحّد."
+        )
+        return
+    for t in tasks:
+        status = t.get("status", "pending")
+        prog = t.get("progress", 0.0) or 0.0
+        label = {
+            "running": "⚙️ قيد التنفيذ",
+            "gathering": "📊 تجميع النتائج",
+            "done": "✅ اكتملت",
+            "failed": "❌ فشلت",
+            "cancelled": "⛔ أُلغيت",
+            "pending": "⏳ في الطابور",
+        }.get(status, status)
+        subgoals = t.get("subgoals") or []
+        roles = t.get("roles") or []
+        with st.expander(
+            f"{label} · {t.get('title', '—')} (`{t.get('task_id', '')}`) "
+            f"· {int(prog * 100)}% · أدوار: {len(roles)}",
+            expanded=(status == "running"),
+        ):
+            if status == "running":
+                st.progress(prog)
+            # مصفوفة الأدوار والتقدم اللحظي
+            if roles:
+                _rtbl = []
+                for r in roles:
+                    n = r.get("name", "—")
+                    st.caption(f"🎭 **{n}** — {(r.get('goal') or '')[:120]}")
+                    _rtbl.append({
+                        "الدور": n,
+                        "الحالة": {
+                            "running": "🔄 يعمل",
+                            "done": "✅ أنجز",
+                            "failed": "❌ فشل",
+                            "pending": "⏳ ينتظر",
+                        }.get(r.get("status", ""), r.get("status", "—")),
+                        "خطوات": len(r.get("steps") or []),
+                        "طلبات ويب": r.get("fetch_count", 0),
+                    })
+                st.dataframe(_rtbl, use_container_width=True, hide_index=True)
+                # سجل الخطوات الأخيرة للأدوار النشطة
+                _recent = []
+                for r in roles:
+                    for s in (r.get("steps") or [])[-6:]:
+                        _recent.append({
+                            "الدور": r.get("name", "—"),
+                            "الأداة": s.get("tool", "—"),
+                            "المدخل": (s.get("tool_input") or "")[:80],
+                            "النتيجة": (s.get("result") or "")[:120],
+                            "الحالة": s.get("status", ""),
+                        })
+                if _recent:
+                    st.caption("آخر خطوات الفريق:")
+                    st.dataframe(
+                        _recent[::-1][:8], use_container_width=True, hide_index=True
+                    )
+            _cols = st.columns([4, 1])
+            with _cols[1]:
+                if status in ("running", "pending"):
+                    if st.button("⛔ أوقف", key=f"coop_stop_{t.get('task_id')}"):
+                        _coop_mgr.cancel(t.get("task_id"))
+                        st.rerun()
+            st.caption(
+                f"مدة: {t.get('duration_s', '—')} ثانية · أهداف فرعية: "
+                f"{len(t.get('subgoals') or [])}"
+            )
+            if status == "done" and t.get("synthesis"):
+                st.markdown((t.get("synthesis") or "")[:3500])
