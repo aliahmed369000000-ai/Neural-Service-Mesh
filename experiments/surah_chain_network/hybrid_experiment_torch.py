@@ -62,6 +62,18 @@ def cosine_lr(step, total_steps, base_lr, warmup_steps=0, min_lr_ratio=0.1):
     return base_lr * (min_lr_ratio + (1.0 - min_lr_ratio) * cosine)
 
 
+class RMSNorm(nn.Module):
+    """RMSNorm (بدون bias) — الاستقرار الموصى به للنماذج الكبيرة بدل LayerNorm العادي."""
+
+    def __init__(self, d: int, eps: float = 1e-6):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(d))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps) * self.weight
+
+
 class SurahChainLayer(nn.Module):
     """طبقة سلسلة السور مع Highway gate + LayerScale + دعم التوسيع الذاتي.
 
@@ -79,7 +91,9 @@ class SurahChainLayer(nn.Module):
         self.d_in = int(d_in)
         self.d_out = int(d_out)
         self.fc = nn.Linear(d_in, d_out)
-        self.ln = nn.LayerNorm(d_out)
+        # السلسلة الوسطى RMSNorm أيضًا (تحقيقًا لطلب استقرار التدريب
+        # عبر كامل الشبكة — السلسلة نفسها لا تتغير بنيتها 114 طبقة)
+        self.ln = RMSNorm(d_out)
         self.shortcut = nn.Linear(d_in, d_out, bias=False) if d_in != d_out else None
         if self.shortcut is not None:
             self._init_shortcut_identity()
@@ -132,12 +146,10 @@ class SurahChainLayer(nn.Module):
                 eye = min(self.d_in, old_out)
                 self.shortcut.weight[:eye, :eye] = torch.eye(eye, device=device, dtype=dtype)
 
-        new_ln = nn.LayerNorm(new_out).to(device=device, dtype=dtype)
+        new_ln = RMSNorm(new_out).to(device=device, dtype=dtype)
         with torch.no_grad():
             new_ln.weight[:old_out] = self.ln.weight
-            new_ln.bias[:old_out] = self.ln.bias
             new_ln.weight[old_out:].fill_(1.0)
-            new_ln.bias[old_out:].zero_()
         self.ln = new_ln
 
         new_ls = nn.Parameter(torch.ones(new_out, device=device, dtype=dtype) * 1e-2)
@@ -235,8 +247,11 @@ class SurahChainNetwork(nn.Module):
 class CausalSelfAttention(nn.Module):
     """
     انتباه سببي عبر SDPA مع تحسينات اختيارية:
-      - QK-Norm: تطبيع Q و K لكل رأس (استقرار)
+      - QK-Norm: تطبيع Q و K لكل رأس (استقرار) — RMSNorm محليّ
       - Gated Attention (NeurIPS 2025): بوابة sigmoid بعد SDPA لكل رأس
+      - GQA (Grouped-Query Attention): n_kv_heads رؤوس KV مشتركة بين
+        مجموعات رؤوس الاستعلام — 8 KV heads × 128/رأس مع 64 رأس استعلام
+        يوفر ضغط KV كبيرًا دون فقدان الجودة.
     لا تمس سلسلة السور — فقط مسار الانتباه.
     """
 
@@ -247,25 +262,34 @@ class CausalSelfAttention(nn.Module):
         dropout: float = 0.1,
         use_qk_norm: bool = True,
         use_gated_attn: bool = True,
+        n_kv_heads: Optional[int] = None,
+        d_head: Optional[int] = None,
     ):
         super().__init__()
-        assert d_model % n_heads == 0
+        # GQA: d_head صريح (مثلاً 128) ثم d_model = n_heads × d_head.
         self.n_heads = n_heads
-        self.d_head = d_model // n_heads
+        self.d_head = int(d_head) if d_head else d_model // n_heads
+        assert d_model == n_heads * self.d_head, (
+            f"d_model ({d_model}) != n_heads×d_head ({n_heads}×{self.d_head})"
+        )
+        # رؤوس KV: افتراضي = n_heads (MHA)؛ للنماذج الكبيرة GQA
+        # (مثلاً n_heads=64 و n_kv_heads=8).
+        self.n_kv_heads = int(n_kv_heads) if n_kv_heads else n_heads
+        assert n_heads % self.n_kv_heads == 0
+        self.gqa = self.n_kv_heads != n_heads
+        self.n_groups = n_heads // self.n_kv_heads
         self.use_qk_norm = use_qk_norm
         self.use_gated_attn = use_gated_attn
-        self.qkv = nn.Linear(d_model, 3 * d_model, bias=False)
+        self.q_proj = nn.Linear(d_model, n_heads * self.d_head, bias=False)
+        self.k_proj = nn.Linear(d_model, self.n_kv_heads * self.d_head, bias=False)
+        self.v_proj = nn.Linear(d_model, self.n_kv_heads * self.d_head, bias=False)
         self.proj = nn.Linear(d_model, d_model, bias=False)
         self.dropout = dropout
         self.resid_drop = nn.Dropout(dropout)
 
         if use_qk_norm:
-            if hasattr(nn, "RMSNorm"):
-                self.q_norm = nn.RMSNorm(self.d_head)
-                self.k_norm = nn.RMSNorm(self.d_head)
-            else:
-                self.q_norm = nn.LayerNorm(self.d_head)
-                self.k_norm = nn.LayerNorm(self.d_head)
+            self.q_norm = RMSNorm(self.d_head)
+            self.k_norm = RMSNorm(self.d_head)
 
         if use_gated_attn:
             # bias=+2 ⇒ sigmoid≈0.88 عند البداية (قريب من السلوك القديم)
@@ -273,15 +297,23 @@ class CausalSelfAttention(nn.Module):
             nn.init.zeros_(self.attn_gate.weight)
             nn.init.constant_(self.attn_gate.bias, 2.0)
 
+    def _repeat_kv(self, t: torch.Tensor) -> torch.Tensor:
+        """يكرر KV heads: (B, K, S, dh) → (B, n_heads, S, dh) عبر البث."""
+        if not self.gqa:
+            return t
+        return t.repeat_interleave(self.n_groups, dim=1)
+
     def forward(self, x: torch.Tensor, key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         B, S, D = x.shape
-        qkv = self.qkv(x).reshape(B, S, 3, self.n_heads, self.d_head)
-        qkv = qkv.permute(2, 0, 3, 1, 4)  # (3, B, H, S, dh)
-        q, k, v = qkv[0], qkv[1], qkv[2]
+        q = self.q_proj(x).reshape(B, S, self.n_heads, self.d_head).transpose(1, 2)
+        k = self.k_proj(x).reshape(B, S, self.n_kv_heads, self.d_head).transpose(1, 2)
+        v = self.v_proj(x).reshape(B, S, self.n_kv_heads, self.d_head).transpose(1, 2)
 
         if self.use_qk_norm:
             q = self.q_norm(q)
             k = self.k_norm(k)
+
+        k_r, v_r = self._repeat_kv(k), self._repeat_kv(v)
 
         drop_p = self.dropout if self.training else 0.0
         if key_padding_mask is not None:
@@ -291,11 +323,11 @@ class CausalSelfAttention(nn.Module):
             bias = torch.zeros(B, 1, S, S, device=x.device, dtype=q.dtype)
             bias = bias.masked_fill(full, float("-inf"))
             bias = bias.masked_fill(pad.expand(B, 1, S, S), float("-inf"))
-            y = F.scaled_dot_product_attention(q, k, v, attn_mask=bias, dropout_p=drop_p)
+            y = F.scaled_dot_product_attention(q, k_r, v_r, attn_mask=bias, dropout_p=drop_p)
         else:
-            y = F.scaled_dot_product_attention(q, k, v, is_causal=True, dropout_p=drop_p)
+            y = F.scaled_dot_product_attention(q, k_r, v_r, is_causal=True, dropout_p=drop_p)
 
-        # y: (B, H, S, dh)
+        # y: (B, n_heads, S, dh)
         if self.use_gated_attn:
             g = torch.sigmoid(self.attn_gate(x))  # (B, S, H)
             g = g.permute(0, 2, 1).unsqueeze(-1)  # (B, H, S, 1)
@@ -310,16 +342,16 @@ class CausalSelfAttention(nn.Module):
         past_kv: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
     ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
-        مسار توليد تدريجي (KV-cache) — يُستخدم فقط أثناء الاستدلال (eval،
+        مسار توليد تدريجي (KV-cache) — يُستخدم فقط أثناء الاستدلال (eval,
         بلا dropout). x يحمل فقط الرمز/الرموز الجديدة (S عادة 1)؛ past_kv
-        يحمل مفاتيح/قيم كل الرموز السابقة فتُلحَق بها الجديدة بدل إعادة
-        حسابها. لا تُستخدم مع padding (توليد دفعة واحدة B=1 عادة).
+        يحمل مفاتيح/قيم n_kv_heads كل الرموز السابقة فتُلحَق بها الجديدة
+        بدل إعادة حسابها (في GQA يخزن KV بأبعاد n_kv_heads فقط).
         يُرجع (المخرج، (k الكاملة، v الكاملة)) ليُمرَّر past_kv للخطوة التالية.
         """
         B, S, D = x.shape
-        qkv = self.qkv(x).reshape(B, S, 3, self.n_heads, self.d_head)
-        qkv = qkv.permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2]
+        q = self.q_proj(x).reshape(B, S, self.n_heads, self.d_head).transpose(1, 2)
+        k = self.k_proj(x).reshape(B, S, self.n_kv_heads, self.d_head).transpose(1, 2)
+        v = self.v_proj(x).reshape(B, S, self.n_kv_heads, self.d_head).transpose(1, 2)
 
         if self.use_qk_norm:
             q = self.q_norm(q)
@@ -332,6 +364,8 @@ class CausalSelfAttention(nn.Module):
         else:
             k_full, v_full = k, v
 
+        k_r, v_r = self._repeat_kv(k_full), self._repeat_kv(v_full)
+
         T_past = k_full.shape[2] - S
         if T_past > 0:
             # الاستعلامات الجديدة تنتبه لكل الماضي بحرّية + سببياً فيما بينها
@@ -340,9 +374,9 @@ class CausalSelfAttention(nn.Module):
             full_mask = torch.cat([allow_past, causal_new], dim=1)
             attn_bias = torch.zeros(S, T_past + S, device=x.device, dtype=q.dtype)
             attn_bias = attn_bias.masked_fill(full_mask, float("-inf"))
-            y = F.scaled_dot_product_attention(q, k_full, v_full, attn_mask=attn_bias, dropout_p=0.0)
+            y = F.scaled_dot_product_attention(q, k_r, v_r, attn_mask=attn_bias, dropout_p=0.0)
         else:
-            y = F.scaled_dot_product_attention(q, k_full, v_full, is_causal=True, dropout_p=0.0)
+            y = F.scaled_dot_product_attention(q, k_r, v_r, is_causal=True, dropout_p=0.0)
 
         if self.use_gated_attn:
             g = torch.sigmoid(self.attn_gate(x))
@@ -354,6 +388,25 @@ class CausalSelfAttention(nn.Module):
         return out, (k_full, v_full)
 
 
+class SwiGLUFFN(nn.Module):
+    """Feed-Forward بنظام SwiGLU (مثل نماذج Llama/Mistral):
+    FFN(x) = Drop(SwiGLU(W_up·x) ⊙ W_gate·x)·W_down.
+    w_up/w_gate: (d_ff × d_model)، w_down: (d_model × d_ff).
+    """
+
+    def __init__(self, d_model: int, d_ff: int, dropout: float = 0.0):
+        super().__init__()
+        self.d_model = d_model
+        self.d_ff = d_ff
+        self.w_up = nn.Linear(d_model, d_ff, bias=False)
+        self.w_gate = nn.Linear(d_model, d_ff, bias=False)
+        self.w_down = nn.Linear(d_ff, d_model, bias=False)
+        self.drop = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.drop(self.w_down(F.silu(self.w_up(x)) * self.w_gate(x)))
+
+
 class TransformerBlock(nn.Module):
     def __init__(
         self,
@@ -363,24 +416,24 @@ class TransformerBlock(nn.Module):
         dropout: float = 0.1,
         use_qk_norm: bool = True,
         use_gated_attn: bool = True,
+        n_kv_heads: Optional[int] = None,
+        d_head: Optional[int] = None,
     ):
         super().__init__()
-        self.ln1 = nn.LayerNorm(d_model)
+        # Pre-Norm: RMSNorm بدل LayerNorm وتحديثه قبل كل طبقة
+        self.ln1 = RMSNorm(d_model)
         self.attn = CausalSelfAttention(
             d_model,
             n_heads,
             dropout,
             use_qk_norm=use_qk_norm,
             use_gated_attn=use_gated_attn,
+            n_kv_heads=n_kv_heads,
+            d_head=d_head,
         )
-        self.ln2 = nn.LayerNorm(d_model)
-        self.ffn = nn.Sequential(
-            nn.Linear(d_model, d_ff),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(d_ff, d_model),
-            nn.Dropout(dropout),
-        )
+        self.ln2 = RMSNorm(d_model)
+        # SwiGLU بدل GELU (استقرار أكبر وممارسات النماذج الكبيرة)
+        self.ffn = SwiGLUFFN(d_model, d_ff, dropout=dropout)
 
     def forward(self, x: torch.Tensor, key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         x = x + self.attn(self.ln1(x), key_padding_mask=key_padding_mask)
@@ -411,14 +464,31 @@ class SurahChainLM(nn.Module):
         use_qk_norm: bool = True,
         use_gated_attn: bool = True,
         chain_scale: float = 1.0,
+        n_kv_heads: Optional[int] = None,
+        d_head: Optional[int] = None,
+        d_ff: Optional[int] = None,
     ):
         super().__init__()
+        # النوازل المعمارية الجديدة (نمط النماذج الكبيرة):
+        # - d_head صريح (مثلاً 128) بحيث d_model = n_heads × d_head
+        # - n_kv_heads رؤوس KV مشتركة (GQA: 8 KV لكل 64 رأس استعلام)
+        # - d_ff صريح (28672 = 3.5 × d_model)؛ الافتراضي 4×d_model
+        # - RMSNorm Pre-Norm عبر كامل الشبكة
+        # - سلسلة السور الـ114 تبقى كما هي (التوسع أثناء التدريب)
+        if d_head:
+            d_head = int(d_head)
+            # d_model مشتق من n_heads × d_head إن لم يتوافق الدخل
+            d_model = n_heads * d_head
         if d_model % n_heads != 0:
             d_model = (d_model // n_heads) * n_heads
         self.d_model = d_model
+        self.d_head = d_head if d_head else d_model // n_heads
+        self.n_heads = n_heads
+        self.n_kv_heads = int(n_kv_heads) if n_kv_heads else self.n_heads
+        assert self.n_heads % self.n_kv_heads == 0
+        self.d_ff = int(d_ff) if d_ff else self.d_model * 4
         self.vocab_size = vocab_size
         self.max_seq = max_seq
-        self.n_heads = n_heads
         self.n_pre = n_pre
         self.n_post = n_post
         self.use_qk_norm = use_qk_norm
@@ -428,18 +498,19 @@ class SurahChainLM(nn.Module):
         self.tok_emb = nn.Embedding(vocab_size, d_model, padding_idx=0)
         self.pos_emb = nn.Embedding(max_seq, d_model)
         self.drop = nn.Dropout(dropout)
-        self.ln_in = nn.LayerNorm(d_model)
+        self.ln_in = RMSNorm(d_model)
 
-        d_ff = d_model * 4
         self.pre_blocks = nn.ModuleList(
             [
                 TransformerBlock(
                     d_model,
                     n_heads,
-                    d_ff,
+                    self.d_ff,
                     dropout,
                     use_qk_norm=use_qk_norm,
                     use_gated_attn=use_gated_attn,
+                    n_kv_heads=self.n_kv_heads,
+                    d_head=self.d_head,
                 )
                 for _ in range(n_pre)
             ]
@@ -455,15 +526,17 @@ class SurahChainLM(nn.Module):
                 TransformerBlock(
                     d_model,
                     n_heads,
-                    d_ff,
+                    self.d_ff,
                     dropout,
                     use_qk_norm=use_qk_norm,
                     use_gated_attn=use_gated_attn,
+                    n_kv_heads=self.n_kv_heads,
+                    d_head=self.d_head,
                 )
                 for _ in range(n_post)
             ]
         )
-        self.ln_f = nn.LayerNorm(d_model)
+        self.ln_f = RMSNorm(d_model)
         self.apply(self._init_weights)
         # أعد تهيئة بوابات الانتباه بعد apply (حتى لا يصفّر _init_weights الـbias)
         if use_gated_attn:
@@ -472,6 +545,11 @@ class SurahChainLM(nn.Module):
                 if gate is not None:
                     nn.init.zeros_(gate.weight)
                     nn.init.constant_(gate.bias, 2.0)
+        # تهيئة SwiGLU القياسية للنماذج الكبيرة: w_up/w_gate ~N(0,√(2/5d_model))
+        # w_down يبدأ بأصفار لتقليل اضطراب التدرج في بداية التدريب
+        for blk in list(self.pre_blocks) + list(self.post_blocks):
+            if hasattr(blk.ffn, "w_down"):
+                nn.init.zeros_(blk.ffn.w_down.weight)
         # أعد تهيئة shortcut سلسلة السور identity-like بعد apply (نفس السبب:
         # self.apply(self._init_weights) يستبدل تهيئة identity الأصلية
         # بتهيئة عشوائية normal(0, 0.02) — راجع SurahChainLayer._init_shortcut_identity
@@ -579,6 +657,9 @@ class SurahChainLM(nn.Module):
             "chain_scale": getattr(self, "chain_scale", 1.0),
             "use_qk_norm": getattr(self, "use_qk_norm", False),
             "use_gated_attn": getattr(self, "use_gated_attn", False),
+            "n_kv_heads": getattr(self, "n_kv_heads", self.n_heads),
+            "d_head": getattr(self, "d_head", self.d_model // self.n_heads),
+            "d_ff": getattr(self, "d_ff", self.d_model * 4),
         }
 
 
@@ -599,6 +680,9 @@ class HybridExperimentModelTorch:
         use_qk_norm: bool = True,
         use_gated_attn: bool = True,
         chain_scale: float = 1.0,
+        n_kv_heads: Optional[int] = None,
+        d_head: Optional[int] = None,
+        d_ff: Optional[int] = None,
     ):
         self.device = torch.device(device) if device else get_device()
         self.base_lr = lr
@@ -607,6 +691,9 @@ class HybridExperimentModelTorch:
         self.use_qk_norm = use_qk_norm
         self.use_gated_attn = use_gated_attn
         self.chain_scale = float(chain_scale) if chain_scale else 1.0
+        self.n_kv_heads = n_kv_heads
+        self.d_head = d_head
+        self.d_ff = d_ff
         self.tokenizer = StrongTokenizer(vocab_size)
         self.model = SurahChainLM(
             vocab_size=vocab_size,
@@ -618,6 +705,9 @@ class HybridExperimentModelTorch:
             use_qk_norm=use_qk_norm,
             use_gated_attn=use_gated_attn,
             chain_scale=self.chain_scale,
+            n_kv_heads=n_kv_heads,
+            d_head=d_head,
+            d_ff=d_ff,
         ).to(self.device)
 
         if compile_model and hasattr(torch, "compile"):
@@ -892,6 +982,9 @@ class HybridExperimentModelTorch:
             "use_qk_norm": bool(getattr(core, "use_qk_norm", True)),
             "use_gated_attn": bool(getattr(core, "use_gated_attn", True)),
             "chain_scale": float(getattr(core, "chain_scale", 1.0)),
+            "n_kv_heads": int(getattr(core, "n_kv_heads", core.n_heads)),
+            "d_head": int(getattr(core, "d_head", core.d_model // core.n_heads)),
+            "d_ff": int(getattr(core, "d_ff", core.d_model * 4)),
             "lr": self.lr,
             "tokenizer": {
                 "word_to_id": self.tokenizer.word_to_id,
@@ -922,6 +1015,17 @@ class HybridExperimentModelTorch:
         want_pre = int(ckpt.get("n_pre", DEFAULT_N_PRE))
         want_post = int(ckpt.get("n_post", DEFAULT_N_POST))
         want_max = int(ckpt.get("max_seq", DEFAULT_MAX_CTX))
+        # GQA: ckpt قديم (MHA/FFN GELU) لا يحمل n_kv_heads/d_head/d_ff —
+        # نشتقها: n_kv_heads=n_heads، d_head=d_model//n_heads، d_ff=4×d_model
+        # (التوافق العكسي يبقي checkpoints القديمة MHA كما هي)
+        if "n_kv_heads" in ckpt:
+            want_kvh = int(ckpt["n_kv_heads"])
+            want_dh = int(ckpt.get("d_head", want_d // want_h))
+            want_ff = int(ckpt.get("d_ff", want_d * 4))
+        else:
+            want_kvh = want_h
+            want_dh = want_d // want_h
+            want_ff = want_d * 4
         sd = ckpt.get("model") or {}
         # اكتشاف الميزات من الـcheckpoint (توافق مع أوزان قديمة بدون QK-Norm/Gated)
         if "use_qk_norm" in ckpt:
@@ -941,6 +1045,9 @@ class HybridExperimentModelTorch:
         self.use_qk_norm = want_qk
         self.use_gated_attn = want_gate
         self.chain_scale = want_scale
+        self.n_kv_heads = want_kvh
+        self.d_head = want_dh
+        self.d_ff = want_ff
 
         core = getattr(self.model, "_orig_mod", self.model)
         need_rebuild = (
@@ -952,6 +1059,9 @@ class HybridExperimentModelTorch:
             or bool(getattr(core, "use_qk_norm", False)) != want_qk
             or bool(getattr(core, "use_gated_attn", False)) != want_gate
             or abs(float(getattr(core, "chain_scale", 1.0)) - want_scale) > 1e-6
+            or int(getattr(core, "n_kv_heads", core.n_heads)) != want_kvh
+            or int(getattr(core, "d_head", core.d_model // core.n_heads)) != want_dh
+            or int(getattr(core, "d_ff", core.d_model * 4)) != want_ff
         )
         if need_rebuild:
             self.model = SurahChainLM(
@@ -964,6 +1074,9 @@ class HybridExperimentModelTorch:
                 use_qk_norm=want_qk,
                 use_gated_attn=want_gate,
                 chain_scale=want_scale,
+                n_kv_heads=want_kvh,
+                d_head=want_dh,
+                d_ff=want_ff,
             ).to(self.device)
             self._compiled = False
             self.opt = torch.optim.AdamW(

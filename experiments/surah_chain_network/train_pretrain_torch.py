@@ -21,6 +21,10 @@ presets:
   small   → d=128, سلسلة 114 كما هي, pre/post=2
   medium  → d=256, سلسلة 114 كما هي, pre/post=4
   large   → d=512, سلسلة 114 كما هي, pre/post=6
+  xlarge  → معمارية نماذج كبيرة: d=8192 | FFN=28672 (SwiGLU) | GQA
+            (64 رأس استعلام + 8 KV × 128/رأس) | RMSNorm Pre-Norm |
+            pre/post=8 — سلسلة 114 تبقى كما هي والتوسع أثناء التدريب
+            (يتطلب GPU ذاكرة ≥ 32GB + torch.compile)
 """
 from __future__ import annotations
 
@@ -45,6 +49,9 @@ EPOCHS = int(os.environ.get("SCN_EPOCHS", "15"))
 BATCH = int(os.environ.get("SCN_BATCH", "16"))
 D_MODEL = int(os.environ.get("SCN_D_MODEL", "128"))
 N_HEADS = int(os.environ.get("SCN_N_HEADS", "8"))
+N_KV_HEADS = int(os.environ.get("SCN_N_KV_HEADS", "0")) or None  # 0 ⇒ MHA عادي
+D_HEAD = int(os.environ.get("SCN_D_HEAD", "0")) or None
+D_FF = int(os.environ.get("SCN_D_FF", "0")) or None
 N_PRE = int(os.environ.get("SCN_N_PRE", "2"))
 N_POST = int(os.environ.get("SCN_N_POST", "2"))
 BASE_LR = float(os.environ.get("SCN_LR", "1e-3"))
@@ -90,6 +97,24 @@ elif PRESET == "large":
     BATCH = int(os.environ.get("SCN_BATCH", "8"))
     BASE_LR = float(os.environ.get("SCN_LR", "3e-4"))
     MAX_LEN = int(os.environ.get("SCN_MAX_LEN", "128"))
+elif PRESET == "xlarge":
+    # معمارية نماذج كبيرة: GQA (64 رأس استعلام + 8 KV heads × 128/رأس)،
+    # SwiGLU FFN (3.5× d_model = 28672)، RMSNorm Pre-Norm.
+    # سلسلة السور الـ114 تبقى كما هي والتوسع يتم أثناء التدريب.
+    D_MODEL, N_HEADS, N_PRE, N_POST = 8192, 64, 8, 8
+    N_KV_HEADS, D_HEAD = 8, 128
+    D_FF = int(os.environ.get("SCN_D_FF", "28672"))
+    CHAIN_SCALE = float(os.environ.get("SCN_CHAIN_SCALE", "1"))
+    N = max(N, int(os.environ.get("SCN_N", "100000")))
+    BATCH = int(os.environ.get("SCN_BATCH", "1"))
+    BASE_LR = float(os.environ.get("SCN_LR", "1e-4"))
+    MAX_LEN = int(os.environ.get("SCN_MAX_LEN", "128"))
+    COMPILE = os.environ.get("SCN_COMPILE", "1") == "1"
+    # استقرار: التوسيع الذاتي أسمح عند هذا الحجم
+    MAX_EXPANDS = int(os.environ.get("SCN_MAX_EXPANDS", "5"))
+
+if N_KV_HEADS is not None and N_HEADS % N_KV_HEADS != 0:
+    raise ValueError(f"n_heads ({N_HEADS}) يجب أن يقبل القسمة على n_kv_heads ({N_KV_HEADS})")
 
 if UNTIL_END:
     EPOCHS = max(EPOCHS, int(os.environ.get("SCN_MAX_EPOCHS", "80")))
@@ -208,8 +233,15 @@ def main():
         use_qk_norm=USE_QK_NORM,
         use_gated_attn=USE_GATED_ATTN,
         chain_scale=CHAIN_SCALE,
+        n_kv_heads=N_KV_HEADS,
+        d_head=D_HEAD,
+        d_ff=D_FF,
     )
-    print(f"QK-Norm={USE_QK_NORM} | Gated-Attention={USE_GATED_ATTN}")
+    core = getattr(m.model, "_orig_mod", m.model)
+    gqa_str = f" | GQA: {core.n_kv_heads} KV heads × {core.d_head}/رأس" if core.n_kv_heads != core.n_heads else " | انتباه: MHA"
+    print(f"QK-Norm={USE_QK_NORM} | Gated-Attention={USE_GATED_ATTN}{gqa_str}")
+    pc = core.param_count()
+    print(f"FFN={'SwiGLU' if hasattr(core.pre_blocks[0].ffn, 'w_up') else 'GELU'} | d_ff={core.d_ff} | params={pc['total']:,}")
 
     if resume_path is not None:
         print(f"استكمال من: {resume_path}")
