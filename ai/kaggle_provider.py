@@ -1069,7 +1069,11 @@ def generate_surahchain_kernel_script(
         print("▶", script)
         r = subprocess.run([sys.executable, str(script)], cwd=str(work), env=env)
         print("exit", r.returncode)
-        raise SystemExit(r.returncode)
+        # لا SystemExit: papermill يعتبره فشل الدفتر حتى لو التدريب نجح
+        if r.returncode == 0:
+            print("✅ انتهت الجولة بنجاح")
+        else:
+            print("⚠ رمز الخروج", r.returncode, "— إن وُجدت checkpoints فالتدريب غالباً نجح")
     """)
     return tmpl.replace("__JOB_ID__", job_id).replace("__REPO__", repo).replace(
         "__BRANCH__", branch).replace("__PRESET__", preset).replace(

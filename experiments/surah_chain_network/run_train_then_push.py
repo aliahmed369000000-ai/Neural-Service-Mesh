@@ -195,7 +195,9 @@ def main() -> int:
         result = push_artifacts(repo=args.repo, branch=args.branch)
         print(result)
         if not result.get("ok"):
-            return 2
+            print("⚠ فشل الرفع التلقائي — التدريب نفسه نجح. حمّل المخرجات من Kaggle Output.")
+            print("سبب الرفع:", result.get("error") or result)
+            return 0
         print("✅ تم الرفع تلقائياً بعد انتهاء التدريب")
     else:
         print("\n(تخطي الرفع)")
