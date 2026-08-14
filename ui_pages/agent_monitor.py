@@ -1796,6 +1796,51 @@ def render_par_panel() -> None:
                         "خطوات كل مسار: المسار الأعلى تصويتًا أولًا "
                         "ثم الخطوات غير المكررة من المسارات الأخرى "
                         "— بحد صارم +0.15 على مكافأة الدمج.")
+                # ── ذاكرة التعارضات (Conflict Memory) ────
+                _cs = None
+                try:
+                    from app_core import _conflict_stats_task
+                    _cs = _conflict_stats_task()
+                except Exception:
+                    _cs = None
+                if _cs and _cs.get("resolutions", 0) > 0:
+                    _mem = _rcd.get("recalled_conflicts", []) or []
+                    st.markdown("**ذاكرة التعارضات**")
+                    _mem_table = [
+                        {"المهمة": (_m.get("task_id", "") or "")[:20],
+                         "الهدف": (_m.get("goal", "") or "")[:30],
+                         "الأدوار": _m.get("roles_csv", ""),
+                         "ن مسارات": _m.get("n_paths", 0),
+                         "تعارض": round(
+                             float(_m.get("conflict_sim", 0) or 0), 2),
+                         "النتيجة": _m.get("outcome")
+                         or "بانتظار القياس",
+                         "صحيح": "نعم" if _m.get("was_correct") else "—"}
+                        for _m in _mem[:5]]
+                    if _mem_table:
+                        st.dataframe(_mem_table,
+                                     use_container_width=True,
+                                     height=150)
+                    st.caption(
+                        f"تعارضات محلولة {int(_cs.get('resolutions', 0))} "
+                        f"— مقاسة {int(_cs.get('measured', 0))} "
+                        f"— صحيحة {int(_cs.get('correct', 0))} "
+                        f"(دقة "
+                        f"{round(float(_cs.get('accuracy', 0) or 0), 2)}) "
+                        f"— أثر الاستحضار "
+                        + str(round(float(_rcd.get('conflict_recall_effect', 0)
+                                        or 0), 3)))
+                    with st.expander(
+                            "كيف يتعلم الفريق من تعارضاته"):
+                        st.text(
+                            "يسجّل المحرك كل حلّ تعارض جماعي مع "
+                            "محاكاته وخطوات الدمج، ثم تربط النتيجة "
+                            "الفعلية للمهمة بأحدث حلّ (proceed صحيح "
+                            "فقط عند نجاح وrevise عند فشل). "
+                            "التعارضات المماثلة في الهدف وانحراف "
+                            "التعارض (±0.05) تُستحضر قبل أي حلّ "
+                            "جديد: السوابق الصحيحة ترفع ثقة الدمج "
+                            "والخاطئة تخفضها — بحد صارم ±0.15.")
     except Exception:
         pass
     st.caption(

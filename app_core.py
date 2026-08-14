@@ -493,6 +493,10 @@ try:
         reason_multi_task as _reason_multi_task,
         reason_multi_role_task as _reason_multi_role_task,
         resolve_collective_task as _resolve_collective_task,
+        record_conflict_task as _record_conflict_task,
+        learn_conflict_task as _learn_conflict_task,
+        recall_conflicts_task as _recall_conflicts_task,
+        conflict_stats_task as _conflict_stats_task,
     )
     _PAR_OK = True
 except Exception:
@@ -523,6 +527,15 @@ except Exception:
         return None
     def _resolve_collective_task(*a, **kw):
         return None
+    def _record_conflict_task(*a, **kw):
+        return None
+    def _learn_conflict_task(*a, **kw):
+        return None
+    def _recall_conflicts_task(*a, **kw):
+        return []
+    def _conflict_stats_task():
+        return {"resolutions": 0, "measured": 0,
+                "correct": 0, "accuracy": 0.0}
 # ── طبقة فحص أمان أولى (regex، بدون تكلفة API) ────────────────────────────
 try:
     from ai.harm_classifier import classify_prompt as _classify_harm, get_domain_label as _harm_label

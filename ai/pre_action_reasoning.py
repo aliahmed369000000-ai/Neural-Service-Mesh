@@ -25,6 +25,11 @@ ai/pre_action_reasoning.py — التفكير ما قبل الفعل (Pre-Action
 الجداول:
   par_records: id, task_id, role, goal, steps_json, risks_json, verdict,
                confidence, revised_n, outcome, created_at
+  conflict_resolutions: حلّل التعارضات الجماعية ونتائجها المقاسة
+               (id, task_id, goal, roles_csv, n_roles, n_paths,
+                conflict_sim, merged_steps_json, chosen_role,
+                chosen_conf, confidence, outcome, was_correct,
+                created_at)
 
 الذاكرة الحسية للأدوار (Role Sensory Memory):
   قبل جلسة التفكير، يستحضر المحرك جلسات التفكير السابقة لنفس الدور
@@ -67,6 +72,18 @@ ai/pre_action_reasoning.py — التفكير ما قبل الفعل (Pre-Action
   خطوات المسارات الأخرى غير المكررة، وكل خطوة تحمل مصدرها ووزنها
   وثقتها. تحفظ الخطة المدمجة جلسةً واحدة في السجل
   (task_id::collective) بثقة محصورة [0,1] ومكافأة دمج ≤ +0.15.
+
+ذاكرة التعارضات (Conflict Memory):
+  يسجّل المحرك كل حلّ تعارض جماعي في جدول conflict_resolutions
+  (بلا نتيجة بعد)، ثم بعد اكتمال المهمة تربط نتيجتها الفعلية
+  (success/failure) بأحدث حلّ لنفس المهمة عبر learn_conflict():
+  تُقاس صحة الحكم الجماعي مقابل النتيجة (proceed صحيح فقط عند
+  success وrevise صحيح عند failure). قبل حلّ أي تعارض جديد
+  يستحضر المحرك السوابق المماثلة (كلمة مشتركة ≥ 3 أحرف في الهدف
+  وانحراف تعارض ≤ 0.05): السوابق المقاسة الصحيحة ترفع ثقة الدمج
+  بحد +0.05 والخاطئة تخفضها بحد −0.075 — أثر الاستحضار محصور
+  دائمًا بحد صارم ±0.15 — وتُعرض الذكريات المستحضرة في لوحة
+  المراقبة ليُرى كيف تعلّم الفريق من تعارضاته السابقة.
 """
 from __future__ import annotations
 
@@ -284,6 +301,10 @@ class CollectivePlan:
         self.conflict_sim: float = 0.0   # نسبة التعارض الافتراضي
         self.resolution_note: str = ""
         self.confidence: float = 0.0     # [0,1]
+        # ذاكرة التعارضات: استحضار الحلول المماثلة السابقة
+        self.conflict_recall: str = ""   # ملاحظة الاستحضار
+        self.conflict_recall_effect: float = 0.0  # أثر المعايرة [−0.15,0.15]
+        self.recalled_conflicts: List[Dict[str, Any]] = []
         self.created_at: float = time.time()
 
     @property
@@ -299,6 +320,9 @@ class CollectivePlan:
             "conflict_sim": round(self.conflict_sim, 3),
             "resolution_note": self.resolution_note,
             "confidence": round(self.confidence, 3),
+            "conflict_recall": self.conflict_recall,
+            "conflict_recall_effect": round(self.conflict_recall_effect, 3),
+            "recalled_conflicts": self.recalled_conflicts,
             "created_at": self.created_at,
         }
 
@@ -925,6 +949,191 @@ class PreActionReasoner:
                     })
         return mr
 
+    # ── ذاكرة التعارضات (Conflict Memory) ──────────────────────────
+
+    def recall_conflicts(self, goal: str, conflict_sim: float = 0.0,
+                         top_k: int = 3) -> List[Dict[str, Any]]:
+        """استحضار حلول تعارضات جماعية سابقة مماثلة.
+
+        المطابقة نمطية بلا نموذج لغوي: تشارك كلمةً واحدةً على الأقل
+        (≥ 3 أحرف) مع الهدف، وانحراف محاكاة التعارض ≤ 0.05. ترجع
+        أحدث `top_k` سوابق بترتيب زمني معكوس، مع outcome معلوم أولًا
+        لأن النتيجة المقاسة أقوى دليلًا من سوابق بلا نتيجة."""
+        out: List[Dict[str, Any]] = []
+        try:
+            goal_words = {w for w in (goal or "").split() if len(w) >= 3}
+            if not goal_words:
+                return out
+            with self._lock, _connect(self._db) as conn:
+                rows = conn.execute("""
+                    SELECT id, task_id, goal, roles_csv, n_roles, n_paths,
+                           conflict_sim, confidence, outcome, was_correct,
+                           created_at
+                    FROM conflict_resolutions
+                    ORDER BY created_at DESC
+                """).fetchall()
+            for row in rows:
+                if len(out) >= top_k:
+                    break
+                rid, t_id, g, roles, n_roles, n_paths, csim, conf, oc, wc, at = row
+                if oc not in ("success", "failure"):
+                    # سوابق غير مقاسة لا تدخل الاستحضار — نتيجة
+                    # فعلية مقاسة فقط دليل موثوق
+                    continue
+                g_words = {w for w in (g or "").split() if len(w) >= 3}
+                if not (goal_words & g_words):
+                    continue
+                if not (-0.05 <= conflict_sim - (csim or 0.0) <= 0.05):
+                    continue
+                out.append({"id": rid, "task_id": t_id,
+                            "goal": g, "roles_csv": roles,
+                            "n_roles": n_roles, "n_paths": n_paths,
+                            "conflict_sim": round(csim, 3),
+                            "confidence": round(conf, 3),
+                            "outcome": oc, "was_correct": wc,
+                            "created_at": at})
+        except Exception as exc:
+            logger.warning("Conflict recall failed: %s", exc)
+        return out
+
+    def record_conflict(self, cp: "CollectivePlan",
+                        n_paths: int) -> Optional[Dict[str, Any]]:
+        """تسجيل حلّ التعارض الجماعي الحالي (بلا نتيجة بعد — تقاس لاحقًا).
+        لا ينشئ سجلًا مزدوجًا: إن كان لهذه المهمة حلّ مسجل غير مقاس
+        (كما يحدث تلقائيًا داخل resolve_collective) يكتفي بإعادة
+        معرّفه؛ وإلا ينشئ سجلًا جديدًا."""
+        try:
+            steps = json.dumps(
+                [{"action": s["action"],
+                  "source_path": s["source_path"],
+                  "source_role": s["source_role"]}
+                 for s in cp.merged_steps],
+                ensure_ascii=False)
+            chosen_role = ""
+            if cp.merged_steps:
+                # الدور صاحب أثقل خطوة في الدمج
+                best = max(cp.merged_steps,
+                           key=lambda s: s.get("step_weight", 0.0))
+                chosen_role = best.get("source_role", "")
+            with self._lock, _connect(self._db) as conn:
+                row = conn.execute("""
+                    SELECT id, outcome FROM conflict_resolutions
+                    WHERE task_id = ? ORDER BY id DESC LIMIT 1
+                """, (cp.task_id,)).fetchone()
+                if row is not None and row[1] not in (
+                        "success", "failure"):
+                    # حلّ سابق غير مقاس — لا ازدواجية
+                    return {"recorded_id": row[0]}
+                cur = conn.execute("""
+                    INSERT INTO conflict_resolutions
+                      (task_id, goal, roles_csv, n_roles, n_paths,
+                       conflict_sim, merged_steps_json, chosen_role,
+                       chosen_conf, confidence, outcome, was_correct,
+                       created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, (cp.task_id, (cp.goal or "")[:300],
+                      ",".join(cp.roles), len(cp.roles), n_paths,
+                      round(cp.conflict_sim, 3), steps, chosen_role,
+                      round(cp.confidence, 3),
+                      round(cp.confidence, 3), None, None,
+                      time.time()))
+                self._prune_conflicts()
+                return {"recorded_id": cur.lastrowid}
+        except Exception as exc:
+            logger.warning("Conflict record failed: %s", exc)
+        return None
+
+    def learn_conflict(self, task_id: str,
+                       outcome: str) -> Optional[Dict[str, Any]]:
+        """ربط نتيجة فعلية بأحدث حلّ تعارض لنفس المهمة.
+
+        outcome ∈ {'success','failure'} — يقيس إن كان الحكم الجماعي
+        (proceed بثقة ≥ الحد الأدنى أم revise) متطابقًا مع النتيجة.
+        ترجع {was_correct, had_outcome_before}."""
+        outcome = (outcome or "").strip().lower()
+        if outcome not in ("success", "failure"):
+            return None
+        try:
+            with self._lock, _connect(self._db) as conn:
+                row = conn.execute("""
+                    SELECT id, outcome FROM conflict_resolutions
+                    WHERE task_id = ? ORDER BY id DESC LIMIT 1
+                """, (task_id,)).fetchone()
+                if row is None:
+                    return None
+                rid, prev = row
+                had_outcome_before = prev in ("success", "failure")
+                verdict = ("proceed" if prev in ("success", "failure")
+                           else "proceed")
+                # الحكم المحفوظ عند التسجيل هو confidence — نشتق
+                # verdict من الثقة المسجلة: proceed إذا ≥ الحد الأدنى
+                conf_row = conn.execute("""
+                    SELECT confidence FROM conflict_resolutions
+                    WHERE id = ?
+                """, (rid,)).fetchone()
+                if conf_row:
+                    verdict = ("proceed" if conf_row[0] >=
+                               _PAR_MIN_CONFIDENCE else "revise")
+                was_correct = (
+                    (verdict == "proceed" and outcome == "success")
+                    or (verdict == "revise" and outcome == "failure"))
+                conn.execute("""
+                    UPDATE conflict_resolutions
+                    SET outcome = ?, was_correct = ?
+                    WHERE id = ?
+                """, (outcome, int(was_correct), rid))
+                conn.commit()
+                return {"record_id": rid, "verdict": verdict,
+                        "outcome": outcome,
+                        "was_correct": was_correct,
+                        "had_outcome_before": had_outcome_before}
+        except Exception as exc:
+            logger.warning("Conflict learn failed: %s", exc)
+        return None
+
+    def conflict_stats(self) -> Dict[str, Any]:
+        """إحصاء ذاكرة التعارضات (للوحة والمعايرة)."""
+        try:
+            with self._lock, _connect(self._db) as conn:
+                total = conn.execute("""
+                    SELECT COUNT(*) FROM conflict_resolutions
+                """).fetchone()[0]
+                measured = conn.execute("""
+                    SELECT COUNT(*) FROM conflict_resolutions
+                    WHERE outcome IN ('success', 'failure')
+                """).fetchone()[0]
+                correct = conn.execute("""
+                    SELECT COUNT(*) FROM conflict_resolutions
+                    WHERE outcome IN ('success', 'failure')
+                      AND was_correct = 1
+                """).fetchone()[0]
+                return {"resolutions": total, "measured": measured,
+                        "correct": correct,
+                        "accuracy": (round(correct / measured, 3)
+                                     if measured else 0.0)}
+        except Exception as exc:
+            logger.warning("Conflict stats failed: %s", exc)
+        return {"resolutions": 0, "measured": 0,
+                "correct": 0, "accuracy": 0.0}
+
+    def _prune_conflicts(self) -> None:
+        """حصر ذاكرة التعارضات بأحدث 500 سجلًا (مقاييس صامتة)."""
+        try:
+            with self._lock, _connect(self._db) as conn:
+                excess = conn.execute("""
+                    SELECT COUNT(*) - 500 FROM conflict_resolutions
+                """).fetchone()[0]
+                if excess and excess > 0:
+                    conn.execute("""
+                        DELETE FROM conflict_resolutions
+                        WHERE id IN (SELECT id
+                                     FROM conflict_resolutions
+                                     ORDER BY id ASC LIMIT ?)
+                    """, (excess,))
+                    conn.commit()
+        except Exception as exc:
+            logger.warning("Conflict prune failed: %s", exc)
+
     def role_accuracy_stats(self) -> Dict[str, Dict[str, Any]]:
         """دقة التوقعات التاريخية لكل دور على حدة (للوحة والمعايرة).
         ترجع {role: {role, learned, correct, accuracy}} — الأدوار ذات
@@ -995,6 +1204,36 @@ class PreActionReasoner:
         else:
             cont = 0.0
         cp.conflict_sim = round(max(ratio, cont), 3)
+        # 1ب. استحضار حلول تعارضات مماثلة سابقة (ذاكرة التعارضات):
+        # سوابق مماثلة (كلمة مشتركة ≥ 3 أحرف وانحراف تعارض ≤ 0.05)
+        # ذات نتيجة مقاسة تُعيّر ثقة الدمج: سوابق صحيحة ترفع
+        # والثقة وسوابق خاطئة تخفضها، بحد صارم ±0.15 على أثر
+        # الاستحضار؛ وتُحفظ الذكريات المستحضرة في الخطة لعرضها.
+        recalled = self.recall_conflicts(mr.goal, cp.conflict_sim)
+        cp.recalled_conflicts = recalled
+        scored = [r for r in recalled
+                  if r.get("outcome") in ("success", "failure")]
+        recall_effect = 0.0
+        if scored:
+            correct = sum(1 for r in scored
+                          if r.get("was_correct"))
+            acc = correct / len(scored)
+            if acc >= 2 / 3:
+                recall_effect = 0.05
+                cp.conflict_recall = (
+                    f"سوابق تعارض مماثلة صحيحة: {correct}/"
+                    f"{len(scored)} ({round(acc, 2)}) — رفع الثقة")
+            elif acc < 0.5:
+                recall_effect = -0.075
+                cp.conflict_recall = (
+                    f"سوابق تعارض مماثلة خاطئة: {correct}/"
+                    f"{len(scored)} ({round(acc, 2)}) — خفض الثقة")
+            else:
+                cp.conflict_recall = (
+                    f"سوابق تعارض مماثلة بين الحدَّين: {correct}/"
+                    f"{len(scored)} — بلا معايرة")
+        cp.conflict_recall_effect = max(-0.15,
+                                        min(0.15, recall_effect))
         # 2. دمج أفضل الخطوات: المسار الأعلى تصويتًا أولًا
         order = sorted(range(n_paths),
                        key=lambda i: (mr.vote_scores[i],
@@ -1043,17 +1282,20 @@ class PreActionReasoner:
             base = sum(src_confs) / len(src_confs)
             merge_bonus = min(0.15, 0.02 * max(
                 0, len(mr.role_judgments) - 1))
-            cp.confidence = max(0.0, min(1.0, base + merge_bonus))
+            cp.confidence = max(0.0, min(1.0,
+                base + merge_bonus + cp.conflict_recall_effect))
             n_votes = sum(len(j) for j in mr.role_judgments.values())
             cp.resolution_note = (
                 f"دمج {cp.n_merged} خطوات من {n_paths} مسارات "
                 f"بأحكام {len(mr.role_judgments)} أدوار "
                 f"(تعارض افتراضي {round(cp.conflict_sim * 100)}% "
                 f"من {n_votes} حكم) — مكافأة دمج +"
-                f"{round(merge_bonus, 3)}")
+                f"{round(merge_bonus, 3)}"
+                f" وأثر استدعاء {round(cp.conflict_recall_effect, 3)}")
         else:
             cp.resolution_note = "لا خطوات قابلة للدمج — بلا أثر"
         self._save_collective_record(cp, candidate_paths)
+        self.record_conflict(cp, n_paths)
         return cp
 
     def _save_collective_record(self, cp: "CollectivePlan",
@@ -1179,9 +1421,30 @@ class PreActionReasoner:
         try:
             with self._lock, _connect(self._db) as conn:
                 conn.execute("DELETE FROM par_records")
+                conn.execute("DELETE FROM conflict_resolutions")
                 conn.commit()
         except Exception as exc:
             logger.warning("PAR reset failed: %s", exc)
+
+
+_CMEM_SCHEMA = """
+CREATE TABLE IF NOT EXISTS conflict_resolutions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id       TEXT NOT NULL,
+    goal          TEXT,
+    roles_csv     TEXT,
+    n_roles       INTEGER NOT NULL DEFAULT 0,
+    n_paths       INTEGER NOT NULL DEFAULT 0,
+    conflict_sim  REAL NOT NULL DEFAULT 0.0,
+    merged_steps_json TEXT,
+    chosen_role   TEXT,
+    chosen_conf   REAL NOT NULL DEFAULT 0.0,
+    confidence    REAL NOT NULL DEFAULT 0.0,
+    outcome       TEXT,
+    was_correct   INTEGER,
+    created_at    REAL NOT NULL DEFAULT 0.0
+);
+"""
 
 
 _SCHEMA = """
@@ -1210,11 +1473,21 @@ def _migrate_outcome(conn: sqlite3.Connection) -> None:
         pass
 
 
+def _ensure_conflict_memory(conn: sqlite3.Connection) -> None:
+    """إنشاء جدول ذاكرة التعارضات (migration آمن للصمت)."""
+    try:
+        conn.executescript(_CMEM_SCHEMA)
+        conn.commit()
+    except Exception:
+        pass
+
+
 def _connect(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, timeout=30)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(_SCHEMA)
     _migrate_outcome(conn)
+    _ensure_conflict_memory(conn)
     return conn
 
 
@@ -1329,6 +1602,31 @@ def reason_multi_role_task(task_id: str, goal: str,
             task_id, goal, candidate_paths or [], roles).to_dict()
     except Exception:
         return None
+
+
+def record_conflict_task(cp: "CollectivePlan",
+                         n_paths: int) -> Optional[Dict[str, Any]]:
+    """تسجيل حلّ تعارض جماعي (ممر إلى الوحدة عبر singleton)."""
+    return get_pre_action_reasoner().record_conflict(cp, n_paths)
+
+
+def learn_conflict_task(task_id: str,
+                        outcome: str) -> Optional[Dict[str, Any]]:
+    """ربط نتيجة فعلية بأحدث حلّ تعارض لنفس المهمة (ممر singleton)."""
+    return get_pre_action_reasoner().learn_conflict(task_id, outcome)
+
+
+def recall_conflicts_task(goal: str,
+                          conflict_sim: float = 0.0,
+                          top_k: int = 3) -> List[Dict[str, Any]]:
+    """استحضار حلول تعارضات مماثلة سابقة (ممر singleton)."""
+    return get_pre_action_reasoner().recall_conflicts(
+        goal, conflict_sim, top_k)
+
+
+def conflict_stats_task() -> Dict[str, Any]:
+    """إحصاء ذاكرة التعارضات (ممر singleton)."""
+    return get_pre_action_reasoner().conflict_stats()
 
 
 def resolve_collective_task(task_id: str, goal: str,
