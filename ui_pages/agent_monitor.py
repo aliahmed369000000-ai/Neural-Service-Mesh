@@ -1688,6 +1688,77 @@ def render_par_panel() -> None:
     st.caption(
         "لا مقارنة مسارات نشطة بعد — مع كل مهمة ذات خطط بديلة يختار "
         "الفريق المسار الأعلى ثقةً تاريخًا للدور (±0.15 كحد صارم).")
+    # ── حُكم الفريق على المسارات (Multi-Role Path Voting) ────────────
+    _par_mrr_fn = None
+    try:
+        from app_core import (_reason_multi_role_task  # noqa: F401
+                               as _par_mrr_fn)
+    except Exception:
+        pass
+    st.markdown("**حُكم الفريق على المسارات**")
+    if _par_mrr_fn is None:
+        st.caption(
+            "غير متاح في هذه النسخة — ميزة يوزع المحرك فيها الخطط "
+            "البديلة على أدوار الفريق، فيقيم كل دور كل مسار من زاوية "
+            "تخصصه، ثم يجتمع الفريق على المسار الأعلى توافقًا وثقةً "
+            "(±0.15 كحد صارم).")
+        return
+    try:
+        _mrr = None
+        if _latest:
+            _goal2 = _latest.get("goal", "")[0:140]
+            if _goal2:
+                _mrr = _par_mrr_fn(
+                    "_ui_mrr",
+                    _goal2,
+                    [["ابحث في الويب عن آخر المستجدات",
+                      "قارن بين النتائج"],
+                     ["اجمع المصادر الموثوقة",
+                      "حلل البيانات داخليا"]],
+                    roles=["analyst", "writer"])
+        if _mrr and _mrr.get("n_paths", 0) >= 2:
+            _mcmp = []
+            for _i in range(_mrr.get("n_paths", 0)):
+                _chosen_tag = ("المختار "
+                               if _i == _mrr.get("chosen_index") else "")
+                _mcmp.append({
+                    "المسار": f"{_chosen_tag}مسار {_i + 1}",
+                    "ثقة الفريق": round(
+                        _mrr.get("vote_scores", [0.0] * 2)[_i], 3),
+                    "التوافق بين الأدوار": round(
+                        _mrr.get("consensus_scores", [0.0] * 2)[_i], 3),
+                })
+            st.dataframe(_mcmp, use_container_width=True, height=140)
+            if _mrr.get("role_judgments"):
+                with st.expander("أحكام الأدوار التفصيلية"):
+                    for _r, _jud in _mrr["role_judgments"].items():
+                        _acc = _mrr.get("role_accuracies", {})
+                        _a = _acc.get(_r, {})
+                        st.text(
+                            f"◂ {(_r or '—').capitalize()} "
+                            f"(دقة تاريخية {round(float(
+                                _a.get('accuracy', 0) or 0), 2)} "
+                            f"من {_a.get('learned', 0)} مهمة) — "
+                            f"أحكام المسارات: "
+                            + "; ".join(
+                                f"مسار {int(_k) + 1}: "
+                                f"ثقة {round(float(
+                                    _v.get('confidence', 0)), 2)} "
+                                f"{'نفّذ' if _v.get('verdict') == 'proceed' else 'راجع'}"
+                                for _k, _v in sorted(_jud.items())))
+            st.caption(
+                _mrr.get("chosen_role_note", "")
+                + " — يوزع المحرك الخطط البديلة على أدوار متخصصة: كل "
+                "دور يقيم كل مسار من زاوية تخصصه بثقته وذاكرته "
+                "الحسية ومعايرته التاريخية، ثم يجمع الأحكام بوزن "
+                "الثقة التاريخية للدور (±0.03 مكافأة توافق و±0.15 "
+                "حد صارم) ويختار المسار الأعلى توافقًا وثقةً.")
+    except Exception:
+        pass
+    st.caption(
+        "لا حُكم فريق نشطًا بعد — مع كل مهمة ذات خطط بديلة يوزع "
+        "المحرك الأحكام على أدوار الفريق ويجتمع على المسار الأعلى "
+        "توافقًا وثقةً (±0.15 كحد صارم).")
 
 
 

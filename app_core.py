@@ -491,6 +491,7 @@ try:
         par_calibration as _par_calibration,
         par_role_accuracy as _par_role_accuracy,
         reason_multi_task as _reason_multi_task,
+        reason_multi_role_task as _reason_multi_role_task,
     )
     _PAR_OK = True
 except Exception:
@@ -516,6 +517,8 @@ except Exception:
     def _par_role_accuracy():
         return {}
     def _reason_multi_task(*a, **kw):
+        return None
+    def _reason_multi_role_task(*a, **kw):
         return None
 # ── طبقة فحص أمان أولى (regex، بدون تكلفة API) ────────────────────────────
 try:

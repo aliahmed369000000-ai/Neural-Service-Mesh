@@ -171,6 +171,76 @@ class MultiPathPlan:
         }
 
 
+class MultiRolePlan:
+    """التوقع المتعدد المسارات عبر أدوار الفريق (Multi-Role Path Voting).
+
+    يوزّع الخطط البديلة على أدوار متخصصة: لكل دور تجري جلسة تفكير
+    مستقلة لكل مسار (كل جلسة تحفظ في السجل باسمها المسلكي
+    task_id::role::path{i} مع ذاكرتها الحسية ومعايرتها التاريخية
+    وأثرها النمطي)، ثم يجمع المحرك الأحكام عبر الأدوار:
+    لكل مسار متوسط مرجّح بالثقة التاريخية للدور + مكافأة توافق
+    (أدوار متقاربة الآراء) + أثر تاريخي على المسار نفسه — بحد صارم
+    ±0.15 على كل معايرة — ويختار المسار الأعلى توافقًا وثقةً.
+    """
+
+    def __init__(self, task_id: str, goal: str,
+                 roles: Optional[List[str]] = None) -> None:
+        self.task_id = task_id
+        self.goal = goal
+        self.roles: List[str] = roles or []
+        self.multi_path: Optional[MultiPathPlan] = None
+        # {role: {path_idx: ReasoningPlan}}
+        self.role_judgments: Dict[str, Dict[int, ReasoningPlan]] = {}
+        # {role: {n, correct, accuracy}}
+        self.role_accuracies: Dict[str, Dict[str, Any]] = {}
+        self.consensus_scores: List[float] = []  # degree agreement/مسار
+        self.vote_scores: List[float] = []  # score نهائي/مسار
+        self.chosen_index: int = 0
+        self.created_at: float = time.time()
+
+    @property
+    def chosen_role_note(self) -> str:
+        if not self.roles:
+            return ""
+        judges = {}
+        for r, judg in self.role_judgments.items():
+            if self.chosen_index in judg:
+                judges[r] = judg[self.chosen_index].confidence
+        if not judges:
+            return ""
+        top = max(judges, key=judges.get)
+        return f"أعلى حكم من دور {top} بثقة {round(judges[top], 3)}"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "task_id": self.task_id, "goal": self.goal,
+            "roles": self.roles,
+            "n_roles": len(self.role_judgments),
+            "chosen_index": self.chosen_index,
+            "chosen_role_note": self.chosen_role_note,
+            "consensus_scores": [round(s, 3) for s in self.consensus_scores],
+            "vote_scores": [round(s, 3) for s in self.vote_scores],
+            "role_judgments": {
+                r: {str(i): {
+                    "confidence": round(p.confidence, 3),
+                    "verdict": p.verdict,
+                    "memory_effect": round(p.memory_effect, 3),
+                    "calibration_effect": round(p.calibration_effect, 3),
+                } for i, p in judg.items()}
+                for r, judg in self.role_judgments.items()
+            },
+            "role_accuracies": {
+                r: {"learned": a.get("learned", 0),
+                    "correct": a.get("correct", 0),
+                    "accuracy": round(float(a.get("accuracy", 0) or 0), 3)}
+                for r, a in self.role_accuracies.items()
+            },
+            "multi_path": (self.multi_path.to_dict()
+                           if self.multi_path else None),
+            "created_at": self.created_at,
+        }
+
+
 def _classify_risk(text: str) -> tuple:
     """تصنيف مخاطر خطوة من نصها (level, why)."""
     t = f" {text} ".lower()
@@ -611,6 +681,168 @@ class PreActionReasoner:
                 "history_effect": round(mp.history_scores[i], 3),
             })
         return mp
+
+    # ═══ التوقع المتعدد المسارات عبر أدوار الفريق ═══
+
+    def reason_multi_role(self, task_id: str, goal: str,
+                          candidate_paths: List[List[str]],
+                          roles: Optional[List[str]] = None
+                          ) -> MultiRolePlan:
+        """التوقع المتعدد المسارات عبر أدوار الفريق (Multi-Role Voting).
+
+        توزع الخطط البديلة على أدوار متخصصة: لكل دور تجري جلسة تفكير
+        مستقلة لكل مسار (بذاكرته الحسية ومعايرته التاريخية وأثره
+        النمطي، وتُحفظ جميعًا في السجل باسمها المسلكي
+        task_id::role::path{i}). ثم يجمع المحرك الأحكام عبر الأدوار:
+
+          vote[i] = weighted_mean(conf_judge_ij)
+                    + consensus_bonus_i + history_effect_i
+
+        حيث الوزن التاريخي للدور: دقة ≥2/3 → 1.5، <1/2 → 0.5،
+        بينها → 1.0 (بعد 3 جلسات مقاسة للدور، وإلا 1.0)؛
+        consensus_bonus: +0.03 إذا كان انحراف الثقات بين الأدوار
+        ≤ 0.04 (أدوار متقاربة الآراء على المسار)؛ وhistory_effect
+        هو أثر التشابه النمطي لمسار الدور المختص (محصور بـ ±0.15).
+        كل معايرة إضافية محصورة بحد صارم ±0.15 والمتوسط يبقى في
+        [0,1] لأن المدخلات كذلك. في حالة تعادل يفوز المسار ذو
+        التوافق الأعلى.
+
+        تساقط آمن: بلا أدوار أو دور واحد → reason_multi بوحدة
+        «الفريق»؛ وأي دور يفشل يسقط من التصويت دون إفساد الجلسة؛
+        إن فشلت كل الأدوار تسقط الجلسة إلى reason_multi عادي."""
+        mr = MultiRolePlan(task_id, goal, roles)
+        active_roles: List[str] = []
+        for r in (roles or []):
+            if r and r.strip():
+                active_roles.append(r.strip())
+        if len(active_roles) < 2:
+            mp = self.reason_multi(task_id, goal, candidate_paths,
+                                   role="الفريق")
+            mr.multi_path = mp
+            mr.role_judgments["الفريق"] = {
+                i: p for i, p in enumerate(mp.plans)}
+            mr.consensus_scores = [0.0] * len(mp.plans)
+            mr.vote_scores = list(mp.history_scores)
+            mr.chosen_index = mp.chosen_index
+            return mr
+        # 1. كل دور يقيم كل مسار
+        for role in active_roles:
+            judg: Dict[int, ReasoningPlan] = {}
+            for i, path in enumerate(candidate_paths):
+                try:
+                    judg[i] = self.reason(
+                        f"{task_id}::{role}::path{i}", goal,
+                        plan_steps=path, role=role)
+                except Exception as exc:
+                    logger.warning("Multi-role judge %s path %d "
+                                   "failed: %s", role, i, exc)
+            if judg:
+                mr.role_judgments[role] = judg
+            try:
+                mr.role_accuracies[role] = self.calibrate_historical(
+                    role)
+            except Exception:
+                mr.role_accuracies[role] = {
+                    "n": 0, "correct": 0, "accuracy": 0.0}
+        if not mr.role_judgments:
+            try:
+                mp = self.reason_multi(task_id, goal, candidate_paths,
+                                       role="الفريق")
+            except Exception as exc:
+                logger.warning("Multi-role full fallback "
+                               "reason_multi failed: %s", exc)
+                mp = None
+            if mp is not None:
+                mr.multi_path = mp
+                mr.role_judgments["الفريق"] = {
+                    i: p for i, p in enumerate(mp.plans)}
+                mr.consensus_scores = [0.0] * len(mp.plans)
+                mr.vote_scores = list(mp.history_scores)
+                mr.chosen_index = mp.chosen_index
+                return mr
+            # لا يوجد حتى تساقط آمن: خطة صفريّة بأحكم جزئية
+            mr.vote_scores = [0.5] * len(candidate_paths)
+            mr.consensus_scores = [0.0] * len(candidate_paths)
+            if candidate_paths:
+                mr.chosen_index = 0
+            return mr
+        n_paths = len(candidate_paths)
+        # 2. جمع الأحكام عبر الأدوار لكل مسار
+        for i in range(n_paths):
+            confs, weighted, wsum = [], [], 0.0
+            for role, judg in mr.role_judgments.items():
+                if i not in judg:
+                    continue
+                p = judg[i]
+                confs.append(p.confidence)
+                a = float(mr.role_accuracies[role]
+                          .get("accuracy") or 0.0)
+                n = int(mr.role_accuracies[role].get("n") or 0)
+                weight = 1.0
+                if n >= 3:
+                    weight = (1.5 if a >= 2 / 3
+                              else (0.5 if a < 0.5 else 1.0))
+                weighted.append(p.confidence * weight)
+                wsum += weight
+            if not confs:
+                mr.consensus_scores.append(0.0)
+                mr.vote_scores.append(0.0)
+                continue
+            # متوسط موزون (confs ∈ [0,1] والوزون > 0 → الوسط ∈ [0,1])
+            std = 0.0
+            if len(confs) >= 2:
+                mu = sum(confs) / len(confs)
+                std = (sum((c - mu) ** 2 for c in confs)
+                       / len(confs)) ** 0.5
+            consensus = 1.0 - min(1.0, std / 0.2)
+            consensus_bonus = 0.03 if std <= 0.04 else 0.0
+            # أثر تاريخي نمطي على المسار عبر الأدوار
+            hist = 0.0
+            for role, judg in mr.role_judgments.items():
+                if i not in judg:
+                    continue
+                steps = [s.get("action", "")
+                         for s in judg[i].expected_steps]
+                try:
+                    hs = self.history_score_for_path(steps, role)
+                    hist = max(-0.15, min(0.15, hist
+                                          + hs["history_effect"]))
+                except Exception:
+                    pass
+            vote = max(0.0, min(1.0, sum(weighted) / max(1e-9, wsum)
+                       + consensus_bonus + hist))
+            mr.consensus_scores.append(round(consensus, 3))
+            mr.vote_scores.append(vote)
+        # 3. اختيار المسار الأعلى توافقًا وثقةً (التعادل → توافق أعلى)
+        if mr.vote_scores:
+            mr.chosen_index = max(
+                range(len(mr.vote_scores)),
+                key=lambda i: (mr.vote_scores[i],
+                               mr.consensus_scores[i]))
+            # وسم المسار المختار في ذكريات أحكام كل دور
+            for role, judg in mr.role_judgments.items():
+                if mr.chosen_index in judg:
+                    p = judg[mr.chosen_index]
+                    p.recalled_memories.insert(0, {
+                        "task_id": "",
+                        "role": role[:60],
+                        "goal": ("حُكم فريق عبر الأدوار: "
+                                 f"مسار {mr.chosen_index + 1}"
+                                 f"/{n_paths} (المختار)"),
+                        "verdict": p.verdict,
+                        "confidence": round(p.confidence, 3),
+                        "created_at": time.time(),
+                        "similarity": 1.0,
+                        "outcome": "",
+                        "path_index": mr.chosen_index,
+                        "is_chosen": True,
+                        "vote_score": round(
+                            mr.vote_scores[mr.chosen_index], 3),
+                        "consensus": round(
+                            mr.consensus_scores[mr.chosen_index], 3),
+                    })
+        return mr
+
     def role_accuracy_stats(self) -> Dict[str, Dict[str, Any]]:
         """دقة التوقعات التاريخية لكل دور على حدة (للوحة والمعايرة).
         ترجع {role: {role, learned, correct, accuracy}} — الأدوار ذات
@@ -867,6 +1099,21 @@ def reason_multi_task(task_id: str, goal: str,
     try:
         return get_pre_action_reasoner().reason_multi(
             task_id, goal, candidate_paths or [], role).to_dict()
+    except Exception:
+        return None
+
+
+def reason_multi_role_task(task_id: str, goal: str,
+                           candidate_paths: Optional[
+                               List[List[str]]] = None,
+                           roles: Optional[List[str]] = None
+                           ) -> Optional[Dict[str, Any]]:
+    """مساعدة للدمج: التوقع المتعدد المسارات عبر أدوار الفريق —
+    يوزع الخطط البديلة على أدوار متخصصة ويجمع أحكامها في المسار
+    الأعلى توافقًا وثقةً (بلا API، حد ±0.15 صارم)."""
+    try:
+        return get_pre_action_reasoner().reason_multi_role(
+            task_id, goal, candidate_paths or [], roles).to_dict()
     except Exception:
         return None
 
