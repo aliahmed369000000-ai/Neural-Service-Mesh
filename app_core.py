@@ -488,6 +488,8 @@ try:
         par_recall as _par_recall,
         par_learn as _par_learn,
         par_learned_stats as _par_learned_stats,
+        par_calibration as _par_calibration,
+        par_role_accuracy as _par_role_accuracy,
     )
     _PAR_OK = True
 except Exception:
@@ -507,6 +509,11 @@ except Exception:
         return None
     def _par_learned_stats():
         return {"learned": 0, "correct": 0, "accuracy": 0.0}
+    def _par_calibration(*a, **kw):
+        return {"role": "", "n": 0, "correct": 0, "accuracy": 0.0,
+                "calibration_effect": 0.0, "reason": ""}
+    def _par_role_accuracy():
+        return {}
 # ── طبقة فحص أمان أولى (regex، بدون تكلفة API) ────────────────────────────
 try:
     from ai.harm_classifier import classify_prompt as _classify_harm, get_domain_label as _harm_label

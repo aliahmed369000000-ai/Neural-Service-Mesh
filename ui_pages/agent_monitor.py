@@ -1546,6 +1546,55 @@ def render_par_panel() -> None:
         "(نجحت/فشلت) بجلسة التفكير السابقة لنفس المهمة، ثم يقيس: هل كان "
         "حكم «نفّذ» صحيحًا؟ هل كانت «راجع» صحيحة؟ — فتتراكم دقة تفكير "
         "الفريق وتُغذّى بها الذاكرة الحسية (سوابق معروفة النتائج).")
+    # ── 🆕 معايرة الدقة التاريخية (Historical Calibration) ─────────
+    _par_cal_fn = None
+    _par_ra_fn = None
+    try:
+        from app_core import (_par_calibration as _par_cal_fn,  # noqa: F401
+                              _par_role_accuracy as _par_ra_fn)
+    except Exception:
+        pass
+    _ra = {}
+    if _par_ra_fn is not None:
+        try:
+            _ra = _par_ra_fn()
+        except Exception:
+            _ra = {}
+    st.markdown("**معايرة الدقة التاريخية**")
+    if _ra:
+        _rows = []
+        for _r in _ra.values():
+            _effect = 0.0
+            _label = "بلا معايرة"
+            if _r.get("learned", 0) >= 3:
+                _a = float(_r.get("accuracy", 0) or 0)
+                if _a >= 2 / 3:
+                    _effect = 0.05
+                    _label = "↑ ثقة +0.05 (دور دقيق تاريخًا)"
+                elif _a < 0.5:
+                    _effect = -0.075
+                    _label = "↓ ثقة −0.075 (دور كثير الأخطاء)"
+                else:
+                    _label = "دقة بين الحدّين — بلا معايرة"
+            _rows.append({
+                "الدور": _r.get("role", ""),
+                "مهام حُسمت": _r.get("learned", 0),
+                "توقعات صحيحة": _r.get("correct", 0),
+                "الدقة التاريخية": round(
+                    float(_r.get("accuracy", 0) or 0), 3),
+                "المعايرة المُستحضرة": _label,
+            })
+        st.dataframe(_rows, use_container_width=True, height=220)
+        st.caption(
+            "قبل كل جلسة تفكير يستحضر المحرك دقة التوقعات السابقة لنفس "
+            "الدور، فيرفع ثقة الدور الدقيق تاريخًا بحد +0.05 ويخفّض ثقة "
+            "الدور كثير الأخطاء بحد −0.075 — والمعايرة محصورة بحد صارم "
+            "±0.15 ولا تحدث قبل 3 مهام مقاسة للدور.")
+    else:
+        st.caption(
+            "لا توجد بعدُ أدوار بحسم نتائج: مع كل مهمة تكتمل وتُقاس "
+            "نتيجتها، يستحضر الفريق دقة كل دور تاريخًا ويُعاير ثقته "
+            "بحد آمن صارم ±0.15.")
     # ── الذاكرة الحسية للأدوار ───────────────────────────────────────
     _par_recall_fn = None
     try:
