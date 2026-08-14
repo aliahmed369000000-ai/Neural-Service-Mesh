@@ -30,10 +30,263 @@ import numpy as np
 
 logger = logging.getLogger("ModelTrainingAgent")
 
+# ═══════════════════════════════════════════════════════════════════════════
+# منهجية NSM الموروثة (methodology_engine) — دورة plan/inspect/execute/verify
+# ودرس تلقائي من فشل التدريب. fallback آمن كامل: إن غابت الوحدة يعمل
+# الوكيل كالمعتاد تمامًا.
+# ═══════════════════════════════════════════════════════════════════════════
+try:
+    from ai.methodology_engine import (
+        method_record_lesson as _meth_record_lesson,
+        method_step as _meth_step,
+        method_task_finished as _meth_task_finished,
+        method_task_started as _meth_task_started,
+    )
+    _METH_OK = True
+except Exception:  # pragma: no cover
+    _METH_OK = False
+
+    def _meth_task_started(task_id, request, plan=None):
+        return None
+
+    def _meth_step(task_id="", step_type="execute", note="", ok=True, meta=None):
+        return None
+
+    def _meth_task_finished(task_id="", status="done", ok=True, result_summary=""):
+        return None
+
+    def _meth_record_lesson(principle_id, error_context="", lesson=""):
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# قناة الكيرنل المنعزل (nb_kernel) — تدريب PyTorch الثقيل في عملية معزولة
+# عن Streamlit بدل التنفيذ داخل العملية نفسها، مع fallback كامل للآلية
+# الحالية حتى لا يُكسر أي سلوك قائم.
+# ═══════════════════════════════════════════════════════════════════════════
+_TRAIN_KERNEL_SESSION = "mta_kernel"
 ROOT = Path(__file__).resolve().parent.parent
 ARTIFACTS = ROOT / "artifacts" / "model_training"
-ARTIFACTS.mkdir(parents=True, exist_ok=True)
+_ARTIFACTS = ARTIFACTS  # أمان: أي مرجع قديم لـ _ARTIFACTS يبقى صالحًا
+_MTA_LESSONS_PATH = ARTIFACTS / "mta_lessons.json"
+_MTA_LESSONS_PATH.parent.mkdir(parents=True, exist_ok=True)
 
+
+def _kernel_available() -> bool:
+    """هل الكيرنل المنعزل جاهز للاستخدام؟ (ipykernel + حد الجلسات)."""
+    try:
+        from ai.nb_kernel import _available_for_kernel
+        return bool(_available_for_kernel())
+    except Exception:
+        return False
+
+
+def _kern_run_cell(source: str, timeout: int = 300) -> Dict[str, Any]:
+    """تنفيذ خلية داخل كيرنل التدريب المنعزل (ثابت لكل الوكيل)."""
+    try:
+        from ai.nb_kernel import run_cell_kernel
+        return dict(run_cell_kernel(_TRAIN_KERNEL_SESSION, source, timeout=timeout))
+    except Exception as exc:
+        return {"ok": False, "outputs": [], "timeout": False,
+                "error": f"kernel unavailable: {type(exc).__name__}: {exc}"}
+
+
+def _kern_collect_text(res: Dict[str, Any]) -> str:
+    """تجميع نصوص مخرجات خلية الكيرنل (stdout/stderr/أخطاء)."""
+    parts: List[str] = []
+    errs: List[str] = []
+    for o in res.get("outputs") or []:
+        t = o.get("text") or ""
+        if o.get("type") == "stream" and o.get("name") == "stdout":
+            parts.append(t)
+        else:
+            errs.append(t)
+    err = res.get("error") or ""
+    if err and err not in ("None", ""):
+        errs.append(str(err))
+    joined = "".join(parts)
+    if errs:
+        joined += ("\n" if joined else "") + "⚠ kernel:\n" + "".join(errs)
+    return joined
+
+
+def _read_mta_lessons() -> Dict[str, Any]:
+    """قراءة سجل دروس الوكيل (batch مفضّل ونصائح من أخطاء سابقة)."""
+    if _MTA_LESSONS_PATH.is_file():
+        data = _load_json(_MTA_LESSONS_PATH)
+        if isinstance(data, dict):
+            return data
+    return {"preferred_batch": None, "lessons": [], "oom_count": 0}
+
+
+def _write_mta_lessons(data: Dict[str, Any]) -> None:
+    try:
+        _MTA_LESSONS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(_MTA_LESSONS_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        logger.warning("mta_lessons write: %s", exc)
+
+
+def _suggest_kernel_batch(n: int, n_features: int = 64, base: int = 16) -> int:
+    """حجم batch مقترح للتدريب عبر الكيرنل — يبدأ من base ويصغّر بعد OOM.
+    درس من منهجية الوالد: من الفشل نتعلم — batch أصغر تلقائيًا."""
+    lessons = _read_mta_lessons()
+    pref = lessons.get("preferred_batch")
+    if pref is not None:
+        return max(1, min(int(pref), n))
+    return max(4, min(base, n))
+
+
+def _record_kernel_oom_lesson(
+    context: str = "",
+    current_batch: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    """درس تلقائي من منهجية الوالد: من فشل OOM نتعلم — batch أصغر تلقائيًا.
+    يسجّل الدرس في ذاكرة المنهجية الموروثة ويحدّث المفضّل المحفوظ."""
+    lessons = _read_mta_lessons()
+    prev = lessons.get("preferred_batch")
+    new_batch = None
+    if current_batch is not None:
+        new_batch = max(1, int(current_batch) // 2)
+    elif prev is not None:
+        new_batch = max(1, int(prev) // 2)
+    lessons["oom_count"] = int(lessons.get("oom_count", 0)) + 1
+    if new_batch is not None:
+        lessons["preferred_batch"] = new_batch
+    lesson_txt = (
+        f"فشل التدريب بنقص ذاكرة (OOM) عند batch={current_batch}. "
+        f"الدرس: استخدم batch={new_batch} في المرة القادمة "
+        f"(تعلّم تلقائي — OOM count={lessons['oom_count']})."
+    )
+    lessons.setdefault("lessons", []).append({
+        "ts": time.time(), "kind": "oom_backoff",
+        "from_batch": current_batch, "to_batch": new_batch,
+        "count": lessons["oom_count"], "note": lesson_txt,
+    })
+    _write_mta_lessons(lessons)
+    try:
+        _meth_record_lesson(
+            principle_id=5,  # "التعلم من الأخطاء"
+            error_context=(context or "")[:400],
+            lesson=lesson_txt,
+        )
+    except Exception as exc:
+        logger.warning("mta oom lesson: %s", exc)
+    return lessons
+
+
+def _torch_kernel_source(
+    X: np.ndarray,
+    y: np.ndarray,
+    task: str,
+    epochs: int,
+    batch_size: int,
+    run_id: Optional[str],
+    checkpoint_dir: str,
+    best_ckpt: Optional[str],
+) -> str:
+    """بناء كود PyTorch كامل بصيغة خلية كيرنل — نفس منطق train_torch_on_arrays
+    لكن يُنفَّذ في عملية معزولة (لا يحجب الشات، ويقبض OOM/Timeout)."""
+    return (
+        "import json, time\n"
+        "import numpy as np, torch, torch.nn as nn\n"
+        f"_X = {json.dumps(X.tolist())}\n"
+        f"_y = {json.dumps(y.tolist())}\n"
+        f"_task = {json.dumps(task)}\n"
+        f"_epochs = {int(epochs)}\n"
+        f"_batch_size = {int(batch_size)}\n"
+        f"_run_id = {json.dumps(run_id)}\n"
+        f"_ckpt_dir = {json.dumps(checkpoint_dir)}\n"
+        f"_best_ckpt = {json.dumps(best_ckpt)}\n"
+        "device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')\n"
+        "n_samples, n_features = _X.shape[0], _X.shape[1]\n"
+        "n_out = (int(np.max(_y)) + 1) if _task == 'classification' else 1\n"
+        "model = nn.Sequential(nn.Linear(n_features, 64), nn.ReLU(), "
+        "nn.Linear(64, 32), nn.ReLU(), nn.Linear(32, n_out)).to(device)\n"
+        "opt = torch.optim.Adam(model.parameters(), lr=1e-3)\n"
+        "loss_fn = nn.CrossEntropyLoss() if _task == 'classification' "
+        "else nn.MSELoss()\n"
+        "X_t = torch.tensor(_X, dtype=torch.float32, device=device)\n"
+        "y_t = torch.tensor(_y, dtype=torch.long if _task == 'classification' "
+        "else torch.float32, device=device)\n"
+        "if _task != 'classification': y_t = y_t.reshape(-1, 1)\n"
+        "idx = np.random.permutation(n_samples)\n"
+        "split = max(1, int(0.8 * n_samples))\n"
+        "tr, te = idx[:split], idx[split:] if split < n_samples else idx[-1:]\n"
+        "hist, val_hist, best_val = [], [], float('inf')\n"
+        "import os; os.makedirs(_ckpt_dir, exist_ok=True)\n"
+        "for ep in range(_epochs):\n"
+        "    model.train()\n"
+        "    perm = np.random.permutation(tr)\n"
+        "    ep_loss, n_b = 0.0, 0\n"
+        "    for i in range(0, len(perm), _batch_size):\n"
+        "        bi = perm[i:i + _batch_size]\n"
+        "        opt.zero_grad(); loss = loss_fn(model(X_t[bi]), y_t[bi])\n"
+        "        loss.backward(); opt.step()\n"
+        "        ep_loss += float(loss.item()); n_b += 1\n"
+        "    hist.append(ep_loss / max(1, n_b))\n"
+        "    model.eval()\n"
+        "    with torch.no_grad():\n"
+        "        vl = float(loss_fn(model(X_t[te]), y_t[te]).item())\n"
+        "    val_hist.append(vl)\n"
+        "    if vl < best_val: best_val = vl\n"
+        "    if (ep + 1) % 5 == 0 or vl <= best_val:\n"
+        "        torch.save({'epoch': ep + 1, 'model_state': model.state_dict(), "
+        "'optimizer_state': opt.state_dict(), 'best_val_loss': best_val, "
+        "'history': hist, 'val_history': val_hist, 'task': _task, "
+        "'n_features': n_features, 'batch_size': _batch_size}, "
+        "os.path.join(_ckpt_dir, 'latest.pt'))\n"
+        "    if vl <= best_val:\n"
+        "        torch.save({'epoch': ep + 1, 'model_state': model.state_dict(), "
+        "'optimizer_state': opt.state_dict(), 'best_val_loss': best_val, "
+        "'history': hist, 'val_history': val_hist, 'task': _task, "
+        "'n_features': n_features, 'batch_size': _batch_size}, "
+        "os.path.join(_ckpt_dir, 'best.pt'))\n"
+        "    if len(hist) > 2 and abs(hist[-1] - hist[-2]) < 1e-4 and vl < hist[-1]:\n"
+        "        break\n"
+        "print(json.dumps({'epochs': ep + 1, 'train_loss_last5': hist[-5:], "
+        "'val_loss_last5': val_hist[-5:], 'best_val_loss': best_val, "
+        "'device': str(device), 'batch_size': _batch_size, "
+        "'checkpoint_dir': _ckpt_dir}))\n"
+    )
+
+
+def train_via_kernel(
+    source: str,
+    timeout: int = 300,
+    fallback: Optional[Callable[[], str]] = None,
+) -> str:
+    """
+    تنفيذ كود تدريب (PyTorch/شامل) داخل كيرنل معزول عن عملية Streamlit
+    — يمنع حجب الشات أثناء تدريب طويل، ويقبض الأخطاء (OOM/Timeout) بأمان.
+
+    عند توفر الكيرنل يُنفَّذ هناك؛ وإلا يُنفَّذ fallback الممرَّر (الآلية
+    القديمة). إن لم يُمرَّر fallback يُعاد تقرير فشل واضح — الوكيل لا يتجمد.
+    """
+    if not _kernel_available():
+        if fallback is not None:
+            try:
+                return fallback()
+            except Exception as exc:
+                return f"❌ {type(exc).__name__}: {exc}"
+        return ("⚠ الكيرنل المنعزل غير متاح في هذه البيئة."
+                " جرّب إعادة تحميل التطبيق.")
+    res = _kern_run_cell(source, timeout=timeout)
+    txt = _kern_collect_text(res)
+    if res.get("ok") and not res.get("timeout"):
+        return txt or "✅ نفّذ الكيرنل الخلية بنجاح (بلا مخرجات نصية)."
+    if res.get("timeout"):
+        note = f"⏱ تجاوزت الخلية المهلة ({timeout}s) — أُوقفت بأمان دون حجب الشات."
+        try:
+            from ai.nb_kernel import restart_kernel
+            restart_kernel(_TRAIN_KERNEL_SESSION)
+        except Exception:
+            pass
+        return (note + "\n\n" + txt).strip()
+    return f"❌ فشل التنفيذ في الكيرنل المنعزل:\n\n{txt}".strip()
+
+ARTIFACTS.mkdir(parents=True, exist_ok=True)
 # مزامنة اختيارية للـ checkpoints مع تخزين خارجي (معطّلة افتراضياً — راجع
 # ai/checkpoint_storage.py). لا تكسر الوكيل إن تعذّر الاستيراد.
 try:
@@ -1725,6 +1978,10 @@ def run_training_mission(
     """
     دورة موحّدة: فحص → خطة → (اختياري) تنفيذ مع سجل حالات
     planned | running | completed | failed | rejected
+
+    مع منهجية NSM الموروثة: تسجّل المهمة وخطواتها (plan/inspect/execute/
+    verify) في ذاكرة المنهجية حتى تظهر في لوحة المراقبة (قسم المنهجية)
+    وتتعلّم منها الدروس. إن غابت الوحدة تعمل كالمعتاد تمامًا.
     """
     run_id = f"run_{int(time.time())}"
     base = {
@@ -1761,8 +2018,36 @@ def run_training_mission(
     }
     _append_training_run(base)
 
+    # منهجية الوالد: تسجيل المهمة وخطة خطواتها في ذاكرة المنهجية الموروثة
+    try:
+        _meth_task_started(
+            run_id,
+            request=(f"تدريب نموذج: {path_str}" +
+                     (f" الهدف={target_col}" if target_col else "")),
+            plan=[
+                {"step": "inspect", "desc": "فحص البيانات واختيار المحرك"},
+                {"step": "plan", "desc": "بناء خطة التدريب (epochs, engine)"},
+                {"step": "execute", "desc": "تنفيذ التدريب (kernel أو مباشر)"},
+                {"step": "verify", "desc": "التحقق من النتيجة وحفظ checkpoint"},
+                {"step": "reflect", "desc": "تسجيل النتيجة/الدرس المنهجي"},
+            ],
+        )
+        _meth_step(run_id, step_type="inspect", ok=True,
+                   note=(f"البيانات: {info['n_samples']} عينة · "
+                         f"{info['n_features']} ميزة · "
+                         f"المهمة={info['task']} · المحرك={info['engine']}"))
+    except Exception:
+        pass
+
     plan_txt = format_training_plan(info, execute=execute)
     if not execute:
+        try:
+            _meth_step(run_id, step_type="plan", ok=True,
+                       note="خطة معاينة آمنة — لا تنفيذ")
+            _meth_task_finished(run_id, status="done", ok=True,
+                                result_summary="خطة تدريب معاينة بدون تنفيذ")
+        except Exception:
+            pass
         return plan_txt
 
     # تنفيذ فعلي
@@ -1796,17 +2081,41 @@ def run_training_mission(
             "has_checkpoint": has_ckpt,
         })
         _append_training_run(done)
+
+        # منهجية الوالد: خطوة تحقق وتسجيل النتيجة في ذاكرة المنهجية
+        try:
+            _meth_step(run_id, step_type="execute", ok=True,
+                       note=f"التدريب عبر {eng} اكتمل")
+            _meth_step(run_id, step_type="verify", ok=bool(has_ckpt),
+                       note=("checkpoint محفوظ" if has_ckpt else "بلا checkpoint"))
+            _meth_task_finished(
+                run_id, status="done", ok=True,
+                result_summary=(result or "")[:400])
+        except Exception:
+            pass
         return plan_txt + "\n\n---\n" + result
     except Exception as e:
+        err_txt = f"{type(e).__name__}: {e}"
         fail = dict(base)
         has_ckpt = (_checkpoint_dir(run_id) / "latest.pt").is_file()
         fail.update({
             "status": "failed",
             "ts": time.time(),
-            "error": f"{type(e).__name__}: {e}",
+            "error": err_txt,
             "has_checkpoint": has_ckpt,
         })
         _append_training_run(fail)
+
+        # منهجية الوالد: فشل تنفيذ → خطوة reflection + درس تلقائي
+        try:
+            _meth_step(run_id, step_type="verify", ok=False,
+                       note=f"فشل التنفيذ: {err_txt}")
+            _meth_task_finished(run_id, status="failed", ok=False,
+                                result_summary=err_txt[:400])
+            if "Memory" in err_txt or "CUDA" in err_txt or "OOM" in err_txt:
+                _record_kernel_oom_lesson(context=err_txt[:400])
+        except Exception:
+            pass
         note = (
             f"\n\n> 💾 يوجد checkpoint محفوظ لهذه المهمة (`{run_id}`) — "
             f"استخدم **استأنف التدريب** بدل البدء من الصفر."
@@ -1971,11 +2280,28 @@ def train_torch_on_arrays(
     checkpoint_every: int = 5,
     resume: bool = False,
 ) -> str:
-    import torch
-    import torch.nn as nn
-
     epochs = _sb_clamp_epochs(max(3, min(int(epochs), 120)))
     checkpoint_every = max(1, int(checkpoint_every))
+
+    # ═══ منهجية الوالد: التدريب الثقيل في كيرنل منعزل ═══
+    # إن توفر الكيرنل المنعزل، يُنفَّذ التدريب في عملية معزولة عن Streamlit
+    # (لا حجب للشات، وقبض آمن لـ OOM/Timeout) مع حفظ checkpoint ودرس تلقائي
+    # عند OOM. عند غيابه يعمل بالآلية الحالية دون أي تغيير.
+    if _kernel_available():
+        ckpt_dir = str(_checkpoint_dir(run_id)) if run_id else str(
+            ARTIFACTS / "model_training" / "fallback")
+        bs = _suggest_kernel_batch(int(X.shape[0]),
+                                   n_features=int(X.shape[1]))
+        source = _torch_kernel_source(
+            X, y, task, epochs, bs, run_id, ckpt_dir, None)
+        direct = lambda: _run(batch_size=bs)  # noqa: E731
+        res = train_via_kernel(source, timeout=600, fallback=direct)
+        if "❌ فشل التنفيذ في الكيرنل" in res and "Memory" in res:
+            _record_kernel_oom_lesson(context=res[:400], current_batch=bs)
+        return res
+
+    import torch
+    import torch.nn as nn
     device, dev_info = _gpu_torch_device()
     n_samples, n_features = int(X.shape[0]), int(X.shape[1])
     free_v = getattr(dev_info, "free_vram_gb", None) if dev_info else None

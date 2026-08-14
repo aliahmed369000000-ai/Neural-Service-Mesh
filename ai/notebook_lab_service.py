@@ -103,6 +103,36 @@ def lab_health() -> Dict[str, Any]:
     h["ready_to_launch_kaggle"] = bool(
         h["checks"].get("streamlit_kaggle_user") and h["checks"].get("streamlit_kaggle_key")
     )
+
+    # Groq — مفتاح مجاني فائق السرعة؛ إن وُجد في البيئة فعّله تلقائيًا
+    try:
+        groq_key = (os.environ.get("GROQ_API_KEY") or "").strip()
+        groq_ok = bool(groq_key)
+        h["checks"]["groq_key"] = {"ok": groq_ok, "note": (
+            "مفعّل — Groq سيُستخدم أولًا في استدعاءات LLM" if groq_ok
+            else "مفتاح GROQ_API_KEY غير مضبوط")}
+        if groq_ok:
+            try:
+                import urllib.request
+                req = urllib.request.Request(
+                    "https://api.groq.com/openai/v1/models",
+                    headers={"Authorization": f"Bearer {groq_key}"})
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    models = json.loads(r.read().decode())
+                h["checks"]["groq_ping"] = {"ok": True,
+                                            "n_models": len(models.get("data") or [])}
+            except Exception as ge:
+                h["checks"]["groq_ping"] = {"ok": False,
+                                            "note": f"{type(ge).__name__}: {ge}"}
+    except Exception:
+        pass
+
+    # kernel المنعزل (nb_kernel) — مسار تدريب PyTorch الآمن المعزول
+    try:
+        from ai.nb_kernel import _available_for_kernel
+        h["checks"]["isolated_kernel"] = bool(_available_for_kernel())
+    except Exception:
+        h["checks"]["isolated_kernel"] = False
     return h
 
 
