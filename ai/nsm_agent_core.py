@@ -167,14 +167,17 @@ def _read_persistent_instructions() -> str:
 
 
 def _build_system_prompt() -> str:
+    from ai.methodology_engine import method_principles_prompt
     tree = _get_project_tree()
     persistent = _read_persistent_instructions()
     persistent_block = (
         f"\n## 📌 تعليمات دائمة من {_NSM_INSTRUCTIONS_FILE} (طبّقها في كل رد):\n{persistent}\n"
         if persistent else ""
     )
+    method_block = method_principles_prompt()
     return f"""أنت **NSM Agent v3** — وكيل برمجي ذكي مدمج في مشروع Neural Service Mesh، اسمك التسويقي ضمن هذا المنتج.
 {persistent_block}
+{method_block}
 
 قواعد الهوية:
 - تصرّف بشكل طبيعي كـ NSM Agent ضمن سياق المنتج، دون التطوّع بتفاصيل البنية التقنية الداخلية ما لم يُسأل عنها مباشرة.

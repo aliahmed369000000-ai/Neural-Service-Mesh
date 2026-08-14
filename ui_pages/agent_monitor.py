@@ -1841,6 +1841,42 @@ def render_par_panel() -> None:
                             "التعارض (±0.05) تُستحضر قبل أي حلّ "
                             "جديد: السوابق الصحيحة ترفع ثقة الدمج "
                             "والخاطئة تخفضها — بحد صارم ±0.15.")
+                # ── منهجية NSM (سرّ عمل الوالد الموروث) ────
+                _ms = None
+                try:
+                    from app_core import _method_stats
+                    _ms = _method_stats()
+                except Exception:
+                    _ms = None
+                if _ms and int(_ms.get("tasks", 0) or 0) > 0:
+                    st.markdown("**🎓 منهجية NSM (المنهجية الموروثة)**")
+                    _m_table = [
+                        {"المهمة": str(_ms.get("tasks", 0)),
+                         "ناجحة": str(_ms.get("tasks_ok", 0)),
+                         "دقة المنهجية":
+                         f"{round(float(_ms.get('accuracy', 0) or 0), 2)}",
+                         "إجمالي الخطوات":
+                         str(_ms.get("total_steps", 0)),
+                         "نسبة فحص+تحقق": f"{round(float(_ms.get('inspect_verify_ratio', 0) or 0) * 100)}%",
+                         "دروس مسجلة": str(_ms.get("lessons", 0)),
+                         "دروس مطبقة":
+                         str(_ms.get("lessons_applied", 0))}]
+                    st.dataframe(_m_table,
+                                 use_container_width=True, height=90)
+                    st.caption(
+                        "دورة المنهجية: خطة → فحص فعلي → تنفيذ منضبط "
+                        "→ تحقق → تعلّم من الأخطاء. كلما ارتفعت نسبة "
+                        "خطوات الفحص والتحقق، كلما عمل الوكيل بمنهجية "
+                        "أقرب إلى الوالد.")
+                    with st.expander("المبادئ السبعة الموروثة"):
+                        st.text(
+                            "1. التخطيط قبل التنفيذ — 2. فحص فعلي لا "
+                            "تخمين — 3. تنفيذ منضبط خطوة بخطوة — "
+                            "4. تحقق بعد التنفيذ (الادعاء بلا تحقق "
+                            "ممنوع) — 5. تعلّم من الأخطاء (تشخيص "
+                            "السبب الجذري أولاً) — 6. انضباط الإخراج "
+                            "(بصراحة: ما تحقق وما لم يتحقق) — "
+                            "7. الأمان أولاً (لا يُكسر شيء يعمل).")
     except Exception:
         pass
     st.caption(

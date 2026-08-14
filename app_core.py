@@ -536,6 +536,46 @@ except Exception:
     def _conflict_stats_task():
         return {"resolutions": 0, "measured": 0,
                 "correct": 0, "accuracy": 0.0}
+# ── 🆕 منهجية NSM (نقل سرّ عمل Manus إلى الوكلاء) ───────────────────────
+# محرك منهجي حتمي يوثّق دورة (خطة → فحص فعلي → تنفيذ منضبط → تحقق →
+# تعلم من الأخطاء) لكل مهمة، ويُسجّلها في data/methodology.db، ويغذّي
+# الـagent بمبادئ المنهجية السبعة عبر system prompt.
+try:
+    from ai.methodology_engine import (
+        method_task_started as _method_task_started,
+        method_step as _method_step,
+        method_task_finished as _method_task_finished,
+        method_stats as _method_stats,
+        method_latest_task as _method_latest_task,
+        method_task_steps as _method_task_steps,
+        method_record_lesson as _method_record_lesson,
+        method_recall_lessons as _method_recall_lessons,
+        method_principles_prompt as _method_principles_prompt,
+    )
+    _METH_OK = True
+except Exception:
+    _METH_OK = False
+    def _method_task_started(*a, **kw):  # احتياطي آمن
+        return None
+    def _method_step(*a, **kw):
+        return None
+    def _method_task_finished(*a, **kw):
+        return None
+    def _method_stats():
+        return {"tasks": 0, "tasks_ok": 0, "accuracy": 0.0,
+                "total_steps": 0, "step_types": {},
+                "inspect_verify_ratio": 0.0, "lessons": 0,
+                "lessons_applied": 0}
+    def _method_latest_task():
+        return None
+    def _method_task_steps(*a, **kw):
+        return []
+    def _method_record_lesson(*a, **kw):
+        return None
+    def _method_recall_lessons(*a, **kw):
+        return []
+    def _method_principles_prompt():
+        return ""
 # ── طبقة فحص أمان أولى (regex، بدون تكلفة API) ────────────────────────────
 try:
     from ai.harm_classifier import classify_prompt as _classify_harm, get_domain_label as _harm_label
