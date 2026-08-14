@@ -7,7 +7,7 @@ NSM Agent Core — ai/nsm_agent_core.py  (v3 — Replit Agent Level)
 ✅ [v2] يُشغّل الكود ويرى النتيجة
 ✅ [v2] هيكل المشروع الديناميكي في كل طلب
 ✅ [v2] multi-step في رد واحد
-✅ [v2] fallback: CF → Gemini → OpenRouter → Groq
+✅ [v2] fallback: Groq → Cloudflare → Gemini → OpenRouter
 
 🆕 [v3] Streaming بحرف بحرف — Generator يرسل النتائج فور اكتمال كل خطوة
 🆕 [v3] Self-Healing Loop — يصحح أخطاءه تلقائياً (حتى 3 محاولات)
@@ -323,10 +323,37 @@ _OPENROUTER_MODELS = [
 
 
 def _call_api(messages: List[Dict]) -> str:
-    """Cloudflare → Gemini → OpenRouter → Groq"""
+    """Groq (مجاني وسريع) → Cloudflare → Gemini → OpenRouter"""
     errors: List[str] = []
-
-    # ── 1. Cloudflare Workers AI ──
+    # ── 1. Groq — مجاني (14k طلب/دقيقة) وسريع جداً (~1000 توكن/ث) مع
+    #    نماذج متعددة حتى استُنفدت الحصة أو حُجب النموذج، ثم ينتقل
+    #    تلقائياً للمجانيات الأخرى (Cloudflare/Gemini/OpenRouter).
+    groq_key = os.getenv("GROQ_API_KEY", "").strip()
+    if groq_key:
+        for model in _GROQ_MODELS:
+            payload = json.dumps({
+                "model": model, "messages": messages,
+                "max_tokens": 3000, "temperature": 0.2, "stream": False,
+            }).encode()
+            req = urllib.request.Request(
+                _GROQ_URL, data=payload,
+                headers={"Authorization": f"Bearer {groq_key}",
+                         "Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=25) as r:
+                    text = json.loads(r.read())["choices"][0]["message"]["content"].strip()
+                if text:
+                    return text
+            except urllib.error.HTTPError as e:
+                if e.code in (401, 403):
+                    errors.append(f"Groq محجوب ({e.code})")
+                    break
+                errors.append(f"Groq/{model}: HTTP {e.code}")
+            except Exception as e:
+                errors.append(f"Groq/{model}: {e}")
+    # ── 2. Cloudflare Workers AI ──
     cf_token   = os.getenv("CF_API_TOKEN", "").strip()
     cf_account = os.getenv("CF_ACCOUNT_ID", "").strip()
     if cf_token and cf_account:
@@ -407,33 +434,6 @@ def _call_api(messages: List[Dict]) -> str:
                     return text
             except Exception as e:
                 errors.append(f"OR/{model}: {e}")
-
-    # ── 4. Groq ──
-    groq_key = os.getenv("GROQ_API_KEY", "").strip()
-    if groq_key:
-        for model in _GROQ_MODELS:
-            payload = json.dumps({
-                "model": model, "messages": messages,
-                "max_tokens": 3000, "temperature": 0.2, "stream": False,
-            }).encode()
-            req = urllib.request.Request(
-                _GROQ_URL, data=payload,
-                headers={"Authorization": f"Bearer {groq_key}",
-                         "Content-Type": "application/json"},
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(req, timeout=25) as r:
-                    text = json.loads(r.read())["choices"][0]["message"]["content"].strip()
-                if text:
-                    return text
-            except urllib.error.HTTPError as e:
-                if e.code in (401, 403):
-                    errors.append(f"Groq محجوب ({e.code})")
-                    break
-                errors.append(f"Groq/{model}: HTTP {e.code}")
-            except Exception as e:
-                errors.append(f"Groq/{model}: {e}")
 
     raise RuntimeError(" | ".join(errors) or "لا يوجد مزوّد متاح")
 

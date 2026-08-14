@@ -425,6 +425,24 @@ def generate_reply(item: SocialItem, persona_prompt: Optional[str] = None) -> st
         messages.append({"role": h["role"], "content": h["content"]})
     messages.append({"role": "user", "content": f"[{item.author}]: {item.text}"})
 
+    # ── 1. Groq — مجاني وسريع جداً (~1000 توكن/ث) — الردود الاجتماعية
+    #    قصيرة (300 توكن) فتُنفَّذ فوريًا تقريبًا بلا استهلاك لأي رصيد.
+    #    يجرّب النماذج المتاحة بالترتيب حتى ينجح أحدها.
+    try:
+        from .free_router import _call_groq_model, FREE_DIRECT_MODELS
+
+        groq_models = [m for m in FREE_DIRECT_MODELS if m.startswith("groq:")]
+        for model_id in groq_models:
+            real_model = model_id.split(":", 1)[1]
+            try:
+                text = _call_groq_model(real_model, messages, 0.7, 300)
+                if text and text.strip():
+                    return text.strip()
+            except Exception:
+                continue  # النموذج التالي
+    except Exception:
+        pass  # غياب وحدة free_router أو كل نماذج Groq لا يمنع الرد
+
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
     if api_key:
         import requests as _requests
@@ -448,7 +466,7 @@ def generate_reply(item: SocialItem, persona_prompt: Optional[str] = None) -> st
         except Exception:
             pass  # يسقط تلقائياً للنموذج المجاني المباشر أدناه
 
-    # ── لا يوجد مفتاح OpenRouter صالح، أو فشل الاتصال به: نموذج مجاني مباشر ──
+    # ── لا يوجد Groq ولا OpenRouter صالح: نموذج مجاني مباشر ──
     try:
         from .free_router import chat_free
 
@@ -456,8 +474,8 @@ def generate_reply(item: SocialItem, persona_prompt: Optional[str] = None) -> st
         return text
     except Exception as exc:
         raise NotConfiguredError(
-            "تعذّر توليد الرد: لا يوجد OPENROUTER_API_KEY صالح، وفشلت كل "
-            f"النماذج المجانية المباشرة أيضاً. التفاصيل: {exc}"
+            "تعذّر توليد الرد: لا يوجد GROQ_API_KEY صالح ولا OPENROUTER_API_KEY، "
+            f"وفشلت كل النماذج المجانية المباشرة أيضاً. التفاصيل: {exc}"
         ) from exc
 
 

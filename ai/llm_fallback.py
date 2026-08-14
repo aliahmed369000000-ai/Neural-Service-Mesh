@@ -1,22 +1,32 @@
 """
-LLM Generative Fallback Engine — NSM v18.3
+LLM Generative Fallback Engine — NSM v18.4
 ============================================
 يوفر طبقة توليد نصي حقيقي عندما لا يجد NSMChat إجابة كافية في قاموسه الثابت.
 
 الأولوية في اختيار المزوّد (auto-detect من env vars):
-  1. Anthropic Claude (ANTHROPIC_API_KEY) — Claude Sonnet 5 ← الأولوية الأولى ✅
+  1. Groq            (GROQ_API_KEY)     ← الأولوية الأولى ✅ gpt-oss-120b
+                                           (مجاني: 14k طلب/دقيقة — ~1000 توكن/ث)
+  1.5. Cerebras      (CEREBRAS_API_KEY) — احتياطي فوري لـGroq، نفس أوزان
+                                           gpt-oss-120b على عتاد وحصة مستقلة
   2. Cloudflare Workers AI (CF_API_TOKEN + CF_ACCOUNT_ID) — مجاني 10k/يوم
   3. Google Gemini   (GOOGLE_API_KEY)   — Gemini 2.5 Flash
   4. OpenRouter      (OPENROUTER_API_KEY) — نماذج مجانية تلقائياً، أو Kimi K3
                                              (moonshotai/kimi-k3) عبر model_key="kimi"
-  5. Groq            (GROQ_API_KEY)     — قد يُحجب من بعض الشبكات
-  5.5. Cerebras      (CEREBRAS_API_KEY) — احتياطي فوري لـGroq، نفس أوزان
-                                           gpt-oss-120b على عتاد وحصة مستقلة
+  5. Anthropic Claude (ANTHROPIC_API_KEY) — Claude Sonnet 5 — يُضاف بعد النماذج
+                                            المجانية لأنه مدفوع بالإنشاء
   6. OpenAI API      (OPENAI_API_KEY)   — GPT-4o-mini
   7. Together.xyz    (TOGETHER_API_KEY) — Llama-3/Mixtral
   8. Hugging Face    (HUGGINGFACE_API_KEY أو HF_TOKEN) — Falcon-Arabic-7B-Instruct (مجاني)
   9. نموذج محلي (Ollama) — فقط إذا حُدِّد NSM_LOCAL_LLM_URL صراحة
  10. CKG Synthesis   (بدون مفتاح)      — يولّد من الرسم المعرفي دائماً
+
+🆕 NSM_LLM_PROVIDER_PREF (اختياري) — فرض مزوّد واحد دون غيره:
+   NSM_LLM_PROVIDER_PREF=groq        → Groq فقط (ثم CKG إن فشل)
+   NSM_LLM_PROVIDER_PREF=openrouter  → OpenRouter فقط
+   NSM_LLM_PROVIDER_PREF=gemini      → Gemini فقط
+   NSM_LLM_PROVIDER_PREF=cf          → Cloudflare فقط
+   NSM_LLM_PROVIDER_PREF=anthropic   → Anthropic فقط
+   NSM_LLM_PROVIDER_PREF=auto        → السلسلة الكاملة أعلاه (الافتراضي)
 
 🔒 وضع النشر المغلق (بدون إنترنت خارجي — سيرفرات الجهة المشترية):
    NSM_OFFLINE_MODE=1 يجعل النموذج المحلي (Ollama) المزوّد الوحيد في
@@ -60,13 +70,13 @@ logger = logging.getLogger("LLMFallback")
 # ════════════════════════════════════════════════════════════════════════════
 
 class Provider(Enum):
-    ANTHROPIC = "anthropic"    # Claude — الأولوية الأولى ✅
+    ANTHROPIC = "anthropic"    # Claude — مدفوع بالإنشاء (بعد المجانيات) ✅
     CLOUDFLARE = "cloudflare"  # مجاني 10k/يوم ويعمل من اليمن ✅
     GEMINI    = "gemini"
     OPENROUTER = "openrouter"
     OPENAI    = "openai"
     TOGETHER  = "together"
-    GROQ      = "groq"
+    GROQ      = "groq"       # الأولوية الأولى ✅ — مجاني وسريع جداً
     CEREBRAS  = "cerebras"      # احتياطي فوري لـGroq — نفس أوزان gpt-oss-120b
                                  # على عتاد مختلف وحصة مجانية منفصلة (dual-homing)
     HUGGINGFACE = "huggingface"  # Falcon-Arabic-7B-Instruct — مجاني (HF Inference API)
@@ -461,16 +471,18 @@ class LLMFallback:
     """
     طبقة التوليد الذكي. تُفعَّل عند score < threshold في NSMChat.
 
-    أولوية المزوّدين:
-      1. Anthropic Claude (ANTHROPIC_API_KEY) ← الأولوية الأولى دائماً
+    أولوية المزوّدين (auto):
+      1. Groq      (GROQ_API_KEY) ← الأولوية الأولى ✅ gpt-oss-120b
+      1.5. Cerebras (CEREBRAS_API_KEY) ← احتياطي فوري لـGroq (نفس gpt-oss-120b)
       2. Cloudflare (CF_API_TOKEN + CF_ACCOUNT_ID) ← مجاني 10k/يوم
       3. Gemini   (GOOGLE_API_KEY)   ← سريع ومجاني
       4. OpenRouter (OPENROUTER_API_KEY)
-      5. Groq     (GROQ_API_KEY)     ← قد يُحجب من بعض الشبكات
-      5.5. Cerebras (CEREBRAS_API_KEY) ← احتياطي فوري لـGroq (نفس gpt-oss-120b)
+      5. Anthropic (ANTHROPIC_API_KEY) ← مدفوع بالإنشاء — بعد المجانيات
       6. OpenAI   (OPENAI_API_KEY)
       7. Together (TOGETHER_API_KEY)
       8. CKG Synthesis               ← دائماً متاح (fallback أخير)
+
+    قابل للتخصيص عبر NSM_LLM_PROVIDER_PREF (انظر توثيق أعلى الملف).
 
     مثال:
         fb = LLMFallback(ckg=my_ckg)
@@ -525,8 +537,31 @@ class LLMFallback:
         """
         يُعيد قائمة مرتّبة بكل المزوّدين الذين لديهم مفاتيح صالحة.
         هذه القائمة هي مصدر الحقيقة لنظام التبديل التلقائي.
+        Groq أولاً (مجاني وسريع جداً)، ثم المجانيات الأخرى، ثم المدفوعون.
+        NSM_LLM_PROVIDER_PREF يفرض مزوّداً واحداً إن حُدِّد صراحة.
         """
         chain: List[Tuple[Provider, str, str]] = []
+        pref = os.getenv("NSM_LLM_PROVIDER_PREF", "auto").strip().lower() or "auto"
+        if pref not in (
+            "auto", "groq", "cerebras", "cf", "cloudflare", "gemini",
+            "openrouter", "anthropic", "openai", "together",
+            "huggingface", "hf",
+        ):
+            logger.warning(
+                "[LLMFallback] قيمة NSM_LLM_PROVIDER_PREF غير معروفة "
+                "(%r) — تُستخدم auto", pref
+            )
+            pref = "auto"
+
+        def _keep(prov: Provider) -> bool:
+            """هل يُسمح بهذا المزوّد في الوضع الحالي؟"""
+            if pref == "auto":
+                return True
+            if pref == "cf" and prov is Provider.CLOUDFLARE:
+                return True
+            if pref == "hf" and prov is Provider.HUGGINGFACE:
+                return True
+            return prov.value == pref
 
         # 0) وضع النشر المغلق (بدون إنترنت خارجي): النموذج المحلي فقط —
         #    نتوقف هنا فوراً ولا نضيف أي مزوّد سحابي للسلسلة إطلاقاً.
@@ -544,30 +579,37 @@ class LLMFallback:
         #      ضرورية)، ويُضاف كخيار قبل CKG synthesis النهائي.
         local_url = os.getenv("NSM_LOCAL_LLM_URL", "").strip()
 
-        # 1) Anthropic Claude
-        k = os.getenv("ANTHROPIC_API_KEY", "").strip()
-        if k:
-            model = (
-                ANTHROPIC_MODELS[self._model_key]
-                if self._model_key else _ANTHROPIC_MODEL
-            )
-            chain.append((Provider.ANTHROPIC, k, model))
+        # 1) Groq — gpt-oss-120b: مجاني (14k طلب/دقيقة) وسريع جداً (~1000
+        #    توكن/ثانية). يُضاف قبل الجميع لأنه مجاني وسريع — إذا حُجب أو
+        #    استُنفدت حصته ينتقل النظام تلقائياً للمجانيات الأخرى (cooldown)
+        #    قبل أي مزوّد مدفوع.
+        k = os.getenv("GROQ_API_KEY", "").strip()
+        if k and _keep(Provider.GROQ):
+            chain.append((Provider.GROQ, k, _GROQ_MODELS[0]))
+
+        # 1.5) Cerebras — احتياطي فوري لنفس gpt-oss-120b (حصة مجانية مستقلة
+        #      عن Groq تماماً). يُضاف مباشرة بعد Groq حتى لو فشل الأخير
+        #      (حجب شبكي، انتهاء حصة)، يُجرَّب نفس النموذج على مزوّد آخر
+        #      قبل النزول لمزوّدين أضعف.
+        k = os.getenv("CEREBRAS_API_KEY", "").strip()
+        if k and _keep(Provider.CEREBRAS):
+            chain.append((Provider.CEREBRAS, k, _CEREBRAS_MODEL))
 
         # 2) Cloudflare Workers AI
         cf_token   = os.getenv("CF_API_TOKEN",   "").strip()
         cf_account = os.getenv("CF_ACCOUNT_ID",  "").strip()
-        if cf_token and cf_account:
+        if cf_token and cf_account and _keep(Provider.CLOUDFLARE):
             chain.append((Provider.CLOUDFLARE, cf_token, _CF_MODEL))
 
         # 3) Google Gemini
         k = os.getenv("GOOGLE_API_KEY", "").strip()
-        if k and k.startswith("AIzaSy"):
+        if k and k.startswith("AIzaSy") and _keep(Provider.GEMINI):
             chain.append((Provider.GEMINI, k, _GEMINI_MODEL))
 
         # 4) OpenRouter — نموذج مُختار صراحةً (مثال: "kimi" لـKimi K3) يتجاوز
         #    الاكتشاف التلقائي، وإلا يُكتشف أفضل نموذج مجاني متاح تلقائياً.
         k = os.getenv("OPENROUTER_API_KEY", "").strip()
-        if k:
+        if k and _keep(Provider.OPENROUTER):
             if self._model_key in OPENROUTER_MODELS:
                 chosen = OPENROUTER_MODELS[self._model_key]
                 self._openrouter_models = [chosen]
@@ -577,32 +619,30 @@ class LLMFallback:
                 self._openrouter_models = models
                 chain.append((Provider.OPENROUTER, k, models[0]))
 
-        # 5) Groq
-        k = os.getenv("GROQ_API_KEY", "").strip()
-        if k:
-            chain.append((Provider.GROQ, k, _GROQ_MODELS[0]))
-
-        # 5.5) Cerebras — احتياطي فوري لنفس gpt-oss-120b (حصة مجانية مستقلة
-        #      عن Groq تماماً). يُضاف مباشرة بعد Groq حتى لو فشل الأخير
-        #      (حجب شبكي، انتهاء حصة)، يُجرَّب نفس النموذج على مزوّد آخر
-        #      قبل النزول لمزوّدين أضعف.
-        k = os.getenv("CEREBRAS_API_KEY", "").strip()
-        if k:
-            chain.append((Provider.CEREBRAS, k, _CEREBRAS_MODEL))
+        # 5) Anthropic Claude — مدفوع بالإنشاء، يُضاف بعد المجانيات:
+        #    المجانيات تكفي لمعظم الردود، والمدفوع يبقى خياراً احتياطياً
+        #    دون استهلاك رصيد ما لم تُستنفد المجانيات.
+        k = os.getenv("ANTHROPIC_API_KEY", "").strip()
+        if k and _keep(Provider.ANTHROPIC):
+            model = (
+                ANTHROPIC_MODELS[self._model_key]
+                if self._model_key else _ANTHROPIC_MODEL
+            )
+            chain.append((Provider.ANTHROPIC, k, model))
 
         # 6) OpenAI
         k = os.getenv("OPENAI_API_KEY", "").strip()
-        if k:
+        if k and _keep(Provider.OPENAI):
             chain.append((Provider.OPENAI, k, _OPENAI_MODEL))
 
         # 7) Together
         k = os.getenv("TOGETHER_API_KEY", "").strip()
-        if k:
+        if k and _keep(Provider.TOGETHER):
             chain.append((Provider.TOGETHER, k, _TOGETHER_MODEL))
 
         # 8) Hugging Face — Falcon-Arabic-7B-Instruct (مجاني بالكامل)
         k = os.getenv("HUGGINGFACE_API_KEY", "").strip() or os.getenv("HF_TOKEN", "").strip()
-        if k:
+        if k and _keep(Provider.HUGGINGFACE):
             chain.append((Provider.HUGGINGFACE, k, _HF_MODEL))
 
         # 9) نموذج محلي (Ollama) — فقط إذا حُدِّد عنوان الخادم صراحة عبر
@@ -756,14 +796,16 @@ class LLMFallback:
         return self._provider != Provider.CKG_SYNTH
 
     def info(self) -> Dict[str, str]:
+        pref = os.getenv("NSM_LLM_PROVIDER_PREF", "auto").strip().lower() or "auto"
         return {
             "provider": self._provider.value,
             "model":    self._model,
             "live_llm": "✅" if self.has_live_llm() else "❌ (CKG synthesis)",
             "api_key":  "✅ موجود" if self._api_key else "❌ غير موجود",
+            "pref_mode": f"مفروض ({pref})" if pref != "auto" else "تلقائي",
         }
 
-    # ── Anthropic Claude (الأولوية الأولى ✅) ───────────────────────────
+    # ── Anthropic Claude (بعد المجانيات — مدفوع بالإنشاء) ────────────
 
     def _call_anthropic(
         self, query: str, history: List[Tuple[str, str]],
