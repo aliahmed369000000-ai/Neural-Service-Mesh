@@ -1526,6 +1526,43 @@ def render_par_panel() -> None:
     st.caption(
         "تُخزَّن كل جلسة تفكير مع مهمتها — تظهر تفاصيل آخر جلسة في تقرير "
         "المهمة نفسها بلوحة المهام الطويلة والتعاونية (حقل التفكير المسبق).")
+    # ── الذاكرة الحسية للأدوار ───────────────────────────────────────
+    _par_recall_fn = None
+    try:
+        from app_core import _par_recall as _par_recall_fn  # noqa: F401
+    except Exception:
+        pass
+    st.markdown("**ذاكرة الأدوار الحسية**")
+    if _par_recall_fn is None:
+        st.caption(
+            "لا توجد ذكريات حسية بعد — مع كل جلسة جديدة يبدأ الفريق "
+            "بتراكم خبراته: يستحضر سوابق الدور نفسه أو الأهداف "
+            "المتشابهة قبل التفكير، فيرتفع مستوى ذكائه الاستباقي "
+            "مع الزمن.")
+        return
+    try:
+        _mems = _par_recall_fn(top_k=8)
+    except Exception:
+        _mems = []
+    if not _mems:
+        st.caption(
+            "لا سوابق تفكير بعد — كلما تراكمَت الجلسات، استحضرت وحدة "
+            "التفكير ذكريات مماثلة لترفع الثقة عند السوابق الناجحة "
+            "وتخففها عند تكرار المراجعات.")
+        return
+    _proc = sum(1 for _m in _mems if _m.get("verdict") == "proceed")
+    st.caption(
+        f"آخر {len(_mems)} جلسات مماثلة: {_proc} أمرت بـ«نفّذ» و"
+        f"{len(_mems) - _proc} أمرت بـ«راجع» — يستحضرها الفريق قبل كل "
+        "جلسة جديدة فيرتفع ذكاؤه الاستباقي مع الزمن.")
+    with st.expander("أحدث الذكريات المستحضرة"):
+        for _m in _mems[:8]:
+            _v = "نفّذ" if _m.get("verdict") == "proceed" else "راجع"
+            st.text(
+                f"[{_v}] {_m.get('role') or '—'}: "
+                f"{_m.get('goal', '')[:110]} — "
+                f"ثقة {round(float(_m.get('confidence') or 0), 2)} "
+                f"(تشابه {round(float(_m.get('similarity') or 0), 2)})")
 
 
 

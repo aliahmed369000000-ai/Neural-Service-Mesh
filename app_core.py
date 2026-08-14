@@ -485,6 +485,7 @@ try:
         reason_task as _reason_task,
         par_stats as _par_stats,
         par_latest as _par_latest,
+        par_recall as _par_recall,
     )
     _PAR_OK = True
 except Exception:
@@ -498,6 +499,8 @@ except Exception:
                 "avg_confidence": 0.0}
     def _par_latest(*a, **kw):
         return None
+    def _par_recall(*a, **kw):
+        return []
 # ── طبقة فحص أمان أولى (regex، بدون تكلفة API) ────────────────────────────
 try:
     from ai.harm_classifier import classify_prompt as _classify_harm, get_domain_label as _harm_label

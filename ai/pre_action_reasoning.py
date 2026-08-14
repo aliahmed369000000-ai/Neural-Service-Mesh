@@ -17,7 +17,13 @@ ai/pre_action_reasoning.py — التفكير ما قبل الفعل (Pre-Action
 
 الجداول:
   par_records: id, task_id, role, goal, steps_json, risks_json, verdict,
-               confidence, revised_n, created_at
+               confidence, revised_n, memory_recall_json, created_at
+
+الذاكرة الحسية للأدوار (Role Sensory Memory):
+  قبل جلسة التفكير، يستحضر المحرك جلسات التفكير السابقة لنفس الدور
+  أو لأهداف متشابهة لفظيًا، ويستخدمها لرفع الثقة عند وجود سوابق
+  ناجحة (proceed) أو خفضها عند تكرار المراجعات (revise)، وترجع
+  الذكريات المستحضرة مع نتيجة الجلسة في حقل recalled_memories.
 """
 from __future__ import annotations
 
@@ -75,6 +81,9 @@ class ReasoningPlan:
         self.expected_steps: List[Dict[str, Any]] = []
         self.risks: List[Dict[str, Any]] = []
         self.confidence: float = 0.0
+        self.base_confidence: float = 0.0
+        self.recalled_memories: List[Dict[str, Any]] = []
+        self.memory_effect: float = 0.0  # أثر الذاكرة على الثقة (+/-)
         self.verdict: str = "proceed"  # proceed | revise
         self.revisions: List[str] = []
         self.created_at: float = time.time()
@@ -85,6 +94,9 @@ class ReasoningPlan:
             "expected_steps": self.expected_steps,
             "risks": self.risks,
             "confidence": round(self.confidence, 3),
+            "base_confidence": round(self.base_confidence, 3),
+            "memory_effect": round(self.memory_effect, 3),
+            "recalled_memories": self.recalled_memories,
             "verdict": self.verdict,
             "revisions": self.revisions,
             "created_at": self.created_at,
@@ -139,6 +151,21 @@ class PreActionReasoner:
         """يجري جلسة تفكير كاملة ويحفظها في السجل."""
         plan = ReasoningPlan(goal, role)
         try:
+            # ═══ الذاكرة الحسية: استحضار السوابق قبل التفكير ═══
+            try:
+                plan.recalled_memories = self.recall(goal, role, top_k=5)
+            except Exception as exc:
+                logger.warning("PAR sensory recall failed: %s", exc)
+            # أثر الذاكرة على الثقة:
+            # سوابق ناجحة (proceed) → ترفع الثقة، مراجعات متكررة (revise)
+            # → تخفض الثقة. الحد الإجمالي ±0.2 حتى لا تطغى الذاكرة.
+            if plan.recalled_memories:
+                proc = sum(1 for m in plan.recalled_memories
+                           if m["verdict"] == "proceed")
+                rev = sum(1 for m in plan.recalled_memories
+                          if m["verdict"] == "revise")
+                plan.memory_effect = max(-0.2, min(
+                    0.2, 0.05 * proc - 0.08 * rev))
             steps = _extract_plan_steps(goal, plan_steps)
             for i, step in enumerate(steps, 1):
                 level, why = _classify_risk(step)
@@ -159,6 +186,9 @@ class PreActionReasoner:
                 plan.confidence = 0.3  # لا خطوات قابلة للتحليل → ثقة محدودة
 
             # تعديلات (revise): بديل داخلي للخطوات العالية، أو خطوة فحص أولى
+            plan.base_confidence = plan.confidence
+            plan.confidence = max(0.0, min(
+                1.0, plan.confidence + plan.memory_effect))
             if plan.confidence < _PAR_MIN_CONFIDENCE:
                 plan.verdict = "revise"
                 for r in plan.risks:
@@ -188,6 +218,45 @@ class PreActionReasoner:
         except Exception as exc:
             logger.warning("PAR reason failed: %s", exc)
         return plan
+
+    def recall(self, goal: str = "", role: str = "",
+               top_k: int = 5) -> List[Dict[str, Any]]:
+        """استحضار جلسات التفكير السابقة المماثلة (الذاكرة الحسية).
+        يطابق الدور حرفيًا أولًا، ثم يشترط تطابق كلمة واحدة على الأقل
+        من كلمات الهدف مع كلمات الأهداف المسجلة (بلا LLM، بلا متجهات).
+        كل ذكرى ترجع مع درجة تشابه بسيطة (0.0 - 1.0) وتاريخها."""
+        out: List[Dict[str, Any]] = []
+        try:
+            with self._lock, _connect(self._db) as conn:
+                role = (role or "").strip()
+                words = [w for w in (goal or "").split()
+                         if len(w) >= 2]
+                rows = conn.execute("""
+                    SELECT task_id, role, goal, verdict, confidence,
+                           created_at FROM par_records
+                    ORDER BY created_at DESC LIMIT 300
+                """).fetchall()
+                for r in rows:
+                    sim = 0.0
+                    if role and r[1] and r[1] == role:
+                        sim = 1.0
+                    elif words and r[2]:
+                        rwords = [w for w in r[2].split() if len(w) >= 2]
+                        if rwords:
+                            common = sum(1 for w in words if w in rwords)
+                            sim = round(common / len(words), 2)
+                    if sim > 0.0:
+                        out.append({
+                            "task_id": r[0], "role": r[1], "goal": r[2],
+                            "verdict": r[3], "confidence": r[4],
+                            "created_at": r[5],
+                            "similarity": sim,
+                        })
+                    if len(out) >= top_k:
+                        break
+        except Exception as exc:
+            logger.warning("PAR recall failed: %s", exc)
+        return out
 
     def latest(self, task_id: str) -> Optional[Dict[str, Any]]:
         try:
@@ -330,3 +399,12 @@ def par_latest(task_id: str) -> Optional[Dict[str, Any]]:
         return get_pre_action_reasoner().latest(task_id)
     except Exception:
         return None
+
+
+def par_recall(goal: str = "", role: str = "",
+               top_k: int = 5) -> List[Dict[str, Any]]:
+    """مساعدة للدمج: استحضار ذكريات حسية لسوابق مماثلة."""
+    try:
+        return get_pre_action_reasoner().recall(goal, role, top_k)
+    except Exception:
+        return []
