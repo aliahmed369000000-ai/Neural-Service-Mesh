@@ -2124,6 +2124,193 @@ def run_training_mission(
         return plan_txt + f"\n\n## ❌ فشل التنفيذ\n\n{type(e).__name__}: {e}" + note
 
 
+def run_kaggle_training(
+    preset: str = "small",
+    n: Optional[int] = None,
+    epochs: int = 15,
+    batch: int = 16,
+    fresh: bool = True,
+    auto_push: bool = True,
+) -> str:
+    """
+    تشغيل تدريب SurahChain على GPU Kaggle عبر Kaggle API — بنفس منهجية NSM:
+
+      جهّز (generate kernel script + metadata)
+      → ادفع (`kaggle kernels push`)
+      → راقب حتى RUNNING ثم اكتمال (COMPLETE/FAILED/ERROR)
+      → اقرأ Logs عند الانتهاء
+      → إن فشل: درس منهجي تلقائي (OOM/ذاكرة) + تقرير الإصلاح المقترح
+      → AUTO_PUSH=1 بعد نجاح التدريب (يرفع checkpoint لـ GitHub)
+
+    الافتراضي: preset small / d_model=128 (كما طلب المستخدم).
+    لا يتطلب مفاتيح في الكود: Kaggle keys من Streamlit Secrets
+    وGITHUB_TOKEN من Kaggle Secrets.
+    """
+    run_id = f"kag_{int(time.time())}"
+    base = {"id": run_id, "ts": time.time(), "type": "kaggle", "preset": preset}
+    _KAGGLE_CFGS = {
+        "small": {"preset": "small", "d_model": 128, "n": 30000, "batch": 16},
+        "medium": {"preset": "medium", "d_model": 256, "n": 60000, "batch": 24},
+        "large": {"preset": "large", "d_model": 512, "n": 100000, "batch": 8},
+        "smoke": {"preset": "small", "d_model": 128, "n": 2000, "batch": 8},
+    }
+    cfg = _KAGGLE_CFGS.get((preset or "").lower())
+    if cfg is None:
+        return "## ❌ preset غير معروف — استخدم small/medium/large/smoke"
+    n = n or cfg["n"]
+    batch = batch or cfg["batch"]
+    d_model = cfg["d_model"]
+
+    lines = [
+        "## 🟠 دورة تدريب Kaggle (GPU T4) — SurahChain",
+        f"- preset=**{cfg['preset']}** · d_model=**{d_model}** · N=**{n}** · epochs=**{epochs}** · batch=**{batch}**",
+        f"- AUTO_PUSH={'مفعّل ✅' if auto_push else 'معطّل ❌'} · fresh={'نعم' if fresh else 'استكمال'}",
+        "",
+    ]
+
+    try:
+        from ai.kaggle_provider import (
+            ensure_kaggle_env, start_surahchain_training_api,
+            status_kaggle_kernel, download_kaggle_output,
+            _kaggle_cli_available, _kaggle_py_available,
+        )
+    except Exception as e:
+        return "## ❌ وحدة kaggle_provider غير متاحة\n\n" + str(e)
+
+    ok_cred, msg = ensure_kaggle_env()
+    cli_ok = _kaggle_cli_available() or _kaggle_py_available()
+    base["checks"] = {"creds": ok_cred, "creds_msg": msg, "cli": cli_ok}
+    if not ok_cred or not cli_ok:
+        base.update({"status": "rejected", "error": msg})
+        _append_training_run(base)
+        lines.append("### 🚫 الجاهزية")
+        lines.append(f"- بيانات Kaggle (Streamlit Secrets): {'✅' if ok_cred else '❌ ' + (msg or '')}")
+        lines.append(f"- Kaggle CLI: {'✅' if cli_ok else '❌ '}")
+        lines.append("> ضع KAGGLE_USERNAME + KAGGLE_KEY في Streamlit Secrets وGITHUB_TOKEN في Kaggle Secrets ثم أعد المحاولة.")
+        return "\n".join(lines)
+
+    base["status"] = "running"
+    try:
+        _meth_task_started(
+            run_id,
+            request=f"تدريب Kaggle SurahChain preset={cfg['preset']} d={d_model} N={n} epochs={epochs}",
+            plan={"preset": cfg["preset"], "d_model": d_model, "n": n,
+                  "epochs": epochs, "batch": batch, "fresh": fresh,
+                  "auto_push": auto_push, "gpu": "T4"},
+        )
+    except Exception:
+        pass
+
+    # ── 1) جهّز + ادفع kernel ──
+    _meth_step(run_id, step_type="plan", ok=True,
+               note=f"خطة Kaggle: clone repo → train_pretrain_torch ({cfg['preset']}) → AUTO_PUSH")
+    launch = start_surahchain_training_api(
+        preset=str(cfg["preset"]), n=int(n), epochs=int(epochs),
+        batch=int(batch), fresh=bool(fresh), auto_push=bool(auto_push),
+    )
+    if not launch.get("ok"):
+        base.update({"status": "failed", "error": launch.get("error")})
+        _append_training_run(base)
+        try:
+            _meth_task_finished(run_id, status="failed", ok=False,
+                                result_summary=(launch.get("error") or "")[:400])
+        except Exception:
+            pass
+        lines.append("### ❌ فشل الدفع")
+        lines.append("```")
+        lines.append(json.dumps(launch, ensure_ascii=False, indent=2))
+        lines.append("```")
+        return "\n".join(lines)
+
+    job_id = launch.get("job_id") or run_id
+    slug = (launch.get("push") or {}).get("kernel_slug") or launch.get("kernel_url") or ""
+    base["job_id"] = job_id
+    base["kernel_url"] = launch.get("kernel_url")
+    lines.append("### 🚀 تم الدفع")
+    lines.append(f"- رابط الكيرنل: {launch.get('kernel_url') or 'https://www.kaggle.com/code/' + slug}")
+    lines.append("")
+    _meth_step(run_id, step_type="execute", ok=True,
+               note=f"kernel={slug} pushed via Kaggle API")
+
+    # ── 2) مراقبة حتى RUNNING ثم اكتمال ──
+    status_txt = ""
+    final_status = None
+    waited = 0
+    max_wait = 60  # مراقبة قصيرة في الجلسة: Kaggle kernel قد يستغرق ساعات تدريبًا
+    while waited < max_wait:
+        time.sleep(5)
+        waited += 5
+        try:
+            st = status_kaggle_kernel(job_id)
+            status_txt = st.get("status_raw") or json.dumps(st, ensure_ascii=False)
+        except Exception as e:
+            status_txt = f"status err: {e}"
+        low = status_txt.lower()
+        # نواصل المراقبة حتى حالة نهائية (complete/failed/error) — "running" ليست نهائية
+        for cand in ("complete", "error", "failed", "killed", "cancelled"):
+            if cand in low:
+                final_status = cand
+                break
+        if final_status:
+            break
+    base["poll_seconds"] = waited
+    base["status_raw"] = status_txt[:600]
+    base["final_status"] = final_status
+
+    # ── 3) قراءة Logs عند أي حالة نهائية ──
+    if final_status in ("complete", "failed", "error"):
+        try:
+            dl = download_kaggle_output(job_id)
+            base["output_files"] = dl.get("files") or []
+            out_dir = ROOT / (dl.get("output_dir") or "")
+            tail = ""
+            for cand in ("logs", "output"):
+                p = out_dir / cand if out_dir.is_dir() else None
+                if p and p.is_dir():
+                    logs = sorted(p.iterdir())[-1:]
+                    if logs:
+                        tail = logs[0].read_text(errors="ignore")[-3000:]
+                        break
+            base["log_tail"] = tail
+            if final_status != "complete":
+                err_ctx = tail or status_txt
+                try:
+                    if "Memory" in err_ctx or "CUDA" in err_ctx or "OOM" in err_ctx:
+                        _record_kernel_oom_lesson(context=err_ctx[:400],
+                                                  current_batch=batch)
+                except Exception:
+                    pass
+        except Exception as e:
+            base["download_error"] = str(e)
+
+    _meth_step(run_id, step_type="verify", ok=final_status == "complete",
+               note=f"kaggle status={final_status} waited={waited}s")
+    base["status"] = "completed" if final_status == "complete" else "running"
+    _meth_task_finished(
+        run_id, status="done" if final_status == "complete" else "failed",
+        ok=bool(final_status == "complete"),
+        result_summary=f"preset={cfg['preset']} d={d_model} N={n} "
+                       f"epochs={epochs} kaggle_status={final_status}",
+    )
+    _append_training_run(base)
+
+    lines.append("### 📡 حالة الكيرنل")
+    lines.append(f"- الحالة الآن: **{final_status or 'لم تُحدد بعد — راقب من Kaggle'}**")
+    if final_status == "complete":
+        lines.append("- ✅ التدريب انتهى — الـcheckpoint يُرفع تلقائيًا لـ GitHub (AUTO_PUSH=1) إن وُجد GITHUB_TOKEN في Kaggle Secrets.")
+    elif final_status in ("failed", "error"):
+        lines.append("- ❌ انتهى بفشل — راجع Logs في Kaggle. إن كان السبب ذاكرة/توصيلات: الدرس المسجّل يُصيّر الـbatch للنصف تلقائيًا.")
+    else:
+        lines.append("- ⏳ ما زال في الطابور/التشغيل — Kaggle قد يستغرق دقائق إلى ساعات حسب preset.")
+        lines.append("> راقب يدويًا: `حالة kaggle ` أو افتح رابط الكيرنل أعلاه.")
+    lines.append("")
+    lines.append("```json")
+    lines.append(json.dumps({k: v for k, v in base.items() if k != "status_raw"},
+                            ensure_ascii=False, indent=2, default=str)[:1500])
+    lines.append("```")
+    return "\n".join(lines)
+
+
 def list_training_runs(limit: int = 15) -> str:
     rows = _read_training_runs(limit=max(5, min(int(limit), 50)))
     lines = ["## 📜 سجل مهام التدريب", ""]
@@ -2969,6 +3156,31 @@ def handle_training_command(user_input: str) -> Optional[str]:
         except Exception as _ar_err:
             logger.warning("architect: %s", _ar_err)
 
+    # ── تدريب Kaggle SurahChain المباشر (نفس منهجية NSM) ──
+    # أولوية أعلى من المنسّق العام لأن أوامره أدق — قبل orchestrator
+    m_kagtrain = re.search(
+        r"(?:ادرب|درّ?ب|شغّل?|نفّ?ذ|أطلق|ابدأ|جهّ?ز|حضّر?|prepare)\s*"
+        r"(?:تدريب\s*)?(?:kaggle|كاجل|كاغل)(?:\s+(surahchain|سلسلة\s*السور))?|"
+        r"(?:train|run|launch)\s*kaggle\s*(?:surah)?",
+        low,
+    )
+    if m_kagtrain:
+        kpreset = "small"
+        kepochs = 15
+        kfresh = True
+        kap = True
+        for m2 in re.finditer(r"(?:preset|نمط)\s*[=:]?\s*(small|medium|large|smoke)", low):
+            kpreset = m2.group(1)
+        m_ep = re.search(r"(?:epochs?|عصور|حقب)\s*[=:]?\s*(\d+)", text, re.I)
+        if m_ep:
+            kepochs = max(1, min(200, int(m_ep.group(1))))
+        if re.search(r"(استكمال|resume|continue)", low):
+            kfresh = False
+        if re.search(r"(بدون\s*(push|رفع|رفع\s*تلقائي)|skip\s*push|auto_push\s*=\s*0)", low):
+            kap = False
+        return run_kaggle_training(
+            preset=kpreset, epochs=kepochs, fresh=kfresh, auto_push=kap)
+
     # منسّق المنصات البعيدة (Kaggle + Colab + كفاءة التدريب)
     if _ORCH_OK and _orch_handle is not None:
         try:
@@ -2978,7 +3190,7 @@ def handle_training_command(user_input: str) -> Optional[str]:
         except Exception as _oc_err:
             logger.warning("orchestrator: %s", _oc_err)
 
-    # Kaggle (API + Dual T4) — قبل remote العام لأن أوامره أكثر تحديداً
+        # Kaggle (API + Dual T4) — قبل remote العام لأن أوامره أكثر تحديداً
     if _KAGGLE_OK and _kaggle_handle is not None:
         try:
             kg = _kaggle_handle(text)

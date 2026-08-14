@@ -357,7 +357,10 @@ def rewrite_to_canonical(text: str) -> str:
         "registry": "سجل نماذج",
         "platforms": "حالة المنصات",
         "kaggle_status": "حالة kaggle",
-        "kaggle_prepare": "جهّز kaggle",
+        "kaggle_prepare": (
+            text if re.search(r"surahchain|سلسلة\s*السور|سلسلة\s*سور|resume|استكمال|continue", text, re.I)
+            else "جهّز kaggle"
+        ),
         "kaggle_push": text,  # يحتاج id
         "kaggle_download": text,
         "colab_mission": "مهمة colab",

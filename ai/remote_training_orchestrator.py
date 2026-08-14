@@ -515,7 +515,7 @@ def handle_orchestrator_command(user_input: str) -> Optional[str]:
 
     # درّب بعيد kaggle [وادفع]
     m_k = re.search(
-        r"(?:در[ّ]?ب|train)\s*(?:بعيد|remote)?\s*kaggle|(?:در[ّ]?ب|train)\s*kaggle\s*(?:فع[ّ]?ال|efficient)",
+        r"(?<![اأ])(?:در[ّ]?ب|train)\s*(?:بعيد|remote)?\s*kaggle|(?<![اأ])(?:در[ّ]?ب|train)\s*kaggle\s*(?:فع[ّ]?ال|efficient)",
         text,
         re.I,
     )

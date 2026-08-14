@@ -990,25 +990,29 @@ def generate_surahchain_kernel_script(
     repo: str = "aliahmed369000000-ai/Neural-Service-Mesh",
     branch: str = "main",
 ) -> str:
-    """سكربت Kaggle يشغّل run_train_then_push (تدريب ثم رفع لـ GitHub)."""
+    """سكربت Kaggle يشغّل run_train_then_push (تدريب ثم رفع لـ GitHub).
+
+    البناء عبر template string عادي (لا f-string على كامل القالب) —
+    الف-string المزدوجة القديمة كانت ترمي NameError عند التوليد (خطأ مكتشف
+    عمليًا: `_i` غير معرّف في نطاق المولّد).
+    """
     fresh_s = "1" if fresh else "0"
     push_s = "1" if auto_push else "0"
-    return textwrap.dedent(
-        f"""
+    tmpl = textwrap.dedent("""\
         #!/usr/bin/env python3
-        \"\"\"NSM SurahChain Kaggle Kernel — job {job_id}\"\"\"
+        \"\"\"NSM SurahChain Kaggle Kernel — job __JOB_ID__\"\"\"
         from __future__ import annotations
         import os, sys, subprocess
         from pathlib import Path
 
-        REPO = "{repo}"
-        BRANCH = "{branch}"
-        PRESET = "{preset}"
-        SCN_N = "{n}"
-        SCN_EPOCHS = "{epochs}"
-        SCN_BATCH = "{batch}"
-        SCN_FRESH = "{fresh_s}"
-        AUTO_PUSH = "{push_s}"
+        REPO = "__REPO__"
+        BRANCH = "__BRANCH__"
+        PRESET = "__PRESET__"
+        SCN_N = "__SCN_N__"
+        SCN_EPOCHS = "__SCN_EPOCHS__"
+        SCN_BATCH = "__SCN_BATCH__"
+        SCN_FRESH = "__SCN_FRESH__"
+        AUTO_PUSH = "__AUTO_PUSH__"
 
         def secret(name, default=""):
             try:
@@ -1019,11 +1023,10 @@ def generate_surahchain_kernel_script(
 
         token = secret("GITHUB_TOKEN") or secret("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
         work = Path("/kaggle/working/Neural-Service-Mesh")
-        print("CUDA check…")\n        # monitor defined below after torch import
+        print("=== CUDA check ===")
         try:
             import torch
             print("torch", torch.__version__, "cuda", torch.cuda.is_available(), "gpus", torch.cuda.device_count())
-            # لقطة GPU
             try:
                 for _i in range(torch.cuda.device_count() if torch.cuda.is_available() else 0):
                     print(f"  GPU{_i} mem_alloc={torch.cuda.memory_allocated(_i)/1e9:.2f}G name={torch.cuda.get_device_name(_i)}")
@@ -1039,9 +1042,9 @@ def generate_surahchain_kernel_script(
 
         if not token:
             print("⚠ لا GITHUB_TOKEN في Kaggle Secrets — استنساخ عام / قد يفشل الرفع")
-            url = f"https://github.com/{{REPO}}.git"
+            url = "https://github.com/" + REPO + ".git"
         else:
-            url = f"https://x-access-token:{{token}}@github.com/{{REPO}}.git"
+            url = "https://x-access-token:" + token + "@github.com/" + REPO + ".git"
             os.environ["GITHUB_TOKEN"] = token
             os.environ["AUTO_PUSH"] = AUTO_PUSH
 
@@ -1053,7 +1056,7 @@ def generate_surahchain_kernel_script(
 
         os.chdir(work)
         env = os.environ.copy()
-        env.update({{
+        env.update({
             "SCN_PRESET": PRESET,
             "SCN_N": SCN_N,
             "SCN_EPOCHS": SCN_EPOCHS,
@@ -1061,14 +1064,18 @@ def generate_surahchain_kernel_script(
             "SCN_FRESH": SCN_FRESH,
             "AUTO_PUSH": AUTO_PUSH,
             "PYTHONUNBUFFERED": "1",
-        }})
+        })
         script = work / "experiments/surah_chain_network/run_train_then_push.py"
         print("▶", script)
         r = subprocess.run([sys.executable, str(script)], cwd=str(work), env=env)
         print("exit", r.returncode)
         raise SystemExit(r.returncode)
-        """
-    )
+    """)
+    return tmpl.replace("__JOB_ID__", job_id).replace("__REPO__", repo).replace(
+        "__BRANCH__", branch).replace("__PRESET__", preset).replace(
+        "__SCN_N__", str(n)).replace("__SCN_EPOCHS__", str(epochs)).replace(
+        "__SCN_BATCH__", str(batch)).replace("__SCN_FRESH__", fresh_s).replace(
+        "__AUTO_PUSH__", push_s)
 
 
 def prepare_surahchain_kaggle_job(
