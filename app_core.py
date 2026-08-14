@@ -492,6 +492,7 @@ try:
         par_role_accuracy as _par_role_accuracy,
         reason_multi_task as _reason_multi_task,
         reason_multi_role_task as _reason_multi_role_task,
+        resolve_collective_task as _resolve_collective_task,
     )
     _PAR_OK = True
 except Exception:
@@ -519,6 +520,8 @@ except Exception:
     def _reason_multi_task(*a, **kw):
         return None
     def _reason_multi_role_task(*a, **kw):
+        return None
+    def _resolve_collective_task(*a, **kw):
         return None
 # ── طبقة فحص أمان أولى (regex، بدون تكلفة API) ────────────────────────────
 try:

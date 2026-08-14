@@ -50,6 +50,23 @@ ai/pre_action_reasoning.py — التفكير ما قبل الفعل (Pre-Action
   (−0.08), والأثر محصور بحد صارم ±0.15. يختار المحرك المسار الأعلى
   ثقة بعد كل المعايرات ويعيد MultiPathPlan بكل المسارات ومؤشر
   المسار المختار.
+
+حُكم الفريق على المسارات (Multi-Role Path Voting):
+  يوزّع المحرك الخطط البديلة على أدوار الفريق؛ كل دور يجري جلسة
+  تفكير مستقلة لكل مسار (مسلك حفظ: task_id::role::pathN)، ثم تجمع
+  الأحكام بوزن الدقة التاريخية للدور (≥2/3 → 1.5، <1/2 → 0.5) مع
+  مكافأة توافق +0.03 وتأثير تاريخي نمطي على المسار، ويختار المسار
+  الأعلى توافقًا وثقةً — حد صارم ±0.15 على كل أثر، وتساقط آمن
+  كامل عند غياب الأدوار أو تعطل دور أو فشل الكل.
+
+التوقع الجماعي المتطور (Collective Resolution):
+  بعد جمع أحكام الأدوار، يحاكي المحرك سيناريو تعارضٍ افتراضي بين
+  الأحكام (كل حكم ينحرف عن متوسط مسار مساره بمقدار > 0.10 يعد
+  تعارضًا محسوبًا رياضيًا — بلا أي نموذج لغوي)، ويولّد خطة واحدة
+  موسّعة تدمج أفضل خطوات كل مسار: المسار الأعلى تصويتًا أولاً ثم
+  خطوات المسارات الأخرى غير المكررة، وكل خطوة تحمل مصدرها ووزنها
+  وثقتها. تحفظ الخطة المدمجة جلسةً واحدة في السجل
+  (task_id::collective) بثقة محصورة [0,1] ومكافأة دمج ≤ +0.15.
 """
 from __future__ import annotations
 
@@ -197,6 +214,7 @@ class MultiRolePlan:
         self.vote_scores: List[float] = []  # score نهائي/مسار
         self.chosen_index: int = 0
         self.created_at: float = time.time()
+        self.resolved: Optional[CollectivePlan] = None  # الخطة المدمجة
 
     @property
     def chosen_role_note(self) -> str:
@@ -237,6 +255,50 @@ class MultiRolePlan:
             },
             "multi_path": (self.multi_path.to_dict()
                            if self.multi_path else None),
+            "resolved": (self.resolved.to_dict()
+                         if self.resolved else None),
+            "created_at": self.created_at,
+        }
+
+
+class CollectivePlan:
+    """التوقع الجماعي المتطور (Collective Resolution).
+
+    خطة واحدة موسّعة تولّدها المحاكاة الجماعية بعد حُكم الفريق على
+    المسارات: تدمج أفضل خطوات كل مسار (المسار الأعلى تصويتًا أولًا
+    ثم الخطوات غير المكررة)، وتحمل محاكاة التعارض الافتراضي بين
+    الأحكام (conflict_sim ∈ [0,1]) وثقة الخطة المدمجة المحصورة
+    [0,1] بمكافأة دمج لا تتجاوز +0.15.
+    """
+
+    def __init__(self, task_id: str, goal: str,
+                 roles: List[str],
+                 candidate_paths: Optional[List[List[str]]] = None
+                 ) -> None:
+        self.task_id = task_id
+        self.goal = goal
+        self.roles: List[str] = list(roles or [])
+        # Dict[n, action, source_path, source_role,
+        # source_confidence, step_weight, risk_level]
+        self.merged_steps: List[Dict[str, Any]] = []
+        self.conflict_sim: float = 0.0   # نسبة التعارض الافتراضي
+        self.resolution_note: str = ""
+        self.confidence: float = 0.0     # [0,1]
+        self.created_at: float = time.time()
+
+    @property
+    def n_merged(self) -> int:
+        return len(self.merged_steps)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "task_id": self.task_id, "goal": self.goal,
+            "roles": self.roles,
+            "n_merged": self.n_merged,
+            "merged_steps": self.merged_steps,
+            "conflict_sim": round(self.conflict_sim, 3),
+            "resolution_note": self.resolution_note,
+            "confidence": round(self.confidence, 3),
             "created_at": self.created_at,
         }
 
@@ -298,10 +360,21 @@ class PreActionReasoner:
             # سوابق ناجحة (proceed) → ترفع الثقة، مراجعات متكررة (revise)
             # → تخفض الثقة. الحد الإجمالي ±0.2 حتى لا تطغى الذاكرة.
             if plan.recalled_memories:
-                proc = sum(1 for m in plan.recalled_memories
-                           if m["verdict"] == "proceed")
-                rev = sum(1 for m in plan.recalled_memories
-                          if m["verdict"] == "revise")
+                # ترجيح الأثر حسب التشابه: سوابق الدور نفسه (sim=1.0)
+                # تؤثر بالأثر الكامل، وسوابق الأهداف المشتركة فقط
+                # (sim<1.0، أدوار أخرى) تؤثر بنصف الأثر — حتى لا تُرفع
+                # ثقة دورٍ ضعيفٍ بسوابق نجاح دورٍ آخر.
+                # سوابق معلومة النتيجة الفاشلة (outcome=failure) لا
+                # ترفع الثقة أبدًا حتى لو كان قرارها proceed — الدقة
+                # المقاسة أثقل من القرار الظاهري.
+                def _mweight(m):
+                    return m.get("similarity", 0.0) or 0.0
+                proc = sum(_mweight(m) for m in plan.recalled_memories
+                           if m["verdict"] == "proceed"
+                           and m.get("outcome") != "failure")
+                rev = sum(_mweight(m) for m in plan.recalled_memories
+                          if m["verdict"] == "revise"
+                          or m.get("outcome") == "failure")
                 plan.memory_effect = max(-0.2, min(
                     0.2, 0.05 * proc - 0.08 * rev))
             # ═══ استحضار الدقة التاريخية: معايرة الثقة حسب دقة الدور ═══
@@ -819,6 +892,15 @@ class PreActionReasoner:
                 range(len(mr.vote_scores)),
                 key=lambda i: (mr.vote_scores[i],
                                mr.consensus_scores[i]))
+            # التوقع الجماعي المتطور: محاكاة تعارض افتراضي
+            # وتوليد خطة مدمجة إذا تعددت المسارات والأدوار
+            if n_paths >= 2 and len(mr.role_judgments) >= 2:
+                try:
+                    mr.resolved = self.resolve_collective(
+                        mr, candidate_paths)
+                except Exception as exc:
+                    logger.warning("Collective resolution failed: %s",
+                                   exc)
             # وسم المسار المختار في ذكريات أحكام كل دور
             for role, judg in mr.role_judgments.items():
                 if mr.chosen_index in judg:
@@ -871,6 +953,137 @@ class PreActionReasoner:
         except Exception as exc:
             logger.warning("PAR role_accuracy_stats failed: %s", exc)
         return out
+
+    def resolve_collective(self, mr: MultiRolePlan,
+                           candidate_paths: List[List[str]]
+                           ) -> "CollectivePlan":
+        """التوقع الجماعي المتطور: محاكاة تعارضٍ افتراضي بين أحكام
+        الأدوار وتوليد خطة واحدة موسّعة تدمج أفضل خطوات كل مسار.
+
+        التعارض يُحسب رياضيًا بلا أي نموذج لغوي: يقيس تباين الأحكام
+        المجمعة النهائية بين المسارات (vote_scores — متوسط مرجح
+        بأوزان دقة الأدوار)؛ كل مسار ينحرف عن المتوسط بأكثر من
+        0.10 يعد مسارًا متعارضًا، ومحاكاة التعارض conflict_sim هي
+        نسبة المسارات المتعارضة مع إضافة معيار استمراري (الانحراف
+        المعياري النسبي للأحكام المجمعة، محصور [0,1]) حتى لا يهبط
+        التعارض إلى صفر كلما تقاربت الأحكام جزئيًا. الخطة المدمجة تُرتّب
+        المسار الأعلى تصويتًا أولًا ثم تضيف خطوات المسارات الأخرى
+        غير المكررة (تطابق نمطي بكلمة مشتركة ≥ 3 أحرف)، وكل خطوة
+        تحمل مصدرها ووزنها. تحفظ الخطة جلسةً واحدة في السجل
+        (task_id::collective) بثقة محصورة [0,1]."""
+        cp = CollectivePlan(mr.task_id, mr.goal, mr.roles,
+                            candidate_paths)
+        if not mr.vote_scores or not mr.role_judgments:
+            cp.resolution_note = "لا أحكام كافية — بلا خطة مدمجة"
+            self._save_collective_record(cp, candidate_paths)
+            return cp
+        n_paths = len(mr.vote_scores)
+        # 1. محاكاة التعارض الافتراضي: تباين الأحكام المجمعة بين
+        # المسارات — كل مسار ينحرف عن متوسط الأحكام المجمعة بأكثر
+        # من 0.10 يعد مسارًا متعارضًا (نسبة المسارات المتعارضة)،
+        # مضافًا إليه معيار استمراري هو الانحراف المعياري النسبي
+        # للأحكام المجمعة محصورًا [0,1]؛ والنسبتان تُرجع أعلى
+        # قيمة بينهما (قياس بأكمله رياضي بلا أي نموذج لغوي).
+        mu = sum(mr.vote_scores) / max(1, n_paths)
+        diverged = sum(1 for v in mr.vote_scores
+                       if abs(v - mu) > 0.10)
+        ratio = diverged / max(1, n_paths)
+        if mu > 0 and n_paths > 1:
+            var = sum((v - mu) ** 2 for v in mr.vote_scores) / n_paths
+            norm_std = (var ** 0.5) / mu
+            cont = min(1.0, norm_std)
+        else:
+            cont = 0.0
+        cp.conflict_sim = round(max(ratio, cont), 3)
+        # 2. دمج أفضل الخطوات: المسار الأعلى تصويتًا أولًا
+        order = sorted(range(n_paths),
+                       key=lambda i: (mr.vote_scores[i],
+                                      mr.consensus_scores[i]),
+                       reverse=True)
+        seen_words = set()
+        for idx in order:
+            best = None
+            best_weight = -1.0
+            for r, judg in mr.role_judgments.items():
+                if idx not in judg:
+                    continue
+                p = judg[idx]
+                a = float(mr.role_accuracies.get(r, {}).get("n") or 0)
+                acc = float(mr.role_accuracies.get(r, {})
+                            .get("accuracy") or 0.0)
+                w = (1.5 if a >= 3 and acc >= 2 / 3
+                     else (0.5 if a >= 3 and acc < 0.5 else 1.0))
+                if p.confidence * w > best_weight:
+                    best, best_weight = p, p.confidence * w
+            if best is None:
+                continue
+                # لا سوابق لهذا المسار — تخطى
+            for s in best.expected_steps:
+                action = (s.get("action") or "").strip()
+                if not action:
+                    continue
+                words = {w for w in action.split() if len(w) >= 3}
+                if words and words <= seen_words:
+                    # كل كلماتها موجودة في خطوات مدمجة سابقًا
+                    continue
+                if words:
+                    seen_words.update(words)
+                cp.merged_steps.append({
+                    "n": len(cp.merged_steps) + 1,
+                    "action": action,
+                    "source_path": idx,
+                    "source_role": best.role or "",
+                    "source_confidence": round(best.confidence, 3),
+                    "step_weight": round(best_weight, 3),
+                    "risk_level": s.get("risk_level", "low"),
+                })
+        # 3. الثقة: متوسط موزون للجلسات المندمجة + مكافأة دمج محصورة
+        if cp.merged_steps:
+            src_confs = [s["source_confidence"] for s in cp.merged_steps]
+            base = sum(src_confs) / len(src_confs)
+            merge_bonus = min(0.15, 0.02 * max(
+                0, len(mr.role_judgments) - 1))
+            cp.confidence = max(0.0, min(1.0, base + merge_bonus))
+            n_votes = sum(len(j) for j in mr.role_judgments.values())
+            cp.resolution_note = (
+                f"دمج {cp.n_merged} خطوات من {n_paths} مسارات "
+                f"بأحكام {len(mr.role_judgments)} أدوار "
+                f"(تعارض افتراضي {round(cp.conflict_sim * 100)}% "
+                f"من {n_votes} حكم) — مكافأة دمج +"
+                f"{round(merge_bonus, 3)}")
+        else:
+            cp.resolution_note = "لا خطوات قابلة للدمج — بلا أثر"
+        self._save_collective_record(cp, candidate_paths)
+        return cp
+
+    def _save_collective_record(self, cp: "CollectivePlan",
+                                candidate_paths: List[List[str]]
+                                ) -> None:
+        """حفظ جلسة الخطة المدمجة في السجل باسم task_id::collective."""
+        try:
+            steps = json.dumps(
+                [{"action": s["action"],
+                  "source_path": s["source_path"],
+                  "source_role": s["source_role"]}
+                 for s in cp.merged_steps],
+                ensure_ascii=False)
+            risks = json.dumps([], ensure_ascii=False)
+            with self._lock, _connect(self._db) as conn:
+                conn.execute("""
+                    INSERT INTO par_records
+                      (task_id, role, goal, steps_json, risks_json,
+                       verdict, confidence, revised_n, outcome,
+                       created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)
+                """, (f"{cp.task_id}::collective", "collective",
+                      f"{cp.goal} — خطة مدمجة ({cp.n_merged} خطوة)",
+                      steps, risks,
+                      "proceed" if cp.confidence >= _PAR_MIN_CONFIDENCE
+                      else "revise",
+                      round(cp.confidence, 3), 0, None, time.time()))
+                self._prune()
+        except Exception as exc:
+            logger.warning("Collective record save failed: %s", exc)
 
     def learned_stats(self) -> Dict[str, Any]:
         """دقة التوقعات المقاسة من السجلات ذات النتائج الفعلية."""
@@ -1114,6 +1327,25 @@ def reason_multi_role_task(task_id: str, goal: str,
     try:
         return get_pre_action_reasoner().reason_multi_role(
             task_id, goal, candidate_paths or [], roles).to_dict()
+    except Exception:
+        return None
+
+
+def resolve_collective_task(task_id: str, goal: str,
+                            candidate_paths: Optional[
+                                List[List[str]]] = None,
+                            roles: Optional[List[str]] = None
+                            ) -> Optional[Dict[str, Any]]:
+    """مساعدة للدمج: التوقع الجماعي المتطور — يحاكي تعارضًا
+    افتراضيًا بين أحكام أدوار الفريق ويولّد خطة موسّعة تدمج
+    أفضل خطوات كل مسار (بلا API، مكافأة دمج ≤ +0.15)."""
+    try:
+        reasoner = get_pre_action_reasoner()
+        mr = reasoner.reason_multi_role(
+            task_id, goal, candidate_paths or [], roles)
+        if mr is not None and mr.resolved is not None:
+            return mr.resolved.to_dict()
+        return None
     except Exception:
         return None
 

@@ -1753,6 +1753,49 @@ def render_par_panel() -> None:
                 "الحسية ومعايرته التاريخية، ثم يجمع الأحكام بوزن "
                 "الثقة التاريخية للدور (±0.03 مكافأة توافق و±0.15 "
                 "حد صارم) ويختار المسار الأعلى توافقًا وثقةً.")
+            # ── التوقع الجماعي المتطور (Collective Resolution) ────
+            _rcd = None
+            try:
+                from app_core import _resolve_collective_task
+                _rcd = _resolve_collective_task(
+                    "_ui_collective", _goal2,
+                    [["ابحث في الويب عن آخر المستجدات",
+                      "قارن بين النتائج"],
+                     ["اجمع المصادر الموثوقة",
+                      "حلل البيانات داخليا"]],
+                    roles=["analyst", "writer"])
+            except Exception:
+                _rcd = None
+            if _rcd and _rcd.get("n_merged", 0) > 0:
+                st.markdown("**التوقع الجماعي المتطور**")
+                _cmt = [
+                    {"الخطوة": s.get("n"),
+                     "الإجراء": s.get("action", ""),
+                     "المسار المصدر": s.get("source_path", 0) + 1,
+                     "الدور المصدر": s.get("source_role", ""),
+                     "ثقة المصدر": round(
+                         float(s.get("source_confidence", 0) or 0), 2),
+                     "الوزن": round(
+                         float(s.get("step_weight", 0) or 0), 2)}
+                    for s in _rcd.get("merged_steps", [])]
+                st.dataframe(_cmt,
+                             use_container_width=True,
+                             height=180)
+                st.caption(
+                    f"ثقة الخطة المدمجة {round(
+                        float(_rcd.get('confidence', 0) or 0), 2)} "
+                    f"— تعارض افتراضي بين الأحكام "
+                    f"{round(float(_rcd.get('conflict_sim', 0) or 0) * 100)}% "
+                    f"— {_rcd.get('resolution_note', '')}")
+                with st.expander("تفاصيل الدمج"):
+                    st.text(
+                        "بعد جمع أحكام أدوار الفريق على المسارات "
+                        "البديلة، يحاكي المحرك سيناريو تعارضٍ "
+                        "افتراضيًا بين الأحكام (رياضيًا بلا أي نموذج "
+                        "لغوي)، ثم يولّد خطة واحدة موسّعة تدمج أفضل "
+                        "خطوات كل مسار: المسار الأعلى تصويتًا أولًا "
+                        "ثم الخطوات غير المكررة من المسارات الأخرى "
+                        "— بحد صارم +0.15 على مكافأة الدمج.")
     except Exception:
         pass
     st.caption(
