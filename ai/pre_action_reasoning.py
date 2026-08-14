@@ -38,9 +38,18 @@ ai/pre_action_reasoning.py — التفكير ما قبل الفعل (Pre-Action
   توقعاته صحيحة تاريخًا (ثلثان أو أكثر) تُرفع ثقته بحد +0.05، ودورٌ
   كثير الأخطاء (أقل من نصف توقعاته صحيحة) تُخفَّض ثقته بحد -0.075 —
   أي دور بين ذلك تبقى ثقته بلا معايرة. المعايرة لا تحدث إلا بعد 3
-  جلسات مقاسة للدور على الأقل (حتى لا تتأثر الثقة بعينة صغيرة)،
-  ومحصورة دائمًا بحد آمن صارم ±0.15 مهما تعددت المعايرات. تُعرض دقة
+  جلسات مقاسة للدور على الأقل (حتى لا تتأثر الثقة بعينة صغيرة),
+  ومحصورة دائما بحد آمن صارم ±0.15 مهما تعددت المعايرات. تُعرض دقة
   كل دور في لوحة المراقبة لتُفهم ثقة الفريق لحظة بلحظة.
+
+التوقع المتعدد المسارات (Multi-Path Forecasting):
+  قبل أي فعل يمكن عرض عدة خطط بديلة للهدف نفسه (candidate paths)؛
+  فيجري المحرك جلسة تفكير مستقلة لكل مسار (تُحفظ جميعها في السجل),
+  ثم يصنّف كل مسار مقابل السوابق المقاسة تاريخيا للدور: كل خطوة
+  تتشابه مع جلسة صحيحة ترفع المسار (+0.05), ومع جلسة خاطئة تخفضه
+  (−0.08), والأثر محصور بحد صارم ±0.15. يختار المحرك المسار الأعلى
+  ثقة بعد كل المعايرات ويعيد MultiPathPlan بكل المسارات ومؤشر
+  المسار المختار.
 """
 from __future__ import annotations
 
@@ -122,6 +131,42 @@ class ReasoningPlan:
             "recalled_memories": self.recalled_memories,
             "verdict": self.verdict,
             "revisions": self.revisions,
+            "created_at": self.created_at,
+        }
+
+
+class MultiPathPlan:
+    """مقارنة عدة خطط بديلة للهدف نفسه قبل الفعل (Multi-Path Forecasting).
+
+    يُحسب لكل مسار جلسة تفكير مستقلة (تحفظ في السجل)، ثم تُصنَّف خطوات
+    المسار مقابل السوابق المقاسة تاريخًا للدور: خطوات متشابهة لفظًا مع
+    جلسات صحيحة ترفع المسار، ومع جلسات خاطئة تخفضه، بحد صارم ±0.15.
+    يختار المحرك المسار الأعلى ثقةً تاريخًا ويعيد كل الجلسات داخل
+    MultiPathPlan مع المسار المختار مؤشَّرًا في recalled_memories.
+    """
+
+    def __init__(self, task_id: str, goal: str, role: str = "") -> None:
+        self.task_id = task_id
+        self.goal = goal
+        self.role = role
+        self.plans: List[ReasoningPlan] = []  # جلسة تفكير لكل مسار
+        self.history_scores: List[float] = []  # أثر التشابه التاريخي لكل مسار
+        self.chosen_index: int = 0  # مسار المسار المختار
+        self.created_at: float = time.time()
+
+    @property
+    def chosen_plan(self) -> Optional[ReasoningPlan]:
+        return self.plans[self.chosen_index] if self.plans else None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "task_id": self.task_id, "goal": self.goal, "role": self.role,
+            "n_paths": len(self.plans),
+            "history_scores": [round(s, 3) for s in self.history_scores],
+            "chosen_index": self.chosen_index,
+            "chosen_confidence": (round(self.chosen_plan.confidence, 3)
+                                  if self.chosen_plan else 0.0),
+            "paths": [p.to_dict() for p in self.plans],
             "created_at": self.created_at,
         }
 
@@ -418,6 +463,154 @@ class PreActionReasoner:
             logger.warning("PAR calibrate_historical failed: %s", exc)
         return result
 
+    # ═══ التوقع المتعدد المسارات (Multi-Path Forecasting) ═══
+
+    def history_score_for_path(self, path_steps: List[str],
+                               role: str = "") -> Dict[str, Any]:
+        """تصنيف مسار تنفيذي مقابل السوابق المقاسة تاريخًا للدور.
+
+        يطابق كلمات كل خطوة مع خطوات الجلسات المقاسة (outcome معلوم):
+        كل خطوة تتشابه مع جلسة صحيحة (verdict+outcome متطابقان) تضيف
+        +0.05، ومع جلسة خاطئة تخصم −0.08 — أي تأثير محصور بحد صارم
+        ±0.15 مهما تعددت المسارات أو السجلات.
+        ترجع {path_key, matching_steps, correct_n, wrong_n,
+        history_effect, n_measured, verdict_summary}.
+        """
+        result: Dict[str, Any] = {
+            "matching_steps": 0, "correct_n": 0, "wrong_n": 0,
+            "history_effect": 0.0, "n_measured": 0, "verdict_summary": "",
+        }
+        try:
+            with self._lock, _connect(self._db) as conn:
+                rows = conn.execute("""
+                    SELECT goal, verdict, outcome FROM par_records
+                    WHERE role = ? AND outcome IN ('success', 'failure')
+                """, ((role or "").strip(),)).fetchall()
+                if not rows:
+                    result["verdict_summary"] = (
+                        "لا سوابق مقاسة للدور — بلا أثر تاريخي")
+                    return result
+                correct, wrong = 0, 0
+                matched = 0
+                for _step in (path_steps or []):
+                    t = f" {_step} ".lower()
+                    if not t.strip():
+                        continue
+                    s_correct = any(self._path_matches_record(
+                        _step, r[0]) for r in rows
+                        if self._record_is_correct(r[1], r[2]))
+                    s_wrong = any(self._path_matches_record(
+                        _step, r[0]) for r in rows
+                        if not self._record_is_correct(r[1], r[2]))
+                    if s_correct:
+                        correct += 1
+                        matched += 1
+                    elif s_wrong:
+                        wrong += 1
+                        matched += 1
+                effect = max(-0.15, min(0.15,
+                                        0.05 * correct - 0.08 * wrong))
+                n_meas = len(rows)
+                summary = ""
+                if effect > 0:
+                    summary = (f"مسار يتشابه مع {correct} سوابق صحيحة "
+                               f"({n_meas} جلسة مقاسة) → رفع الثقة")
+                elif effect < 0:
+                    summary = (f"مسار يتشابه مع {wrong} سوابق خاطئة "
+                               f"({n_meas} جلسة مقاسة) → خفض الثقة")
+                else:
+                    summary = (f"مسار بلا تشابه حاسم مع السوابق "
+                               f"({n_meas} جلسة مقاسة) — بلا أثر")
+                result.update({"matching_steps": matched,
+                               "correct_n": correct, "wrong_n": wrong,
+                               "history_effect": effect,
+                               "n_measured": n_meas,
+                               "verdict_summary": summary})
+        except Exception as exc:
+            logger.warning("PAR history_score_for_path failed: %s", exc)
+        return result
+
+    @staticmethod
+    def _record_is_correct(verdict: str, outcome: str) -> bool:
+        """سجل صحيح: proceed+success أو revise+failure."""
+        return ((verdict == "proceed" and outcome == "success")
+                or (verdict == "revise" and outcome == "failure"))
+
+    @staticmethod
+    def _path_matches_record(step: str, record_goal: str) -> bool:
+        """تطابق نمطي بسيط: كلمة مشتركة بطول ≥ 3 أحرف بين الخطوة والهدف."""
+        t = f" {step} ".lower()
+        rwords = [w for w in (record_goal or "").split() if len(w) >= 3]
+        return any(w in t for w in rwords)
+
+    def reason_multi(self, task_id: str, goal: str,
+                     candidate_paths: List[List[str]],
+                     role: str = "") -> MultiPathPlan:
+        """التوقع المتعدد المسارات: مقارنة عدة خطط بديلة واختيار
+        الأعلى ثقةً تاريخًا للدور.
+
+        لكل مسار: جلسة تفكير مستقلة (تُحفظ في السجل) مع نفس استحضار
+        الذاكرة الحسية والمعايرة التاريخية، ثم يضاف أثر التشابه
+        التاريخي مع السوابق المقاسة للدور (history_score). المسار
+        الأعلى ثقةً بعد كل التعديلات هو المختار — لكن الثقة تبقى
+        محصورة [0,1] والمعايرات محكومة بحد ±0.15.
+
+        الحد الأدنى 2 مسارات وإلا تسقط إلى reason() لمسار واحد. المسار
+        المختار يوسم في recalled_memories، وكل مسار يحفظ تاريخه
+        (n_measured, correct_n, wrong_n, history_effect) في to_dict().
+        """
+        mp = MultiPathPlan(task_id, goal, role)
+        if not candidate_paths or len(candidate_paths) < 2:
+            # تساقط آمن: جلسة تفكير واحدة كالمعتاد
+            plan = self.reason(task_id, goal, role=role)
+            mp.plans.append(plan)
+            mp.history_scores.append(0.0)
+            mp.chosen_index = 0
+            return mp
+        # جلسة تفكير لكل مسار (task_id::path{i})
+        for i, path in enumerate(candidate_paths):
+            plan = self.reason(f"{task_id}::path{i}", goal,
+                               plan_steps=path, role=role)
+            mp.plans.append(plan)
+        # أثر التشابه التاريخي لكل مسار (من سجلات الدور المقاسة)
+        mp._path_histories: List[Dict[str, Any]] = []  # type: ignore[attr-defined]
+        for plan in mp.plans:
+            steps = [s.get("action", "") for s in plan.expected_steps]
+            hs = self.history_score_for_path(steps, role)
+            plan.history_score = hs  # type: ignore[attr-defined]
+            mp._path_histories.append(hs)  # type: ignore[attr-defined]
+            mp.history_scores.append(hs["history_effect"])
+        # الثقة النهائية لكل مسار = clamp(... + history_effect)
+        # (history_effect محصور بـ ±0.15 أصلًا)
+        for plan in mp.plans:
+            if hasattr(plan, "history_score"):
+                plan.confidence = max(0.0, min(1.0, plan.confidence
+                    + plan.history_score["history_effect"]))
+        # اختيار المسار الأعلى ثقةً
+        if mp.plans:
+            mp.chosen_index = max(range(len(mp.plans)),
+                                  key=lambda i: mp.plans[i].confidence)
+        # وسم المسار المختار في ذكريات كل جلسة
+        for i, plan in enumerate(mp.plans):
+            hs = mp._path_histories[i]  # type: ignore[attr-defined]
+            summary = hs.get("verdict_summary", "")
+            plan.recalled_memories.insert(0, {
+                "task_id": "",
+                "role": role[:60],
+                "goal": ("توقع متعدد المسارات: مسار "
+                         f"{i + 1}/{len(mp.plans)}"
+                         + (" (المختار)" if i == mp.chosen_index else "")
+                         + " — " + summary),
+                "verdict": plan.verdict,
+                "confidence": round(plan.confidence, 3),
+                "created_at": time.time(),
+                "similarity": 1.0,
+                "outcome": "",
+                "path_index": i,
+                "is_chosen": i == mp.chosen_index,
+                "history_effect": round(mp.history_scores[i], 3),
+            })
+        return mp
     def role_accuracy_stats(self) -> Dict[str, Dict[str, Any]]:
         """دقة التوقعات التاريخية لكل دور على حدة (للوحة والمعايرة).
         ترجع {role: {role, learned, correct, accuracy}} — الأدوار ذات
@@ -663,6 +856,19 @@ def par_role_accuracy() -> Dict[str, Dict[str, Any]]:
         return get_pre_action_reasoner().role_accuracy_stats()
     except Exception:
         return {}
+
+
+def reason_multi_task(task_id: str, goal: str,
+                      candidate_paths: Optional[
+                          List[List[str]]] = None,
+                      role: str = "") -> Optional[Dict[str, Any]]:
+    """مساعدة للدمج: التوقع المتعدد المسارات — مقارنة خطط بديلة
+    واختيار الأعلى ثقةً تاريخا للدور (بلا API، حد ±0.15 صارم)."""
+    try:
+        return get_pre_action_reasoner().reason_multi(
+            task_id, goal, candidate_paths or [], role).to_dict()
+    except Exception:
+        return None
 
 
 def reset_learned_outcomes() -> None:

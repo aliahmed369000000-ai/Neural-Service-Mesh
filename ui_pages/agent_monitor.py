@@ -1632,6 +1632,62 @@ def render_par_panel() -> None:
                 f"{_m.get('goal', '')[:110]} — "
                 f"ثقة {round(float(_m.get('confidence') or 0), 2)} "
                 f"(تشابه {round(float(_m.get('similarity') or 0), 2)})")
+    # ── التوقع المتعدد المسارات (Multi-Path Forecasting) ──────────
+    _par_multi_fn = None
+    try:
+        from app_core import _reason_multi_task as _par_multi_fn  # noqa: F401
+    except Exception:
+        pass
+    st.markdown("**التوقع المتعدد المسارات**")
+    if _par_multi_fn is None:
+        st.caption(
+            "غير متاح في هذه النسخة — يمكن للفريق مقارنة عدة خطط بديلة "
+            "للهدف نفسه واختيار الأعلى ثقةً تاريخًا بحد ±0.15 صارم.")
+        return
+    # محاكاة توضيحية فورية على أحدث هدف معروف في السجل دون كسر الحالة
+    try:
+        _latest = None
+        try:
+            from app_core import _par_latest as _par_latest_fn  # noqa: F401
+            _latest = _par_latest_fn("")  # لا نجبر جلب هدف معين
+        except Exception:
+            _latest = None
+        if _latest:
+            _goal = _latest.get("goal", "")[:140]
+            _paths = (
+                [["ابحث في الويب عن آخر المستجدات","قارن بين النتائج"]]
+                if _goal else [])
+            if _paths:
+                _multi = _par_multi_fn(
+                    "_ui_multi",
+                    _goal or "استكشاف الهدف",
+                    _paths,
+                    role=_latest.get("role") or "")
+                if _multi and _multi.get("n_paths", 0) >= 2:
+                    _cmp = []
+                    for _i, _p in enumerate(_multi.get("paths", [])):
+                        _cmp.append({
+                            "المسار": f"{('المختار ' if _i == _multi.get('chosen_index') else '')}مسار {_i + 1}",
+                            "الثقة بعد المعايرة": round(_p.get("confidence", 0), 3),
+                            "الأثر التاريخي": round(
+                                _multi.get("history_scores", [_multi.get("history_scores")[0]]*2)[_i], 3),
+                            "الحكم": ("نفّذ" if _p.get("verdict") == "proceed" else "راجع"),
+                        })
+                    st.dataframe(_cmp, use_container_width=True,
+                                 height=190)
+                    st.caption(
+                        "عند تعدد الخطط البديلة للهدف نفسه، يجري المحرك "
+                        "جلسة تفكير مستقلة لكل مسار ويصنّف خطواته مقابل "
+                        "السوابق المقاسة تاريخًا للدور: خطوات متشابهة مع "
+                        "سوابق صحيحة ترفع المسار (+0.05) ومع سوابق خاطئة "
+                        "تخفضه (−0.08) — بحد صارم ±0.15 — ثم يختار "
+                        "المسار الأعلى ثقةً تاريخًا للتنفيذ.")
+                    return
+    except Exception:
+        pass
+    st.caption(
+        "لا مقارنة مسارات نشطة بعد — مع كل مهمة ذات خطط بديلة يختار "
+        "الفريق المسار الأعلى ثقةً تاريخًا للدور (±0.15 كحد صارم).")
 
 
 

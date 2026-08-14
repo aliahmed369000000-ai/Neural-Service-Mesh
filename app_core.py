@@ -490,6 +490,7 @@ try:
         par_learned_stats as _par_learned_stats,
         par_calibration as _par_calibration,
         par_role_accuracy as _par_role_accuracy,
+        reason_multi_task as _reason_multi_task,
     )
     _PAR_OK = True
 except Exception:
@@ -514,6 +515,8 @@ except Exception:
                 "calibration_effect": 0.0, "reason": ""}
     def _par_role_accuracy():
         return {}
+    def _reason_multi_task(*a, **kw):
+        return None
 # ── طبقة فحص أمان أولى (regex، بدون تكلفة API) ────────────────────────────
 try:
     from ai.harm_classifier import classify_prompt as _classify_harm, get_domain_label as _harm_label
