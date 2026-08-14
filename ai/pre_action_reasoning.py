@@ -12,12 +12,19 @@ ai/pre_action_reasoning.py — التفكير ما قبل الفعل (Pre-Action
      فحص أولية / استبدل أداة).
   5. يسجّل كل جلسة تفكير في قاعدة SQLite محلية دائمة لتراكم الخبرة.
 
+الحلقة الاستدراكية (Learning from Actual Outcomes):
+  بعد اكتمال أي مهمة، تُصنَّف النتيجة الفعلية (success/failure) وتُربط
+  بجلسة التفكير السابقة لنفس task_id عبر learn(): يُسجَّل outcome في
+  سجل الجلسة، وتُقارن النتيجة بقرارها (proceed/revise) لقياس دقة
+  التوقعات وتغذية الذاكرة الحسية بسوابق معلومة النتائج (recalled
+  memories ذات outcome حقيقي تزن أكثر).
+
 لا يستدعي أي API خارجي — التحليل نمطي محلي بالكامل (مثل agent_reflection).
 التدهور: فشل كامل → كتلة _PAR_OK في app_core تعطل الوحدة بصمت.
 
 الجداول:
   par_records: id, task_id, role, goal, steps_json, risks_json, verdict,
-               confidence, revised_n, memory_recall_json, created_at
+               confidence, revised_n, outcome, created_at
 
 الذاكرة الحسية للأدوار (Role Sensory Memory):
   قبل جلسة التفكير، يستحضر المحرك جلسات التفكير السابقة لنفس الدور
@@ -233,7 +240,7 @@ class PreActionReasoner:
                          if len(w) >= 2]
                 rows = conn.execute("""
                     SELECT task_id, role, goal, verdict, confidence,
-                           created_at FROM par_records
+                           created_at, outcome FROM par_records
                     ORDER BY created_at DESC LIMIT 300
                 """).fetchall()
                 for r in rows:
@@ -251,6 +258,7 @@ class PreActionReasoner:
                             "verdict": r[3], "confidence": r[4],
                             "created_at": r[5],
                             "similarity": sim,
+                            "outcome": r[6] or "",
                         })
                     if len(out) >= top_k:
                         break
@@ -258,12 +266,65 @@ class PreActionReasoner:
             logger.warning("PAR recall failed: %s", exc)
         return out
 
+    def learn(self, task_id: str, outcome: str) -> Optional[Dict[str, Any]]:
+        """الحلقة الاستدراكية: ربط النتيجة الفعلية (success/failure)
+        بأحدث جلسة تفكير لنفس المهمة — يسجّل outcome ويقيس دقة التوقع.
+        outcome=None يمسح النتيجة فقط (لإعادة التقييم)."""
+        if outcome not in (None, "success", "failure"):
+            return None
+        try:
+            with self._lock, _connect(self._db) as conn:
+                row = conn.execute("""
+                    SELECT id, verdict, outcome FROM par_records
+                    WHERE task_id = ?
+                    ORDER BY created_at DESC LIMIT 1
+                """, (task_id,)).fetchone()
+                if not row:
+                    return None
+                rid, verdict, prev = row
+                conn.execute(
+                    "UPDATE par_records SET outcome=? WHERE id=?",
+                    (outcome, rid))
+                conn.commit()
+                # قياس الدقة: verdict متوقع مقابل النتيجة الفعلية
+                # proceed + success → صحيح، revise + failure → صحيح
+                correct = ((verdict == "proceed" and outcome == "success")
+                           or (verdict == "revise" and outcome == "failure"))
+                return {"task_id": task_id, "verdict": verdict,
+                        "outcome": outcome, "was_correct": correct,
+                        "had_outcome_before": prev is not None
+                        and prev != ""}
+        except Exception as exc:
+            logger.warning("PAR learn failed: %s", exc)
+        return None
+
+    def learned_stats(self) -> Dict[str, Any]:
+        """دقة التوقعات المقاسة من السجلات ذات النتائج الفعلية."""
+        try:
+            with self._lock, _connect(self._db) as conn:
+                total = conn.execute("""
+                    SELECT COUNT(*) FROM par_records
+                    WHERE outcome IN ('success', 'failure')
+                """).fetchone()[0]
+                correct = conn.execute("""
+                    SELECT COUNT(*) FROM par_records
+                    WHERE outcome IN ('success', 'failure')
+                      AND (verdict = 'proceed' AND outcome = 'success'
+                           OR verdict = 'revise' AND outcome = 'failure')
+                """).fetchone()[0]
+                return {"learned": total, "correct": correct,
+                        "accuracy": (round(correct / total, 3)
+                                     if total else 0.0)}
+        except Exception as exc:
+            logger.warning("PAR learned_stats failed: %s", exc)
+        return {"learned": 0, "correct": 0, "accuracy": 0.0}
+
     def latest(self, task_id: str) -> Optional[Dict[str, Any]]:
         try:
             with self._lock, _connect(self._db) as conn:
                 row = conn.execute("""
                     SELECT goal, role, steps_json, risks_json, verdict,
-                           confidence, revised_n, created_at
+                           confidence, revised_n, created_at, outcome
                     FROM par_records WHERE task_id = ?
                     ORDER BY created_at DESC LIMIT 1
                 """, (task_id,)).fetchone()
@@ -273,7 +334,8 @@ class PreActionReasoner:
                         "expected_steps": json.loads(row[2] or "[]"),
                         "risks": json.loads(row[3] or "[]"),
                         "verdict": row[4], "confidence": row[5],
-                        "revised_n": row[6], "created_at": row[7]}
+                        "revised_n": row[6], "created_at": row[7],
+                        "outcome": row[8] or ""}
         except Exception as exc:
             logger.warning("PAR latest failed: %s", exc)
         return None
@@ -349,12 +411,23 @@ CREATE TABLE IF NOT EXISTS par_records (
     created_at  REAL NOT NULL DEFAULT 0.0
 );
 """
+_OUTCOME_COL = "ALTER TABLE par_records ADD COLUMN outcome TEXT"
+
+
+def _migrate_outcome(conn: sqlite3.Connection) -> None:
+    """إضافة عمود outcome للجداول القديمة (migration آمن للصمت)."""
+    try:
+        conn.execute(_OUTCOME_COL)
+        conn.commit()
+    except Exception:
+        pass
 
 
 def _connect(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, timeout=30)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(_SCHEMA)
+    _migrate_outcome(conn)
     return conn
 
 
@@ -408,3 +481,32 @@ def par_recall(goal: str = "", role: str = "",
         return get_pre_action_reasoner().recall(goal, role, top_k)
     except Exception:
         return []
+
+
+def par_learn(task_id: str, outcome: str) -> Optional[Dict[str, Any]]:
+    """مساعدة للدمج: الحلقة الاستدراكية — ربط نتيجة فعلية بجلسة التفكير."""
+    try:
+        return get_pre_action_reasoner().learn(task_id, outcome)
+    except Exception:
+        return None
+
+
+def par_learned_stats() -> Dict[str, Any]:
+    """مساعدة للدمج: دقة التوقعات المقاسة."""
+    try:
+        return get_pre_action_reasoner().learned_stats()
+    except Exception:
+        return {"learned": 0, "correct": 0, "accuracy": 0.0}
+
+
+def reset_learned_outcomes() -> None:
+    """مساعدة للدمج: مسح النتائج الفعلية (لإعادة التقييم)."""
+    try:
+        with __import__("sqlite3").connect(_LOCAL_DB, timeout=30) as conn:
+            conn.execute("""
+                UPDATE par_records SET outcome = NULL
+                WHERE outcome IN ('success', 'failure')
+            """)
+            conn.commit()
+    except Exception as exc:
+        logger.warning("PAR reset learned failed: %s", exc)

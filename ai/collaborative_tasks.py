@@ -444,6 +444,13 @@ def _par_reason_task(task_id, goal, plan_steps, role=""):  # type: ignore[misc]
         raise RuntimeError("التفكير ما قبل الفعل غير متاح")
     return fn(task_id, goal, plan_steps=plan_steps, role=role)
 
+# ── 🆕 الحلقة الاستدراكية (Learning from Actual Outcomes) ──
+def _learn_par(task_id, outcome):  # type: ignore[misc]
+    fn = getattr(_app_core_for_tem, "_par_learn", None)
+    if fn is None:
+        raise RuntimeError("التعلم من النتائج غير متاح")
+    return fn(task_id, outcome)
+
 def _share_role_finding(task_id: str, role_name: str, text: str,
                         tool: str, source: str, index: int) -> None:
     """يشارك الدور نتيجته في الناقل المشترك (فشل صامت = لا شيء)."""
@@ -618,6 +625,12 @@ def _record_role_experience(task: CollaborativeTask, role: CollabRole,
                     skills=[tool] if tool else None)
             except Exception:
                 pass
+        # ── 🆕 الحلقة الاستدراكية: ربط النتيجة بجلسة التفكير السابقة ──
+        try:
+            if _PAR_OK() and getattr(task, "_par", None):
+                _learn_par(task.task_id, outcome)
+        except Exception:
+            pass
     except Exception:
         pass
 

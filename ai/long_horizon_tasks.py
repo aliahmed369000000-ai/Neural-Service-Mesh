@@ -566,6 +566,13 @@ def _par_reason_task(task_id, goal, plan_steps, role=""):  # type: ignore[misc]
         raise RuntimeError("التفكير ما قبل الفعل غير متاح")
     return fn(task_id, goal, plan_steps=plan_steps, role=role)
 
+# ── 🆕 الحلقة الاستدراكية (Learning from Actual Outcomes) ──
+def _learn_par(task_id, outcome):  # type: ignore[misc]
+    fn = getattr(_app_core_for_lht, "_par_learn", None)
+    if fn is None:
+        raise RuntimeError("التعلم من النتائج غير متاح")
+    return fn(task_id, outcome)
+
 _MIN_CONFIDENCE = 0.3
 
 
@@ -670,6 +677,12 @@ def _run_task(manager: "LongHorizonTaskManager", task: LHTask) -> None:
                 pass
             task.status = STATUS_DONE if ok else STATUS_FAILED
             _record_lht_experience(manager, task, [])
+            # ── 🆕 الحلقة الاستدراكية لمسار الخطاف: ربط النتيجة بجلسة التفكير ──
+            try:
+                if _PAR_OK() and getattr(task, "_par", None):
+                    _learn_par(task.task_id, "success" if ok else "failure")
+            except Exception:
+                pass
             return
         if _LHT_PLAN_HOOK is not None and _LHT_PLAN_HOOK(task):
             pass  # اختبار: خطاف يملأ الخطة فقط ثم يكمل التنفيذ الحتمي
@@ -867,6 +880,12 @@ def _run_task(manager: "LongHorizonTaskManager", task: LHTask) -> None:
                     task_id=task.task_id)
         except Exception:
             pass
+        # ── 🆕 الحلقة الاستدراكية: ربط النتيجة بجلسة التفكير السابقة ──
+        try:
+            if _PAR_OK() and getattr(task, "_par", None):
+                _learn_par(task.task_id, "success" if done_n else "failure")
+        except Exception:
+            pass
         if task.status == STATUS_RUNNING:
             task.status = STATUS_DONE
         manager._emit(
@@ -901,6 +920,12 @@ def _run_task(manager: "LongHorizonTaskManager", task: LHTask) -> None:
                     outcome="failure",
                     role_type="long_horizon",
                     task_id=task.task_id)
+        except Exception:
+            pass
+        # ── 🆕 الحلقة الاستدراكية لفشل المهمة (إذا وجد تفكير سابق) ──
+        try:
+            if _PAR_OK() and getattr(task, "_par", None):
+                _learn_par(task.task_id, "failure")
         except Exception:
             pass
         manager._emit("lht_failed", task, detail=f"فشل المهمة: {task.error}")

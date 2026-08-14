@@ -1494,7 +1494,8 @@ def render_ltg_panel() -> None:
 def render_par_panel() -> None:
     """لوحة التفكير ما قبل الفعل: جلسات التفكير المسجلة وحكمها وثقتها."""
     try:
-        from app_core import _PAR_OK, _par_stats, _par_latest
+        from app_core import (_PAR_OK, _par_stats, _par_latest,
+                              _par_learned_stats)
     except Exception:
         return
     st.markdown("---")
@@ -1526,6 +1527,25 @@ def render_par_panel() -> None:
     st.caption(
         "تُخزَّن كل جلسة تفكير مع مهمتها — تظهر تفاصيل آخر جلسة في تقرير "
         "المهمة نفسها بلوحة المهام الطويلة والتعاونية (حقل التفكير المسبق).")
+    # ── 🆕 دقة التوقعات (الحلقة الاستدراكية) ────────────────────────
+    try:
+        _acc = _par_learned_stats()
+    except Exception:
+        _acc = {"learned": 0, "correct": 0, "accuracy": 0.0}
+    _learned = _acc.get("learned", 0)
+    _correct = _acc.get("correct", 0)
+    _acc_cards = st.columns(3)
+    _acc_cards[0].metric("🎯 مهام حُسمت نتائجها",
+                         _learned)
+    _acc_cards[1].metric("✅ توقعات صحيحة",
+                         _correct)
+    _acc_cards[2].metric("📈 دقة التوقعات",
+                         round(float(_acc.get("accuracy", 0) or 0), 3))
+    st.caption(
+        "بعد اكتمال كل مهمة تربط الحلقة الاستدراكية النتيجة الفعلية "
+        "(نجحت/فشلت) بجلسة التفكير السابقة لنفس المهمة، ثم يقيس: هل كان "
+        "حكم «نفّذ» صحيحًا؟ هل كانت «راجع» صحيحة؟ — فتتراكم دقة تفكير "
+        "الفريق وتُغذّى بها الذاكرة الحسية (سوابق معروفة النتائج).")
     # ── الذاكرة الحسية للأدوار ───────────────────────────────────────
     _par_recall_fn = None
     try:
