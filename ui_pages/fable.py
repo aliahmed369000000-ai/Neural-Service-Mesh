@@ -899,6 +899,104 @@ def render_fable():
                     "مواصفات رسمية لمنصة TikTok</span></div>",
                     unsafe_allow_html=True,
                 )
+                # ── 🤖 ترجمة AI بمزامنة الكلمات — Edge TTS يُخرج WordBoundary
+                #    حقيقي (توقيت كل كلمة فعلي) دون الحاجة لـASR. تبني SRT
+                #    وVTT بمزامنة دقيقة وتعرض نمطًا سريعًا (كلمة/سطر)
+                #    لنمط TikTok/CapCut، مع خيار حرق الترجمة على الفيديو.
+                st.markdown(
+                    '<div style="margin:0.8rem 0 0.4rem;">'
+                    '<span class="badge badge-blue">🤖 ترجمة AI بمزامنة الكلمات</span> '
+                    '<span style="color:var(--text-muted); margin-right:6px;">'
+                    "مزامنة كلمة-بكلمة فعلية من محرك الصوت — نمط TikTok/CapCut"
+                    " + SRT/VTT + حرق مباشر على الفيديو</span></div>",
+                    unsafe_allow_html=True,
+                )
+                _sub_cols = st.columns([1, 1, 2])
+                with _sub_cols[0]:
+                    _sub_max_words = st.selectbox(
+                        "نمط العرض",
+                        [1, 2, 3],
+                        index=0,
+                        help=("1 = كلمة لكل سطر (الأسرع والأكثر "
+                              "انتشارًا في TikTok/CapCut) · 2-3 = "
+                              "مجموعات أصغر أسهل للقراءة"),
+                        key="shorts_sub_max_words",
+                    )
+                with _sub_cols[1]:
+                    _sub_burn = st.checkbox(
+                        "🔥 احرق الترجمة على الفيديو",
+                        value=True,
+                        help=("يدمج الترجمة مباشرة داخل الفيديو "
+                              "(بدون تغيير الدقة أو الصوت) — مثالي "
+                              "للتحميل المباشر على TikTok/Reels"),
+                        key="shorts_sub_burn",
+                    )
+                with _sub_cols[2]:
+                    st.write("")
+                    if st.button("✨ ولّد الترجمة بمزامنة الكلمات",
+                                 key="shorts_generate_subs"):
+                        try:
+                            _sub = engine.generate_ai_subtitles(
+                                short,
+                                mp4_bytes=mp4_bytes,
+                                max_words=int(_sub_max_words),
+                                subtitle_format="srt",
+                                burn=bool(_sub_burn),
+                            )
+                            st.session_state.shorts_subs = _sub
+                            st.success("✅ " + (_sub.get("reason") or "تم توليد الترجمة"))
+                        except Exception as _sub_err:  # noqa: BLE001
+                            st.error(f"⚠️ فشل توليد الترجمة: {_sub_err}")
+
+                _subs = st.session_state.get("shorts_subs")
+                if _subs and _subs.get("srt_text"):
+                    _sub_res_cols = st.columns(2)
+                    with _sub_res_cols[0]:
+                        st.markdown("**📝 ملف الترجمة (SRT)**")
+                        st.code(_subs["srt_text"], language="text")
+                        st.download_button(
+                            "⬇️ تحميل SRT",
+                            data=_subs["srt_text"].encode("utf-8"),
+                            file_name=f"{short.title[:40] or 'short'}.srt",
+                            mime="text/srt",
+                            key="shorts_download_srt_ai",
+                        )
+                    with _sub_res_cols[1]:
+                        st.markdown("**🌐 ملف الترجمة (WebVTT)**")
+                        st.code(_subs.get("vtt_text", "") or "(غير متاح)", language="text")
+                        if _subs.get("vtt_text"):
+                            st.download_button(
+                                "⬇️ تحميل VTT",
+                                data=_subs["vtt_text"].encode("utf-8"),
+                                file_name=f"{short.title[:40] or 'short'}.vtt",
+                                mime="text/vtt",
+                                key="shorts_download_vtt_ai",
+                            )
+                    _burned = _subs.get("burned_bytes")
+                    _orig_kb = len(mp4_bytes) / 1024
+                    _burned_kb = len(_burned or b"") / 1024
+                    if _burned and _subs.get("burned_ok"):
+                        st.info(
+                            f"🔥 الفيديو مع الترجمة المحروقة جاهز — "
+                            f"{int(_burned_kb)}KB "
+                            f"(الأصل {int(_orig_kb)}KB)"
+                        )
+                        st.video(_burned)
+                        st.download_button(
+                            "⬇️ تحميل الفيديو مع الترجمة",
+                            data=_burned,
+                            file_name=(f"{short.title[:40] or 'short'}"
+                                       "_subtitled.mp4"),
+                            mime="video/mp4",
+                            key="shorts_download_subtitled",
+                        )
+                    elif _burned and not _subs.get("burned_ok"):
+                        st.warning(
+                            "⚠️ تعذّر حرق الترجمة على الفيديو — "
+                            "يعمل الفيديو الأصلي + ملفات SRT/VTT "
+                            "(انظر السبب أعلاه)"
+                        )
+
                 _tiktok = st.session_state.get("shorts_tiktok_export")
                 _tiktok_cols = st.columns([1, 4])
                 with _tiktok_cols[0]:

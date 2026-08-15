@@ -230,7 +230,9 @@ def _synthesize_edge(text: str, voice: str) -> TTSResult:
             if chunk["type"] == "audio":
                 chunks.extend(chunk["data"])
             elif chunk["type"] == "WordBoundary":
-                # offset/duration بوحدة 100-نانوثانية (100ns ticks) حسب SSML/Edge
+                # offset/duration بوحدة 100-نانوثانية (100ns ticks) حسب
+                # SSML — تحقّق عملي (v7.2.8): خام 'الذكاء' = 66,625,000
+                # tick = 6.6625s، وكلمة 'بسم' تبدأ عند 1,000,000 = 0.1s.
                 start_sec = chunk["offset"] / 1e7
                 dur_sec = chunk["duration"] / 1e7
                 timings.append((chunk["text"], start_sec, dur_sec))

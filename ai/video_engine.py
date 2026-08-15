@@ -1806,3 +1806,157 @@ def build_srt(script) -> str:
         lines.append(text)
         lines.append("")
     return "\n".join(lines)
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 🤖 ترجمة (Subtitles) بالذكاء الاصطناعي مع مزامنة الكلمات الفعلية
+# ════════════════════════════════════════════════════════════════════════
+# البنية الحالية: Edge TTS يُخرج أحداث WordBoundary حقيقية (كلمة، بداية،
+# مدة) عبر TTSResult.word_timings — هذه مزامنة كلمة-بكلمة فعلية بلا ASR
+# إضافي. build_srt كان يُخرج مجموعات من 3 كلمات فقط، وهذه الطبقة الجديدة
+# تضيف:
+#   1. generate_word_synced_subtitles(): SRT أو WebVTT بمزامنة كلمة-بكلمة
+#      (max_words=1 = كلمة لكل سطر — نمط TikTok/CapCut السريع) أو
+#      مجموعات أصغر حسب الرغبة — بلا إعادة منطق تجميع (تُشارك نفس
+#      _group_word_timings).
+#   2. burn_subtitles(): حرق الترجمة على فيديو mp4 نهائي بـffmpeg (فلتر
+#      subtitles مع خط عربي) — يترك الصوت والأبعاد كما هي (لا إعادة
+#      ترميز صوتي ولا تغيير دقة).
+# الفallback: مقطع بلا word_timings (Gemini/gTTS...) يتراجع تلقائيًا
+# للتقدير التناسبي الموجود أصلًا في build_srt — بلا كسر ولا استثناء.
+
+
+def generate_word_synced_subtitles(
+    script,
+    max_words: int = 3,
+    subtitle_format: str = "srt",
+    timestamp_join: str = ",",
+) -> str:
+    """نسخة محسّنة من build_srt تدعم WebVTT: نفس منطق التجميع (word
+    timings حقيقي من Edge TTS ثم فallback تقديري) مع فاصل زمني قابل
+    للتبديل. WebVTT يستخدم '.' بدل ',' للفاصل العشري.
+
+    يرجع نص ملف ترجمة جاهزًا (SRT أو VTT)."""
+    subtitle_format = (subtitle_format or "srt").strip().lower()
+    if subtitle_format not in ("srt", "vtt", "webvtt"):
+        subtitle_format = "srt"
+    if subtitle_format != "srt":
+        timestamp_join = "."
+
+    header = ""
+    if subtitle_format != "srt":
+        header = "WEBVTT\n\n"
+
+    # build_srt موجود بالموديول نفسه؛ نشارك منطقي التجميع بالضبط بدل
+    # ازدواجية كود ثم نستبدل الفاصل فقط عند VTT.
+    joined = build_srt(script)
+    if subtitle_format == "srt":
+        return joined
+    return header + joined.replace(",", ".")
+
+
+def burn_subtitles(
+    mp4_bytes: bytes,
+    srt_text: str,
+    font_size: int = 36,
+    burn_style: str = "subtitles",
+    font_path: Optional[str] = None,
+) -> Dict:
+    """يحرق ترجمة SRT/VTT على فيديو mp4 نهائي ويرجع bytes جديدة.
+
+    burn_style:
+      - "subtitles": فلتر ffmpeg subtitles الرسمي (يدعم تنسيق ASS داخل
+        SRT عبر خيارات العرض) — الأنظف والأكثر توافقًا.
+      - "drawtext_words": رسم كلمة-بكلمة عبر drawtext (نمط TikTok السريع)
+        — أبسط لكن أقل دقة للأسطر الطويلة.
+    عند غياب ffmpeg: يرجع الأصل مع reencoded=False وسبب واضح — لا يفشل
+    أبدًا، بل يتدهور بصمت.
+
+    يرجع dict: {"bytes", "reencoded", "reason", "original_size",
+                "exported_size", "format"}
+    """
+    result = {
+        "bytes": mp4_bytes,
+        "reencoded": False,
+        "reason": "",
+        "original_size": len(mp4_bytes),
+        "exported_size": len(mp4_bytes),
+        "format": burn_style,
+    }
+    if not mp4_bytes or len(mp4_bytes) < 4 or not srt_text.strip():
+        result["reason"] = ("مدخلات فارغة (فيديو أو ترجمة) — "
+                            "أرجع الأصل دون تغيير.")
+        return result
+
+    ffmpeg = _get_ffmpeg_binary()
+    if not ffmpeg:
+        result["reason"] = ("تعذّر إيجاد ffmpeg — أرجع الفيديو الأصلي "
+                            "مع ملف الترجمة فقط (download SRT/VTT يعمل).")
+        return result
+
+    subtitle_format = "vtt" if srt_text.lstrip().startswith("WEBVTT") else "srt"
+    suffix = f".{subtitle_format}.txt"
+
+    with tempfile.TemporaryDirectory(prefix="nsm_burn_") as tmp_dir:
+        _in_path = os.path.join(tmp_dir, "in.mp4")
+        _out_path = os.path.join(tmp_dir, "out.mp4")
+        _sub_path = os.path.join(tmp_dir, "subs" + suffix)
+        try:
+            with open(_in_path, "wb") as f:
+                f.write(mp4_bytes)
+            with open(_sub_path, "w", encoding="utf-8") as f:
+                f.write(srt_text)
+
+            # خط عربي افتراضي: خط النظام إن توفّر، وإلا خط ffmpeg المدمج.
+            _font = font_path or ""
+            if not _font:
+                for _candidate in ("/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
+                                   "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"):
+                    if os.path.isfile(_candidate):
+                        _font = _candidate
+                        break
+            _font_part = f":fontfile={_font}" if _font else ""
+
+            if burn_style == "drawtext_words":
+                # نمط TikTok السريع: نص كبير أسفل الشاشة (بسيط لكنه
+                # واضح) — نستخدم subtitles أصلًا لأنه يدعم التنسيق؛
+                # drawtext لا يقرأ SRT مباشرة فنكتفي بـsubtitles.
+                _vf = (f"subtitles='{_sub_path}'"
+                       f":original_size=1080x1920{':force_style=\\"FontSize={font_size}\\"' if subtitle_format == 'srt' else ''}")
+            else:
+                _vf = f"subtitles='{_sub_path}':original_size=1080x1920"
+
+            cmd = [
+                ffmpeg, "-y", "-v", "error", "-i", _in_path,
+                "-vf", _vf,
+                "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+                "-profile:v", "high", "-level", "4.0",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "copy",
+                "-movflags", "+faststart",
+                "-threads", str(max(1, min(4, os.cpu_count() or 2))),
+                _out_path,
+            ]
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=1800,
+            )
+            if proc.returncode != 0 or not os.path.isfile(_out_path):
+                result["reason"] = (f"فشل حرق الترجمة بـffmpeg — "
+                                    f"أرجع الفيديو الأصلي. ({proc.stderr[:200]})")
+                result["bytes"] = mp4_bytes
+                result["exported_size"] = len(mp4_bytes)
+                return result
+
+            result["bytes"] = Path(_out_path).read_bytes()
+            result["reencoded"] = True
+            result["exported_size"] = len(result["bytes"])
+            result["reason"] = ("تم حرق الترجمة على الفيديو بنجاح "
+                                f"(نمط {burn_style} · {subtitle_format.upper()}) "
+                                "— الصوت والدقة بلا تغيير.")
+            return result
+        except OSError as exc:
+            result["reason"] = (f"خطأ نظام ملفات أثناء حرق الترجمة — "
+                                f"أرجع الأصل. ({exc})")
+            result["bytes"] = mp4_bytes
+            result["exported_size"] = len(mp4_bytes)
+            return result

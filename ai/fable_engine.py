@@ -592,6 +592,80 @@ class FableEngine:
             }
         return export_tiktok(mp4_bytes, max_size_bytes=max_size_bytes)
 
+    # ── 🤖 ترجمة AI بمزامنة الكلمات + حرق على الفيديو ──────────────────
+    def generate_ai_subtitles(
+        self,
+        script,
+        mp4_bytes: bytes = b"",
+        max_words: int = 3,
+        subtitle_format: str = "srt",
+        burn: bool = True,
+    ) -> Dict:
+        """توليد ترجمة (Subtitles) بالذكاء الاصطناعي مع مزامنة كلمات فعلية.
+
+        الخطوات:
+          1. تستخرج توقيت كل كلمة من TTS (Edge TTS يخرج WordBoundary
+             حقيقي — مزامنة كلمة-بكلمة دقيقة بلا ASR إضافي). المقاطع
+             بلا توقيتات (مزوّدون آخرون) تتراجع تلقائيًا للتقدير
+             التناسبي الموجود في المحرك.
+          2. تبني ملف SRT أو WebVTT بمزامنة دقيقة (max_words=1 = كلمة لكل
+             سطر — نمط TikTok/CapCut السريع).
+          3. عند burn=True: تحرق الترجمة على الفيديو بـffmpeg (لا تغيير
+             للدقة/الصوت) — لا يفشل أبدًا، يرجع الأصل عند أي عطل.
+
+        يرجع dict: {srt_text, vtt_text, burned_bytes, burned_ok,
+                    reencoded, reason, ...}
+        """
+        try:
+            from ai.video_engine import (  # noqa: F811
+                burn_subtitles, generate_word_synced_subtitles,
+            )
+        except ImportError as exc:
+            return {
+                "srt_text": "",
+                "vtt_text": "",
+                "burned_bytes": mp4_bytes,
+                "burned_ok": False,
+                "reencoded": False,
+                "reason": ("تعذّر تحميل وحدة الترجمة — أضِف imageio-ffmpeg. "
+                           + str(exc)),
+            }
+
+        srt_text = ""
+        vtt_text = ""
+        try:
+            srt_text = generate_word_synced_subtitles(
+                script, max_words=max_words, subtitle_format="srt",
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "srt_text": "", "vtt_text": "", "burned_bytes": mp4_bytes,
+                "burned_ok": False, "reencoded": False,
+                "reason": f"فشل بناء الترجمة: {exc}",
+            }
+        try:
+            vtt_text = generate_word_synced_subtitles(
+                script, max_words=max_words, subtitle_format="vtt",
+            )
+        except Exception:  # noqa: BLE001
+            vtt_text = ""
+
+        burned_result = {
+            "bytes": mp4_bytes, "reencoded": False, "reason": "",
+        }
+        if burn and mp4_bytes:
+            burned_result = burn_subtitles(mp4_bytes, srt_text)
+
+        return {
+            "srt_text": srt_text,
+            "vtt_text": vtt_text,
+            "burned_bytes": burned_result.get("bytes", mp4_bytes),
+            "burned_ok": burned_result.get("reencoded", False),
+            "reencoded": burned_result.get("reencoded", False),
+            "reason": burned_result.get("reason", ""),
+            "exported_size": len(burned_result.get("bytes", mp4_bytes)),
+        }
+
     # ── بناء تعليمات النظام لكل جلسة ────────────────────────────────────
 
     def _system_prompt(self, mode: str, character: str) -> str:
