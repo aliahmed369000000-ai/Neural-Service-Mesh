@@ -1074,7 +1074,7 @@ def generate_surahchain_kernel_script(
         })
         script = work / "experiments/surah_chain_network/run_train_then_push.py"
         print("▶", script)
-        r = subprocess.run([sys.executable, str(script)], cwd=str(work), env=env)
+        r = subprocess.run([sys.executable, "-u", str(script)], cwd=str(work), env=env)
         print("exit", r.returncode)
         # لا SystemExit: papermill يعتبره فشل الدفتر حتى لو التدريب نجح
         if r.returncode == 0:
@@ -1290,3 +1290,92 @@ def start_surahchain_training_api(
             else "فشل الدفع — راجع تفاصيل push"
         ),
     }
+
+
+def live_training_status(job_id: str, fetch_progress_from_github: bool = True) -> Dict[str, Any]:
+    """NSM Live Logs: تجميع حيّ لحالة تدريب SurahChain جارٍ.
+
+    تجمع في رد واحد:
+    1) حالة الـkernel من Kaggle (RUNNING/QUEUED/COMPLETE/ERROR)
+    2) آخر log lines من Kaggle (stdout/err)
+    3) progress_{TAG}.json من GitHub (أبعد/أسرع مؤشر — كُتب كل عصر من التدريب)
+
+    ملاحظة: progress.json يُرفع عبر checkpoint auto-push — إن لم يكتمل عصر بعد
+    نقرأه من آخر checkpoint push متاح. هذه الطريقة تعمل حتى لو كانت Kaggle
+    logs فارغة (buffering) أو kernel في طابور GPU.
+    """
+    job_dir = KAGGLE_DIR / job_id
+    kernel_id = ""
+    meta_path = job_dir / "kernel-metadata.json"
+    if meta_path.is_file():
+        kernel_id = json.loads(meta_path.read_text(encoding="utf-8")).get("id") or ""
+    jp = job_dir / "job.json"
+    if jp.is_file():
+        try:
+            jdata = json.loads(jp.read_text(encoding="utf-8"))
+            kernel_id = jdata.get("kernel_slug") or jdata.get("kernel_id") or kernel_id
+        except Exception:
+            pass
+
+    out: Dict[str, Any] = {"ok": True, "job_id": job_id, "kernel_id": kernel_id}
+
+    # 1) حالة الـkernel
+    if kernel_id and _kaggle_cli_available():
+        try:
+            proc = subprocess.run(
+                ["kaggle", "kernels", "status", kernel_id],
+                capture_output=True, text=True, timeout=60,
+            )
+            st = (proc.stdout or "").strip() or (proc.stderr or "").strip()
+            state = (st.split("State: ")[1].split()[0] if "State: " in st else "")
+            out["kernel_state"] = state
+            out["kernel_status"] = st[-2500:]
+        except Exception as e:
+            out["kernel_status_error"] = str(e)
+
+    # 2) آخر logs من Kaggle
+    if kernel_id and _kaggle_cli_available():
+        try:
+            proc = subprocess.run(
+                ["kaggle", "kernels", "logs", kernel_id],
+                capture_output=True, text=True, timeout=120,
+            )
+            logs = (proc.stdout or "") + (proc.stderr or "")
+            out["kernel_logs"] = logs[-8000:]
+            out["kernel_logs_lines"] = logs.count("\n")
+        except Exception as e:
+            out["kernel_logs_error"] = str(e)
+
+    # 3) آخر progress من GitHub (أحدث من logs لأنه atomic + كل عصر)
+    if fetch_progress_from_github:
+        token = (os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or "").strip()
+        if token and kernel_id and _kaggle_cli_available():
+            try:
+                proc = subprocess.run(
+                    ["kaggle", "kernels", "pull", kernel_id],
+                    capture_output=True, text=True, timeout=300,
+                )
+                # ابحث عن progress_*.json في أي مجلد checkpoints داخل المجلد المسحوب
+                for pf in sorted(job_dir.rglob("progress_*.json")):
+                    try:
+                        out["progress"] = json.loads(pf.read_text(encoding="utf-8"))
+                        out["progress_file"] = str(pf.relative_to(job_dir))
+                        out["progress_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+                    except Exception:
+                        continue
+                    break
+            except Exception as e:
+                out["progress_error"] = str(e)
+        else:
+            # بدون CLI: من الكود المحلي مباشرة (تدريب جارٍ على نفس الجهاز)
+            try:
+                from experiments.surah_chain_network.train_pretrain_torch import read_progress
+                p = read_progress()
+                if p:
+                    out["progress"] = p
+                    out["progress_file"] = "local"
+            except Exception:
+                pass
+
+    out["checked_at"] = _now()
+    return out

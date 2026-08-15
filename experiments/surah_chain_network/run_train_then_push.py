@@ -29,7 +29,7 @@ ROOT = EXP.parent.parent
 
 
 def run(cmd: list[str], cwd: Path | None = None, env: dict | None = None, check: bool = True) -> int:
-    print("+", " ".join(cmd))
+    print("+", " ".join(cmd), flush=True)
     r = subprocess.run(cmd, cwd=str(cwd or ROOT), env=env)
     if check and r.returncode != 0:
         raise SystemExit(r.returncode)
@@ -156,7 +156,7 @@ def main() -> int:
         env.setdefault("HF_DATASETS_NUM_PROC", "1")
         env.setdefault("TOKENIZERS_PARALLELISM", "false")
         r = subprocess.run(
-            [sys.executable, str(EXP / "prepare_pretrain_data.py")],
+            [sys.executable, "-u", str(EXP / "prepare_pretrain_data.py")],
             cwd=str(ROOT),
             env=env,
         )
@@ -181,7 +181,7 @@ def main() -> int:
     if not args.skip_train:
         print("\n--- 2) التدريب ---")
         r = subprocess.run(
-            [sys.executable, str(EXP / "train_pretrain_torch.py")],
+            [sys.executable, "-u", str(EXP / "train_pretrain_torch.py")],
             cwd=str(ROOT),
             env=env,
         )

@@ -134,6 +134,7 @@ CKPT_BEST = CKPT_DIR / f"best_pretrain_{TAG}.pt"
 CKPT_LATEST = CKPT_DIR / f"latest_pretrain_{TAG}.pt"
 VOCAB_PATH = _HERE / f"tokenizer_vocab_pretrain_{TAG}.json"
 STATE_FILE = CKPT_DIR / f"pretrain_state_{TAG}.json"
+PROGRESS_FILE = CKPT_DIR / f"progress_{TAG}.json"
 PRETRAIN_CACHE = _HERE / "data" / "pretrain_sentences.pkl"
 # توافق مع الملفات القديمة عند small/d128
 if TAG in ("d128_s1", "d128_s1p0") or (D_MODEL == 128 and CHAIN_SCALE == 1.0 and not os.environ.get("SCN_TAG")):
@@ -145,6 +146,7 @@ if TAG in ("d128_s1", "d128_s1p0") or (D_MODEL == 128 and CHAIN_SCALE == 1.0 and
             CKPT_BEST = _old_best
             CKPT_LATEST = _old_latest
             STATE_FILE = CKPT_DIR / "pretrain_torch_state.json"
+            PROGRESS_FILE = CKPT_DIR / "progress_torch.json"
             VOCAB_PATH = _HERE / "tokenizer_vocab_pretrain.json"
 
 
@@ -184,6 +186,40 @@ def load_pretrain_sentences(max_n: int) -> list:
         pickle.dump(sentences, f, protocol=pickle.HIGHEST_PROTOCOL)
     print(f"حُفظ الكاش: {CACHE_FILE} ({len(sentences)} مقطع)")
     return sentences
+
+
+def _write_progress(obj: Dict) -> None:
+    """NSM Live Logs: يكتب تقدم التدريب إلى ملف JSON كل عصر (مع flush فوري)."""
+    try:
+        CKPT_DIR.mkdir(parents=True, exist_ok=True)
+        entry = {**obj, "updated_at": time.time()}
+        tmp = PROGRESS_FILE.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(entry, f, ensure_ascii=False, default=str)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except Exception:
+                pass
+        try:
+            tmp.replace(PROGRESS_FILE)
+        except Exception:
+            with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
+                json.dump(entry, f, ensure_ascii=False, default=str)
+    except Exception as e:
+        print("[progress] write skipped:", e)
+
+
+def read_progress(path: Path | None = None) -> Dict | None:
+    """NSM Live Logs: يقرأ آخر تقدم مسجّل — للعرض الحي في Streamlit."""
+    if path is None:
+        base = Path(__file__).resolve().parent.parent / "surah_chain_network" / "checkpoints"
+        path = base / "progress_torch.json"
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 
 def _upload_checkpoint(ep: int) -> None:
@@ -545,7 +581,12 @@ def main():
         # ── NSM: رفع checkpoint دوري إلى GitHub كل CHECKPOINT_EVERY عصور ──
         if CHECKPOINT_EVERY > 0 and (ep - start_epoch) % CHECKPOINT_EVERY == 0:
             _upload_checkpoint(ep)
-        print(f"epoch {ep:03d}/{end_epoch}  loss={mean_l:.4f}  lr={m.lr:.6f}{mark}")
+        print(f"epoch {ep:03d}/{end_epoch}  loss={mean_l:.4f}  lr={m.lr:.6f}{mark}", flush=True)
+        _write_progress({
+            "epoch": ep, "end_epoch": end_epoch, "loss": mean_l, "best_loss": best,
+            "lr": m.lr, "global_step": global_step,
+            "started_at": t0, "elapsed": time.time() - t0, "mark": mark or None,
+        })
 
     elapsed = time.time() - t0
     state = {

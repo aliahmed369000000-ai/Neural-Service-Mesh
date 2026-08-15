@@ -27,7 +27,7 @@ def render_scheduler_hub():
         "عند نفاد كل الكوتا: ينتقل تلقائيًا إلى Colab المجاني ثم Lightning AI (22 ساعة L4/شهر)."
     )
 
-    tab = st.tabs(["📊 الحالة والكوتا", "⚙️ إطلاق مهمة", "🔔 التنبيهات", "👥 الحسابات", "🔧 المزودات المجانية"])
+    tab = st.tabs(["📊 الحالة والكوتا", "⚙️ إطلاق مهمة", "🔔 التنبيهات", "📡 Live Logs", "👥 الحسابات", "🔧 المزودات المجانية"])
 
     with tab[0]:
         _tab_status(MAS)
@@ -39,9 +39,12 @@ def render_scheduler_hub():
         _tab_alerts()
 
     with tab[3]:
-        _tab_accounts(MAS)
+        _tab_live_logs()
 
     with tab[4]:
+        _tab_accounts(MAS)
+
+    with tab[5]:
         _tab_free_providers(FP, MAS)
 
 
@@ -223,6 +226,69 @@ def _tab_accounts(MAS):
 
     if st.button("🔄 إعادة تحميل القائمة", use_container_width=True):
         st.rerun()
+
+
+def _tab_live_logs():
+    """NSM Live Logs: عرض حيّ لحالة تدريب SurahChain جارٍ — يجمع kernel status + logs + progress."""
+    from ai import kaggle_provider as KP
+
+    st.markdown("##### 📡 المخرجات الحيّة للتدريب")
+    st.caption(
+        "تجميع لحظي: حالة الـkernel + آخر السجلات + ملف التقدم (progress.json يُكتب كل عصر "
+        "بعد اكتمال التدريب). يُحدّث تلقائيًا كل 60 ثانية."
+    )
+
+    auto = st.toggle("⚡ تحديث تلقائي كل 60 ثانية", value=True)
+    if auto:
+        import time as _time
+        st.markdown(f"_آخر تحديث: {_time.strftime('%H:%M:%S')}_")
+
+    # قائمة jobs المتاحة
+    jobs = KP.list_kaggle_jobs() if hasattr(KP, "list_kaggle_jobs") else []
+    scn_jobs = [j for j in jobs if isinstance(j, dict) and j.get("type") in ("surahchain", "training")]
+    if not scn_jobs:
+        st.info("لا توجد مهمة تدريب SurahChain — ادفع مهمة من تبويب ⚙️ إطلاق مهمة أولًا")
+        return
+    job_id = st.selectbox(
+        "اختر المهمة", options=[j.get("job_id") for j in scn_jobs],
+        format_func=lambda jid: next((j.get("title") or jid for j in scn_jobs if j.get("job_id") == jid), jid),
+    )
+    if not job_id:
+        return
+
+    res = KP.live_training_status(job_id)
+    col1, col2 = st.columns(2)
+    with col1:
+        state = (res.get("kernel_state") or "—").upper()
+        if "RUN" in state:
+            st.success(f"الـkernel: {state} 🟢")
+        elif "COMP" in state:
+            st.success(f"الـkernel: {state} ✅")
+        elif "ERROR" in state or "FAIL" in state:
+            st.error(f"الـkernel: {state} ❌")
+        else:
+            st.warning(f"الـkernel: {state or 'غير معروف'} 🟡")
+    with col2:
+        prog = res.get("progress")
+        if prog:
+            ep, end = prog.get("epoch"), prog.get("end_epoch")
+            loss = prog.get("loss")
+            best = prog.get("best_loss")
+            st.metric("العصر", f"{ep} / {end}")
+            st.metric("Loss (آخر)", f"{loss:.4f}" if isinstance(loss, (int, float)) else str(loss))
+            st.metric("Best Loss", f"{best:.4f}" if isinstance(best, (int, float)) else str(best))
+        else:
+            st.info("لم تُرْفَع progress.json بعد — أول عصر لم يكتمل أو التدريب لم يبدأ")
+
+    with st.expander("📜 آخر سجلات الـkernel (آخر 200 سطر)", expanded=True):
+        logs = res.get("kernel_logs") or "لا سجلات بعد — kernel في الطابور أو logs buffering"
+        st.code(logs[-6000:], language="text")
+
+    with st.expander("🧬 تفاصيل raw"):
+        st.json({k: v for k, v in res.items() if k not in ("kernel_logs",)})
+
+    if auto:
+        st.empty()
 
 
 def _tab_free_providers(FP, MAS):
