@@ -796,6 +796,396 @@ def kill_kernel_session(nb_id: str) -> bool:
         return False
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# 🆕 v2: المجدول الخفيف (Scheduler) — تشغيل دفتر دوريًا أو عند وقت محدد
+# ═══════════════════════════════════════════════════════════════════════════
+SCHED_DIR = ROOT / "artifacts" / "model_training" / "scheduled_runs"
+SCHED_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def schedule_notebook(nb_id: str, name: str, run_at: str,
+                      interval_minutes: int = 0,
+                      description: str = "") -> Dict[str, Any]:
+    """جدولة دفتر: run_at بصيغة HH:MM أو 'now'، interval_minutes>0 = تكرار دوري.
+    تُحفظ المهمة في SCHED_DIR وتُشغّل عبر run_scheduled_jobs() (تُدعى دوريًا من الواجهة/Streamlit rerun)."""
+    job = {
+        "id": uuid.uuid4().hex[:10],
+        "nb_id": nb_id,
+        "name": name,
+        "description": description,
+        "run_at": run_at,
+        "interval_minutes": max(0, int(interval_minutes or 0)),
+        "created_at": _now(),
+        "last_run_at": None,
+        "next_run_at": None,
+        "status": "scheduled",
+        "last_result": None,
+    }
+    job["next_run_at"] = _next_run_at(job)
+    _write_job(job)
+    return {"ok": True, "job": job}
+
+
+def _next_run_at(job: Dict[str, Any]) -> Optional[str]:
+    from datetime import datetime as _dt
+    now = _dt.now()
+    try:
+        if job["run_at"] == "now":
+            target = now
+        else:
+            hh, mm = map(int, str(job["run_at"]).split(":")[:2])
+            target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+            if target <= now:
+                target = target.replace(day=target.day + 1)
+    except Exception:
+        return None
+    interval = job.get("interval_minutes") or 0
+    if interval and (job.get("last_run_at") or ""):
+        try:
+            base = _dt.fromisoformat(job["last_run_at"])
+            from datetime import timedelta as _td
+            target = base + _td(minutes=interval)
+        except Exception:
+            pass
+    return target.strftime("%Y-%m-%d %H:%M")
+
+
+def _job_path(job_id: str) -> Path:
+    return SCHED_DIR / f"{job_id}.json"
+
+
+def _write_job(job: Dict[str, Any]) -> None:
+    _job_path(job["id"]).write_text(
+        json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def list_scheduled_jobs() -> List[Dict[str, Any]]:
+    jobs = []
+    for p in SCHED_DIR.glob("*.json"):
+        try:
+            jobs.append(json.loads(p.read_text(encoding="utf-8")))
+        except Exception:
+            continue
+    return sorted(jobs, key=lambda j: j.get("next_run_at") or "", reverse=False)
+
+
+def delete_scheduled_job(job_id: str) -> bool:
+    p = _job_path(job_id)
+    if p.is_file():
+        p.unlink()
+        return True
+    return False
+
+
+def run_scheduled_jobs() -> List[Dict[str, Any]]:
+    """يفحص المهام المجدولة ويشغّل المستحقّ منها الآن — يُستدعى دوريًا.
+    يعيد قائمة نتائج التشغيل (فارغة إن لم يكن هناك شيء)."""
+    from datetime import datetime as _dt
+    now_str = _dt.now().strftime("%Y-%m-%d %H:%M")
+    results = []
+    for job in list_scheduled_jobs():
+        nxt = (job.get("next_run_at") or "")[:16]
+        if job.get("status") == "disabled":
+            continue
+        if nxt and nxt <= now_str:
+            nb = load_notebook(job["nb_id"])
+            res = {"job_id": job["id"], "name": job["name"]}
+            if nb is None:
+                res.update({"ok": False, "error": "الدفتر غير موجود"})
+            else:
+                try:
+                    out = run_all(nb)
+                    job["last_result"] = {"ok": True,
+                                          "cells": len(out),
+                                          "errors": sum(1 for r in out
+                                                          if r.get("status") == "error")}
+                    res.update({"ok": True, "cells": len(out)})
+                except Exception as e:
+                    job["last_result"] = {"ok": False, "error": str(e)[:200]}
+                    res.update({"ok": False, "error": str(e)[:200]})
+            job["last_run_at"] = _now()
+            job["next_run_at"] = _next_run_at(job)
+            job["status"] = "completed"
+            _write_job(job)
+            results.append(res)
+    return results
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 🆕 v2: مخرجات حيّة (streaming) — تنفيذ خلية في خيط جانبي مع جمع المخرجات
+# تدريجيًا (كل 0.3ث) في قائمة مشتركة، لعرضها لحظيًا في الواجهة
+# ═══════════════════════════════════════════════════════════════════════════
+def run_cell_streaming(nb: Notebook, cell_id: str, timeout: int = _DEFAULT_TIMEOUT) -> Dict[str, Any]:
+    """تشغيل خلية في خيط جانبي وجمع مخرجات kernel الحقيقية تدريجيًا.
+    يعيد {'live': [{'text':...}], 'final_cell': Cell} — تقرأ الواجهة 'live' دوريًا."""
+    cell = next((c for c in nb.cells if c.id == cell_id), None)
+    if not cell:
+        raise KeyError(cell_id)
+    kr = _NSK.get("run_cell_kernel")
+    if kr is None or (nb.provider or "local") != "local":
+        # لا دعم حي خارج kernel الحقيقي
+        c = run_cell(nb, cell.id, timeout=timeout)
+        return {"live": [], "final_cell": c}
+    import threading as _thr
+    live: List[Dict[str, Any]] = []
+    cell.status = "running"
+    cell.outputs = []
+    save_notebook(nb)
+    state = {"final": None}
+    def _worker():
+        try:
+            kc = _NSK["kernel_health"] and __import__("ai.nb_kernel",
+                                                       fromlist=["get_kernel_client"]
+                                                      ).get_kernel_client(nb.id)
+            # نعيد الاستخدام: ننفذ عبر run_cell_kernel في خيط مستقل
+            state["final"] = run_cell(nb, cell_id, timeout=timeout)
+        except Exception as e:
+            cell.status = "error"
+            cell.outputs.append({"type": "stream", "name": "stderr",
+                                 "text": str(e)[:2000]})
+            state["final"] = cell
+            save_notebook(nb)
+    t = _thr.Thread(target=_worker, daemon=True)
+    t.start()
+    # جمع المخرجات الحالية دوريًا أثناء التشغيل
+    while t.is_alive():
+        time.sleep(0.3)
+        live.append({"outputs": list(cell.outputs), "status": cell.status,
+                     "thread_alive": True})
+    return {"live": live, "final_cell": state["final"] or cell}
+
+
+def live_outputs(nb: Notebook, cell_id: str) -> Dict[str, Any]:
+    """لحظة مخرجات خلية: آخر ما توفّر من outputs دون انتظار."""
+    cell = next((c for c in nb.cells if c.id == cell_id), None)
+    return {"outputs": list(cell.outputs or []), "status": cell.status}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 🆕 v2: سجل إصدارات الخلية (Undo/Redo) — يحفظ آخر 20 تعديلًا/تنفيذًا لمصدر الخلية
+# ═══════════════════════════════════════════════════════════════════════════
+_CELL_HISTORY_MAX = 20
+
+
+def _cell_history(nb: Notebook, cell_id: str) -> List[Dict[str, Any]]:
+    return nb.metadata.setdefault("cell_history", {}).setdefault(cell_id, [])
+
+
+def save_cell_version(nb: Notebook, cell_id: str, note: str = "") -> None:
+    """حفظ لقطة حالية للمصدر قبل التعديل (تُدعى من الواجهة عند حفظ مصدر)."""
+    cell = next((c for c in nb.cells if c.id == cell_id), None)
+    if not cell:
+        return
+    hist = _cell_history(nb, cell_id)
+    hist.append({"source": cell.source, "at": _now(), "note": note})
+    if len(hist) > _CELL_HISTORY_MAX:
+        hist.pop(0)
+    save_notebook(nb)
+
+
+def undo_cell(nb: Notebook, cell_id: str) -> Dict[str, Any]:
+    """🆕 تراجع: استعادة آخر لقطة لمصدر الخلية."""
+    cell = next((c for c in nb.cells if c.id == cell_id), None)
+    hist = _cell_history(nb, cell_id)
+    if not hist:
+        return {"ok": False, "error": "لا لقطات سابقة لهذه الخلية"}
+    snap = hist.pop()
+    if cell is not None:
+        cell.source = snap["source"]
+    save_notebook(nb)
+    return {"ok": True, "restored_at": snap["at"], "remaining": len(hist)}
+
+
+def cell_version_list(nb: Notebook, cell_id: str) -> List[Dict[str, Any]]:
+    return list(_cell_history(nb, cell_id))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 🆕 v2: أسرار الدفتر (Secrets) — مفاتيح تُمرَّر كمتغيرات بيئة داخل kernel
+# (لا تُحفظ داخل الكود — تبقى في metadata النظيف)
+# ═══════════════════════════════════════════════════════════════════════════
+def set_notebook_secret(nb: Notebook, key: str, value: str) -> None:
+    """تخزين سر بأمان مشوّه (mask) داخل metadata — لا يظهر في المصادر."""
+    secrets = nb.metadata.setdefault("secrets", {})
+    secrets[key] = value
+    nb.metadata["secret_keys"] = list(secrets.keys())
+    save_notebook(nb)
+
+
+def delete_notebook_secret(nb: Notebook, key: str) -> bool:
+    secrets = nb.metadata.get("secrets", {})
+    if key in secrets:
+        del secrets[key]
+        nb.metadata["secret_keys"] = list(secrets.keys())
+        save_notebook(nb)
+        return True
+    return False
+
+
+def list_notebook_secrets(nb: Notebook) -> List[str]:
+    """يُعيد أسماء الأسرار فقط — لا القيم."""
+    return list(nb.metadata.get("secret_keys") or [])
+
+
+def inject_secrets_into_kernel(nb: Notebook) -> int:
+    """حقن أسرار الدفتر كمتغيرات بيئة داخل kernel (بدون تسجيل القيم)."""
+    kc = None
+    try:
+        import ai.nb_kernel as _nbk
+        kc = _nbk.get_kernel_client(nb.id)
+    except Exception:
+        return 0
+    if kc is None:
+        return 0
+    secrets = nb.metadata.get("secrets", {})
+    n = 0
+    for k, v in secrets.items():
+        try:
+            kc.execute(f"import os; os.environ[{k!r}] = {v!r}",
+                       store_history=False, silent=True)
+            n += 1
+        except Exception:
+            pass
+    return n
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 🆕 v2: مكتبة قوالب الكود (Snippets)
+# ═══════════════════════════════════════════════════════════════════════════
+CODE_SNIPPETS: Dict[str, Dict[str, str]] = {
+    "train_pytorch": {
+        "label_ar": "تدريب PyTorch مصغّر",
+        "source": textwrap.dedent("""\
+            import torch, torch.nn as nn
+            model = nn.Sequential(nn.Linear(10, 32), nn.ReLU(), nn.Linear(32, 1))
+            opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+            for epoch in range(5):
+                x = torch.randn(64, 10); y = x.sum(1, keepdim=True)
+                loss = nn.MSELoss()(model(x), y)
+                loss.backward(); opt.step(); opt.zero_grad()
+                print(f"epoch {epoch+1} loss {loss.item():.4f}")
+            """),
+    },
+    "dataloader": {
+        "label_ar": "DataLoader عربي (نص → توكنات)",
+        "source": textwrap.dedent("""\
+            from torch.utils.data import DataLoader, Dataset
+            class ArabicText(Dataset):
+                def __init__(self, texts): self.texts = texts
+                def __len__(self): return len(self.texts)
+                def __getitem__(self, i): return self.texts[i]
+            dl = DataLoader(ArabicText(["مرحبا بالعالم", "الذكاء الاصطناعي"]), batch_size=2)
+            for batch in dl:
+                print(batch)
+            """),
+    },
+    "matplotlib_plot": {
+        "label_ar": "رسم matplotlib",
+        "source": textwrap.dedent("""\
+            import matplotlib.pyplot as plt
+            plt.plot([1, 2, 3, 4], [1, 4, 2, 3])
+            plt.title("مخطط تجريبي")
+            plt.show()
+            """),
+    },
+    "metrics_parse": {
+        "label_ar": "استخراج مقاييس من سجلات التدريب",
+        "source": textwrap.dedent("""\
+            import re, json
+            # مثال: قراءة metrics من outputs الخلايا السابقة
+            metrics = {"loss": [], "step": []}
+            print(json.dumps(metrics, ensure_ascii=False, indent=2))
+            """),
+    },
+    "hf_load_stream": {
+        "label_ar": "تحميل بيانات من HF (streaming)",
+        "source": textwrap.dedent("""\
+            # requires datasets; uses HF_TOKEN from environment if needed
+            from datasets import load_dataset
+            ds = load_dataset("ClusterlabAi/101_billion_arabic_words_dataset",
+                              split="train", streaming=True)
+            for i, row in enumerate(ds):
+                print(row)
+                if i >= 3:
+                    break
+            """),
+    },
+    "kaggle_env": {
+        "label_ar": "فحص بيئة Kaggle",
+        "source": textwrap.dedent("""\
+            import os
+            print("KAGGLE kernel:", os.path.exists("/kaggle/input"))
+            print("GPU:", os.popen("nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1").read().strip() or "none")
+            """),
+    },
+}
+
+
+def get_snippet(key: str) -> Optional[Dict[str, str]]:
+    return CODE_SNIPPETS.get(key)
+
+
+def insert_snippet(nb: Notebook, snippet_key: str, index: Optional[int] = None) -> Optional[Cell]:
+    """إدراج قالب كود جديد في الدفتر."""
+    snip = CODE_SNIPPETS.get(snippet_key)
+    if not snip:
+        return None
+    cell = add_cell(nb, "code", snip["source"], index=index)
+    cell.metadata["snippet"] = snippet_key
+    save_notebook(nb)
+    return cell
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 🆕 v2: مشاركة الدفاتر (Shared Notebooks) — مجلد مُتشارك عام داخل repo
+# ═══════════════════════════════════════════════════════════════════════════
+SHARED_NB_DIR = ROOT / "artifacts" / "model_training" / "shared_notebooks"
+SHARED_NB_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def share_notebook(nb: Notebook, description: str = "") -> Dict[str, Any]:
+    """مشاركة الدفتر في المكتبة المشتركة (يدخلها الوكلاء/الأعضاء) — مخرجاته مضمّنة."""
+    shared = {
+        "id": nb.id,
+        "name": nb.name,
+        "description": description,
+        "shared_at": _now(),
+        "notebook": nb.to_dict(),
+    }
+    p = SHARED_NB_DIR / f"{nb.id}.json"
+    p.write_text(json.dumps(shared, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "path": str(p)}
+
+
+def list_shared_notebooks() -> List[Dict[str, Any]]:
+    rows = []
+    for p in SHARED_NB_DIR.glob("*.json"):
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+            nb = d.get("notebook") or {}
+            rows.append({
+                "id": d.get("id"),
+                "name": d.get("name"),
+                "description": d.get("description"),
+                "cells": len(nb.get("cells") or []),
+                "shared_at": d.get("shared_at"),
+            })
+        except Exception:
+            continue
+    return sorted(rows, key=lambda r: r.get("shared_at") or "", reverse=True)
+
+
+def import_shared_notebook(shared_id: str) -> Optional[Notebook]:
+    """استنساخ دفتر مُتشارك إلى دفاتري الشخصية."""
+    p = SHARED_NB_DIR / f"{shared_id}.json"
+    if not p.is_file():
+        return None
+    d = json.loads(p.read_text(encoding="utf-8"))
+    nb = Notebook.from_dict(d.get("notebook") or {})
+    clone = duplicate_notebook(nb, new_name=f"{nb.name} (مُشارك)")
+    return clone
+
+
 def nb_kernel_health() -> Dict[str, Any]:
     """🆕 حالة محرك kernel: توفر ipykernel، الجلسات النشطة، الباك إند الفعلي."""
     if _NSK.get("kernel_health") is None:

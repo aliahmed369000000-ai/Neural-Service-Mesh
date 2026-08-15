@@ -1,0 +1,157 @@
+{
+  "id": "4c47d7e028",
+  "name": "اختبار",
+  "description": "اختبار مشترك",
+  "shared_at": "2026-08-15T01:54:00.029715+00:00",
+  "notebook": {
+    "id": "4c47d7e028",
+    "name": "اختبار",
+    "cells": [
+      {
+        "id": "a1244280",
+        "type": "markdown",
+        "source": "# 🧪 NSM Training Lab\nدفتر تدريب بأسلوب **Colab / Kaggle**: خلايا Markdown وCode وBash.\n- التنفيذ المحلي الآن · الإرسال لـ GPU/Kaggle لاحقاً عبر المزوّد.\n- الجلسة **محفوظة على القرص** — لا تُمسح بانقطاع المتصفح.",
+        "outputs": [],
+        "execution_count": null,
+        "metadata": {},
+        "status": "idle"
+      },
+      {
+        "id": "ed34f965",
+        "type": "code",
+        "source": "import sys, platform\nprint(\"Python\", sys.version.split()[0])\nprint(\"Platform\", platform.platform())\ntry:\n    import torch\n    print(\"PyTorch\", torch.__version__, \"CUDA\", torch.cuda.is_available())\n    if torch.cuda.is_available():\n        print(\"GPU\", torch.cuda.get_device_name(0))\nexcept Exception as e:\n    print(\"torch:\", e)\ntry:\n    from ai.gpu_runtime import detect_device\n    d = detect_device()\n    print(\"NSM device:\", d)\nexcept Exception as e:\n    print(\"gpu_runtime:\", e)\n",
+        "outputs": [],
+        "execution_count": null,
+        "metadata": {},
+        "status": "idle"
+      },
+      {
+        "id": "61c002fc",
+        "type": "bash",
+        "source": "pwd && ls -la ai | head -20 && git status -sb 2>/dev/null | head -5",
+        "outputs": [],
+        "execution_count": null,
+        "metadata": {},
+        "status": "idle"
+      },
+      {
+        "id": "ba89c9bb",
+        "type": "train",
+        "source": "# خلية تدريب — مثال خفيف (CPU/GPU حسب التوفر)\n# استبدل بسكربت التدريب الفعلي: run_training_loop.sh أو train_*.py\nprint(\"Training cell placeholder — ربط مع run_training_loop / Kaggle provider\")\nimport os\nprint(\"NSM_ALLOW_GPU =\", os.environ.get(\"NSM_ALLOW_GPU\", \"not set\"))\n",
+        "outputs": [],
+        "execution_count": null,
+        "metadata": {
+          "epochs": 5,
+          "provider_hint": "local"
+        },
+        "status": "idle"
+      },
+      {
+        "id": "26e869a8",
+        "type": "markdown",
+        "source": "### 🚀 مزوّدو GPU\n| مزوّد | الاستخدام |\n|------|----------|\n| local | تنفيذ هنا |\n| **kaggle** | مجاني ~30س/أسبوع + API |\n| **modal** | رصيد مجاني + API tokens |\n| **lightning** | رصيد شهري + API |\n| **huggingface** | HF_TOKEN |\n| colab | سريع وقد ينقطع |\n| runpod / vast | مستقر (مدفوع غالباً) |\n\nكتالوج كامل: `ai/free_gpu_providers.py` — مفاتيح في Streamlit Secrets.",
+        "outputs": [],
+        "execution_count": null,
+        "metadata": {},
+        "status": "idle"
+      },
+      {
+        "id": "86923e3f",
+        "type": "code",
+        "source": "x = 99",
+        "outputs": [],
+        "execution_count": 1,
+        "metadata": {},
+        "status": "ok"
+      },
+      {
+        "id": "a3f25733",
+        "type": "code",
+        "source": "y = x * 2  # يجب أن يعرف x\nprint('y=', y)",
+        "outputs": [
+          {
+            "type": "stream",
+            "name": "stdout",
+            "text": "y= 42\n"
+          }
+        ],
+        "execution_count": 2,
+        "metadata": {},
+        "status": "ok"
+      },
+      {
+        "id": "14295d7f",
+        "type": "code",
+        "source": "import time\nfor i in range(4):\n    print('step', i)\n    time.sleep(0.15)",
+        "outputs": [
+          {
+            "type": "stream",
+            "name": "stdout",
+            "text": "step 0\nstep 1\n"
+          },
+          {
+            "type": "stream",
+            "name": "stdout",
+            "text": "step 2\nstep 3\n"
+          }
+        ],
+        "execution_count": 3,
+        "metadata": {},
+        "status": "ok"
+      },
+      {
+        "id": "932b9887",
+        "type": "code",
+        "source": "import time\ntime.sleep(60)",
+        "outputs": [
+          {
+            "type": "error",
+            "ename": "KeyboardInterrupt",
+            "evalue": "",
+            "traceback": [
+              "\u001b[31m---------------------------------------------------------------------------\u001b[39m",
+              "\u001b[31mKeyboardInterrupt\u001b[39m                         Traceback (most recent call last)",
+              "\u001b[36mCell\u001b[39m\u001b[36m \u001b[39m\u001b[32mIn[4]\u001b[39m\u001b[32m, line 2\u001b[39m\n\u001b[32m      1\u001b[39m \u001b[38;5;28;01mimport\u001b[39;00m time\n\u001b[32m----> \u001b[39m\u001b[32m2\u001b[39m time.sleep(\u001b[32m60\u001b[39m)\n",
+              "\u001b[31mKeyboardInterrupt\u001b[39m: "
+            ]
+          }
+        ],
+        "execution_count": 4,
+        "metadata": {},
+        "status": "error"
+      },
+      {
+        "id": "54290472",
+        "type": "code",
+        "source": "import torch, torch.nn as nn\nmodel = nn.Sequential(nn.Linear(10, 32), nn.ReLU(), nn.Linear(32, 1))\nopt = torch.optim.Adam(model.parameters(), lr=1e-3)\nfor epoch in range(5):\n    x = torch.randn(64, 10); y = x.sum(1, keepdim=True)\n    loss = nn.MSELoss()(model(x), y)\n    loss.backward(); opt.step(); opt.zero_grad()\n    print(f\"epoch {epoch+1} loss {loss.item():.4f}\")\n",
+        "outputs": [],
+        "execution_count": null,
+        "metadata": {
+          "snippet": "train_pytorch"
+        },
+        "status": "idle"
+      }
+    ],
+    "created_at": "2026-08-15T01:53:54.901479+00:00",
+    "updated_at": "2026-08-15T01:54:00.029227+00:00",
+    "metadata": {
+      "secrets": {
+        "TEST_TOKEN": "abc123"
+      },
+      "secret_keys": [
+        "TEST_TOKEN"
+      ],
+      "cell_history": {
+        "86923e3f": [
+          {
+            "source": "x = 21",
+            "at": "2026-08-15T01:54:00.028952+00:00",
+            "note": "اختبار"
+          }
+        ]
+      }
+    },
+    "kernel": "python3",
+    "provider": "local"
+  }
+}

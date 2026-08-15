@@ -117,6 +117,45 @@ def _render_cell_outputs(outputs):
             st.error("\n".join(out.get("traceback") or [out.get("evalue", "")]))
 
 
+def _metrics_plot(nb):
+    """🆕 v2: رسم مقاييس التدريب (loss/steps) المستخرجة من مخرجات خلايا الدفتر."""
+    import re as _re
+    loss_vals: List[float] = []
+    steps: List[str] = []
+    for c in nb.cells:
+        for o in (c.outputs or []):
+            txt = ""
+            if o.get("stdout"):
+                txt = o["stdout"]
+            elif o.get("type") == "stream" and o.get("text"):
+                txt = "".join(o["text"])
+            for line in txt.splitlines():
+                # loss: 0.1234 أو loss=0.1234 أو loss: 0.1234
+                m = _re.search(r"(?:loss\s*[=:]\s*|)(\d+\.?\d*(?:e[+-]?\d+)?)", line, _re.I)
+                if m and ("loss" in line.lower()):
+                    try:
+                        loss_vals.append(float(m.group(1)))
+                        steps.append(f"[{c.id[:4]}]")
+                    except ValueError:
+                        continue
+    if not loss_vals:
+        st.info("لا مقاييس loss في مخرجات الخلايا بعد — نفّذ خلية تدريب أولًا")
+        return
+    try:
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(figsize=(7, 3))
+        ax.plot(range(1, len(loss_vals) + 1), loss_vals, marker=".", color="#1f77b4")
+        ax.set_xlabel("خطوة")
+        ax.set_ylabel("loss")
+        ax.set_title("منحنى فقدان التدريب (من مخرجات الدفتر)")
+        ax.grid(alpha=0.3)
+        st.pyplot(fig)
+        st.caption(f"{len(loss_vals)} قيمة loss من مخرجات الخلايا")
+    except Exception as e:
+        st.code("\n".join(f"{s} {v}" for s, v in zip(steps[:50], loss_vals[:50])))
+        st.caption(str(e)[:200])
+
+
 def render_training_notebook():
     """مختبر تدريب متكامل — سهل الاستخدام واحترافي."""
     st.markdown(
@@ -130,21 +169,34 @@ def render_training_notebook():
 
     from ai.notebook_engine import (
         add_cell,
+        cell_version_list,
         create_notebook,
         delete_cell,
         delete_notebook,
+        delete_scheduled_job,
         detect_compute,
         duplicate_notebook,
         export_ipynb,
         import_ipynb,
+        import_shared_notebook,
+        inject_secrets_into_kernel,
+        insert_snippet,
         interrupt_cell,
+        list_notebook_secrets,
         list_notebooks,
+        list_scheduled_jobs,
+        list_shared_notebooks,
         load_notebook,
         move_cell,
         plan_remote_run,
         run_all,
         run_cell,
+        run_scheduled_jobs,
+        save_cell_version,
         save_notebook,
+        schedule_notebook,
+        set_notebook_secret,
+        undo_cell,
     )
     import os
     from ai.notebook_lab_service import (
@@ -411,6 +463,142 @@ def render_training_notebook():
                 key="dl_ipynb2",
             )
 
+        # ── 🆕 v2: شريط أدوات موسّع (قوالب + أسرار + مشاركة + جدولة) ──
+        tools_tabs = st.tabs(["📚 قوالب", "🔐 أسرار", "🤝 مشاركة", "⏰ جدولة", "📊 مقاييس", "⌨️ اختصارات"])
+        # قوالب الكود الجاهزة (snippets)
+        with tools_tabs[0]:
+            from ai.notebook_engine import CODE_SNIPPETS
+            snip_keys = list(CODE_SNIPPETS.keys())
+            snip_labels = [f"{CODE_SNIPPETS[k]['label_ar']} ({k})" for k in snip_keys]
+            if snip_labels:
+                pick = st.selectbox("اختر قالبًا لإضافته للدفتر", snip_labels, key="nb_snip_pick")
+                if pick:
+                    k = snip_keys[snip_labels.index(pick)]
+                    if st.button("➕ إدراج القالب في النهاية", use_container_width=True, key="nb_snip_insert"):
+                        c = insert_snippet(nb, k)
+                        st.toast(f"أُدرج القالب: {CODE_SNIPPETS[k]['label_ar']}", icon="📚")
+                        st.rerun()
+            # 🆕 اقتراح الخلية التالية (تكملة تلقائية/اقتراح سياقي)
+            with st.expander("🪄 اقتراح الخلية التالية"):
+                hist = [c.source.splitlines()[0] for c in nb.cells if c.source.strip()]
+                if st.button("اقترح", use_container_width=True, key="nb_next_suggest"):
+                    from ai.notebook_copilot import suggest_next
+                    s = suggest_next("", hist)
+                    st.markdown(f"💡 {s.get('text', '—')}")
+                    if st.button("➕ أضف كخلية جديدة", use_container_width=True, key="nb_next_insert"):
+                        add_cell(nb, "code", s.get("text", ""))
+                        st.rerun()
+        # أسرار الدفتر (متغيرات بيئة داخل kernel — لا تظهر في الكود)
+        with tools_tabs[1]:
+            st.caption("تُحقن كمتغيرات بيئة داخل kernel — لا تُعرض داخل المصادر")
+            k1, k2 = st.columns([2, 1.4])
+            with k1:
+                sk = st.text_input("اسم المفتاح", placeholder="HF_TOKEN", key="nb_secret_key")
+            with k2:
+                sv = st.text_input("القيمة", type="password", placeholder="••••••", key="nb_secret_val")
+            if sk and sv and st.button("💾 حفظ السر", key="nb_secret_save"):
+                set_notebook_secret(nb, sk, sv)
+                st.toast(f"حُفظ: {sk}", icon="🔐")
+                st.rerun()
+            keys_ = list_notebook_secrets(nb)
+            if keys_:
+                st.markdown("**الأسرار المحفوظة:** " + ", ".join(f"`{k}`" for k in keys_))
+                if st.button("⚡ حقن في kernel", use_container_width=True, key="nb_secret_inject"):
+                    n = inject_secrets_into_kernel(nb)
+                    st.toast(f"حُقنت {n} سرًا في kernel", icon="⚡")
+            # دفع الدفتر إلى Kaggle كـkernel
+            with st.expander("🚀 دفع هذا الدفتر إلى Kaggle"):
+                from ai.kaggle_provider import push_kaggle_kernel
+                st.caption("يُصدّر الدفتر ويدفعه كـkernel Kaggle في مشروعك")
+                if st.button("🚀 Push to Kaggle", use_container_width=True, key="nb_push_kaggle"):
+                    with st.spinner("تصدير + دفع…"):
+                        try:
+                            from ai.notebook_engine import export_ipynb as _exp, ROOT as _ROOT
+                            out = _exp(nb)
+                            import tempfile as _tf
+                            _p = _ROOT / "artifacts" / "model_training" / "notebooks" / f"{nb.id}.ipynb"
+                            _p.parent.mkdir(parents=True, exist_ok=True)
+                            _p.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+                            res = push_kaggle_kernel(nb.id)
+                            st.session_state["nb_push_res"] = res
+                        except Exception as e:
+                            st.session_state["nb_push_res"] = {"ok": False, "error": str(e)}
+                    st.rerun()
+                if st.session_state.get("nb_push_res"):
+                    r = st.session_state["nb_push_res"]
+                    if r.get("ok"):
+                        st.success(f"دُفع: {r.get('kernel_url') or r.get('slug')}")
+                    else:
+                        st.error(str(r.get("error"))[:300])
+        # مشاركة الدفاتر (مكتبة مشتركة بين الوكلاء والأعضاء)
+        with tools_tabs[2]:
+            sh1, sh2 = st.columns(2)
+            with sh1:
+                if st.button("📤 مشاركة هذا الدفتر", use_container_width=True, key="nb_share_this"):
+                    from ai.notebook_engine import share_notebook as _share
+                    res = _share(nb, "مشترك من مختبر NSM")
+                    st.toast("تمت المشاركة", icon="🤝") if res.get("ok") else st.error(str(res))
+                    st.rerun()
+            with sh2:
+                if st.button("🔄 تحديث المكتبة", use_container_width=True, key="nb_shared_refresh"):
+                    st.session_state["nb_shared_list"] = list_shared_notebooks()
+            for row in st.session_state.get("nb_shared_list") or list_shared_notebooks()[:10]:
+                st.markdown(f"- **{row.get('name')}** ({row.get('cells')} خلية) — `{row.get('id')}`")
+                sid = row.get("id")
+                if sid and st.button("📥 استنساخ", key=f"nb_shared_imp_{sid}"):
+                    c = import_shared_notebook(sid)
+                    st.session_state.nsm_nb_id = c.id
+                    st.toast("تم الاستنساخ", icon="📥")
+                    st.rerun()
+        # الجدولة (تشغيل دوري)
+        with tools_tabs[3]:
+            # فحص دوري خفيف للمهام المستحقة
+            try:
+                ran = run_scheduled_jobs()
+            except Exception:
+                ran = []
+            if ran:
+                for r in ran:
+                    st.toast(f"⏰ مهمّة {r.get('name')}: {'✅' if r.get('ok') else '❌'}", icon="⏰")
+            sch1, sch2, sch3, sch4 = st.columns([2, 2, 2, 1.5])
+            with sch1:
+                sch_at = st.text_input("وقت (HH:MM) أو now", value="now", key="nb_sch_at")
+            with sch2:
+                sch_int = st.number_input("تكرار كل (دقائق) — 0 = مرة واحدة", 0, 1440, 0, key="nb_sch_int")
+            with sch3:
+                sch_name = st.text_input("اسم المهمة", value=f"{nb.name}", key="nb_sch_name")
+            with sch4:
+                if st.button("⏰ جدولة", use_container_width=True, key="nb_sch_go"):
+                    res = schedule_notebook(nb.id, sch_name, sch_at, int(sch_int))
+                    st.toast("تمت الجدولة", icon="⏰") if res.get("ok") else st.error(str(res))
+                    st.rerun()
+            jobs_ = list_scheduled_jobs()
+            if jobs_:
+                for j in jobs_:
+                    st.markdown(
+                        f"- ⏰ **{j.get('name')}** · `{j.get('id')}` · "
+                        f"التالي {j.get('next_run_at') or '—'} · "
+                        f"دورية {j.get('interval_minutes')}د"
+                    )
+                    if st.button("🗑", key=f"nb_sch_del_{j.get('id')}"):
+                        delete_scheduled_job(j["id"])
+                        st.rerun()
+            else:
+                st.caption("لا مهام مجدولة")
+        # مقاييس التدريب (استخراج loss/steps من مخرجات الخلايا)
+        with tools_tabs[4]:
+            st.caption("يُستخرج loss/خطوات من مخرجات الخلايا تلقائيًا ويُرسم")
+            _metrics_plot(nb)
+        # اختصارات لوحة المفاتيح
+        with tools_tabs[5]:
+            st.caption("💡 استخدم اختصارات المتصفح مع الأزرار: Shift+Enter داخل textarea لا يشغّل — اضغط ▶ يدويًا (Streamlit لا يدعم اختصارات مخصصة بالكامل)")
+            st.markdown(
+                "- **▶ تشغيل خلية**: زر ▶ بجوار كل خلية\n"
+                "- **⏳ إيقاف**: زر ⏹ عند خلية جارية\n"
+                "- **↺ تراجع**: زر ↺ بجوار كل خلية\n"
+                "- **🤖 مساعد**: زر 🤖 بجوار كل خلية (شرح/إصلاح/تحسين)"
+            )
+
         # 🆕 شريط حالة kernel (Colab/Kaggle style): ذاكرة مستمرة بين الخلايا
         try:
             from ai.notebook_engine import nb_kernel_health, restart_kernel_session
@@ -455,11 +643,31 @@ def render_training_notebook():
                     st.toast(str(res.get("error")), icon="❌")
                 st.rerun()
 
+        # 🆕 v2: تشغيل دوري خفيف للمهام المجدولة (كل rerun للواجهة)
+        try:
+            _ran = run_scheduled_jobs()
+        except Exception:
+            _ran = []
+        if _ran:
+            for _r in _ran:
+                st.toast(f"⏰ مهمة {_r.get('name')}: {'✅' if _r.get('ok') else '❌'}", icon="⏰")
+            st.rerun()
+
+        # 🆕 v2: live run — تشغيل الخلية في خيط جانبي مع تحديث مخرجاتها دوريًا
+        def _nb_live_run(_cell_id: str) -> None:
+            try:
+                from ai.notebook_engine import run_cell_streaming
+                st.session_state[f"nb_live_{_cell_id}"] = True
+                run_cell_streaming(nb, _cell_id, timeout=int(timeout))
+            finally:
+                st.session_state.pop(f"nb_live_{_cell_id}", None)
+                st.rerun()
+
         for i, cell in enumerate(list(nb.cells)):
             badge = {"markdown": "📝", "code": "🐍", "bash": "💻", "train": "🏋️"}.get(cell.type, "•")
             status_icon = {"ok": "✅", "error": "❌", "running": "⏳", "idle": "⚪"}.get(cell.status, "⚪")
             with st.container():
-                h1, h2, h3, h4, h5, h6 = st.columns([1.6, 0.5, 0.45, 0.45, 0.45, 0.8])
+                h1, h2, h3, h4, h5, h6, h7 = st.columns([1.5, 0.45, 0.45, 0.45, 0.45, 0.45, 0.6])
                 _dur = None
                 for _o in (cell.outputs or [])[::-1]:
                     if _o.get("duration_ms") is not None:
@@ -488,31 +696,75 @@ def render_training_notebook():
                             run_cell(nb, cell.id, timeout=int(timeout))
                         st.rerun()
                 with h3:
+                    # 🆕 v2: تشغيل حي في خيط جانبي (مخرجات تُحدّث خلال التنفيذ)
+                    if st.button("⚡", key=f"live_{cell.id}", help="Live: مخرجات محدّثة أثناء التنفيذ"):
+                        _nb_live_run(cell.id)
+                with h4:
                     if st.button("↑", key=f"up_{cell.id}"):
                         move_cell(nb, cell.id, -1)
                         st.rerun()
-                with h4:
+                with h5:
                     if st.button("↓", key=f"dn_{cell.id}"):
                         move_cell(nb, cell.id, 1)
                         st.rerun()
-                with h5:
-                    if st.button("🗑", key=f"del_{cell.id}"):
-                        delete_cell(nb, cell.id)
-                        st.rerun()
                 with h6:
-                    types = ["markdown", "code", "bash", "train"]
-                    ti = types.index(cell.type) if cell.type in types else 1
-                    new_type = st.selectbox("t", types, index=ti, key=f"typ_{cell.id}", label_visibility="collapsed")
-                    if new_type != cell.type:
-                        cell.type = new_type
-                        save_notebook(nb)
+                    # 🆕 v2: تراجع عن آخر تعديل (Undo)
+                    if st.button("↺", key=f"undo_{cell.id}", help="تراجع عن آخر تعديل"):
+                        res = undo_cell(nb, cell.id)
+                        st.toast(
+                            "تم التراجع" if res.get("ok") else str(res.get("error"))[:60],
+                            icon="↺" if res.get("ok") else "⚠️",
+                        )
                         st.rerun()
-
-                height = 100 if cell.type == "markdown" else 150
-                src = st.text_area("s", value=cell.source, height=height, key=f"src_{cell.id}", label_visibility="collapsed")
+                with h7:
+                    # 🆕 v2: المساعد الذكي للخلية (شرح/إصلاح/تحسين)
+                    if st.button("🤖", key=f"cop_{cell.id}", help="مساعد: شرح / إصلاح / تحسين"):
+                        st.session_state[f"nb_cop_open_{cell.id}"] = not st.session_state.get(f"nb_cop_open_{cell.id}")
+                        st.rerun()
+                    if st.session_state.get(f"nb_cop_open_{cell.id}"):
+                        from ai.notebook_copilot import explain_cell as _explain, \
+                            fix_cell as _fix, improve_cell as _improve
+                        a1, a2, a3 = st.columns(3)
+                        with a1:
+                            if st.button("📖 شرح", use_container_width=True, key=f"cop_ex_{cell.id}"):
+                                st.session_state[f"nb_cop_res_{cell.id}"] = {
+                                    "n": "شرح", "r": _explain(cell.source)}
+                        with a2:
+                            if st.button("🛠 إصلاح", use_container_width=True, key=f"cop_fx_{cell.id}"):
+                                last_err = ""
+                                for _oe in (cell.outputs or [])[::-1]:
+                                    if _oe.get("type") == "error":
+                                        last_err = "\n".join(_oe.get("traceback") or [_oe.get("evalue", "")])[:1500]
+                                        break
+                                st.session_state[f"nb_cop_res_{cell.id}"] = {
+                                    "n": "إصلاح", "r": _fix(cell.source, last_err)}
+                        with a3:
+                            if st.button("✨ تحسين", use_container_width=True, key=f"cop_im_{cell.id}"):
+                                st.session_state[f"nb_cop_res_{cell.id}"] = {
+                                    "n": "تحسين", "r": _improve(cell.source)}
+                        cr = st.session_state.get(f"nb_cop_res_{cell.id}")
+                        if cr:
+                            st.markdown(f"**🤖 {cr['n']}:**")
+                            st.markdown(str(cr["r"].get("text", "—")))
+                types = ["markdown", "code", "bash", "train"]
+                ti = types.index(cell.type) if cell.type in types else 1
+                new_type = st.selectbox("t", types, index=ti, key=f"typ_{cell.id}", label_visibility="collapsed")
+                if new_type != cell.type:
+                    cell.type = new_type
+                    save_notebook(nb)
+                    st.rerun()
+                # 🆕 v2: حفظ نسخة تلقائيًا قبل التعديل (Undo history)
+                src = st.text_area("s", value=cell.source, height=150,
+                                   key=f"src_{cell.id}", label_visibility="collapsed")
                 if src != cell.source:
+                    save_cell_version(nb, cell.id, note="تعديل من الواجهة")
                     cell.source = src
                     save_notebook(nb)
+                # 🆕 v2: شريط تقدم داخل الخلية الجارية (kernel حي يعرض حالة)
+                if cell.status == "running":
+                    st.progress(0.5, text="⏳ الخلية تجري — راقب ⏹ للإيقاف")
+
+                # (يُنفّذ أعلاه — src محفوظ + نسخة تاريخ)
                 if cell.type == "markdown":
                     st.markdown(cell.source)
                 else:
