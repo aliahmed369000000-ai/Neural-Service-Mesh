@@ -1016,6 +1016,7 @@ def generate_surahchain_kernel_script(
         SCN_EPOCHS = "__SCN_EPOCHS__"
         SCN_BATCH = "__SCN_BATCH__"
         SCN_FRESH = "__SCN_FRESH__"
+        SCN_RESUME = "auto"
         AUTO_PUSH = "__AUTO_PUSH__"
 
         def secret(name, default=""):
@@ -1066,6 +1067,8 @@ def generate_surahchain_kernel_script(
             "SCN_EPOCHS": SCN_EPOCHS,
             "SCN_BATCH": SCN_BATCH,
             "SCN_FRESH": SCN_FRESH,
+            "SCN_RESUME": SCN_RESUME,
+            "SCN_CHECKPOINT_EVERY": "2",
             "AUTO_PUSH": AUTO_PUSH,
             "PYTHONUNBUFFERED": "1",
         })

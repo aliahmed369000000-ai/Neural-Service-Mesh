@@ -76,6 +76,10 @@ STOP_PATIENCE = int(os.environ.get("SCN_STOP_PATIENCE", "0"))
 UNTIL_END = os.environ.get("SCN_UNTIL_END", "0") == "1"
 FRESH = os.environ.get("SCN_FRESH", "0") == "1"
 RESUME_PATH = os.environ.get("SCN_RESUME_PATH", "").strip()
+# ── NSM resume ذكي: "auto" يستأنف تلقائيًا من آخر checkpoint مرفوع على GitHub
+#     حتى مع SCN_FRESH=1 — حتى لا يضيع التدريب عند انقطاع الجلسة ──
+SCN_RESUME = os.environ.get("SCN_RESUME", "").strip().lower()
+CHECKPOINT_EVERY = int(os.environ.get("SCN_CHECKPOINT_EVERY", "2"))  # حفظ مرفوع كل كذا عصر
 
 # ----- presets للسعة -----
 PRESET = os.environ.get("SCN_PRESET", "").strip().lower()
@@ -182,9 +186,114 @@ def load_pretrain_sentences(max_n: int) -> list:
     return sentences
 
 
-def _pick_resume_path():
-    if FRESH:
+def _upload_checkpoint(ep: int) -> None:
+    """رفع checkpoint الحالي + state إلى GitHub (فرع main) — استئناف آمن.
+
+    يعمل حتى خارج repo (clone مؤقت في /tmp) — مثالي لـ Kaggle kernels.
+    """
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
+    if not token:
+        print("[checkpoint] لا GITHUB_TOKEN — تخطي الرفع الدوري")
+        return
+    repo = os.environ.get("SCN_REPO", "aliahmed369000000-ai/Neural-Service-Mesh")
+    branch = os.environ.get("SCN_BRANCH", "main")
+    tmp = Path("/tmp/nsm_ckpt_push")
+    import shutil
+    import subprocess
+
+    shutil.rmtree(str(tmp), ignore_errors=True)
+    try:
+        r = subprocess.run(
+            ["git", "clone", "-q", "--branch", branch,
+             f"https://x-access-token:{token}@github.com/{repo}.git", str(tmp)],
+            capture_output=True, text=True, timeout=300,
+        )
+        if r.returncode != 0:
+            print(f"[checkpoint] clone فشل: {r.stderr[-200:]}")
+            return
+        dest = tmp / "experiments" / "surah_chain_network" / "checkpoints"
+        dest.mkdir(parents=True, exist_ok=True)
+        files = [
+            (CKPT_LATEST, f"latest_pretrain_{TAG}.pt"),
+            (CKPT_BEST, f"best_pretrain_{TAG}.pt"),
+            (STATE_FILE, f"pretrain_state_{TAG}.json"),
+            (VOCAB_PATH, f"tokenizer_vocab_pretrain_{TAG}.json"),
+        ]
+        for src, name in files:
+            if src.is_file():
+                shutil.copy(str(src), str(dest / name))
+        subprocess.run(["git", "-C", str(tmp), "add", "-f", "experiments/surah_chain_network/checkpoints/"],
+                       capture_output=True, check=False)
+        st = subprocess.run(["git", "-C", str(tmp), "status", "--porcelain"],
+                            capture_output=True, text=True)
+        if not st.stdout.strip():
+            print(f"[checkpoint] لا تغييرات (epoch {ep}) — تخطي")
+            return
+        subprocess.run(
+            ["git", "-C", str(tmp), "-c", "user.email=nsm-bot@users.noreply.github.com",
+             "-c", "user.name=NSM Bot", "commit", "-q", "-m",
+             f"NSM: checkpoint epoch {ep} (surahchain {TAG})"],
+            capture_output=True, check=False)
+        r2 = subprocess.run(["git", "-C", str(tmp), "push", "-q", "origin", branch],
+                            capture_output=True, text=True, timeout=600)
+        if r2.returncode == 0:
+            print(f"[checkpoint] رُفعت checkpoint epoch {ep} إلى GitHub ✅")
+        else:
+            print(f"[checkpoint] push فشل: {r2.stderr[-200:]}")
+    except Exception as e:
+        print(f"[checkpoint] خطأ: {e}")
+    finally:
+        shutil.rmtree(str(tmp), ignore_errors=True)
+
+
+def _fetch_uploaded_checkpoint() -> Path | None:
+    """يسحب آخر checkpoint مرفوعة على GitHub (branch main) إلى مجلد checkpoints.
+
+    يبحث عن: latest_pretrain_{TAG}.pt ثم latest_pretrain_torch.pt.
+    يُستخدم مع SCN_RESUME=auto (يتجاوز SCN_FRESH=1).
+    """
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
+    if not token:
+        print("[resume] لا GITHUB_TOKEN — لا يمكن سحب checkpoint المرفوعة")
         return None
+    repo = os.environ.get("SCN_REPO", "aliahmed369000000-ai/Neural-Service-Mesh")
+    branch = os.environ.get("SCN_BRANCH", "main")
+    candidates = [
+        f"experiments/surah_chain_network/checkpoints/latest_pretrain_{TAG}.pt",
+        "experiments/surah_chain_network/checkpoints/latest_pretrain_torch.pt",
+    ]
+    import base64
+    import urllib.request
+
+    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    for rel in candidates:
+        u = f"https://raw.githubusercontent.com/{repo}/{branch}/{rel}"
+        dest = CKPT_DIR / rel.split("/")[-1]
+        try:
+            req = urllib.request.Request(u, headers={"Authorization": f"Basic {basic}", "User-Agent": "nsm-bot"})
+            with urllib.request.urlopen(req, timeout=60) as r:
+                if r.status != 200:
+                    continue
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(r.read())
+            print(f"[resume] سُحبت checkpoint المرفوعة: {rel}")
+            return dest
+        except Exception as e:
+            print(f"[resume] لم تُوجد {rel} ({type(e).__name__})")
+            if dest.exists():
+                dest.unlink()
+    return None
+
+
+def _pick_resume_path():
+    if FRESH and SCN_RESUME != "auto":
+        return None
+    if SCN_RESUME == "auto":
+        # استئناف تلقائي: المرفوع على GitHub له الأولوية (آخر تدريب ناجح)،
+        # ثم المحلي (جولة سابقة منقطعة)
+        remote = _fetch_uploaded_checkpoint()
+        if remote is not None:
+            return remote
     if RESUME_PATH:
         p = Path(RESUME_PATH)
         return p if p.exists() else None
@@ -433,6 +542,9 @@ def main():
                 break
         train_meta["best_loss"] = best
         m.save(str(CKPT_LATEST), train_meta=train_meta)
+        # ── NSM: رفع checkpoint دوري إلى GitHub كل CHECKPOINT_EVERY عصور ──
+        if CHECKPOINT_EVERY > 0 and (ep - start_epoch) % CHECKPOINT_EVERY == 0:
+            _upload_checkpoint(ep)
         print(f"epoch {ep:03d}/{end_epoch}  loss={mean_l:.4f}  lr={m.lr:.6f}{mark}")
 
     elapsed = time.time() - t0

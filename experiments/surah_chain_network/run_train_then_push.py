@@ -137,6 +137,9 @@ def main() -> int:
     env.setdefault("SCN_EPOCHS", "30")
     env.setdefault("SCN_BATCH", "24")
     env.setdefault("SCN_FRESH", "1")
+    # استئناف تلقائي من checkpoint المرفوعة على GitHub (حتى مع FRESH=1)
+    env.setdefault("SCN_RESUME", "auto")
+    env.setdefault("SCN_CHECKPOINT_EVERY", "2")
     env.setdefault("PYTHONUNBUFFERED", "1")
 
     print("=" * 60)
