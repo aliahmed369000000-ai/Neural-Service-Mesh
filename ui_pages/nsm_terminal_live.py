@@ -4,7 +4,8 @@ NSM Terminal Live — تيرمنال حي بنمط Tmux داخل المتصفح
 ثلاث لوحات:
 1. 🖥️ Live  — إدخال مباشر (بدون form) + بث حي للمخرجات لحظة بلحظة
 2. 🚀 Kaggle — حالة وlogs kernels مع أوامر kg* مدمجة
-3. 🧠 Smart — اقتراحات LLM + aliases قابلة للتخصيص
+3. 🤖 الوكلاء — طرفية خاصة لكل وكيل من وكلاء المشروع التسعة (صلاحيات + سجل + تدقيق)
+4. 🧠 Smart — اقتراحات LLM + aliases قابلة للتخصيص
 
 يعتمد على:
 - ai/nsm_terminal.py (المحرك: جلسات، صلاحيات، kg shortcuts)
@@ -103,11 +104,14 @@ def render_nsm_terminal_live():
     sid = st.session_state.nsm_live_session
     sess = term.get_session(sid)
 
-    live_tab, kaggle_tab, smart_tab = st.tabs(["🖥️ Live", "🚀 Kaggle", "🧠 Smart"])
+    live_tab, kaggle_tab, agents_tab, smart_tab = st.tabs(
+        ["🖥️ Live", "🚀 Kaggle", "🤖 الوكلاء", "🧠 Smart"])
     with live_tab:
         _render_live(term, sess, sid)
     with kaggle_tab:
         _render_kaggle(term, sess, sid)
+    with agents_tab:
+        _render_agents()
     with smart_tab:
         _render_smart(term, sess, sid)
 
@@ -335,3 +339,114 @@ def _render_smart(term, sess, sid):
 
     st.caption("ملاحظة: السجل الكامل (التدقيق) محفوظ في ai/nsm_terminal.py ويُقرأ "
                "عبر امر `audit` داخل التيرمنال.")
+
+
+# ══════════════════════ 4. الوكلاء ══════════════════════
+
+def _render_agents():
+    """🆕 طرفية خاصة لكل وكيل — طرفية دائمة + صلاحيات + سجل + تدقيق مستقل.
+    يعتمد على ai/agent_terminals.py (مدير طرفيات الوكلاء)."""
+    st.markdown("**🤖 طرفيات الوكلاء** — كل وكيل له طرفية خاصة به لا يشاركها غيره")
+    st.caption("""كل وكيل من وكلاء "🤖 وكلاء AI" التسعة يملك طرفية دائمة مستقلة:
+    جلسة خاصة · مجلد مقيد (scope) · قائمة أوامر مسموحة وممنوعة · سجل تدقيق JSONL منفصل.
+    الأوامر المحظورة تُرفض فورًا (exit 126) وتُسجَّل في التدقيق حتى عند الرفض.""")
+
+    at_ok = True
+    try:
+        from ai.agent_terminals import get_agent_terminals
+        at = get_agent_terminals()
+    except Exception as e:
+        at, at_ok = None, False
+        st.error(f"⚠️ تعذّر تحميل ai/agent_terminals.py: {e}")
+        return
+
+    # شريط اختيار الوكيل
+    agents = at.list_agents()
+    names = [a.key for a in agents]
+    sel_key = st.selectbox(
+        "اختر وكيلًا لعرض طرفيته:",
+        options=names,
+        format_func=lambda k: next((a.title for a in agents if a.key == k), k),
+        key="nsm_live_agent_sel",
+    )
+    a = next((x for x in agents if x.key == sel_key), None)
+    if not a:
+        return
+
+    # بطاقات خلاصة الوكيل
+    b1, b2, b3, b4 = st.columns(4)
+    with b1:
+        st.metric("الدور", a.role_ar or a.role)
+    with b2:
+        st.metric("النطاق", a.scope)
+    with b3:
+        st.metric("Kaggle CLI", "✅ نعم" if a.kaggle_cli else "❌ لا")
+    with b4:
+        st.metric("أوامر منفذة", a.cmd_count)
+
+    st.markdown(f"**session** `{a.session_id}` · **cwd** `{a.cwd}` · **mode** `{a.mode}`")
+
+    # تنفيذ أمر باسم الوكيل
+    c1, c2 = st.columns([4, 1])
+    with c1:
+        cmd = st.text_input(
+            f"أمر لوكيل `{sel_key}`",
+            key="nsm_live_agent_cmd",
+            placeholder="مثال: git status" if sel_key == "coding" else "مثال: ls",
+            label_visibility="collapsed",
+        )
+    with c2:
+        if st.button("▶️ نفّذ", key="nsm_live_agent_run", use_container_width=True,
+                     disabled=not cmd.strip()):
+            with st.spinner("تنفيذ باسم الوكيل…"):
+                r, _ = at.run(sel_key, cmd.strip())
+                st.session_state["_nsm_live_agent_result"] = {
+                    "ok": r.ok, "out": r.stdout, "err": r.stderr,
+                    "cmd": r.cmd, "cwd": r.cwd, "exit": r.exit_code,
+                }
+                st.rerun()
+
+    res = st.session_state.get("_nsm_live_agent_result")
+    if res:
+        with st.expander(
+            f"نتيجة `{res['cmd']}` — {'✅' if res['ok'] else '❌'}",
+            expanded=True):
+            if res.get("out"):
+                st.code(res["out"], language="text")
+            if res.get("err"):
+                st.caption(f"خطأ: {res['err'][:600]}")
+            st.caption(f"exit {res['exit']} · cwd {res['cwd']}")
+
+    st.markdown("---")
+    # صلاحيات الوكيل
+    with st.expander("🔐 صلاحيات الوكيل الحالية", expanded=False):
+        perms = at.agent_permissions(sel_key)
+        try:
+            import json as _json
+            st.code(_json.dumps(perms, ensure_ascii=False, indent=2, default=str),
+                    language="json")
+        except Exception:
+            st.caption(str(perms))
+
+    # سجل أوامر الوكيل
+    hist = at.agent_history(sel_key, limit=20)
+    with st.expander(f"📜 سجل أوامر الوكيل ({len(hist)})", expanded=True):
+        if hist:
+            rows = [[h.get("cmd", ""), h.get("exit_code", ""),
+                     str(h.get("stdout", ""))[:120]] for h in hist]
+            st.table(rows)
+        else:
+            st.caption("لا أوامر منفذة بعد لهذه الطرفية.")
+
+    # التدقيق الخاص بالوكيل
+    aud = at.agent_audit(sel_key, limit=15)
+    with st.expander(f"🔍 سجل التدقيق الخاص بالوكيل ({len(aud)})", expanded=True):
+        if aud:
+            for ev in aud:
+                mark = "✅" if ev.get("allowed") else "❌"
+                st.markdown(
+                    f"{mark} `{ev.get('cmd','')}` — "
+                    f"allowed={ev.get('allowed')} · {ev.get('reason','')[:120]}",
+                )
+        else:
+            st.caption("لا أحداث تدقيق مسجلة بعد.")

@@ -247,7 +247,7 @@ class NSMTerminal:
     def __init__(self, root: Optional[Path] = None):
         self.root = Path(root or ROOT).resolve()
         self._sessions: Dict[str, TerminalSession] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # reentrant — تسمح بالتداخل (create_session يُستدعى داخل lock من طرفيات الوكلاء)
         self._jobs: Dict[str, BackgroundJob] = {}
         self._procs: Dict[str, subprocess.Popen] = {}
         self._jobs_lock = threading.Lock()
@@ -359,6 +359,12 @@ class NSMTerminal:
                                if s.agent == agent_id), None)
         if agent_sess is None:
             agent_sess = self.create_session(mode="safe", agent=agent_id)
+            # 🆕 قيّد cwd بالوكيل (scope) — قد لا يكون الدور مسجلاً وقت إنشاء الجلسة
+            # لأن التسجيل يحدث متأخرًا في دورة الطرفيات، فنقيّد هنا أيضًا:
+            start, why = self.role_manager.scoped_cwd(agent_id,
+                                                      Path(agent_sess.cwd).resolve())
+            if str(start) != agent_sess.cwd:
+                agent_sess.cwd = str(start)
         if session_id is None:
             session_id = agent_sess.id
         allowed, reason = self.role_manager.check(agent_id, cmd, is_kaggle_cli=is_kaggle_cli)
@@ -369,7 +375,7 @@ class NSMTerminal:
             r = CommandResult(ok=False, cmd=cmd, cwd=agent_sess.cwd,
                               exit_code=126, stdout="", stderr=reason, duration_ms=0,
                               mode="safe", error=reason)
-            self._push_history(agent_sess, r)
+            # 🆕 الرفض لا يُدوَّن في سجل الجلسة (audit يملكه منفصلًا)
             return r
         r = self.run(cmd, session_id=session_id, mode="safe", timeout=timeout)
         return r

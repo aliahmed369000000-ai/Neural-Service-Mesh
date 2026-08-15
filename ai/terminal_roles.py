@@ -25,6 +25,18 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 ROOT = Path(__file__).resolve().parent.parent
 
+
+def get_root() -> Path:
+    """الجذر الفعلي للمشروع — يُقرأ ديناميكيًا من ai/nsm_terminal إن كان
+    مستبدلًا (اختبارات/تكوينات خاصة)، وإلا يعود لجذر هذه الوحدة."""
+    try:
+        import ai.nsm_terminal as _nt
+        if _nt.ROOT is not None and _nt.ROOT != ROOT:
+            return Path(_nt.ROOT)
+    except Exception:
+        pass
+    return ROOT
+
 _ROLE_NAMES = ("owner", "admin", "agent", "sandbox")
 
 # ───────────────────────────── سجل التدقيق ─────────────────────────────
@@ -158,11 +170,14 @@ class TerminalRoleManager:
         extra_allowed: Optional[str] = None,
         extra_denied: Optional[List[str]] = None,
         can_kaggle: Optional[bool] = None,
+        safe_list: Optional[List[str]] = None,
     ) -> None:
         """يسجل وكيلًا بدور وقيود خاصة:
         scope  => مجلد مقيد يتحرك داخله فقط (نسبي لجذر المشروع)
         extra_allowed => نمط regex لأوامر إضافية مسموحة
         extra_denied => كلمات محظورة لهذا الوكيل تحديدًا
+        safe_list => قائمة أوامر مسموحة حصرية للوكيل (تتخطى قائمة safe العامة).
+        إن حددت فهي القائمة الكاملة المسموحة (بدون union مع القائمة العامة).
         """
         if role not in _ROLE_NAMES:
             role = "agent"
@@ -176,12 +191,18 @@ class TerminalRoleManager:
             overrides["extra_denied"] = [str(d) for d in extra_denied]
         if can_kaggle is not None:
             overrides["can_use_kaggle_cli"] = bool(can_kaggle)
+        if safe_list is not None:
+            try:
+                overrides["safe_list"] = [str(s).lower() for s in safe_list]
+            except Exception:
+                overrides["safe_list"] = None
         with self._lock:
             self._agent_overrides[agent_id] = overrides
             if scope:
                 try:
-                    p = (ROOT / scope).resolve()
-                    p.relative_to(ROOT)
+                    _root = get_root()
+                    p = (_root / scope).resolve()
+                    p.relative_to(_root)
                     self._agent_scopes[agent_id] = p
                 except Exception:
                     self._agent_scopes[agent_id] = None
@@ -258,10 +279,36 @@ class TerminalRoleManager:
                 r"^(cd|export|unset|snapshot|alias)(\s|$)", low):
             return False, f"الأوامر الإدارية ({low.split()[0]}) محظورة لدور {role_name}"
 
+        # ── قائمة الوكيل الحصرية (safe_list) ──
+        sl = ov.get("safe_list")
+        if sl is not None:
+            first = low.split()[0] if low.split() else ""
+            _hit = any(
+                low == s.strip() or low.startswith(s.strip()) or first == s.strip()
+                for s in sl)
+            if not _hit:
+                return False, (f"الأمر محظور على الوكيل {agent_id} — "
+                               f"مسموح فقط: {', '.join(sl[:10])}...")
+
         # ── نمط regex إضافي مسموح ──
         rx = ov.get("allow_regex")
         if rx and isinstance(rx, re.Pattern) and rx.search(c):
             return True, ""
+
+        # ── القائمة الآمنة الافتراضية (default_safe_prefixes_only) ──
+        # الأدوار المقيّدة (agent/sandbox) تُحصَر في قائمة الأوامر الآمنة
+        # الافتراضية؛ الأدوار الحرة (owner/admin) تتخطاها:
+        if perms.default_safe_prefixes_only:
+            from ai.nsm_terminal import _SAFE_PREFIXES as _safe_prefixes
+            _in = False
+            for p in _safe_prefixes:
+                p = p.strip()
+                if low == p or low.startswith(p):
+                    _in = True
+                    break
+            if not _in:
+                return False, (f"الأمر خارج قائمة الوكيل الآمنة الافتراضية "
+                               f"— دور {role_name} مقيد بالأوامر الأساسية")
 
         # ── مشغلات shell ──
         if perms.allow_shell_operators:
