@@ -15,6 +15,7 @@ NSM Terminal Engine — أفضل طرفية للوكلاء والواجهة
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
@@ -62,6 +63,29 @@ _BLOCKED = (
 _MAX_LOG_BYTES = 2_000_000  # 2MB — تدوير تلقائي لمنع نمو غير محدود
 _MAX_SESSIONS = 40  # حد أقصى للجلسات المتزامنة — إخلاء الأقدم نشاطاً عند التجاوز
 _SESSION_TTL_SECONDS = 6 * 3600  # جلسات خاملة أكثر من 6 ساعات تُخلى تلقائياً
+
+# 🆕 aliases قابلة للتخصيص + حفظ/استعادة جلسات
+
+def _cfg_dir() -> Path:
+    return ROOT / "config"
+
+def _aliases_path() -> Path:
+    return _cfg_dir() / "terminal_aliases.json"
+
+def _sessions_snapshot_path() -> Path:
+    return ROOT / "memory" / "terminal_sessions_snapshot.json"
+_DEFAULT_ALIASES: Dict[str, str] = {
+    "gs": "git status --short --branch",
+    "gl": "git log -12 --oneline --decorate",
+    "gd": "git diff --stat HEAD",
+    "py": "python3",
+    "pi": "python3 -m pip",
+    "tc": "python3 -m py_compile",
+    "pt": "python3 -m pytest -q --tb=line",
+    "kstat": "kaggle kernels status",
+    "klog": "kaggle kernels logs",
+    "kls": "kaggle kernels list",
+}
 
 
 def _now() -> str:
@@ -141,6 +165,7 @@ class TerminalSession:
     created_at: str = field(default_factory=_now)
     last_active_ts: float = field(default_factory=time.time)
     env: Dict[str, str] = field(default_factory=dict)  # 🆕 متغيرات export مستمرة داخل الجلسة
+    agent: str = ""  # 🆕 معرف الوكيل المالك للجلسة (فارغ => مالك بشري)
 
     def to_dict(self) -> dict:
         return {
@@ -150,6 +175,7 @@ class TerminalSession:
             "history_len": len(self.history),
             "created_at": self.created_at,
             "env": dict(self.env),
+            "agent": self.agent,
             "last": self.history[-1] if self.history else None,
         }
 
@@ -227,15 +253,140 @@ class NSMTerminal:
         self._jobs_lock = threading.Lock()
         self._default_id: Optional[str] = None  # يُضبط بعد إنشاء الجلسة الافتراضية أدناه
         self._default_id = self.create_session(mode="safe").id
+        # 🆕 aliases قابلة للتخصيص (تُحمّل من config/terminal_aliases.json إن وُجدت)
+        self.aliases: Dict[str, str] = dict(_DEFAULT_ALIASES)
+        self._load_aliases()
+        # 🆕 طبقة الصلاحيات الدقيقة وسجل التدقيق
+        from ai.terminal_roles import get_role_manager, register_default_agents
+        self.role_manager = get_role_manager()
+        try:
+            register_default_agents()
+        except Exception:
+            pass
 
-    def create_session(self, mode: str = "safe", cwd: Optional[str] = None) -> TerminalSession:
+    # ─────────────── 🆕 aliases + حفظ/استعادة ───────────────
+    def _load_aliases(self) -> None:
+        try:
+            if _aliases_path().exists():
+                custom = json.loads(_aliases_path().read_text(encoding="utf-8"))
+                if isinstance(custom, dict):
+                    self.aliases.update({k: v for k, v in custom.items() if isinstance(v, str)})
+        except Exception:
+            pass
+
+    def save_aliases(self) -> bool:
+        """يحفظ aliases الحالية إلى config/terminal_aliases.json."""
+        try:
+            _aliases_path().parent.mkdir(parents=True, exist_ok=True)
+            _aliases_path().write_text(json.dumps(self.aliases, ensure_ascii=False, indent=2),
+                                       encoding="utf-8")
+            return True
+        except Exception:
+            return False
+
+    def set_alias(self, name: str, cmd: str) -> Tuple[bool, str]:
+        name = name.strip()
+        if not re.match(r"^[A-Za-z_][A-Za-z0-9_-]*$", name):
+            return False, f"اسم غير صالح: {name}"
+        if not cmd.strip():
+            return False, "الأمر فارغ"
+        self.aliases[name] = cmd.strip()
+        self.save_aliases()
+        return True, f"alias {name}={cmd.strip()}"
+
+    def del_alias(self, name: str) -> Tuple[bool, str]:
+        if name in self.aliases:
+            del self.aliases[name]
+            self.save_aliases()
+            return True, f"alias {name} محذوف"
+        return False, f"لا يوجد alias: {name}"
+
+    def _expand_alias(self, cmd: str) -> str:
+        first, _, rest = cmd.partition(" ")
+        if first in self.aliases:
+            return self.aliases[first] + (" " + rest if rest else "")
+        return cmd
+
+    def save_sessions_snapshot(self) -> bool:
+        """يحفظ حالة الجلسات الحالية (بدون السجل الكامل) لاستعادتها عند إعادة التشغيل."""
+        try:
+            data = [{"id": s.id, "cwd": s.cwd, "mode": s.mode, "agent": s.agent,
+                     "env": dict(s.env), "created_at": s.created_at}
+                    for s in self._sessions.values()]
+            _sessions_snapshot_path().parent.mkdir(parents=True, exist_ok=True)
+            _sessions_snapshot_path().write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                                                 encoding="utf-8")
+            return True
+        except Exception:
+            return False
+
+    def restore_sessions_snapshot(self) -> int:
+        """يستعيد الجلسات من آخر snapshot — يعيد العدد فقط (السجل يبقى في JSONL)."""
+        restored = 0
+        try:
+            if not _sessions_snapshot_path().exists():
+                return 0
+            data = json.loads(_sessions_snapshot_path().read_text(encoding="utf-8"))
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                sid = str(item.get("id", ""))
+                if sid == self._default_id or sid in self._sessions:
+                    continue
+                s = TerminalSession(
+                    id=sid, cwd=str(item.get("cwd", self.root)),
+                    mode=item.get("mode", "safe"), agent=str(item.get("agent", "")),
+                    env={k: v for k, v in item.get("env", {}).items() if isinstance(v, str)},
+                    created_at=str(item.get("created_at", _now())),
+                )
+                with self._lock:
+                    self._sessions[sid] = s
+                restored += 1
+        except Exception:
+            pass
+        return restored
+
+    # ─────────────── 🆕 أوامر وكيل (agent run) ───────────────
+    def run_agent(self, agent_id: str, cmd: str, session_id: Optional[str] = None,
+                  timeout: int = _DEFAULT_TIMEOUT) -> CommandResult:
+        """تنفيذ أمر باسم وكيل — يفحص صلاحيات الدور، يسجل في audit، ويلتزم بـscope.
+        الأوامر تبدأ بـkaggle (مسافات) تعالج كمجموعة Kaggle CLI."""
+        cmd = (cmd or "").strip()
+        is_kaggle_cli = cmd.lower().startswith("kaggle ") or cmd == "kaggle"
+        # افتح أو أعد استخدام جلسة الوكيل (لكل وكيل جلسة باسمه إن لم توجد)
+        with self._lock:
+            agent_sess = next((s for s in self._sessions.values()
+                               if s.agent == agent_id), None)
+        if agent_sess is None:
+            agent_sess = self.create_session(mode="safe", agent=agent_id)
+        if session_id is None:
+            session_id = agent_sess.id
+        allowed, reason = self.role_manager.check(agent_id, cmd, is_kaggle_cli=is_kaggle_cli)
+        self.role_manager.record(agent_id, cmd, allowed, reason, extra={
+            "is_kaggle_cli": is_kaggle_cli, "cwd": agent_sess.cwd,
+        })
+        if not allowed:
+            r = CommandResult(ok=False, cmd=cmd, cwd=agent_sess.cwd,
+                              exit_code=126, stdout="", stderr=reason, duration_ms=0,
+                              mode="safe", error=reason)
+            self._push_history(agent_sess, r)
+            return r
+        r = self.run(cmd, session_id=session_id, mode="safe", timeout=timeout)
+        return r
+
+    def create_session(self, mode: str = "safe", cwd: Optional[str] = None,
+                       agent: str = "") -> TerminalSession:
         sid = uuid.uuid4().hex[:10]
         start = Path(cwd).resolve() if cwd else self.root
         try:
             start.relative_to(self.root)
         except Exception:
             start = self.root
-        sess = TerminalSession(id=sid, cwd=str(start), mode=mode if mode in ("safe", "admin") else "safe")
+        # 🆕 قيد cwd بالوكيل عبر TerminalRoleManager
+        if agent:
+            start, _ = self.role_manager.scoped_cwd(agent, start)
+        sess = TerminalSession(id=sid, cwd=str(start), mode=mode if mode in ("safe", "admin") else "safe",
+                               agent=agent)
         with self._lock:
             self._sessions[sid] = sess
             self._evict_stale_locked()
@@ -405,6 +556,9 @@ class NSMTerminal:
         env_extra: Optional[Dict[str, str]] = None,
     ) -> CommandResult:
         cmd = (cmd or "").strip()
+        # 🆕 توسيع aliases (gs => git status ...) — لا ينطبق على الأوامر المدمجة الخاصة
+        if not cmd.startswith(("cd", "export", "unset", "pwd", "clear")):
+            cmd = self._expand_alias(cmd)
         sess = self.get_session(session_id)
         sess.last_active_ts = time.time()
         if mode in ("safe", "admin"):
@@ -434,12 +588,83 @@ class NSMTerminal:
             r = self._handle_export(sess, cmd)
             self._push_history(sess, r)
             return r
+        # 🆕 أوامر aliases: alias / alias name=cmd / unalias name
+        if cmd == "alias" or cmd.startswith("alias "):
+            body = cmd[len("alias"):].strip()
+            if not body:
+                listing = "\n".join(f"{k}={v}" for k, v in self.aliases.items()) or "(لا توجد)"
+                r = CommandResult(ok=True, cmd=cmd, cwd=sess.cwd, exit_code=0,
+                                  stdout=listing, stderr="", duration_ms=0, mode=sess.mode)
+            else:
+                if body.startswith("rm ") or body.startswith("delete "):
+                    ok2, msg = self.del_alias(body.split(None, 1)[1].strip())
+                elif "=" in body:
+                    name, _, value = body.partition("=")
+                    ok2, msg = self.set_alias(name.strip(), value)
+                else:
+                    ok2, msg = (body in self.aliases, self.aliases.get(body, "غير معرّف"))
+                r = CommandResult(ok=ok2, cmd=cmd, cwd=sess.cwd, exit_code=0 if ok2 else 1,
+                                  stdout=msg if ok2 else "", stderr="" if ok2 else msg,
+                                  duration_ms=0, mode=sess.mode)
+            self._push_history(sess, r)
+            return r
+        # 🆕 audit — عرض سجل التدقيق لآخر N أوامر
+        if cmd == "audit" or cmd.startswith("audit "):
+            try:
+                n = int(cmd.split()[1]) if len(cmd.split()) > 1 else 30
+                events = self.role_manager.audit_events(limit=min(n, 200))
+                lines = [json.dumps(e, ensure_ascii=False) for e in events]
+                r = CommandResult(ok=True, cmd=cmd, cwd=sess.cwd, exit_code=0,
+                                  stdout="\n".join(lines) or "(سجل فارغ)", stderr="",
+                                  duration_ms=0, mode=sess.mode)
+            except Exception as e:
+                r = CommandResult(ok=False, cmd=cmd, cwd=sess.cwd, exit_code=1,
+                                  stdout="", stderr=str(e), duration_ms=0, mode=sess.mode)
+            self._push_history(sess, r)
+            return r
+        # 🆕 snapshot — حفظ/استعادة حالة الجلسات
+        if cmd == "snapshot save" or cmd == "snapshot save_now":
+            ok2 = self.save_sessions_snapshot()
+            r = CommandResult(ok=ok2, cmd=cmd, cwd=sess.cwd, exit_code=0 if ok2 else 1,
+                              stdout="حُفظ snapshot" if ok2 else "فشل الحفظ",
+                              stderr="" if ok2 else "فشل الحفظ", duration_ms=0, mode=sess.mode)
+            self._push_history(sess, r)
+            return r
+        if cmd == "snapshot restore":
+            n = self.restore_sessions_snapshot()
+            r = CommandResult(ok=True, cmd=cmd, cwd=sess.cwd, exit_code=0,
+                              stdout=f"استُعيدت {n} جلسة", stderr="",
+                              duration_ms=0, mode=sess.mode)
+            self._push_history(sess, r)
+            return r
         if cmd == "unset" or cmd.startswith("unset "):
             r = self._handle_unset(sess, cmd)
             self._push_history(sess, r)
             return r
 
+        # 🆕 أوامر Kaggle shortcuts (kg status/logs/list/output)
+        _kag_ok, _kag_key, _kag_args = self._match_kaggle_cmd(cmd)
+        if _kag_ok:
+            r = self._run_kaggle_cmd(sess, cmd, _kag_key, _kag_args)
+            self._push_history(sess, r)
+            return r
+
         if sess.mode != "admin":
+            # 🆕 أوامر kaggle CLI للوكلاء المسجلين لا تحتاج mode=admin
+            # (الفحص الدوراني جرى أصلًا في run_agent قبل الوصول هنا)
+            is_kag = cmd.lower().startswith("kaggle ") or cmd == "kaggle"
+            if is_kag and sess.agent and self.role_manager.role_of(sess.agent).get(
+                    "can_use_kaggle_cli"):
+                allowed2, _ = self.role_manager.check(
+                    sess.agent, cmd, is_kaggle_cli=True)
+                if allowed2:
+                    # جهّز البيئة ثم نفذ مباشرة (كـ kaggle CLI للوكيل)
+                    env = os.environ.copy()
+                    env["PYTHONUNBUFFERED"] = "1"
+                    env.update(sess.env)
+                    if env_extra:
+                        env.update(env_extra)
+                    return self._run_shell(sess, cmd, time.time(), env, timeout)
             ok, reason = self._is_safe_command(cmd)
             if not ok:
                 r = CommandResult(
@@ -453,11 +678,36 @@ class NSMTerminal:
         env["PYTHONUNBUFFERED"] = "1"
         env["TERM"] = "xterm-256color"
         env.update(sess.env)  # 🆕 متغيرات export المستمرة الخاصة بالجلسة
-        # strip tokens from child env display risk — keep for git if needed but redact output
         if env_extra:
             env.update(env_extra)
-
         t0 = time.time()
+        return self._run_shell(sess, cmd, t0, env, timeout)
+
+    # ── Kaggle shortcuts ──────────────────────────────
+    @staticmethod
+    def _match_kaggle_cmd(cmd: str):
+        try:
+            from ai.terminal_smart import is_kaggle_cmd
+            return is_kaggle_cmd(cmd)
+        except Exception:
+            return False, None, []
+
+    def _run_kaggle_cmd(self, sess, cmd, key, args):
+        from ai.terminal_smart import KAGGLE_COMMANDS
+        t0 = time.time()
+        try:
+            exit_code, stdout, stderr = KAGGLE_COMMANDS[key](args)
+        except Exception as e:
+            return CommandResult(ok=False, cmd=cmd, cwd=sess.cwd, exit_code=1,
+                                 stdout="", stderr=str(e), duration_ms=0, mode=sess.mode)
+        return CommandResult(
+            ok=exit_code == 0, cmd=cmd, cwd=sess.cwd, exit_code=exit_code,
+            stdout=stdout, stderr=stderr, duration_ms=int((time.time() - t0) * 1000),
+            mode=sess.mode, error=(stderr or "") if exit_code != 0 else "",
+        )
+
+    def _run_shell(self, sess, cmd, t0, env, timeout):
+        # منطق subprocess التنفيذي المشترك (يُستخدم من run ومن bypass kaggle CLI)
         try:
             proc = subprocess.run(
                 cmd,
@@ -489,7 +739,7 @@ class NSMTerminal:
                 ok=False, cmd=cmd, cwd=sess.cwd, exit_code=124,
                 stdout="", stderr="", duration_ms=int((time.time() - t0) * 1000),
                 mode=sess.mode, error=f"timeout after {timeout}s",
-            )
+            )  # placeholder
         except Exception as e:
             r = CommandResult(
                 ok=False, cmd=cmd, cwd=sess.cwd, exit_code=1,

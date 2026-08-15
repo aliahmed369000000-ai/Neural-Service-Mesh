@@ -576,8 +576,9 @@ def push_kaggle_kernel(job_id: str) -> Dict[str, Any]:
         }
 
     try:
-        # اقرأ accelerator من metadata إن وُجد
+        # اقرأ accelerator من metadata إن وُجد، أو من NSM_ACCEL env override
         accel = "NvidiaTeslaT4"
+        env_accel = os.environ.get("NSM_ACCEL")
         meta_path = job_dir / "kernel-metadata.json"
         if meta_path.is_file():
             try:
@@ -588,6 +589,8 @@ def push_kaggle_kernel(job_id: str) -> Dict[str, Any]:
                     accel = ""
             except Exception:
                 pass
+        if env_accel:
+            accel = str(env_accel)
         cmd = ["kaggle", "kernels", "push", "-p", str(job_dir)]
         if accel:
             cmd += ["--accelerator", accel]
