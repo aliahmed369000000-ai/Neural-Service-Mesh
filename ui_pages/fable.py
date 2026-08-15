@@ -797,6 +797,42 @@ def render_fable():
                         "لمتابعة العمل بدون أي مفتاح."
                     )
 
+            # ── قالب تصميم النصوص والعناوين (Shorts/TikTok) ────────────
+            # المرجع الوحيد للقوالب المتاحة هو VideoEngine.CAPTION_TEMPLATES
+            # — أي قالب يُضاف هناك يظهر تلقائياً هنا دون تعديل الواجهة.
+            from ai.video_engine import VideoEngine as _CaptionTemplateVE
+            _tpl_options = list(_CaptionTemplateVE.CAPTION_TEMPLATES.keys())
+            _tpl_default = _tpl_options[0] if _tpl_options else "classic_pill"
+            selected_caption_tpl = st.selectbox(
+                "قالب تصميم النصوص فوق الفيديو",
+                options=_tpl_options,
+                index=_tpl_options.index("classic_pill") if "classic_pill" in _tpl_options else 0,
+                key="shorts_caption_template",
+                format_func=lambda k: (
+                    _CaptionTemplateVE.CAPTION_TEMPLATES[k]["name"]
+                    if k in _CaptionTemplateVE.CAPTION_TEMPLATES else k
+                ),
+                help=(
+                    "قوالب تصميم جاهزة للنصوص والعناوين مخصصة لفيديوهات "
+                    "Shorts وتيك توك، تُطبَّق على كل لقطة عند الرندر "
+                    "وتحافظ على العربية المنسّقة والخط العربي المُثبَّت "
+                    "بالمشروع: "
+                    + " | ".join(
+                        f"{_CaptionTemplateVE.CAPTION_TEMPLATES[k]['name']} "
+                        f"— {_CaptionTemplateVE.CAPTION_TEMPLATES[k]['desc']}"
+                        for k in _tpl_options
+                    )
+                ),
+            ) if _CaptionTemplateVE else _tpl_default
+            if selected_caption_tpl and _CaptionTemplateVE:
+                _tpl_info = _CaptionTemplateVE.CAPTION_TEMPLATES.get(selected_caption_tpl)
+                if _tpl_info:
+                    st.markdown(
+                        f'<div class="badge badge-blue" style="margin:0 0 0.4rem;">'
+                        f"💬 {_tpl_info['name']}</div>",
+                        unsafe_allow_html=True,
+                    )
+
             if st.button("🎬 أنشئ الفيديو الآن", type="primary", key="shorts_render_video_btn"):
                 try:
                     _spinner_msg = (
@@ -815,6 +851,7 @@ def render_fable():
                             use_background_music=use_bg_music if professional_mode else use_bg_music,
                             music_volume=0.09 if use_bg_music else 0.0,
                             cinematic_strategy=cinematic_strategy if use_cinematic_bg else "hero",
+                            caption_template=selected_caption_tpl,
                         )
                     st.session_state.shorts_mp4 = mp4_bytes
                     st.success("✅ تم إنتاج فيديو Shorts" + (" بجودة احترافية" if professional_mode else ""))

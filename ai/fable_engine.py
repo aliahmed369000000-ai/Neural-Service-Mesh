@@ -491,6 +491,7 @@ class FableEngine:
         wan_skip_spaces: Optional[set] = None,
         professional_mode: bool = True,
         cinematic_strategy: str = "hero",
+        caption_template: str = "classic_pill",
     ) -> bytes:
         """يبني mp4 فعلي (نص متحرك + صوت سرد) من ExplainerScript. يستدعي
         render_audio() تلقائياً إن لم يكن الصوت مولَّداً بعد. يرجع bytes
@@ -517,6 +518,11 @@ class FableEngine:
         التوفّر» بالواجهة) — تُستبعَد فوراً من أول مشهد بدل انتظار فشلها
         الفعلي (مهلة قد تصل 70-110 ثانية للاكتشاف). لا تأثير له إن
         cinematic_provider != "wan_free".
+
+        caption_template: قالب تصميم النصوص والعناوين (Shorts/TikTok) —
+        أحد مفاتيح VideoEngine.CAPTION_TEMPLATES (مثل "neon" أو
+        "headline")؛ افتراضياً "classic_pill". أي قيمة غير معروفة يتراجع
+        إليها النظام تلقائيًا داخل المحرك دون كسر.
 
         الاستيراد هنا داخلي (lazy) عمداً: لو moviepy/imageio-ffmpeg غير
         مثبَّتة بعد، باقي NSM (الشات، الوكلاء، إلخ) يستمر يشتغل طبيعياً
@@ -550,6 +556,7 @@ class FableEngine:
                 wan_skip_spaces=wan_skip_spaces,
                 professional_mode=professional_mode,
                 cinematic_strategy=cinematic_strategy,
+                caption_template=caption_template or "classic_pill",
             ).render(script)
         except ImportError as exc:
             raise RuntimeError(

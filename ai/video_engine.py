@@ -677,6 +677,50 @@ def _shape_arabic(text: str) -> str:
 class VideoEngine:
     """يحوّل ExplainerScript (مع صوت مُولَّد مسبقاً) إلى فيديو mp4 فعلي."""
 
+    # ── قوالب تصميم النصوص والعناوين الجاهزة (Shorts/TikTok) ────────
+    # كل قالب: style = نمط الرسم داخل _draw_caption ("pill"/"bottom"/
+    # "neon"/"headline"/"top"/"highlight"/"dramatic")، color = اللون
+    # الفاقع الافتراضي إن لم تُمرَّر accent_color، name/desc = العرض
+    # في الواجهة (عربية RTL) — قائمة CAPTION_TEMPLATES هي المرجع الوحيد
+    # للقوالب المتاحة؛ أي قالب جديد يُضاف هنا ويظهر تلقائيًا.
+    CAPTION_TEMPLATES = {
+        "classic_pill": {
+            "name": "حاجز ملوّن (الافتراضي)",
+            "desc": "نص عريض فوق حاجز ملوّن بالمنتصف — أعلى قابلية قراءة، أقرب لأسلوب CapCut/Submagic.",
+            "style": "pill", "color": (255, 199, 0),
+        },
+        "classic_lower": {
+            "name": "كلاسيكي أسفل الشاشة",
+            "desc": "نص أبيض بحد أسود أسفل الفيديو — نفس أسلوب اليوتيوب الكلاسيكي، لا يغطي وسط اللقطة.",
+            "style": "bottom", "color": None,
+        },
+        "neon": {
+            "name": "متوهّج (نيون)",
+            "desc": "نص أبيض متوهّج ملوّن بلا حاجز — تيرند تيك توك الأشهر، يعطي إحساس حيوي على الخلفيات الداكنة.",
+            "style": "neon", "color": (255, 92, 92),
+        },
+        "headline": {
+            "name": "عنوان ضخم",
+            "desc": "عنوان ثخين جدًّا (112) بحد أبيض وأسود بالمنتصف — Hook قوي يحبس العين في أول ثانية.",
+            "style": "headline", "color": (255, 255, 255),
+        },
+        "top_banner": {
+            "name": "شريط علوي",
+            "desc": "شريط داكن نصف شفاف أعلى الشاشة مع نص أبيض — مناسب للتحليل والأخبار.",
+            "style": "top", "color": None,
+        },
+        "highlighted": {
+            "name": "الكلمة البارزة",
+            "desc": "الكلمة الأولى بلون فاقع داخل حاجز + بقية النص أبيض — نمط الـHook السريع المنتشر.",
+            "style": "highlight", "color": (94, 211, 255),
+        },
+        "dramatic": {
+            "name": "دراماتيكي",
+            "desc": "نص أحمر دموي بحد أبيض سميك وظل أسود — قصص الغموض والإثارة والرعب.",
+            "style": "dramatic", "color": (205, 35, 35),
+        },
+    }
+
     def __init__(
         self,
         use_cinematic_backgrounds: bool = False,
@@ -687,8 +731,21 @@ class VideoEngine:
         wan_skip_spaces: Optional[set] = None,
         professional_mode: bool = False,
         cinematic_strategy: str = "hero",
+        caption_template: str = "classic_pill",
     ) -> None:
         self._font_path = _resolve_arabic_font()
+        # قالب التصميم النصي المستخدم فوق الفيديو (Shorts/TikTok):
+        #   classic_pill = حاجز ملوّن خلف النص بالمنتصف (الأسلوب الحالي)
+        #   classic_lower = نص أبيض بحد أسود أسفل الشاشة (يوتيوب الكلاسيكي)
+        #   neon = نص متوهّج ملوّن بلا حاجز (تيرند تيك توك)
+        #   headline = عنوان ضخم ثخين وسط الشاشة (Hook قوي)
+        #   top_banner = شريط علوي نصف شفاف مع نص (أخبار/تحليل)
+        #   highlighted = الكلمة الأولى بلون فاقع داخل حاجز صغير (CapCut)
+        #   dramatic = نص أحمر-أبيض دراماتيكي بحدّ سميك
+        # أي قيمة غير معروفة → يتراجع silently إلى classic_pill.
+        if caption_template not in VideoEngine.CAPTION_TEMPLATES:
+            caption_template = "classic_pill"
+        self._caption_template = caption_template
         # وضع احترافي لـ Shorts: جودة ترميز أعلى، شريط تقدّم، انتقالات أنعم،
         # تظليل vignette، وموسيقى محيطية خفيفة افتراضياً إن طُلب.
         self._professional_mode = bool(professional_mode)
@@ -831,7 +888,13 @@ class VideoEngine:
         text: str,
         font_size: int = 84,
         accent_color: Optional[Tuple[int, int, int]] = None,
+        template: Optional[str] = None,
     ) -> "Image.Image":
+        """يرسم عبارة نصية واحدة بأسلوب قالب التصميم المحدد (Shorts/TikTok).
+        template: معرّف قالب من CAPTION_TEMPLATES (مثل "neon", "headline").
+        إن لم يُحدَّد يُستخدم قالب الفيديو الافتراضي (self._caption_template).
+        accent_color: اللون الفاقع للقالب (يُختار تلقائيًا بالدوران على
+        _ACCENT_COLORS إن تركته None)."""
         from PIL import ImageDraw, ImageFont
 
         draw = ImageDraw.Draw(img, "RGBA")
@@ -845,6 +908,10 @@ class VideoEngine:
             )
             font = ImageFont.load_default()
 
+        _ct = VideoEngine.CAPTION_TEMPLATES
+        tpl = _ct.get(template or self._caption_template) or _ct["classic_pill"]
+        style = tpl["style"]
+        color = accent_color or tpl.get("color") or (255, 199, 0)
         # ⚠️ مهم جداً — ترتيب العمليات هنا يمنع مشكلة النص المشوّه/المبعثر:
         # يجب لفّ السطور بالترتيب المنطقي الأصلي (حسب الكلمات) *قبل* تطبيق
         # التشكيل (reshape) وBiDi. تطبيق get_display (الذي يعكس النص لترتيب
@@ -852,6 +919,8 @@ class VideoEngine:
         # مُعاد ترتيبه بصرياً بالفعل حسب عدّ الأحرف، فتُقطَّع الكلمات في
         # منتصف تسلسلها البصري وتظهر متكسّرة/معكوسة — بالضبط الخلل السابق.
         stroke_w = max(4, font_size // 14)
+        # سماكة الحد الموحّدة للقوالب (تُستخدم في highlight/dramatic).
+        sw1 = max(4, font_size // 14)
         logical_lines = textwrap.wrap(text, width=16) or [text]
         wrapped_lines = [_shape_arabic(line) for line in logical_lines]
 
@@ -863,33 +932,166 @@ class VideoEngine:
             line_widths.append(bbox[2] - bbox[0])
         total_h = sum(line_heights) + max(0, len(wrapped_lines) - 1) * 22
 
-        y = (FRAME_H - total_h) // 2
-
-        if accent_color is not None:
-            pad_x, pad_y = 44, 26
+        # ── قوالب التصميم الجاهزة (Shorts/TikTok) ────────────────────
+        # كل قالب يحدد مكان النص (y) وطريقة رسمه؛ القالب الافتراضي
+        # classic_pill هو سلوك الرسم الأصلي للحفاظ على التوافق التام.
+        if style == "bottom":
+            # كلاسيكي أسفل الشاشة: نص أبيض بحد أسود (بدون حاجز) — نفس أسلوب
+            # اليوتيوب الكلاسيكي، لا يغطي مركز الفيديو.
+            y = FRAME_H - total_h - max(180, int(FRAME_H * 0.12))
+            for line, lh, lw in zip(wrapped_lines, line_heights, line_widths):
+                x = (FRAME_W - lw) // 2
+                draw.text(
+                    (x, y), line, font=font,
+                    fill=(255, 255, 255), stroke_width=stroke_w + 2,
+                    stroke_fill=(0, 0, 0),
+                )
+                y += lh + 22
+            return img
+        if style == "neon":
+            # متوهّج: طبقة ظل ملونة (glow) خلف النص ثم نص أبيض نظيف —
+            # أسلوب منتشِر في تيرندات تيك توك، بلا أي حاجز.
+            y = (FRAME_H - total_h) // 2
+            glow = (color[0], color[1], color[2], 230)
+            for line, lh, lw in zip(wrapped_lines, line_heights, line_widths):
+                x = (FRAME_W - lw) // 2
+                draw.text((x + 2, y + 2), line, font=font, fill=glow)
+                draw.text((x - 2, y - 2), line, font=font, fill=glow)
+                draw.text((x + 2, y - 2), line, font=font, fill=glow)
+                draw.text((x - 2, y + 2), line, font=font, fill=glow)
+                draw.text(
+                    (x, y), line, font=font,
+                    fill=(255, 255, 255), stroke_width=max(2, font_size // 28),
+                    stroke_fill=color,
+                )
+                y += lh + 22
+            return img
+        if style == "headline":
+            # عنوان ضخم ثخين: خط أكبر (112) حدّ سميك أسود + ظل أبيض —
+            # Hook قوي لأول ثانية من الـShort.
+            big_font = font
+            if self._font_path:
+                try:
+                    big_font = ImageFont.truetype(self._font_path, 112)
+                except Exception:
+                    pass
+            big_lines = textwrap.wrap(text, width=10) or [text]
+            big_wrapped = [_shape_arabic(l) for l in big_lines]
+            b_heights, b_widths = [], []
+            for bl in big_wrapped:
+                bb = draw.textbbox((0, 0), bl, font=big_font, stroke_width=6)
+                b_heights.append(bb[3] - bb[1])
+                b_widths.append(bb[2] - bb[0])
+            b_total = sum(b_heights) + max(0, len(big_wrapped) - 1) * 26
+            y = (FRAME_H - b_total) // 2
+            for bl, bh, bw in zip(big_wrapped, b_heights, b_widths):
+                x = (FRAME_W - bw) // 2
+                draw.text((x, y), bl, font=big_font, fill=(0, 0, 0))
+                draw.text(
+                    (x, y), bl, font=big_font,
+                    fill=(255, 255, 255), stroke_width=6, stroke_fill=(0, 0, 0),
+                )
+                y += bh + 26
+            return img
+        if style == "top":
+            # شريط علوي نصف شفاف + نص داكن (أسلوب الأخبار والتحليل) —
+            # يترك ثلثي الشاشة سفلاً لللقطات.
+            pad_x, pad_y = 36, 22
             block_w = max(line_widths) + pad_x * 2
             block_h = total_h + pad_y * 2
             bx = (FRAME_W - block_w) // 2
-            by = y - pad_y
-            # ظل ناعم أسفل الحاجز (drop shadow) — يفصله بصرياً عن الخلفية
-            # ويعطي إحساس عمق/ارتفاع (elevation) بنفس أسلوب تصميم الحركة
-            # الاحترافي (Material/After Effects)، بدل الحاجز المستوي تماماً
-            # على الخلفية سابقاً.
+            by = max(120, int(FRAME_H * 0.10)) - pad_y
+            draw.rounded_rectangle(
+                [bx, by, bx + block_w, by + block_h],
+                radius=24, fill=(15, 15, 20, 205),
+            )
+            y = by + pad_y
+            for line, lh, lw in zip(wrapped_lines, line_heights, line_widths):
+                x = (FRAME_W - lw) // 2
+                draw.text(
+                    (x, y), line, font=font,
+                    fill=(255, 255, 255), stroke_width=max(2, font_size // 30),
+                    stroke_fill=(0, 0, 0),
+                )
+                y += lh + 22
+            return img
+        if style == "highlight":
+            # الكلمة الأولى ملونة داخل حاجز صغير + بقية النص أبيض —
+            # نمط CapCut السائد في فيديوهات الـHook السريعة.
+            words = text.strip().split()
+            first = words[0] if words else ""
+            rest = " ".join(words[1:]) if len(words) > 1 else ""
+            first_wrapped = [_shape_arabic(first)]
+            rest_wrapped = [_shape_arabic(l) for l in textwrap.wrap(rest, width=16)] if rest else []
+            fb = draw.textbbox((0, 0), first_wrapped[0], font=font, stroke_width=sw1)
+            fw, fh = fb[2] - fb[0], fb[3] - fb[1]
+            pad_x, pad_y = 28, 20
+            block_w = fw + pad_x * 2
+            block_h = fh + pad_y * 2
+            bx = (FRAME_W - block_w) // 2
+            by = (FRAME_H - block_h) // 2 - 60
             shadow_offset = 10
             draw.rounded_rectangle(
                 [bx + shadow_offset, by + shadow_offset,
                  bx + block_w + shadow_offset, by + block_h + shadow_offset],
-                radius=32, fill=(0, 0, 0, 90),
+                radius=28, fill=(0, 0, 0, 90),
             )
             draw.rounded_rectangle(
                 [bx, by, bx + block_w, by + block_h],
-                radius=32, fill=(*accent_color, 235),
+                radius=28, fill=(*color, 240),
             )
-            text_fill = (18, 14, 10)
-            stroke_fill = (255, 255, 255)
-        else:
-            text_fill = (255, 255, 255)
-            stroke_fill = (0, 0, 0)
+            draw.text(
+                (bx + (block_w - fw) // 2, by + pad_y), first_wrapped[0],
+                font=font, fill=(18, 14, 10), stroke_width=sw1, stroke_fill=(255, 255, 255),
+            )
+            y = by + block_h + 30
+            for line in rest_wrapped:
+                bb = draw.textbbox((0, 0), line, font=font, stroke_width=sw1)
+                lw = bb[2] - bb[0]
+                draw.text(
+                    ((FRAME_W - lw) // 2, y), line, font=font,
+                    fill=(255, 255, 255), stroke_width=sw1, stroke_fill=(0, 0, 0),
+                )
+                y += (bb[3] - bb[1]) + 22
+            return img
+        if style == "dramatic":
+            # دراماتيكي: نص أحمر دموي بحدّ أبيض سميك + ظل أسود —
+            # مناسب لقصص الغموض والإثارة (ترند الرعب).
+            y = (FRAME_H - total_h) // 2
+            for line, lh, lw in zip(wrapped_lines, line_heights, line_widths):
+                x = (FRAME_W - lw) // 2
+                draw.text((x + 3, y + 3), line, font=font, fill=(0, 0, 0, 180))
+                draw.text(
+                    (x, y), line, font=font,
+                    fill=(205, 35, 35), stroke_width=sw1 + 4, stroke_fill=(255, 255, 255),
+                )
+                y += lh + 22
+            return img
+
+        # classic_pill (الافتراضي — السلوك الأصلي):
+        y = (FRAME_H - total_h) // 2
+
+        pad_x, pad_y = 44, 26
+        block_w = max(line_widths) + pad_x * 2
+        block_h = total_h + pad_y * 2
+        bx = (FRAME_W - block_w) // 2
+        by = y - pad_y
+        # ظل ناعم أسفل الحاجز (drop shadow) — يفصله بصرياً عن الخلفية
+        # ويعطي إحساس عمق/ارتفاع (elevation) بنفس أسلوب تصميم الحركة
+        # الاحترافي (Material/After Effects)، بدل الحاجز المستوي تماماً
+        # على الخلفية سابقاً.
+        shadow_offset = 10
+        draw.rounded_rectangle(
+            [bx + shadow_offset, by + shadow_offset,
+             bx + block_w + shadow_offset, by + block_h + shadow_offset],
+            radius=32, fill=(0, 0, 0, 90),
+        )
+        draw.rounded_rectangle(
+            [bx, by, bx + block_w, by + block_h],
+            radius=32, fill=(*color, 235),
+        )
+        text_fill = (18, 14, 10)
+        stroke_fill = (255, 255, 255)
 
         for line, lh, lw in zip(wrapped_lines, line_heights, line_widths):
             x = (FRAME_W - lw) // 2
@@ -1047,7 +1249,14 @@ class VideoEngine:
             else:
                 from PIL import Image
                 frame_img = Image.new("RGBA", (FRAME_W, FRAME_H), (0, 0, 0, 0))
-            frame_img = self._draw_caption(frame_img, chunk_text, accent_color=accent)
+            # قالب التصميم المحدد في __init__ يحدد أسلوب رسم النص على كامل
+            # الفيديو؛ لون الأكسنت الدوّار يُمرَّر أيضًا فيُفضَّل على لون
+            # القالب (قوالب مثل highlight/neon/dramatic تستخدمه). القالب
+            # غير المعروف يتراجع تلقائيًا لـclassic_pill داخل الدالة.
+            frame_img = self._draw_caption(
+                frame_img, chunk_text, accent_color=accent,
+                template=getattr(self, "_caption_template", "classic_pill"),
+            )
             if getattr(self, "_professional_mode", False):
                 # تقدّم المشهد داخل الشريط الكلي للفيديو
                 total = max(1, int(getattr(self, "_pro_total_segments", 1)))
