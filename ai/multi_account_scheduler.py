@@ -324,10 +324,38 @@ def scheduler_tick(
                 if "complete" in raw:
                     jmeta["status"] = "complete"
                     jmeta["finished_at"] = _now()
+                    if not jmeta.get("alerted_complete"):
+                        try:
+                            from ai.training_alerts import alert_job_status
+                            alert_job_status(
+                                jid, "complete",
+                                account=jmeta.get("account") or "",
+                                kernel_url=jmeta.get("kernel_url") or "",
+                                preset=jmeta.get("preset") or "",
+                                n=jmeta.get("n") or 0,
+                                epochs=jmeta.get("epochs") or 0,
+                            )
+                        except Exception as exc:
+                            logger.warning("فشل تنبيه الاكتمال: %s", exc)
+                        jmeta["alerted_complete"] = True
                 elif any(t in raw for t in ("error", "failed", "cancelled")):
                     jmeta["status"] = "failed"
                     jmeta["finished_at"] = _now()
                     jmeta["failure_raw"] = (st.get("status_raw") or "")[-1000:]
+                    if not jmeta.get("alerted_failed"):
+                        try:
+                            from ai.training_alerts import alert_job_status
+                            alert_job_status(
+                                jid, "failed",
+                                account=jmeta.get("account") or "",
+                                kernel_url=jmeta.get("kernel_url") or "",
+                                preset=jmeta.get("preset") or "",
+                                n=jmeta.get("n") or 0,
+                                epochs=jmeta.get("epochs") or 0,
+                            )
+                        except Exception as exc:
+                            logger.warning("فشل تنبيه الفشل: %s", exc)
+                        jmeta["alerted_failed"] = True
                 elif "queued" in raw:
                     jmeta["status"] = "queued"
                 else:
@@ -358,8 +386,23 @@ def scheduler_tick(
             "providers": FALLBACK_PROVIDERS,
             "hint": "أضف حسابات Kaggle جديدة عبر NSM_KAGGLE_ACCOUNTS_JSON أو الملف المحلي",
         }
+        # تنبيه ذكي عند تفعيل الفشلوفر
+        try:
+            from ai.training_alerts import alert_fallback_activated
+            alert_fallback_activated()
+        except Exception as exc:
+            logger.warning("فشل تنبيه الفشلوفر: %s", exc)
         save_state(state)
         return summary
+
+    # 4) تنبيهات الكوتا (اقتراب النفاد)
+    try:
+        from ai.training_alerts import check_and_alert_quotas
+        summary["quota_alerts"] = check_and_alert_quotas(
+            [a["quota"] for a in [pick] if a.get("quota")]
+        )
+    except Exception as exc:
+        logger.warning("فشل فحص تنبيهات الكوتا: %s", exc)
 
     # 3) إطلاق مهمة جديدة على الحساب المختار
     res = run_training_job(

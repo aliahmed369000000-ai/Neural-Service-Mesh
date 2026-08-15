@@ -27,7 +27,7 @@ def render_scheduler_hub():
         "عند نفاد كل الكوتا: ينتقل تلقائيًا إلى Colab المجاني ثم Lightning AI (22 ساعة L4/شهر)."
     )
 
-    tab = st.tabs(["📊 الحالة والكوتا", "⚙️ إطلاق مهمة", "👥 الحسابات", "🔧 المزودات المجانية"])
+    tab = st.tabs(["📊 الحالة والكوتا", "⚙️ إطلاق مهمة", "🔔 التنبيهات", "👥 الحسابات", "🔧 المزودات المجانية"])
 
     with tab[0]:
         _tab_status(MAS)
@@ -36,9 +36,12 @@ def render_scheduler_hub():
         _tab_launch(MAS)
 
     with tab[2]:
-        _tab_accounts(MAS)
+        _tab_alerts()
 
     with tab[3]:
+        _tab_accounts(MAS)
+
+    with tab[4]:
         _tab_free_providers(FP, MAS)
 
 
@@ -125,6 +128,81 @@ def _tab_launch(MAS):
     with c[1]:
         if st.button("🔄 حدّث التقرير", use_container_width=True):
             st.rerun()
+
+
+def _tab_alerts():
+    """تبويب التنبيهات الذكية: سجل التنبيهات + الملخص + اختبار Discord."""
+    try:
+        from ai import training_alerts as TA
+    except ImportError:
+        st.warning("training_alerts غير متوفر — شغّل التطبيق من جذر المستودع")
+        return
+
+    try:
+        summary = TA.alerts_summary()
+    except Exception as e:
+        st.error(f"فشل تحميل الملخص: {e}")
+        return
+
+    st.markdown("###### ملخص التنبيهات")
+    c = st.columns(4)
+    metrics = [
+        ("📨 إجمالي", str(summary["total"])),
+        ("🟢 info", str(summary["by_severity"].get("info", 0))),
+        ("🟡 warning", str(summary["by_severity"].get("warning", 0))),
+        ("🔴 critical", str(summary["by_severity"].get("critical", 0))),
+    ]
+    for col, (label, val) in zip(c, metrics):
+        col.metric(label, val)
+
+    disc_ok = summary.get("discord_enabled")
+    st.markdown(
+        f"**حالة Discord:** {_badge(disc_ok)} {'مفعّل (DISCORD_BOT_TOKEN مضبوط)' if disc_ok else 'غير مفعّل — اضبط Secrets'}\n\n"
+        "التنبيهات تُرسَل تلقائيًا عند اكتمال/فشل مهمة تدريب أو اقتراب نفاد كوتا GPU المجانية. "
+        "الإرسال من داخل kernels Kaggle (بيئتها غير محجوبة)."
+    )
+
+    cc = st.columns(2)
+    with cc[0]:
+        if st.button("🧪 جرّب تنبيه Discord الآن", use_container_width=True):
+            with st.spinner("يرسل اختبارًا..."):
+                res = TA.record_alert(
+                    "ui_test", "info", "اختبار من لوحة المجدول",
+                    "هذه رسالة اختبار من تبويب التنبيهات — إذا وصلت لقناة Discord فكل شيء يعمل",
+                    subject="ui_test",
+                )
+                st.session_state["alert_test"] = res
+            res = st.session_state.get("alert_test")
+            if res and res.get("discord", {}).get("ok"):
+                st.success("✅ وصل تنبيه Discord!")
+            elif res:
+                d = res.get("discord") or {}
+                st.warning(
+                    f"سُجّل محليًا لكن Discord فشل: {(d.get('error') or d.get('reason') or '—')[:200]}\n\n"
+                    "ملاحظة: إرسال Discord من بيئة الاستضافة قد يكون محجوبًا — "
+                    "التنبيهات الحرجة تُرسَل من داخل kernels نفسها وتصل فعليًا."
+                )
+    with cc[1]:
+        if st.button("🔄 تحديث", use_container_width=True):
+            st.rerun()
+
+    st.markdown("###### سجل التنبيهات الأخير")
+    try:
+        alerts = TA.list_alerts(15)
+    except Exception as e:
+        st.error(f"فشل: {e}")
+        alerts = []
+    if not alerts:
+        st.info("لا توجد تنبيهات بعد — أول تنبيه يصل عند اكتمال/فشل مهمة تدريب.")
+    else:
+        for a in alerts:
+            sev = a.get("severity", "info")
+            icon = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}.get(sev, "📢")
+            sent = "✅ Discord" if (a.get("discord") or {}).get("ok") else "⏸ محلي فقط"
+            st.markdown(
+                f"- {icon} **[{a.get('kind')}]** {a.get('title')} — {(a.get('at') or '')[:19]} · {sent}\n"
+                f"  - {str(a.get('message', ''))[:200]}"
+            )
 
 
 def _tab_accounts(MAS):

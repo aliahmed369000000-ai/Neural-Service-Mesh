@@ -992,6 +992,7 @@ def generate_surahchain_kernel_script(
     auto_push: bool = True,
     repo: str = "aliahmed369000000-ai/Neural-Service-Mesh",
     branch: str = "main",
+    kernel_url: str = "",
 ) -> str:
     """سكربت Kaggle يشغّل run_train_then_push (تدريب ثم رفع لـ GitHub).
 
@@ -1075,14 +1076,65 @@ def generate_surahchain_kernel_script(
         # لا SystemExit: papermill يعتبره فشل الدفتر حتى لو التدريب نجح
         if r.returncode == 0:
             print("✅ انتهت الجولة بنجاح")
+            _notify("complete", 0)
         else:
             print("⚠ رمز الخروج", r.returncode, "— إن وُجدت checkpoints فالتدريب غالباً نجح")
+            _notify("failed", r.returncode)
     """)
-    return tmpl.replace("__JOB_ID__", job_id).replace("__REPO__", repo).replace(
+    # حقن نظام التنبيهات الذكي (training_alerts.py كـbase64 + notify wrapper)
+    return _inject_alerts(tmpl.replace("__JOB_ID__", job_id).replace("__REPO__", repo).replace(
         "__BRANCH__", branch).replace("__PRESET__", preset).replace(
         "__SCN_N__", str(n)).replace("__SCN_EPOCHS__", str(epochs)).replace(
         "__SCN_BATCH__", str(batch)).replace("__SCN_FRESH__", fresh_s).replace(
-        "__AUTO_PUSH__", push_s)
+        "__AUTO_PUSH__", push_s), job_id=job_id, kernel_url=kernel_url)
+
+
+_ALERTS_B64_CACHE: Dict[str, str] = {}
+
+
+def _alerts_module_b64() -> str:
+    """يُرمّز ai/training_alerts.py كـbase64 مرة واحدة ويعيد استخدامه."""
+    if not _ALERTS_B64_CACHE:
+        alerts_file = ROOT / "ai" / "training_alerts.py"
+        if alerts_file.is_file():
+            import base64 as _b
+            _ALERTS_B64_CACHE["b64"] = _b.b64encode(alerts_file.read_bytes()).decode()
+        else:
+            _ALERTS_B64_CACHE["b64"] = ""
+    return _ALERTS_B64_CACHE.get("b64", "")
+
+
+def _inject_alerts(script: str, job_id: str = "", kernel_url: str = "") -> str:
+    """يحضر نظام التنبيهات إلى رأس سكربت kernel: حمّل training_alerts.py من base64
+    وعرّف _notify(status, exit_code) الذي يرسل تنبيه Discord عند اكتمال/فشل المهمة.
+    بيئة Kaggle غير محجوبة على Discord لذا يصل الإشعار فعليًا.
+    """
+    b64 = _alerts_module_b64()
+    if not b64:
+        return script
+    alert_block = textwrap.dedent(f'''
+        # ── NSM Training Alerts (injected) ──
+        import base64 as _b64a, tempfile as _tf_a, importlib.util as _iu_a
+        _src_a = _b64a.b64decode("{b64}")  # noqa: B64
+        _f_a = _tf_a.NamedTemporaryFile("wb", suffix=".py", delete=False)
+        _f_a.write(_src_a); _f_a.close()
+        _sp_a = _iu_a.spec_from_file_location("training_alerts", _f_a.name)
+        _mod_a = _iu_a.module_from_spec(_sp_a); _sp_a.loader.exec_module(_mod_a)
+        def _notify(status, exit_code):
+            try:
+                _mod_a.alert_job_status(
+                    "{job_id}", status,
+                    account=os.environ.get("KAGGLE_USERNAME", ""),
+                    kernel_url="{kernel_url}",
+                    preset=os.environ.get("SCN_PRESET", ""),
+                    n=int(os.environ.get("SCN_N") or 0),
+                    epochs=int(os.environ.get("SCN_EPOCHS") or 0),
+                )
+            except Exception as _ne:
+                print("alerts:", _ne)
+        # ── end alerts ──
+    ''')
+    return alert_block + script
 
 
 def prepare_surahchain_kaggle_job(
@@ -1119,7 +1171,8 @@ def prepare_surahchain_kaggle_job(
     slug = _safe_slug(title or f"nsm-surahchain-{job_id}")
     effective_title = slug.replace("-", " ")
     script = generate_surahchain_kernel_script(
-        job_id, preset=preset, n=n, epochs=epochs, batch=batch, fresh=fresh, auto_push=auto_push
+        job_id, preset=preset, n=n, epochs=epochs, batch=batch, fresh=fresh, auto_push=auto_push,
+        kernel_url=f"https://www.kaggle.com/code/{user}/{_safe_slug(title or f'nsm-surahchain-{job_id}')}"
     )
     meta = generate_kernel_metadata(
         job_id,
