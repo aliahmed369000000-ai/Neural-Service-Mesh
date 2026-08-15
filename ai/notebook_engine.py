@@ -34,6 +34,7 @@ _NSK = {
     "restart_kernel": None,
     "shutdown_session": None,
     "kernel_health": None,
+    "interrupt_kernel": None,
 }
 try:
     from ai.nb_kernel import (  # noqa: E402
@@ -41,9 +42,11 @@ try:
         restart_kernel as _rk,
         run_cell_kernel as _rck,
         shutdown_session as _ss,
+        interrupt_kernel as _ik,
     )
     _NSK.update({"run_cell_kernel": _rck, "restart_kernel": _rk,
-                 "shutdown_session": _ss, "kernel_health": _kh})
+                 "shutdown_session": _ss, "kernel_health": _kh,
+                 "interrupt_kernel": _ik})
 except Exception:  # ipykernel غير متوفر — نبقى على الآلية القديمة
     pass
 
@@ -722,6 +725,56 @@ def run_cell(nb: Notebook, cell_id: str, timeout: int = _DEFAULT_TIMEOUT) -> Cel
     return cell
 
 
+def interrupt_cell(nb: Notebook, cell_id: str) -> Dict[str, Any]:
+    """🆕 إيقاف خلية معلّقة (Ctrl+C) دون قتل kernel والذاكرة المشتركة.
+    يدعم kernel الحقيقي (ipykernel)؛ للمسار القديم (subprocess) تُسجّل
+    علامة إيقاف لأن العملية لا تستمر بعد timeout أصلاً."""
+    target_running = any(c.id == cell_id and c.status == "running"
+                         for c in nb.cells)
+    if not target_running:
+        return {"ok": False, "error": "الخلية غير معلّقة حاليًا — لا شيء لإيقافه"}
+    kr = _NSK.get("interrupt_kernel")
+    if kr is not None and (nb.provider or "local") == "local":
+        try:
+            res = kr(nb.id)
+            if res.get("ok"):
+                for c in nb.cells:
+                    if c.id == cell_id and c.status == "running":
+                        c.outputs.append({"type": "stream", "name": "stderr",
+                                          "text": "⏹ توقّفت الخلية بطلب المستخدم (interrupt)"})
+                        break
+                save_notebook(nb)
+                return {"ok": True, "error": None}
+        except Exception:
+            pass
+    for c in nb.cells:
+        if c.id == cell_id and c.status == "running":
+            c.status = "idle"
+            c.outputs.append({"type": "stream", "name": "stderr",
+                              "text": "⏹ توقّفت الخلية بطلب المستخدم (interrupt)"})
+            break
+    save_notebook(nb)
+    return {"ok": False, "error": "لا kernel نشط — الخلية ستنتهي تلقائيًا بانتهاء المهلة"}
+
+
+def duplicate_notebook(nb: Notebook, new_name: Optional[str] = None) -> Notebook:
+    """🆕 استنساخ دفتر كامل بهوية جديدة — مثل Copy Notebook في Colab/Kaggle."""
+    import copy as _copy
+    clone = Notebook(id=uuid.uuid4().hex[:10], name=new_name or f"نسخة من {nb.name}",
+                     provider=nb.provider or "local")
+    clone.metadata = _copy.deepcopy(nb.metadata or {})
+    clone.cells = []
+    for c in nb.cells:
+        clone.cells.append(Cell(
+            id=uuid.uuid4().hex[:8],
+            type=c.type,
+            source=c.source,
+            metadata=_copy.deepcopy(c.metadata or {}),
+        ))
+    save_notebook(clone)
+    return clone
+
+
 def restart_kernel_session(nb_id: str) -> Dict[str, Any]:
     """🆕 يعيد تشغيل kernel الدفتر — ذاكرة صافية مثل Reset في Colab/Kaggle.
     غير مؤثرة في الدفاتر التي تعمل بالآلية القديمة (subprocess)."""
@@ -756,9 +809,12 @@ def nb_kernel_health() -> Dict[str, Any]:
 
 
 def run_all(nb: Notebook, timeout: int = _DEFAULT_TIMEOUT, stop_on_error: bool = True) -> List[dict]:
+    """🆕 تشغيل كل الخلايا بالترتيب — الحالة والمخرجات تُحفظ بعد كل خلية،
+    فترى الواجهة تقدّمًا حيًا (⏳→✅/❌) بدل انتظار النهاية الكاملة."""
     results = []
-    for cell in nb.cells:
+    for i, cell in enumerate(nb.cells, 1):
         if cell.type == "markdown":
+            cell.status = "idle"
             continue
         try:
             c = run_cell(nb, cell.id, timeout=timeout)
@@ -766,6 +822,10 @@ def run_all(nb: Notebook, timeout: int = _DEFAULT_TIMEOUT, stop_on_error: bool =
             if c.status == "error" and stop_on_error:
                 break
         except Exception as e:
+            cell.status = "error"
+            cell.outputs.append({"type": "stream", "name": "stderr",
+                                 "text": str(e)[:2000]})
+            save_notebook(nb)
             results.append({"id": cell.id, "status": "error", "error": str(e)})
             if stop_on_error:
                 break

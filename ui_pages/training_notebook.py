@@ -134,7 +134,10 @@ def render_training_notebook():
         delete_cell,
         delete_notebook,
         detect_compute,
+        duplicate_notebook,
         export_ipynb,
+        import_ipynb,
+        interrupt_cell,
         list_notebooks,
         load_notebook,
         move_cell,
@@ -143,6 +146,7 @@ def render_training_notebook():
         run_cell,
         save_notebook,
     )
+    import os
     from ai.notebook_lab_service import (
         PRESETS,
         feature_list_ar,
@@ -305,6 +309,43 @@ def render_training_notebook():
                 nb = create_notebook("SurahChain Kaggle Lab", template="surahchain")
                 st.session_state.nsm_nb_id = nb.id
                 st.rerun()
+            # 🆕 استيراد دفتر .ipynb (Colab/Kaggle) إلى المختبر
+            if st.button("⬆️ استيراد ipynb", use_container_width=True,
+                         key="nb_import_ask"):
+                st.session_state["nb_show_import"] = True
+                st.rerun()
+            if st.session_state.get("nb_show_import"):
+                up = st.file_uploader(".ipynb",
+                                      accept_multiple_files=False,
+                                      type=["ipynb", "json"],
+                                      key="nb_import_uploader",
+                                      label_visibility="collapsed")
+                if up is not None:
+                    import tempfile as _tf
+                    with _tf.NamedTemporaryFile(suffix=".ipynb", delete=False) as _f:
+                        _f.write(up.read())
+                        _tmp = _f.name
+                    try:
+                        nb = import_ipynb(_tmp, name=up.name.rsplit(".", 1)[0])
+                        st.session_state.nsm_nb_id = nb.id
+                        st.session_state.pop("nb_show_import", None)
+                        st.toast("تم استيراد الدفتر", icon="✅")
+                    except Exception as e:
+                        st.error(f"فشل الاستيراد: {e}")
+                    finally:
+                        try:
+                            os.unlink(_tmp)
+                        except Exception:
+                            pass
+                    st.rerun()
+                if st.button("إلغاء", use_container_width=True, key="nb_import_cancel"):
+                    st.session_state.pop("nb_show_import", None)
+                    st.rerun()
+            if st.button("⎘ استنساخ", use_container_width=True, key="nb_dup_ask"):
+                dup = duplicate_notebook(nb)
+                st.session_state.nsm_nb_id = dup.id
+                st.toast(f"استنسخ الدفتر: {dup.name}", icon="✅")
+                st.rerun()
             cur_id = st.session_state.get("nsm_nb_id")
             if st.session_state.get("nb_confirm_delete") == cur_id:
                 st.warning("حذف الدفتر نهائي — تأكيد؟")
@@ -338,9 +379,11 @@ def render_training_notebook():
         t1, t2, t3, t4, t5, t6 = st.columns(6)
         with t1:
             if st.button("▶️ Run All", use_container_width=True, key="nb_run_all"):
-                with st.spinner("تشغيل…"):
+                with st.spinner("تشغيل… الحالات تُحفظ بعد كل خلية"):
                     results = run_all(nb, timeout=int(timeout), stop_on_error=True)
-                st.toast(str(results)[:120], icon="✅")
+                n_ok = sum(1 for r in results if r.get("status") == "ok")
+                n_err = sum(1 for r in results if r.get("status") == "error")
+                st.toast(f"✅ {n_ok} · ❌ {n_err} من {len(results)} خلايا", icon="✅")
                 st.rerun()
         with t2:
             if st.button("➕ Code", use_container_width=True, key="nb_add_code"):
@@ -371,11 +414,22 @@ def render_training_notebook():
         # 🆕 شريط حالة kernel (Colab/Kaggle style): ذاكرة مستمرة بين الخلايا
         try:
             from ai.notebook_engine import nb_kernel_health, restart_kernel_session
+            from ai.nb_kernel import sessions_detail as _sd
             kbh = nb_kernel_health()
+            _sessions = _sd() if kbh.get("backend") == "kernel" else []
         except Exception:
             kbh = {"ipykernel_available": False, "backend": "subprocess", "active_sessions": 0}
+            _sessions = []
         kernel_ok = kbh.get("backend") == "kernel"
         sess = nb_kernel_summary(nb.id) if kernel_ok else None
+        # 🆕 عرض جلسات kernel النشطة للأمانة
+        if _sessions:
+            for _s in _sessions:
+                st.caption(
+                    f"⚙️ جلسة kernel `{_s['session_id'][:8]}…`: "
+                    f"{'حيّة 🟢' if _s['alive'] else 'ميتة 🔴'} · "
+                    f"Uptime {(_s['uptime_s'] or 0) // 60}د {_s['uptime_s'] % 60}ث"
+                )
         status_cols = st.columns([4, 1.4, 1.2])
         with status_cols[0]:
             st.markdown(
@@ -405,11 +459,31 @@ def render_training_notebook():
             badge = {"markdown": "📝", "code": "🐍", "bash": "💻", "train": "🏋️"}.get(cell.type, "•")
             status_icon = {"ok": "✅", "error": "❌", "running": "⏳", "idle": "⚪"}.get(cell.status, "⚪")
             with st.container():
-                h1, h2, h3, h4, h5, h6 = st.columns([1.4, 0.45, 0.45, 0.45, 0.45, 0.8])
+                h1, h2, h3, h4, h5, h6 = st.columns([1.6, 0.5, 0.45, 0.45, 0.45, 0.8])
+                _dur = None
+                for _o in (cell.outputs or [])[::-1]:
+                    if _o.get("duration_ms") is not None:
+                        _dur = _o["duration_ms"]
+                        break
+                dur_text = f" · {(_dur / 1000):.1f}ث" if _dur else ""
+                count_text = (f" · In[{cell.execution_count}]" if cell.execution_count else "")
                 with h1:
-                    st.markdown(f"**[{i}] {badge} {cell.type}** {status_icon} `{cell.id}`")
+                    st.markdown(
+                        f"**[{i}] {badge} {cell.type}** {status_icon}{dur_text}{count_text} "
+                        f"`{cell.id}`"
+                    )
                 with h2:
-                    if st.button("▶", key=f"run_{cell.id}"):
+                    if cell.status == "running":
+                        if st.button("⏹", key=f"int_{cell.id}"):
+                            from ai.notebook_engine import interrupt_cell as _ic
+                            with st.spinner("إيقاف…"):
+                                res = _ic(nb, cell.id)
+                            st.toast(
+                                "أُوقفت الخلية" if res.get("ok") else str(res.get("error"))[:80],
+                                icon="⏹" if res.get("ok") else "⚠️",
+                            )
+                            st.rerun()
+                    elif st.button("▶", key=f"run_{cell.id}"):
                         with st.spinner("…"):
                             run_cell(nb, cell.id, timeout=int(timeout))
                         st.rerun()

@@ -161,6 +161,24 @@ def kernel_health() -> Dict[str, Any]:
     }
 
 
+def sessions_detail() -> List[Dict[str, Any]]:
+    """🆕 تفاصيل كل جلسات kernel النشطة (uptime/alive) للواجهة."""
+    rows = []
+    for sid, entry in _KERNELS.items():
+        alive = False
+        try:
+            alive = entry["kc"].is_alive()
+        except Exception:
+            pass
+        rows.append({
+            "session_id": sid,
+            "alive": alive,
+            "started_at": entry.get("started_at"),
+            "uptime_s": int(time.time() - entry["started_at"]) if entry.get("started_at") else None,
+        })
+    return rows
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # تنفيذ خلية عبر kernel
 # ═══════════════════════════════════════════════════════════════════════════
