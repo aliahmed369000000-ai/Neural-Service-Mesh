@@ -974,6 +974,84 @@ class FableEngine:
         self._save_script_to_history(script, source_excerpt=source_text)
         return script
 
+    # ── 🆕 تعديل اللقطات يدوياً + وصف وهاشتاجات النشر الاجتماعي ────────
+    def rebuild_short_segments(
+        self,
+        segments_json: str,
+        original_segments: Optional[List["ExplainerSegment"]] = None,
+    ) -> List["ExplainerSegment"]:
+        """يعيد بناء قائمة اللقطات من نص JSON عدّله المستخدم في الواجهة.
+        يحافظ على الصوت المولَّد لكل لقطة (audio_bytes / word_timings)
+        من `original_segments` عند التطابق بالرقم — فلا يحتاج المستخدم
+        إعادة توليد الصوت بعد تعديل نصي فقط. يرفع ValueError عند فشل
+        التحليل أو عدم وجود لقطات صالحة."""
+        try:
+            data = json.loads(segments_json or "[]")
+            if isinstance(data, dict) and "segments" in data:
+                data = data["segments"]
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise ValueError(f"نص اللقطات غير صالح كـJSON: {exc}") from exc
+        if not isinstance(data, list):
+            raise ValueError("يتوقع JSON قائمة لقطات.")
+        rebuilt: List["ExplainerSegment"] = []
+        for i, item in enumerate(data):
+            if not isinstance(item, dict):
+                raise ValueError(f"اللقطة {i + 1} يجب أن تكون كائناً (dict).")
+            narration = str(item.get("narration") or "").strip()
+            if not narration:
+                continue
+            seg = ExplainerSegment(
+                index=i + 1,
+                narration=narration,
+                visual_notes=str(item.get("visual_notes") or ""),
+                est_seconds=max(2, int(item.get("est_seconds") or 5)),
+            )
+            if original_segments:
+                for orig in original_segments:
+                    if orig.index == seg.index:
+                        seg.audio_bytes = orig.audio_bytes
+                        seg.audio_format = orig.audio_format
+                        seg.audio_provider = orig.audio_provider
+                        seg.word_timings = orig.word_timings
+                        break
+            rebuilt.append(seg)
+        if not rebuilt:
+            raise ValueError("لا توجد لقطات صالحة بعد التعديل (كل سرد فارغ).")
+        return rebuilt
+
+    def generate_short_social_description(
+        self,
+        script: "ExplainerScript",
+    ) -> Dict[str, str]:
+        """يولّد عنوانَ نشر + وصف + هاشتاجات جاهزة لرفع الفيديو على
+        YouTube Shorts / TikTok. يعمل مع أي مزوّد متاح، وعند فشل LLM
+        يرجع وصفاً احتياطياً مولَّداً محلياً بلا أي مفتاح."""
+        narration = script.full_narration or ""
+        try:
+            sp = (
+                "اكتب وصفاً قصيراً جذاباً لفيديو قصير عربي ثم هاشتاجات "
+                "مرتفعة الوصول. أجب بصيغة JSON فقط: "
+                '{"title": "...", "description": "...", "hashtags": ["#ا","#b"]}'
+            )
+            result = self.llm.generate(
+                f"موضوع الفيديو:\n{narration[:1500]}", history=[], system_prompt=sp,
+            )
+            payload = json.loads(result.text or "{}")
+            return {
+                "title": str(payload.get("title") or script.title or ""),
+                "description": str(payload.get("description") or ""),
+                "hashtags": " ".join(payload.get("hashtags") or []),
+                "provider": getattr(result.provider, "value", str(result.provider)),
+            }
+        except Exception as exc:  # فشل LLM → وصف احتياطي مولّد محلياً
+            return {
+                "title": script.title or "شورت · NSM",
+                "description": (narration[:90] or script.title or "فيديو قصير").strip(),
+                "hashtags": "#شورتس #فيديو_قصير #arabic #shorts #reels",
+                "provider": "محلي",
+                "fallback_error": f"تعذّر توليد الوصف بالـLLM: {exc}",
+            }
+
     def _save_script_to_history(self, script: "ExplainerScript", source_excerpt: str = "") -> None:
         """يحفظ سيناريو Shorts/وثائقي في shorts_history — best-effort، لا
         يرفع استثناءً أبداً (فشل الحفظ لا يجوز أن يُفشل التوليد نفسه)."""

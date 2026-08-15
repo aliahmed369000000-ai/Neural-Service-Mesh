@@ -48,6 +48,71 @@ def render_fable():
         st.caption("🎨 اختر الوضع والراوي ثم ابدأ — يمكنك توجيه القصة بالخيارات في كل فصل.")
         cur = st.session_state.fable_chapter
 
+        # ── 🆕 جلسات القصص المحفوظة: القصص تُحفظ تلقائياً في قاعدة البيانات
+        #    (memory/fable.db) وتبقى متاحة حتى بعد إعادة تحميل الصفحة.
+        try:
+            _recent_sessions = engine.memory.list_recent_sessions(limit=10)
+        except Exception:  # noqa: BLE001
+            _recent_sessions = []
+        if _recent_sessions:
+            st.markdown("#### 📚 قصصي المحفوظة (تُحفظ تلقائياً)")
+            _saved_cols = st.columns(min(3, max(1, len(_recent_sessions))))
+            for _ci, (_sc, _srow) in enumerate(zip(_recent_sessions, _saved_cols)):
+                with _sc:
+                    _s_mode = STORY_MODES.get(_srow["mode"], {}).get("emoji", "📖")
+                    _s_char = CHARACTERS.get(_srow["character"], {}).get("emoji", "🖊️")
+                    try:
+                        _s_when = datetime.fromtimestamp(_srow["created_at"]).strftime("%m-%d %H:%M")
+                    except Exception:  # noqa: BLE001
+                        _s_when = ""
+                    st.markdown(
+                        f"{_s_mode} {_srow['mode']} · {_s_char} {_srow['character']} "
+                        f"<span style='color:var(--text-muted)'>{_s_when}</span>",
+                        unsafe_allow_html=True,
+                    )
+                    with st.container():
+                        _col_resume, _col_delete = st.columns(2)
+                        with _col_resume:
+                            if st.button(
+                                "▶️ استئناف",
+                                key=f"fable_resume_{_srow['session_id']}",
+                                use_container_width=True,
+                            ):
+                                # آخر فصل سردي محفوظ في الجلسة = نقطة الاستئناف
+                                _hist = engine.memory.get_history(
+                                    _srow["session_id"], limit=200,
+                                )
+                                _narr_rows = [
+                                    r for r in _hist if r["role"] == "narration"
+                                ]
+                                _prev_text = (
+                                    _narr_rows[-1]["content"] if _narr_rows else ""
+                                )
+                                if not _prev_text:
+                                    st.warning("⚠️ لا يوجد محتوى محفوظ لهذه الجلسة.")
+                                else:
+                                    st.session_state.fable_chapter = FableChapter(
+                                        session_id=_srow["session_id"],
+                                        text=_prev_text,
+                                        mode=_srow["mode"],
+                                        character=_srow["character"],
+                                        provider="مستأنفة من الحفظ",
+                                    )
+                                    st.rerun()
+                        with _col_delete:
+                            if st.button(
+                                "🗑️",
+                                key=f"fable_del_{_srow['session_id']}",
+                                use_container_width=True,
+                            ):
+                                try:
+                                    engine.memory.delete_session(_srow["session_id"])
+                                except Exception as e:  # noqa: BLE001
+                                    st.error(f"⚠️ تعذّر الحذف: {e}")
+                                else:
+                                    st.rerun()
+            st.divider()
+
         if cur is None:
             c1, c2 = st.columns(2)
             with c1:
@@ -521,6 +586,80 @@ def render_fable():
 
             with st.expander("📋 النص الكامل للسرد"):
                 st.text_area("النص الكامل:", value=short.full_narration, height=150, key="shorts_full_text")
+
+            # ── 🆕 محرر اللقطات: تعديل نص كل لقطة ومدة لقطة بصرياً ثم
+            #    إعادة بناء السيناريو (يُبقي الصوت المولّد للقطة عند
+            #    التطابق بالرقم فلا يلزم إعادة توليد الصوت لتعديل نصي). ──
+            with st.expander("✏️ تعديل اللقطات يدوياً (اختياري)"):
+                st.caption(
+                    "عدّل سرد أو وصف أي لقطة ثم اضغط «طبّق التعديلات» — "
+                    "الصوت المولّد للقطات غير المعدّلة يبقى كما هو. "
+                    "كل لقطة: {\"narration\": \"...\", \"visual_notes\": \"...\", \"est_seconds\": 5}"
+                )
+                _segs_editable = [
+                    {"index": s.index, "narration": s.narration,
+                     "visual_notes": s.visual_notes, "est_seconds": s.est_seconds}
+                    for s in short.segments
+                ]
+                st.session_state.setdefault("shorts_segments_json", json.dumps(
+                    _segs_editable, ensure_ascii=False, indent=1,
+                ))
+                # إعادة تهيئة محرر JSON عند تغيير السيناريو
+                if st.session_state.get("shorts_last_script_id") != short.title:
+                    st.session_state["shorts_segments_json"] = json.dumps(
+                        _segs_editable, ensure_ascii=False, indent=1,
+                    )
+                    st.session_state["shorts_last_script_id"] = short.title
+                st.session_state["shorts_segments_json"] = st.text_area(
+                    "اللقطات (JSON):", value=st.session_state["shorts_segments_json"],
+                    height=220, key="shorts_segments_editor",
+                )
+                _ed_cols = st.columns(2)
+                with _ed_cols[0]:
+                    if st.button("✅ طبّق التعديلات على السيناريو", key="shorts_apply_edit"):
+                        try:
+                            _new_segs = engine.rebuild_short_segments(
+                                st.session_state["shorts_segments_json"],
+                                original_segments=short.segments,
+                            )
+                            if len(_new_segs) != len(short.segments):
+                                st.warning(
+                                    f"⚠️ عدّلت عدد اللقطات: {len(short.segments)} ← {len(_new_segs)} "
+                                    "(الأصوات ستُعاد توليدها لللقطات المتغيرة)."
+                                )
+                            st.session_state.shorts_script.segments = _new_segs
+                            st.success("✅ طُبّقت التعديلات — يمكنك الآن معاينة الصوت أو رندر الفيديو.")
+                            st.rerun()
+                        except ValueError as e:
+                            st.error(f"⚠️ JSON غير صالح: {e}")
+                with _ed_cols[1]:
+                    if st.button("🔄 استعد السيناريو الأصلي", key="shorts_reset_edit"):
+                        st.session_state["shorts_segments_json"] = json.dumps(
+                            _segs_editable, ensure_ascii=False, indent=1,
+                        )
+                        st.rerun()
+
+            # ── 🆕 معاينة صوتية سريعة: يولّد صوت أول لقطة فقط للسماع قبل
+            #    الالتزام برندر كامل (يوفر دقائق من الانتظار). ──
+            _preview_cols = st.columns([1, 3])
+            with _preview_cols[0]:
+                if st.button("🔊 معاينة صوت اللقطة الأولى", key="shorts_voice_preview"):
+                    if short.segments:
+                        with st.spinner("يولّد عينة صوتية قصيرة..."):
+                            try:
+                                engine.render_audio(ExplainerScript(
+                                    topic=short.topic, title=f"معاينة · {short.title}",
+                                    segments=[short.segments[0]], format=short.format,
+                                ), voice=st.session_state.get("shorts_voice_select", ""))
+                                _prev_seg = short.segments[0]
+                                if _prev_seg.audio_bytes:
+                                    st.audio(_prev_seg.audio_bytes)
+                                else:
+                                    st.warning("⚠️ تعذّر توليد الصوت للقطعة — تخطّ للمعاينة الكاملة.")
+                            except Exception as e:  # noqa: BLE001
+                                st.error(f"⚠️ تعذّرت المعاينة الصوتية: {e}")
+                    else:
+                        st.warning("⚠️ لا توجد لقطات في السيناريو.")
                 _sc1, _sc2 = st.columns(2)
                 with _sc1:
                     st.download_button(
@@ -710,6 +849,67 @@ def render_fable():
                     except Exception as _srt_err:  # noqa: BLE001
                         logger.debug("تعذّر بناء ملف SRT لـShorts: %s", _srt_err)
 
+                st.markdown("---")
+                # ── 🆕 توليد تلقائي لعنوان النشر + الوصف + الهاشتاجات —
+                #    جاهز للنسخ أو للرفع (يدمج مع YouTubeAdapter أدناه). ──
+                st.markdown("#### 📤 بطاقة النشر الجاهزة (عنوان + وصف + هاشتاجات)")
+                st.caption(
+                    "يولّد بطاقة نشر كاملة بالذكاء الاصطناعي — صالحة لـ"
+                    "YouTube Shorts / TikTok / Reels. يمكن تعديل الحقول قبل النشر."
+                )
+                _card_btn, _regen_btn = st.columns([1, 3])
+                with _card_btn:
+                    if st.button("✨ أنشئ بطاقة النشر", key="shorts_gen_card"):
+                        with st.spinner("يكتب بطاقة النشر..."):
+                            try:
+                                _card = engine.generate_short_social_description(short)
+                                st.session_state.shorts_social_card = _card
+                            except Exception as e:  # noqa: BLE001
+                                st.session_state.shorts_social_card = {
+                                    "title": short.title,
+                                    "description": short.full_narration[:90],
+                                    "hashtags": "#شورتس #arabic #shorts",
+                                    "provider": "خطأ",
+                                    "fallback_error": str(e),
+                                }
+                _card = st.session_state.get("shorts_social_card")
+                if _card:
+                    with st.container():
+                        _card_fields = [
+                            ("عنوان الفيديو", "shorts_card_title", _card.get("title", "")),
+                            ("وصف النشر", "shorts_card_desc", _card.get("description", "")),
+                            ("الهاشتاجات", "shorts_card_tags", _card.get("hashtags", "")),
+                        ]
+                        for _fl, _fk, _fv in _card_fields:
+                            _fv = st.session_state.setdefault(_fk, _fv)
+                            _fv = st.text_area(_fl, value=_fv, height=60, key=_fk)
+                            st.session_state[_fk] = _fv
+                        st.caption(f"المزوّد: {_card.get('provider', '—')}" + (
+                            f" · ملاحظة: {_card['fallback_error']}" if _card.get("fallback_error") else ""
+                        ))
+                        _copy_cols = st.columns(2)
+                        with _copy_cols[0]:
+                            st.download_button(
+                                "⬇️ تحميل بطاقة النشر (نص)",
+                                data=(
+                                    f"العنوان:\n{st.session_state.get('shorts_card_title', '')}\n\n"
+                                    f"الوصف:\n{st.session_state.get('shorts_card_desc', '')}\n\n"
+                                    f"الهاشتاجات:\n{st.session_state.get('shorts_card_tags', '')}\n"
+                                ),
+                                file_name=f"{short.title[:30] or 'shorts'}_card.txt",
+                                mime="text/plain",
+                                key="shorts_card_download",
+                            )
+                        with _copy_cols[1]:
+                            _copy_button(
+                                (
+                                    f"{st.session_state.get('shorts_card_title', '')}\n\n"
+                                    f"{st.session_state.get('shorts_card_desc', '')}\n"
+                                    f"{st.session_state.get('shorts_card_tags', '')}"
+                                ),
+                                key="shorts_card_copy",
+                                label="📋 نسخ بطاقة النشر",
+                            )
                 st.markdown("---")
                 st.markdown("#### 📤 مشاركة اجتماعية فعلية (رفع الفيديو)")
                 try:
