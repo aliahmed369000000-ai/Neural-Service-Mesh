@@ -241,6 +241,233 @@ def pick_next_account(min_gpu_hours: float = MIN_QUOTA_HOURS) -> Optional[Dict[s
     return None
 
 
+# ─── Handoff نقاط التفتيش بين الحسابات ────────────────────────────────────
+
+def pull_kernel_checkpoints(job_id: str, into: Optional[Path] = None) -> Dict[str, Any]:
+    """يسحب مخرجات kernel Kaggle (تشمل checkpoints/*.pt وprogress_*.json المرفوعة
+    داخل kernel) إلى مجلد محلي — الخطوة الأولى في handoff قبل إيقاف kernel.
+    """
+    from ai.kaggle_provider import download_kaggle_output
+
+    res = download_kaggle_output(job_id)
+    if not res.get("ok"):
+        return res
+    out_dir = Path(res["output_dir"]) if res.get("output_dir") else None
+    into_dir = into or (SCHEDULER_DIR / "handoff" / job_id)
+    files_found = []
+    if out_dir and out_dir.is_dir():
+        try:
+            import shutil
+
+            for pat in ("checkpoints/*.pt", "checkpoints/*.json", "progress_*.json", "checkpoints/**/*"):
+                for f in out_dir.glob(pat):
+                    if f.is_file():
+                        rel = f.relative_to(out_dir)
+                        dest = into_dir / rel
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy(str(f), str(dest))
+                        files_found.append(str(rel))
+        except Exception as exc:
+            logger.warning("نسخ checkpoints فشل: %s", exc)
+    res["local_dir"] = str(into_dir) if into_dir else ""
+    res["checkpoint_files"] = files_found
+    return res
+
+
+def upload_handoff_checkpoint(
+    job_id: str,
+    from_account: str,
+    to_account: str,
+    files_dir: str = "",
+) -> Dict[str, Any]:
+    """يرفع آخر checkpoint من مهمة منتهية/موقوفة إلى GitHub كـhandoff رسمی.
+
+    يُستخدم قبل إيقاف kernel عند نفاد كوتا الحساب أو عند اكتشاف اكتمال/فشل مهمة،
+    حتى يستأنف الحساب التالي من آخر عصر (SCN_RESUME=auto يسحبها تلقائيًا).
+    """
+    if not (os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or os.environ.get("NSM_GITHUB_TOKEN")):
+        return {"ok": False, "error": "لا GITHUB_TOKEN — تخطي رفع الـhandoff"}
+    repo = os.environ.get("SCN_REPO", "aliahmed369000000-ai/Neural-Service-Mesh")
+    branch = os.environ.get("SCN_BRANCH", "main")
+    src_dir = Path(files_dir) if files_dir else (SCHEDULER_DIR / "handoff" / job_id)
+    if not src_dir.is_dir():
+        return {"ok": False, "error": f"لا مجلد checkpoints للحركة {src_dir}"}
+    tmp = Path("/tmp/nsm_handoff_push")
+    import shutil
+    import subprocess
+
+    shutil.rmtree(str(tmp), ignore_errors=True)
+    try:
+        token = (
+            os.environ.get("GITHUB_TOKEN")
+            or os.environ.get("GH_TOKEN")
+            or os.environ.get("NSM_GITHUB_TOKEN")
+            or ""
+        )
+        r = subprocess.run(
+            ["git", "clone", "-q", "--branch", branch,
+             f"https://x-access-token:{token}@github.com/{repo}.git", str(tmp)],
+            capture_output=True, text=True, timeout=300,
+        )
+        if r.returncode != 0:
+            return {"ok": False, "error": "clone فشل", "detail": r.stderr[-300:]}
+        dest = tmp / "experiments" / "surah_chain_network" / "checkpoints"
+        dest.mkdir(parents=True, exist_ok=True)
+        copied = []
+        # ملاحظة: pull_kernel_checkpoints ينسخ الملفات إلى local_dir/checkpoints/
+        # لكن يمكن أيضًا أن تكون الملفات مباشرة في src_dir
+        search_dirs = [src_dir]
+        if (src_dir / "checkpoints").is_dir():
+            search_dirs.append(src_dir / "checkpoints")
+        for pat in ("*.pt", "*.json"):
+            seen = set()
+            for sdir in search_dirs:
+                for f in sorted(sdir.glob(pat)):
+                    if f.name in seen:
+                        continue
+                    shutil.copy(str(f), str(dest / f.name))
+                    copied.append(f.name)
+                    seen.add(f.name)
+        subprocess.run(["git", "-C", str(tmp), "add", "-f", "experiments/surah_chain_network/checkpoints/"],
+                       capture_output=True, check=False)
+        st = subprocess.run(["git", "-C", str(tmp), "status", "--porcelain"], capture_output=True, text=True)
+        if not st.stdout.strip():
+            return {"ok": True, "skipped": True, "msg": "لا تغييرات جديدة"}
+        msg = (
+            f"NSM: checkpoint handoff من @{from_account} إلى @{to_account}"
+            f" (job {job_id})"
+        )
+        subprocess.run(
+            ["git", "-C", str(tmp), "-c", "user.email=nsm-bot@users.noreply.github.com",
+             "-c", "user.name=NSM Bot", "commit", "-q", "-m", msg],
+            capture_output=True, check=False,
+        )
+        r2 = subprocess.run(["git", "-C", str(tmp), "push", "-q", "origin", branch],
+                            capture_output=True, text=True, timeout=600)
+        if r2.returncode == 0:
+            return {
+                "ok": True,
+                "uploaded": copied,
+                "msg": msg,
+                "from": from_account,
+                "to": to_account,
+            }
+        return {"ok": False, "error": "push فشل", "detail": r2.stderr[-300:]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        shutil.rmtree(str(tmp), ignore_errors=True)
+
+
+def record_handoff(
+    from_account: str,
+    to_account: str,
+    job_id: str,
+    status: str = "success",
+    detail: str = "",
+) -> Dict[str, Any]:
+    """يسجّل عملية handoff في سجل مركزي scheduler_state.json".
+    """
+    state = load_state()
+    handoffs = state.setdefault("handoffs", [])
+    entry = {
+        "at": _now(),
+        "from_account": from_account,
+        "to_account": to_account,
+        "job_id": job_id,
+        "status": status,
+        "detail": detail or "",
+    }
+    handoffs.append(entry)
+    state["handoffs"] = handoffs[-100:]
+    save_state(state)
+    return entry
+
+
+def pause_kernel(job_id: str) -> Dict[str, Any]:
+    """يوقف kernel Kaggle بلطف عبر Kaggle API (cancel) — الجزء الاختياري من handoff.
+    الإيقاف ليس إلزاميًا: الـkernel قد يكون اكتمل أو فشل بالفعل، ونعالج ذلك بهدوء.
+    """
+    job_dir = ROOT / "artifacts" / "model_training" / "kaggle_jobs" / job_id
+    meta_path = job_dir / "kernel-metadata.json"
+    if not meta_path.is_file():
+        return {"ok": False, "error": "لا metadata"}
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    kernel_id = meta.get("id") or ""
+    if not kernel_id or not _kaggle_cli_available_local():
+        return {"ok": False, "error": "kaggle CLI غير متاح"}
+    try:
+        proc = subprocess.run(
+            ["kaggle", "kernels", "status", kernel_id],
+            capture_output=True, text=True, timeout=60,
+        )
+        st = (proc.stdout or "").strip()
+        if any(t in st.lower() for t in ("complete", "cancelled", "error")):
+            return {"ok": True, "already_done": True, "status": st}
+        proc2 = subprocess.run(
+            ["kaggle", "kernels", "stop", kernel_id],
+            capture_output=True, text=True, timeout=60,
+        )
+        out = (proc2.stdout or "") + "\n" + (proc2.stderr or "")
+        return {
+            "ok": proc2.returncode == 0 or "cancelled" in (out or "").lower(),
+            "cli_output": out[-500:],
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def _kaggle_cli_available_local() -> bool:
+    """فحص سريع لوجود kaggle CLI محليًا (دون الاعتماد على ensure_kaggle_env)."""
+    try:
+        r = subprocess.run(["kaggle", "--version"], capture_output=True, text=True, timeout=20)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def perform_handoff(
+    from_account: str,
+    to_account: str,
+    job_id: str,
+    pause_kernel_first: bool = True,
+) -> Dict[str, Any]:
+    """الخطوة الكاملة: إيقاف kernel (إن كان يعمل) + سحب checkpoints + رفعها إلى GitHub.
+
+    تُستدعى تلقائيًا من scheduler_tick عند نفاد كوتا حساب أو عند اكتمال/فشل مهمة
+    — الحساب التالي يستأنف تلقائيًا بفضل SCN_RESUME=auto.
+    """
+    result: Dict[str, Any] = {"ok": False, "job_id": job_id, "from": from_account, "to": to_account}
+
+    if pause_kernel_first:
+        try:
+            pa = pause_kernel(job_id)
+            result["pause"] = pa
+        except Exception as exc:
+            result["pause_error"] = str(exc)
+
+    try:
+        pull = pull_kernel_checkpoints(job_id)
+        result["pull"] = pull
+        if not pull.get("ok"):
+            record_handoff(from_account, to_account, job_id, "failed_pull", str(pull.get("error")))
+            return result
+    except Exception as exc:
+        result["pull_error"] = str(exc)
+        record_handoff(from_account, to_account, job_id, "failed_pull", str(exc))
+        return result
+
+    files_dir = pull.get("local_dir") or ""
+    uploaded = upload_handoff_checkpoint(job_id, from_account, to_account, files_dir)
+    result["upload"] = uploaded
+    if uploaded.get("ok"):
+        record_handoff(from_account, to_account, job_id, "success", ",".join(uploaded.get("uploaded") or []))
+    else:
+        record_handoff(from_account, to_account, job_id, "failed_upload", str(uploaded.get("error") or ""))
+    result["ok"] = uploaded.get("ok")
+    return result
+
+
 # ─── دورة المجدول ────────────────────────────────────────────────────────────
 
 def run_training_job(
@@ -338,6 +565,12 @@ def scheduler_tick(
                         except Exception as exc:
                             logger.warning("فشل تنبيه الاكتمال: %s", exc)
                         jmeta["alerted_complete"] = True
+                        # Handoff تلقائي: kernel اكتمل — تأكد أن آخر checkpoint
+                        # مرفوعة على GitHub قبل إطلاق المهمة على الحساب التالي
+                        try:
+                            _handoff_on_job_end(jid, jmeta, reason="complete")
+                        except Exception as hexc:
+                            logger.warning("فشل handoff عند الاكتمال: %s", hexc)
                 elif any(t in raw for t in ("error", "failed", "cancelled")):
                     jmeta["status"] = "failed"
                     jmeta["finished_at"] = _now()
@@ -356,6 +589,12 @@ def scheduler_tick(
                         except Exception as exc:
                             logger.warning("فشل تنبيه الفشل: %s", exc)
                         jmeta["alerted_failed"] = True
+                        # Handoff تلقائي: kernel فشل/أُوقف — ارفع checkpoint الأخيرة
+                        # قبل أن ينتقل التدريب إلى الحساب التالي
+                        try:
+                            _handoff_on_job_end(jid, jmeta, reason="failed")
+                        except Exception as hexc:
+                            logger.warning("فشل handoff عند الفشل: %s", hexc)
                 elif "queued" in raw:
                     jmeta["status"] = "queued"
                 else:
@@ -380,7 +619,14 @@ def scheduler_tick(
 
     pick = pick_next_account()
     if not pick:
-        # نفدت كوتا كل الحسابات — الفشلوفر إلى Colab/Lightning
+        # نفدت كوتا كل الحسابات — قبل الفشلوفر إلى Colab/Lightning،
+        # ارفع checkpoint آخر مهمة مكتملة/منتهية إلى GitHub إن وُجدت
+        try:
+            exhausted = _handoff_on_quota_exhaustion(jobs)
+            summary["handoff_on_exhaustion"] = exhausted
+        except Exception as exc:
+            logger.warning("فشل handoff عند نفاد الكوتا: %s", exc)
+            summary["handoff_on_exhaustion"] = {"ok": False, "error": str(exc)}
         summary["action"] = "all_accounts_exhausted"
         summary["fallback"] = {
             "providers": FALLBACK_PROVIDERS,
@@ -394,6 +640,14 @@ def scheduler_tick(
             logger.warning("فشل تنبيه الفشلوفر: %s", exc)
         save_state(state)
         return summary
+
+    # 2ب) الحساب الحالي نفدت كوتاه ولكن توجد حسابات أخرى صالحة؟
+    #     (pick_next_account يتخطى الحساب المنفد تلقائيًا — لكن إن كانت المهمة
+    #      النشطة الوحيدة على حساب ينفد قريبًا نسجّل تنبيه handoff وقائي)
+    try:
+        _handoff_warning_on_low_quota(jobs, pick)
+    except Exception as exc:
+        logger.warning("فشل فحص الكوتا المنخفضة: %s", exc)
 
     # 4) تنبيهات الكوتا (اقتراب النفاد)
     try:
@@ -438,6 +692,65 @@ def scheduler_tick(
     return summary
 
 
+def _handoff_on_job_end(jid: str, jmeta: Dict[str, Any], reason: str) -> Dict[str, Any]:
+    """Handoff داخلي عند انتهاء مهمة (اكتمال/فشل): kernel انتهى من نفسه فلا نوقفه
+    بالقوة — نسحب checkpoints من مخرجاته ونرفعها إلى GitHub، ثم يسجّل الحدث.
+    """
+    acc = jmeta.get("account") or ""
+    res = perform_handoff(acc, acc, jid, pause_kernel_first=False)
+    try:
+        from ai.training_alerts import record_alert
+
+        record_alert(
+            f"handoff_{reason}", "info",
+            f"Handoff checkpoint — {jid} ({reason})",
+            (
+                f"اكتملت مهمة {jid} ({reason}) على حساب {acc}. "
+                f"Checkpoint الأخيرة رُفعت إلى GitHub حتى يستأنف الحساب التالي تلقائيًا. "
+                f"الحالة: {'نجح' if res.get('ok') else 'فشل'}"
+            ),
+            subject=f"handoff_{jid}",
+        )
+    except Exception as exc:
+        logger.warning("فشل تنبيه handoff: %s", exc)
+    return res
+
+
+def _handoff_on_quota_exhaustion(jobs: Dict[str, Any]) -> Dict[str, Any]:
+    """عند نفاد كوتا كل الحسابات: ابحث عن آخر مهمة منتهية حديثة وارفع checkpoint الأخيرة منها."""
+    recently_done = [
+        j for j in jobs.values()
+        if j.get("status") in ("complete", "failed") and j.get("finished_at")
+    ]
+    if not recently_done:
+        return {"ok": False, "reason": "لا مهام منتهية حديثة للـhandoff"}
+    # الأحدث أولًا
+    recently_done.sort(key=lambda j: j.get("finished_at", ""), reverse=True)
+    return _handoff_on_job_end(
+        recently_done[0]["job_id"],
+        recently_done[0],
+        reason="quota_exhausted",
+    )
+
+
+def _handoff_warning_on_low_quota(jobs: Dict[str, Any], pick: Dict[str, Any]) -> None:
+    """إن كانت مهمة نشطة على حساب كوته منخفضة جدًا، سجّل تحذير handoff وقائي."""
+    acc = pick.get("account") or {}
+    quota = pick.get("quota") or {}
+    rem = quota.get("gpu_remaining_hours") or 0.0
+    if rem <= ESTIMATED_SESSION_HOURS * 0.5:
+        active_on_account = [
+            j for j in jobs.values()
+            if j.get("status") in ("running", "queued") and (j.get("account") or "") == acc.get("username", "")
+        ]
+        for j in active_on_account:
+            record_handoff(
+                acc.get("username", ""), "<next>", j.get("job_id", ""),
+                "warning_low_quota",
+                f"كوتا منخفضة ({rem:.1f}h) — سيُنفَّذ handoff تلقائيًا عند اكتمال/فشل المهمة",
+            )
+
+
 # ─── واجهة عامة ──────────────────────────────────────────────────────────────
 
 def scheduler_report() -> Dict[str, Any]:
@@ -451,8 +764,24 @@ def scheduler_report() -> Dict[str, Any]:
         "active_jobs": [j for j in jobs if j.get("status") in ("running", "queued")],
         "all_jobs": jobs,
         "history": state.get("history", [])[-20:],
+        "handoffs": state.get("handoffs", [])[-10:],
+        "last_checkpoint": _last_handoff_checkpoint(state),
         "updated_at": state.get("updated_at"),
     }
+
+
+def _last_handoff_checkpoint(state: Dict[str, Any]) -> Dict[str, Any]:
+    """آخر handoff ناجح مع تفاصيلها — لعرض حالة الاستئناف التلقائي في الواجهة."""
+    for entry in reversed(state.get("handoffs", [])):
+        if entry.get("status") == "success":
+            return {
+                "at": entry.get("at"),
+                "job_id": entry.get("job_id"),
+                "from_account": entry.get("from_account"),
+                "to_account": entry.get("to_account"),
+                "files": (entry.get("detail") or "").split(","),
+            }
+    return {}
 
 
 def scheduler_cli(args: Optional[List[str]] = None) -> str:
@@ -481,6 +810,33 @@ def scheduler_cli(args: Optional[List[str]] = None) -> str:
 
     if cmd == "quota":
         return json.dumps(accounts_quota_status(), ensure_ascii=False, indent=2, default=str)
+
+    if cmd == "handoff":
+        # handoff <from_account> <to_account> <job_id>
+        if len(argv) < 4:
+            return "الاستخدام: handoff <الحساب_القديم> <الحساب_الجديد> <job_id> [stop_kernel 0|1]"
+        stop = "0"
+        try:
+            stop = argv[4]
+        except IndexError:
+            pass
+        res = perform_handoff(argv[1], argv[2], argv[3], pause_kernel_first=stop != "0")
+        return json.dumps(res, ensure_ascii=False, indent=2)
+
+    if cmd == "handoffs":
+        state = load_state()
+        entries = state.get("handoffs", [])
+        lines = ["── سجل handoffs ──"]
+        for h in entries[-20:]:
+            lines.append(
+                f"  [{h.get('at', '')[:19]}] {h.get('status')}: "
+                f"{h.get('job_id')} @{h.get('from_account')} → {h.get('to_account')} — {h.get('detail', '')}"
+            )
+        if len(entries) > 20:
+            lines.append(f"  ... و{len(entries) - 20} أخرى")
+        if len(entries) == 0:
+            lines.append("  لا handoffs حتى الآن — تُسجّل عند اكتمال/فشل مهمة أو نفاد الكوتا")
+        return "\n".join(lines)
 
     if cmd == "accounts":
         return json.dumps(load_accounts(), ensure_ascii=False, indent=2)

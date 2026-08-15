@@ -92,6 +92,33 @@ def _tab_status(MAS):
             for ev in hist[-10:]:
                 st.caption(f"• [{(ev.get('at') or '')[:19]}] {ev.get('event')} — {ev.get('job_id', '')} @{ev.get('account', '')}")
 
+    # سجل التبديل بين الحسابات (Checkpoint Handoff)
+    handoffs = report.get("handoffs") or []
+    last_ckpt = report.get("last_checkpoint")
+    st.markdown("###### 🔗 التبديل بين الحسابات (Checkpoint Handoff)")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.metric(
+            "آخر نقطة تفتيش على GitHub",
+            str(last_ckpt.get("job_id", "—") or "—"),
+            delta=str(last_ckpt.get("at", "")[:16] or "لا نقل بعد"),
+            help="آخر checkpoint رُفعت إلى GitHub قبل التبديل بين الحسابات (SCN_RESUME=auto يستأنفها تلقائيًا)",
+        )
+    with c2:
+        st.metric("إجمالي عمليات النقل", str(len(handoffs)))
+    if not handoffs:
+        st.info("لا توجد عمليات نقل بين الحسابات بعد — تُنفَّذ تلقائيًا عند نفاد كوتا الحساب أو انتهاء المهمة.")
+    else:
+        for h in handoffs[-10:]:
+            status = h.get("status") or ""
+            icon = {"success": "✅", "failed": "❌", "warning": "⚠️"}.get(status, "🔄")
+            reason = h.get("reason") or ("نفاد كوتا" if h.get("exhausted") else "اكتمال المهمة")
+            st.markdown(
+                f"- {icon} **{h.get('job_id')}**: `@{h.get('from_account')}` → `@{h.get('to_account')}` — "
+                f"{(h.get('at') or '')[:19]} · {reason}"
+            )
+            if h.get("pause_url"):
+                st.caption(f"  - kernel أُوقف: [{h['pause_url']}]({h['pause_url']})")
 
 def _tab_launch(MAS):
     """إطلاق دورة تدريب (tick) مع المعلمات."""
