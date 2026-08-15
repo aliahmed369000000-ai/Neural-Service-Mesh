@@ -74,6 +74,15 @@ EXPAND_WARMUP_RUN = int(os.environ.get("SCN_EXPAND_WARMUP_RUN", "4"))  # عصو�
 EXPAND_FLAT_REL = float(os.environ.get("SCN_EXPAND_FLAT_REL", "0.015"))  # هضبة: تذبذب نسبي صغير
 STOP_PATIENCE = int(os.environ.get("SCN_STOP_PATIENCE", "0"))
 UNTIL_END = os.environ.get("SCN_UNTIL_END", "0") == "1"
+# قانون التوافق مع البيانات (Data Co-Scaling, Chinchilla D≈ratio×N):
+# معطّل افتراضياً (SCN_DATA_GATE=0) فلا يغيّر أي سلوك حالي إطلاقاً.
+# عند التفعيل: يمنع التوسيع لو البيانات المتاحة تغطي أقل من الحد الأدنى
+# من احتياج Chinchilla للحجم الحالي للنموذج (لا يحسب حجم *بعد* التوسيع
+# لأن دلتا التوسيع الفردي صغيرة جداً مقابل الحجم الكلي — نفس منطق
+# EXPAND_FLAT_REL: قرار متحفظ لا يفشل بصمت).
+DATA_GATE = os.environ.get("SCN_DATA_GATE", "0") == "1"
+DATA_GATE_MIN_RATIO = float(os.environ.get("SCN_DATA_GATE_MIN_RATIO", "0.5"))
+CHINCHILLA_RATIO = float(os.environ.get("SCN_CHINCHILLA_RATIO", "20"))
 FRESH = os.environ.get("SCN_FRESH", "0") == "1"
 RESUME_PATH = os.environ.get("SCN_RESUME_PATH", "").strip()
 # ── NSM resume ذكي: "auto" يستأنف تلقائيًا من آخر checkpoint مرفوع على GitHub
@@ -340,6 +349,13 @@ def _pick_resume_path():
     return None
 
 
+def _estimate_total_tokens(texts) -> int:
+    """تقدير تقريبي (بلا tokenizer) لعدد التوكنات الكلي في مجموعة الجمل:
+    عدد الكلمات × 1.3 (معامل شائع لتوسّع subword في العربية). تقدير كافٍ
+    لقرار "كفاية بيانات" تحفّظي — لا يُستخدم في أي حساب تدريب فعلي."""
+    return int(sum(len(t.split()) for t in texts) * 1.3)
+
+
 def main():
     CKPT_DIR.mkdir(parents=True, exist_ok=True)
     print("=" * 60)
@@ -352,6 +368,13 @@ def main():
         sys.exit(1)
     print(f"مقاطع التدريب: {len(texts)}")
     print(f"عينة: {texts[0][:120]}...")
+
+    total_tokens_estimate = _estimate_total_tokens(texts)
+    if DATA_GATE:
+        print(
+            f"data-gate مفعّل: تقدير التوكنات≈{total_tokens_estimate:,} | "
+            f"حد أدنى={DATA_GATE_MIN_RATIO*100:.0f}% من Chinchilla (D≈{CHINCHILLA_RATIO:.0f}×N)"
+        )
 
     resume_path = _pick_resume_path()
     start_epoch = 0
@@ -517,6 +540,15 @@ def main():
             if len(window) >= 3:
                 weak_trend = window[-1] > window[0] - 1e-3  # لم ينخفض بوضوح من أول النافذة لآخرها
 
+            # قانون التوافق مع البيانات (معطّل افتراضياً، لا يغيّر السلوك الحالي)
+            data_ok = True
+            data_ratio = None
+            if DATA_GATE:
+                current_params = m.param_count().get("total", 0)
+                needed_tokens = CHINCHILLA_RATIO * max(1, current_params)
+                data_ratio = total_tokens_estimate / needed_tokens
+                data_ok = data_ratio >= DATA_GATE_MIN_RATIO
+
             can_expand = (
                 n_expands < MAX_EXPANDS
                 and no_improve >= PATIENCE
@@ -525,6 +557,7 @@ def main():
                 and since_expand >= EXPAND_COOLDOWN
                 and flat
                 and weak_trend
+                and data_ok
             )
             if can_expand:
                 info = m.expand_narrowest(delta=1)
@@ -557,6 +590,8 @@ def main():
                     reasons.append("not_flat")
                 if not weak_trend:
                     reasons.append("still_trending_down")
+                if not data_ok:
+                    reasons.append(f"data_gate({data_ratio*100:.1f}%<{DATA_GATE_MIN_RATIO*100:.0f}%)")
                 if reasons and (no_improve == PATIENCE or no_improve % 5 == 0):
                     print(f"  · لا توسيع بعد: {', '.join(reasons)}")
 
