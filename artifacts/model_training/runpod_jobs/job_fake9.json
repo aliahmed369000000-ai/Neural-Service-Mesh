@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "job_id": "job_fake9",
+  "endpoint_id": "ep_fake123",
+  "status": "COMPLETED",
+  "raw": {
+    "status": "COMPLETED",
+    "output": {
+      "files": [
+        "job_id.txt"
+      ]
+    }
+  },
+  "fetched_at": "2026-08-15T02:12:19.103310+00:00"
+}

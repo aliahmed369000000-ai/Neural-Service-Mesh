@@ -223,7 +223,7 @@ def render_training_notebook():
 
     # ═══════════ 1) إطلاق سريع ═══════════
     with lab_tabs[0]:
-        st.markdown("### ابدأ تدريباً على Kaggle GPU")
+        st.markdown("### ابدأ تدريباً على GPU سحابي (Kaggle أو RunPod)")
         health = lab_health()
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -259,25 +259,70 @@ def render_training_notebook():
         m5.metric("تقدير", cfg["eta_hours"] + "س")
         st.caption(cfg["desc"])
 
-        x1, x2 = st.columns(2)
-        with x1:
+        with st.expander("☁️ اختيار مزود التشغيل (Kaggle / RunPod) وتخصيص RunPod"):
+            prov = st.radio(
+                "المزود",
+                ["Kaggle (مجاني)", "RunPod (مدفوع — سحابة GPU)"],
+                index=0,
+                key="lab_provider_radio",
+            )
+            runpod_cfg = health.get("checks", {}).get("runpod_creds", {}) or {}
+            st.markdown(_badge(health.get("ready_to_launch_runpod", False), "RunPod", "أضف Secrets"))
+            if runpod_cfg.get("need"):
+                st.caption("المطلوب في Streamlit Secrets: " + "، ".join(str(x) for x in runpod_cfg["need"]))
+            man_epid = st.text_input(
+                "RUNPOD_ENDPOINT_ID (اختياري — يُنشأ تلقائيًا إن ترك فارغًا)",
+                value="",
+                key="lab_runpod_endpoint_id",
+            )
             fresh = st.checkbox("من الصفر (FRESH)", value=True, key="lab_fresh")
             if fresh:
                 st.caption("⚠️ سيبدأ التدريب من الصفر ويتجاوز أي checkpoint سابق محفوظ.")
-        with x2:
-            auto_push = st.checkbox("رفع تلقائي بعد النجاح", value=True, key="lab_autopush")
+            auto_push = st.checkbox("رفع تلقائي بعد النجاح (يتطلب GITHUB_TOKEN على المزود)", value=True, key="lab_autopush")
 
-        if st.button(
-            "▶ ابدأ التدريب على Kaggle الآن",
-            type="primary",
-            use_container_width=True,
-            key="lab_launch_btn",
-            disabled=not health.get("ready_to_launch_kaggle"),
-        ):
-            with st.spinner("تجهيز الـkernel ودفعه عبر Kaggle API…"):
-                res = launch_preset(preset_key, fresh=fresh, auto_push=auto_push)
-            st.session_state["lab_last_launch"] = res
-            st.rerun()
+        use_runpod = "RunPod" in (prov or "Kaggle (مجاني)")
+        if use_runpod:
+            if st.button(
+                "▶ ابدأ التدريب على RunPod الآن",
+                type="primary",
+                use_container_width=True,
+                key="lab_launch_runpod_btn",
+                disabled=not health.get("ready_to_launch_runpod"),
+            ):
+                with st.spinner("إنشاء/فحص Endpoint ودفع المهمة عبر RunPod API…"):
+                    try:
+                        from ai.notebook_lab_service import launch_runpod_preset
+                        res = launch_runpod_preset(
+                            preset_key,
+                            fresh=fresh,
+                            auto_push=auto_push,
+                            endpoint_id=(man_epid or None) or None,
+                        )
+                    except Exception as e:
+                        res = {"ok": False, "error": str(e)}
+                    res["provider"] = "runpod"
+                st.session_state["lab_last_launch"] = res
+                st.rerun()
+            if not health.get("ready_to_launch_runpod"):
+                st.warning(
+                    "ضع في **Streamlit Secrets**:\n\n"
+                    "```toml\nRUNPOD_API_KEY = \"...\"\n"
+                    "RUNPOD_TEMPLATE_ID = \"...\"\nGITHUB_TOKEN = \"...\"\n```\n\n"
+                    "أنشئ Serverless Template من RunPod console يعتمد "
+                    "`runpod/pytorch:2.5.1-py3.11-cuda12.1.1-dev` مع git وcurl."
+                )
+        else:
+            if st.button(
+                "▶ ابدأ التدريب على Kaggle الآن",
+                type="primary",
+                use_container_width=True,
+                key="lab_launch_btn",
+                disabled=not health.get("ready_to_launch_kaggle"),
+            ):
+                with st.spinner("تجهيز الـkernel ودفعه عبر Kaggle API…"):
+                    res = launch_preset(preset_key, fresh=fresh, auto_push=auto_push)
+                st.session_state["lab_last_launch"] = res
+                st.rerun()
 
         # تخصيص يدوي
         with st.expander("⚙️ تخصيص يدوي (يتجاوز القالب)"):
@@ -317,13 +362,23 @@ def render_training_notebook():
         if st.session_state.get("lab_last_launch"):
             res = st.session_state["lab_last_launch"]
             if res.get("ok"):
-                st.success(res.get("msg_ar") or "تم دفع المهمة إلى Kaggle")
+                provider_name = "RunPod" if res.get("provider") == "runpod" else "Kaggle"
+                st.success(res.get("msg_ar") or f"تم دفع المهمة إلى {provider_name}")
                 if res.get("kernel_url"):
                     st.markdown(f"**رابط المتابعة:** [{res['kernel_url']}]({res['kernel_url']})")
-                st.info(
-                    "بعد البدء: راقب Logs على Kaggle. ابحث عن `--- 2) التدريب ---`. "
-                    "GITHUB_TOKEN في Kaggle Secrets مطلوب للرفع النهائي."
-                )
+                if res.get("endpoint_id"):
+                    st.code(f"endpoint_id: {res['endpoint_id']}  |  job_id: {res.get('job_id')}")
+                if res.get("provider") == "runpod":
+                    st.info(
+                        "راقب المهمة عبر تبويب البيئة → RunPod، أو `curl /status` على endpoint. "
+                        "بعد الاكتمال يُرفع المستودع تلقائيًا إن وُجد GITHUB_TOKEN. "
+                        "التكلفة تظهر في RunPod console (GPU ساعة)."
+                    )
+                else:
+                    st.info(
+                        "بعد البدء: راقب Logs على Kaggle. ابحث عن `--- 2) التدريب ---`. "
+                        "GITHUB_TOKEN في Kaggle Secrets مطلوب للرفع النهائي."
+                    )
             else:
                 st.error(str(res.get("error") or res.get("msg_ar") or "فشل الإطلاق"))
                 if res.get("need"):

@@ -104,6 +104,18 @@ def lab_health() -> Dict[str, Any]:
         h["checks"].get("streamlit_kaggle_user") and h["checks"].get("streamlit_kaggle_key")
     )
 
+    # RunPod — مزود GPU سحابي يعمل مثل Kaggle (دفع مهمة/مراقبة/رفع)
+    try:
+        from ai.runpod_provider import credentials_status as runpod_credentials
+        h["checks"]["runpod_creds"] = runpod_credentials()
+    except Exception as e:
+        h["checks"]["runpod_creds"] = {"ok": False, "error": str(e)}
+    h["ready_to_launch_runpod"] = bool(
+        h["checks"].get("runpod_creds", {}).get("ok")
+        and (os.environ.get("RUNPOD_API_KEY") or "").strip()
+        and ((os.environ.get("RUNPOD_TEMPLATE_ID") or os.environ.get("RUNPOD_ENDPOINT_ID") or "").strip())
+    )
+
     # Groq — مفتاح مجاني فائق السرعة؛ إن وُجد في البيئة فعّله تلقائيًا
     try:
         groq_key = (os.environ.get("GROQ_API_KEY") or "").strip()
@@ -186,6 +198,41 @@ def refresh_job_status(job_id: str, kernel_slug: Optional[str] = None) -> Dict[s
     return out
 
 
+def launch_runpod_preset(preset_key: str, fresh: bool = True, auto_push: bool = True,
+                         endpoint_id: Optional[str] = None) -> Dict[str, Any]:
+    """إطلاق تدريب SurahChain على RunPod (مثل Kaggle: دفعة + مراقبة + AUTO_PUSH)."""
+    cfg = PRESETS.get(preset_key) or PRESETS["medium"]
+    t0 = time.time()
+    try:
+        from ai.runpod_provider import push_surahchain_runpod_job
+        res = push_surahchain_runpod_job(
+            preset=str(cfg["preset"]),
+            n=int(cfg["n"]),
+            epochs=int(cfg["epochs"]),
+            batch=int(cfg["batch"]),
+            fresh=fresh,
+            auto_push=auto_push,
+            endpoint_id=endpoint_id or None,
+        )
+    except Exception as e:
+        res = {"ok": False, "error": str(e)}
+    res["preset_key"] = preset_key
+    res["config"] = cfg
+    res["duration_ms"] = int((time.time() - t0) * 1000)
+    res["provider"] = "runpod"
+    append_job({
+        "type": "surahchain_runpod_launch",
+        "preset_key": preset_key,
+        "ok": res.get("ok"),
+        "job_id": res.get("job_id"),
+        "endpoint_id": res.get("endpoint_id"),
+        "provider": "runpod",
+        "kernel_url": res.get("endpoint_url") or "",
+        "error": res.get("error"),
+    })
+    return res
+
+
 def launch_preset(preset_key: str, fresh: bool = True, auto_push: bool = True) -> Dict[str, Any]:
     """إطلاق تدريب من قالب جاهز عبر Kaggle API."""
     cfg = PRESETS.get(preset_key) or PRESETS["medium"]
@@ -227,6 +274,7 @@ def feature_list_ar() -> List[str]:
         "تقدير زمن تقريبي لكل قالب",
         "AUTO_PUSH بعد نجاح التدريب (يتطلب GITHUB_TOKEN على Kaggle)",
         "كشف GPU المحلي + كتالوج مزوّدين مجانيين",
+        "مزود RunPod: تشغيل SurahChain على GPU سحابي مثل Kaggle مع AUTO_PUSH",
         "Run All مع إيقاف عند أول خطأ",
         "مراقبة GPU: nvidia-smi + VRAM snapshot من تبويب البيئة",
     ]
