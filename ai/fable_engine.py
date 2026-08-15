@@ -557,6 +557,34 @@ class FableEngine:
                 "أضِفهما لـ requirements.txt: moviepy>=2.0, imageio-ffmpeg>=0.4.9"
             ) from exc
 
+    # ── 📤 تصدير الفيديو بصيغة TikTok جاهزة للرفع ──────────────────────
+    def generate_tiktok_export(
+        self, mp4_bytes: bytes,
+        max_size_bytes: int = 287 * 1024 * 1024,
+    ) -> Dict:
+        """يحوّل فيديو Shorts النهائي إلى صيغة TikTok الأمثل (1080×1920
+        عمودي · 30fps · H.264 High 4.0 · AAC 128k stereo · faststart)
+        مع ضغط تلقائي تحت حد TikTok (287MB iOS / 72MB Android).
+
+        لا يفشل أبداً: عند تعذّر ffmpeg يرجع الأصل كما هو مع توثيق السبب
+        في "reason". لا يمسّ أي مسار آخر لتوليد الفيديو.
+
+        يرجع dict: {bytes, reencoded, reason, original_size, exported_size,
+                    fits_tiktok} — انظر ai.video_engine.export_tiktok."""
+        try:
+            from ai.video_engine import export_tiktok
+        except ImportError as exc:
+            return {
+                "bytes": mp4_bytes,
+                "reencoded": False,
+                "reason": ("تعذّر تحميل وحدة تحويل TikTok — أضِف"
+                           " imageio-ffmpeg للبيئة. " + str(exc)),
+                "original_size": len(mp4_bytes),
+                "exported_size": len(mp4_bytes),
+                "fits_tiktok": len(mp4_bytes) <= max_size_bytes,
+            }
+        return export_tiktok(mp4_bytes, max_size_bytes=max_size_bytes)
+
     # ── بناء تعليمات النظام لكل جلسة ────────────────────────────────────
 
     def _system_prompt(self, mode: str, character: str) -> str:

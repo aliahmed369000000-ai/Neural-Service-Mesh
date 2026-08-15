@@ -833,6 +833,7 @@ def render_fable():
                         mime="video/mp4",
                         key="shorts_download_mp4",
                     )
+
                 with _shorts_dl_cols[1]:
                     # ── ملف ترجمة SRT — راجع نفس الشرح بتبويب Higgsfield
                     #    Explainer أعلاه (ai.video_engine.build_srt).
@@ -848,6 +849,51 @@ def render_fable():
                         )
                     except Exception as _srt_err:  # noqa: BLE001
                         logger.debug("تعذّر بناء ملف SRT لـShorts: %s", _srt_err)
+
+                # ── 📤 تصدير بصيغة TikTok — مواصفات رسمية: 1080×1920 عمودي،
+                #    30fps، H.264 High 4.0، AAC 128k stereo، faststart،
+                #    وضغط تلقائي تحت حد TikTok (287MB iOS / 72MB Android).
+                #    لا مفاتيح API ولا أي خدمة خارجية — ffmpeg محلي بالكامل.
+                st.markdown(
+                    '<div style="margin:0.3rem 0 0.6rem;">'
+                    '<span class="badge badge-blue">📤 جاهز لـ TikTok</span> '
+                    '<span style="color:var(--text-muted); margin-right:6px;">'
+                    "1080×1920 · 30fps · H.264 High · AAC · &lt;287MB — "
+                    "مواصفات رسمية لمنصة TikTok</span></div>",
+                    unsafe_allow_html=True,
+                )
+                _tiktok = st.session_state.get("shorts_tiktok_export")
+                _tiktok_cols = st.columns([1, 4])
+                with _tiktok_cols[0]:
+                    if st.button("⬇️ تصدير لصيغة TikTok", key="shorts_export_tiktok"):
+                        with st.spinner("يتحقق من المواصفات ويجهّز صيغة TikTok..."):
+                            try:
+                                st.session_state.shorts_tiktok_export = \
+                                    engine.generate_tiktok_export(mp4_bytes)
+                            except Exception as e:  # noqa: BLE001
+                                st.session_state.shorts_tiktok_export = {
+                                    "bytes": mp4_bytes,
+                                    "reencoded": False,
+                                    "reason": str(e),
+                                    "original_size": len(mp4_bytes),
+                                    "exported_size": len(mp4_bytes),
+                                    "fits_tiktok": len(mp4_bytes) <= 287 * 1024 * 1024,
+                                }
+                with _tiktok_cols[1]:
+                    if _tiktok:
+                        _tk_size_kb = _tiktok["exported_size"] / 1024
+                        st.caption(
+                            (f"✅ الصيغة جاهزة · {_tk_size_kb:,.0f} KB"
+                             + (" (ضغط تحت حد TikTok)" if _tiktok["reencoded"] else "")
+                             + f" · السبب: {_tiktok['reason']}")
+                        )
+                        st.download_button(
+                            "⬇️ تحميل فيديو TikTok (mp4 · 1080×1920 · 30fps)",
+                            data=_tiktok["bytes"],
+                            file_name=f"{short.title[:40] or 'short'}_tiktok.mp4",
+                            mime="video/mp4",
+                            key="shorts_download_tiktok",
+                        )
 
                 st.markdown("---")
                 # ── 🆕 توليد تلقائي لعنوان النشر + الوصف + الهاشتاجات —

@@ -53,7 +53,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import List, Optional, Tuple
+import shutil
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger("VideoEngine")
 
@@ -1303,6 +1304,216 @@ class VideoEngine:
 # وإتاحة ترجمة السيناريو لاحقاً للغة أخرى بالاعتماد على توقيت جاهز.
 # دالة إضافية بحتة — لا تُعدّل أي سلوك بمسار render() الحالي إطلاقاً.
 _SRT_CONCAT_PADDING = 0.15  # يطابق padding=-0.15 في concatenate_videoclips بـ render()
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 📤 تصدير فيديو بصيغة TikTok جاهزة للرفع — مواصفات منشورة رسمية
+# ════════════════════════════════════════════════════════════════════════
+# المواصفات التي نعتمد عليها (مجمّعة من أدلة TikTok الرسمية ودليل
+# creators لعام 2026):
+#   - الأبعاد: 1080×1920 عمودي (9:16) — الدقة الموصى بها رسميًا،
+#     والحد الأقصى المسموح 1080p (أي فيديو أعلى يُخفَّض تلقائياً)
+#   - الصيغة: MP4 مع H.264 + AAC (التركيبة الأوثق توافقًا)
+#   - الإطار: 30fps ثابت (تجنب تذبذب الإطارات)
+#   - الصوت: AAC 128k، stereo، 48kHz
+#   - الـprofile: High level 4.0 (المعيار الأوسع دعماً بمشغّلات TikTok)
+#   - حد الحجم: 287MB على iOS و72MB تقريباً على Android — نضغط
+#     تلقائياً عند تجاوز العتبة القابلة للتعديل
+#   - faststart: moov atom في بداية الملف (يبدأ البث فور فتح الملف)
+#   - color matrix: BT.709 + yuv420p (تجنب إزاحة ألوان على Android)
+
+# ── ثابتة: الحد الأقصى الافتراضي لحجم فيديو TikTok (بالبايت) ──
+TIKTOK_MAX_SIZE_IOS = 287 * 1024 * 1024  # حد iOS الرسمي
+TIKTOK_EXPORT_DEFAULT_MAX = TIKTOK_MAX_SIZE_IOS
+
+
+def _get_ffmpeg_binary() -> Optional[str]:
+    """يبحث عن ثنائي ffmpeg: النظام أولاً، ثم ثنائي imageio-ffmpeg المعبّأ
+    (المتوفّر تلقائياً في Streamlit Community Cloud دون apt)."""
+    from pathlib import Path as _Path
+    system = shutil.which("ffmpeg")
+    if system:
+        return system
+    try:
+        import imageio_ffmpeg as _iff
+        _p = _Path(_iff.get_ffmpeg_exe())
+        return str(_p) if _p.is_file() else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def export_tiktok(
+    mp4_bytes: bytes,
+    max_size_bytes: int = TIKTOK_EXPORT_DEFAULT_MAX,
+    resolution: tuple = (1080, 1920),
+) -> Dict:
+    """يحوّل فيديو mp4 نهائي إلى صيغة TikTok الأمثل ويرجعه كـbytes جديدة.
+
+    الفحص/التحويل:
+      1. يقرأ مواصفات الملف الأصلي بـffprobe (دقة/fps/ترميز/صوت).
+      2. إن كانت المواصفات مطابقة تماماً (1080×1920 · 30fps · H.264 High ·
+         AAC stereo · الحجم ≤ الحد): يرجع الأصل كما هو (re-mux فقط).
+      3. خلاف ذلك: يمرّ ffmpeg بتحويل كامل: scale=pads لملء 9:16 من
+         المنتصف، fps=30 ثابت، H.264 High 4.0 + yuv420p + film tune،
+         AAC 128k stereo 48kHz، +faststart.
+      4. إن تجاوز الناتج max_size_bytes (حد TikTok): يعيد الضغط بـCRF
+         متدرج (17 → 23 → 28 → 32) حتى ينخفض الحجم تحت الحد، أو يرجع
+         أصغر ناتج مع تحذير إن فشل كل المحاولات.
+      5. إن تعذّر ffmpeg بأي مرحلة: يرجع الأصل مع "reencoded": False
+         وتوثيق السبب — لا يفشل أبداً، بل يتدهور بصمت للأفضل المتاح.
+
+    يرجع dict:
+      {"bytes": bytes, "reencoded": bool, "reason": str,
+       "original_size": int, "exported_size": int, "fits_tiktok": bool}
+    """
+    result = {
+        "bytes": mp4_bytes,
+        "reencoded": False,
+        "reason": "",
+        "original_size": len(mp4_bytes),
+        "exported_size": len(mp4_bytes),
+        "fits_tiktok": len(mp4_bytes) <= max_size_bytes,
+    }
+
+    if not mp4_bytes or len(mp4_bytes) < 4:
+        result["reason"] = "مدخلات فارغة أو غير صالحة — أرجع الأصل دون تغيير."
+        return result
+
+    ffmpeg = _get_ffmpeg_binary()
+    if not ffmpeg:
+        result["reason"] = ("تعذّر إيجاد ffmpeg — أرجع الأصل دون تحويل. "
+                            "(imageio-ffmpeg غير مثبّت بالنسخة الجارية)")
+        return result
+
+    _sp = subprocess  # مستورد أعلى الملف
+
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as _in_f:
+        _in_f.write(mp4_bytes)
+        _in_path = _in_f.name
+    _out_path = _in_path + ".tiktok.mp4"
+    try:
+        # ── 1) الفحص بـffprobe ──
+        probe_ok = False
+        # ffprobe الأداة الأنسب لفحص الملفات؛ إذا غاب (نادر) نجرّب ffmpeg
+        # نفسه الذي يدعم نفس خيارات probe.
+        _ffprobe = shutil.which("ffprobe")
+        _probe_bin = _ffprobe or ffmpeg
+        try:
+            probe = _sp.run(
+                [_probe_bin, "-v", "error", "-print_format", "json",
+                 "-show_streams", "-i", _in_path],
+                capture_output=True, text=True, timeout=30,
+                check=True,
+            )
+            probe_info = json.loads(probe.stdout or "{}")
+            streams = probe_info.get("streams") or []
+            _vid = next((s for s in streams if s.get("codec_type") == "video"), None)
+            _aud = next((s for s in streams if s.get("codec_type") == "audio"), None)
+            if _vid and _aud:
+                _w, _h = int(_vid.get("width", 0)), int(_vid.get("height", 0))
+                _fps_m = _vid.get("r_frame_rate", "0/1")
+                _fps = 0
+                if "/" in str(_fps_m):
+                    n, d = str(_fps_m).split("/", 1)
+                    _fps = int(n) // int(d) if int(d) else 0
+                _profile = (_vid.get("profile") or "").lower()
+                _is_match = (
+                    _w == resolution[0] and _h == resolution[1]
+                    and _fps == 30
+                    and _vid.get("codec_name") == "h264"
+                    and _profile.startswith("high")
+                    and _aud.get("codec_name") == "aac"
+                    and int(_aud.get("channels", 0)) >= 2
+                    and len(mp4_bytes) <= max_size_bytes
+                )
+                if _is_match:
+                    probe_ok = True
+                    result["reason"] = ("المواصفات مطابقة لمتطلبات TikTok تماماً "
+                                        "(1080×1920 · 30fps · High · AAC) — "
+                                        "أرجع الملف دون إعادة ترميز.")
+        except Exception as _pe:  # noqa: BLE001
+            logger.debug("ffprobe skipped: %s", _pe)
+
+        if probe_ok:
+            return result
+
+        # ── 2) تحويل كامل لمواصفات TikTok ──
+        _target_w, _target_h = resolution
+        # scale/pad يملأ 9:16 تماماً: تكبير حتى يغطي الإطار ثم قص من المنتصف.
+        # ألوان: yuv420p إلزامي للمشغّلات؛ تحويل bt709 اختياري — فلتر
+        # colorspace غير موجود في بعض نسخ ffmpeg المدمجة (imageio-ffmpeg
+        # القديمة) أو يفشل بصمت على بعض المساحات اللونية (rc=234)، لذا
+        # نجرب بدونه أولًا عند أي فشل في التحويل الأساسي.
+        _vf_core = (f"scale={_target_w}:{_target_h}:force_original_aspect_"
+                    f"ratio=increase:eval=init,crop={_target_w}:{_target_h},"
+                    f"fps=30,format=yuv420p")
+
+        def _encode(crf: str, color_flags: Tuple = ()) -> bool:
+            vf = _vf_core
+            for _cf in color_flags:
+                vf += "," + _cf
+            # حذف ملف الخرج السابق قبل كل محاولة حتى لا نقرأ ملفًا قديمًا
+            # متروكًا من محاولة ملونة فاشلة (rc≠0 لا يحذف الملف).
+            try:
+                if os.path.isfile(_out_path):
+                    os.remove(_out_path)
+            except OSError:
+                pass
+            cmd = [
+                ffmpeg, "-y", "-v", "error", "-i", _in_path,
+                "-vf", vf,
+                "-c:v", "libx264", "-preset", "medium", "-crf", crf,
+                "-profile:v", "high", "-level", "4.0",
+                "-tune", "film",
+                "-c:a", "aac", "-b:a", "128k", "-ac", "2", "-ar", "48000",
+                "-movflags", "+faststart",
+                "-threads", str(max(1, min(4, os.cpu_count() or 2))),
+                _out_path,
+            ]
+            proc = _sp.run(cmd, capture_output=True, text=True, timeout=1800)
+            if proc.returncode != 0 or not os.path.isfile(_out_path):
+                return False
+            try:
+                result["bytes"] = Path(_out_path).read_bytes()
+            except OSError:
+                return False
+            result["reencoded"] = True
+            result["exported_size"] = len(result["bytes"])
+            result["fits_tiktok"] = result["exported_size"] <= max_size_bytes
+            return True
+
+        # محاولة بألوان bt709 أولًا (الأنظف لونيًا)، وعند فشل الفلتر
+        # نعيد المحاولة بدونه — لا نفشل أبدًا بسبب ألوان.
+        if not _encode("17", ("colorspace=bt709:all=bt709",)) and not _encode("17"):
+            result["reason"] = ("فشل تحويل TikTok الأساسي بـCRF 17 — "
+                                "أرجع الأصل دون تغيير.")
+            result["bytes"] = mp4_bytes
+            result["exported_size"] = len(mp4_bytes)
+            return result
+
+        # ── 3) ضغط متدرج إن تجاوز الحد ──
+        if result["exported_size"] <= max_size_bytes:
+            result["reason"] = "تم التحويل لمواصفات TikTok بنجاح (CRF 17)."
+            return result
+        for _crf in ("23", "28", "32"):
+            if (_encode(_crf, ("colorspace=bt709:all=bt709",))
+                    or _encode(_crf)) and result["exported_size"] <= max_size_bytes:
+                result["reason"] = (f"تم التحويل لمواصفات TikTok مع ضغط إضافي "
+                                    f"(CRF {_crf}) ليصبح الحجم تحت حد TikTok.")
+                return result
+        # آخر فرصة: إن كان أحد المحاولات أنتج أصغر حجم رغم تجاوز الحد
+        if result["reencoded"]:
+            result["reason"] = ("تم التحويل لمواصفات TikTok لكن الحجم لا يزال "
+                                "فوق حد TikTok — الفيديو القصير عادة تحت الحد "
+                                "مباشرةً بعد أول تمريرة.")
+        return result
+    finally:
+        for _p in (_in_path, _out_path):
+            try:
+                if os.path.isfile(_p):
+                    os.remove(_p)
+            except OSError:
+                pass
 
 
 def _format_srt_timestamp(seconds: float) -> str:
