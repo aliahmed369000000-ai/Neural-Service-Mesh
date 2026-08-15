@@ -27,6 +27,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import http.client
 from urllib import error, request
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -47,6 +48,26 @@ GPU_CATALOG = {
 }
 DEFAULT_GPU = "AMPERE_16"
 
+# صور PyTorch رسمية من runpod/pytorch (مُثبتة على Docker Hub — القديم 2.5.1-py3.11 حُذف من registry):
+DEFAULT_TEMPLATE_IMAGES = [
+    "runpod/pytorch:1.1.0-rc.154-cu1281-torch260-ubuntu2204",
+    "runpod/pytorch:1.1.0-rc.154-cu1290-torch260-ubuntu2204",
+    "runpod/pytorch:1.1.0-rc.154-cu1281-torch280-ubuntu2204",
+    "runpod/pytorch:1.1.0-rc.154-cu1290-torch280-ubuntu2204",
+]
+DEFAULT_TEMPLATE_IMAGE = DEFAULT_TEMPLATE_IMAGES[0]
+
+# GPU ids المتاحة في حسابات RunPod العامة (gpuTypes الرسمية):
+GPU_TYPE_MAP = {
+    "AMPERE_16": ["NVIDIA RTX A4000 Laptop GPU", "NVIDIA RTX A4000", "NVIDIA RTX A5000", "NVIDIA RTX A4500"],
+    "AMPERE_24": ["NVIDIA GeForce RTX 3090", "NVIDIA GeForce RTX 4090", "NVIDIA RTX A5000"],
+    "ADA_24": ["NVIDIA GeForce RTX 4090"],
+    "AMPERE_48": ["NVIDIA A40"],
+    "ADA_48_PRO": ["NVIDIA RTX 6000 Ada Generation"],
+    "AMPERE_80": ["NVIDIA A100 80GB PCIe", "NVIDIA A100-SXM4-80GB"],
+    "ADA_80_PRO": ["NVIDIA RTX 6000 Ada Generation 80GB Pro"],
+}
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -56,21 +77,54 @@ def _secret(name: str, default: str = "") -> str:
     return (os.environ.get(name) or "").strip() or default
 
 
+UA_BROWSER = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+
+
 def _post_json(url: str, data: Any, headers: Dict[str, str], timeout: int = 60) -> Dict[str, Any]:
-    req = request.Request(
-        url,
-        data=json.dumps(data).encode("utf-8"),
-        headers=headers,
-        method="POST",
-    )
-    with request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode("utf-8"))
+    headers = dict(headers)
+    headers.setdefault("user-agent", UA_BROWSER)
+    body = json.dumps(data).encode("utf-8")
+    parsed = request.urlparse(url)
+    last_err = None
+    for attempt in range(3):
+        try:
+            conn = http.client.HTTPSConnection(parsed.hostname, timeout=timeout)
+            path = parsed.path or "/"
+            if parsed.query:
+                path += "?" + parsed.query
+            conn.request("POST", path, body=body, headers=headers)
+            with conn.getresponse() as r:
+                out = r.read().decode("utf-8")
+            if r.status in (403, 429):
+                time.sleep(2 * (attempt + 1))
+                continue
+            if r.status >= 400:
+                return {"ok": False, "error": f"HTTP {r.status}", "raw": out[:500]}
+            return json.loads(out)
+        except Exception as ex:  # connection errors — retry
+            last_err = ex
+            time.sleep(1)
+    if last_err is not None:
+        raise last_err
+    raise RuntimeError("runpod api: no successful response after retries")
 
 
 def _get_json(url: str, headers: Dict[str, str], timeout: int = 60) -> Dict[str, Any]:
-    req = request.Request(url, headers=headers, method="GET")
-    with request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode("utf-8"))
+    headers = dict(headers)
+    headers.setdefault("user-agent", UA_BROWSER)
+    last_err = None
+    for attempt in range(3):
+        req = request.Request(url, headers=headers, method="GET")
+        try:
+            with request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except error.HTTPError as he:
+            last_err = he
+            if he.code in (403, 429):
+                time.sleep(2 * (attempt + 1))
+                continue
+            raise
+    raise last_err
 
 
 # ----------------------------------------------------------------------------
@@ -104,9 +158,118 @@ def credentials_status() -> Dict[str, Any]:
 # إدارة endpoints عبر GraphQL
 # ----------------------------------------------------------------------------
 
-def _graphql(payload: Dict[str, Any], api_key: str) -> Dict[str, Any]:
+def _graphql(payload: Dict[str, Any], api_key: str, retries: int = 4) -> Dict[str, Any]:
     url = GRAPHQL + "?api_key=" + request.quote(api_key, safe="")
-    return _post_json(url, payload, {"content-type": "application/json"})
+    last_err = None
+    for attempt in range(retries):
+        try:
+            res = _post_json(url, payload, {"content-type": "application/json"})
+        except Exception as ex:  # rate limit / connection — retry
+            last_err = ex
+            time.sleep(2 * (attempt + 1))
+            continue
+        errs = (res or {}).get("errors") or []
+        code = errs[0].get("extensions", {}).get("code", "") if errs else ""
+        if code in ("GRAPHQL_VALIDATION_FAILED", "TOO_MANY_REQUESTS") or "rate" in code.lower():
+            last_err = RuntimeError(f"graphql {code}: {errs[0].get('message')}")
+            time.sleep(3 * (attempt + 1))
+            continue
+        return res
+    raise last_err or RuntimeError("graphql: no response")
+
+
+def find_template(api_key: str, image: Optional[str] = None) -> Optional[str]:
+    """البحث عن template id جاهز لصورة PyTorch.
+
+    GraphQL RunPod لا يعرّض قائمة templates قراءة (لا query ولا mutation list)،
+    لذا نعتمد على template محليًا محفوظًا في: env/Secrets > RUNPOD_TEMPLATE_ID
+    أو السجل المحلي ~/.nsm_runpod_templates.json الذي نكتبه عند الإنشاء.
+    """
+    import pathlib
+    local = (pathlib.Path.home() / ".nsm_runpod_templates.json").resolve()
+    if local.exists():
+        try:
+            saved = json.loads(local.read_text())
+        except Exception:
+            saved = {}
+        for tpl in (saved if isinstance(saved, list) else saved.get("templates", [])):
+            if isinstance(tpl, dict):
+                img = (tpl.get("imageId") or "").lower()
+                if image:
+                    if image.lower() in img or img in image.lower():
+                        return tpl["id"]
+                elif "pytorch" in img or "runpod/pytorch" in img:
+                    return tpl["id"]
+    return None
+
+
+def create_pytorch_template(api_key: str, name: str = "nsm-pytorch-dev") -> Optional[str]:
+    """إنشاء Serverless template PyTorch تلقائيًا عبر saveTemplate.
+
+    RunPod GraphQL لا يعرض templates القديمة (2.x-py3.11) في Docker Hub؛
+    نستخدم أحدث صور runpod/pytorch الإنتاجية: cuXXX-torchXXX-ubuntuNNNN.
+    """
+    candidates = [
+        "runpod/pytorch:1.1.0-rc.154-cu1281-torch260-ubuntu2204",
+        "runpod/pytorch:1.1.0-rc.154-cu1290-torch260-ubuntu2204",
+        "runpod/pytorch:1.1.0-rc.154-cu1281-torch280-ubuntu2204",
+        "runpod/pytorch:1.1.0-rc.154-cu1290-torch280-ubuntu2204",
+    ]
+    import uuid
+    # أولاً: أي template سابق أنشأناه NSM في السجل المحلي؟
+    local_tid = find_template(api_key)
+    if local_tid:
+        return local_tid
+    for image in candidates:
+        try:
+            save = _graphql({
+                "query": (
+                    "mutation { saveTemplate(input: { "
+                    'name: "' + name + "-" + uuid.uuid4().hex[:6] + '", '
+                    'imageName: "' + image + '", '
+                    "env: [ { key: \"HF_HUB_DISABLE_TELEMETRY\", value: \"1\" } ], "
+                    'dockerArgs: "", '
+                    "containerDiskInGb: 40, "
+                    "volumeInGb: 40, "
+                    'volumeMountPath: "/workspace", '
+                    'readme: "NSM pytorch training template", '
+                    "isPublic: false "
+                    "}) { id } }"
+                )
+            }, api_key)
+            data = (save.get("data") or {}).get("saveTemplate") or {}
+            tid = data.get("id")
+            if tid:
+                return tid
+            errs = save.get("errors") or []
+            if not errs:
+                continue
+            # IMAGE_VALIDATION_FAILED تعني أن الصورة غير موجودة — نجرب التالية
+            code = errs[0].get("extensions", {}).get("code", "") if errs else ""
+        except Exception:
+            continue
+    return None
+
+
+def _remember_template(template_id: str, image: str) -> None:
+    """حفظ template id محليًا في ~/.nsm_runpod_templates.json."""
+    try:
+        import pathlib
+        local = pathlib.Path.home() / ".nsm_runpod_templates.json"
+        saved = {}
+        if local.exists():
+            try:
+                saved = json.loads(local.read_text())
+            except Exception:
+                saved = {}
+        if not isinstance(saved, dict):
+            saved = {"templates": saved if isinstance(saved, list) else []}
+        seen = [t for t in saved.get("templates", []) if t.get("id") != template_id]
+        seen.append({"id": template_id, "imageId": image, "name": "nsm-pytorch-dev"})
+        saved["templates"] = seen
+        local.write_text(json.dumps(saved, indent=2))
+    except Exception:
+        pass
 
 
 def generate_endpoint(
@@ -119,7 +282,6 @@ def generate_endpoint(
     if not api_key:
         return {"ok": False, "error": "RUNPOD_API_KEY غير مضبوط",
                 "hint_ar": "ضعه في NSM Secrets"}
-    template_id = _secret("RUNPOD_TEMPLATE_ID")
     pre = _secret("RUNPOD_ENDPOINT_ID")
     if pre:
         return {
@@ -129,9 +291,29 @@ def generate_endpoint(
             "endpoint_url": f"https://api.runpod.ai/v2/{pre}",
             "msg_ar": "تم استخدام RUNPOD_ENDPOINT_ID الجاهز",
         }
+    # تلقائي: البحث عن template عام (runpod/pytorch) في حساب المستخدم
+    template_id = _secret("RUNPOD_TEMPLATE_ID")
     if not template_id:
-        return {"ok": False, "error": "RUNPOD_TEMPLATE_ID غير مضبوط",
-                "hint_ar": "أنشئ Serverless template من كونسل RunPod"}
+        found = None
+        try:
+            found = find_template(api_key)
+        except Exception:
+            pass
+        if found:
+            template_id = found
+        else:
+            # إنشاء تلقائي: template PyTorch جديد عبر saveTemplate
+            created = create_pytorch_template(api_key)
+            if created:
+                template_id = created
+                # حفظه محليًا وفي env للجلسات القادمة
+                _remember_template(template_id, DEFAULT_TEMPLATE_IMAGE)
+                os.environ["RUNPOD_TEMPLATE_ID"] = template_id
+            else:
+                return {"ok": False, "error": "RUNPOD_TEMPLATE_ID غير مضبوط ولا يمكن إنشاء template تلقائيًا",
+                        "hint_ar": "ضع RUNPOD_TEMPLATE_ID في NSM Secrets، أو أنشئ template من "
+                                   "https://www.runpod.io/console/serverless/user/templates "
+                                   "يعتمد صورة " + DEFAULT_TEMPLATE_IMAGE}
     gpu = (gpu_ids or _secret("RUNPOD_GPU_IDS", DEFAULT_GPU)).upper()
     if gpu not in GPU_CATALOG:
         return {"ok": False, "error": f"gpuIds غير صالح: {gpu}",
@@ -176,13 +358,13 @@ def generate_endpoint(
             "endpoint_url": f"https://api.runpod.ai/v2/{eid}",
             "msg_ar": "تم إنشاء endpoint بنجاح — workersMin=0 يعني scale-to-zero",
         }
-    except error.HTTPError as he:
-        body = ""
+    except Exception as he:
+        body = getattr(he, "read", lambda: b"")
         try:
-            body = he.read().decode("utf-8", "ignore")[:500]
+            body = body().decode("utf-8", "ignore")[:500]
         except Exception:
-            pass
-        return {"ok": False, "error": f"HTTP {he.code}: {body or he.reason}"}
+            body = ""
+        return {"ok": False, "error": f"HTTP: {body or str(he)}"}
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
