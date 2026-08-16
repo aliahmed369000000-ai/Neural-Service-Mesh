@@ -621,6 +621,9 @@ except Exception:
     _SKLEARN_OK = False
 
 # 🚀 تأجيل تحميل torch: يُحمل عند أول استخدام فعلي (يوفّر ~1.5s عند بدء التطبيق)
+# يجب تهيئة المتغيرات على مستوى الوحدة حتى لا تُطلق أي دالة تستخدمها مباشرة
+# (مثل training_dashboard في سطر 1277) NameError قبل استدعاء _ensure_torch_agent()
+_TORCH_OK = False
 _TORCH_ATTEMPTED = False
 
 def _ensure_torch_agent():
@@ -1074,7 +1077,7 @@ def train_torch_mlp(
     epochs: int = 25,
     hidden: int = 64,
 ) -> str:
-    if not _TORCH_OK:
+    if not _ensure_torch_agent():
         return "❌ PyTorch غير متاح في هذه البيئة."
 
     task = task.lower().strip()
@@ -1274,9 +1277,8 @@ def training_dashboard() -> str:
     except Exception:
         lines.append("- GPU: تعذّر التقرير")
     lines.append(f"- scikit-learn: {'✅' if _SKLEARN_OK else '❌'}")
-    lines.append(f"- PyTorch: {'✅' if _TORCH_OK else '❌'}")
+    lines.append(f"- PyTorch: {'✅' if _ensure_torch_agent() else '❌'}")
     lines.append("")
-
     # آخر مهام التدريب الموحّدة
     lines.append("### 📜 آخر مهام التدريب")
     try:
@@ -1427,7 +1429,7 @@ def smart_train_next(recommend_only: bool = False) -> str:
             "③ لشبكات أعقد: ثبّت torch ثم `درّب شبكة torch`."
         )
 
-    if _TORCH_OK and ram >= 1.0:
+    if _ensure_torch_agent() and ram >= 1.0:
         return (
             "① **درّب شبكة torch** (MLP تجريبي) للتحقق من المسار.\n"
             "② راقب الرام — قلّل الحقب إن لزم.\n"
@@ -1930,12 +1932,13 @@ def inspect_training_data(path_str: str, target_col: Optional[str] = None) -> di
     n_classes = None
     if task == "classification":
         n_classes = int(len(set(bundle["y"].tolist()))) if hasattr(bundle["y"], "tolist") else None
-    # اختيار محرك تلقائي
+    # اختيار محرك تلقائي (تفعيل lazy torch قبل القرار)
+    _torch_agent_ready = _ensure_torch_agent()
     if bundle["feature_mode"] == "text":
-        engine = "torch" if _TORCH_OK else "sklearn"
+        engine = "torch" if _torch_agent_ready else "sklearn"
     elif n_samples < 5000 and n_features < 200 and _SKLEARN_OK:
         engine = "sklearn"
-    elif _TORCH_OK:
+    elif _torch_agent_ready:
         engine = "torch"
     elif _SKLEARN_OK:
         engine = "sklearn"
@@ -1953,7 +1956,7 @@ def inspect_training_data(path_str: str, target_col: Optional[str] = None) -> di
         "n_classes": n_classes,
         "engine": engine,
         "sklearn_ok": _SKLEARN_OK,
-        "torch_ok": _TORCH_OK,
+        "torch_ok": _torch_agent_ready,
         "bundle": bundle,
     }
 
@@ -2434,7 +2437,7 @@ def train_from_csv(
         except Exception as e:
             results.append(f"sklearn فشل: {e}")
 
-    if use_torch and _TORCH_OK:
+    if use_torch and _ensure_torch_agent():
         try:
             if prefer in ("cnn",) and bundle["feature_mode"] == "numeric":
                 results.append(train_torch_cnn_on_arrays(X, y, task, epochs=epochs))
@@ -2668,7 +2671,7 @@ def train_torch_cnn_on_arrays(
     X: np.ndarray, y: np.ndarray, task: str, epochs: int = 25
 ) -> str:
     """Conv1d على متجه الميزات (مناسب لبيانات جدولية/إشارات قصيرة)."""
-    if not _TORCH_OK:
+    if not _ensure_torch_agent():
         return "PyTorch غير متاح"
     epochs = _sb_clamp_epochs(max(3, min(int(epochs), 100)))
     n, f = X.shape
@@ -2770,7 +2773,7 @@ def train_torch_text_on_texts(
     texts: List[str], y: np.ndarray, task: str, epochs: int = 20, max_len: int = 32
 ) -> str:
     """Tokenizer حرفي بسيط + Embedding + TransformerEncoder layer."""
-    if not _TORCH_OK:
+    if not _ensure_torch_agent():
         return "PyTorch غير متاح"
     epochs = _sb_clamp_epochs(max(3, min(int(epochs), 80)))
     # بناء قاموس أحرف

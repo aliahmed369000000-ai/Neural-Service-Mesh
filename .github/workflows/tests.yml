@@ -26,7 +26,9 @@ jobs:
             tests/test_model_training_agent.py \
             tests/test_agent_growth_loop.py \
             tests/test_agent_project_bridge.py \
-            tests/test_system_hub.py
+            tests/test_system_hub.py \
+            tests/test_chat_sessions.py \
+            tests/test_no_unbound_local.py
 
   full:
     name: pytest + py_compile
