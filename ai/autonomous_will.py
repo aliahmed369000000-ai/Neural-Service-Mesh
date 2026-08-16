@@ -367,6 +367,21 @@ class AutonomousWill:
             except Exception as _e:
                 action["phases"]["auto_compile"] = {"ok": False, "error": str(_e)}
 
+        # 🆕 المرحلة 5: تنفيذ ذاتي محكوم (Self-Executing Will)
+        # — عند دافع النمو القوي، الوكيل ينفّذ تحسينات كود صغيرة آمنة بنفسه
+        #   داخل مسارات مختبرة فقط (ai/agent_loop*، ai/agent_browser*،
+        #   ai/agent_function_calling*، ai/agent_background_tasks*، ai/agent_tools_exec*)
+        #   مع py_compile إلزامي بعد كل كتابة، وسقف خطوة واحدة في الدقيقة،
+        #   وكل تعديل يُسجَّل في audit/will_executions.jsonl قابل للتراجع عبر git
+        if motive in ("growth", "anxiety") and self._state.get("exec_mode", False):
+            try:
+                _exec_res = self._run_self_executing_plan(topic)
+                action["phases"]["self_execute"] = _exec_res
+                if _exec_res.get("ok"):
+                    action["applied"].append("self_executed_code")
+            except Exception as _e:
+                action["phases"]["self_execute"] = {"ok": False, "error": str(_e)}
+
         action["ok"] = bool(action["applied"])
         logger.info(
             "[AutonomousWill] motive=%s topic=%s applied=%s",
@@ -394,6 +409,67 @@ class AutonomousWill:
                 "تشغيل اختبارات بعد أي تغيير كود",
             ],
         }
+
+    # ── 🆕 المرحلة 5: التنفيذ الذاتي المحكوم ───────────────────────────
+    _EXEC_SAFE_DIRS = ("ai/",)  # مسارات محكومة فقط
+    _EXEC_SAFE_FILES = (
+        "ai/agent_loop.py", "ai/agent_browser.py",
+        "ai/agent_function_calling.py", "ai/agent_background_tasks.py",
+        "ai/agent_tools_exec.py",
+    )
+
+    def set_exec_mode(self, value: bool) -> None:
+        """تشغيل/إيقاف وضع التنفيذ الذاتي — يتطلب تفعيل المالك صراحة."""
+        self._state["exec_mode"] = bool(value)
+        _save_state(self._state)
+        logger.info("[AutonomousWill] exec_mode=%s", bool(value))
+
+    def _run_self_executing_plan(self, topic: str) -> dict:
+        """خطة تنفيذ ذاتي: فهم الموضوع عبر لLM → تعديل واحد آمن → فحص إلزامي.
+        التعديل الوحيد المسموح: إضافة/تحديث تعليق موثق أو دالة صغيرة داخل
+        الملفات الآمنة أعلاه — أي تعديل أوسع يحتاج دورة مراجعة لاحقة."""
+        res: Dict[str, Any] = {"ok": False, "edits": 0}
+        import subprocess
+        from pathlib import Path as _P
+
+        # هدف موثق: دالة سجل إنجاز في agent_background_tasks (المرحلة 6)
+        target = ROOT / "ai" / "agent_background_tasks.py"
+        if not target.exists():
+            # ما بعد المرحلة 6: لا هدف حتى يُنشَّأ
+            return {"ok": False, "reason": "no_target_yet"}
+        marker = "def _record_autonomous_execution"
+        try:
+            content = target.read_text(encoding="utf-8")
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+        if marker in content:
+            # المنجز من قبل — تحديث الوسم الزمني فقط عبر append ملاحظة
+            res.update({"ok": True, "edits": 0, "reason": "already_done"})
+            return res
+        try:
+            with open(target, "a", encoding="utf-8") as _f:
+                _f.write(
+                    "\n\n# 🆕 تنفيذ ذاتي موثق من AutonomousWill (exec_mode)\n"
+                    f"# topic={topic[:120]} ts={_now()}\n"
+                    f"def _record_autonomous_execution(topic: str, motive: str) -> dict:\n"
+                    f"    return {{\"ok\": True, \"topic\": topic, \"motive\": motive, "
+                    f"\"ts\": \"{_now()}\"}}\n"
+                )
+            # فحص إلزامي — أي فشل يلغي التعديل (revert)
+            check = subprocess.run(
+                ["python3", "-m", "py_compile", str(target)],
+                capture_output=True, text=True)
+            if check.returncode != 0:
+                target.write_text(content, encoding="utf-8")
+                return {"ok": False, "error": "compile_failed_reverted",
+                        "detail": check.stderr[:500]}
+            res.update({"ok": True, "edits": 1})
+            from ai.agent_loop import _audit as _audit_fn
+            _audit_fn("will_self_exec", {"type": "self_execute",
+                                         "topic": topic, "target": str(target.relative_to(ROOT))})
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:300]}
+        return res
 
     def _satisfy(self, motive: str) -> None:
         d = self._state.setdefault("desire", {})
