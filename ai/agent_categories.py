@@ -861,6 +861,26 @@ class UnifiedAgentChat:
                 parts.append(f"[{emoji} {title}]\n{reply.strip()}")
             combined = "\n\n───\n\n".join(parts)
 
+        # 🆕 فاحص اتساق الفريق: تعارضات صريحة أو اتساق منخفض قبل التوليف
+        _team_warning = ""
+        try:
+            from ai.team_consistency import check_team_consistency
+            _tc = check_team_consistency(agent_replies)
+            _team_warning = _tc.get("warning") or ""
+            if _tc.get("clashing_pairs"):
+                _sy_emit(
+                    "team_consistency_clash",
+                    agent_id="master_orchestrator",
+                    title="المدير الموحّد",
+                    status="running",
+                    detail=f"كُشف {len(_tc['clashing_pairs'])} تعارض صريح بين ردود الوكلاء — يُحسم أثناء التوليف",
+                    metadata={"score": _tc.get("score"), "pairs": [list(p) for p in _tc["clashing_pairs"][:3]]},
+                )
+        except Exception as _tc_err:
+            import logging as _tc_log
+            _tc_log.getLogger("team_consistency").warning(
+                "team_consistency: تعطّل — يعمل النظام كالعادة: %s", _tc_err)
+
         # ── الذاكرة الجماعية: دروس مستفادة من مهام سابقة ذات صلة ──────
         _cm_lessons = ""
         try:
@@ -907,6 +927,21 @@ class UnifiedAgentChat:
                 "(انتبه لها أثناء التوليف):\n"
                 + failure_warnings
             )
+        if _team_warning:
+            synth_prompt += (
+                "\n\n🔍 تقرير اتساق الفريق (راجع قبل التوليف — التزامك به إلزامي):\n"
+                + _team_warning
+            )
+
+        # 🆕 خبرة التوجيه التكيفية: تلميحات من جولات ناجحة سابقة لمهمة مشابهة
+        _re_hints = ""
+        try:
+            from ai.routing_experience import get_routing_experience
+            _re_hints = get_routing_experience().hints_for(task)
+        except Exception:
+            pass
+        if _re_hints:
+            synth_prompt += "\n\n" + _re_hints
         try:
             _llm = LLMFallback()
             if getattr(_llm, "available", False):

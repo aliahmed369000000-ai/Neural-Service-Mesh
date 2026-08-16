@@ -153,12 +153,30 @@ def _is_bad_response(response: Optional[str]) -> bool:
     if len(text) < 4 and not re.search(r"[a-zA-Z\u0600-\u06FF]", text):
         return True
     failure_decl = re.compile(
-        r"^\s*(عذراً|عذرا|أسف|آسف|تعذر|تعذّر|فشل|لم أتمكن|لم أستطع|لم يتمكن|sorry|failed|could not)",
+        r"^\s*(عذراً|عذرا|أسف|آسف|تعذر|تعذّر|فشل|لم أتمكن|لم أستطع|لم يتمكن|sorry|failed|could not)"
+        r"[\s،,\.\:\-\(]*",  # كلمة الاعتذار تتلوها فاصلة/مسافة (مثال: «عذرًا، فشلت...»)
         re.IGNORECASE,
     )
     if failure_decl.match(text) and len(text) < 300:
         return True
     return False
+
+
+def _strategy_for_failure(
+    failure: ReflectionFailure,
+    last_error: str,
+    on_retry: Optional[Callable[[int, Dict[str, Any]], None]],
+) -> str:
+    """🆕 Reflection Memory: إن وُجد درس محفوظ يطابق الخطأ يُطبَّق حله مباشرة
+    (يُعيد اسم الاستراتيجية)، وإلا نستخدم استراتيجية التشخيص المحلي المعتادة."""
+    try:
+        from ai.reflection_memory import get_reflection_memory
+        hit = get_reflection_memory().lookup(last_error or "")
+        if hit is not None:
+            return str(hit.get("lesson", {}).get("strategy", "")) or failure.strategy
+    except Exception:  # الذاكرة خيار تحسين لا يجوز أن تكسر المسار الأصلي
+        pass
+    return failure.strategy
 
 
 def reflecting_call(
@@ -194,6 +212,8 @@ def reflecting_call(
                 detail=f"مراجعة ذاتية بعد الفشل (محاولة {context.attempt_no})",
                 metadata=failure.to_event_metadata(),
             )
+            # 🆕 Reflection Memory: درس محفوظ يطابق هذا الخطأ؟ يُطبَّق فورًا
+            _memory_strategy = _strategy_for_failure(failure, last_error or "", on_retry)
             _emit(
                 EVENT_REFLECT_ANALYSIS,
                 agent_id=agent_id, title=title, status="running",
@@ -208,26 +228,56 @@ def reflecting_call(
                     metadata=failure.to_event_metadata(),
                 )
                 if response is None and last_error:
+                    # 🆕 Reflection Memory: استسلام نهائي — يُسجّل كفشل للدرس
+                    try:
+                        from ai.reflection_memory import get_reflection_memory
+                        get_reflection_memory().record(
+                            last_error, failure.reason, failure.strategy, success=False)
+                    except Exception:
+                        pass
                     raise RuntimeError(last_error) from None
                 # ردّ فاشل ظاهرياً: نعيد رميه كخطأ قابل للاكتشاف
                 raise RuntimeError(f"فشل الوكيل رغم التقييم الذاتي: {failure.reason}")
+            # 🆕 درس الذاكرة يتفوق على استراتيجية التشخيص المحلي عند وجوده
+            _effective_strategy = _memory_strategy or failure.strategy
             _emit(
                 EVENT_REFLECT_RETRY,
                 agent_id=agent_id, title=title, status="running",
-                detail=f"إعادة المحاولة بعد {ReflectionPolicy.backoff(context.attempt_no):.1f}ث — {failure.strategy}",
+                detail=(f"إعادة المحاولة بعد {ReflectionPolicy.backoff(context.attempt_no):.1f}ث — "
+                        f"{_effective_strategy}" + (" · درس محفوظ من ذاكرة الأخطاء" if _memory_strategy else "")),
                 metadata=failure.to_event_metadata(),
             )
             if on_retry is not None:
-                on_retry(context.attempt_no, {"strategy": failure.strategy, "reason": failure.reason})
+                on_retry(context.attempt_no, {"strategy": _effective_strategy, "reason": failure.reason})
+            # 🆕 Reflection Memory: نستفيد من إعادة المحاولة نفسها كتجربة للدرس
+            try:
+                from ai.reflection_memory import get_reflection_memory
+                if _memory_strategy:
+                    get_reflection_memory().record(
+                        last_error or "", failure.reason, _effective_strategy, success=True)
+            except Exception:
+                pass
             time.sleep(ReflectionPolicy.backoff(context.attempt_no))
             continue
 
         # نجاح — بث نتيجة المراجعة إن سبقت المحاولة تقييمات
         if context.reflections:
+            _final_strategy = context.reflections[-1].strategy
             _emit(
                 EVENT_REFLECT_RESOLVED,
                 agent_id=agent_id, title=title, status="done",
                 detail=f"تصحيح تلقائي ناجح بعد {context.attempt_no} محاولة",
-                metadata={"attempts": context.attempt_no, "final_strategy": context.reflections[-1].strategy},
+                metadata={"attempts": context.attempt_no, "final_strategy": _final_strategy},
             )
+            # 🆕 Reflection Memory: درس نجح — نُسجّل الاستراتيجية الناجحة
+            try:
+                from ai.reflection_memory import get_reflection_memory
+                get_reflection_memory().record(
+                    last_error or "", context.reflections[-1].reason,
+                    _final_strategy, success=True)
+            except Exception:
+                pass
+        else:
+            # أول محاولة نجحت دون أخطاء — درس صامت: لا أخطاء تستحق الحفظ هنا
+            pass
         return response
