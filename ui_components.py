@@ -98,6 +98,35 @@ _DESIGN_CSS = r"""
 .nsm-dashboard-action-note { color:var(--text-muted); font-size:.76rem; line-height:1.6; margin:.1rem .2rem 0; }
 @media (max-width:900px) { .nsm-dashboard-grid{grid-template-columns:repeat(2,minmax(0,1fr));} .nsm-dashboard-lower{grid-template-columns:1fr;} }
 @media (max-width:640px) { .nsm-dashboard-hero{padding:1rem;} .nsm-dashboard-title{font-size:1.2rem;} .nsm-dashboard-action-grid{grid-template-columns:1fr;} }
+
+/* دليل التنقّل وشريط التبويبات الرئيسي */
+.nsm-nav-guide {
+  display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.65rem;
+  direction:rtl; margin:.45rem 0 .7rem;
+}
+.nsm-nav-card {
+  display:flex; align-items:flex-start; gap:.6rem; min-height:66px;
+  padding:.7rem .8rem; border:1px solid var(--nsm-line); border-radius:15px;
+  background:linear-gradient(145deg,var(--nsm-glass-strong),var(--nsm-glass));
+  transition:transform .16s ease,border-color .16s ease,background .16s ease;
+}
+.nsm-nav-card:hover { transform:translateY(-2px); border-color:rgba(45,212,191,.52); }
+.nsm-nav-card-icon { flex:0 0 auto; width:32px; height:32px; display:grid; place-items:center; border-radius:10px; background:rgba(109,93,252,.16); font-size:1rem; }
+.nsm-nav-card-title { color:var(--text); font-size:.78rem; font-weight:850; }
+.nsm-nav-card-copy { margin-top:.18rem; color:var(--text-muted); font-size:.68rem; line-height:1.55; }
+.stTabs [data-baseweb="tab-list"] {
+  gap:.3rem !important; padding:.3rem !important; border:1px solid var(--nsm-line);
+  border-radius:16px; background:linear-gradient(135deg,var(--nsm-glass-strong),var(--nsm-glass));
+}
+.stTabs [data-baseweb="tab"] {
+  min-height:2.5rem; padding:.5rem .82rem !important; border-radius:11px;
+  color:var(--text-muted); font-weight:800; transition:background .16s ease,color .16s ease,transform .16s ease;
+}
+.stTabs [data-baseweb="tab"]:hover { background:rgba(45,212,191,.09); color:var(--text); transform:translateY(-1px); }
+.stTabs [data-baseweb="tab"][aria-selected="true"] { color:var(--text); background:linear-gradient(135deg,rgba(109,93,252,.22),rgba(45,212,191,.14)); }
+.stTabs [data-baseweb="tab-highlight"] { background:var(--nsm-cyan) !important; height:2px !important; }
+@media (max-width:900px) { .nsm-nav-guide{grid-template-columns:1fr;} .nsm-nav-card{min-height:auto;} }
+@media (max-width:640px) { .stTabs [data-baseweb="tab"]{padding:.45rem .62rem !important;font-size:.78rem;} }
 </style>
 """
 
