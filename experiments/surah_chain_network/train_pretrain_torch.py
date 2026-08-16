@@ -35,6 +35,7 @@ import random
 import sys
 import time
 from pathlib import Path
+from typing import Dict
 
 _HERE = Path(__file__).resolve().parent
 _REPO = _HERE.parents[1]
@@ -88,6 +89,10 @@ RESUME_PATH = os.environ.get("SCN_RESUME_PATH", "").strip()
 #     حتى مع SCN_FRESH=1 — حتى لا يضيع التدريب عند انقطاع الجلسة ──
 SCN_RESUME = os.environ.get("SCN_RESUME", "").strip().lower()
 CHECKPOINT_EVERY = int(os.environ.get("SCN_CHECKPOINT_EVERY", "2"))  # حفظ مرفوع كل كذا عصر
+# ── رفع سريع أول الجولة: epoch الأول والثاني يُرفعان فورًا —
+#     أقصى حماية من موت مبكر قبل أول رفع دوري ──
+FIRST_FAST = os.environ.get("SCN_FIRST_FAST", "1").strip().lower() in ("1", "true", "yes")
+UPLOAD_RETRIES = max(1, int(os.environ.get("SCN_UPLOAD_RETRIES", "3")))
 
 # ----- presets للسعة -----
 PRESET = os.environ.get("SCN_PRESET", "").strip().lower()
@@ -275,6 +280,28 @@ def _upload_checkpoint(ep: int) -> None:
     import subprocess
 
     shutil.rmtree(str(tmp), ignore_errors=True)
+    # ── إعادة محاولة للرفع: الكيرنل قد يموت أثناء clone — retry مع backoff ──
+    last_err = None
+    for attempt in range(1, UPLOAD_RETRIES + 1):
+        last_err = _upload_checkpoint_once(token, repo, branch, tmp, ep, attempt)
+        if last_err is None:
+            break
+        import shutil as _sh
+        _sh.rmtree(str(tmp), ignore_errors=True)
+        if attempt < UPLOAD_RETRIES:
+            wait = 5 * attempt  # 5s → 10s → 15s
+            print(f"[checkpoint] إعادة محاولة رفع #{attempt + 1}/{UPLOAD_RETRIES} بعد {wait}s…")
+            time.sleep(wait)
+    if last_err is not None:
+        print(f"[checkpoint] استُنفدت {UPLOAD_RETRIES} محاولات — لن يُفقد التدريب، سيُرفع في الجولة التالية")
+
+
+def _upload_checkpoint_once(token: str, repo: str, branch: str, tmp: Path,
+                            ep: int, attempt: int = 1) -> str | None:
+    """محاولة واحدة للرفع — ترجع None عند النجاح أو نص خطأ."""
+    import shutil
+    import subprocess
+    shutil.rmtree(str(tmp), ignore_errors=True)
     try:
         r = subprocess.run(
             ["git", "clone", "-q", "--branch", branch,
@@ -283,7 +310,7 @@ def _upload_checkpoint(ep: int) -> None:
         )
         if r.returncode != 0:
             print(f"[checkpoint] clone فشل: {r.stderr[-200:]}")
-            return
+            return "clone failed"
         dest = tmp / "experiments" / "surah_chain_network" / "checkpoints"
         dest.mkdir(parents=True, exist_ok=True)
         files = [
@@ -309,12 +336,28 @@ def _upload_checkpoint(ep: int) -> None:
             capture_output=True, check=False)
         r2 = subprocess.run(["git", "-C", str(tmp), "push", "-q", "origin", branch],
                             capture_output=True, text=True, timeout=600)
-        if r2.returncode == 0:
-            print(f"[checkpoint] رُفعت checkpoint epoch {ep} إلى GitHub ✅")
-        else:
+        if r2.returncode != 0:
             print(f"[checkpoint] push فشل: {r2.stderr[-200:]}")
+            return "push failed"
+        # ── تحقق فعلي من الرفع: ls-remote يطابق الـcommit المرفوع ──
+        local_head = subprocess.run(
+            ["git", "-C", str(tmp), "rev-parse", "HEAD"],
+            capture_output=True, text=True).stdout.strip()
+        rv = subprocess.run(
+            ["git", "-C", str(tmp), "ls-remote", "origin", f"refs/heads/{branch}"],
+            capture_output=True, text=True, timeout=120)
+        remote_head = rv.stdout.split("\t")[0].strip() if rv.returncode == 0 else ""
+        if remote_head and remote_head == local_head:
+            print(f"[checkpoint] رُفعت checkpoint epoch {ep} إلى GitHub ✅ (ls-remote مُطابَق)")
+        elif remote_head:
+            print(f"[checkpoint] رُفعت checkpoint epoch {ep} لكن remote={remote_head[:12]} ≠ local={local_head[:12]} — إعادة المحاولة")
+            return "remote mismatch"
+        else:
+            print(f"[checkpoint] push نجح لكن ls-remote غير متاح — نعتبرها مرفوعة (attempt {attempt})")
+        return None
     except Exception as e:
         print(f"[checkpoint] خطأ: {e}")
+        return str(e)[:200]
     finally:
         shutil.rmtree(str(tmp), ignore_errors=True)
 
@@ -375,6 +418,55 @@ def _pick_resume_path():
     if CKPT_BEST.exists():
         return CKPT_BEST
     return None
+
+
+_CRASH_STATE: Dict = {}
+
+
+def _handle_fatal_signal(sig: int, frame) -> None:
+    """موت مفاجئ (SIGTERM/SIGINT من Kaggle stop أو انقطاع) —
+    احفظ checkpoint وارفع ما وصل إليه التدريب فورًا قبل الموت."""
+    sig_name = "SIGTERM" if sig == 15 else "SIGINT"
+    print(f"\n⚠ إشارة {sig_name} — موت مفاجئ! حفظ طوارئ ورفع...")
+    m = _CRASH_STATE.get("model")
+    train_meta = _CRASH_STATE.get("train_meta")
+    ep = _CRASH_STATE.get("epoch")
+    try:
+        if m is not None and CKPT_DIR.exists():
+            try:
+                m.save(str(CKPT_LATEST), train_meta=train_meta)
+                print("[emergency] حُفظت checkpoint الطوارئ ✅")
+            except Exception as e:
+                print(f"[emergency] حفظ فشل: {e}")
+            try:
+                _upload_checkpoint(ep or 0)
+                print(f"[emergency] رُفعت checkpoint الطوارئ epoch {ep} ✅")
+            except Exception as e:
+                print(f"[emergency] رفع فشل: {e}")
+    except Exception:
+        pass
+    sys.exit(0)
+
+
+def _should_upload(ep: int, start_epoch: int, every: int = CHECKPOINT_EVERY,
+                   fast: bool = FIRST_FAST) -> bool:
+    """منطق قرار الرفع الدوري: رفع دوري كل `every` عصور + رفع سريع
+    أول عصورين من الجولة (FIRST_FAST) للحماية من الموت المبكر."""
+    into_run = ep - start_epoch
+    if fast and 1 <= into_run <= 2:
+        return True
+    return every > 0 and into_run % every == 0
+
+
+# ── معالج الموت المفاجئ: Kaggle يبعث SIGTERM قبل القتل —
+#     التسجيل هنا module-level حتى يعمل فور استيراد السكربت
+#     (حتى قبل بدء main) — بدون هذا handler يضيع كل ما بعد آخر رفع دوري ──
+import signal as _sig
+for _s in (_sig.SIGTERM, _sig.SIGINT):
+    try:
+        _sig.signal(_s, _handle_fatal_signal)
+    except Exception:
+        pass
 
 
 def main():
@@ -657,8 +749,11 @@ def main():
                 break
         train_meta["best_loss"] = best
         m.save(str(CKPT_LATEST), train_meta=train_meta)
+        _CRASH_STATE.update({"model": m, "train_meta": train_meta, "epoch": ep})
         # ── NSM: رفع checkpoint دوري إلى GitHub كل CHECKPOINT_EVERY عصور ──
-        if CHECKPOINT_EVERY > 0 and (ep - start_epoch) % CHECKPOINT_EVERY == 0:
+        #     مع رفع سريع أول عصورين (FIRST_FAST) للحماية من الموت المبكر ──
+        should_upload = _should_upload(ep, start_epoch)
+        if should_upload:
             _upload_checkpoint(ep)
         # ── إشارة التوقف الآمن (زر التوقف) ──────────────────────────────
         if STOP_SIGNAL_FILE.exists():
