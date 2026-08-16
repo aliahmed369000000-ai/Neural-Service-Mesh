@@ -993,15 +993,20 @@ def generate_surahchain_kernel_script(
     repo: str = "aliahmed369000000-ai/Neural-Service-Mesh",
     branch: str = "main",
     kernel_url: str = "",
+    use_tpu: bool = False,
 ) -> str:
     """سكربت Kaggle يشغّل run_train_then_push (تدريب ثم رفع لـ GitHub).
 
-    البناء عبر template string عادي (لا f-string على كامل القالب) —
+    بناء عبر template string عادي (لا f-string على كامل القالب) —
     الف-string المزدوجة القديمة كانت ترمي NameError عند التوليد (خطأ مكتشف
     عمليًا: `_i` غير معرّف في نطاق المولّد).
+
+    use_tpu=True: سكربت لبيئة TPU v5e-8 (صورة TPUVM) — يفعّل SCN_TPU=1
+    ويتخطّى bitsandbytes (غير مدعوم على XLA) ويفحص torch_xla بدل CUDA.
     """
     fresh_s = "1" if fresh else "0"
     push_s = "1" if auto_push else "0"
+    tpu_s = "1" if use_tpu else "0"
     tmpl = textwrap.dedent("""\
         #!/usr/bin/env python3
         \"\"\"NSM SurahChain Kaggle Kernel — job __JOB_ID__\"\"\"
@@ -1060,14 +1065,45 @@ def generate_surahchain_kernel_script(
             subprocess.run(["git", "clone", "--depth", "1", "-b", BRANCH, url, str(work)], check=True)
 
         os.chdir(work)
-        # تثبيت bitsandbytes (Adam-8bit) للحجوم الكبيرة مثل preset=xlarge —
-        # يقلّص حالة المحسّن ≈40% من VRAM ويجعل d=8192 قابلاً للبدء على T4.
-        _pip_ok = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-q", "bitsandbytes"],
-            check=False,
-        )
-        if _pip_ok.returncode != 0:
-            print("⚠ bitsandbytes لم يُثبّت — xlarge قد يفشل")
+        # ── التحقق من الجهاز (TPU أو GPU) ────────────────────────────────
+        SCN_TPU = "__SCN_TPU__"
+        if SCN_TPU == "1":
+            print("=== TPU check ===")
+            try:
+                import torch
+                import torch_xla
+                import torch_xla.core.xla_model as xm
+                print("torch", torch.__version__, "torch_xla", torch_xla.__version__)
+                print("XLA device:", xm.xla_device())
+            except Exception as _xe:
+                print("⚠ torch_xla غير متوفر:", _xe)
+        else:
+            print("=== CUDA check ===")
+            try:
+                import torch
+                print("torch", torch.__version__, "cuda", torch.cuda.is_available(), "gpus", torch.cuda.device_count())
+                try:
+                    for _i in range(torch.cuda.device_count() if torch.cuda.is_available() else 0):
+                        print(f"  GPU{_i} mem_alloc={torch.cuda.memory_allocated(_i)/1e9:.2f}G name={torch.cuda.get_device_name(_i)}")
+                except Exception as _me:
+                    print("gpu mem:", _me)
+                try:
+                    import subprocess as _sp
+                    print(_sp.check_output(["nvidia-smi","--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu","--format=csv,noheader"], text=True, timeout=10).strip())
+                except Exception as _se:
+                    print("smi:", _se)
+            except Exception as e:
+                print("torch:", e)
+
+        # ── تثبيت bitsandbytes (Adam-8bit) على GPU فقط (توفير ≈40% VRAM) ──
+        # على TPU غير مدعوم — skip لتسريع بدء kernel
+        if SCN_TPU != "1":
+            _pip_ok = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-q", "bitsandbytes"],
+                check=False,
+            )
+            if _pip_ok.returncode != 0:
+                print("⚠ bitsandbytes لم يُثبّت — xlarge قد يفشل")
         env = os.environ.copy()
         env.update({
             "SCN_PRESET": PRESET,
@@ -1079,8 +1115,11 @@ def generate_surahchain_kernel_script(
             "SCN_CHECKPOINT_EVERY": "2",
             "AUTO_PUSH": AUTO_PUSH,
             "PYTHONUNBUFFERED": "1",
-            "SCN_USE_8BIT_ADAM": "1",
-            "SCN_GRAD_ACCUM": "2",
+            "SCN_TPU": SCN_TPU,
+            "SCN_USE_8BIT_ADAM": "1" if SCN_TPU != "1" else "0",
+            "SCN_GRAD_ACCUM": "8" if SCN_TPU == "1" else "2",
+            "SCN_COMPILE": "0",
+            "XLA_USE_BF16": "1" if SCN_TPU == "1" else "0",
         })
         script = work / "experiments/surah_chain_network/run_train_then_push.py"
         print("▶", script)
@@ -1107,7 +1146,8 @@ def generate_surahchain_kernel_script(
         "__BRANCH__", branch).replace("__PRESET__", preset).replace(
         "__SCN_N__", str(n)).replace("__SCN_EPOCHS__", str(epochs)).replace(
         "__SCN_BATCH__", str(batch)).replace("__SCN_FRESH__", fresh_s).replace(
-        "__AUTO_PUSH__", push_s), job_id=job_id, kernel_url=kernel_url)
+        "__AUTO_PUSH__", push_s).replace("__SCN_TPU__", tpu_s),
+        job_id=job_id, kernel_url=kernel_url)
 
 
 _ALERTS_B64_CACHE: Dict[str, str] = {}
@@ -1189,8 +1229,15 @@ def prepare_surahchain_kaggle_job(
     fresh: bool = True,
     auto_push: bool = True,
     title: Optional[str] = None,
+    use_tpu: bool = True,
 ) -> Dict[str, Any]:
-    """يجهّز kernel SurahChain جاهز للرفع عبر API."""
+    """يجهّز kernel SurahChain جاهز للرفع عبر API.
+
+    use_tpu=True (افتراضيًا): TPU v5e-8 على Kaggle — أسرع وأكبر ذاكرة
+    (8 شرائح × 16GB = 128GB HBM) — ضروري لـ preset=xlarge (d=8192 يحتاج
+    ≈46GB ويستحيل على T4/16GB). على TPU: enable_gpu=False +
+    machine_shape=TpuV5E8 + صورة TPUVM + SCN_TPU=1 في البيئة.
+    """
     job_id = f"scn_{uuid.uuid4().hex[:10]}"
     job_dir = KAGGLE_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -1214,17 +1261,39 @@ def prepare_surahchain_kaggle_job(
 
     slug = _safe_slug(title or f"nsm-surahchain-{job_id}")
     effective_title = slug.replace("-", " ")
-    script = generate_surahchain_kernel_script(
-        job_id, preset=preset, n=n, epochs=epochs, batch=batch, fresh=fresh, auto_push=auto_push,
-        kernel_url=f"https://www.kaggle.com/code/{user}/{_safe_slug(title or f'nsm-surahchain-{job_id}')}"
-    )
-    meta = generate_kernel_metadata(
-        job_id,
-        username=user,
-        title=effective_title,
-        enable_gpu=True,
-        accelerator="NvidiaTeslaT4",
-    )
+    if use_tpu:
+        # وضع TPU: Kaggle v5e-8 (128GB HBM إجمالي — ضروري لـxlarge d=8192)
+        meta = generate_kernel_metadata(
+            job_id,
+            username=user,
+            title=effective_title,
+            enable_gpu=False,
+            accelerator=None,
+        )
+        meta["machine_shape"] = "TpuV5E8"
+        meta["docker_image"] = (
+            "gcr.io/kaggle-private-byod/python-tpuvm@sha256:" +
+            "a2111cb9be558ea4bc187754bb95d7b65e90d8259434f1eb0e0ab1193ff498c0"
+        )
+        script = generate_surahchain_kernel_script(
+            job_id, preset=preset, n=n, epochs=epochs, batch=batch, fresh=fresh,
+            auto_push=auto_push, use_tpu=True,
+            kernel_url=f"https://www.kaggle.com/code/{user}/{slug}",
+        )
+    else:
+        # وضع GPU: T4 مفردة (الافتراضي القديم)
+        meta = generate_kernel_metadata(
+            job_id,
+            username=user,
+            title=effective_title,
+            enable_gpu=True,
+            accelerator="NvidiaTeslaT4",
+        )
+        script = generate_surahchain_kernel_script(
+            job_id, preset=preset, n=n, epochs=epochs, batch=batch, fresh=fresh,
+            auto_push=auto_push, use_tpu=False,
+            kernel_url=f"https://www.kaggle.com/code/{user}/{slug}",
+        )
     meta["id"] = f"{user}/{slug}"
     meta["enable_internet"] = True
     meta["is_private"] = True

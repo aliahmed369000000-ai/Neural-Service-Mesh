@@ -50,6 +50,49 @@ def get_device() -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+def _xla_available() -> bool:
+    """هل PyTorch/XLA (TPU) متاح في بيئة التشغيل؟"""
+    try:
+        import torch_xla  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def get_xla_device() -> Optional[torch.device]:
+    """يُرجع جهاز XLA/TPU إن كان متاحًا ومطلوبًا عبر SCN_TPU=1، وإلا None.
+
+    على Kaggle TPU v5e-8: صور TPUVM تأتي مع torch_xla مثبتًا. تفعيل
+    SCN_TPU=1 يحرك التدريب إلى xm.xla_device() مع mark_step() بعد كل خطوة.
+    """
+    if os.environ.get("SCN_TPU", "0") != "1":
+        return None
+    if not _xla_available():
+        return None
+    try:
+        import torch_xla.core.xla_model as xm
+        dev = xm.xla_device()
+        return dev
+    except Exception:
+        return None
+
+
+def xla_mark_step(device: Optional[torch.device]) -> None:
+    """مزامنة XLA/TPU بعد خطوات المحسّن — إلزامية على TPU."""
+    if device is None or getattr(device, "type", "") != "xla":
+        return
+    try:
+        import torch_xla.core.xla_model as xm
+        xm.mark_step()
+    except Exception:
+        pass
+
+
+def xla_dtype() -> torch.dtype:
+    """دقة الافتراض على TPU: bfloat16 (الأفضل أداءً واستقرارًا على v5e)."""
+    return torch.bfloat16 if os.environ.get("SCN_TPU_DTYPE", "bf16") == "bf16" else torch.float32
+
+
 def cosine_lr(step, total_steps, base_lr, warmup_steps=0, min_lr_ratio=0.1):
     if total_steps <= 0:
         return base_lr
@@ -684,6 +727,9 @@ class HybridExperimentModelTorch:
         d_head: Optional[int] = None,
         d_ff: Optional[int] = None,
     ):
+        # دعم TPU عبر SCN_TPU=1 (torch_xla) — يُفضَّل على CUDA/CPU إن وُجد
+        if device is None and get_xla_device() is not None:
+            device = get_xla_device()
         self.device = torch.device(device) if device else get_device()
         self.base_lr = lr
         self.lr = lr
@@ -805,25 +851,34 @@ class HybridExperimentModelTorch:
         self.model.train()
         if not accum:
             self.opt.zero_grad(set_to_none=True)
-        logits = self.model(x, key_padding_mask=pad_mask)
-        loss = F.cross_entropy(
-            logits.reshape(-1, logits.size(-1)),
-            y.reshape(-1),
-            ignore_index=-100,
-        )
+        _is_xla = getattr(self.device, "type", "") == "xla"
+        if _is_xla:
+            # TPU: bfloat16 افتراضيًا — أسرع وأخف على الذاكرة (v5e أبطأ في FP32)
+            autocast = torch.autocast(device_type="xla", dtype=xla_dtype(), enabled=True)
+        else:
+            autocast = contextlib.nullcontext()
+        with autocast:
+            logits = self.model(x, key_padding_mask=pad_mask)
+            loss = F.cross_entropy(
+                logits.reshape(-1, logits.size(-1)),
+                y.reshape(-1),
+                ignore_index=-100,
+            )
         # مقسوم على عدد micro-batches المتراكمة لإبقاء مقياس التدرج ثابتًا
         scale = max(1, getattr(self, "_accum_scale", 1))
         (loss / scale).backward()
         if not accum:
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.opt.step()
+            xla_mark_step(self.device)
         return float(loss.item())
 
     def accum_step(self) -> None:
-        """يُنهي تجميع التدرجات: clip → optimizer step → zero_grad."""
+        """يُنهي تجميع التدرجات: clip → optimizer step → zero_grad → mark_step (TPU)."""
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
         self.opt.step()
         self.opt.zero_grad(set_to_none=True)
+        xla_mark_step(self.device)
 
     def train_step(self, text: str, max_len: int = DEFAULT_MAX_LEN) -> Optional[float]:
         return self.train_batch([text], max_len=max_len)

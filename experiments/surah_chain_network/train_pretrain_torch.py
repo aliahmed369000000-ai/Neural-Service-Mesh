@@ -128,6 +128,27 @@ elif PRESET == "xlarge":
     GRAD_ACCUM = max(1, int(os.environ.get("SCN_GRAD_ACCUM", "2")))
     # استقرار: التوسيع الذاتي أسمح عند هذا الحجم
     MAX_EXPANDS = int(os.environ.get("SCN_MAX_EXPANDS", "5"))
+    # ── وضع TPU v5e-8 (PyTorch/XLA) ─────────────────────────────────────
+    # SCN_TPU=1: النقل إلى Kaggle TPU v5e-8 (8 شرائح × 16GB = 128GB HBM).
+    # - bitsandbytes غير مدعوم على TPU → AdamW عادي مع bf16
+    # - XLA JIT compiler يجمع الرسم بيانيًا تلقائيًا → COMPILE=0
+    # - دفعات أكبر ممكنة: BATCH أعلى + تجميع تدرجات أوسع (effective batch أضخم)
+    # - d_model=8192: ~15GB أوزان + ~31GB حالة محسّن FP32 ≈ 46GB —
+    #   لا يكفي على T4 (16GB) لكن مريح على شريحة TPU v5e واحدة (16GB حرة
+    #   بعد الأوزان عبر bf16 + 8-bit-like packing أو micro-batch صغيرة)
+    SCN_TPU = os.environ.get("SCN_TPU", "0") == "1"
+    if SCN_TPU:
+        # Adam-8bit لا يعمل على TPU — البديل: bf16 للمحسّن والأوزان
+        USE_8BIT_ADAM = False
+        COMPILE = False
+        # دفعات أكبر على TPU: micro-batch per step أعلى، وتجميع أوسع
+        BATCH = int(os.environ.get("SCN_BATCH", "2"))
+        GRAD_ACCUM = max(1, int(os.environ.get("SCN_GRAD_ACCUM", "8")))
+        print(
+            f"✅ وضع TPU (SCN_TPU=1): 8-bit Adam معطّل (غير مدعوم على XLA) | "
+            f"torch.compile معطّل (XLA JIT) | BATCH={BATCH} × "
+            f"accum={GRAD_ACCUM} → effective_batch={BATCH * GRAD_ACCUM}"
+        )
 
 if N_KV_HEADS is not None and N_HEADS % N_KV_HEADS != 0:
     raise ValueError(f"n_heads ({N_HEADS}) يجب أن يقبل القسمة على n_kv_heads ({N_KV_HEADS})")
@@ -474,6 +495,11 @@ def main():
         )
 
     # ── 8-bit Adam: تخفيض ≈40% من VRAM للحجوم الكبيرة ─────────────────────
+    # bitsandbytes غير مدعوم على TPU/XLA — تعطيل تلقائي في وضع TPU
+    SCN_TPU_ANY = os.environ.get("SCN_TPU", "0") == "1"
+    if SCN_TPU_ANY and USE_8BIT_ADAM:
+        USE_8BIT_ADAM = False
+        print("✅ وضع TPU: 8-bit Adam معطّل تلقائيًا (bitsandbytes لا يعمل على XLA)")
     if USE_8BIT_ADAM:
         try:
             from bitsandbytes.optim import AdamW8bit
