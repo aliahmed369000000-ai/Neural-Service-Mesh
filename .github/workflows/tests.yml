@@ -31,7 +31,8 @@ jobs:
             tests/test_no_unbound_local.py \
             tests/test_surah_training_monitor.py \
             tests/test_reflection_hardening.py \
-            tests/test_unified_semantic_memory.py
+            tests/test_unified_semantic_memory.py \
+            tests/test_training_experience_registry.py
 
   full:
     name: pytest + py_compile
