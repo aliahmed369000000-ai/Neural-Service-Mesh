@@ -306,6 +306,12 @@ def render_chat():
         _show_bookmarks_only = False
     
     # عرض المحادثة
+    # تهيئة متغيرات العرض قبل الفرع الشرطي حتى يبقى قسم «تحميل المزيد»
+    # آمناً عند أول فتح للمحادثة الفارغة، ولا يعتمد على متغيرات عُرّفت
+    # فقط داخل فرع وجود رسائل سابقة.
+    _hidden_count = 0
+    _search_active = False
+    _display_ceil = NSM_CHAT_DISPLAY_LIMIT
     html = '<div class="chat-box-wrap"><div class="chat-box" id="nsm-chat-box">'
     if not st.session_state.nsm_messages:
         html += '''<div style="text-align:center;color:var(--text-muted);padding:3rem 1rem;

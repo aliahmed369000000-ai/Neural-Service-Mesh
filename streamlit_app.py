@@ -11,7 +11,7 @@ Streamlit front-end لمشروع النظام المعرفي العربي.
 from __future__ import annotations
 
 from app_core import *  # noqa: F401,F403 — كل الثوابت والدوال المساعدة المشتركة
-from ui_components import inject_design_system, render_brand_bar
+from ui_components import inject_design_system, render_brand_bar, render_status_bar
 
 from ui_pages.home import render_home
 from ui_pages.search import render_search
@@ -505,6 +505,13 @@ def main():
     </div>
     </div>
     """, unsafe_allow_html=True)
+
+    render_status_bar([
+        {"label": "الحالة", "value": "تشغيل حي"},
+        {"label": "اللغة", "value": "العربية"},
+        {"label": "الاحتياطي", "value": "محلي جاهز"},
+        {"label": "الوصول", "value": "24/7"},
+    ])
 
     # ── التبويبات ─────────────────────────────────────────────────────────
     # تبويب ⚙️ النظام لا يُضاف لقائمة التبويبات أصلاً إلا بعد فتح وضع المالك

@@ -51,6 +51,30 @@ _DESIGN_CSS = r"""
 .nsm-agent-status--error { color:var(--nsm-danger); background:rgba(251,113,133,.12); }
 .nsm-agent-status--waiting { color:var(--nsm-amber); background:rgba(246,196,83,.12); }
 @media (max-width:640px) { .nsm-kpi-grid{grid-template-columns:repeat(2,1fr)} .nsm-section-head{align-items:flex-start;flex-direction:column;gap:.25rem} }
+
+/* شريط الحالة الموحد أسفل العنوان الرئيسي */
+.nsm-status-bar {
+  display:flex; align-items:center; justify-content:space-between; gap:.65rem;
+  flex-wrap:wrap; margin:.25rem 0 1rem; padding:.58rem .75rem;
+  border:1px solid var(--nsm-line); border-radius:15px;
+  background:linear-gradient(110deg,rgba(109,93,252,.10),rgba(45,212,191,.08));
+  box-shadow:0 8px 24px rgba(0,0,0,.08); direction:rtl;
+}
+.nsm-status-item { display:inline-flex; align-items:center; gap:.42rem; color:var(--text-muted); font-size:.76rem; font-weight:700; white-space:nowrap; }
+.nsm-status-item strong { color:var(--text); font-weight:850; }
+.nsm-status-dot { width:7px; height:7px; border-radius:50%; background:var(--nsm-cyan); box-shadow:0 0 0 4px rgba(45,212,191,.12); }
+.nsm-status-divider { width:1px; height:18px; background:var(--nsm-line); }
+.main .block-container { max-width:1440px; padding-top:1.25rem; padding-bottom:2.2rem; }
+.stTabs [data-baseweb="tab-list"] { overflow-x:auto !important; scrollbar-width:thin; }
+.stTabs [data-baseweb="tab"]:focus-visible, .stButton>button:focus-visible, input:focus-visible, textarea:focus-visible { outline:2px solid var(--nsm-cyan) !important; outline-offset:2px; }
+.stButton>button { min-height:2.45rem; font-weight:750 !important; transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease !important; }
+.stButton>button:hover { transform:translateY(-1px); box-shadow:0 8px 20px rgba(0,0,0,.12) !important; }
+[data-testid="stTextInput"] input, [data-testid="stTextArea"] textarea { border-radius:12px !important; }
+@media (max-width:640px) {
+  .nsm-status-bar { align-items:flex-start; flex-direction:column; gap:.4rem; }
+  .nsm-status-divider { display:none; }
+  .main .block-container { padding-top:.8rem; }
+}
 </style>
 """
 
@@ -108,6 +132,22 @@ def render_alert_cards(alerts: Iterable[Mapping[str, Any]], limit: int = 8) -> N
     st.markdown("".join(html), unsafe_allow_html=True)
 
 
+def render_status_bar(items: Sequence[Mapping[str, Any]]) -> None:
+    """يعرض حالة مختصرة للواجهة من دون ربطها بخدمة خارجية أو تغيير منطق الصفحات."""
+    html = ['<div class="nsm-status-bar" role="status" aria-label="حالة نظام NSM">']
+    for index, item in enumerate(items):
+        if index:
+            html.append('<span class="nsm-status-divider" aria-hidden="true"></span>')
+        label = escape(str(item.get("label", "")))
+        value = escape(str(item.get("value", "")))
+        html.append(
+            f'<span class="nsm-status-item"><span class="nsm-status-dot" aria-hidden="true"></span>'
+            f'{label}: <strong>{value}</strong></span>'
+        )
+    html.append('</div>')
+    st.markdown("".join(html), unsafe_allow_html=True)
+
+
 def render_agent_cards(states: Mapping[str, Mapping[str, Any]]) -> None:
     html = ['<div class="nsm-agent-grid">']
     for agent_id, row in states.items():
@@ -120,4 +160,4 @@ def render_agent_cards(states: Mapping[str, Mapping[str, Any]]) -> None:
     st.markdown("".join(html), unsafe_allow_html=True)
 
 
-__all__ = ["inject_design_system", "render_brand_bar", "render_section_header", "render_kpi_cards", "render_alert_cards", "render_agent_cards"]
+__all__ = ["inject_design_system", "render_brand_bar", "render_status_bar", "render_section_header", "render_kpi_cards", "render_alert_cards", "render_agent_cards"]
