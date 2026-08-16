@@ -1237,9 +1237,26 @@ def render_chat():
                         placeholder.markdown(full_response or "⚠️ خطأ في NSM Agent — جاري الإعادة...")
                 if hasattr(bot, "_last_source"):
                     bot._last_source = "nsm_agent"
-                _response  = full_response.replace("⏳ *أفكر...*\n\n", "", 1)
+                _response  = full_response.replace("⏳ *أفكر...\n\n", "", 1)
                 _ctx_tag   = bot.context_info() if hasattr(bot, "context_info") else ""
                 _src_badge = bot.source_badge() if hasattr(bot, "source_badge") else "🧠 NSM Agent"
+                # 🆕 شارات التعلم المؤسسي: تلميح خبرة توجيه مثبتة + درس
+                # ذاكرة الأخطاء + نتيجة اتساق الفريق — تظهر أسفل الرد مباشرة
+                _learn_badges: List[str] = []
+                try:
+                    _rex_h = st.session_state.pop("_nsm_rex_hint", None)
+                    if _rex_h and str(_rex_h).strip() and "لا توجد خبرة" not in str(_rex_h):
+                        _learn_badges.append(str(_rex_h)[:260])
+                    _rm_h = st.session_state.pop("_nsm_rm_hint", None)
+                    if _rm_h and str(_rm_h).strip():
+                        _learn_badges.append(str(_rm_h)[:260])
+                    _tc_res = st.session_state.pop("_nsm_tc_result", None)
+                    if isinstance(_tc_res, dict) and _tc_res.get("warning"):
+                        _learn_badges.append("⚖️ " + str(_tc_res["warning"])[:260])
+                except Exception:
+                    pass
+                if _learn_badges:
+                    st.caption("\n———\n".join(_learn_badges))
 
             else:
                 # ── مسار free_router (الاحتياطي الأخير) ──────────────────

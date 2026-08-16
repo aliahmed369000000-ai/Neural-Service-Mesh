@@ -1976,6 +1976,29 @@ class NSMAgent:
                     if delegated:
                         names = ", ".join(str(item) for item in delegated)
                         yield f"📌 *الفريق المكلّف: {names}*\n\n"
+                    # 🆕 تمرير نتيجة اتساق الفريق للواجهة (badge أسفل الرد)
+                    try:
+                        import streamlit as st
+                        _tc_m = team_meta.get("team_consistency") or {}
+                        if _tc_m:
+                            st.session_state["_nsm_tc_result"] = dict(_tc_m)
+                    except Exception:
+                        pass
+                    # 🆕 تسجيل نتيجة الجولة في خبرة التوجيه المثبتة
+                    # (single-agent route من orchestrator)
+                    try:
+                        from ai.routing_experience import get_routing_experience
+                        _route_ok = not team_meta.get("_team_failed") and bool(
+                            (team_meta.get("team_consistency") or {}).get("score", 1.0) or 1.0 >= 0.45
+                        )
+                        get_routing_experience().record(
+                            user_input,
+                            route_method=team_meta.get("route_method", "default"),
+                            selected_agents=delegated,
+                            ok=bool(_route_ok),
+                        )
+                    except Exception:
+                        pass
                     yield team_response
                     return
         except Exception:
@@ -1990,6 +2013,40 @@ class NSMAgent:
                 _hints = format_experience_hints(user_input)
                 if _hints:
                     system = system + chr(10)*2 + _hints
+        except Exception:
+            pass
+        # 🆕 تلميح خبرة التوجيه المثبتة — من جولات ناجحة سابقة فعلية
+        # (routing_experience.py): إن وُجدت خبرة مثبتة لطلب مشابه يُدفع
+        # التلميح داخل system prompt ليوجّه أسلوب الرد فورًا.
+        try:
+            from ai.routing_experience import get_routing_experience
+            _rex = get_routing_experience()
+            _rex_hint = _rex.hints_for(user_input)
+            if _rex_hint:
+                system = system + chr(10)*2 + _rex_hint
+                # تذكير للواجهة (badge) — يُقرأ لاحقًا من session_state
+                try:
+                    import streamlit as st
+                    st.session_state["_nsm_rex_hint"] = _rex_hint
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # 🆕 درس الذاكرة التعلمية — إن سجّلنا سابقًا خطئًا مماثلًا لهذا الرد،
+        # نحمّله كتحذير وقائي (reflection_memory.py) حتى لا يتكرر الفشل.
+        try:
+            from ai.reflection_memory import get_reflection_memory
+            _sig = getattr(self, "_last_error_signature", None)
+            if _sig:
+                _rm = get_reflection_memory()
+                _l = _rm.lookup(_sig)
+                if _l:
+                    system = system + chr(10)*2 + "⚠️ " + _l["hint"]
+                    try:
+                        import streamlit as st
+                        st.session_state["_nsm_rm_hint"] = _l["hint"]
+                    except Exception:
+                        pass
         except Exception:
             pass
         messages: List[Dict] = [{"role": "system", "content": system}]

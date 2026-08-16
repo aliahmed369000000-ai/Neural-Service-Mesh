@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ai.llm_fallback import LLMFallback, LIVE_LLM_PROVIDERS
 
@@ -1250,6 +1250,15 @@ class UnifiedAgentChat:
             f"{AGENT_CATEGORIES[k].emoji}{AGENT_CATEGORIES[k].title}"
             for k in selected if k in AGENT_CATEGORIES
         )
+        # 🆕 نتيجة فاحص اتساق الفريق في meta — لعرضها في واجهة الدردشة
+        _tc_meta: Dict[str, Any] = {}
+        try:
+            from ai.team_consistency import check_team_consistency as _tc_check
+            _tc_meta = _tc_check(
+                {k: strip_delegation_tags(v or "") for k, v in agent_replies.items() if k not in failed}
+            )
+        except Exception:
+            pass
         meta = {
             "category_key": "master_orchestrator",
             "category_title": "المدير الموحّد",
@@ -1258,7 +1267,20 @@ class UnifiedAgentChat:
             "provider_badge": f"🎯 مدير المشروع · فريق: {team_label}",
             "quality_badge": "",
             "delegated_agents": selected,
+            "team_consistency": _tc_meta,
         }
+        # 🆕 تسجيل نتيجة التوجيه في خبرة التوجيه المثبتة —
+        # (multi-agent نجح إن لم يفشل وكيل أو يتعارض الفريق بشدة)
+        try:
+            from ai.routing_experience import get_routing_experience
+            get_routing_experience().record(
+                user_input,
+                route_method=f"multi:{route_method}",
+                selected_agents=selected,
+                ok=bool(not failed and (_tc_meta.get("score", 1.0) or 1.0) >= 0.45),
+            )
+        except Exception:
+            pass
         self.shared_history.append((user_input, final))
         self.turns_meta.append(meta)
         emit_event(

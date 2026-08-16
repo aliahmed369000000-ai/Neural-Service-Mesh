@@ -222,6 +222,34 @@ def _render_background(term, sess, sid):
                      disabled=not (bg_cmd or "").strip()):
             _run_bg(term, sess, sid, bg_cmd, int(bg_to))
 
+    # ── 🆕 تشغيلات سريعة بنقرة واحدة (presets من المحرك) ──
+    _preset_map = {
+        "🔍 حالة repo": "status",
+        "📜 آخر commits": "log",
+        "📊 الفروقات": "diff",
+        "🌿 الفروع": "branch",
+        "🐍 إصدار Python": "python",
+        "✅ فحص ai": "compile_ai",
+        "💾 الأقراص": "disk",
+    }
+    if st.session_state.get("_nsm_presets_row", True):
+        st.caption("تشغيل سريع:")
+        cols = st.columns(len(_preset_map))
+        for (col, (label, preset_name)) in zip(cols, _preset_map.items()):
+            with col:
+                if st.button(label, key=f"nsm_bg_preset_{preset_name}",
+                             use_container_width=True):
+                    try:
+                        _pq = term.quick(preset_name, session_id=sid)
+                        st.toast(
+                            "✅ " + preset_name if _pq and _pq.ok else
+                            "❌ " + preset_name,
+                            icon="✅" if _pq and _pq.ok else "❌",
+                        )
+                    except Exception as _pq_err:
+                        st.toast(f"فشل {preset_name}: {_pq_err}", icon="❌")
+                    st.rerun()
+
     # ── قائمة المهام ──
     jobs = term.list_jobs()
     if not jobs:

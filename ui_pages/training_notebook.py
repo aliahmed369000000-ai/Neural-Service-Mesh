@@ -763,6 +763,10 @@ def render_training_notebook():
                 try:
                     for c in list(nb.cells):
                         if c.type != "markdown":
+                            # خلية ما زالت جارية من تنفيذ سابق أو من إيقاف يدوي
+                            # — تجاهلها في run-all بدل إعادة تنفيذها
+                            if c.status == "running":
+                                continue
                             _rc(nb, c.id, timeout=int(timeout))
                             if stop_on_err and c.status == "error":
                                 break
