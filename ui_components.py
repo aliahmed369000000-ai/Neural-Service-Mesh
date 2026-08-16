@@ -140,6 +140,50 @@ _DESIGN_CSS = r"""
 .stTabs [data-baseweb="tab-highlight"] { background:var(--nsm-cyan) !important; height:2px !important; }
 @media (max-width:900px) { .nsm-nav-guide{grid-template-columns:1fr;} .nsm-nav-card{min-height:auto;} .nsm-agent-monitor-hero{flex-direction:column;} }
 @media (max-width:640px) { .stTabs [data-baseweb="tab"]{padding:.45rem .62rem !important;font-size:.78rem;} }
+.nsm-health-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.8rem; margin:.7rem 0 1.15rem; }
+.nsm-health-card { position:relative; overflow:hidden; min-height:116px; padding:1rem; border:1px solid var(--nsm-line); border-radius:18px; background:linear-gradient(145deg,var(--nsm-glass-strong),var(--nsm-glass)); box-shadow:var(--nsm-shadow); }
+.nsm-health-card::before { content:""; position:absolute; inset:0 auto 0 0; width:4px; background:var(--health-accent,var(--nsm-cyan)); }
+.nsm-health-card--ok { --health-accent:#2dd4bf; }
+.nsm-health-card--warn { --health-accent:#f6c453; }
+.nsm-health-card--bad { --health-accent:#fb7185; }
+.nsm-health-card--info { --health-accent:#8b7cff; }
+.nsm-health-icon { float:right; font-size:1.35rem; margin-left:.55rem; }
+.nsm-health-label { color:var(--text-muted); font-size:.78rem; font-weight:800; }
+.nsm-health-value { margin-top:.3rem; color:var(--text); font-size:1.48rem; font-weight:950; letter-spacing:-.02em; }
+.nsm-health-note { margin-top:.28rem; color:var(--text-muted); font-size:.72rem; line-height:1.45; }
+.nsm-system-columns { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr); gap:1rem; align-items:start; }
+.nsm-system-panel { padding:1rem; border:1px solid var(--nsm-line); border-radius:18px; background:var(--nsm-glass); }
+.nsm-system-panel-title { display:flex; justify-content:space-between; gap:.6rem; align-items:center; margin-bottom:.8rem; color:var(--text); font-weight:900; }
+.nsm-notice-stack { display:grid; gap:.55rem; }
+.nsm-notice-row { display:flex; gap:.7rem; align-items:flex-start; padding:.7rem .75rem; border:1px solid var(--notice-line, var(--nsm-line)); border-radius:13px; background:var(--notice-bg, var(--nsm-glass-strong)); }
+.nsm-notice-row--critical { --notice-bg:rgba(251,113,133,.10); --notice-line:rgba(251,113,133,.32); }
+.nsm-notice-row--warning { --notice-bg:rgba(246,196,83,.10); --notice-line:rgba(246,196,83,.30); }
+.nsm-notice-row--info { --notice-bg:rgba(45,212,191,.08); --notice-line:rgba(45,212,191,.28); }
+.nsm-notice-mark { flex:0 0 auto; font-size:1.05rem; }
+.nsm-notice-title { color:var(--text); font-size:.82rem; font-weight:900; }
+.nsm-notice-detail { margin-top:.15rem; color:var(--text-muted); font-size:.72rem; line-height:1.5; }
+.nsm-notice-time { margin-right:auto; color:var(--text-muted); font-size:.67rem; white-space:nowrap; }
+.nsm-provider-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.55rem; }
+.nsm-provider { display:flex; gap:.55rem; align-items:center; padding:.6rem .65rem; border:1px solid var(--nsm-line); border-radius:12px; background:var(--nsm-glass-strong); }
+.nsm-provider-dot { width:9px; height:9px; flex:0 0 auto; border-radius:50%; background:#94a3b8; box-shadow:0 0 0 4px rgba(148,163,184,.12); }
+.nsm-provider--ready .nsm-provider-dot { background:#2dd4bf; box-shadow:0 0 0 4px rgba(45,212,191,.13); }
+.nsm-provider--missing .nsm-provider-dot { background:#f6c453; box-shadow:0 0 0 4px rgba(246,196,83,.13); }
+.nsm-provider-name { color:var(--text); font-size:.76rem; font-weight:850; }
+.nsm-provider-state { margin-right:auto; color:var(--text-muted); font-size:.67rem; }
+.nsm-event-list { display:grid; gap:.25rem; }
+.nsm-event-row { display:grid; grid-template-columns:auto 1fr auto; gap:.6rem; align-items:center; padding:.55rem .2rem; border-bottom:1px solid var(--nsm-line); }
+.nsm-event-row:last-child { border-bottom:0; }
+.nsm-event-dot { width:8px; height:8px; border-radius:50%; background:var(--event-dot,#94a3b8); }
+.nsm-event-dot--ok { --event-dot:#2dd4bf; }
+.nsm-event-dot--bad { --event-dot:#fb7185; }
+.nsm-event-dot--run { --event-dot:#f6c453; box-shadow:0 0 0 4px rgba(246,196,83,.12); }
+.nsm-event-main { min-width:0; }
+.nsm-event-title { overflow:hidden; color:var(--text); font-size:.75rem; font-weight:850; text-overflow:ellipsis; white-space:nowrap; }
+.nsm-event-detail { overflow:hidden; color:var(--text-muted); font-size:.68rem; text-overflow:ellipsis; white-space:nowrap; }
+.nsm-event-time { color:var(--text-muted); font-size:.66rem; white-space:nowrap; }
+.nsm-empty-state { padding:1rem; border:1px dashed var(--nsm-line); border-radius:14px; color:var(--text-muted); text-align:center; font-size:.78rem; }
+@media (max-width:900px) { .nsm-health-grid{grid-template-columns:repeat(2,minmax(0,1fr));} .nsm-system-columns{grid-template-columns:1fr;} }
+@media (max-width:640px) { .nsm-health-grid{grid-template-columns:1fr 1fr; gap:.55rem;} .nsm-health-card{min-height:102px; padding:.75rem;} .nsm-health-value{font-size:1.22rem;} .nsm-provider-grid{grid-template-columns:1fr;} .nsm-event-row{grid-template-columns:auto 1fr;} .nsm-event-time{grid-column:2;} }
 </style>
 """
 
@@ -247,4 +291,79 @@ def render_agent_cards(states: Mapping[str, Mapping[str, Any]]) -> None:
     st.markdown("".join(html), unsafe_allow_html=True)
 
 
-__all__ = ["inject_design_system", "render_brand_bar", "render_status_bar", "render_section_header", "render_kpi_cards", "render_alert_cards", "render_agent_cards"]
+def render_health_cards(cards: Sequence[Mapping[str, Any]]) -> None:
+    """يعرض بطاقات صحة موجزة؛ لا يتصل بخدمة خارجية ولا يغيّر حالة النظام."""
+    html = ['<div class="nsm-health-grid" role="list" aria-label="مؤشرات صحة النظام">']
+    for card in cards:
+        tone = str(card.get("tone", "info"))
+        if tone not in {"ok", "warn", "bad", "info"}:
+            tone = "info"
+        icon = escape(str(card.get("icon", "•")))
+        label = escape(str(card.get("label", "مؤشر")))
+        value = escape(str(card.get("value", "—")))
+        note = escape(str(card.get("note", "")))
+        html.append(
+            f'<article class="nsm-health-card nsm-health-card--{tone}" role="listitem">'
+            f'<span class="nsm-health-icon" aria-hidden="true">{icon}</span>'
+            f'<div class="nsm-health-label">{label}</div>'
+            f'<div class="nsm-health-value">{value}</div>'
+            f'<div class="nsm-health-note">{note}</div>'
+            f'</article>'
+        )
+    html.append('</div>')
+    st.markdown("".join(html), unsafe_allow_html=True)
+
+
+def render_provider_cards(providers: Sequence[Mapping[str, Any]]) -> None:
+    """يعرض حالة مزودي الذكاء الاصطناعي دون إظهار أي مفتاح أو قيمة سرية."""
+    if not providers:
+        st.markdown('<div class="nsm-empty-state">لا توجد بيانات مزودين متاحة حالياً.</div>', unsafe_allow_html=True)
+        return
+    html = ['<div class="nsm-provider-grid" role="list" aria-label="حالة مزودي الذكاء الاصطناعي">']
+    for provider in providers:
+        ready = bool(provider.get("ready"))
+        state = "مهيأ" if ready else "غير مهيأ"
+        tone = "ready" if ready else "missing"
+        name = escape(str(provider.get("name", "مزود")))
+        detail = escape(str(provider.get("detail", state)))
+        html.append(
+            f'<div class="nsm-provider nsm-provider--{tone}" role="listitem">'
+            f'<span class="nsm-provider-dot" aria-hidden="true"></span>'
+            f'<span><span class="nsm-provider-name">{name}</span>'
+            f'<br><span class="nsm-provider-state">{detail} · {state}</span></span>'
+            f'</div>'
+        )
+    html.append('</div>')
+    st.markdown("".join(html), unsafe_allow_html=True)
+
+
+def render_system_events(events: Sequence[Mapping[str, Any]], limit: int = 8) -> None:
+    """يعرض أحدث أحداث النظام في جلسة المستخدم فقط."""
+    rows = list(events)[-max(1, int(limit)):]
+    if not rows:
+        st.markdown('<div class="nsm-empty-state">لا توجد أحداث حيّة بعد. ستظهر هنا عند تشغيل الوكلاء أو المهام.</div>', unsafe_allow_html=True)
+        return
+    html = ['<div class="nsm-event-list" role="list" aria-label="آخر أحداث النظام">']
+    for row in reversed(rows):
+        status = str(row.get("status", ""))
+        if status in {"error", "failed"}:
+            tone = "bad"
+        elif status in {"running", "pending"}:
+            tone = "run"
+        else:
+            tone = "ok"
+        title = escape(str(row.get("title") or row.get("event_type") or "حدث نظام"))
+        detail = escape(str(row.get("detail") or row.get("event_type") or "—")[:140])
+        timestamp = escape(str(row.get("timestamp", "—")))
+        html.append(
+            f'<div class="nsm-event-row" role="listitem">'
+            f'<span class="nsm-event-dot nsm-event-dot--{tone}" aria-hidden="true"></span>'
+            f'<div class="nsm-event-main"><div class="nsm-event-title">{title}</div>'
+            f'<div class="nsm-event-detail">{detail}</div></div>'
+            f'<span class="nsm-event-time">{timestamp}</span></div>'
+        )
+    html.append('</div>')
+    st.markdown("".join(html), unsafe_allow_html=True)
+
+
+__all__ = ["inject_design_system", "render_brand_bar", "render_status_bar", "render_section_header", "render_kpi_cards", "render_alert_cards", "render_agent_cards", "render_health_cards", "render_provider_cards", "render_system_events"]

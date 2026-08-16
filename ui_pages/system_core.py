@@ -6,6 +6,172 @@ from __future__ import annotations
 
 from app_core import *  # noqa: F401,F403 — إعادة تصدير كل الاستيرادات والدوال المساعدة المشتركة
 
+import os
+from pathlib import Path
+
+from ui_components import (
+    render_alert_cards,
+    render_health_cards,
+    render_provider_cards,
+    render_section_header,
+    render_system_events,
+)
+
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _process_memory_mb():
+    """قراءة استهلاك العملية الحالية دون اعتماد إضافي أو اتصال خارجي."""
+    try:
+        for line in Path("/proc/self/status").read_text(encoding="utf-8").splitlines():
+            if line.startswith("VmRSS:"):
+                return round(float(line.split()[1]) / 1024.0, 1)
+    except Exception:
+        pass
+    return None
+
+
+def _provider_status():
+    """يعرض وجود إعدادات المزود فقط؛ لا يطبع مفاتيح ولا يختبر الشبكة."""
+    providers = [
+        ("OpenRouter", "OPENROUTER_API_KEY", "مسار النماذج المتعددة"),
+        ("OpenAI-compatible", "OPENAI_API_KEY", "مسار الذكاء الاصطناعي الأساسي"),
+        ("Kaggle Scheduler", "NSM_KAGGLE_ACCOUNTS_JSON", "جدولة التدريب السحابي"),
+        ("Discord Alerts", "DISCORD_BOT_TOKEN", "التنبيهات الاجتماعية"),
+    ]
+    return [
+        {
+            "name": name,
+            "ready": bool(os.environ.get(env_name)),
+            "detail": detail if os.environ.get(env_name) else "لا يوجد إعداد في البيئة",
+        }
+        for name, env_name, detail in providers
+    ]
+
+
+def _render_system_center() -> None:
+    """لوحة قراءة فقط تجمع صحة NSM والتنبيهات دون تغيير أي مسار تشغيل."""
+    try:
+        snapshot = system_snapshot()
+    except Exception as exc:
+        snapshot = {
+            "score": 0.0,
+            "path_ok": 0,
+            "path_total": 0,
+            "sections": {},
+            "error": str(exc),
+        }
+
+    sections = snapshot.get("sections") or {}
+    score = float(snapshot.get("score") or 0.0)
+    score_tone = "ok" if score >= .75 else "warn" if score >= .5 else "bad"
+
+    try:
+        from ai.background_tasks import get_background_task_manager
+        background = get_background_task_manager().status()
+    except Exception:
+        background = {"total": 0, "pending": 0, "running": 0, "done": 0, "failed": 0}
+
+    try:
+        from ai.training_alerts import alerts_summary, list_alerts
+        alert_summary = alerts_summary()
+        alerts = list_alerts(limit=6)
+    except Exception:
+        alert_summary = {"total": 0, "by_severity": {}, "discord_enabled": False}
+        alerts = []
+
+    try:
+        from ai.agent_event_bus import get_events
+        events = get_events(limit=40)
+    except Exception:
+        events = []
+
+    memory_mb = _process_memory_mb()
+    path_ok = int(snapshot.get("path_ok") or 0)
+    path_total = int(snapshot.get("path_total") or 0)
+    failed_tasks = int(background.get("failed") or 0)
+    active_tasks = int(background.get("running") or 0) + int(background.get("pending") or 0)
+    critical_alerts = int((alert_summary.get("by_severity") or {}).get("critical", 0))
+    warning_alerts = int((alert_summary.get("by_severity") or {}).get("warning", 0))
+
+    st.markdown(
+        '<div class="section-header">📡 مركز الحالة والإشعارات</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<p style="color:var(--text-muted);direction:rtl;margin-top:-.35rem">'
+        'لوحة قراءة موحّدة تجمع صحة المكوّنات، الذاكرة، المهام الخلفية، مزودي الذكاء الاصطناعي، وآخر التنبيهات دون تغيير مسارات التشغيل.'
+        '</p>',
+        unsafe_allow_html=True,
+    )
+    refresh_col, note_col = st.columns([1, 4])
+    with refresh_col:
+        if st.button("↻ تحديث الحالة", key="system_center_refresh"):
+            st.rerun()
+    with note_col:
+        st.caption("البيانات تُقرأ من الحالة الحالية للعملية، ولا تُرسل أسراراً أو تُجري طلبات شبكة تلقائية.")
+
+    render_health_cards([
+        {
+            "icon": "🫀",
+            "label": "الصحة الكلية",
+            "value": f"{score:.0%}",
+            "note": f"{path_ok}/{path_total} مكوّنات حرجة متاحة",
+            "tone": score_tone,
+        },
+        {
+            "icon": "🧠",
+            "label": "ذاكرة العملية",
+            "value": f"{memory_mb:.1f} MB" if memory_mb is not None else "غير متاح",
+            "note": "قياس RSS محلي للعملية الحالية",
+            "tone": "info",
+        },
+        {
+            "icon": "⚙️",
+            "label": "المهام الخلفية",
+            "value": str(active_tasks),
+            "note": f"نشطة أو معلّقة · {failed_tasks} فاشلة",
+            "tone": "warn" if failed_tasks else "ok",
+        },
+        {
+            "icon": "🔔",
+            "label": "التنبيهات",
+            "value": str(alert_summary.get("total", 0)),
+            "note": f"{critical_alerts} حرجة · {warning_alerts} تحذير",
+            "tone": "bad" if critical_alerts else "warn" if warning_alerts else "ok",
+        },
+    ])
+
+    left, right = st.columns([1.12, .88])
+    with left:
+        st.markdown(
+            '<div class="nsm-system-panel-title"><span>🔔 آخر التنبيهات</span>'
+            f'<span class="badge badge-{"red" if critical_alerts else "green"}">{len(alerts)} معروض</span></div>',
+            unsafe_allow_html=True,
+        )
+        if alerts:
+            render_alert_cards(alerts, limit=6)
+        else:
+            st.markdown('<div class="nsm-empty-state">لا توجد تنبيهات مسجلة حالياً.</div>', unsafe_allow_html=True)
+
+        st.markdown('<div class="nsm-system-panel-title" style="margin-top:1rem"><span>🛰️ آخر أحداث النظام</span></div>', unsafe_allow_html=True)
+        render_system_events(events, limit=8)
+
+    with right:
+        st.markdown('<div class="nsm-system-panel-title"><span>🔌 مزودو الذكاء الاصطناعي</span></div>', unsafe_allow_html=True)
+        render_provider_cards(_provider_status())
+
+        training = sections.get("training") or {}
+        bridge = sections.get("bridge") or {}
+        moe = sections.get("moe") or {}
+        st.markdown('<div class="nsm-system-panel-title" style="margin-top:1rem"><span>🧩 ملخص الوحدات</span></div>', unsafe_allow_html=True)
+        render_health_cards([
+            {"icon": "🧬", "label": "MoE", "value": "جاهز" if moe.get("ok") else "تنبيه", "note": str(moe.get("detail", "لا توجد بيانات"))[:70], "tone": "ok" if moe.get("ok") else "warn"},
+            {"icon": "🎓", "label": "التدريب", "value": "متاح" if training.get("ok") else "تنبيه", "note": str(training.get("detail", "لا توجد بيانات"))[:70], "tone": "ok" if training.get("ok") else "warn"},
+            {"icon": "🌉", "label": "جسر الوكلاء", "value": "متصل" if bridge.get("ok") else "جزئي", "note": str(bridge.get("detail", "لا توجد بيانات"))[:70], "tone": "ok" if bridge.get("ok") else "warn"},
+            {"icon": "📦", "label": "المشروع", "value": str((sections.get("project") or {}).get("tests", "—")), "note": "اختبارات مرصودة في المشروع", "tone": "info"},
+        ])
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -13,6 +179,7 @@ from app_core import *  # noqa: F401,F403 — إعادة تصدير كل الا�
 # ══════════════════════════════════════════════════════════════════════════
 def render_system_core():
     """ربط الوحدات الداخلية الأساسية بالواجهة."""
+    _render_system_center()
     st.markdown('<div class="section-header">⚙️ النظام الداخلي — Neural Core & Intelligence</div>',
                 unsafe_allow_html=True)
     st.markdown(
