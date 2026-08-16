@@ -588,6 +588,7 @@ def main():
 
     # ── 8-bit Adam: تخفيض ≈40% من VRAM للحجوم الكبيرة ─────────────────────
     # bitsandbytes غير مدعوم على TPU/XLA — تعطيل تلقائي في وضع TPU
+    global USE_8BIT_ADAM  # NSM: بدون هذا التعيين المحلي يسبّب UnboundLocalError (تعديل محلي لاحق + قراءة قبلها)
     SCN_TPU_ANY = os.environ.get("SCN_TPU", "0") == "1"
     if SCN_TPU_ANY and USE_8BIT_ADAM:
         USE_8BIT_ADAM = False
