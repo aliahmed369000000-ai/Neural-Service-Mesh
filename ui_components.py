@@ -40,17 +40,25 @@ _DESIGN_CSS = r"""
 .nsm-alert-icon { font-size:1rem; line-height:1.4; }
 .nsm-alert-title { color:var(--text); font-weight:850; font-size:.82rem; }
 .nsm-alert-detail { color:var(--text-muted); font-size:.76rem; margin-top:.12rem; }
-.nsm-agent-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(185px,1fr)); gap:.65rem; margin:.3rem 0 1rem; direction:rtl; }
-.nsm-agent-card { padding:.85rem; border:1px solid var(--nsm-line); border-radius:16px; background:var(--nsm-glass); }
-.nsm-agent-top { display:flex; align-items:center; justify-content:space-between; gap:.5rem; }
-.nsm-agent-name { color:var(--text); font-weight:800; font-size:.84rem; }
-.nsm-agent-id { color:var(--text-muted); font-size:.68rem; direction:ltr; }
-.nsm-agent-status { display:inline-flex; align-items:center; gap:.35rem; margin-top:.55rem; padding:.25rem .55rem; border-radius:999px; font-size:.7rem; font-weight:800; }
+.nsm-agent-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(205px,1fr)); gap:.7rem; margin:.3rem 0 1rem; direction:rtl; }
+.nsm-agent-card { position:relative; overflow:hidden; padding:.9rem; border:1px solid var(--nsm-line); border-radius:17px; background:linear-gradient(145deg,var(--nsm-glass-strong),var(--nsm-glass)); box-shadow:0 9px 24px rgba(0,0,0,.08); transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease; }
+.nsm-agent-card:hover { transform:translateY(-3px); border-color:rgba(45,212,191,.52); box-shadow:0 13px 30px rgba(0,0,0,.13); }
+.nsm-agent-card::before { content:""; position:absolute; inset:0 0 auto; height:3px; background:linear-gradient(90deg,var(--nsm-indigo),var(--nsm-cyan)); opacity:.8; }
+.nsm-agent-top { display:flex; align-items:flex-start; justify-content:space-between; gap:.5rem; }
+.nsm-agent-name { color:var(--text); font-weight:850; font-size:.86rem; line-height:1.45; }
+.nsm-agent-id { color:var(--text-muted); font-size:.67rem; direction:ltr; text-align:left; }
+.nsm-agent-status { display:inline-flex; align-items:center; gap:.35rem; margin-top:.6rem; padding:.25rem .58rem; border-radius:999px; font-size:.7rem; font-weight:850; }
+.nsm-agent-status::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; box-shadow:0 0 0 3px color-mix(in srgb,currentColor 16%,transparent); }
 .nsm-agent-status--running { color:var(--nsm-cyan); background:rgba(45,212,191,.12); }
+.nsm-agent-status--running::before { animation:nsm-live-pulse 1.45s infinite; }
 .nsm-agent-status--done { color:#86efac; background:rgba(134,239,172,.12); }
 .nsm-agent-status--error { color:var(--nsm-danger); background:rgba(251,113,133,.12); }
 .nsm-agent-status--waiting { color:var(--nsm-amber); background:rgba(246,196,83,.12); }
-@media (max-width:640px) { .nsm-kpi-grid{grid-template-columns:repeat(2,1fr)} .nsm-section-head{align-items:flex-start;flex-direction:column;gap:.25rem} }
+.nsm-agent-meta { display:flex; justify-content:space-between; gap:.45rem; margin-top:.65rem; color:var(--text-muted); font-size:.68rem; }
+.nsm-agent-detail { min-height:2.45rem; margin-top:.5rem; color:var(--text-muted); font-size:.73rem; line-height:1.65; }
+.nsm-agent-progress { height:4px; margin-top:.65rem; overflow:hidden; border-radius:999px; background:rgba(148,163,184,.16); }
+.nsm-agent-progress > span { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,var(--nsm-indigo),var(--nsm-cyan)); transition:width .25s ease; }
+@media (max-width:640px) { .nsm-kpi-grid{grid-template-columns:repeat(2,1fr)} .nsm-section-head{align-items:flex-start;flex-direction:column;gap:.25rem} .nsm-agent-grid{grid-template-columns:1fr;} }
 
 /* شريط الحالة الموحد أسفل العنوان الرئيسي */
 .nsm-status-bar {
@@ -99,6 +107,11 @@ _DESIGN_CSS = r"""
 @media (max-width:900px) { .nsm-dashboard-grid{grid-template-columns:repeat(2,minmax(0,1fr));} .nsm-dashboard-lower{grid-template-columns:1fr;} }
 @media (max-width:640px) { .nsm-dashboard-hero{padding:1rem;} .nsm-dashboard-title{font-size:1.2rem;} .nsm-dashboard-action-grid{grid-template-columns:1fr;} }
 
+.nsm-agent-monitor-hero { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; direction:rtl; margin:.35rem 0 1rem; padding:1rem 1.1rem; border:1px solid var(--nsm-line); border-radius:18px; background:linear-gradient(135deg,rgba(109,93,252,.13),rgba(45,212,191,.08)); }
+.nsm-agent-monitor-eyebrow { color:var(--nsm-cyan); font-size:.72rem; font-weight:850; }
+.nsm-agent-monitor-title { color:var(--text); font-size:1.12rem; font-weight:900; margin-top:.22rem; }
+.nsm-agent-monitor-copy { color:var(--text-muted); font-size:.78rem; line-height:1.7; margin-top:.3rem; }
+.nsm-agent-monitor-chip { flex:0 0 auto; padding:.35rem .62rem; border:1px solid rgba(45,212,191,.28); border-radius:999px; color:var(--nsm-cyan); background:rgba(45,212,191,.09); font-size:.72rem; font-weight:850; white-space:nowrap; }
 /* دليل التنقّل وشريط التبويبات الرئيسي */
 .nsm-nav-guide {
   display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.65rem;
@@ -125,7 +138,7 @@ _DESIGN_CSS = r"""
 .stTabs [data-baseweb="tab"]:hover { background:rgba(45,212,191,.09); color:var(--text); transform:translateY(-1px); }
 .stTabs [data-baseweb="tab"][aria-selected="true"] { color:var(--text); background:linear-gradient(135deg,rgba(109,93,252,.22),rgba(45,212,191,.14)); }
 .stTabs [data-baseweb="tab-highlight"] { background:var(--nsm-cyan) !important; height:2px !important; }
-@media (max-width:900px) { .nsm-nav-guide{grid-template-columns:1fr;} .nsm-nav-card{min-height:auto;} }
+@media (max-width:900px) { .nsm-nav-guide{grid-template-columns:1fr;} .nsm-nav-card{min-height:auto;} .nsm-agent-monitor-hero{flex-direction:column;} }
 @media (max-width:640px) { .stTabs [data-baseweb="tab"]{padding:.45rem .62rem !important;font-size:.78rem;} }
 </style>
 """
@@ -201,13 +214,35 @@ def render_status_bar(items: Sequence[Mapping[str, Any]]) -> None:
 
 
 def render_agent_cards(states: Mapping[str, Mapping[str, Any]]) -> None:
+    status_labels = {
+        "running": "⏳ يعمل الآن",
+        "done": "✅ اكتملت المهمة",
+        "error": "❌ تحتاج مراجعة",
+        "waiting": "⏸️ في الانتظار",
+    }
+    progress_values = {"running": 68, "done": 100, "error": 100, "waiting": 22}
     html = ['<div class="nsm-agent-grid">']
     for agent_id, row in states.items():
         status = str(row.get("status", "waiting"))
-        safe_status = status if status in {"running", "done", "error", "waiting"} else "waiting"
+        safe_status = status if status in status_labels else "waiting"
         title = escape(str(row.get("title") or agent_id))
-        detail = escape(str(row.get("timestamp", "—")))
-        html.append(f'<div class="nsm-agent-card"><div class="nsm-agent-top"><div class="nsm-agent-name">{title}</div><div class="nsm-agent-id">{escape(str(agent_id))}</div></div><div class="nsm-agent-status nsm-agent-status--{safe_status}">{escape(status)} · آخر تحديث {detail}</div></div>')
+        safe_id = escape(str(agent_id))
+        timestamp = escape(str(row.get("timestamp", "—")))
+        event_type = escape(str(row.get("event_type") or "آخر حدث"))
+        detail = escape(str(row.get("detail") or "لا توجد تفاصيل إضافية لهذا الوكيل")[:180])
+        duration = row.get("duration_ms")
+        duration_label = f"{float(duration):.0f} ms" if duration is not None else "—"
+        progress = progress_values[safe_status]
+        html.append(
+            f'<article class="nsm-agent-card">'
+            f'<div class="nsm-agent-top"><div class="nsm-agent-name">{title}</div>'
+            f'<div class="nsm-agent-id">{safe_id}</div></div>'
+            f'<div class="nsm-agent-status nsm-agent-status--{safe_status}">{status_labels[safe_status]}</div>'
+            f'<div class="nsm-agent-detail">{detail}</div>'
+            f'<div class="nsm-agent-meta"><span>{event_type}</span><span>{timestamp} · {duration_label}</span></div>'
+            f'<div class="nsm-agent-progress" role="progressbar" aria-valuenow="{progress}" aria-valuemin="0" aria-valuemax="100"><span style="width:{progress}%"></span></div>'
+            f'</article>'
+        )
     html.append('</div>')
     st.markdown("".join(html), unsafe_allow_html=True)
 

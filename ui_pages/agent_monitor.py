@@ -1,6 +1,8 @@
 """لوحة مراقبة حيّة لتفاعل agents داخل جلسة Streamlit."""
 from __future__ import annotations
 
+from html import escape as _escape
+
 from app_core import *  # noqa: F401,F403
 from typing import Any, Dict
 
@@ -74,6 +76,19 @@ def render_agent_monitor() -> None:
         stale_threshold_s=float(stale_threshold_s),
     )
     performance = performance_summary(events)
+    _latest = events[-1] if events else {}
+    _latest_agent = _escape(str(_latest.get("title") or _latest.get("agent_id") or "لا يوجد نشاط بعد"))
+    _latest_event = _escape(str(_latest.get("event_type") or "بانتظار أول حدث"))
+    _latest_status = _escape(_status_label(str(_latest.get("status", "waiting"))))
+    st.markdown(
+        f'<div class="nsm-agent-monitor-hero">'
+        f'<div><div class="nsm-agent-monitor-eyebrow">● مراقبة حيّة داخل الجلسة</div>'
+        f'<div class="nsm-agent-monitor-title">خريطة الوكلاء في نظرة واحدة</div>'
+        f'<div class="nsm-agent-monitor-copy">تابع الوكلاء النشطين، آخر الأحداث، وأزمنة التنفيذ من دون مغادرة صفحة المراقبة.</div></div>'
+        f'<div class="nsm-agent-monitor-chip">آخر نشاط: {_latest_agent} · {_latest_status} · {_latest_event}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
     render_section_header("صحة الشبكة", "مؤشرات مباشرة من ناقل الأحداث")
     if alerts:
@@ -94,12 +109,31 @@ def render_agent_monitor() -> None:
         st.info("لا توجد أحداث بعد. نفّذ مهمة من تبويب «منسّق الوكلاء» أو «الوكيل الموحّد» لتظهر هنا.")
         return
 
-    render_section_header("الحالة الحالية لكل وكيل", f"{len(states)} عقدة متصلة")
-    render_agent_cards(states)
+    _filter_labels = {"all": "كل الحالات", "running": "⏳ يعمل", "done": "✅ اكتمل", "error": "❌ فشل", "waiting": "⏸️ ينتظر"}
+    _status_filter = st.selectbox(
+        "تصفية الوكلاء حسب الحالة",
+        options=list(_filter_labels),
+        format_func=lambda value: _filter_labels.get(value, value),
+        key="agent_monitor_status_filter",
+    ) or "all"
+    _visible_states = {
+        agent_id: row for agent_id, row in states.items()
+        if _status_filter == "all" or row.get("status") == _status_filter
+    }
+    _visible_events = [
+        row for row in events
+        if _status_filter == "all" or row.get("status") == _status_filter
+    ]
+
+    render_section_header("الحالة الحالية لكل وكيل", f"{len(_visible_states)} من {len(states)} عقدة متصلة")
+    if _visible_states:
+        render_agent_cards(_visible_states)
+    else:
+        st.info("لا يوجد وكيل بالحالة المحددة في السجل الحالي.")
 
     render_section_header("السجل الزمني للتفاعل", "آخر الأحداث بالترتيب العكسي")
     table = []
-    for row in reversed(events):
+    for row in reversed(_visible_events):
         table.append({
             "الوقت": row.get("timestamp", "—"),
             "الحدث": row.get("event_type", "—"),
