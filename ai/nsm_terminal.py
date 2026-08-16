@@ -187,13 +187,16 @@ class BackgroundJob:
     session_id: str
     cwd: str
     mode: str
-    status: str = "running"  # running | done | killed | error
+    status: str = "running"  # running | done | killed | error | timed_out
     started_at: str = field(default_factory=_now)
     finished_at: str = ""
     exit_code: Optional[int] = None
     stdout: str = ""
     stderr: str = ""
     error: str = ""
+    live_lines: List[str] = field(default_factory=list)  # 🆕 مخرجات حية خطًا بخط (stdout+stderr ممزوجان بوسم)
+    timeout: int = 300  # 🆕 مهلة خاصة بالمهمة (صفر = لا مهلة)
+    live_lock: threading.Lock = field(default_factory=threading.Lock)
 
     def to_dict(self) -> dict:
         return {
@@ -201,7 +204,23 @@ class BackgroundJob:
             "mode": self.mode, "status": self.status, "started_at": self.started_at,
             "finished_at": self.finished_at, "exit_code": self.exit_code,
             "stdout": self.stdout, "stderr": self.stderr, "error": self.error,
+            "timeout": self.timeout, "lines": len(self.live_lines),
         }
+
+    # 🆕 واجهات آمنة الخيط للبث الحي
+    def append_line(self, line: str) -> None:
+        with self.live_lock:
+            self.live_lines.append(line)
+            if len(self.live_lines) > _MAX_HISTORY:
+                self.live_lines = self.live_lines[-_MAX_HISTORY:]
+
+    def tail(self, n: int = 40) -> List[str]:
+        with self.live_lock:
+            return self.live_lines[-n:]
+
+    def duration_s(self) -> float:
+        t0 = datetime.fromisoformat(self.started_at).timestamp()
+        return max(0.0, time.time() - t0)
 
 
 def _mask_quotes(s: str) -> str:
@@ -648,6 +667,68 @@ class NSMTerminal:
             self._push_history(sess, r)
             return r
 
+        # 🆕 أوامر الخلفية: jobs / tail <id> [n] / kill <id>
+        if cmd == "jobs" or cmd.startswith("jobs "):
+            try:
+                n = int(cmd.split()[1]) if len(cmd.split()) > 1 else 15
+                jobs = self.list_jobs()[:n]
+                if not jobs:
+                    r = CommandResult(ok=True, cmd=cmd, cwd=sess.cwd, exit_code=0,
+                                      stdout="(لا توجد مهام خلفية)", stderr="", duration_ms=0,
+                                      mode=sess.mode)
+                else:
+                    lines = []
+                    for j in jobs:
+                        lines.append(
+                            f"[{j['status']}] {j['id']}  {j['cmd'][:80]}  "
+                            f"exit={j.get('exit_code') if j['exit_code'] is not None else '—'}  "
+                            f"lines={j.get('lines', 0)}"
+                        )
+                    r = CommandResult(ok=True, cmd=cmd, cwd=sess.cwd, exit_code=0,
+                                      stdout="\n".join(lines), stderr="", duration_ms=0,
+                                      mode=sess.mode)
+            except ValueError:
+                r = CommandResult(ok=False, cmd=cmd, cwd=sess.cwd, exit_code=1,
+                                  stdout="", stderr="jobs <n>", duration_ms=0, mode=sess.mode)
+            self._push_history(sess, r)
+            return r
+        if cmd.startswith("tail ") or cmd.startswith("tail-job "):
+            try:
+                parts = cmd.split()
+                tid = parts[1]
+                n = int(parts[2]) if len(parts) > 2 else 40
+            except (ValueError, IndexError):
+                r = CommandResult(ok=False, cmd=cmd, cwd=sess.cwd, exit_code=1,
+                                  stdout="", stderr="tail <job_id> [n]", duration_ms=0,
+                                  mode=sess.mode)
+                self._push_history(sess, r)
+                return r
+            with self._jobs_lock:
+                job = self._jobs.get(tid)
+            if job is None:
+                r = CommandResult(ok=False, cmd=cmd, cwd=sess.cwd, exit_code=1,
+                                  stdout="", stderr=f"لا توجد مهمة: {tid}", duration_ms=0,
+                                  mode=sess.mode)
+                self._push_history(sess, r)
+                return r
+            lines = job.tail(n)
+            status_line = (f"status={job.status} · exit={job.exit_code if job.exit_code is not None else '—'} "
+                           f"· {job.duration_s():.1f}s")
+            r = CommandResult(ok=True, cmd=cmd, cwd=sess.cwd, exit_code=0,
+                              stdout="\n".join(lines), stderr=status_line, duration_ms=0,
+                              mode=sess.mode)
+            self._push_history(sess, r)
+            return r
+        if cmd.startswith("kill ") or cmd.startswith("stop "):
+            tid = cmd.split(maxsplit=1)[1].strip()
+            res = self.stop_job(tid)
+            r = CommandResult(ok=res.get("ok"), cmd=cmd, cwd=sess.cwd,
+                              exit_code=0 if res.get("ok") else 1,
+                              stdout=res.get("msg", ""), stderr=res.get("error", ""),
+                              duration_ms=0, mode=sess.mode)
+            self._push_history(sess, r)
+            return r
+
         # 🆕 أوامر Kaggle shortcuts (kg status/logs/list/output)
         _kag_ok, _kag_key, _kag_args = self._match_kaggle_cmd(cmd)
         if _kag_ok:
@@ -767,13 +848,15 @@ class NSMTerminal:
     def start_background(
         self, cmd: str, session_id: Optional[str] = None,
         mode: Optional[str] = None, env_extra: Optional[Dict[str, str]] = None,
+        timeout: int = 300,
     ) -> BackgroundJob:
         cmd = (cmd or "").strip()
         sess = self.get_session(session_id)
         if mode in ("safe", "admin"):
             sess.mode = mode
         job_id = uuid.uuid4().hex[:10]
-        job = BackgroundJob(id=job_id, cmd=cmd, session_id=sess.id, cwd=sess.cwd, mode=sess.mode)
+        job = BackgroundJob(id=job_id, cmd=cmd, session_id=sess.id, cwd=sess.cwd,
+                            mode=sess.mode, timeout=int(timeout or 0) or 0)
 
         if not cmd:
             job.status, job.error = "error", "أمر فارغ"
@@ -807,14 +890,56 @@ class NSMTerminal:
                 )
                 with self._jobs_lock:
                     self._procs[job_id] = proc
-                out, err = proc.communicate()
+                # 🆕 بث حي: قراءة غير حاجزة لسطور stdout/stderr وإلحاقها بالمهمة
+                # (نستخدم select على POSIX وسقوط آمن للباقي عبر polling قصير)
+                import selectors as _sel
+                try:
+                    sel = _sel.DefaultSelector()
+                    sel.register(proc.stdout, _sel.EVENT_READ, "out")
+                    sel.register(proc.stderr, _sel.EVENT_READ, "err")
+                    timeout_deadline = (t0 + job.timeout) if job.timeout else None
+                    while proc.poll() is None:
+                        if timeout_deadline and time.time() >= timeout_deadline:
+                            with self._jobs_lock:
+                                j = self._jobs.get(job_id)
+                                if j and j.status == "running":
+                                    j.status, j.error, j.exit_code = "timed_out", (
+                                        f"timeout after {job.timeout}s"), 124
+                                    try:
+                                        proc.kill()
+                                    except Exception:
+                                        pass
+                            break
+                        for key, _ in sel.select(timeout=0.15):
+                            with key.fileobj as stream:
+                                tag = key.data
+                                for line in iter(stream.readline, ""):
+                                    job.append_line(f"[{tag}] {line.rstrip()}")
+                    sel.close()
+                except Exception:
+                    pass
+                # التماس النهائي لبقية المخرجات غير المقروءة
+                try:
+                    out, err = proc.communicate(timeout=3)
+                    for line in (out or "").splitlines():
+                        if line.strip():
+                            job.append_line(f"[out] {line}")
+                    for line in (err or "").splitlines():
+                        if line.strip():
+                            job.append_line(f"[err] {line}")
+                except Exception:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
                 with self._jobs_lock:
                     j = self._jobs.get(job_id)
                     if j:
                         j.exit_code = proc.returncode
-                        j.stdout = redact(out or "")[:_MAX_OUTPUT]
-                        j.stderr = redact(err or "")[:_MAX_OUTPUT]
-                        if j.status == "running":  # لم يُقتل يدوياً أثناء التنفيذ
+                        j.stdout = redact(j.stdout or "")[:_MAX_OUTPUT]
+                        j.stderr = redact(j.stderr or "")[:_MAX_OUTPUT]
+                        # إبقاء status=timed_out إن ضُبط أثناء الحلقة
+                        if j.status == "running":
                             j.status = "done"
                         j.finished_at = j.finished_at or _now()
                     self._procs.pop(job_id, None)
@@ -825,12 +950,14 @@ class NSMTerminal:
                         j.status, j.error, j.finished_at = "error", str(e), _now()
                     self._procs.pop(job_id, None)
             finally:
+                with self._jobs_lock:
+                    _j = self._jobs.get(job_id)
                 r = CommandResult(
-                    ok=(self._jobs.get(job_id).exit_code == 0) if self._jobs.get(job_id) else False,
-                    cmd=cmd, cwd=sess.cwd, exit_code=self._jobs[job_id].exit_code or 0,
-                    stdout=self._jobs[job_id].stdout, stderr=self._jobs[job_id].stderr,
+                    ok=(_j.exit_code == 0) if _j else False,
+                    cmd=cmd, cwd=sess.cwd, exit_code=_j.exit_code or 0,
+                    stdout=_j.stdout if _j else "", stderr=_j.stderr if _j else "",
                     duration_ms=int((time.time() - t0) * 1000), mode=sess.mode,
-                    error=self._jobs[job_id].error,
+                    error=_j.error if _j else "",
                 )
                 self._push_history(sess, r)
 
@@ -858,11 +985,48 @@ class NSMTerminal:
                 return False
             job.status = "killed"
             job.finished_at = _now()
-        if proc is not None:
             try:
-                proc.kill()
+                if proc is not None:
+                    proc.kill()
             except Exception:
                 pass
+        return True
+
+    def stop_job(self, job_id: str) -> dict:
+        """🆕 إيقاف آمن شامل: SIGTERM أولًا ثم SIGKILL بعد 3 ثوانٍ إن لزم.
+        يعيد نتيجة قراءة (ok, error) للواجهة."""
+        with self._jobs_lock:
+            proc = self._procs.get(job_id)
+            job = self._jobs.get(job_id)
+            if not job:
+                return {"ok": False, "error": f"لا توجد مهمة: {job_id}"}
+            if job.status != "running":
+                return {"ok": False, "error": f"المهمة {job.status} بالفعل — لا تحتاج إيقافًا"}
+            job.status = "killed"
+            job.finished_at = _now()
+        if proc is not None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            # SIGKILL احتياط بعد 3 ثوانٍ إن بقي حيًا
+            def _force_kill():
+                time.sleep(3)
+                try:
+                    if proc.poll() is None:
+                        proc.kill()
+                except Exception:
+                    pass
+            threading.Thread(target=_force_kill, daemon=True).start()
+        return {"ok": True, "msg": "أُرسل أمر الإيقاف — إن لم ينته خلال 3 ثوانٍ سيُقتل نهائيًا"}
+
+    def clear_job(self, job_id: str) -> bool:
+        """🆕 مسح مهمة منتهية (غير جارية) من سجل المهام لتخفيف اللوحة."""
+        with self._jobs_lock:
+            job = self._jobs.get(job_id)
+            if not job or job.status == "running":
+                return False
+            self._jobs.pop(job_id, None)
         return True
 
     def _push_history(self, sess: TerminalSession, result: CommandResult) -> None:
@@ -888,8 +1052,24 @@ class NSMTerminal:
             "python": "python3 --version",
             "branch": "git branch -vv",
             "lfs": "git lfs ls-files 2>/dev/null | head -20 || echo 'no lfs files'",
+            "jobs": "jobs",
+            "kill_last": None,  # خاص — يُعالج يدويًا أدناه
         }
         cmd = presets.get(name)
+        if cmd is None and name == "kill_last":
+            # يوقف آخر مهمة خلفية جارية (إن وجدت)
+            jobs = self.list_jobs(session_id=session_id)
+            running = [j for j in jobs if j.get("status") == "running"]
+            if not running:
+                return CommandResult(
+                    ok=False, cmd=name, cwd=str(self.root), exit_code=1,
+                    stdout="", stderr="لا توجد مهام خلفية جارية", duration_ms=0, mode=mode,
+                )
+            res = self.stop_job(running[0]["id"])
+            return CommandResult(
+                ok=bool(res.get("ok")), cmd=name, cwd=str(self.root), exit_code=0,
+                stdout=res.get("msg", ""), stderr=res.get("error", ""), duration_ms=0, mode=mode,
+            )
         if not cmd:
             return CommandResult(
                 ok=False, cmd=name, cwd=str(self.root), exit_code=1,

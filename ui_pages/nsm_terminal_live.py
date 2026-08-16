@@ -85,7 +85,7 @@ def _admin_ok() -> bool:
 
 
 def render_nsm_terminal_live():
-    """لوحة التيرمنال الحي — تبويبات: Live / Kaggle / Smart."""
+    """لوحة التيرمنال الحي — تبويبات: Live / Background / Kaggle / Smart / الوكلاء."""
     if not _admin_ok():
         st.warning("🔒 وضع المالك مطلوب لفتح التيرمنال الحي.")
         return
@@ -104,16 +104,18 @@ def render_nsm_terminal_live():
     sid = st.session_state.nsm_live_session
     sess = term.get_session(sid)
 
-    live_tab, kaggle_tab, agents_tab, smart_tab = st.tabs(
-        ["🖥️ Live", "🚀 Kaggle", "🤖 الوكلاء", "🧠 Smart"])
+    live_tab, bg_tab, kaggle_tab, smart_tab, agents_tab = st.tabs(
+        ["🖥️ Live", "🚦 Background", "🚀 Kaggle", "🧠 Smart", "🤖 الوكلاء"])
     with live_tab:
         _render_live(term, sess, sid)
+    with bg_tab:
+        _render_background(term, sess, sid)
     with kaggle_tab:
         _render_kaggle(term, sess, sid)
-    with agents_tab:
-        _render_agents()
     with smart_tab:
         _render_smart(term, sess, sid)
+    with agents_tab:
+        _render_agents()
 
 
 # ══════════════════════ 1. Live ══════════════════════
@@ -151,6 +153,13 @@ def _render_live(term, sess, sid):
         _send_cmd(term, sess, sid, cmd_input, int(to), mode)
         return
 
+    # 🆕 زر خلفية سريع (بدون الانتقال لتبويب Background)
+    if st.button("▶️ تشغيل في الخلفية", key="nsm_live_bg_here", use_container_width=True):
+        if not (cmd_input or "").strip():
+            st.toast("أدخل أمرًا أولًا", icon="⚠️")
+        else:
+            _run_bg(term, sess, sid, cmd_input, int(to))
+
     # حفظ السجل كـ JSON
     if sess.history:
         if st.download_button(
@@ -181,6 +190,95 @@ def _send_cmd(term, sess, sid, cmd: str, timeout: int, mode: str):
 
     threading.Thread(target=_worker, daemon=True).start()
     st.rerun()
+
+
+def _run_bg(term, sess, sid, cmd: str, timeout: int):
+    """🆕 إطلاق أمر في الخلفية — بث حي فوري في تبويب Background."""
+    cmd = (cmd or "").strip()
+    if not cmd:
+        return
+    j = term.start_background(cmd, session_id=sid, mode=sess.mode, timeout=max(60, timeout))
+    st.session_state.setdefault("_nsm_bg_active", {})[j.id] = {"ts": time.time()}
+    st.toast(f"🚦 خلفية: {j.id}", icon="🚦")
+    st.rerun()
+
+
+def _render_background(term, sess, sid):
+    """🆕 لوحة المهام الخلفية — تشغيل أمر جديد + قائمة المهام الحية مع بث مباشر
+    لكل مهمة جارية (polling عند كل re-run) + إيقاف فوري."""
+    st.markdown("**🚦 المهام الخلفية** — تشغيل أوامر طويلة (تدريب، تجميع، دفعة git…) دون حجب الطرفية")
+    st.caption("بث حي خطًا بخط لكل مهمة · إيقاف SIGTERM→SIGKILL · مهلة قابلة للضبط · أوامر `jobs`/`tail`/`kill` مدمجة أيضًا في Live")
+
+    # ── تشغيل جديد ──
+    c1, c2, c3 = st.columns([5, 1.5, 1])
+    with c1:
+        bg_cmd = st.text_input("أمر الخلفية", key="nsm_bg_input",
+                               placeholder="python3 experiments/surah_chain_network/run_train_then_push.py",
+                               label_visibility="collapsed")
+    with c2:
+        bg_to = st.number_input("مهلة s", 60, 3600, 300, key="nsm_bg_to", label_visibility="collapsed")
+    with c3:
+        if st.button("▶️ تشغيل", key="nsm_bg_run", use_container_width=True,
+                     disabled=not (bg_cmd or "").strip()):
+            _run_bg(term, sess, sid, bg_cmd, int(bg_to))
+
+    # ── قائمة المهام ──
+    jobs = term.list_jobs()
+    if not jobs:
+        st.info("لا توجد مهام خلفية — أطلق أول أمر من الحقول أعلاه.")
+        return
+
+    st.markdown(f"**{len(jobs)} مهمة** (أحدثها أولًا)")
+    for j in jobs:
+        is_running = j.get("status") == "running"
+        badge = "🟡 جارية" if is_running else (
+            "✅ انتهت" if j.get("status") == "done" else
+            "⛔ أوقفت" if j.get("status") == "killed" else
+            "⏱️ انتهت المهلة" if j.get("status") == "timed_out" else "❌ خطأ")
+        with st.expander(
+                f"{badge} · `{j['id']}` · {j['cmd'][:90]} · exit={j.get('exit_code') if j.get('exit_code') is not None else '—'}",
+                expanded=(is_running and len(jobs) <= 4)):
+            b1, b2 = st.columns([3, 1])
+            with b1:
+                st.caption(f"cwd: {j.get('cwd','')} · {j.get('mode','')} · "
+                           f"مهلة {j.get('timeout',0)}s · بدأ {j.get('started_at','')}")
+            with b2:
+                if is_running:
+                    if st.button("⛔ إيقاف", key=f"nsm_bg_kill_{j['id']}",
+                                 use_container_width=True):
+                        res = term.stop_job(j["id"])
+                        st.toast("✅ أُرسل الإيقاف", icon="✅")
+                        st.rerun()
+                else:
+                    if st.button("🗑 مسح", key=f"nsm_bg_clear_{j['id']}",
+                                 use_container_width=True):
+                        term.clear_job(j["id"])
+                        st.rerun()
+            # 🆕 بث حي: آخر سطور المهمة
+            if is_running:
+                st.markdown('<div class="nsm-live-wrap"><div class="nsm-live-body">',
+                            unsafe_allow_html=True)
+                with term._jobs_lock:
+                    job = term._jobs.get(j["id"])
+                tail = job.tail(30) if job else []
+                parts = []
+                for line in tail:
+                    line = _esc(line)
+                    if line.startswith("[err]"):
+                        parts.append(f'<div class="nsm-live-err">{line}</div>')
+                    else:
+                        parts.append(f'<div class="nsm-live-out">{line}</div>')
+                if not parts:
+                    parts.append('<div class="nsm-live-meta">في انتظار أول مخرجات…</div>')
+                else:
+                    parts.append('<div class="nsm-live-running">█ يتم التحديث تلقائيًا عند كل إعادة تحميل للصفحة</div>')
+                st.markdown(''.join(parts) + '</div></div>', unsafe_allow_html=True)
+            else:
+                # مخرجات نهائية
+                if j.get("stdout"):
+                    st.code(j["stdout"][-2000:], language="text")
+                if j.get("stderr"):
+                    st.caption(_esc(j["stderr"][-800:]))
 
 
 def _render_screen(sess, depth: int):

@@ -4,6 +4,8 @@ ui_pages/training_notebook.py — مختبر تدريب احترافي (Colab/Ka
 from __future__ import annotations
 
 import json
+import re as _nre
+import time
 
 import streamlit as st
 
@@ -148,12 +150,13 @@ def _metrics_plot(nb):
             elif o.get("type") == "stream" and o.get("text"):
                 txt = "".join(o["text"])
             for line in txt.splitlines():
-                # loss: 0.1234 أو loss=0.1234 أو loss: 0.1234
-                m = _re.search(r"(?:loss\s*[=:]\s*|)(\d+\.?\d*(?:e[+-]?\d+)?)", line, _re.I)
-                if m and ("loss" in line.lower()):
+                # loss: 0.1234 أو loss=0.1234 أو loss: 0.1234 أو epoch N loss X
+                m = _re.search(r"loss\s*[=:)]\s*(\d+\.?\d*(?:e[+-]?\d+)?)", line, _re.I)
+                if m:
                     try:
                         loss_vals.append(float(m.group(1)))
-                        steps.append(f"[{c.id[:4]}]")
+                        ep = _re.search(r"epoch\s*[=:)]?\s*(\d+)", line, _re.I)
+                        steps.append(f"[{c.id[:4]}]" + (f"ep{ep.group(1)}" if ep else ""))
                     except ValueError:
                         continue
     if not loss_vals:
@@ -726,14 +729,65 @@ def render_training_notebook():
                 st.toast(f"⏰ مهمة {_r.get('name')}: {'✅' if _r.get('ok') else '❌'}", icon="⏰")
             st.rerun()
 
-        # 🆕 v2: live run — تشغيل الخلية في خيط جانبي مع تحديث مخرجاتها دوريًا
+        # 🆕 v2: live run — تشغيل الخلية في خيط جانبي (غير مسبب للواجهة) مع
+        # تحديث مخرجاتها دوريًا (auto-refresh كل ~1.5s أثناء الجريان)
         def _nb_live_run(_cell_id: str) -> None:
-            try:
-                from ai.notebook_engine import run_cell_streaming
-                st.session_state[f"nb_live_{_cell_id}"] = True
-                run_cell_streaming(nb, _cell_id, timeout=int(timeout))
-            finally:
-                st.session_state.pop(f"nb_live_{_cell_id}", None)
+            import threading as _t
+
+            from ai.notebook_engine import run_cell_streaming
+            st.session_state[f"nb_live_{_cell_id}"] = True
+            def _w():
+                try:
+                    run_cell_streaming(nb, _cell_id, timeout=int(timeout))
+                finally:
+                    st.session_state.pop(f"nb_live_{_cell_id}", None)
+            _t.Thread(target=_w, daemon=True).start()
+
+        def _auto_refresh_nb() -> None:
+            """🆕 polling دوري خفيف: أي خلية running → re-run تلقائي بعد مهلة قصيرة"""
+            any_running = any(c.status == "running" for c in nb.cells)
+            last = st.session_state.get("nb_last_poll", 0.0)
+            if any_running and (time.time() - last) > 1.5:
+                st.session_state.nb_last_poll = time.time()
+                st.rerun()
+
+        _auto_refresh_nb()
+
+        # 🆕 v3: تشغيل كل الخلايا ترتيبًا (run-all) في خيط جانبي
+        def _nb_run_all(stop_on_err: bool) -> None:
+            import threading as _t
+
+            from ai.notebook_engine import run_cell as _rc
+            st.session_state.nb_runall_active = True
+            def _w():
+                try:
+                    for c in list(nb.cells):
+                        if c.type != "markdown":
+                            _rc(nb, c.id, timeout=int(timeout))
+                            if stop_on_err and c.status == "error":
+                                break
+                finally:
+                    st.session_state.pop("nb_runall_active", None)
+            _t.Thread(target=_w, daemon=True).start()
+
+        ac1, ac2 = st.columns(2)
+        with ac1:
+            if st.session_state.get("nb_runall_active"):
+                st.button("🔄 تشغيل الكل…", disabled=True,
+                          use_container_width=True, key="nb_runall_btn")
+            elif st.button("▶️▶️ تشغيل الكل", use_container_width=True,
+                           key="nb_runall_start", help="يشغّل كل الخلايا بالترتيب (يشمل train)"):
+                _nb_run_all(stop_on_err=True)
+        with ac2:
+            if st.button("⏹ إيقاف أي خلية جارية", use_container_width=True,
+                         key="nb_stop_any"):
+                stopped = 0
+                for c in nb.cells:
+                    if c.status == "running":
+                        from ai.notebook_engine import interrupt_cell as _ic2
+                        _ic2(nb, c.id)
+                        stopped += 1
+                st.toast(f"أُرسل إيقاف لـ {stopped} خلية", icon="⏹")
                 st.rerun()
 
         for i, cell in enumerate(list(nb.cells)):
@@ -833,9 +887,39 @@ def render_training_notebook():
                     save_cell_version(nb, cell.id, note="تعديل من الواجهة")
                     cell.source = src
                     save_notebook(nb)
-                # 🆕 v2: شريط تقدم داخل الخلية الجارية (kernel حي يعرض حالة)
+                # 🆕 v3: شريط تقدم داخل الخلية الجارية + استخراج loss/epoch لحظي
                 if cell.status == "running":
-                    st.progress(0.5, text="⏳ الخلية تجري — راقب ⏹ للإيقاف")
+                    _live_last = ""
+                    for _lo in (cell.outputs or [])[::-1]:
+                        if _lo.get("type") == "stream" and _lo.get("text"):
+                            _live_last = "".join(_lo["text"])[-200:]
+                            break
+                    if not _live_last:
+                        for _lo in (cell.outputs or [])[::-1]:
+                            if _lo.get("stdout"):
+                                _live_last = _lo["stdout"][-200:]
+                                break
+                    _lm = _nre.search(
+                        r"(?:epoch|ep)\s*[=:)]?\s*(\d+).{0,20}?loss\s*[=:]?\s*([\d.e+-]+)",
+                        _live_last, _nre.I)
+                    if not _lm:
+                        _lm = _nre.search(
+                            r"loss\s*[=:)\s]\s*([\d.e+-]+)\s*(?:\S*\s*){0,2}?\b(?:epoch|ep)\b\s*[=:)]?\s*(\d+)",
+                            _live_last, _nre.I)
+                    if not _lm:
+                        _lm = _nre.search(
+                            r"loss\s*[=:)\s]\s*([\d.e+-]+)(?:[^\d]|$)",
+                            _live_last, _nre.I)
+                    if _lm:
+                        _a, _b = _lm.group(1), _lm.group(2)
+                        if _a is not None and _b is not None:
+                            _ep, _loss = ((_a, _b) if _a.isdigit() else (_b, _a))
+                        else:
+                            _ep, _loss = _b, _a  # loss-only
+                        st.progress(0.5,
+                                    text=f"⏳ epoch {_ep or '…'} · loss {_loss or '…'} — راقب ⏹ للإيقاف")
+                    else:
+                        st.progress(0.5, text="⏳ الخلية تجري — راقب ⏹ للإيقاف")
 
                 # (يُنفّذ أعلاه — src محفوظ + نسخة تاريخ)
                 if cell.type == "markdown":
