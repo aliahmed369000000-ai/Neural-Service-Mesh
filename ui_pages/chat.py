@@ -212,6 +212,33 @@ def render_chat():
         border-radius: 10px !important;
     }
 
+    /* ── بطاقة تعريف المحادثة ── */
+    .chat-hero {
+        display:grid;grid-template-columns:auto 1fr;gap:0.85rem;align-items:center;
+        padding:0.95rem 1.05rem;margin:0.2rem 0 1rem;
+        border:1px solid var(--border);border-radius:18px;
+        background:linear-gradient(135deg,var(--surface2),var(--bg-soft));
+        box-shadow:0 5px 18px var(--shadow);
+    }
+    .chat-hero-icon {
+        width:46px;height:46px;border-radius:14px;display:flex;align-items:center;
+        justify-content:center;font-size:1.45rem;background:var(--accent-grad);
+        box-shadow:0 5px 16px var(--gold-soft);
+    }
+    .chat-hero-title { color:var(--text);font-size:0.98rem;font-weight:800;line-height:1.5; }
+    .chat-hero-subtitle { color:var(--text-muted);font-size:0.79rem;line-height:1.7;margin-top:0.1rem; }
+    .chat-hero-pills { grid-column:2;display:flex;flex-wrap:wrap;gap:0.38rem;margin-top:-0.25rem; }
+    .chat-hero-pill {
+        display:inline-flex;align-items:center;gap:0.2rem;padding:0.18rem 0.52rem;
+        border-radius:999px;background:var(--surface);border:1px solid var(--border);
+        color:var(--text-muted);font-size:0.68rem;white-space:nowrap;
+    }
+    .chat-composer-hint {
+        display:flex;justify-content:space-between;gap:0.6rem;flex-wrap:wrap;
+        color:var(--text-muted);font-size:0.72rem;margin:0.15rem 0 0.42rem;
+    }
+    .chat-composer-hint span { padding:0.18rem 0.45rem;border-radius:7px;background:var(--surface);border:1px solid var(--border); }
+
     /* ── استجابة الجوال ── */
     @media (max-width: 640px) {
         .chat-box {
@@ -223,6 +250,10 @@ def render_chat():
         }
         .chat-nsm .bbl { line-height:1.7; }
         [data-testid="stChatMessage"] { max-width: 92%; }
+        .chat-hero { grid-template-columns:auto 1fr;padding:0.8rem;border-radius:14px; }
+        .chat-hero-icon { width:40px;height:40px;font-size:1.2rem;border-radius:12px; }
+        .chat-hero-pills { grid-column:1 / -1;margin-top:0; }
+        .chat-composer-hint { justify-content:flex-start; }
     }
     
     /* ── زر النجمة (الإشارة المرجعية) ── */
@@ -251,6 +282,22 @@ def render_chat():
         if ctx:
             st.markdown(f'<div class="ctx-tag">📎 {ctx}</div>', unsafe_allow_html=True)
         st.metric("رسائل الجلسة", st.session_state.nsm_count)
+
+    st.markdown("""
+    <div class="chat-hero">
+        <div class="chat-hero-icon">🧠</div>
+        <div>
+            <div class="chat-hero-title">مساحتك للحوار والفهم المتدرّج</div>
+            <div class="chat-hero-subtitle">اسأل بحرية، تابع السياق، واستكشف الإجابة من أكثر من زاوية دون مغادرة المحادثة.</div>
+        </div>
+        <div class="chat-hero-pills">
+            <span class="chat-hero-pill">🧠 فهم السياق</span>
+            <span class="chat-hero-pill">📚 شبكة معرفية</span>
+            <span class="chat-hero-pill">📋 نسخ الرد</span>
+            <span class="chat-hero-pill">⌘+Enter إرسال</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     # ── تهيئة حالة الملفات المرفَقة (تُستخدم لاحقاً في قسم الكتابة) ───────
     if "chat_pending_files" not in st.session_state:
@@ -711,6 +758,13 @@ def render_chat():
                 st.rerun()
 
     # صندوق الإدخال
+    st.markdown("""
+    <div class="chat-composer-hint">
+        <span>✍️ اكتب سؤالك بالعربية أو أرفق ملفاً</span>
+        <span>Enter سطر جديد</span>
+        <span>Ctrl+Enter إرسال</span>
+    </div>
+    """, unsafe_allow_html=True)
     if not st.session_state.get("_nsm_input_css_injected"):
         st.session_state["_nsm_input_css_injected"] = True
         st.markdown("""
