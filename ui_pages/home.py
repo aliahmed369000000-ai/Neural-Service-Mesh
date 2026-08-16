@@ -122,18 +122,77 @@ def render_home():
         st.markdown("")
 
     # ══════════════════════════════════════════════════════════════════
+    # 🧭 لوحة التحكم — ملخص تشغيلي واختصارات سريعة من دون تكرار منطق الصفحات
+    # ══════════════════════════════════════════════════════════════════
+    import html as _dashboard_html
+    _dashboard_ckg_stats = load_ckg_stats()
+    _dashboard_message_count = len(_prev_msgs)
+    _dashboard_status = "جلسة نشطة" if _dashboard_message_count else "جاهزة للبدء"
+    _dashboard_last_text = _last_user_msg.strip().replace("\n", " ") if _last_user_msg else "لم تبدأ محادثة بعد — اطرح أول سؤال من تبويب المحادثة."
+    if len(_dashboard_last_text) > 135:
+        _dashboard_last_text = _dashboard_last_text[:135].rstrip() + "…"
+    _dashboard_last_text = _dashboard_html.escape(_dashboard_last_text)
+    _dashboard_concepts = _dashboard_ckg_stats.get("concepts", "—") if _dashboard_ckg_stats else "—"
+    _dashboard_relations = _dashboard_ckg_stats.get("relations", "—") if _dashboard_ckg_stats else "—"
+    _dashboard_knowledge_state = "متاحة" if _dashboard_ckg_stats else "قيد التهيئة"
+
+    st.markdown(f"""
+    <section class="nsm-dashboard-hero" aria-label="لوحة تحكم NSM">
+        <div class="nsm-dashboard-eyebrow">لوحة التحكم الرئيسية · متابعة سريعة</div>
+        <h2 class="nsm-dashboard-title">مرحباً بك في مركز القيادة المعرفي</h2>
+        <div class="nsm-dashboard-subtitle">
+            ابدأ من هنا للوصول إلى المحادثة والبحث والوكلاء. يعرض هذا الملخص حالة الجلسة
+            وأهم مؤشرات الشبكة من دون إخفاء أي أداة أو تغيير مسارها الأصلي.
+        </div>
+    </section>
+    <div class="nsm-dashboard-grid" role="list" aria-label="مؤشرات NSM الرئيسية">
+        <div class="nsm-dashboard-stat" role="listitem"><div class="nsm-dashboard-stat-value nsm-dashboard-stat-accent">{_dashboard_status}</div><div class="nsm-dashboard-stat-label">حالة الجلسة الحالية</div></div>
+        <div class="nsm-dashboard-stat" role="listitem"><div class="nsm-dashboard-stat-value">{_dashboard_message_count}</div><div class="nsm-dashboard-stat-label">رسائل هذه الجلسة</div></div>
+        <div class="nsm-dashboard-stat" role="listitem"><div class="nsm-dashboard-stat-value">{_dashboard_concepts}</div><div class="nsm-dashboard-stat-label">مفاهيم في الشبكة</div></div>
+        <div class="nsm-dashboard-stat" role="listitem"><div class="nsm-dashboard-stat-value">{_dashboard_knowledge_state}</div><div class="nsm-dashboard-stat-label">حالة المعرفة</div></div>
+    </div>
+    <div class="nsm-dashboard-lower">
+        <div class="nsm-dashboard-panel">
+            <div class="nsm-dashboard-panel-title">🕘 آخر نشاط</div>
+            <div class="nsm-dashboard-panel-copy">{_dashboard_last_text}</div>
+            <div class="nsm-dashboard-action-note">العلاقات المعرفية الحالية: {_dashboard_relations}</div>
+        </div>
+        <div class="nsm-dashboard-panel">
+            <div class="nsm-dashboard-panel-title">⚡ جاهز للعمل</div>
+            <div class="nsm-dashboard-panel-copy">استخدم الاختصارات أدناه أو انتقل إلى أي تبويب من التبويبات الرئيسية. كل المكوّنات الحالية تعمل من مكانها المعتاد.</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="section-header">⚡ اختصارات سريعة</div>', unsafe_allow_html=True)
+    _dashboard_action_cols = st.columns(3)
+    with _dashboard_action_cols[0]:
+        if st.button("💬 ابدأ محادثة", key="home_dashboard_chat", use_container_width=True):
+            st.session_state["_nsm_home_jump_target"] = "💬 المحادثة"
+            st.rerun()
+    with _dashboard_action_cols[1]:
+        if st.button("🔍 ابحث عن مفهوم", key="home_dashboard_search", use_container_width=True):
+            st.session_state["_nsm_home_jump_target"] = "📚 المعرفة"
+            st.rerun()
+    with _dashboard_action_cols[2]:
+        if st.button("🤖 راقب الوكلاء", key="home_dashboard_agents", use_container_width=True):
+            st.session_state["_nsm_home_jump_target"] = "🤖 الوكلاء"
+            st.rerun()
+    st.markdown('<div class="nsm-dashboard-action-note">هذه الاختصارات تنقلك إلى الصفحات الأصلية نفسها؛ لا توجد نسخة بديلة أو مسار معزول.</div>', unsafe_allow_html=True)
+
+    # ══════════════════════════════════════════════════════════════════
     # 📊 الشبكة المعرفية بالأرقام — أعداد حقيقية من CKG المحمَّل فعلياً
     # (لا بيانات وهمية). تُخفى الفقرة كاملة تلقائياً إن تعذّر تحميل
     # الشبكة (مثلاً أول تشغيل قبل أي تدريب) بدل إظهار أصفار مضلِّلة.
     # ══════════════════════════════════════════════════════════════════
-    _ckg_stats = load_ckg_stats()
+    _ckg_stats = _dashboard_ckg_stats
     if _ckg_stats:
         # 🆕 فاصل "---" قبل عنوان القسم — كل الأقسام اللاحقة بهذه الصفحة
         # (🔎/💡/🌟/🚀 أسفل) مسبوقة بنفس الفاصل، وكان هذا القسم وحده (مع
         # 🎬 أدناه) بلا فاصل فعلياً، ما يجعل التباعد بين الأقسام يبدو غير
         # منتظم عند التمرير من أعلى الصفحة.
         st.markdown("---")
-        st.markdown('<div class="section-header">📊 الشبكة المعرفية بالأرقام</div>',
+        st.markdown('<div class="section-header">📊 تفاصيل الشبكة المعرفية</div>',
                     unsafe_allow_html=True)
         _stat_defs = [
             ("concepts",  "مفهوم معرفي مترابط",      True),
