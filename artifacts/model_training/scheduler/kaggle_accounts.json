@@ -1,5 +1,37 @@
 [
-  {"username": "aliahmedmo", "key": "85a99ee819b2fceb84f708a5d3285a61", "note": "الحساب الرئيسي (aliahmedmo)"},
-  {"username": "aliahmedworld", "key": "c421db1256c39e68b424751bba6a53dc", "note": "الحساب الاحتياطي الثاني (aliahmedworld) — 30h GPU + 20h TPU أسبوعيًا"},
-  {"username": "hxjxnxhzjxj", "key": "25ececd1a93907d3a4c4fba30ae65035", "note": "الحساب الاحتياطي الثالث (hxjxnxhzjxj)"}
+  {
+    "username": "aliahmedmo",
+    "key": "85a99ee819b2fceb84f708a5d3285a61",
+    "note": "الحساب الرئيسي (aliahmedmo)"
+  },
+  {
+    "username": "aliahmedworld",
+    "key": "c421db1256c39e68b424751bba6a53dc",
+    "note": "الحساب الاحتياطي الثاني (aliahmedworld) — 30h GPU + 20h TPU أسبوعيًا"
+  },
+  {
+    "username": "hxjxnxhzjxj",
+    "key": "25ececd1a93907d3a4c4fba30ae65035",
+    "note": "الحساب الاحتياطي الثالث (hxjxnxhzjxj)"
+  },
+  {
+    "username": "mosaly1",
+    "key": "c87e23ba6d47fd84fc152ea85c49cdc3",
+    "note": "الحساب الاحتياطي الرابع (mosaly1) — 30h GPU + 20h TPU أسبوعيًا"
+  },
+  {
+    "username": "bkknnkkbkkbnnn",
+    "key": "8c33eef9e221405a4544b6630ab23b95",
+    "note": "الحساب الاحتياطي الخامس (bkknnkkbkkbnnn) — 30h GPU + 20h TPU أسبوعيًا"
+  },
+  {
+    "username": "qlixhzjnxi",
+    "key": "c74587c703f928e415736b3639bf57d7",
+    "note": "الحساب الاحتياطي السادس (qlixhzjnxi) — 30h GPU + 20h TPU أسبوعيًا"
+  },
+  {
+    "username": "mosaod",
+    "key": "656da62dbb2ca81166d717f8599ca6cd",
+    "note": "الحساب الاحتياطي السابع (mosaod) — 30h GPU + 20h TPU أسبوعيًا"
+  }
 ]
