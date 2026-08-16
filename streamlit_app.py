@@ -24,6 +24,7 @@ from ui_pages.scheduler_hub import render_scheduler_hub
 from ui_pages.aiaas_console import render_aiaas_console
 from ui_pages.economic_engine import render_economic_engine, render_aiaas_economy_hub
 from ui_pages.training_ops_dashboard import render_training_ops_dashboard
+from ui_pages.training_monitor import render_training_monitor
 from ui_pages.moe_agent_studio import render_moe_agent_studio
 from ui_pages.memory import render_memory
 from ui_pages.health import render_health
@@ -130,13 +131,14 @@ def render_training_ops_hub():
         unsafe_allow_html=True,
     )
     st.caption("تدريب النماذج · خليط الخبراء ونمو الوكيل · AIaaS والاقتصاد · لوحة عمليات التدريب")
-    sub = st.tabs(["🎓 التدريب", "📓 Notebook", "🧩 MoE والوكيل", "☁️ AIaaS والاقتصاد", "📡 عمليات التدريب", "🌐 المجدول متعدد الحسابات"])
+    sub = st.tabs(["🎓 التدريب", "📓 Notebook", "🧩 MoE والوكيل", "☁️ AIaaS والاقتصاد", "📡 عمليات التدريب", "🌐 المجدول متعدد الحسابات", "📶 التدريب الحي"])
     with sub[0]: render_training()
     with sub[1]: render_training_notebook()
     with sub[2]: render_moe_agent_studio()
     with sub[3]: render_aiaas_economy_hub()
     with sub[4]: render_training_ops_dashboard()
     with sub[5]: render_scheduler_hub()
+    with sub[6]: render_training_monitor()
 
 
 def render_system_group():
