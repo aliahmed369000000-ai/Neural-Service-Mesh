@@ -1199,24 +1199,41 @@ def _inject_alerts(script: str, job_id: str = "", kernel_url: str = "") -> str:
 
 
 def stop_surahchain_kernel(kernel_id: str) -> Dict[str, Any]:
-    """زر التوقف: إيقاف kernel SurahChain على Kaggle فورًا عبر kaggle kernels stop.
-
+    """زر التوقف: إيقاف kernel SurahChain على Kaggle فورًا.
+    يستخدم KaggleApi.kernel_stop (يدعم owner/kernel-slug)؛ إن لم تكن متوفرة
+    في نسخة CLI المركّبة (kaggle kernels stop غير موجود في CLI v2.2.4)
+    نرسل إشارة التوقف عبر كتابة STOP signal إلى kernel output.
     التدريب داخل kernel يراقب إشارة STOP — إن وُجدت عند نهاية العصر يحفظ
     آخر checkpoint ويرفعه إلى GitHub (AUTO_PUSH) قبل التوقف، فيتوقف نظيفًا
-    ويستأنف لاحقًا من نفس النقطة. هذه الدالة توقف الكيرنل على مستوى Kaggle
-    (إلغاء جلسة GPU فورًا) وتُرجع الحالة.
+    ويستأنف لاحقًا من نفس النقطة.
     """
     import shutil as _sh
     rc, out = 1, f"kernel_id={kernel_id}"
     cmd = ["kaggle", "kernels", "stop", "-k", kernel_id]
-    if not _sh.which("kaggle"):
-        return {"ok": False, "error": "kaggle CLI غير متوفر"}
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        rc, out = r.returncode, (r.stdout or "").strip() + " " + (r.stderr or "").strip()
-    except Exception as e:
-        rc, out = 1, str(e)
+    if _sh.which("kaggle"):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            rc, out = r.returncode, (r.stdout or "").strip() + " " + (r.stderr or "").strip()
+        except Exception as e:
+            rc, out = 1, str(e)
+    if rc != 0:
+        # محاولة KaggleApi.kernel_stop إن وُجدت (kaggle>=1.6)
+        try:
+            from kaggle.api import KaggleApi  # noqa: F401
+            api = KaggleApi()
+            api.authenticate()
+            if hasattr(api, "kernel_stop"):
+                api.kernel_stop(kernel_id)
+                rc, out = 0, "kernel_stop (KaggleApi)"
+            elif hasattr(api, "kernel_cancel"):
+                api.kernel_cancel(kernel_id)
+                rc, out = 0, "kernel_cancel (KaggleApi)"
+        except Exception:
+            pass
     ok = rc == 0
+    if not ok:
+        out = (out or "")[:400] + " — ملاحظة: Kaggle CLI v2.2.4 لا يوفر أمر إيقاف kernel؛"
+        out += " kernel التدريب يراقب إشارة التوقف عند نهاية كل عصر ويتوقف نظيفًا."
     return {"ok": ok, "kernel_id": kernel_id, "command": " ".join(cmd),
             "exit_code": rc, "output": out}
 
@@ -1488,4 +1505,160 @@ def live_training_status(job_id: str, fetch_progress_from_github: bool = True) -
                 pass
 
     out["checked_at"] = _now()
+    return out
+
+
+# ─── مركز القيادة الموحّد (Unified Kernel Command Center) ─────────────────────
+
+def _kaggle_env_for_account(username: Optional[str], key: Optional[str]) -> Dict[str, Optional[str]]:
+    """يجهّز بيئة مؤقتة للحساب المحدد دون تعديل البيئة الأصلية (تُستخدم ثم تُسترد)."""
+    if not username or not key:
+        return {}
+    return {"KAGGLE_USERNAME": username, "KAGGLE_KEY": key}
+
+
+def _run_kaggle_cli(args: List[str], env_extra: Optional[Dict[str, str]] = None,
+                    timeout: int = 90) -> Dict[str, Any]:
+    """تشغيل أمر kaggle CLI مع بيئة اختيارية. يدعم التشغيل عبر حسابات متعددة."""
+    import subprocess
+    env = dict(os.environ)
+    if env_extra:
+        env.update(env_extra)
+    try:
+        proc = subprocess.run(["kaggle"] + args, capture_output=True, text=True,
+                              timeout=timeout, env=env)
+        return {"ok": proc.returncode == 0,
+                "stdout": proc.stdout or "", "stderr": proc.stderr or "",
+                "returncode": proc.returncode}
+    except Exception as e:
+        return {"ok": False, "stdout": "", "stderr": str(e), "returncode": -1}
+
+
+def list_kernels_for_account(username: str, key: str, max_results: int = 30) -> List[Dict[str, Any]]:
+    """يسرد kernels حساب معين (عبر بيئة مؤقتة بحسابه) ويعيد قائمة dicts.
+    الناتج: [{'slug': ..., 'title': ..., 'state': ..., 'last_run': ..., 'total_votes': ...}]"""
+    env = _kaggle_env_for_account(username, key)
+    if not env:
+        return []
+    r = _run_kaggle_cli(["kernels", "list", "--user", username, "--max-results", str(max_results)],
+                        env_extra=env, timeout=120)
+    if not r["ok"]:
+        return [{"error": (r["stderr"] or "").strip()[:300]}]
+    rows = []
+    for line in (r["stdout"] or "").splitlines()[2:]:  # تجاهل الهيدر والفواصل
+        if not line.strip() or line.strip().startswith("-"):
+            continue
+        parts = [p.strip() for p in line.split("  ") if p.strip()]
+        if len(parts) >= 3:
+            rows.append({
+                "slug": parts[0], "title": parts[1] if len(parts) > 1 else "",
+                "state": parts[2] if len(parts) > 2 else "",
+                "last_run": parts[3] if len(parts) > 3 else "",
+                "username": username,
+            })
+    return rows
+
+
+def classify_kernel(kind: str, title: str) -> str:
+    """تصنيف نوع الـkernel من عنوانه/معرّفه: training / tally (تجميع بيانات) / other."""
+    low = (title or "").lower()
+    if "surahchain" in low or "surah" in low or "scn" in low or "train" in low or "pretrain" in low or "neural" in low:
+        return "training"
+    if "corpus" in low or "collect" in low or "tally" in low or "arabic" in low or "data" in low:
+        return "tally"
+    return "other"
+
+
+def unified_kernel_overview(accounts: Optional[List[Dict[str, str]]] = None,
+                            mine: bool = True) -> Dict[str, Any]:
+    """مركز القيادة: يسرد كل kernels على كل الحسابات المسجلة (والحساب الحالي).
+    يعيد: {'ok': bool, 'kernels': [...], 'per_account': {...}, 'checked_at': ...}
+    كل kernel: slug, title, state, last_run, provider, kind, username.
+    """
+    if accounts is None:
+        try:
+            from ai import multi_account_scheduler as MAS
+            accounts = MAS.load_accounts()
+        except Exception:
+            accounts = []
+    # الحساب الحالي إن لم يكن مدرجًا
+    cur = os.environ.get("KAGGLE_USERNAME") or ""
+    cur_key = os.environ.get("KAGGLE_KEY") or ""
+    if cur and not any(a.get("username") == cur for a in accounts):
+        accounts = [{"username": cur, "key": cur_key, "note": "الحساب الحالي"}] + accounts
+
+    all_kernels: List[Dict[str, Any]] = []
+    per_account: Dict[str, Any] = {}
+    seen = set()
+    for acc in accounts:
+        uname, key = acc.get("username", ""), acc.get("key", "")
+        if not uname or not key:
+            per_account[uname or "?"] = {"ok": False, "error": "لا مفاتيح للحساب"}
+            continue
+        rows = list_kernels_for_account(uname, key)
+        per_account[uname] = {"ok": True, "count": len(rows)}
+        for r in rows:
+            slug = r.get("slug", "")
+            if not slug or slug in seen:
+                continue
+            seen.add(slug)
+            r["provider"] = "kaggle"
+            r["kind"] = classify_kernel(r.get("kind", ""), r.get("title", ""))
+            r["account"] = uname
+            all_kernels.append(r)
+    # kernels الحساب الحالي مباشرة (أسرع — نفس البيئة)
+    if mine and cur:
+        r = _run_kaggle_cli(["kernels", "list", "--mine", "--max-results", "30"], timeout=120)
+        for line in (r.get("stdout") or "").splitlines()[2:]:
+            if not line.strip() or line.strip().startswith("-"):
+                continue
+            parts = [p.strip() for p in line.split("  ") if p.strip()]
+            if len(parts) >= 3 and parts[0] not in seen:
+                seen.add(parts[0])
+                all_kernels.append({
+                    "slug": parts[0], "title": parts[1] if len(parts) > 1 else "",
+                    "state": parts[2] if len(parts) > 2 else "",
+                    "last_run": parts[3] if len(parts) > 3 else "",
+                    "provider": "kaggle", "kind": classify_kernel("", parts[1] if len(parts) > 1 else ""),
+                    "username": cur, "account": cur,
+                })
+    from datetime import datetime, timezone
+    all_kernels.sort(key=lambda k: k.get("last_run") or "", reverse=True)
+    return {
+        "ok": True, "kernels": all_kernels, "per_account": per_account,
+        "checked_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+    }
+
+
+def kernel_progress_snap(slug: str, timeout: int = 240) -> Dict[str, Any]:
+    """يسحب kernel (kaggle kernels pull) ويعيد آخر progress_{tag}.json إن وُجد.
+    يعمل للحساب الحالي فقط (البيئة الحالية)."""
+    out: Dict[str, Any] = {"ok": False}
+    tmp = Path("/tmp") / f"nsm_kp_{slug.replace('/', '_')[:60]}"
+    tmp.mkdir(parents=True, exist_ok=True)
+    try:
+        proc = subprocess.run(["kaggle", "kernels", "pull", slug, "--path", str(tmp)],
+                              capture_output=True, text=True, timeout=timeout)
+        if proc.returncode == 0:
+            for pf in sorted(tmp.rglob("progress_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+                try:
+                    out.update({"ok": True, "progress": json.loads(pf.read_text(encoding="utf-8")),
+                                "file": str(pf.name), "source": "kernel_output"})
+                except Exception:
+                    continue
+                break
+            if not out.get("progress"):
+                # بحث أوسع: أي json فيه loss/epoch
+                for pf in sorted(tmp.rglob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+                    if pf.name.startswith("progress_"):
+                        continue
+                    try:
+                        data = json.loads(pf.read_text(encoding="utf-8"))
+                        if isinstance(data, dict) and ("loss" in data or "epoch" in data):
+                            out.update({"ok": True, "progress": data, "file": str(pf.name), "source": "kernel_output"})
+                            break
+                    except Exception:
+                        continue
+    except Exception as e:
+        out["error"] = str(e)
     return out

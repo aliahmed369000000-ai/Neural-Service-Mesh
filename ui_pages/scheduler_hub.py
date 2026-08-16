@@ -9,6 +9,7 @@ ui_pages/scheduler_hub.py — لوحة المجدول متعدد الحسابا�
 from __future__ import annotations
 
 import json
+import re
 
 import streamlit as st
 
@@ -27,7 +28,7 @@ def render_scheduler_hub():
         "عند نفاد كل الكوتا: ينتقل تلقائيًا إلى Colab المجاني ثم Lightning AI (22 ساعة L4/شهر)."
     )
 
-    tab = st.tabs(["📊 الحالة والكوتا", "⚙️ إطلاق مهمة", "🔔 التنبيهات", "📡 Live Logs", "👥 الحسابات", "🔧 المزودات المجانية"])
+    tab = st.tabs(["📊 الحالة والكوتا", "⚙️ إطلاق مهمة", "🔔 التنبيهات", "📡 Live Logs", "🎯 مركز القيادة", "👥 الحسابات", "🔧 المزودات المجانية"])
 
     with tab[0]:
         _tab_status(MAS)
@@ -42,9 +43,12 @@ def render_scheduler_hub():
         _tab_live_logs()
 
     with tab[4]:
-        _tab_accounts(MAS)
+        _tab_command_center()
 
     with tab[5]:
+        _tab_accounts(MAS)
+
+    with tab[6]:
         _tab_free_providers(FP, MAS)
 
 
@@ -233,6 +237,153 @@ def _tab_alerts():
                 f"- {icon} **[{a.get('kind')}]** {a.get('title')} — {(a.get('at') or '')[:19]} · {sent}\n"
                 f"  - {str(a.get('message', ''))[:200]}"
             )
+
+
+def _tab_command_center():
+    """🎯 مركز القيادة الموحّد: كل kernels على كل المزودين، مع رسم loss حيّ وأزرار التحكم."""
+    from ai import kaggle_provider as KP
+
+    st.markdown("##### 🎯 مركز القيادة — كل kernels على كل المزودين")
+    st.caption(
+        "لوحة موحّدة حية: kernels التدريب وتجميع البيانات عبر كل حسابات Kaggle "
+        "(والحساب الحالي تلقائيًا). تنبيه أحمر عند أي kernel فاشل."
+    )
+
+    auto = st.toggle("⚡ تحديث تلقائي كل 60 ثانية", value=True)
+
+    c_btn = st.columns(3)
+    with c_btn[0]:
+        if st.button("🔄 تحديث الآن", use_container_width=True):
+            st.session_state.pop("cmd_center", None)
+            st.rerun()
+    with c_btn[1]:
+        if st.button("📜 عرض كل الأنواع (يشمل other)", use_container_width=True):
+            st.session_state["cmd_show_all"] = not st.session_state.get("cmd_show_all")
+    with c_btn[2]:
+        if st.button("🧹 إخفاء المكتمل", use_container_width=True):
+            st.session_state["cmd_hide_done"] = not st.session_state.get("cmd_hide_done")
+
+    try:
+        overview = st.session_state.get("cmd_center") or KP.unified_kernel_overview()
+        st.session_state["cmd_center"] = overview
+    except Exception as e:
+        st.error(f"فشل جلب kernels: {e}")
+        return
+
+    kernels = overview.get("kernels") or []
+    show_all = st.session_state.get("cmd_show_all")
+    hide_done = st.session_state.get("cmd_hide_done")
+    kinds_filter = {"training", "tally", "other"} if show_all else {"training", "tally"}
+    kernels = [k for k in kernels if k.get("kind", "other") in kinds_filter]
+    if hide_done:
+        kernels = [k for k in kernels if not re.match(r"^(complete|canceled|cancelled|error)$", (k.get("state") or "").lower())]
+
+    if not kernels:
+        st.info("لا توجد kernels تدريب/تجميع حاليًا.")
+        return
+
+    # شريط إحصاءات
+    total = len(kernels)
+    running = sum(1 for k in kernels if "RUN" in (k.get("state") or "").upper())
+    failed = sum(1 for k in kernels if "ERROR" in (k.get("state") or "").upper() or "FAIL" in (k.get("state") or "").upper())
+    comp = sum(1 for k in kernels if re.match(r"^(complete|canceled|cancelled)$", (k.get("state") or "").lower()))
+    st.markdown(f"**{total} kernels** — 🟢 {running} جارية · 🔴 {failed} فاشلة · ✅ {comp} مكتملة/متوقفة")
+    if failed:
+        st.error("⚠️ يوجد kernels فاشلة — راجع الجدول أدناه (اللون الأحمر).")
+
+    # جدول kernels
+    rows = []
+    for k in kernels:
+        state = (k.get("state") or "").upper()
+        icon = ("🟢" if "RUN" in state or "QUEU" in state
+                else ("🔴" if "ERROR" in state or "FAIL" in state
+                      else ("✅" if "COMP" in state else "🟡")))
+        rows.append({
+            "الحالة": f"{icon} {k.get('state', '—')[:28]}",
+            "النوع": "تدريب" if k.get("kind") == "training" else "تجميع" if k.get("kind") == "tally" else "أخرى",
+            "الحساب": k.get("username") or k.get("account") or "—",
+            "آخر تشغيل": (k.get("last_run") or "")[11:19] if k.get("last_run") else "—",
+            "الرابط": k.get("slug") or "—",
+        })
+    st.dataframe(rows, use_container_width=True, hide_index=True,
+                 column_config={"الرابط": st.column_config.LinkColumn("kernel", width="medium")})
+
+    # تفاعل: تفاصيل + control لـkernel محدد
+    st.markdown("###### تفاصيل kernel محدد")
+    slug_choice = st.selectbox(
+        "اختر kernel",
+        options=[k.get("slug") for k in kernels],
+        format_func=lambda s: next((f"{k.get('state','—')[:20]} — {k.get('title','')[:50]} ({s})" for k in kernels if k.get("slug") == s), s),
+    )
+
+    if slug_choice:
+        c_det, c_ctrl = st.columns([3, 2])
+        with c_det:
+            if st.button("📊 عرض التقدم ومنحنى loss", use_container_width=True):
+                with st.spinner("يسحب kernel output..."):
+                    try:
+                        snap = KP.kernel_progress_snap(slug_choice)
+                        st.session_state["cmd_snap"] = snap
+                    except Exception as e:
+                        st.error(f"فشل السحب: {e}")
+            snap = st.session_state.get("cmd_snap")
+            if snap and snap.get("ok") and snap.get("progress"):
+                prog = snap["progress"]
+                if isinstance(prog, dict):
+                    cm = st.columns(3)
+                    cm[0].metric("العصر", f"{prog.get('epoch','?')} / {prog.get('end_epoch','?')}")
+                    loss = prog.get("loss")
+                    cm[1].metric("Loss", f"{loss:.4f}" if isinstance(loss, (int, float)) else str(loss))
+                    best = prog.get("best_loss")
+                    cm[2].metric("Best Loss", f"{best:.4f}" if isinstance(best, (int, float)) else str(best))
+                    # منحنى loss عبر epochs
+                    series = prog.get("loss_series") or prog.get("history") or []
+                    if series:
+                        try:
+                            import pandas as pd
+                            df = pd.DataFrame(series)
+                            if "loss" in df.columns and "epoch" in df.columns:
+                                st.line_chart(df.set_index("epoch")["loss"], x_label="epoch", y_label="loss")
+                        except Exception:
+                            st.caption("لا يمكن رسم المنحنى (بيانات غير منظمة).")
+                st.caption(f"المصدر: {snap.get('source')} — {snap.get('file')}")
+            elif snap and not snap.get("ok"):
+                st.info("لا يوجد ملف تقدم (progress.json) بعد — kernel في البداية أو لم تُرفع النقاط.")
+        with c_ctrl:
+            st.markdown("**التحكم**")
+            if st.button("⏹ إيقاف kernel", use_container_width=True, type="secondary"):
+                try:
+                    res = KP.stop_surahchain_kernel(slug_choice)
+                    st.success("تم إرسال طلب الإيقاف" if (res or {}).get("ok") else f"النتيجة: {res}")
+                except Exception as e:
+                    st.error(f"فشل الإيقاف: {e}")
+            if st.button("📜 آخر السجلات", use_container_width=True):
+                try:
+                    res = KP.kernel_logs_raw(slug_choice) if hasattr(KP, "kernel_logs_raw") else {"ok": False, "error": "غير متوفر"}
+                    if res.get("ok"):
+                        st.code((res.get("logs") or "")[-3000:], language="text")
+                    else:
+                        st.warning(f"فشل: {(res.get('error') or '')[:200]}")
+                except Exception as e:
+                    st.error(f"فشل: {e}")
+
+    if auto:
+        st.empty()
+
+
+# ════ مساعدات kernel control ═══════════════════════════════════════════════════
+
+def _stop_kernel_by_slug(slug: str) -> dict:
+    """إيقاف kernel محدد مباشرة (تستخدمه مركز القيادة)."""
+    from ai import kaggle_provider as KP
+    if hasattr(KP, "stop_surahchain_kernel"):
+        return KP.stop_surahchain_kernel(slug)
+    import subprocess
+    try:
+        proc = subprocess.run(["kaggle", "kernels", "status", slug], capture_output=True, text=True, timeout=60)
+        return {"ok": proc.returncode == 0, "output": proc.stdout[:200]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 def _tab_accounts(MAS):
