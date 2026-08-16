@@ -51,6 +51,12 @@ ESTIMATED_SESSION_HOURS = 3.0
 
 FALLBACK_PROVIDERS = ["colab", "lightning"]
 
+# Self-Healing: الحد الأقصى لمحاولات إعادة الإطلاق لكل سلسلة مهمة (الأصلية + المحاولات)
+MAX_HEAL_ATTEMPTS = 3
+# أقل فترة انتظار (دقائق) بعد فشل المهمة قبل إعادة إطلاقها (تحمي من حلقات
+# إعادة الإطلاق الفورية عند فشل متكرر)
+MIN_HEAL_COOLDOWN_MINUTES = 5
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -595,6 +601,13 @@ def scheduler_tick(
                             _handoff_on_job_end(jid, jmeta, reason="failed")
                         except Exception as hexc:
                             logger.warning("فشل handoff عند الفشل: %s", hexc)
+                        # Self-Healing: أعد الإطلاق تلقائيًا على حساب آخر
+                        try:
+                            healed = _heal_failed_job(jid, jmeta, state)
+                            jmeta["healed"] = healed.get("ok", False)
+                            jmeta["heal_result"] = healed
+                        except Exception as hexc:
+                            logger.warning("فشل الإصلاح التلقائي: %s", hexc)
                 elif "queued" in raw:
                     jmeta["status"] = "queued"
                 else:
@@ -690,6 +703,127 @@ def scheduler_tick(
 
     save_state(state)
     return summary
+
+
+# ─── Self-Healing: إعادة إطلاق المهام الفاشلة تلقائيًا ───────────────────
+
+def _pick_next_account_excluding(
+    excluded_account: str,
+) -> Optional[Dict[str, Any]]:
+    """اختيار أغنى حساب بالكوتا يستبعد حسابًا محددًا (الحساب الفاشل)."""
+    accounts = load_accounts()
+    best: Optional[Dict[str, Any]] = None
+    best_hours = -1.0
+    for acc in accounts:
+        if not acc.get("key"):
+            continue
+        if acc.get("username", "").strip() == (excluded_account or "").strip():
+            continue
+        q = check_account_quota(acc["username"], acc["key"])
+        if not q.get("ok"):
+            continue
+        rem = q.get("gpu_remaining_hours") or 0.0
+        if rem >= MIN_QUOTA_HOURS and rem > best_hours:
+            best, best_hours = {"account": acc, "quota": q}, rem
+    return best
+
+
+def _heal_failed_job(
+    jid: str,
+    jmeta: Dict[str, Any],
+    state: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Self-Healing: بعد فشل kernel، يعيد إطلاق المهمة تلقائيًا على حساب آخر
+    من آخر checkpoint متاح (SCN_RESUME=auto داخل kernel يستأنف تلقائيًا).
+    يُسجَّل healed_from وheal_attempts ليعرف المراقب أن المهمة امتداد
+    لمهمة سابقة. لا يعيد الإطلاق إن بلغت السلسلة سقف المحاولات، أو مرّ أقل
+    من فترة الانتظار، أو لم يوجد حساب بديل غني بالكوتا."""
+    res: Dict[str, Any] = {"ok": False, "reason": ""}
+    root_id = jmeta.get("heal_root") or jid
+    chain_attempts = jmeta.get("heal_attempts", 0) + 1
+    if chain_attempts > MAX_HEAL_ATTEMPTS:
+        res["reason"] = (
+            f"بلعت المهمة الأم {root_id} سقف محاولات الإصلاح ({MAX_HEAL_ATTEMPTS})"
+        )
+        return res
+    # فترة انتظار بعد الفشل (لا نعيد الإطلاق فورًا بنفس الخطأ)
+    finished_at = jmeta.get("finished_at") or ""
+    age_minutes = MIN_HEAL_COOLDOWN_MINUTES + 1
+    if finished_at:
+        try:
+            age_minutes = (
+                datetime.now(timezone.utc) - datetime.fromisoformat(finished_at)
+            ).total_seconds() / 60.0
+        except Exception:
+            age_minutes = MIN_HEAL_COOLDOWN_MINUTES + 1
+    if age_minutes < MIN_HEAL_COOLDOWN_MINUTES:
+        res["reason"] = (
+            f"فترة الانتظار {MIN_HEAL_COOLDOWN_MINUTES}د لم تنتهِ بعد (انقضت {age_minutes:.1f}د)"
+        )
+        return res
+    # حساب بديل غني بالكوتا (لا نعيد الإطلاق على الحساب الفاشل نفسه)
+    failed_account = jmeta.get("account") or ""
+    pick = _pick_next_account_excluding(failed_account)
+    if not pick:
+        res["reason"] = "لا يوجد حساب بديل غني بالكوتا لإعادة الإطلاق"
+        return res
+    chosen = (pick.get("account") or {}).get("username", "")
+    jparams = {
+        "preset": jmeta.get("preset") or "medium",
+        "n": jmeta.get("n") or 60000,
+        "epochs": jmeta.get("epochs") or 30,
+        "batch": jmeta.get("batch") or 24,
+    }
+    launch = run_training_job(
+        preset=jparams["preset"], n=jparams["n"],
+        epochs=jparams["epochs"], batch=jparams["batch"],
+        fresh=False, auto_push=True, account=pick["account"],
+    )
+    if not launch.get("ok"):
+        res["reason"] = "فشل إعادة الإطلاق: " + str(
+            launch.get("error") or launch.get("push", {}).get("output") or ""
+        )[-400:]
+        return res
+    new_jid = launch.get("job_id")
+    state["jobs"][new_jid] = {
+        "job_id": new_jid,
+        "status": "running",
+        "account": launch.get("account"),
+        "kernel_url": launch.get("kernel_url"),
+        "preset": jparams["preset"], "n": jparams["n"],
+        "epochs": jparams["epochs"], "batch": jparams["batch"],
+        "started_at": launch.get("pushed_at"),
+        "quota_before": pick.get("quota"),
+        "healed_from": jid,
+        "heal_root": root_id,
+        "heal_attempts": chain_attempts,
+    }
+    state["history"].append({
+        "event": "job_healed",
+        "new_job_id": new_jid,
+        "healed_from": jid,
+        "old_account": failed_account,
+        "new_account": chosen,
+        "at": _now(),
+    })
+    # تنبيه فوري بأن المهمة أُعيدت إطلاقها
+    try:
+        from ai.training_alerts import record_alert
+
+        record_alert(
+            "job_healed", "info",
+            f"إعادة إطلاق تلقائي — {jid} → {new_jid}",
+            (
+                f"فشلت المهمة {jid} على حساب {failed_account} فأُعيد إطلاقها تلقائيًا "
+                f"على حساب {chosen} من آخر checkpoint (محاولة {chain_attempts}/"
+                f"{MAX_HEAL_ATTEMPTS}). المعاملات: {jparams}"
+            ),
+            subject=f"healed_{root_id}_{chain_attempts}",
+        )
+    except Exception as exc:
+        logger.warning("فشل تنبيه الإصلاح: %s", exc)
+    res.update({"ok": True, "new_job_id": new_jid, "new_account": chosen})
+    return res
 
 
 def _handoff_on_job_end(jid: str, jmeta: Dict[str, Any], reason: str) -> Dict[str, Any]:
