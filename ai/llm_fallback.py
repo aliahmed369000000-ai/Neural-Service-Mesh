@@ -755,6 +755,50 @@ class LLMFallback:
 
             except Exception as exc:
                 err_msg = str(exc)[:120]
+                # 🆕 الحزمة 3: إعادة محاولة ذكية للأخطاء العابرة قبل الانتقال
+                # للمزوّد التالي — أخطاء 429 (حد المعدّل) و 502/503/504 (ازدحام
+                #/انقطاع مؤقت) وأخطاء الشبكة/الانتهاء الزمني مؤقتة بطبيعتها،
+                # والنجاح فيها غالب بعد انتظار قصير، وبالإعادة عليها هنا نقلّل
+                # التنقّل غير الضروري بين المزوّدين ونحفظ الكوتا المجانية.
+                # الأخطاء الدائمة (400/401/404/محتوى غير صالح) لا تُعاد.
+                _retry_exc_str = str(exc)[:100].upper()
+                _is_transient = (
+                    isinstance(exc, (TimeoutError, OSError, ConnectionError))
+                    or any(_tk in _retry_exc_str for _tk in (
+                        "429", "502", "503", "504",
+                        "RATE LIMIT", "TIMEOUT", "TEMPORARILY UNAVAILABLE",
+                    ))
+                )
+                if _is_transient:
+                    _rb = 1.5  # أول انتظار 1.5ث ثم مضاعف
+                    for _retry_i in range(2):
+                        try:
+                            time.sleep(_rb)
+                            _rb *= 2
+                            logger.info(
+                                f"[Rotation] إعادة محاولة عابرة #{_retry_i+1}/2 → {prov.value}"
+                            )
+                            result = self._call_provider(prov, key, mdl, query, history, sp)
+                            self._provider, self._api_key, self._model = prov, key, mdl
+                            self._failed_until.pop(prov, None)
+                            tried.append(f"{prov.value}:retry-ok({_retry_i+1})")
+                            result.tried = tried
+                            result.latency_ms = round((time.time() - t0) * 1000, 1)
+                            logger.info(
+                                f"[Rotation] نجح {prov.value} بإعادة محاولة عابرة #{_retry_i+1}"
+                            )
+                            return result
+                        except Exception as _retry_exc:
+                            _re_str = str(_retry_exc)[:100].upper()
+                            if not (
+                                isinstance(_retry_exc, (TimeoutError, OSError, ConnectionError))
+                                or any(_tk in _re_str for _tk in (
+                                    "429", "502", "503", "504", "RATE LIMIT", "TIMEOUT",
+                                ))
+                            ):
+                                # خطأ غير عابر خلال الإعادة → لا نُعيد أكثر
+                                err_msg = str(_retry_exc)[:120]
+                                break
                 logger.warning(
                     f"[Rotation] فشل {prov.value}: {err_msg} — جرّب التالي..."
                 )

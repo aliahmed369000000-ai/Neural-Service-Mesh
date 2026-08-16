@@ -268,6 +268,15 @@ def render_chat():
     .bookmark-btn.bookmarked { color:var(--gold);background:var(--gold-soft);border-color:var(--gold);}
     .bookmark-btn:active { transform:scale(0.96); }
 
+    /* ── 🆕 الحزمة 1: شارة أداء last_metadata (زمن/مزود/إعادة توجيه) ── */
+    .nsm-perf-meta {
+        display:inline-flex;gap:0.35rem;align-items:center;flex-wrap:wrap;
+        font-size:0.7rem;color:var(--text-muted);margin-bottom:0.35rem;
+        padding:0.15rem 0.6rem;border-radius:999px;
+        background:var(--surface);border:1px dashed var(--border);
+        direction:ltr;
+    }
+
     </style>
     """, unsafe_allow_html=True)
 
@@ -316,6 +325,114 @@ def render_chat():
             label_visibility="collapsed",
         ).strip()
 
+    # ══════════════════════════════════════════════════════════════════════
+    # 📂 الحزمة 2: إدارة الجلسات المتعددة — استعادة محادثات سابقة محفوظة
+    # في memory/chat_history.db (عبر ai/chat_history_store.py) — التدهور
+    # آمن كامل: أي فشل استيراد/قراءة لا يمنع عرض المحادثة الحيّة إطلاقًا.
+    # ══════════════════════════════════════════════════════════════════════
+    _CHS_OK = False
+    _chs_list_sessions = None
+    _chs_get_session_messages = None
+    try:
+        from ai import chat_history_store as _CHS_MOD
+        _chs_list_sessions = _CHS_MOD.list_sessions
+        _chs_get_session_messages = _CHS_MOD.get_session_messages
+        _CHS_OK = True
+    except Exception:
+        _CHS_OK = False
+    _session_loaded_id = st.session_state.get("_nsm_session_loaded_id", "")
+    if _CHS_OK:
+        with st.expander("📂 إدارة الجلسات السابقة", expanded=False):
+            _ses_cols = st.columns([1, 3])
+            with _ses_cols[0]:
+                st.caption(f"جلسة حية: `{st.session_state.nsm_chat_session_id[:8]}…`")
+                if st.button("➕ محادثة جديدة", key="nsm_new_session_btn", use_container_width=True,
+                             help="يولّد معرّف جلسة جديدة ويبدأ من الصفر — الرسائل الحالية محفوظة في قاعدة البيانات بلا حذف"):
+                    st.session_state.nsm_chat_session_id = str(_uuid.uuid4())
+                    st.session_state.nsm_messages = []
+                    st.session_state.nsm_count = 0
+                    st.session_state["_nsm_session_loaded_id"] = ""
+                    st.session_state["_nsm_chat_summary"] = ""
+                    st.rerun()
+                if st.button("🧹 تنظيف الجلسات (أقدم من 30 يومًا)", key="nsm_prune_sessions_btn", use_container_width=True):
+                    try:
+                        _CHS_MOD.delete_sessions_older_than(30)
+                        st.success("✅ تم تنظيف الجلسات القديمة")
+                    except Exception as _prune_exc:
+                        st.warning(f"⚠️ تعذّر التنظيف: {_prune_exc}")
+                    st.rerun()
+            with _ses_cols[1]:
+                try:
+                    _all_hist_sessions = _chs_list_sessions(limit=50) or []
+                    _hist_items = []
+                    for _hs in _all_hist_sessions:
+                        _hs_id = str(_hs.get("session_id", ""))
+                        _hs_cnt = _hs.get("message_count", 0)
+                        _hs_last = str(_hs.get("last_at", ""))[:16]
+                        _hs_label = f"{_hs_id[:8]}… · {_hs_cnt} رسالة · آخرها {_hs_last}" if _hs_last else f"{_hs_id[:8]}… · {_hs_cnt} رسالة"
+                        _hist_items.append((_hs_label, _hs_id))
+                    if not _hist_items:
+                        st.caption("لا توجد جلسات سابقة محفوظة بعد")
+                    else:
+                        _sel_idx = st.selectbox(
+                            "اختر جلسة لاستعادة محادثتها",
+                            options=range(len(_hist_items)),
+                            format_func=lambda _j: _hist_items[_j][0],
+                            key="nsm_session_selector",
+                        )
+                        _restore_cols = st.columns(2)
+                        with _restore_cols[0]:
+                            if st.button("📥 استعادة هذه الجلسة", use_container_width=True):
+                                _pick_sid = _hist_items[_sel_idx][1]
+                                try:
+                                    _hist_msgs = _chs_get_session_messages(_pick_sid, limit=500) or []
+                                    if not _hist_msgs:
+                                        st.warning("⚠️ لا توجد رسائل في هذه الجلسة")
+                                    else:
+                                        st.session_state.nsm_messages = []
+                                        for _hm in _hist_msgs:
+                                            _hm_role = str(_hm.get("role", "nsm") or "nsm")
+                                            _hm_content = str(_hm.get("content", "") or "")
+                                            _hm_badge = str(_hm.get("source_badge", "") or "")
+                                            _hm_ts = str(_hm.get("created_at", ""))
+                                            if _hm_ts and len(_hm_ts) >= 16:
+                                                _hm_ts = _hm_ts[11:16]
+                                            _ts_slot = _hm_ts if _hm_ts and _hm_ts != "None" else ""
+                                            st.session_state.nsm_messages.append(
+                                                (_hm_role, _hm_content, "", _hm_badge, _ts_slot)
+                                            )
+                                        st.session_state.nsm_chat_session_id = _pick_sid
+                                        st.session_state.nsm_count = len(st.session_state.nsm_messages)
+                                        st.session_state["_nsm_session_loaded_id"] = _pick_sid
+                                        st.session_state["_nsm_chat_summary"] = ""
+                                        st.session_state["_nsm_chat_display_ceil"] = NSM_CHAT_DISPLAY_LIMIT
+                                        st.rerun()
+                                except Exception as _load_exc:
+                                    st.warning(f"⚠️ تعذّر استعادة الجلسة: {_load_exc}")
+                        with _restore_cols[1]:
+                            if st.button("🗑 حذف هذه الجلسة", use_container_width=True):
+                                _del_sid = _hist_items[_sel_idx][1]
+                                # حذف الجلسة المحددة فوريًا: نستخدم نفس جدول
+                                # chat_history_store (chat_messages) — API موجود
+                                # delete_sessions_older_than يعتمد على الأيام
+                                # فلا يُرضي حذفًا فوريًا مستهدفًا؛ لذا SQL مباشر
+                                # داخل try محمي كامل.
+                                if _del_sid:
+                                    try:
+                                        _conn = _CHS_MOD._db()
+                                        _conn.execute(
+                                            "DELETE FROM chat_messages WHERE session_id = ?", (_del_sid,)
+                                        )
+                                        _conn.commit()
+                                        _conn.close()
+                                    except Exception:
+                                        try:
+                                            _conn.close()
+                                        except Exception:
+                                            pass
+                                    st.rerun()
+                except Exception as _list_exc:
+                    st.warning(f"⚠️ تعذّر قراءة سجل الجلسات: {_list_exc}")
     # ══════════════════════════════════════════════════════════════════════
     # 📊 إحصائيات الجلسة + فلتر الرسائل المرجعية
     # ══════════════════════════════════════════════════════════════════════
@@ -524,6 +641,35 @@ def render_chat():
                         f'<audio controls style="width:100%;margin-top:0.5rem;height:36px" '
                         f'src="data:audio/{_a_fmt};base64,{_a_b64}"></audio>'
                     )
+                # ── 🆕 الحزمة 1: شارة أداء last_metadata أسفل كل ردّ ───────
+                # لكل ردّ NSM نبحث في nsm_route_log (سجل آخر 100 قرار توجيه) عن
+                # آخر قرار نجاح لم يُستهلَك بعد — بهذا تطابق كل فقاعة ردّ
+                # بزمن الاستجابة الحقيقي (ms) والمزوّد الذي ردّ فعليًا وعدد
+                # محاولات إعادة التوجيه (failover). أي فشل استرجاع = لا شارة
+                # إطلاقًا (لا يؤثر على عرض الردّ).
+                _perf_html = ""
+                _route_log_perf = st.session_state.get("nsm_route_log", [])
+                if _route_log_perf:
+                    try:
+                        _nsm_seen_perf = 0
+                        for _k, _mv in enumerate(st.session_state.nsm_messages[: _i + 1]):
+                            if _mv[0] != "user":
+                                _nsm_seen_perf += 1
+                        _succ_entries_perf = [e for e in _route_log_perf if e.get("success")]
+                        if len(_succ_entries_perf) >= _nsm_seen_perf:
+                            _pe = _succ_entries_perf[_nsm_seen_perf - 1]
+                            _pe_node = str(_pe.get("node", "")).replace("nsm:", "")
+                            _pe_lat = _pe.get("latency_ms", 0) or 0
+                            _pe_fo = bool(_pe.get("failover"))
+                            _lat_color = "var(--emerald)" if _pe_lat < 1500 else ("#F59E0B" if _pe_lat > 5000 else "var(--text-muted)")
+                            _perf_html = (
+                                f'<div class="nsm-perf-meta" title="سجل التوجيه: {_pe_node}">'
+                                f'⏱ {int(_pe_lat)}ms'
+                                f'<span style="color:{_lat_color}"> · {(_pe_node or "—")[:30]}</span>'
+                                + (" · 🔄 failover" if _pe_fo else "") + "</div>"
+                            )
+                    except Exception:
+                        _perf_html = ""
                 import html as _html
                 if "<" not in text and ">" not in text:
                     safe_reply = _html.escape(text).replace("\n", "<br>")
@@ -534,7 +680,7 @@ def render_chat():
                 _bookmark_icon = "★" if _is_bookmarked else "☆"
                 html += f'''<div class="chat-nsm">
                     <span style="font-size:1.4rem;margin-top:3px">🧠</span>
-                    <div class="bbl">{ctx_html}{src_html}<div class="bbl-text" id="nsm-bbl-{_i}">{safe_reply}</div>{_audio_html}
+                    <div class="bbl">{ctx_html}{src_html}{_perf_html}<div class="bbl-text" id="nsm-bbl-{_i}">{safe_reply}</div>{_audio_html}
                         <div class="bbl-footer">
                             <button class="copy-btn" title="نسخ الرد"
                                 onclick="var t=document.getElementById('nsm-bbl-{_i}').innerText;

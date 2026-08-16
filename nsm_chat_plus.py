@@ -31,6 +31,14 @@ except Exception:
     is_song_lyrics_request = None
     SONG_LYRICS_REFUSAL = ""
 
+# 🆕 الحزمة 4: الذاكرة الدلالية للمحادثات — Qdrant أولًا ثم SQLite محلي
+try:
+    from ai.qdrant_semantic_memory import QdrantSemanticMemory
+    _QDRANT_MEM: Optional[QdrantSemanticMemory] = QdrantSemanticMemory()
+except Exception as _qsm_init_err:
+    logger.debug(f"[NSMChatPlus] الذاكرة الدلالية غير متاحة: {_qsm_init_err}")
+    _QDRANT_MEM = None
+
 logger = logging.getLogger("NSMChatPlus")
 
 # ⚠️ غير مُستخدَم في هذا الملف بعد حذف القاموس — أُبقي عليه فقط لأن
@@ -171,9 +179,32 @@ class NSMChatPlus(NSMChat):
             self._set_metadata(started, source="code_agent", route="code")
             return agent_response
 
+        # 🆕 الحزمة 4: الذاكرة الدلالية — استحضار أقرب محادثات سابقة ذات صلة
+        # بالسياق (Qdrant/bge-m3 عربي، وعند تعذّره ترتيب محلي TF عربي)
+        # لتحسين دقة الرد في المواضيع المتكررة.
+        _semantic_context = ""
+        _used_semantic_memory = False
+        if _QDRANT_MEM is not None:
+            try:
+                _convo_hits = _QDRANT_MEM.search_conversations(user_input)
+                if _convo_hits:
+                    _hits_text = []
+                    for _sc, _sp in _convo_hits:
+                        _hits_text.append(
+                            f"سؤال سابق مشابه: {_sp.get('user_text','')[:300]}\n"
+                            f"جوابه السابق: {_sp.get('assistant_text','')[:500]}"
+                        )
+                    _semantic_context = (
+                        "محادثات سابقة ذات صلة بالسؤال الحالي:\n"
+                        + "\n---\n".join(_hits_text)
+                    )
+                    _used_semantic_memory = True
+            except Exception as _sc_err:
+                logger.debug(f"[NSMChatPlus] استحضار دلالي فاشل (صامت): {_sc_err}")
+
         # ❸ تغنية الاستعلام بالسياق (pronoun resolution + ذاكرة الحقائق)
         query = user_input
-        used_memory = False
+        used_memory = _used_semantic_memory
         if self.memory and self.memory.needs_context(user_input):
             query = self.memory.enrich_query(user_input)
             used_memory = True
@@ -219,6 +250,11 @@ class NSMChatPlus(NSMChat):
                     "[معلومات مرجعية دقيقة من قاعدة معرفة NSM التعليمية — "
                     "استخدمها إن كانت ذات صلة]\n" + _refs
                 )
+        # 🆕 الحزمة 4: إلحاق المحادثات الدلالية المستحضرة كسياق إضافي
+        if _semantic_context and _context_blocks:
+            _context_blocks.append(_semantic_context)
+        elif _semantic_context:
+            query = _semantic_context + f"\n\n[سؤال المستخدم]\n{query}"
         if _context_blocks:
             query = "\n\n".join(_context_blocks) + f"\n\n[سؤال المستخدم]\n{query}"
 
@@ -249,9 +285,21 @@ class NSMChatPlus(NSMChat):
         self._set_metadata(
             started,
             source=self._last_source,
-            used_memory=used_memory,
+            used_memory=used_memory or _used_semantic_memory,
             route="llm" if self._last_source in {"llm", "ckg"} else "chat",
         )
+        # 🆕 الحزمة 4: حفظ المحادثة الحالية في الذاكرة الدلالية (Qdrant أولًا
+        # ثم SQLite محلي) — score هنا درجة جودة الرد المتاحة من _last_score
+        if _QDRANT_MEM is not None and (user_input.strip() and answer.strip()):
+            try:
+                _QDRANT_MEM.add_conversation(
+                    convo_id=f"conv_{int(time.time()*1000)}_{self._turn_count}",
+                    user_text=user_input,
+                    assistant_text=answer,
+                    relevance=float(self._last_score or 0.0),
+                )
+            except Exception as _save_err:
+                logger.debug(f"[NSMChatPlus] حفظ دلالي فاشل (صامت): {_save_err}")
         return answer
 
     # ── معلومات الإجابة ──────────────────────────────────────────────────
