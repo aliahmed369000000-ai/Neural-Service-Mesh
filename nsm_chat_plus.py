@@ -11,7 +11,9 @@ Drop-in replacement لـ NSMChat يضيف:
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional, Tuple
+import re
+import time
+from typing import Any, Dict, List, Optional, Tuple
 
 import nsm_chat as _nsm_chat_module
 from nsm_chat import (
@@ -43,6 +45,18 @@ _SOURCE_BADGES: Dict[str, str] = {
     "copyright_guard": "©️ حقوق نشر",
 }
 
+# عبارات صريحة تسمح بتمرير الطلب إلى الوكيل حتى إن لم تبدأ الجملة بفعل
+# موجود في _AGENT_TRIGGERS، مع إبقاء التوجيه محافظاً لتجنب تنفيذ عرضي.
+_AGENT_INTENT_RE = re.compile(
+    r"(?:نفّذ|نفذ|شغّل|شغل|طبّق|طبق|اختبر|حلّل|حلل|افحص|عدّل|عدل|"""
+    r"أنشئ|انشئ|طوّر|طور|أضف|اضف|ارفع|صحّح|صحح)\b",
+    re.IGNORECASE,
+)
+
+_MAX_PROMPT_HISTORY_TURNS = 8
+_MAX_PROMPT_CHARS = 18000
+
+
 
 class NSMChatPlus(NSMChat):
     """
@@ -69,16 +83,66 @@ class NSMChatPlus(NSMChat):
         self._last_source   = "nsm_agent"
         self._last_score    = 0.0
         self._system_prompt = system_prompt  # NSM_SYSTEM_PROMPT يُمرَّر من streamlit_app.py
+        self._turn_count = 0
+        self._last_latency_ms = 0.0
+        self._last_metadata: Dict[str, Any] = {}
         logger.info(
             f"[NSMChatPlus] جاهز | fallback: {self.fallback.provider.value}"
             f" | نموذج: {self.fallback.model}"
             f" | system_prompt: {'مخصص' if system_prompt else 'افتراضي'}"
         )
 
+    # ── أدوات سياق وتوجيه مشتركة ─────────────────────────────────────────
+
+    @staticmethod
+    def _is_agent_request(user_input: str) -> bool:
+        """تحديد محافظ لطلبات التنفيذ البرمجية أو التحليلية العميقة."""
+        text = user_input.strip()
+        if any(text.startswith(trigger) for trigger in _AGENT_TRIGGERS):
+            return True
+        # لا نستخدم البحث الجزئي إلا مع أفعال تنفيذ صريحة في بداية الطلب؛
+        # ذلك يمنع تحويل سؤال عادي يحتوي كلمة «حلل» عرضاً إلى تنفيذ.
+        return bool(_AGENT_INTENT_RE.match(text))
+
+    def _history_for_prompt(self) -> List[Tuple[str, str]]:
+        """يبني سياقاً مضبوط الحجم مع الحفاظ على أحدث الأدوار كاملة."""
+        turns = list(self.history[-_MAX_PROMPT_HISTORY_TURNS:])
+        if not turns:
+            return []
+        selected: List[Tuple[str, str]] = []
+        chars = 0
+        for user_text, assistant_text in reversed(turns):
+            pair_chars = len(user_text) + len(assistant_text)
+            if selected and chars + pair_chars > _MAX_PROMPT_CHARS:
+                break
+            selected.append((user_text, assistant_text))
+            chars += pair_chars
+        return list(reversed(selected))
+
+    def _set_metadata(self, started: float, *, source: str,
+                      used_memory: bool = False, route: str = "chat") -> None:
+        self._turn_count += 1
+        self._last_latency_ms = round((time.perf_counter() - started) * 1000, 1)
+        self._last_metadata = {
+            "turn": self._turn_count,
+            "source": source,
+            "route": route,
+            "used_memory": used_memory,
+            "latency_ms": self._last_latency_ms,
+            "history_turns": len(self.history),
+        }
+
+    @property
+    def last_metadata(self) -> Dict[str, Any]:
+        """بيانات قابلة للعرض في لوحة المراقبة دون كشف محتوى سري."""
+        return dict(self._last_metadata)
+
     # ── override chat ────────────────────────────────────────────────────
 
     def chat(self, user_input: str, system_prompt: str = None) -> str:
+        started = time.perf_counter()
         if not user_input.strip():
+            self._set_metadata(started, source="validation", route="chat")
             return "الرجاء كتابة سؤالك."
 
         # ⓪ حقوق النشر — رفض استباقي لطلبات كلمات أغاني/قصائد كاملة (nova_search_copyright.py
@@ -88,15 +152,15 @@ class NSMChatPlus(NSMChat):
         if _HAS_COPYRIGHT_CHECK and is_song_lyrics_request(user_input):
             self._last_source = "copyright_guard"
             self.history.append((user_input, SONG_LYRICS_REFUSAL))
+            self._set_metadata(started, source="copyright_guard", route="guard")
             return SONG_LYRICS_REFUSAL
 
         # ❶ NSM Agent الذكي — أولوية 1 للطلبات البرمجية
-        if _nsm_chat_module._HAS_NSM_AGENT and _nsm_chat_module._nsm_agent and any(
-            user_input.strip().startswith(t) for t in _AGENT_TRIGGERS
-        ):
+        if _nsm_chat_module._HAS_NSM_AGENT and _nsm_chat_module._nsm_agent and self._is_agent_request(user_input):
             response = _nsm_chat_module._nsm_agent.run(user_input)
             self._last_source = "nsm_agent"
             self.history.append((user_input, response))
+            self._set_metadata(started, source="nsm_agent", route="agent")
             return response
 
         # ❷ Code Agent المباشر — أولوية 2 للأوامر الدقيقة (افحص/قائمة/ارفع)
@@ -104,12 +168,15 @@ class NSMChatPlus(NSMChat):
         if agent_response is not None:
             self._last_source = "code_agent"
             self.history.append((user_input, agent_response))
+            self._set_metadata(started, source="code_agent", route="code")
             return agent_response
 
         # ❸ تغنية الاستعلام بالسياق (pronoun resolution + ذاكرة الحقائق)
         query = user_input
+        used_memory = False
         if self.memory and self.memory.needs_context(user_input):
             query = self.memory.enrich_query(user_input)
+            used_memory = True
 
         # ❸.5 حقن كتلة الذاكرة القوية (حقائق + محادثات ذات صلة دلالياً)
         #     — best-effort تماماً: أي خطأ يُتجاهل ولا يوقف الرد أبداً
@@ -118,6 +185,7 @@ class NSMChatPlus(NSMChat):
                 mem_block = self.memory.build_memory_context(user_input)
                 if mem_block:
                     query = f"[{mem_block}]\n{query}"
+                    used_memory = True
             except Exception as _mem_err:
                 logger.debug(f"memory context injection skipped: {_mem_err}")
 
@@ -159,7 +227,7 @@ class NSMChatPlus(NSMChat):
         _sp = system_prompt or self._system_prompt
         result = self.fallback.generate(
             query=query,
-            history=self.history[-4:],
+            history=self._history_for_prompt(),
             system_prompt=_sp,
         )
         answer = result.text
@@ -178,6 +246,12 @@ class NSMChatPlus(NSMChat):
             except Exception as _fact_err:
                 logger.debug(f"fact extraction skipped: {_fact_err}")
         self.history.append((user_input, answer))
+        self._set_metadata(
+            started,
+            source=self._last_source,
+            used_memory=used_memory,
+            route="llm" if self._last_source in {"llm", "ckg"} else "chat",
+        )
         return answer
 
     # ── معلومات الإجابة ──────────────────────────────────────────────────
