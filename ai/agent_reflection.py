@@ -32,15 +32,18 @@ EVENT_REFLECT_GAVE_UP = "reflect_gave_up"
 
 class ReflectionPolicy:
     """سياسة التقييم الذاتي — ثوابت قابلة للضبط."""
-    MAX_REFLECT_ROUNDS = 2          # دورتا مراجعة إضافيتان بعد الفشل الأول (3 محاولات إجمالاً)
+    MAX_REFLECT_ROUNDS = 3          # ثلاث دورات مراجعة إضافيات بعد الفشل الأول (4 محاولات إجمالاً)
     BACKOFF_SECONDS = 1.5           # انتظار قصير قبل إعادة المحاولة
+    MAX_BACKOFF_SECONDS = 9.0       # سقف الانتظار بين المحاولات
+    FAILURE_DECAY = 1               # يُخصم من دورات المراجعة إن تكرر نفس السبب — يحد التكرار العقيم
     RECOVERABLE_PATTERNS = (
         # أنماط أخطاء عابرة قابلة للاستعادة
         r"rate.?limit", r"429", r"timeout", r"overloaded",
         r"service unavailable", r"5\d\d", r"temporary",
         r"refused", r"unavailable", r"busy", r"retry",
-        r"empty", r"فارغ", r"تعذّر", r"فشل", r"خطأ",
-        r"no provider", r"لا يوجد مزوّد",
+        r"empty", r"فارغ", r"تعذّر", r"تعذر", r"فشل", r"خطأ",
+        r"خطأ في الاتصال", r"انقطع", r"انقطاع", r"لا استجابة",
+        r"no provider", r"لا يوجد مزوّد", r"مزود",
     )
     # الأنماط التي تعني رفض الخدمة ولا يجب إعادة المحاولة عليها فوراً
     UNRECOVERABLE_HINTS = (
@@ -50,7 +53,7 @@ class ReflectionPolicy:
 
     @classmethod
     def backoff(cls, attempt_no: int) -> float:
-        return cls.BACKOFF_SECONDS * min(attempt_no, 3)
+        return min(cls.BACKOFF_SECONDS * attempt_no, cls.MAX_BACKOFF_SECONDS)
 
 
 class ReflectionFailure:
@@ -72,10 +75,21 @@ class ReflectionFailure:
             return "empty_response"
         if re.search(r"rate.?limit|429|overloaded|busy", text):
             return "rate_limit"
-        if re.search(r"timeout|timed out", text):
-            return "timeout"
+        # أصناف عربية وتشخيصية دقيقة تُفحص قبل الأنماط العامة
+        if re.search(r"مستخدم|المفتاح|api key|apikey|unauthorized|توكن|token", text):
+            return "auth_issue"
+        if re.search(r"quota|حصة|سقف|محدود|limit exceeded|نفد", text):
+            return "quota_exceeded"
+        if re.search(r"context|طول.*سياق|long context|تجاوز", text):
+            return "context_overflow"
+        if re.search(r"json|parse|فك|تحويل.*خطأ|encoding|utf", text):
+            return "format_error"
+        if re.search(r"socket|dns|hostname|resolve|network|شبكة|اتصال", text):
+            return "network_error"
         if re.search(r"no provider|لا يوجد مزوّد|unavailable|unreachable", text):
             return "provider_unavailable"
+        if re.search(r"timeout|timed out|انق\w+ |انقطاع|لا استجابة", text):
+            return "timeout"
         if re.search(r"refused|4\d\d|5\d\d|http", text):
             return "transient_http"
         return "unknown"
@@ -87,7 +101,9 @@ class ReflectionFailure:
                 return False
         return (
             self.is_empty
-            or self.reason in {"rate_limit", "timeout", "provider_unavailable", "transient_http", "unknown"}
+            or self.reason in {"rate_limit", "timeout", "provider_unavailable",
+                               "transient_http", "network_error", "format_error",
+                               "auth_issue", "quota_exceeded", "context_overflow", "unknown"}
         )
 
     def _choose_strategy(self) -> str:
@@ -95,8 +111,18 @@ class ReflectionFailure:
             return "retry_with_backoff"
         if self.reason == "timeout":
             return "retry_with_backoff"
+        if self.reason == "network_error":
+            return "retry_with_backoff"
         if self.reason == "provider_unavailable":
             return "switch_provider_hint"
+        if self.reason == "quota_exceeded":
+            return "switch_provider_hint"
+        if self.reason == "auth_issue":
+            return "switch_provider_hint"
+        if self.reason == "context_overflow":
+            return "simplify_prompt"
+        if self.reason == "format_error":
+            return "retry_with_backoff"
         if self.is_empty:
             return "simplify_prompt"
         return "retry_with_backoff"
@@ -108,6 +134,28 @@ class ReflectionFailure:
             "recoverable": self.recoverable,
             "strategy": self.strategy,
         }
+
+
+# ── 🆕 تقرير موجز للوحات (لا يغيّر أي سلوك قائم) ────────────────────────
+
+def reflection_summary(context: ReflectionContext) -> Dict[str, Any]:
+    """ملخص تشخيصي للمراجعة الذاتية — يظهر في لوحة المراقبة.
+    يسرد كل دورة مراجعة بسببها واستراتيجيتها، ويحدد إذا كان هناك نمط متكرر."""
+    if not context.reflections:
+        return {"rounds": 0, "patterns": {}, "repeated_reason": False}
+    counts: Dict[str, int] = {}
+    for f in context.reflections:
+        counts[f.reason] = counts.get(f.reason, 0) + 1
+    repeated = any(c >= 2 for c in counts.values())
+    return {
+        "rounds": len(context.reflections),
+        "attempts": context.attempt_no,
+        "reasons": [f.reason for f in context.reflections],
+        "strategies": [f.strategy for f in context.reflections],
+        "patterns": counts,
+        "repeated_reason": repeated,
+        "last_status": "recovered" if context.reflections[-1].recoverable else "gave_up",
+    }
 
 
 class ReflectionContext:
@@ -123,11 +171,20 @@ class ReflectionContext:
         return failure
     def should_retry(self) -> bool:
         # نسمح بدورات مراجعة إضافية تصل إلى MAX_REFLECT_ROUNDS بعد أول فشل.
-        # عدد دورات الاستنفاد المتبقية = MAX_REFLECT_ROUNDS - عدد دورات المراجعة المستنفدة.
+        # مع FAILURE_DECAY: إذا تكرر نفس سبب الفشل مرتين فالاستمرار عقيم
         if len(self.reflections) >= ReflectionPolicy.MAX_REFLECT_ROUNDS + 1:
             return False
         last = self.reflections[-1] if self.reflections else None
-        return last is not None and last.recoverable
+        if last is None or not last.recoverable:
+            return False
+        if ReflectionPolicy.FAILURE_DECAY > 0 and len(self.reflections) >= 2:
+            recent_same = [
+                f for f in self.reflections[-(ReflectionPolicy.FAILURE_DECAY + 1):]
+                if f.reason == last.reason and f is not last
+            ]
+            if len(recent_same) >= ReflectionPolicy.FAILURE_DECAY:
+                return False
+        return True
 
     def reset(self) -> None:
         self.attempt_no = 0

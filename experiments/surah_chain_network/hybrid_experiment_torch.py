@@ -10,6 +10,7 @@ Surah-Chain LM — PyTorch فقط (بدون NumPy)
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import os
