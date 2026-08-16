@@ -620,14 +620,25 @@ try:
 except Exception:
     _SKLEARN_OK = False
 
-try:
-    import torch
-    import torch.nn as nn
-    import torch.optim as optim
+# 🚀 تأجيل تحميل torch: يُحمل عند أول استخدام فعلي (يوفّر ~1.5s عند بدء التطبيق)
+_TORCH_ATTEMPTED = False
 
-    _TORCH_OK = True
-except Exception:
-    _TORCH_OK = False
+def _ensure_torch_agent():
+    # type: () -> bool
+    '''تحميل تأجيلي لـ torch — أول نداء فقط.'''
+    global _TORCH_OK, _TORCH_ATTEMPTED, torch, nn, optim
+    if _TORCH_ATTEMPTED:
+        return _TORCH_OK
+    _TORCH_ATTEMPTED = True
+    try:
+        import torch as _t
+        import torch.nn as _nn
+        import torch.optim as _optim
+        torch, nn, optim = _t, _nn, _optim
+        _TORCH_OK = True
+    except Exception:
+        _TORCH_OK = False
+    return _TORCH_OK
 
 
 def _ram_gb() -> float:
@@ -676,7 +687,7 @@ def inventory() -> str:
         "### المكتبات",
         f"- numpy: ✅ ({np.__version__})",
         f"- scikit-learn: {'✅' if _SKLEARN_OK else '❌ غير مثبت'}",
-        f"- PyTorch: {'✅ ' + torch.__version__ if _TORCH_OK else '❌ غير متاح'}",
+        f"- PyTorch: {'✅ ' + torch.__version__ if _ensure_torch_agent() else '❌ غير متاح'}",
         "",
         "### أهداف NSM الداخلية (اختيارية)",
     ]
