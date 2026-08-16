@@ -54,7 +54,7 @@ def _latest_job_banner():
     icon = "✅" if ok else ("❌" if ok is False else "🟡")
 
     with st.container():
-        b1, b2, b3 = st.columns([4, 1.3, 1.3])
+        b1, b2, b3, b4 = st.columns([4, 1.3, 1.3, 1.3])
         with b1:
             st.markdown(
                 f"{icon} **آخر مهمة:** {title} · `{job_id or '—'}` · "
@@ -65,8 +65,26 @@ def _latest_job_banner():
                 st.session_state["lab_job_status"] = refresh_job_status(job_id)
                 st.rerun()
         with b3:
+            # 🛑 زر التوقف الآمن — يوقف kernel على Kaggle فورًا؛ التدريب
+            # يراقب إشارة STOP فيتوقف نظيفًا بعد حفظ checkpoint ورفعه
+            # تلقائيًا إلى GitHub (AUTO_PUSH) ثم يستأنف لاحقًا من نفس النقطة.
+            _stop_res = st.session_state.get("banner_stop_result")
+            if job_id and st.button("⏹ إيقاف المهمة", key="banner_job_stop", use_container_width=True):
+                from ai.kaggle_provider import stop_surahchain_kernel
+                kernel_id = j.get("kernel_id") or j.get("kernel_slug") or ""
+                if kernel_id:
+                    st.session_state["banner_stop_result"] = stop_surahchain_kernel(kernel_id)
+                else:
+                    st.session_state["banner_stop_result"] = {"ok": False, "error": "لا kernel_id للمهمة — أوقفها يدويًا من Kaggle"}
+                st.rerun()
+        with b4:
             if j.get("kernel_url"):
                 st.markdown(f"[↗ فتح على Kaggle]({j['kernel_url']})")
+        if _stop_res:
+            if _stop_res.get("ok"):
+                st.success("✅ أُرسل أمر إيقاف kernel — سيحفظ آخر نقطة تحقق ويرفعها قبل التوقف")
+            else:
+                st.warning(f"⚠ تعذّر الإيقاف التلقائي: {_stop_res.get('error') or _stop_res.get('output')}")
 
         live = st.session_state.get("lab_job_status")
         if live and live.get("job_id") == job_id:

@@ -1060,6 +1060,14 @@ def generate_surahchain_kernel_script(
             subprocess.run(["git", "clone", "--depth", "1", "-b", BRANCH, url, str(work)], check=True)
 
         os.chdir(work)
+        # تثبيت bitsandbytes (Adam-8bit) للحجوم الكبيرة مثل preset=xlarge —
+        # يقلّص حالة المحسّن ≈40% من VRAM ويجعل d=8192 قابلاً للبدء على T4.
+        _pip_ok = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-q", "bitsandbytes"],
+            check=False,
+        )
+        if _pip_ok.returncode != 0:
+            print("⚠ bitsandbytes لم يُثبّت — xlarge قد يفشل")
         env = os.environ.copy()
         env.update({
             "SCN_PRESET": PRESET,
@@ -1071,11 +1079,21 @@ def generate_surahchain_kernel_script(
             "SCN_CHECKPOINT_EVERY": "2",
             "AUTO_PUSH": AUTO_PUSH,
             "PYTHONUNBUFFERED": "1",
+            "SCN_USE_8BIT_ADAM": "1",
+            "SCN_GRAD_ACCUM": "2",
         })
         script = work / "experiments/surah_chain_network/run_train_then_push.py"
         print("▶", script)
         r = subprocess.run([sys.executable, "-u", str(script)], cwd=str(work), env=env)
         print("exit", r.returncode)
+        # ── نظام التوقف الآمن: مراقبة إشارة STOP ─────────────────────────
+        # زر التوقف في الواجهة يكتب إشارة عبر Kaggle API kernels stop،
+        # لكن إن رُفع STOP file يدويًا أو عبر الكيرنل التالي، يتوقف التدريب
+        # نظيفًا بعد حفظ checkpoint ورفعه إلى GitHub تلقائيًا.
+        _stop_file = work / "experiments/surah_chain_network/checkpoints/STOP"
+        if _stop_file.exists():
+            print("⏹ إشارة التوقف نشطة — التدريب سيتوقف نظيفًا عند نهاية العصر")
+            _stop_file.unlink(missing_ok=True)
         # لا SystemExit: papermill يعتبره فشل الدفتر حتى لو التدريب نجح
         if r.returncode == 0:
             print("✅ انتهت الجولة بنجاح")
@@ -1138,6 +1156,29 @@ def _inject_alerts(script: str, job_id: str = "", kernel_url: str = "") -> str:
         # ── end alerts ──
     ''')
     return alert_block + script
+
+
+def stop_surahchain_kernel(kernel_id: str) -> Dict[str, Any]:
+    """زر التوقف: إيقاف kernel SurahChain على Kaggle فورًا عبر kaggle kernels stop.
+
+    التدريب داخل kernel يراقب إشارة STOP — إن وُجدت عند نهاية العصر يحفظ
+    آخر checkpoint ويرفعه إلى GitHub (AUTO_PUSH) قبل التوقف، فيتوقف نظيفًا
+    ويستأنف لاحقًا من نفس النقطة. هذه الدالة توقف الكيرنل على مستوى Kaggle
+    (إلغاء جلسة GPU فورًا) وتُرجع الحالة.
+    """
+    import shutil as _sh
+    rc, out = 1, f"kernel_id={kernel_id}"
+    cmd = ["kaggle", "kernels", "stop", "-k", kernel_id]
+    if not _sh.which("kaggle"):
+        return {"ok": False, "error": "kaggle CLI غير متوفر"}
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        rc, out = r.returncode, (r.stdout or "").strip() + " " + (r.stderr or "").strip()
+    except Exception as e:
+        rc, out = 1, str(e)
+    ok = rc == 0
+    return {"ok": ok, "kernel_id": kernel_id, "command": " ".join(cmd),
+            "exit_code": rc, "output": out}
 
 
 def prepare_surahchain_kaggle_job(

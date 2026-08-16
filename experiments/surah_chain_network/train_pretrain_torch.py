@@ -57,6 +57,14 @@ N_POST = int(os.environ.get("SCN_N_POST", "2"))
 BASE_LR = float(os.environ.get("SCN_LR", "1e-3"))
 MAX_LEN = int(os.environ.get("SCN_MAX_LEN", "96"))
 COMPILE = os.environ.get("SCN_COMPILE", "0") == "1"
+# ── توفير ذاكرة للحجوم الكبيرة ───────────────────────────────────────────
+# USE_8BIT_ADAM:Adam-8bit (bitsandbytes) يخفض حالة المحسّن ≈40% من VRAM.
+# GRAD_ACCUM>1 ينفّذ micro-batches متعددة قبل خطوة محسّن واحدة —
+# يضاعف حجم الدفعة الفعلي (BATCH×GRAD_ACCUM) دون زيادة ذاكرة activations.
+USE_8BIT_ADAM = os.environ.get("SCN_USE_8BIT_ADAM", "0") == "1"
+GRAD_ACCUM = max(1, int(os.environ.get("SCN_GRAD_ACCUM", "1")))
+# ── إشارة التوقف الآمن (زر التوقف في واجهة Streamlit / Kaggle) ────────────
+# وجود الملف يعني: أكمل العصر الجاري واحفظ checkpoint ثم توقف نظيفًا.
 USE_QK_NORM = os.environ.get("SCN_QK_NORM", "1") == "1"
 USE_GATED_ATTN = os.environ.get("SCN_GATED_ATTN", "1") == "1"
 CHAIN_SCALE = float(os.environ.get("SCN_CHAIN_SCALE", "1"))
@@ -112,8 +120,12 @@ elif PRESET == "xlarge":
     N = max(N, int(os.environ.get("SCN_N", "100000")))
     BATCH = int(os.environ.get("SCN_BATCH", "1"))
     BASE_LR = float(os.environ.get("SCN_LR", "1e-4"))
-    MAX_LEN = int(os.environ.get("SCN_MAX_LEN", "128"))
-    COMPILE = os.environ.get("SCN_COMPILE", "1") == "1"
+    MAX_LEN = int(os.environ.get("SCN_MAX_LEN", "64"))
+    COMPILE = os.environ.get("SCN_COMPILE", "0") == "1"
+    # توفير ذاكرة إلزامي لـxlarge على Kaggle:
+    # Adam-8bit + تجميع تدرجات — بدونهما يتجاوز الطلب 16GB (T4) بكثير.
+    USE_8BIT_ADAM = os.environ.get("SCN_USE_8BIT_ADAM", "1") == "1"
+    GRAD_ACCUM = max(1, int(os.environ.get("SCN_GRAD_ACCUM", "2")))
     # استقرار: التوسيع الذاتي أسمح عند هذا الحجم
     MAX_EXPANDS = int(os.environ.get("SCN_MAX_EXPANDS", "5"))
 
@@ -136,6 +148,10 @@ VOCAB_PATH = _HERE / f"tokenizer_vocab_pretrain_{TAG}.json"
 STATE_FILE = CKPT_DIR / f"pretrain_state_{TAG}.json"
 PROGRESS_FILE = CKPT_DIR / f"progress_{TAG}.json"
 PRETRAIN_CACHE = _HERE / "data" / "pretrain_sentences.pkl"
+# ── إشارة التوقف الآمن (زر التوقف في واجهة Streamlit / Kaggle) ────────────
+# وجود الملف يعني: أكمل العصر الجاري واحفظ checkpoint ثم توقف نظيفًا —
+# ثم يُعيد _upload_checkpoint() آخر حالة إلى GitHub لاستئناف آمن لاحقًا.
+STOP_SIGNAL_FILE = CKPT_DIR / "STOP"
 # توافق مع الملفات القديمة عند small/d128
 if TAG in ("d128_s1", "d128_s1p0") or (D_MODEL == 128 and CHAIN_SCALE == 1.0 and not os.environ.get("SCN_TAG")):
     if not os.environ.get("SCN_TAG"):
@@ -457,10 +473,23 @@ def main():
             f"stop_patience={STOP_PATIENCE} | until_end={UNTIL_END}"
         )
 
+    # ── 8-bit Adam: تخفيض ≈40% من VRAM للحجوم الكبيرة ─────────────────────
+    if USE_8BIT_ADAM:
+        try:
+            from bitsandbytes.optim import AdamW8bit
+            m.opt = AdamW8bit(m.model.parameters(), lr=m.lr, weight_decay=0.01)
+            print("✅ optimizer: AdamW-8bit (bitsandbytes) — توفير VRAM")
+        except Exception as e:
+            print(f"⚠ AdamW-8bit غير متاح ({e}) — الاستمرار بـAdamW")
+            USE_8BIT_ADAM = False
+    if GRAD_ACCUM > 1:
+        print(f"✅ gradient accumulation: {GRAD_ACCUM} micro-batches/step")
+    stop_reason = ""
     for ep in range(start_epoch + 1, end_epoch + 1):
         order = list(texts)
         random.shuffle(order)
         ep_losses = []
+        micro_buf = []
         for i in range(0, len(order), BATCH):
             batch = order[i : i + BATCH]
             # step نسبي للجولة عند الاستكمال حتى لا يُحسب progress على أفق قديم/جديد بشكل يرفع LR
@@ -468,15 +497,39 @@ def main():
                 run_step = global_step - step0_for_lr
             else:
                 run_step = global_step
-            loss = m.train_batch(
-                batch,
-                max_len=MAX_LEN,
-                step=run_step,
-                total_steps=total_steps,
-                warmup_steps=warmup,
-            )
-            if loss == loss:  # not NaN
-                ep_losses.append(loss)
+            if GRAD_ACCUM > 1:
+                # تجميع تدرجات: zero_grad كل epoch، خطوة محسّن كل GRAD_ACCUM
+                accum_loss = 0.0
+                accum_n = 0
+                for mi in range(0, len(batch), 1):
+                    micro = batch[mi: mi + 1]
+                    loss = m.train_batch(
+                        micro,
+                        max_len=MAX_LEN,
+                        step=run_step,
+                        total_steps=total_steps,
+                        warmup_steps=warmup,
+                        accum=True,
+                    )
+                    if loss == loss:  # not NaN
+                        accum_loss += loss
+                        accum_n += 1
+                if accum_n > 0:
+                    micro_buf.append(accum_loss / accum_n)
+                    if len(micro_buf) >= GRAD_ACCUM or i + BATCH >= len(order):
+                        m.accum_step()
+                        ep_losses.extend(micro_buf)
+                        micro_buf.clear()
+            else:
+                loss = m.train_batch(
+                    batch,
+                    max_len=MAX_LEN,
+                    step=run_step,
+                    total_steps=total_steps,
+                    warmup_steps=warmup,
+                )
+                if loss == loss:  # not NaN
+                    ep_losses.append(loss)
             global_step += 1
         mean_l = sum(ep_losses) / max(1, len(ep_losses))
         history.append({"epoch": ep, "loss": mean_l, "lr": m.lr})
@@ -581,6 +634,15 @@ def main():
         # ── NSM: رفع checkpoint دوري إلى GitHub كل CHECKPOINT_EVERY عصور ──
         if CHECKPOINT_EVERY > 0 and (ep - start_epoch) % CHECKPOINT_EVERY == 0:
             _upload_checkpoint(ep)
+        # ── إشارة التوقف الآمن (زر التوقف) ──────────────────────────────
+        if STOP_SIGNAL_FILE.exists():
+            stop_reason = "stop_signal"
+            train_meta["stopped_early"] = True
+            train_meta["stop_reason"] = "إشارة توقف آمنة (زر التوقف)"
+            print("⏹ إشارة توقف آمنة — إيقاف نظيف بعد حفظ checkpoint")
+            _upload_checkpoint(ep)
+            STOP_SIGNAL_FILE.unlink(missing_ok=True)
+            break
         print(f"epoch {ep:03d}/{end_epoch}  loss={mean_l:.4f}  lr={m.lr:.6f}{mark}", flush=True)
         _write_progress({
             "epoch": ep, "end_epoch": end_epoch, "loss": mean_l, "best_loss": best,
@@ -615,8 +677,11 @@ def main():
         "resumed_from": str(resume_path) if resume_path else None,
         "global_step": global_step,
         "stopped_early": stopped_early,
+        "stop_reason": stop_reason or None,
         "until_end": UNTIL_END,
         "stop_patience": STOP_PATIENCE,
+        "use_8bit_adam": USE_8BIT_ADAM,
+        "grad_accum": GRAD_ACCUM,
         "params": m.param_count(),
     }
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2))
@@ -626,7 +691,9 @@ def main():
         f"العصر النهائي: {final_epoch} | توسيعات: {n_expands} | "
         f"early_stop={stopped_early}"
     )
-    if stopped_early:
+    if stopped_early and stop_reason == "stop_signal":
+        print("✅ توقف آمن بطلب المستخدم — رُفعت آخر checkpoint لاستئناف لاحق")
+    elif stopped_early:
         print("✅ اكتمل التدريب حتى استقرار الـloss (النهاية العملية)")
     else:
         print(f"للاستكمال لاحقاً: أعد نفس الأمر (سيُحمّل {CKPT_LATEST.name} تلقائياً)")

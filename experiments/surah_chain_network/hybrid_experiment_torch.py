@@ -789,28 +789,41 @@ class HybridExperimentModelTorch:
         step: Optional[int] = None,
         total_steps: Optional[int] = None,
         warmup_steps: int = 0,
+        accum: bool = False,
     ) -> float:
-        """دفعة واحدة حقيقية (مصفوفة B×S) — أسرع بكثير من جملة بجملة."""
+        """دفعة واحدة حقيقية (مصفوفة B×S) — أسرع بكثير من جملة بجملة.
+
+        accum=True: يجمّع التدرجات بدل خطوة محسّن فورية (gradient
+        accumulation) — تُستدعى accum_step() بعد عدد GRAD_ACCUM استدعاءات.
+        """
         if step is not None and total_steps is not None:
             self.set_lr(cosine_lr(step, total_steps, self.base_lr, warmup_steps))
-
         packed = self._encode_batch(texts, max_len)
         if packed is None:
             return float("nan")
         x, y, pad_mask = packed
-
         self.model.train()
-        self.opt.zero_grad(set_to_none=True)
+        if not accum:
+            self.opt.zero_grad(set_to_none=True)
         logits = self.model(x, key_padding_mask=pad_mask)
         loss = F.cross_entropy(
             logits.reshape(-1, logits.size(-1)),
             y.reshape(-1),
             ignore_index=-100,
         )
-        loss.backward()
+        # مقسوم على عدد micro-batches المتراكمة لإبقاء مقياس التدرج ثابتًا
+        scale = max(1, getattr(self, "_accum_scale", 1))
+        (loss / scale).backward()
+        if not accum:
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+            self.opt.step()
+        return float(loss.item())
+
+    def accum_step(self) -> None:
+        """يُنهي تجميع التدرجات: clip → optimizer step → zero_grad."""
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
         self.opt.step()
-        return float(loss.item())
+        self.opt.zero_grad(set_to_none=True)
 
     def train_step(self, text: str, max_len: int = DEFAULT_MAX_LEN) -> Optional[float]:
         return self.train_batch([text], max_len=max_len)
