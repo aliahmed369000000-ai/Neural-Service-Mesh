@@ -252,11 +252,21 @@ def _synthesize_edge(text: str, voice: str) -> TTSResult:
 # ════════════════════════════════════════════════════════════════════════════
 
 def _synthesize_gtts(text: str, lang: str) -> TTSResult:
+    """تحويل نص-لصوت عبر gTTS (احتياطي أخير بلا مفتاح).
+
+    إن كانت حزمة gTTS غير مثبتة (أُزيلت من requirements.txt بسبب تعارضها
+    القاطع في click مع huggingface_hub>=1.19) نعتبر المزوّد غير متاح
+    بدلاً من كسر السلسلة — فيرفع الخطأ كـRuntimeError يلتقطه المحرك
+    ويتجاوز المزوّد بصمت نحو النتيجة النهائية (Edge TTS هو الأساس).
+    """
     try:
         from gtts import gTTS  # type: ignore
         import io
     except ImportError as exc:
-        raise RuntimeError("حزمة gTTS غير مثبّتة. أضِف 'gTTS>=2.5.0' لـ requirements.txt") from exc
+        raise RuntimeError(
+            "gTTS غير متوفر (حزمة gTTS غير مثبتة) — مزوّد احتياطي، "
+            "Edge TTS هو الأساس ولا يتأثر."
+        ) from exc
 
     # gTTS لا تقبل معامل timeout مباشرة (تستخدم requests داخلياً بلا مهلة
     # افتراضية). هذا المزوّد هو آخر حلقة بالسلسلة (لا تراجع بعده)، فتعليقه
@@ -311,7 +321,13 @@ class TTSEngine:
         if os.getenv("ELEVENLABS_API_KEY", "").strip():
             chain.append(TTSProvider.ELEVENLABS)
         chain.append(TTSProvider.EDGE)   # دائماً متاح (بدون مفتاح)
-        chain.append(TTSProvider.GTTS)   # احتياطي أخير
+        # gTTS احتياطي أخير — إن كانت حزمته غير مثبتة (تعارض قاطع مع
+        # huggingface_hub في متطلبات click) نتجاوز إضافته لتفادي فشل السلسلة
+        try:
+            from gtts import gTTS as _gtts_check  # type: ignore
+            chain.append(TTSProvider.GTTS)
+        except ImportError:
+            logger.debug("gTTS غير مثبتة — مزوّد الاحتياطي الأخير معطّل")
         return chain
 
     def _is_cooling_down(self, provider: TTSProvider) -> bool:
