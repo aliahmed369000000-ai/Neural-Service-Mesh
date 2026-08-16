@@ -541,6 +541,136 @@ def _exec_bash(source: str, timeout: int) -> Dict[str, Any]:
                 "duration_ms": int((time.time() - t0) * 1000)}
 
 
+def _exec_sql(source: str, timeout: int) -> Dict[str, Any]:
+    """🆕 نوع sql: تنفيذ SQL على قاعدة SQLite محلية (تُحدَّد بسطر تعليق
+    الأول -- db مسار/أو افتراضي notebooks/<nb>.sqlite). قراءة فقط افتراضيًا
+    ما لم يكن الخلية metadata={'allow_writes': True} (INSERT/UPDATE/DELETE).
+    المخرجات: جدول أول 500 صف + إجمالي الصفوف كـdisplay_data HTML."""
+    import sqlite3 as _sqlite3
+    t0 = time.time()
+    try:
+        allow_writes = False
+        lines = source.splitlines()
+        db_rel = f"nbsql_{uuid.uuid4().hex[:8]}.sqlite"
+        for _ln in lines:
+            _s = _ln.strip()
+            if _s.lower().startswith("-- db"):
+                db_rel = _s[5:].strip()
+            elif _s.lower().startswith("-- allow_writes"):
+                allow_writes = True
+        db_path = (NB_DIR / db_rel).resolve()
+        conn = _sqlite3.connect(str(db_path), timeout=timeout)
+        if not allow_writes:
+            conn.execute("PRAGMA query_only = ON")
+        # كل سطر هو جملة SQL مستقلة — لا نضم الأسطر معًا لأن تعليقات SQL
+        # (-- ...) ستصبح جزءًا من الجملة وتفسد التنفيذ في sqlite
+        _sqls = []
+        for _qln in lines:
+            _qs = _qln.split(";")[0].strip()
+            if _qs and not _qs.startswith("--"):
+                _sqls.append(_qs)
+        results = []
+        for _q in _sqls:
+            _qu = _q.strip().upper()
+            if _qu.startswith(("SELECT", "PRAGMA", "EXPLAIN", "WITH")):
+                cur = conn.execute(_q)
+                cols = [d[0] for d in (cur.description or [])]
+                rows = cur.fetchmany(500)
+                results.append({"cols": cols, "rows": list(rows),
+                                "many": len(rows) >= 500})
+            elif allow_writes:
+                # جمل كتابة: CREATE/ALTER/DROP/INSERT/UPDATE/DELETE/... تُنفَّذ
+                # دون إعادة نتائج (fetchmany يفشل لها)
+                conn.execute(_q)
+            # أي نوع آخر عند قراءة-فقط يُتجاهل بأمان
+        conn.commit()
+        conn.close()
+        return {"ok": True, "duration_ms": int((time.time() - t0) * 1000),
+                "exit_code": 0, "results": results}
+    except Exception as e:
+        return {"ok": False, "duration_ms": int((time.time() - t0) * 1000),
+                "exit_code": 1, "error": str(e)}
+
+
+def _exec_http(source: str, timeout: int) -> Dict[str, Any]:
+    """🆕 نوع http: إرسال طلب HTTP. الصيغة: سطر URL أولًا (اختياري GET)
+    أو GET/POST/PUT/DELETE قبله، ويمكن تمرير رؤوس {Header: value} في أسطر
+    تليها، وbody بعد سطر --. المخرجات: status + headers + body مقتطع."""
+    import urllib.request as _ur
+    import urllib.parse as _up
+    t0 = time.time()
+    try:
+        lines = source.strip().splitlines()
+        if not lines:
+            raise ValueError("خلية http فارغة — أضف سطر URL أولًا")
+        body = None
+        custom_headers = {}
+        url = lines[0].strip()
+        method = "GET"
+        for _m in ("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"):
+            if url.upper().startswith(_m + " "):
+                method = _m
+                url = url[len(_m):].strip()
+                break
+        if not url.startswith(("http://", "https://")):
+            url = ("https://" + url) if not url.startswith("//") else url
+        if not _up.urlparse(url).scheme:
+            raise ValueError(f"URL غير صالح: {url}")
+        # أسطر الرؤوس: Key: Value
+        header_lines, body_lines = [], []
+        in_body = False
+        for _l in lines[1:]:
+            if _l.strip() == "--":
+                in_body = True
+                continue
+            (body_lines if in_body else header_lines).append(_l)
+        for _hl in header_lines:
+            if ":" in _hl:
+                _k, _v = _hl.split(":", 1)
+                custom_headers[_k.strip()] = _v.strip()
+        if body_lines:
+            body = "\n".join(body_lines).encode("utf-8")
+        req = _ur.Request(url, data=body, method=method)
+        req.add_header("User-Agent", "nsm-notebook/1.0")
+        for _k, _v in custom_headers.items():
+            req.add_header(_k, _v)
+        with _ur.urlopen(req, timeout=timeout) as resp:
+            status = resp.status
+            resp_headers = dict(resp.getheaders())
+            raw = resp.read()
+        try:
+            body_out = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            body_out = f"[binary {len(raw)} bytes]"
+        return {"ok": True, "duration_ms": int((time.time() - t0) * 1000),
+                "exit_code": status, "status": status,
+                "headers": {k: v for k, v in list(resp_headers.items())[:20]},
+                "body": _truncate(body_out)}
+    except Exception as e:
+        return {"ok": False, "duration_ms": int((time.time() - t0) * 1000),
+                "exit_code": 1, "error": str(e)}
+
+
+def _render_md_ex(source: str, timeout: int) -> Dict[str, Any]:
+    """🆕 نوع markdown_ex: markdown معتمد (mermaid مخططات + HTML خام).
+    لا ينفذ شيء: يُحوّل إلى مخرجات markdown عادية مع ملاحظة النواة
+    (يُفسَّر العرض في الواجهة — الواجهة تعالج ```mermaid وHTML)."""
+    return {"ok": True, "duration_ms": 0, "exit_code": 0,
+            "html": source}
+
+
+def _exec_with_retries(fn, source: str, timeout: int, retries: int,
+                       ) -> Dict[str, Any]:
+    """تشغيل دالة تنفيذ مع إعادة محاولة عند الخطأ (metadata.retries)."""
+    res = fn(source, timeout)
+    attempt = 1
+    while not res.get("ok") and attempt <= retries:
+        attempt += 1
+        res = fn(source, timeout)
+        res.setdefault("attempts", attempt)
+    return res
+
+
 def detect_compute() -> Dict[str, Any]:
     info: Dict[str, Any] = {"providers": {}}
     try:
@@ -578,7 +708,9 @@ def detect_compute() -> Dict[str, Any]:
 def plan_remote_run(nb: Notebook, provider: str) -> Dict[str, Any]:
     """خطة إرسال للمزوّد — لا تشغّل تدريباً ثقيلاً هنا إن لم تُضبط المفاتيح."""
     provider = (provider or "local").lower()
-    code_cells = [c.source for c in nb.cells if c.type in ("code", "train", "bash")]
+    code_cells = [c.source for c in nb.cells
+                  if c.type in ("code", "train", "bash", "sql", "http",
+                                "markdown_ex")]
     plan = {
         "ok": True,
         "provider": provider,
@@ -683,7 +815,8 @@ def run_cell(nb: Notebook, cell_id: str, timeout: int = _DEFAULT_TIMEOUT) -> Cel
         return cell
 
     if cell.type == "bash":
-        res = _exec_bash(cell.source, timeout)
+        _retries = int(cell.metadata.get("retries") or 0)
+        res = _exec_with_retries(_exec_bash, cell.source, timeout, _retries)
         cell.execution_count = (cell.execution_count or 0) + 1
         cell.status = "ok" if res.get("ok") else "error"
         cell.outputs = [{
@@ -696,6 +829,45 @@ def run_cell(nb: Notebook, cell_id: str, timeout: int = _DEFAULT_TIMEOUT) -> Cel
         save_notebook(nb)
         return cell
 
+    if cell.type == "sql":
+        _retries = int(cell.metadata.get("retries") or 0)
+        res = _exec_with_retries(_exec_sql, cell.source, timeout, _retries)
+        cell.execution_count = (cell.execution_count or 0) + 1
+        cell.status = "ok" if res.get("ok") else "error"
+        cell.outputs = [{"type": "sql_result",
+                         "results": res.get("results") or [],
+                         "error": res.get("error") if not res.get("ok") else None,
+                         "duration_ms": res.get("duration_ms"),
+                         "exit_code": res.get("exit_code")}]
+        save_notebook(nb)
+        return cell
+
+    if cell.type == "http":
+        _retries = int(cell.metadata.get("retries") or 0)
+        res = _exec_with_retries(_exec_http, cell.source, timeout, _retries)
+        cell.execution_count = (cell.execution_count or 0) + 1
+        cell.status = "ok" if res.get("ok") else "error"
+        cell.outputs = [{"type": "http_result",
+                         "status": res.get("status"),
+                         "headers": res.get("headers") or {},
+                         "body": res.get("body") or "",
+                         "error": res.get("error") if not res.get("ok") else None,
+                         "duration_ms": res.get("duration_ms"),
+                         "exit_code": res.get("exit_code")}]
+        save_notebook(nb)
+        return cell
+
+    if cell.type == "markdown_ex":
+        _retries = int(cell.metadata.get("retries") or 0)
+        res = _exec_with_retries(_render_md_ex, cell.source, timeout, _retries)
+        cell.execution_count = (cell.execution_count or 0) + 1
+        cell.status = "ok" if res.get("ok") else "error"
+        cell.outputs = [{"type": "markdown_ex",
+                         "html": res.get("html", ""),
+                         "duration_ms": res.get("duration_ms")}]
+        save_notebook(nb)
+        return cell
+
     # code + train — kernel الحقيقي أولًا
     res = None
     kr = _NSK.get("run_cell_kernel")
@@ -704,9 +876,11 @@ def run_cell(nb: Notebook, cell_id: str, timeout: int = _DEFAULT_TIMEOUT) -> Cel
             res = kr(nb.id, cell.source, timeout=timeout)
         except Exception:
             res = None
+    _retries_code = int(cell.metadata.get("retries") or 0)
     if res is None:
         # fallback للآلية القديمة (subprocess منفصل)
-        res = _exec_python(cell.source, timeout)
+        res = _exec_with_retries(_exec_python, cell.source, timeout,
+                                 _retries_code)
         cell.execution_count = (cell.execution_count or 0) + 1
         cell.status = "ok" if res.get("ok") else "error"
         cell.outputs = [{
@@ -721,6 +895,14 @@ def run_cell(nb: Notebook, cell_id: str, timeout: int = _DEFAULT_TIMEOUT) -> Cel
         cell.execution_count = res.get("execution_count") or (cell.execution_count or 0) + 1
         cell.status = "ok" if res.get("ok") else "error"
         cell.outputs = list(res.get("outputs") or [])
+        # retries لمسار kernel الحقيقي: إعادة المحاولة عند الخطأ
+        _att = 0
+        while not cell.status == "ok" and _att < _retries_code:
+            _att += 1
+            res = kr(nb.id, cell.source, timeout=timeout)
+            cell.execution_count = (cell.execution_count or 0) + 1
+            cell.status = "ok" if res.get("ok") else "error"
+            cell.outputs = list(res.get("outputs") or [])
     save_notebook(nb)
     return cell
 
@@ -1118,6 +1300,53 @@ CODE_SNIPPETS: Dict[str, Dict[str, str]] = {
             print("GPU:", os.popen("nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1").read().strip() or "none")
             """),
     },
+    # ═══════════════════════════════════════════════════════════════════
+    # 🆕 قوالب أنواع الخلايا المتقدمة (sql / http / markdown_ex)
+    # ═══════════════════════════════════════════════════════════════════
+    "sql_ex": {
+        "label_ar": "استعلام SQL (جدول تجريبي)",
+        "type": "sql",
+        "source": textwrap.dedent("""\
+            -- db demo.sqlite
+            -- allow_writes
+            CREATE TABLE IF NOT EXISTS tokens (
+                epoch INTEGER, loss REAL, lr REAL
+            );
+            INSERT INTO tokens VALUES (1, 2.45, 0.001), (2, 1.92, 0.0008);
+            SELECT * FROM tokens WHERE loss < 2.0;
+            """),
+    },
+    "http_ping": {
+        "label_ar": "فحص API (HTTP)",
+        "type": "http",
+        "source": textwrap.dedent("""\
+            GET https://api.github.com/rate_limit
+            """),
+    },
+    "http_post": {
+        "label_ar": "POST مع رؤوس وجسم",
+        "type": "http",
+        "source": textwrap.dedent("""\
+            POST https://httpbin.org/post
+            Content-Type: application/json
+            --
+            {"model": "surahchain", "d": 8192}
+            """),
+    },
+    "md_mermaid": {
+        "label_ar": "Markdown+ (مخطط Mermaid)",
+        "type": "markdown_ex",
+        "source": textwrap.dedent("""\
+            ### بنية نظام NSM
+
+            ```mermaid
+            graph LR
+                A[المستخدم] --> B[الوكلاء]
+                B --> C[الذاكرة المشتركة]
+                B --> D[الدفتر]
+            ```
+            """),
+    },
 }
 
 
@@ -1126,11 +1355,12 @@ def get_snippet(key: str) -> Optional[Dict[str, str]]:
 
 
 def insert_snippet(nb: Notebook, snippet_key: str, index: Optional[int] = None) -> Optional[Cell]:
-    """إدراج قالب كود جديد في الدفتر."""
+    """إدراج قالب جديد في الدفتر — يدعم الأنواع المتقدمة (sql/http/
+    markdown_ex) عبر حقل 'type' في القالب؛ افتراضيًا code."""
     snip = CODE_SNIPPETS.get(snippet_key)
     if not snip:
         return None
-    cell = add_cell(nb, "code", snip["source"], index=index)
+    cell = add_cell(nb, snip.get("type") or "code", snip["source"], index=index)
     cell.metadata["snippet"] = snippet_key
     save_notebook(nb)
     return cell
@@ -1297,5 +1527,35 @@ def _export_cell_outputs(outputs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "evalue": o.get("evalue", ""),
                 "traceback": list(o.get("traceback") or []),
             })
+        elif otype == "sql_result":
+            # جدول نتائج SQL — يعرَّض كـHTML في التصدير
+            rows_html = []
+            for _res in o.get("results") or []:
+                _cols = _res.get("cols") or []
+                _rows = _res.get("rows") or []
+                rows_html.append("<table border='1'>"
+                                 + "<tr>" + "".join(
+                                     f"<th>{str(_c)}</th>" for _c in _cols)
+                                 + "</tr>" + "".join(
+                    "<tr>" + "".join(f"<td>{_truncate(str(_v))}</td>"
+                                     for _v in _row) + "</tr>"
+                    for _row in _rows)
+                                 + "</table>")
+            if rows_html:
+                out.append({"output_type": "display_data",
+                            "metadata": {"nsm_sql": True},
+                            "data": {"text/html": rows_html}})
+        elif otype == "http_result":
+            _lines = [f"HTTP status: {o.get('status')}"]
+            for _hk, _hv in (o.get("headers") or {}).items():
+                _lines.append(f"{str(_hk)}: {str(_hv)}")
+            _lines.append("")
+            _lines.append((o.get("body") or "")[:20_000])
+            out.append({"output_type": "stream", "name": "stdout",
+                        "text": "\n".join(_lines).splitlines(keepends=True)})
+        elif otype == "markdown_ex":
+            out.append({"output_type": "display_data",
+                        "metadata": {"nsm_md_ex": True},
+                        "data": {"text/html": o.get("html", "")}})
         # أي بنية غير معروفة تُتجاهل بأمان
     return out

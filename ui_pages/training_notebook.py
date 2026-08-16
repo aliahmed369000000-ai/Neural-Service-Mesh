@@ -135,6 +135,48 @@ def _render_cell_outputs(outputs):
                 st.text("".join(data.get("text/plain") or [""]))
         elif otype == "error":
             st.error("\n".join(out.get("traceback") or [out.get("evalue", "")]))
+        # 🆕 v4: الأنواع المتقدمة (SQL / HTTP / Markdown+)
+        elif otype == "sql_result":
+            for _res in out.get("results") or []:
+                _cols = _res.get("cols") or []
+                _rows = _res.get("rows") or []
+                if _cols and _rows:
+                    try:
+                        import pandas as _pd
+                        st.dataframe(_pd.DataFrame(_rows, columns=_cols),
+                                     use_container_width=True)
+                    except Exception:
+                        st.code("\n".join(
+                            " | ".join(str(_v) for _v in _r) for _r in _rows),
+                            language="text")
+                elif _cols:
+                    st.caption("".join(_cols) + " — 0 صفوف")
+                if _res.get("many"):
+                    st.caption("⚠️ عُرضت أول 500 صف فقط")
+            if out.get("error"):
+                st.error(str(out["error"]))
+            if out.get("duration_ms") is not None:
+                st.caption(f"⏱️ {out.get('duration_ms')}ms")
+        elif otype == "http_result":
+            _st = out.get("status")
+            _ok = isinstance(_st, int) and 200 <= _st < 300
+            _icon = "✅" if _ok else ("⏳" if _st is None else "❌")
+            st.markdown(f"{_icon} **HTTP {_st or '?'}** · "
+                        f"{out.get('duration_ms', 0)}ms")
+            if out.get("headers"):
+                st.caption(" · ".join(
+                    f"{str(_hk)}: {str(_hv)}" for _hk, _hv in
+                    list(out["headers"].items())[:5]))
+            if out.get("body"):
+                st.code(out["body"][:3000], language="text")
+            if out.get("error"):
+                st.error(str(out["error"]))
+        elif otype == "markdown_ex":
+            _html = out.get("html", "")
+            if _html:
+                st.markdown(_html, unsafe_allow_html=True)
+            if out.get("duration_ms") is not None:
+                st.caption(f"⏱️ {out.get('duration_ms')}ms")
 
 
 def _metrics_plot(nb):
@@ -529,6 +571,20 @@ def render_training_notebook():
             if st.button("➕ Train", use_container_width=True, key="nb_add_train"):
                 add_cell(nb, "train", "print('train')")
                 st.rerun()
+        if st.button("➕ SQL 🗄️", use_container_width=True, key="nb_add_sql"):
+            add_cell(nb, "sql",
+                     "-- db demo.sqlite\n-- allow_writes\n"
+                     "CREATE TABLE IF NOT EXISTS t (id INTEGER, v TEXT);\n"
+                     "SELECT * FROM t;")
+            st.rerun()
+        if st.button("➕ HTTP 🌐", use_container_width=True, key="nb_add_http"):
+            add_cell(nb, "http",
+                     "GET https://api.github.com/rate_limit")
+            st.rerun()
+        if st.button("➕ MD+ 📋", use_container_width=True, key="nb_add_mdex"):
+            add_cell(nb, "markdown_ex",
+                     "### عنوان\n```mermaid\ngraph LR\n  A-->B\n```")
+            st.rerun()
         with t6:
             st.download_button(
                 "⬇️ ipynb",
@@ -795,7 +851,8 @@ def render_training_notebook():
                 st.rerun()
 
         for i, cell in enumerate(list(nb.cells)):
-            badge = {"markdown": "📝", "code": "🐍", "bash": "💻", "train": "🏋️"}.get(cell.type, "•")
+            badge = {"markdown": "📝", "code": "🐍", "bash": "💻", "train": "🏋️",
+                     "sql": "🗄️", "http": "🌐", "markdown_ex": "📋"}.get(cell.type, "•")
             status_icon = {"ok": "✅", "error": "❌", "running": "⏳", "idle": "⚪"}.get(cell.status, "⚪")
             with st.container():
                 h1, h2, h3, h4, h5, h6, h7 = st.columns([1.5, 0.45, 0.45, 0.45, 0.45, 0.45, 0.6])
@@ -877,7 +934,8 @@ def render_training_notebook():
                         if cr:
                             st.markdown(f"**🤖 {cr['n']}:**")
                             st.markdown(str(cr["r"].get("text", "—")))
-                types = ["markdown", "code", "bash", "train"]
+                types = ["markdown", "code", "bash", "train",
+                         "sql", "http", "markdown_ex"]
                 ti = types.index(cell.type) if cell.type in types else 1
                 new_type = st.selectbox("t", types, index=ti, key=f"typ_{cell.id}", label_visibility="collapsed")
                 if new_type != cell.type:
