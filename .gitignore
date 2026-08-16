@@ -102,3 +102,4 @@ artifacts/model_training/*.pkl
 artifacts/model_training/notebooks/
 logs/
 artifacts/model_training/alerts/
+reqtest/
