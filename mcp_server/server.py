@@ -473,3 +473,33 @@ def nsm_long_horizon_tasks(status_filter: str = "") -> str:
         return json.dumps(data, ensure_ascii=False, default=str)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def nsm_call_service(service: str, action: str, payload_json: str = "{}"
+                     ) -> str:
+    """استدعاء خدمة داخلية في نظام NSM بنمط الطلب/الاستجابة الثابت
+    (Microservices Layer). الخدمات المتاحة:
+    meta / harm / ckg / dashboard / connectors / backend.
+
+    Args:
+        service: اسم الخدمة (مثال: meta أو connectors أو backend).
+        action: إجراء الخدمة (مثال: list_services أو call أو counts).
+        payload_json: حمولة JSON اختيارية للإجراء.
+    """
+    try:
+        import json as _json
+        from ai.microservices import call_service, list_services
+        payload = _json.loads(payload_json or "{}")
+        services = list_services()
+        if service not in services:
+            return _json.dumps(
+                {"ok": False,
+                 "error": f"خدمة غير مسجلة: {service}",
+                 "available_services": services},
+                ensure_ascii=False)
+        return _json.dumps(
+            call_service(service, action, payload, requested_by="mcp"),
+            ensure_ascii=False, default=str)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)

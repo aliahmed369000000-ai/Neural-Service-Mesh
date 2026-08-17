@@ -476,6 +476,396 @@ async def performance_system(request: Request):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+# ---------------------------------------------------------------- Backend
+@app.get("/backend/counts")
+async def backend_counts(request: Request):
+    """عدّادات جداول مركز البيانات (KV/وكلاء/مهام/ذاكرة/رسائل)."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.backend_layer import backend_counts as _counts
+        return {"ok": True, "counts": _counts()}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.get("/backend/kv")
+async def backend_kv_get(request: Request):
+    """قراءة مفتاح من مخزن KV: ?key=&domain=general&default="""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.backend_layer import kv_get, kv_list
+        key = request.query_params.get("key", "")
+        domain = request.query_params.get("domain", "general")
+        if not key:
+            return {"ok": True, "list": kv_list(
+                domain=domain if domain != "general" else None,
+                limit=int(request.query_params.get("limit", "100")))}
+        return {"ok": True, "key": key, "domain": domain,
+                "value": kv_get(key, domain)}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.post("/backend/kv")
+async def backend_kv_set(request: Request):
+    """حفظ مفتاح/قيمة: {"key", "value", "domain"}."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        body = await request.json()
+        key = str(body.get("key", ""))
+        if not key:
+            return JSONResponse({"ok": False, "error": "key مطلوب"},
+                                status_code=400)
+        from ai.backend_layer import kv_set
+        return {"ok": True, **kv_set(key, body.get("value", ""),
+                                     str(body.get("domain", "general")))}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.delete("/backend/kv")
+async def backend_kv_delete(request: Request):
+    """حذف مفتاح: ?key=&domain=general"""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.backend_layer import kv_delete
+        key = request.query_params.get("key", "")
+        if not key:
+            return JSONResponse({"ok": False, "error": "key مطلوب"},
+                                status_code=400)
+        return {"ok": True, **kv_delete(key,
+                                        request.query_params.get("domain",
+                                                                 "general"))}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.get("/backend/agents")
+async def backend_agents_list(request: Request):
+    """قائمة الوكلاء المسجلين في مركز البيانات."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.backend_layer import agent_list
+        return {"ok": True, "agents": agent_list(
+            limit=int(request.query_params.get("limit", "100")))}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.post("/backend/agents")
+async def backend_agents_register(request: Request):
+    """تسجيل وكيل: {"id", "role", "config"}."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        body = await request.json()
+        agent_id = str(body.get("id", ""))
+        if not agent_id:
+            return JSONResponse({"ok": False, "error": "id مطلوب"},
+                                status_code=400)
+        from ai.backend_layer import agent_register
+        return {"ok": True, **agent_register(agent_id,
+                                             str(body.get("role", "")),
+                                             body.get("config"))}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.get("/backend/agents/{agent_id}")
+async def backend_agent_get(request: Request, agent_id: str):
+    """تفاصيل وكيل واحد."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.backend_layer import agent_get
+        agent = agent_get(agent_id)
+        if agent is None:
+            return JSONResponse({"ok": False, "error": "وكيل غير موجود"},
+                                status_code=404)
+        return {"ok": True, "agent": agent}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.put("/backend/agents/{agent_id}")
+async def backend_agent_update(request: Request, agent_id: str):
+    """تحديث وكيل: {"role", "status", "config"}."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        body = await request.json()
+        from ai.backend_layer import agent_update
+        result = agent_update(agent_id, body)
+        if not result.get("updated"):
+            return JSONResponse({"ok": False,
+                                 "error": "فشل التحديث (وكيل غير موجود?)"},
+                                status_code=404)
+        return {"ok": True, **result}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.delete("/backend/agents/{agent_id}")
+async def backend_agent_unregister(request: Request, agent_id: str):
+    """إزالة تسجيل وكيل."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.backend_layer import agent_unregister
+        return {"ok": True, **agent_unregister(agent_id)}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.get("/backend/tasks")
+async def backend_tasks_list(request: Request):
+    """قائمة المهام (تصفية اختيارية ?status=)."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.backend_layer import task_list
+        status = request.query_params.get("status") or None
+        return {"ok": True, "tasks": task_list(
+            status=status, limit=int(request.query_params.get("limit", "100")))}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.post("/backend/tasks")
+async def backend_tasks_create(request: Request):
+    """إنشاء مهمة: {"title", "type", "payload"}."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        body = await request.json()
+        from ai.backend_layer import task_create
+        return {"ok": True, **task_create(str(body.get("title", "")),
+                                          str(body.get("type", "general")),
+                                          body.get("payload"))}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.get("/backend/tasks/{task_id}")
+async def backend_task_get(request: Request, task_id: str):
+    """تفاصيل مهمة واحدة."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.backend_layer import task_get
+        task = task_get(task_id)
+        if task is None:
+            return JSONResponse({"ok": False, "error": "مهمة غير موجودة"},
+                                status_code=404)
+        return {"ok": True, "task": task}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.put("/backend/tasks/{task_id}")
+async def backend_task_update(request: Request, task_id: str):
+    """تحديث مهمة: {"status", "result", "payload", "title"}."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        body = await request.json()
+        from ai.backend_layer import task_update
+        result = task_update(task_id, body)
+        if not result.get("updated"):
+            return JSONResponse({"ok": False,
+                                 "error": "فشل التحديث (مهمة غير موجودة?)"},
+                                status_code=404)
+        return {"ok": True, **result}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.get("/backend/memories")
+async def backend_memories(request: Request):
+    """الذاكرة: ?q= بحث نصي أو قائمة ?limit=100."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.backend_layer import memory_list, memory_search
+        q = request.query_params.get("q")
+        if q:
+            return {"ok": True, "memories": memory_search(q, limit=25)}
+        return {"ok": True, "memories": memory_list(
+            limit=int(request.query_params.get("limit", "100")))}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.post("/backend/memories")
+async def backend_memory_add(request: Request):
+    """إضافة ذاكرة: {"subject", "content", "tags", "importance"}."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        body = await request.json()
+        if not body.get("subject"):
+            return JSONResponse({"ok": False, "error": "subject مطلوب"},
+                                status_code=400)
+        from ai.backend_layer import memory_add
+        return {"ok": True, **memory_add(
+            str(body.get("subject")), str(body.get("content", "")),
+            body.get("tags"), float(body.get("importance", 0.5)))}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.get("/backend/messages")
+async def backend_messages(request: Request):
+    """صندوق الوارد: ?receiver=&unread_only=&limit=50"""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.backend_layer import message_inbox
+        receiver = request.query_params.get("receiver", "")
+        if not receiver:
+            return JSONResponse({"ok": False, "error": "receiver مطلوب"},
+                                status_code=400)
+        return {"ok": True, "messages": message_inbox(
+            receiver,
+            limit=int(request.query_params.get("limit", "50")),
+            unread_only=request.query_params.get("unread_only") == "1")}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.post("/backend/messages")
+async def backend_message_send(request: Request):
+    """إرسال رسالة: {"sender", "receiver", "subject", "body", "headers"}."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        body = await request.json()
+        if not body.get("receiver"):
+            return JSONResponse({"ok": False, "error": "receiver مطلوب"},
+                                status_code=400)
+        from ai.backend_layer import message_send
+        return {"ok": True, **message_send(
+            str(body.get("sender", "")), str(body["receiver"]),
+            str(body.get("subject", "")), str(body.get("body", "")),
+            body.get("headers"))}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.put("/backend/messages/{msg_id}/read")
+async def backend_message_mark_read(request: Request, msg_id: str):
+    """وضع علامة مقروء على رسالة."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.backend_layer import message_mark_read
+        return {"ok": True, **message_mark_read(msg_id)}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+# ── Microservices & External Connectors ──────────────────────────
+@app.get("/services/list")
+async def services_list(request: Request):
+    """قائمة الخدمات المصغرة المسجّلة (Microservices Layer)."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.microservices import list_services
+        return {"ok": True, "services": list_services(),
+                "schema_version": "nsm-ms/1.0"}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)},
+                            status_code=500)
+
+@app.get("/services/describe")
+async def services_describe(request: Request):
+    """وصف خدمة: ?service=meta أو backend أو connectors..."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.microservices import call_service
+        return call_service("meta", "describe_service",
+                            {"service": request.query_params.get(
+                                "service", "")})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)},
+                            status_code=500)
+
+@app.post("/services/call")
+async def services_call(request: Request):
+    """استدعاء خدمة داخلية بنمط الطلب/الاستجابة الثابت:
+    {"service": "backend", "action": "counts", "payload": {...}}."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        from ai.microservices import call_service
+        return call_service(str(body.get("service", "")),
+                            str(body.get("action", "")),
+                            body.get("payload"))
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)},
+                            status_code=500)
+
+@app.get("/connectors/list")
+async def connectors_list(request: Request):
+    """الموصلات الخارجية المسجّلة وقدراتها (دفع/خرائط/رسائل)."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from connectors.external_services import list_connectors
+        return {"ok": True, "connectors": list_connectors()}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)},
+                            status_code=500)
+
+@app.get("/connectors/describe")
+async def connectors_describe(request: Request):
+    """وصف موصل وإجراءاته: ?service=payment أو maps أو sms."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from connectors.external_services import describe_connector
+        return describe_connector(
+            str(request.query_params.get("service", "")))
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)},
+                            status_code=500)
+
+@app.post("/connectors/call")
+async def connectors_call(request: Request):
+    """استدعاء إجراء على موصل خارجي (محاكاة الآن):
+    {"service": "sms", "action": "send_otp", "payload": {"to": "+966..."}}."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        from connectors.external_services import call_connector
+        return call_connector(str(body.get("service", "")),
+                              str(body.get("action", "")),
+                              body.get("payload"))
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)},
+                            status_code=500)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("api_server:app", host="0.0.0.0", port=5000, reload=True)
