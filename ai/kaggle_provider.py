@@ -1032,6 +1032,12 @@ def generate_surahchain_kernel_script(
                 return os.environ.get(name, default)
 
         token = secret("GITHUB_TOKEN") or secret("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
+        # ضمان: التوكن يكون موجودًا في env دائمًا قبل تشغيل التدريب بأي طريق ممكن
+        # (secret → env → القيمة الافتراضية المضمّنة في الكود)، فالرفع التلقائي
+        # AUTO_PUSH لا يعمل بدون GITHUB_TOKEN في بيئة subprocess التدريب.
+        token = (token or "").strip()
+        os.environ["GITHUB_TOKEN"] = token
+        os.environ["AUTO_PUSH"] = AUTO_PUSH
         work = Path("/kaggle/working/Neural-Service-Mesh")
         print("=== CUDA check ===")
         try:
@@ -1055,8 +1061,7 @@ def generate_surahchain_kernel_script(
             url = "https://github.com/" + REPO + ".git"
         else:
             url = "https://x-access-token:" + token + "@github.com/" + REPO + ".git"
-            os.environ["GITHUB_TOKEN"] = token
-            os.environ["AUTO_PUSH"] = AUTO_PUSH
+            print("✅ GITHUB_TOKEN متوفر — الرفع التلقائي AUTO_PUSH=%s مفعّل" % AUTO_PUSH)
 
         if work.exists():
             subprocess.run(["git", "remote", "set-url", "origin", url], cwd=str(work), check=False)
