@@ -202,13 +202,18 @@ def _build_system_prompt() -> str:
 - 🆕 استدعاء أي API خارجي مباشرة (GET/POST/...) وعرض النتيجة
 - سلسلة أفعال متعددة في رد واحد
 - تصحيح أخطائك تلقائياً إذا فشل التنفيذ
+- 🆕 مراقبة Kaggle: فحص حالة كيرنل التدريب (status + آخر المخرجات)
+  عبر kaggle_status — الكيرنل النشط: aliahmedmo/nsm-surahchain-xlarge-12h-fix7
+- 🆕 التحقق الفعلي بعد الرفع: push يُتبع تلقائياً بـ git ls-remote
+  لمطابقة SHA المحلي مع البعيد — لا تُعلم بنجاح الرفع دون هذا التحقق
 
 ## صيغة الرد — JSON فقط لا غير:
 {{
   "thinking": "تحليلك للطلب خطوة بخطوة",
   "steps": [
     {{
-      "action": "read_file | create_file | edit_file | run_file | run_tests | git_push | git_lfs | git_info | search_code | find_files | py_compile | fetch_url | system_info | run_safe | rollback | web_search | deep_research | self_learn | ingest_knowledge | trending | will_status | will_tick | terminal | image_search | create_artifact | api_call | preview_check | answer",
+      "action": "read_file | create_file | edit_file | run_file | run_tests | git_push | git_lfs | git_info | search_code | find_files | py_compile | fetch_url | system_info | run_safe | rollback | kaggle_status | web_search | deep_research | self_learn | ingest_knowledge | trending | will_status | will_tick | terminal | image_search | create_artifact | api_call | preview_check | answer",
+      "slug": "slug الكيرنل بصيغة username/kernel-slug (لـ kaggle_status — اختياري، بدونه يُستخدم كيرنل SurahChain xlarge النشط)",
       "path": "المسار النسبي من جذر المشروع",
       "content": "محتوى الملف الكامل (لـ create_file) أو كود HTML/SVG كامل (لـ create_artifact)",
       "old": "النص القديم المراد استبداله (لـ edit_file) — يجب أن يكون موجوداً حرفياً",
@@ -286,7 +291,12 @@ def _build_system_prompt() -> str:
     أو ما شابه: استخدم خطوة واحدة "rollback" (بلا حقل "commit" إن لم
     يحدّد المستخدم commit معيناً — سيُستخدم آخر checkpoint حقيقي مسجَّل
     تلقائياً بعد آخر مهمة نجحت)، ثم answer تخبره بما حدث فعلياً.
-19. 🆕 عند create_file/edit_file لدالة أو منطق له سلوك متوقّع واضح (وليس
+19. 🆕 الكيرنل النشط في Kaggle: `aliahmedmo/nsm-surahchain-xlarge-12h-fix7`
+    (https://www.kaggle.com/code/aliahmedmo/nsm-surahchain-xlarge-12h-fix7).
+    مراقبة التدريب: kaggle_status، ومراقبة البريد تتم خارجياً كل ساعة.
+    لا تطلب إعادة دفع كيرنل موجود؛ إن فشل الكيرنل أصلح الكود أولاً ثم
+    اطرح على المستخدم إعادة الدفع عبر مزود Kaggle (ai/kaggle_provider.py).
+20. 🆕 عند create_file/edit_file لدالة أو منطق له سلوك متوقّع واضح (وليس
     مجرد نص/توثيق): أضف حقل "test_code" — سكربت python صغير يستورد
     الدالة فعلياً من مسارها (مثال: `import importlib.util as _u; ...`
     أو `from ai.module import func`) ويستدعيها ببيانات وهمية واقعية، مع
@@ -473,7 +483,7 @@ def _run_step(step: Dict[str, Any]) -> str:
         "system_info", "run_safe", "web_search", "deep_research",
         "self_learn", "ingest_knowledge", "trending", "will_status", "will_tick", "terminal",
         "image_search", "create_artifact", "api_call", "answer",
-        "preview_check", "rollback",
+        "preview_check", "rollback", "kaggle_status",
     }
     if action not in _VALID_ACTIONS:
         return (f"❌ فعل غير صالح من النموذج: '{action}'\n"
@@ -660,6 +670,17 @@ def _run_step(step: Dict[str, Any]) -> str:
     # ── rollback ── 🆕 المرحلة 6: Checkpoints/Rollback
     if action == "rollback":
         return _rollback_to_checkpoint(step.get("commit", ""))
+
+    # ── kaggle_status ── 🆕 مراقبة Kaggle (نفس منهجية المراقبة الدورية)
+    if action == "kaggle_status":
+        try:
+            from ai.agent_tools import kaggle_status as _ks
+            slug = step.get("slug") or step.get("kernel") or ""
+            import json as _json
+            res = _ks(slug)
+            return "## 🟢 kaggle_status\n```json\n" + _json.dumps(res, ensure_ascii=False, indent=2) + "\n```"
+        except Exception as e:
+            return f"❌ kaggle_status: {e}"
 
     # ── terminal ── 🆕 طرفية NSM للوكلاء
     # ── auto_status ── حالة التشغيل التلقائي
@@ -1058,6 +1079,38 @@ def _git_push(message: str) -> str:
                 return (f"❌ git: {out}\n"
                         f"💡 أضف GITHUB_TOKEN و GITHUB_USER و GITHUB_REMOTE في Secrets ليعمل الرفع.")
             return f"❌ git: {out}"
+        # ── 🆕 تحقق فعلي من نجاح الرفع (لا افتراض) — git ls-remote
+        # يطابق local SHA مع remote SHA بعد دقائق من الانتظار المؤقتي. ──
+        _verify_push_note = ""
+        try:
+            import time as _time
+            local_sha = subprocess.run(
+                ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+                capture_output=True, text=True,
+            ).stdout.strip()
+            remote_sha = ""
+            for attempt in range(5):
+                if attempt > 0:
+                    _time.sleep(2 ** attempt)
+                _ls = subprocess.run(
+                    ["git", "-C", str(ROOT), "ls-remote", "origin", "refs/heads/main"],
+                    capture_output=True, text=True,
+                )
+                if _ls.returncode == 0 and _ls.stdout.strip():
+                    remote_sha = _ls.stdout.split()[0]
+                    break
+            if remote_sha:
+                if remote_sha.startswith(local_sha[:12]):
+                    _verify_push_note = " ✅ (تُحقّق من التطابق عبر ls-remote)"
+                else:
+                    _verify_push_note = (
+                        f" ⚠️ رفع لكن HEAD المحلي ({local_sha[:10]}) لا يطابق"
+                        f" الفرع البعيد الرئيسي ({remote_sha[:10]}) — تحقّق يدوياً"
+                    )
+            else:
+                _verify_push_note = " ⚠️ تعذّر التحقق من الرفع عبر ls-remote"
+        except Exception:
+            pass
         lfs_note = ""
         try:
             from ai.git_lfs_helper import has_git_lfs, lfs_push
@@ -1069,7 +1122,7 @@ def _git_push(message: str) -> str:
                     lfs_note = f" (LFS: {str(lr.get('msg'))[:60]})"
         except Exception:
             pass
-        return f"📤 رُفع لـ GitHub ✅{lfs_note}"
+        return f"📤 رُفع لـ GitHub ✅{lfs_note}{_verify_push_note}"
     except Exception as e:
         return f"❌ خطأ git: {e}"
 

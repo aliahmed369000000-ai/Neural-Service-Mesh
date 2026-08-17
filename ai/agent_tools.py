@@ -170,6 +170,57 @@ def py_compile_check(path: str) -> Dict[str, Any]:
     }
 
 
+def kaggle_status(slug: str = "") -> Dict[str, Any]:
+    """حالة كيرنل Kaggle (وlogs عند الحاجة) عبر Kaggle CLI — نفس منهجية
+    المراقبة الدورية. slug بصيغة username/kernel-slug. إن عُرِّف slug
+    فارغاً تُستخدم آخر كيرنل معروف (SurahChain xlarge قيد التدريب)."""
+    import shutil
+    if not shutil.which("kaggle"):
+        return {"ok": False, "msg": "أمر kaggle غير مثبت في البيئة"}
+    slug = (slug or "").strip()
+    if not slug:
+        slug = "aliahmedmo/nsm-surahchain-xlarge-12h-fix7"
+    if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,}/[a-zA-Z0-9._-]+$", slug):
+        return {"ok": False, "msg": "صيغة slug غير صالحة (username/kernel-slug)"}
+    # الحالة أولاً
+    code, out = _run(["kaggle", "kernels", "status", "-k", slug], timeout=60)
+    status_line = (out or "").splitlines()[0] if out else ""
+    lower = out.lower()
+    result: Dict[str, Any] = {
+        "ok": code == 0,
+        "slug": slug,
+        "status": "غير معروف",
+        "output": out or (f"exit code {code}"),
+        "url": f"https://www.kaggle.com/code/{slug}",
+    }
+    up = (out or "").upper()
+    for st in ("RUNNING", "COMPLETE", "ERROR", "FAILED", "QUEUED", "CANCELLING", "CANCELLED"):
+        if st in up:
+            result["status"] = st
+            break
+    # إن كانت حالة نهائية، نجلب مخرجات kernel لإظهار آخر مؤشرات التقدم/الخطأ
+    if result["status"] in ("COMPLETE", "ERROR", "FAILED"):
+        import tempfile
+        tmp = tempfile.mkdtemp(prefix="nsm_kout_")
+        c2, out2 = _run(["kaggle", "kernels", "output", "-k", slug, "-p", tmp], timeout=600)
+        if c2 == 0:
+            tail = ""
+            try:
+                for fp in Path(tmp).iterdir():
+                    if fp.is_file():
+                        try:
+                            tail = fp.read_text(encoding="utf-8", errors="ignore")[-6000:]
+                        except Exception:
+                            pass
+                        break
+            except Exception:
+                pass
+            result["tail_output"] = tail
+        else:
+            result["tail_output"] = f"تعذّر جلب المخرجات: exit code {c2}"
+    return result
+
+
 def fetch_url(url: str, max_chars: int = 8000) -> Dict[str, Any]:
     """جلب نص صفحة ويب (بدون JS) — مفيد للوثائق والـ API العامة."""
     url = (url or "").strip()
@@ -300,6 +351,17 @@ def handle_tool_command(user_input: str) -> Optional[str]:
     if m:
         return format_tool_result("🧪 py_compile", py_compile_check(m.group(2).strip()))
 
+    # Kaggle kernel status
+    m = re.match(r"^(حالة\s*التدريب|حالة\s*الكيرنل|حالة\s*kaggle|kaggle\s*status|kaggle\s*state)\s*(.*?)$", t, re.I)
+    if m:
+        slug = (m.group(2) or "").strip() or None
+        try:
+            from ai.agent_tools import kaggle_status as _ks
+            res = _ks(slug)
+            return format_tool_result("🟢 حالة Kaggle", res)
+        except Exception as e:
+            return f"❌ حالة Kaggle: {e}"
+
     # جلب رابط
     m = re.match(r"^(افتح\s*رابط|جلب|fetch\s*url|open\s*url)\s+(\S+)$", t, re.I)
     if m:
@@ -327,6 +389,7 @@ def handle_tool_command(user_input: str) -> Optional[str]:
             "| `معلومات النظام` | بيئة التشغيل |\n"
             "| `نفّذ <أمر آمن>` | bash محدود |\n"
             "| `حالة lfs` / `اسحب lfs` | Git LFS |\n"
+            "| `حالة التدريب [slug]` | حالة كيرنل Kaggle + آخر المخرجات |\n"
             "| `افحص` / `عدل` / `أنشئ` / `ارفع` | إدارة ملفات + push |\n"
             "| `ابحث <نص>` | بحث ويب |\n"
         )
