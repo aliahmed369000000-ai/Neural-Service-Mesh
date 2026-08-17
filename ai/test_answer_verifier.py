@@ -92,7 +92,9 @@ class TestVerifyAnswerFaithfulnessGracefulDegradation:
         report = verifier.verify_answer_faithfulness(
             "ما حكم الصبر؟", {"summary": "إجابة ما", "verses": [], "primary_concepts": []},
         )
-        assert report["available"] is True
+        # لا يوجد سياق مسترجَع (لا آيات ولا مفاهيم) — الفحص لا معنى له:
+        # available=False بلا استثناء وبسبب واضح (تدهور آمن).
+        assert report["available"] is False
         assert report["faithful"] is None
         assert "سياق" in report["reason"]
 
@@ -103,7 +105,8 @@ class TestVerifyAnswerFaithfulnessGracefulDegradation:
             "ما حكم الصبر؟",
             {"summary": "", "verses": [{"surah": 2, "ayah": 1, "text": "نص الآية"}]},
         )
-        assert report["available"] is True
+        # لا نص إجابة لفحصه — لا يوجد ما يُقاس، available=False بلا استثناء.
+        assert report["available"] is False
         assert report["faithful"] is None
 
     def test_never_raises_even_with_malformed_qa_result(self, monkeypatch):

@@ -400,7 +400,7 @@ def verify_answer_faithfulness(
     retrieval_context = _build_retrieval_context(qa_result)
     if not retrieval_context:
         return {
-            "available": True, "faithful": None, "score": None,
+            "available": False, "faithful": None, "score": None,
             "method": None,
             "reason": "لا يوجد سياق مسترجَع (لا آيات ولا مفاهيم أساسية) — لا معنى لفحص التأسيس على مصدر غير موجود أصلاً.",
         }
@@ -408,7 +408,7 @@ def verify_answer_faithfulness(
     summary = qa_result.get("summary", "")
     if not summary:
         return {
-            "available": True, "faithful": None, "score": None,
+            "available": False, "faithful": None, "score": None,
             "method": None,
             "reason": "لا يوجد نص إجابة (summary) لفحصه.",
         }
