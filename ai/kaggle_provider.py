@@ -400,6 +400,9 @@ def generate_kernel_metadata(
     Dual T4 ×2: يُطلب عبر واجهة Kaggle؛ API يعتمد NvidiaTeslaT4 غالباً.
     """
     slug = _safe_slug(f"nsm-{job_id}")
+    enable_tpu = accelerator in ("TPU v5e-8", "TpuV5E8") or (
+        not enable_gpu and accelerator is None
+    )
     meta: Dict[str, Any] = {
         "id": f"{username}/{slug}",
         "id_no": None,
@@ -409,7 +412,7 @@ def generate_kernel_metadata(
         "kernel_type": "notebook",
         "is_private": True,
         "enable_gpu": bool(enable_gpu),
-        "enable_tpu": False,
+        "enable_tpu": bool(enable_tpu),
         "enable_internet": True,
         "dataset_sources": [],
         "competition_sources": [],
@@ -1031,9 +1034,21 @@ def generate_surahchain_kernel_script(
             except Exception:
                 return os.environ.get(name, default)
 
-        token = secret("GITHUB_TOKEN") or secret("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
-        # ضمان: التوكن يكون موجودًا في env دائمًا قبل تشغيل التدريب بأي طريق ممكن
-        # (secret → env → القيمة الافتراضية المضمّنة في الكود)، فالرفع التلقائي
+        token = ""
+        for _name in ("GITHUB_TOKEN", "GH_TOKEN", "github_token"):
+            try:
+                from kaggle_secrets import UserSecretsClient
+                _v = UserSecretsClient().get_secret(_name) or ""
+                if _v.strip():
+                    token = _v.strip()
+                    break
+            except Exception:
+                pass
+            _e = os.environ.get(_name, "")
+            if _e.strip():
+                token = _e.strip()
+                break
+        # ضمان: التوكن يكون موجودًا في env قبل تشغيل التدريب، فالرفع التلقائي
         # AUTO_PUSH لا يعمل بدون GITHUB_TOKEN في بيئة subprocess التدريب.
         token = (token or "").strip()
         os.environ["GITHUB_TOKEN"] = token
@@ -1057,7 +1072,9 @@ def generate_surahchain_kernel_script(
             print("torch:", e)
 
         if not token:
-            print("⚠ لا GITHUB_TOKEN في Kaggle Secrets — استنساخ عام / قد يفشل الرفع")
+            print("⚠ لا GITHUB_TOKEN في Kaggle Secrets — استنساخ عام / لن يُرفع")
+            print("   لإصلاحه: افتح kernel → Settings → Secrets → Add Secret")
+            print("   Name=GITHUB_TOKEN, Value=ghp_... ثم أعد تشغيل kernel")
             url = "https://github.com/" + REPO + ".git"
         else:
             url = "https://x-access-token:" + token + "@github.com/" + REPO + ".git"
@@ -1074,6 +1091,8 @@ def generate_surahchain_kernel_script(
         SCN_TPU = "__SCN_TPU__"
         if SCN_TPU == "1":
             print("=== TPU check ===")
+            print("TPU_NAME env:", repr(os.environ.get("TPU_NAME")))
+            print("tpu_process_addresses env:", repr(os.environ.get("XRT_TPU_CONFIG", ""))[:200])
             try:
                 import torch
                 import torch_xla
@@ -1082,6 +1101,21 @@ def generate_surahchain_kernel_script(
                 # داخل سكربت التدريب (إصلاح انهيار SIGABRT: double-init).
             except Exception as _xe:
                 print("⚠ torch_xla غير متوفر:", _xe)
+            # تشخيص مبكر: إن لم تكن بيئة Kaggle وفّرت TPU فعليًا (مثال:
+            # تعذر صورة docker مخصصة أو عدم ضبط enable_tpu) فسنعرف ذلك هنا
+            # ونتوقف بوضوح بدل انهيار RESOURCE_EXHAUSTED بعد بناء النموذج.
+            _tpu_found = False
+            try:
+                import torch_xla.distributed.xla_backend as _xb  # noqa
+                _tn = os.environ.get("TPU_NAME")
+                if _tn:
+                    _tpu_found = True
+            except Exception:
+                pass
+            if not os.environ.get("TPU_NAME"):
+                print("⚠⚠ تحذير حاسم: TPU_NAME غير مضبوط — الجلسة قد لا تعمل على TPU فعلي")
+                print("   سيتوقف السكربت الآن بدل انهيار لاحق بسبب نفاذ الذاكرة")
+                sys.exit(42)
         else:
             print("=== CUDA check ===")
             try:
@@ -1297,10 +1331,10 @@ def prepare_surahchain_kaggle_job(
             accelerator=None,
         )
         meta["machine_shape"] = "TpuV5E8"
-        meta["docker_image"] = (
-            "gcr.io/kaggle-private-byod/python-tpuvm@sha256:" +
-            "a2111cb9be558ea4bc187754bb95d7b65e90d8259434f1eb0e0ab1193ff498c0"
-        )
+        meta["enable_tpu"] = True
+        # توثيق Kaggle: صورة docker مخصصة قد تسقط الجلسة إلى وضع local
+        # (tpu_process_addresses="local") — لا نستخدم docker_image إطلاقًا
+        # مع TPU، وenable_tpu=True هو الحقل الحاسم لتفعيل الشريحة فعليًا.
         script = generate_surahchain_kernel_script(
             job_id, preset=preset, n=n, epochs=epochs, batch=batch, fresh=fresh,
             auto_push=auto_push, use_tpu=True,
