@@ -1,0 +1,46 @@
+# إبقاء تطبيق Neural Service Mesh مستيقظًا
+# Community Cloud ينيم التطبيق بعد ~20 دقيقة من الخمول؛ هذا الـworkflow
+# يرسل طلب HTTP كل 5 دقائق لإيقاظ التطبيق ومنع دخوله في وضع النوم.
+# التفعيل: تلقائي عند الرفع (workflow_dispatch متوفر للتشغيل الفوري).
+name: إبقاء التطبيق مستيقظًا (Keep-Alive)
+
+on:
+  schedule:
+    # كل 5 دقائق (CST: قد تتأخر حتى 30 دقيقة تحت ضغط GitHub)
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      app_url:
+        description: "رابط التطبيق (اختياري — الافتراضي رابط النشر الحالي)"
+        required: false
+        default: ""
+
+env:
+  APP_URL: ${{ github.event.inputs.app_url || 'https://neural-service-mesh-b9qfegnlay3iktazbaaaqc.streamlit.app' }}
+
+jobs:
+  keep-alive:
+    name: طلب إيقاظ (Wake Ping)
+    runs-on: ubuntu-latest
+    steps:
+      - name: إرسال طلب إيقاظ للتطبيق
+        id: ping
+        run: |
+          set -u
+          echo "::group::طلب الاستيقاظ: ${APP_URL}"
+          HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 90 \
+            -H "User-Agent: NSM-KeepAlive/1.0 (GitHub Actions)" \
+            "${APP_URL}/") || true
+          echo "http_code=${HTTP_CODE}" >> "${GITHUB_OUTPUT}"
+          echo "::endgroup::"
+          # أي استجابة فعلية من الخادم (200/403/503...) تعني أن الطلب وصل
+          # وسيقظ الخادم — Community Cloud يعيد تشغيل التطبيق النائم تلقائيًا.
+          if [ -z "${HTTP_CODE}" ] || [ "${HTTP_CODE}" = "000" ]; then
+            echo "::error::لم يصل أي رد من ${APP_URL} (http_code=000) — تحقق من الرابط أو حالة النشر."
+            exit 1
+          fi
+          echo "✔ وصل رد HTTP ${HTTP_CODE} — تم إيقاظ التطبيق"
+      - name: ملاحظة الحالة
+        if: always()
+        run: |
+          echo "آخر فحص $(date -u +%Y-%m-%d_%H:%M_UTC) | الرابط ${APP_URL} | الرمز ${{ steps.ping.outputs.http_code }}"

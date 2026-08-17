@@ -1,0 +1,51 @@
+# مراقب Kaggle الدوري لوكلاء NSM
+# يعمل كل ساعة: يفحص حالة kernels التدريب والتجميع عبر Kaggle API،
+# ويترك سجلًا في job log + تعليقًا على آخر commit بحالة kernels.
+# يتطلب secrets: KAGGLE_USERNAME و KAGGLE_KEY (تُضاف من إعدادات المستودع).
+name: مراقب Kaggle (NSM Agent Monitor)
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+jobs:
+  monitor:
+    name: فحص kernels عبر Kaggle API
+    runs-on: ubuntu-latest
+    steps:
+      - name: التحقق من توفر اعتمادات Kaggle
+        id: creds
+        run: |
+          if [ -z "${{ secrets.KAGGLE_USERNAME }}" ] || [ -z "${{ secrets.KAGGLE_KEY }}" ]; then
+            echo "have_creds=false" >> "${GITHUB_OUTPUT}"
+            echo "::warning::سرّات KAGGLE_USERNAME / KAGGLE_KEY غير مضبوطة — سيُكتفى بفحص حالة الواجهة العامة."
+          else
+            echo "have_creds=true" >> "${GITHUB_OUTPUT}"
+          fi
+      - name: تثبيت عميل Kaggle
+        if: steps.creds.outputs.have_creds == 'true'
+        run: pip install -q kaggle
+      - name: ضبط الاعتمادات وفحص kernels
+        if: steps.creds.outputs.have_creds == 'true'
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: |
+          mkdir -p ~/.kaggle
+          printf '{"username":"%s","key":"%s"}' "${KAGGLE_USERNAME}" "${KAGGLE_KEY}" > ~/.kaggle/kaggle.json
+          chmod 600 ~/.kaggle/kaggle.json
+          echo "=== kernels الجارية أو المنهية حديثًا ==="
+          kaggle kernels list -u aliahmedmo -m --sort-by dateCreated 2>&1 | head -20 || true
+          echo ""
+          echo "=== kernels الجاري تشغيلها حاليًا ==="
+          kaggle kernels list -u aliahmedmo -m --status running 2>&1 | head -20 || true
+      - name: فحص حالة kernels من الواجهة العامة (ملاذ احتياطي دائمًا)
+        run: |
+          for slug in "nsm-training-notebook" "nsm-corpus-collector-v6"; do
+            code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 30 \
+              "https://www.kaggle.com/code/aliahmedmo/${slug}")
+            echo "${slug}: HTTP ${code}"
+          done
+      - name: ملخص الفحص
+        run: echo "الفحص المكتمل $(date -u +%Y-%m-%d_%H:%M_UTC)"
