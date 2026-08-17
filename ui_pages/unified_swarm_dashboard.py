@@ -60,6 +60,7 @@ def render_unified_swarm_dashboard() -> None:
     agents = snapshot.get("agents", {})
     swarm = snapshot.get("swarm", {})
     lh = snapshot.get("long_horizon", {})
+    perf = snapshot.get("performance", {}) if isinstance(snapshot.get("performance"), dict) else {}
     alerts = snapshot.get("alerts", []) or []
 
     counts = agents.get("counts", {})
@@ -71,6 +72,51 @@ def render_unified_swarm_dashboard() -> None:
         {"label": "مهام السرب", "value": swarm.get("total", 0), "note": "محفوظة في السجل", "accent": "var(--nsm-indigo)"},
         {"label": "مهام طويلة الأمد", "value": sum(lh.get("counts", {}).values()) if isinstance(lh, dict) else 0, "note": "قيد الإدارة", "accent": "#c084fc"},
     ])
+
+    # ── مؤشرات الأداء: الذاكرة ووقت الاستجابة ──────────────────
+    sys_perf = perf.get("system", {}) if isinstance(perf.get("system"), dict) else {}
+    rt = perf.get("response_times", {}) if isinstance(perf.get("response_times"), dict) else {}
+    mem_used = sys_perf.get("memory_used_mb")
+    mem_total = sys_perf.get("memory_total_mb")
+    mem_note = (
+        f"من إجمالي {mem_total:.0f} MB" if mem_used is not None and mem_total
+        else "على هذه الآلة"
+    )
+    render_kpi_cards([
+        {"label": "استخدام الذاكرة", "value": f"{mem_used:.0f} MB" if mem_used is not None else "—",
+         "note": mem_note, "accent": "#38bdf8"},
+        {"label": "نسبة الذاكرة", "value": f"{sys_perf.get('memory_percent')}%" if sys_perf.get("memory_percent") is not None else "—",
+         "note": "ذاكرة النظام الكلية", "accent": "#38bdf8"},
+        {"label": "ذروة RSS", "value": f"{sys_perf.get('peak_rss_mb')} MB" if sys_perf.get("peak_rss_mb") is not None else "—",
+         "note": "أقصى ما استُخدم منذ البدء", "accent": "#38bdf8"},
+        {"label": "حِمْل النظام (1د)", "value": sys_perf.get("load_1m", "—"),
+         "note": "متوسط الحمل على المعالج", "accent": "#38bdf8"},
+        {"label": "متوسط الاستجابة", "value": f"{rt.get('avg_ms')} ms" if rt.get("avg_ms") is not None else "—",
+         "note": "آخر 80 حدثًا في السجل", "accent": "#facc15"},
+        {"label": "أبطأ استجابة", "value": f"{rt.get('max_ms')} ms" if rt.get("max_ms") is not None else "—",
+         "note": f"العتبة {rt.get('slow_ms_threshold', 12000):.0f} ms", "accent": "#facc15"},
+    ])
+    rt_count = rt.get("count", 0) if isinstance(rt, dict) else 0
+    rt_slow = rt.get("slow_count", 0) if isinstance(rt, dict) else 0
+    if rt_count and rt_slow:
+        st.warning(
+            f"⚠️ **{rt_slow} من {rt_count} استدعاءً** تجاوزت عتبة البطء "
+            f"({rt.get('slow_ms_threshold', 12000):.0f} ms) — راجع «مراقبة حيّة».",
+            icon="⚠️",
+        )
+    # ── وقت استجابة الوكلاء الفردي ────────────────────────────
+    render_section_header("وقت الاستجابة للوكلاء", "آخر زمن تنفيذ مسجل لكل وكيل (ms)")
+    agent_rows = agents.get("agents", {})
+    if agent_rows:
+        _resp = [
+            f"**{_esc(aid)}**: {row.get('last_response_ms')} ms"
+            if row.get("last_response_ms") is not None
+            else f"**{_esc(aid)}**: لم يكمل بعد"
+            for aid, row in agent_rows.items()
+        ]
+        st.markdown(" · ".join(_resp), unsafe_allow_html=True)
+    else:
+        st.info("لا توجد وكلاء نشطة بعد — نفّذ مهمة من أي تبويب وكيل لتظهر أوقات استجابتها هنا.")
 
     # ── التنبيهات ───────────────────────────────────────────────
     render_section_header("التنبيهات", "تُقيَّم وفق القواعد المخصّصة ثم تُطبَّق إجراءاتها التلقائية")

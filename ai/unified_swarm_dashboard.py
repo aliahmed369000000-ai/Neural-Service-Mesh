@@ -168,6 +168,99 @@ def toggle_auto_action(action_id: str, enabled: bool) -> Optional[Dict[str, Any]
     return None
 
 
+# ── مؤشرات الأداء ──────────────────────────────────────────────
+def system_performance() -> Dict[str, Any]:
+    """مؤشرات أداء النظام دون اعتماديات خارجية (stdlib فقط).
+
+    يقرأ الذاكرة من /proc/self/status (VmRSS الفعلية) و/proc/meminfo
+    (الإجمالي/المتاح)، والحمل من os.getloadavg، وأقصى RSS من
+    resource.getrusage. كل قراءة تتسامح مع أي فشل فردي.
+    """
+    result: Dict[str, Any] = {
+        "memory_used_mb": None, "memory_total_mb": None,
+        "memory_percent": None, "load_1m": None, "peak_rss_mb": None,
+    }
+    # VmRSS الحالية (KB في /proc/self/status)
+    try:
+        with open("/proc/self/status", "r", encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("VmRSS:"):
+                    result["memory_used_mb"] = round(
+                        int(line.split()[1]) / 1024.0, 1)
+                    break
+    except (OSError, IndexError, ValueError):
+        pass
+    # الذاكرة الإجمالية والمتاحة (kB في /proc/meminfo)
+    try:
+        info: Dict[str, int] = {}
+        with open("/proc/meminfo", "r", encoding="utf-8") as fh:
+            for line in fh:
+                parts = line.split()
+                if len(parts) >= 2 and parts[-1] == "kB":
+                    info[parts[0].rstrip(":")] = int(parts[1])
+        total_kb = info.get("MemTotal")
+        available_kb = info.get("MemAvailable")
+        if total_kb:
+            result["memory_total_mb"] = round(total_kb / 1024.0, 1)
+            used_mb = result.get("memory_used_mb")
+            if available_kb is not None:
+                result["memory_percent"] = round(
+                    100.0 * (total_kb - available_kb) / total_kb, 1)
+            elif used_mb is not None:
+                result["memory_percent"] = round(
+                    100.0 * (used_mb * 1024.0) / total_kb, 1)
+    except (OSError, IndexError, ValueError):
+        pass
+    # الحمل والنسبة القصوى
+    try:
+        result["load_1m"] = round(os.getloadavg()[0], 2)
+    except OSError:
+        pass
+    try:
+        import resource as _res
+        result["peak_rss_mb"] = round(
+            _res.getrusage(_res.RUSAGE_SELF).ru_maxrss / 1024.0, 1)
+    except Exception:  # pragma: no cover — macOS فقط قد تختلف الوحدة
+        pass
+    return result
+
+
+def response_times(events: Optional[List[Dict[str, Any]]] = None,
+                   limit: int = 80) -> Dict[str, Any]:
+    """مؤشرات وقت الاستجابة للوكلاء من ناقل الأحداث.
+
+    يجمع average/max/last من performance_summary، ويحسب نسبة الوكلاء
+    البطيئين وفق عتبة البطء في قواعد التنبيهات، وعدد الأحداث الكلي.
+    """
+    result: Dict[str, Any] = {"count": 0, "avg_ms": None, "max_ms": None,
+                              "last_ms": None, "slow_count": 0,
+                              "slow_ms_threshold": 12000.0}
+    try:
+        from ai.agent_event_bus import get_events, performance_summary
+        if events is None:
+            events = get_events(limit)
+        perf = performance_summary(events) or {}
+        result["count"] = int(perf.get("count", 0))
+        result["avg_ms"] = perf.get("avg_ms")
+        result["max_ms"] = perf.get("max_ms")
+        result["last_ms"] = perf.get("last_ms")
+        slow_rule = next((r for r in list_alert_rules()
+                          if r.get("enabled")
+                          and r.get("kind") == "slow_threshold_ms"), None)
+        result["slow_ms_threshold"] = float(
+            slow_rule["value"] if slow_rule else 12000.0)
+        for event in events or []:
+            if event.get("duration_ms") is not None:
+                try:
+                    if float(event["duration_ms"]) >= result["slow_ms_threshold"]:
+                        result["slow_count"] += 1
+                except (TypeError, ValueError):
+                    pass
+    except ImportError:  # pragma: no cover
+        pass
+    return result
+
+
 # ── الحالة الموحدة ──────────────────────────────────────────────
 def _safe(func, *args, **kwargs):  # noqa: N802 — اسم قصير خاص
     """تنفيذ آمن: أي استيراد أو تنفيذ فاشل لا يكسر اللوحة."""
@@ -206,6 +299,8 @@ def agents_overview(events: Optional[List[Dict[str, Any]]] = None,
                         row_view["is_slow"] = True
                 except (TypeError, ValueError):
                     pass
+            # زمن آخر استجابة لكل وكيل (ms أو None)
+            row_view["last_response_ms"] = row.get("duration_ms")
             result["agents"][agent_id] = row_view
     except Exception:  # pragma: no cover
         pass
@@ -373,6 +468,14 @@ def unified_dashboard_snapshot() -> Dict[str, Any]:
         "agents": agents_overview(events),
         "swarm": swarm_status(),
         "long_horizon": long_horizon_status(),
+        "performance": {
+            "system": _safe(system_performance) or {"memory_used_mb": None,
+                                                    "memory_total_mb": None,
+                                                    "memory_percent": None,
+                                                    "load_1m": None,
+                                                    "peak_rss_mb": None},
+            "response_times": response_times(events),
+        },
         "alerts": evaluate_alerts(events),
         "alert_rules": list_alert_rules(),
         "auto_actions": list_auto_actions(),

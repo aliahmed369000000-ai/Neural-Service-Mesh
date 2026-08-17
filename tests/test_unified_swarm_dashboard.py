@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import platform
 import shutil
 from pathlib import Path
 
@@ -258,3 +259,82 @@ class TestSnapshot:
         assert snap["agents"]["counts"] == {
             "alive": 0, "done": 0, "failed": 0, "slow": 0, "stale": 0}
         assert snap["swarm"]["total"] == 0
+
+
+class TestPerformance:
+    """مؤشرات أداء النظام ووقت الاستجابة — دون اعتماديات خارجية."""
+
+    def test_system_performance_keys(self):
+        from ai.unified_swarm_dashboard import system_performance
+        perf = system_performance()
+        required = {"memory_used_mb", "memory_total_mb", "memory_percent",
+                    "load_1m", "peak_rss_mb"}
+        assert required.issubset(set(perf))
+        # على Linux في بيئة الاختبار تُقرأ القيم فعليًا من /proc
+        if platform.system().lower() == "linux":
+            assert perf["memory_used_mb"] is not None
+            assert perf["memory_used_mb"] > 0
+            assert perf["memory_total_mb"] is not None
+            assert perf["memory_percent"] is not None
+            assert perf["memory_percent"] <= 100.0
+            assert perf["load_1m"] is not None
+            assert perf["peak_rss_mb"] is not None and perf["peak_rss_mb"] > 0
+
+    def test_response_times_default(self):
+        from ai.unified_swarm_dashboard import response_times
+        rt = response_times(events=[])
+        assert rt["count"] == 0
+        assert rt["slow_count"] == 0
+        assert rt["avg_ms"] == 0.0
+        assert rt["max_ms"] == 0.0
+        assert rt["slow_ms_threshold"] == 12000.0
+
+    def test_response_times_with_slow_events(self):
+        from ai.unified_swarm_dashboard import response_times
+        now = 1700000000.0
+        events = [
+            {"duration_ms": 500.0, "ts": now, "status": "done"},
+            {"duration_ms": 25000.0, "ts": now + 1, "status": "done"},  # بطيء
+        ]
+        rt = response_times(events=events)
+        assert rt["count"] == 2
+        assert rt["slow_count"] == 1
+        assert rt["max_ms"] == 25000.0
+        assert rt["avg_ms"] == 12750.0
+
+    def test_response_times_threshold_follows_rule(self):
+        from ai.unified_swarm_dashboard import (
+            response_times, update_alert_rule)
+        try:
+            update_alert_rule("slow_agent", value=1000.0)
+            events = [{"duration_ms": 2000.0, "ts": 1.0, "status": "done"}]
+            rt = response_times(events=events)
+            assert rt["slow_ms_threshold"] == 1000.0
+            assert rt["slow_count"] == 1
+        finally:
+            update_alert_rule("slow_agent", value=12000.0)
+
+    def test_agent_last_response_ms(self):
+        from ai.unified_swarm_dashboard import agents_overview
+        events = [
+            {"duration_ms": 3500.0, "ts": 1.0, "status": "done",
+             "agent_id": "writer"},
+        ]
+        overview = agents_overview(events=events)
+        assert overview["agents"]["writer"]["last_response_ms"] == 3500.0
+        overview_empty = agents_overview(events=[])
+        assert overview_empty["agents"] == {}
+
+    def test_snapshot_includes_performance(self):
+        from ai.unified_swarm_dashboard import unified_dashboard_snapshot
+        snap = unified_dashboard_snapshot()
+        perf = snap["performance"]
+        assert isinstance(perf, dict)
+        sys_perf = perf["system"]
+        rt = perf["response_times"]
+        required_sys = {"memory_used_mb", "memory_total_mb",
+                        "memory_percent", "load_1m", "peak_rss_mb"}
+        assert required_sys.issubset(set(sys_perf))
+        assert isinstance(rt, dict)
+        assert {"count", "avg_ms", "max_ms", "last_ms", "slow_count",
+                "slow_ms_threshold"}.issubset(set(rt))
