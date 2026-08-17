@@ -97,6 +97,7 @@ render_system_core = _lazy_page("ui_pages.system_core", "render_system_core")
 render_agent_orchestrator = _lazy_page("ui_pages.agent_orchestrator", "render_agent_orchestrator")
 render_agent_monitor = _lazy_page("ui_pages.agent_monitor", "render_agent_monitor")
 render_swarm_studio = _lazy_page("ui_pages.swarm_studio", "render_swarm_studio")
+render_unified_swarm_dashboard = _lazy_page("ui_pages.unified_swarm_dashboard", "render_unified_swarm_dashboard")
 
 
 
@@ -119,13 +120,13 @@ def render_knowledge_hub():
 
 
 def render_agents_group():
-    """🤖 الوكلاء: يجمع الوكيل الموحّد + وكلاء AI + منسّق الوكلاء + السرب الذكي."""
+    """🤖 الوكلاء: يجمع الوكيل الموحّد + وكلاء AI + منسّق الوكلاء + السرب الذكي + لوحة السرب الموحدة."""
     st.markdown(
         '<div class="section-header">🤖 مركز الوكلاء</div>',
         unsafe_allow_html=True,
     )
     st.caption("الوكيل الموحّد للمحادثة اليومية · وكلاء متخصصون · منسّق · سرب")
-    sub = st.tabs(["🎯 الوكيل الموحّد", "🤖 وكلاء AI", "🤝 منسّق الوكلاء", "📡 مراقبة حيّة", "🐝 السرب الذكي"])
+    sub = st.tabs(["🎯 الوكيل الموحّد", "🤖 وكلاء AI", "🤝 منسّق الوكلاء", "📡 مراقبة حيّة", "🐝 السرب الذكي", "🧭 لوحة السرب الموحدة"])
     # 🆕 توضيح مختصر أعلى كل تبويب فرعي — الأربعة تبدو متشابهة لأول وهلة
     # (كلها "وكلاء")، فهذا يفرّق فوراً متى يُستخدم كل واحد بدون قراءة الكود.
     with sub[0]:
@@ -158,6 +159,13 @@ def render_agents_group():
             icon="🐝",
         )
         render_swarm_studio()
+    with sub[5]:
+        st.info(
+            "🧭 **لوحة قيادة واحدة**: حالة كل الوكلاء + السرب + المهام طويلة الأمد + "
+            "تنبيهات قابلة للتخصيص وإجراءات تلقائية (إعادة تشغيل/تجميد/إشعار).",
+            icon="🧭",
+        )
+        render_unified_swarm_dashboard()
 
 
 
