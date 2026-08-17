@@ -449,3 +449,63 @@ class TestServiceMetricsEndpoints:
         mem = r.json()["memory"]
         assert "memory_used_mb" in mem and "memory_percent" in mem
         assert "peak_rss_mb" in mem
+
+
+class TestServiceTimeline:
+    """السلسلة الزمنية لاستجابة الخدمات المصغرة (للرسوم التفاعلية)."""
+
+    def test_timeline_records_each_call(self, _data_dirs):
+        from ai import microservices as ms
+        ms.reset_service_metrics()
+        ms.call_service("meta", "list_services", {})
+        ms.call_service("meta", "list_services", {})
+        rows = ms.service_timeline(limit=60)
+        assert len(rows) >= 2
+        for row in rows:
+            assert set(row) >= {"ts", "service", "latency_ms", "ok"}
+            assert row["service"] == "meta"
+            assert row["ok"] is True
+        # reset يمسح السجل
+        ms.reset_service_metrics()
+        assert ms.service_timeline(limit=60) == []
+
+    def test_timeline_unknown_service_rows_fail(self, _data_dirs):
+        from ai import microservices as ms
+        ms.reset_service_metrics()
+        result = ms.call_service("unknown-service-xyz", "never", {})
+        assert result.get("ok") is False
+        rows = ms.service_timeline(limit=60)
+        svc_rows = [r for r in rows if r["service"] == "unknown-service-xyz"]
+        assert svc_rows and svc_rows[-1]["ok"] is False
+        ms.reset_service_metrics()
+
+
+class TestTimelineApiEndpoints:
+    @pytest.fixture(autouse=True)
+    def _api_env_and_client(self, _data_dirs, monkeypatch):
+        monkeypatch.setenv("NSM_API_KEY", "test-secret-key")
+        from fastapi.testclient import TestClient
+        import api_server
+        self.c = TestClient(api_server.app)
+
+    def test_performance_timeline_403_and_ok(self):
+        assert self.c.get("/performance/timeline").status_code == 403
+        r = self.c.get("/performance/timeline",
+                        headers={"X-API-Key": "test-secret-key"})
+        assert r.status_code == 200 and r.json()["ok"]
+        rows = r.json()["timeline"]
+        assert isinstance(rows, list) and rows
+        assert {"ts", "memory_mb", "peak_rss_mb", "avg_ms", "last_ms",
+                "slow_count"}.issubset(set(rows[-1]))
+
+    def test_services_timeline_403_and_records(self):
+        assert self.c.get("/services/timeline").status_code == 403
+        from ai import microservices as ms
+        ms.reset_service_metrics()
+        ms.call_service("meta", "list_services", {})
+        r = self.c.get("/services/timeline",
+                        headers={"X-API-Key": "test-secret-key"})
+        assert r.status_code == 200 and r.json()["ok"]
+        rows = r.json()["timeline"]
+        assert any(row["service"] == "meta" for row in rows)
+        ms.reset_service_metrics()

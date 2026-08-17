@@ -476,6 +476,38 @@ async def performance_system(request: Request):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+@app.get("/performance/timeline")
+async def performance_timeline_ep(request: Request):
+    """سلسلة زمنية لمؤشرات الأداء: تطوير الذاكرة والاستجابة بمرور الوقت
+    (?limit=60) — للرسوم البيانية التفاعلية في اللوحة."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.unified_swarm_dashboard import performance_timeline
+        return {"ok": True,
+                "timeline": performance_timeline(
+                    limit=int(request.query_params.get("limit", "60")))}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/services/timeline")
+async def services_timeline_ep(request: Request):
+    """سلسلة زمنية لاستجابة الخدمات المصغرة: كل استدعاء بوقت وخدمة ومدة
+    (?limit=60) — للرسوم البيانية التفاعلية في مركز البيانات."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.microservices import service_timeline
+        return {"ok": True,
+                "timeline": service_timeline(
+                    limit=int(request.query_params.get("limit", "60")))}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 # ---------------------------------------------------------------- Backend
 @app.get("/backend/counts")
 async def backend_counts(request: Request):

@@ -261,6 +261,49 @@ def response_times(events: Optional[List[Dict[str, Any]]] = None,
     return result
 
 
+# ── السلاسل الزمنية (للرسوم البيانية التفاعلية) ────────────────
+_TIMELINE_CACHE: Dict[str, Any] = {"rows": [], "expires_at": 0.0}
+_TIMELINE_LIMIT = 120
+
+
+def performance_timeline(limit: int = 60) -> List[Dict[str, Any]]:
+    """سلسلة زمنية لمؤشرات الأداء: استخدام الذاكرة ووقت الاستجابة بمرور الوقت.
+
+    تلتقط عينة كل 5 ثوانٍ (تجنّبًا لقراءات متطابقة متتالية) بحد أقصى
+    `_TIMELINE_LIMIT` عينة، وتعيد آخر `limit` صفًا.
+    كل صف: {ts (HH:MM:SS)، memory_mb، memory_percent، peak_rss_mb، load_1m،
+             avg_ms، last_ms، max_ms، slow_count، event_count}
+    كل قيمة تتسامح مع فشل فردي ولا تحمل أي مفاتيح API.
+    """
+    now = time.time()
+    cache = _TIMELINE_CACHE
+    if not cache["expires_at"] or now >= cache["expires_at"]:
+        row: Dict[str, Any] = {"ts": datetime.now(timezone.utc)
+                               .strftime("%H:%M:%S")}
+        mem = _safe(system_performance) or {}
+        resp = _safe(response_times) or {}
+        row["memory_mb"] = mem.get("memory_used_mb")
+        row["memory_percent"] = mem.get("memory_percent")
+        row["peak_rss_mb"] = mem.get("peak_rss_mb")
+        row["load_1m"] = mem.get("load_1m")
+        row["avg_ms"] = resp.get("avg_ms")
+        row["last_ms"] = resp.get("last_ms")
+        row["max_ms"] = resp.get("max_ms")
+        row["slow_count"] = resp.get("slow_count", 0)
+        row["event_count"] = resp.get("count", 0)
+        cache["rows"].append(row)
+        cache["rows"] = cache["rows"][-_TIMELINE_LIMIT:]
+        cache["expires_at"] = now + 5.0
+    rows = cache["rows"][-max(1, int(limit)):]
+    return list(rows)
+
+
+def reset_performance_timeline() -> None:
+    """إعادة ضبط سجل السلسلة الزمنية (للاختبارات والصيانة)."""
+    _TIMELINE_CACHE["rows"] = []
+    _TIMELINE_CACHE["expires_at"] = 0.0
+
+
 # ── الحالة الموحدة ──────────────────────────────────────────────
 def _safe(func, *args, **kwargs):  # noqa: N802 — اسم قصير خاص
     """تنفيذ آمن: أي استيراد أو تنفيذ فاشل لا يكسر اللوحة."""

@@ -14,6 +14,11 @@ from app_core import *  # noqa: F401,F403
 from typing import Any, Dict
 
 from ui_components import render_agent_cards, render_alert_cards, render_kpi_cards, render_section_header
+try:
+    import plotly.graph_objects as go
+except ImportError:  # Plotly غير متوفر — تتدحرج إلى بطاقات نصية
+    go = None  # type: ignore[assignment]
+
 
 
 def _esc(value: Any) -> str:
@@ -104,6 +109,65 @@ def render_unified_swarm_dashboard() -> None:
             f"({rt.get('slow_ms_threshold', 12000):.0f} ms) — راجع «مراقبة حيّة».",
             icon="⚠️",
         )
+
+    # ── رسوم بيانية تفاعلية: تطور الأداء بمرور الوقت ──────────
+    render_section_header("تطور الأداء بمرور الوقت", "قياسات متسلسلة (تُحدَّث كل خمس ثوانٍ) — استخدم التكبير والتحريك للتحكم")
+    from ai.unified_swarm_dashboard import performance_timeline
+    timeline = performance_timeline(limit=60)
+    if timeline:
+        _ts = [row.get("ts") for row in timeline]
+        _idx = list(range(1, len(timeline) + 1))
+        _mem = [row.get("memory_mb") for row in timeline]
+        _peak = [row.get("peak_rss_mb") for row in timeline]
+        _avg = [row.get("avg_ms") for row in timeline]
+        _last = [row.get("last_ms") for row in timeline]
+        _slow = [row.get("slow_count") for row in timeline]
+        _fig_mem = go.Figure() if go is not None else None
+        _fig_resp = go.Figure() if go is not None else None
+        if _fig_mem is not None:
+            _fig_mem.add_trace(go.Scatter(x=_idx, y=_mem, mode="lines+markers",
+                                          name="الذاكرة الحالية (MB)",
+                                          line=dict(color="#38bdf8", width=2)))
+            _fig_mem.add_trace(go.Scatter(x=_idx, y=_peak, mode="lines+markers",
+                                          name="ذروة RSS (MB)",
+                                          line=dict(color="#818cf8", width=2)))
+            _fig_mem.update_layout(
+                title=dict(text="استهلاك الذاكرة عبر القياسات", x=0.5,
+                           xanchor="center", font=dict(size=14)),
+                xaxis_title="رقم القياس (الأحدث أخيرًا)",
+                yaxis_title="ميغابايت",
+                template="plotly_dark",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                margin=dict(t=60, b=40))
+            st.plotly_chart(_fig_mem, use_container_width=True,
+                            key="nsm_perf_mem_chart")
+        if _fig_resp is not None:
+            _fig_resp.add_trace(go.Scatter(x=_idx, y=_avg, mode="lines+markers",
+                                           name="متوسط الاستجابة (ms)",
+                                           line=dict(color="#facc15", width=2)))
+            _fig_resp.add_trace(go.Scatter(x=_idx, y=_last, mode="lines+markers",
+                                           name="آخر استجابة (ms)",
+                                           line=dict(color="#f472b6", width=2)))
+            _fig_resp.add_trace(go.Scatter(x=_idx, y=_slow, mode="lines+markers",
+                                           name="عدد الاستدعاءات البطيئة",
+                                           line=dict(color="#f87171", width=2)))
+            _fig_resp.update_layout(
+                title=dict(text="زمن استجابة الوكلاء عبر القياسات", x=0.5,
+                           xanchor="center", font=dict(size=14)),
+                xaxis_title="رقم القياس (الأحدث أخيرًا)",
+                yaxis_title="ملّي ثانية / عدد",
+                template="plotly_dark",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                margin=dict(t=60, b=40))
+            st.plotly_chart(_fig_resp, use_container_width=True,
+                            key="nsm_perf_resp_chart")
+        st.caption(
+            f"آخر قياس: {_ts[-1] if _ts else '—'} — "
+            f"ذاكرة {(_mem[-1] if _mem else '—')} MB · "
+            f"متوسط استجابة {(_avg[-1] if _avg else '—')} ms · "
+            f"بطيئة {(_slow[-1] if _slow else '—')}")
+    else:
+        st.info("لا توجد قياسات كافية بعد — ستظهر الرسوم فور تسجيل قياسين فأكثر.")
     # ── وقت استجابة الوكلاء الفردي ────────────────────────────
     render_section_header("وقت الاستجابة للوكلاء", "آخر زمن تنفيذ مسجل لكل وكيل (ms)")
     agent_rows = agents.get("agents", {})

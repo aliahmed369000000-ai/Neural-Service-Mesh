@@ -29,6 +29,7 @@ from __future__ import annotations
 import random
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 SERVICE_REGISTRY: Dict[str, Dict[str, Any]] = {}
@@ -40,6 +41,9 @@ DEFAULT_TIMEOUT_MS = 5000
 _METRICS: Dict[str, Dict[str, Any]] = {}  # {service: {calls, ok, failed,
 #            latencies: [ms], last_latency_ms, max_latency_ms, slow_count}}
 _METRICS_LOCK = threading.Lock()
+_TIMELINE: List[Dict[str, Any]] = []  # [(ts, service, latency_ms, ok)]
+_TIMELINE_LOCK = threading.Lock()
+_TIMELINE_LIMIT = 500
 _DEFAULT_SLOW_THRESHOLD_MS = 2000.0  # عتبة بطء الخدمة (ms)
 
 
@@ -243,24 +247,35 @@ def call_service(service: str, action: str,
     with _REGISTRY_LOCK:
         info = SERVICE_REGISTRY.get(str(service).lower())
     if info is None:
-        return _make_response(False, service, action,
+        latency_ms = (time.time() - start) * 1000
+        resp = _make_response(False, service, action,
                               request_id or _make_request_id(),
                               error=f"خدمة غير مسجلة: {service}",
-                              latency_ms=(time.time() - start) * 1000)
+                              latency_ms=latency_ms)
+        _record_metric(service, latency_ms, False,
+                       _DEFAULT_SLOW_THRESHOLD_MS)
+        return resp
     handler = info["handler"]
     result = handler(action, payload or {})
     if result is None:
-        return _make_response(False, service, action,
+        latency_ms = (time.time() - start) * 1000
+        resp = _make_response(False, service, action,
                               request_id or _make_request_id(),
                               error=f"إجراء غير معروف: {action}",
-                              latency_ms=(time.time() - start) * 1000)
+                              latency_ms=latency_ms)
+        _record_metric(service, latency_ms, False,
+                       _DEFAULT_SLOW_THRESHOLD_MS)
+        return resp
     latency = (time.time() - start) * 1000
     if timeout_ms and latency > timeout_ms:
-        return _make_response(False, service, action,
+        resp = _make_response(False, service, action,
                               request_id or _make_request_id(),
                               result=result,
                               error=f"تجاوز المهلة: {timeout_ms}ms",
                               latency_ms=latency)
+        _record_metric(service, latency, False,
+                       _DEFAULT_SLOW_THRESHOLD_MS)
+        return resp
     resp = _make_response(result.get("ok", True), service, action,
                           request_id or _make_request_id(),
                           result=result, latency_ms=latency)
@@ -293,6 +308,14 @@ def _record_metric(service: str, latency_ms: float, ok: bool,
         row["latencies"].append(latency_ms)
         if len(row["latencies"]) > 500:
             row["latencies"] = row["latencies"][-250:]
+    # السلسلة الزمنية للرسوم البيانية التفاعلية (لكل استدعاء خدمة)
+    with _TIMELINE_LOCK:
+        _TIMELINE.append({
+            "ts": datetime.now(timezone.utc).strftime("%H:%M:%S"),
+            "service": str(service), "latency_ms": round(latency_ms, 2),
+            "ok": bool(ok)})
+        if len(_TIMELINE) > _TIMELINE_LIMIT:
+            del _TIMELINE[:len(_TIMELINE) - _TIMELINE_LIMIT]
         row["last_latency_ms"] = round(latency_ms, 2)
         prev_max = row["max_latency_ms"]
         if prev_max is None or latency_ms > prev_max:
@@ -365,6 +388,20 @@ def reset_service_metrics() -> None:
     """إعادة ضبط كل مؤشرات الأداء (للاختبارات والصيانة)."""
     with _METRICS_LOCK:
         _METRICS.clear()
+    with _TIMELINE_LOCK:
+        _TIMELINE.clear()
+
+
+def service_timeline(limit: int = 60) -> List[Dict[str, Any]]:
+    """سلسلة زمنية لاستجابة الخدمات المصغرة بمرور الوقت.
+
+    كل استدعاء خدمة يسجّل صفًا: {ts (HH:MM:SS)، service، latency_ms، ok}.
+    السجل بحد أقصى `_TIMELINE_LIMIT` صفًا (أحدثها أولًا للعرض).
+    بدون مفاتيح API، ويُعاد ضبطه عبر reset_service_metrics().
+    """
+    with _TIMELINE_LOCK:
+        rows = _TIMELINE[-max(1, int(limit)):]
+    return list(rows)
 
 
 def system_memory() -> Dict[str, Any]:

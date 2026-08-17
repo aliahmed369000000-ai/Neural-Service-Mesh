@@ -19,6 +19,10 @@ import sys
 from typing import Any, Dict
 
 import streamlit as st
+try:
+    import plotly.graph_objects as go
+except ImportError:  # Plotly غير متوفر — تتدحرج إلى العرض الجدولي
+    go = None  # type: ignore[assignment]
 
 _ROOT = __import__("pathlib").Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
@@ -134,6 +138,34 @@ def render_backend_data_panel() -> None:
              for r in svc_rows],
             use_container_width=True,
             hide_index=True)
+
+    # ── رسم تفاعلي: تطور استجابة الخدمات المصغرة ──────────────────────
+    if go is not None:
+        svc_timeline = _safe(ms.service_timeline, 200) or []
+        if len(svc_timeline) >= 2:
+            _services = sorted({r.get("service", "?") for r in svc_timeline})
+            _colors = ["#38bdf8", "#4ade80", "#facc15", "#f472b6",
+                       "#a78bfa", "#fb923c", "#f87171", "#94a3b8"]
+            _fig_svc = go.Figure()
+            for i_, svc_name in enumerate(_services):
+                _rows = [r for r in svc_timeline if r.get("service") == svc_name]
+                _idx = list(range(1, len(_rows) + 1))
+                _fig_svc.add_trace(go.Scatter(
+                    x=_idx, y=[r.get("latency_ms", 0) for r in _rows],
+                    mode="lines+markers", name=svc_name,
+                    line=dict(color=_colors[i_ % len(_colors)], width=2)))
+            _fig_svc.update_layout(
+                title=dict(text="زمن استجابة الخدمات المصغرة عبر الاستدعاءات",
+                           x=0.5, xanchor="center", font=dict(size=14)),
+                xaxis_title="رقم الاستدعاء لكل خدمة (الأحدث أخيرًا)",
+                yaxis_title="ملّي ثانية",
+                template="plotly_dark",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                margin=dict(t=60, b=40))
+            st.plotly_chart(_fig_svc, use_container_width=True,
+                            key="nsm_svc_timeline_chart")
+            st.caption(f"آخر {len(svc_timeline)} استدعاء — "
+                       "كل خدمة تُعرض بسلسلة زمنية مستقلة.")
 
     # ── التبويبات الرئيسية ──────────────────────────────────────────────
     tabs = st.tabs([

@@ -343,3 +343,55 @@ class TestPerformance:
         assert isinstance(rt, dict)
         assert {"count", "avg_ms", "max_ms", "last_ms", "slow_count",
                 "slow_ms_threshold"}.issubset(set(rt))
+
+class TestPerformanceTimeline:
+    """السلسلة الزمنية للرسوم البيانية التفاعلية (ذاكرة/استجابة)."""
+
+    def test_timeline_rows_and_keys(self, monkeypatch):
+        from ai.unified_swarm_dashboard import (
+            performance_timeline,
+            reset_performance_timeline,
+        )
+        reset_performance_timeline()
+        # cache TTL 5 ثوانٍ — صف واحد في كل استدعاء لنفس الإطار الزمني
+        rows1 = performance_timeline(limit=60)
+        assert rows1  # صف واحد على الأقل (عينة حية)
+        row = rows1[-1]
+        required = {"ts", "memory_mb", "memory_percent", "peak_rss_mb",
+                    "load_1m", "avg_ms", "last_ms", "max_ms", "slow_count",
+                    "event_count"}
+        assert required.issubset(set(row))
+        # العينة نفسها لا تتكرر أثناء إطار الـ 5 ثوانٍ
+        rows2 = performance_timeline(limit=60)
+        assert len(rows2) == 1
+        # تجاوز صلاحية الكاش يدويًا يعيد التقاط عينة جديدة (reset يجعل
+        # expires_at=0.0 فيلتقط عينة تالية)
+        import ai.unified_swarm_dashboard as mod
+        reset_performance_timeline()
+        rows3 = performance_timeline(limit=60)
+        assert len(rows3) == 1
+        rows4 = performance_timeline(limit=60)
+        assert len(rows4) == 1
+        reset_performance_timeline()
+
+    def test_timeline_limit(self, monkeypatch):
+        from ai.unified_swarm_dashboard import (
+            performance_timeline,
+            reset_performance_timeline,
+        )
+        reset_performance_timeline()
+        import ai.unified_swarm_dashboard as mod
+        mod._TIMELINE_CACHE["expires_at"] = 0.0
+        # تعبئة كذا صفًا ثم فحص أن الحد لا يتجاوز _TIMELINE_LIMIT
+        for _ in range(5):
+            mod._TIMELINE_CACHE["expires_at"] = 0.0
+            performance_timeline(limit=60)
+        assert len(mod._TIMELINE_CACHE["rows"]) <= mod._TIMELINE_LIMIT
+        reset_performance_timeline()
+
+    def test_timeline_empty_values_safe(self):
+        from ai.unified_swarm_dashboard import performance_timeline
+        # قيم None مسموحة (ذاكرة غير مقروءة) لكن الدالة لا ترمي أبدًا
+        rows = performance_timeline(limit=10)
+        assert isinstance(rows, list)
+        assert all(isinstance(r, dict) for r in rows)
