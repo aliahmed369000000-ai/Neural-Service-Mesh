@@ -252,8 +252,13 @@ class TestSnapshot:
         assert len(snap["alert_rules"]) >= 3
         assert len(snap["auto_actions"]) >= 3
 
-    def test_snapshot_defensive_on_empty_state(self):
+    def test_snapshot_defensive_on_empty_state(self, monkeypatch):
         from ai.unified_swarm_dashboard import unified_dashboard_snapshot
+        # عزل ناقل الأحداث المشترك (خارج session_state) من أي أحداث
+        # متبقية من اختبارات أخرى في نفس العملية — مثل أحداث tester-agent
+        # التي يطلقها اختبار REST API.
+        from ai import agent_event_bus as bus
+        monkeypatch.setattr(bus, "get_events", lambda limit=80: [])
         # لا أحداث ولا سجلات — اللقطة يجب ألا تكسر
         snap = unified_dashboard_snapshot()
         assert snap["agents"]["counts"] == {

@@ -346,6 +346,136 @@ def aiaas_invoice(tenant_id: str):
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
+# ── نقاط لوحة السرب والوكلاء (NSM Agent / Swarm API) ─────────────
+def _nsm_key_check(request: Request):
+    """فحص fail-closed لمفتاح NSM_API_KEY عبر X-API-Key — نفس نمط /process:
+    لو المفتاح غير مضبوط بالبيئة تُرفض كل النقاط بـ403 بدل أن تبقى
+    مفتوحة بلا مصادقة."""
+    configured_key = os.environ.get("NSM_API_KEY", "").strip()
+    provided_key = request.headers.get("x-api-key", "")
+    if not configured_key or not hmac.compare_digest(provided_key,
+                                                      configured_key):
+        return JSONResponse(
+            status_code=403,
+            content={"error": "X-API-Key غير مطابق أو NSM_API_KEY غير مضبوط"},
+        )
+    return None
+
+
+@app.get("/agents/states")
+async def agents_states(request: Request):
+    """أحدث حالة لكل وكيل + ملخص زمن الاستجابة من ناقل الأحداث."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.agent_event_bus import (
+            current_agent_states, get_events, performance_summary)
+        events = get_events(200)
+        return {"ok": True, "agents": current_agent_states(events),
+                "performance": performance_summary(events)}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/agents/events")
+async def agents_events(request: Request):
+    """آخر الأحداث في ناقل الأحداث (limit قابل للتعديل بين 1 و500)."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        limit = min(max(int(request.query_params.get("limit", "80")), 1), 500)
+        from ai.agent_event_bus import get_events
+        return {"ok": True, "events": get_events(limit)}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/swarm/dashboard")
+async def swarm_dashboard(request: Request):
+    """لقطة لوحة السرب الموحدة: وكلاء + سرب + مهام طويلة + أداء + تنبيهات."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.unified_swarm_dashboard import unified_dashboard_snapshot
+        return {"ok": True, "dashboard": unified_dashboard_snapshot()}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/swarm/alerts")
+async def swarm_alerts(request: Request):
+    """تقييم التنبيهات وفق القواعد المخصصة الحالية."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.unified_swarm_dashboard import evaluate_alerts
+        return {"ok": True, "alerts": evaluate_alerts()}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/swarm/apply-actions")
+async def swarm_apply_actions(request: Request):
+    """تطبيق الإجراءات التلقائية المفعّلة على التنبيهات الحالية."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.unified_swarm_dashboard import (
+            apply_auto_actions, evaluate_alerts)
+        applied = apply_auto_actions(evaluate_alerts())
+        return {"ok": True, "applied": applied, "count": len(applied)}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/swarm/long-horizon")
+async def swarm_long_horizon(request: Request):
+    """المهام طويلة الأمد قيد الإدارة."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.unified_swarm_dashboard import long_horizon_status
+        return {"ok": True, "long_horizon": long_horizon_status()}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/mesh/history")
+async def mesh_history(request: Request):
+    """ملخص نظام السرب من MeshBundle (تقييم/ذاكرة/سمعة/سجل تنفيذ مدمج)."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from core.mesh_bundle import get_mesh_bundle
+        bundle = get_mesh_bundle()
+        return {"ok": True, "summary": bundle.summary(),
+                "limit_note": ("MeshBundle يقدّم ملخصًا مجمعًا للتقييم/"
+                               "الذاكرة/السمعة عبر summary() — لا يسجّل "
+                               "قائمة سجلات تنفيذ فردية للاستعلام المباشر")}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/performance/system")
+async def performance_system(request: Request):
+    """مؤشرات أداء النظام: استخدام الذاكرة / ذروة RSS / حِمْل النظام."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.unified_swarm_dashboard import system_performance
+        return {"ok": True, "system": system_performance()}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("api_server:app", host="0.0.0.0", port=5000, reload=True)

@@ -408,3 +408,68 @@ def unified_knowledge_query(question: str) -> str:
         return json.dumps(unified_query(question), ensure_ascii=False, default=str)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def nsm_agent_states() -> str:
+    """أحدث حالة لكل وكيل ذكي في NSM + ملخص زمن الاستجابة للأداء.
+    يعيد لكل وكيل آخر حالة مع المدة والعنوان، وملخص أداء جماعي."""
+    try:
+        from ai.agent_event_bus import (
+            current_agent_states, get_events, performance_summary)
+        events = get_events(200)
+        return json.dumps({
+            "agents": current_agent_states(events),
+            "performance": performance_summary(events),
+        }, ensure_ascii=False, default=str)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def nsm_swarm_dashboard() -> str:
+    """لقطة لوحة السرب الموحدة كاملة: وكلاء + سرب + مهام طويلة الأمد +
+    مؤشرات أداء النظام + التنبيهات + القواعد المخصصة + الإجراءات التلقائية."""
+    try:
+        from ai.unified_swarm_dashboard import unified_dashboard_snapshot
+        return json.dumps(unified_dashboard_snapshot(),
+                          ensure_ascii=False, default=str)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def nsm_alerts_evaluate() -> str:
+    """تقييم التنبيهات الحالية وفق القواعد المخصصة (عتبة البطء/الخنق/دفقة
+    الأخطاء) وإظهار الإجراءات التلقائية المفعّلة المطبّقة على كل تنبيه."""
+    try:
+        from ai.unified_swarm_dashboard import (
+            apply_auto_actions, evaluate_alerts)
+        alerts = evaluate_alerts()
+        return json.dumps({
+            "alerts": alerts,
+            "applied_actions": apply_auto_actions(alerts),
+        }, ensure_ascii=False, default=str)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def nsm_long_horizon_tasks(status_filter: str = "") -> str:
+    """قائمة المهام طويلة الأمد قيد الإدارة.
+
+    Args:
+        status_filter: تصفية اختيارية حسب الحالة (pending/running/done/cancelled).
+    """
+    try:
+        from ai.unified_swarm_dashboard import long_horizon_status
+        data = long_horizon_status(limit=30)
+        status_filter = (status_filter or "").strip().lower()
+        if status_filter and isinstance(data.get("tasks"), list):
+            data["tasks"] = [
+                t for t in data["tasks"]
+                if (t.get("status") or "").lower() == status_filter
+            ]
+        return json.dumps(data, ensure_ascii=False, default=str)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
