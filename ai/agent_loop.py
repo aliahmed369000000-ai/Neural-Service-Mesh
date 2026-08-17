@@ -52,6 +52,13 @@ _MAX_ROUNDS = 10                # أقصى جولات LLM في الحلقة ال
 _MAX_TOOLS_PER_ROUND = 8        # أقصى أدوات في الجولة الواحدة
 _MAX_TOTAL_TOOLS = 40           # ميزانية الأدوات الإجمالية
 _DEFAULT_TIMEOUT = 90           # ثوانٍ لتنفيذ الأمر الواحد
+_LONG_CMD_MARKERS = ("git clone", "git pull --rebase", "kaggle kernels output",
+                     "kaggle datasets download", "pip install -r", "pytest")
+
+def _default_timeout_for(cmd: str) -> int:
+    """🆕 مهلة افتراضية أطول للأوامر طويلة الأمد (clone ضخم، تنزيل output، تدريب خفيف)."""
+    c = (cmd or "").lower()
+    return 600 if any(m in c for m in _LONG_CMD_MARKERS) else _DEFAULT_TIMEOUT
 _MAX_OUTPUT_CHARS = 4000        # حد الملاحظة المعادة للنموذج لكل أداة
 _CMD_BLOCKLIST = (
     "sudo ", "sudo\t", "rm -rf /", "mkfs", ":(){ :|:& };:",
@@ -154,7 +161,7 @@ def _exec_shell(params: Dict[str, Any]) -> str:
     try:
         from ai.nsm_terminal import get_terminal
         r = get_terminal().run_agent("agent_loop", cmd,
-                                     timeout=int(params.get("timeout", _DEFAULT_TIMEOUT)))
+                                     timeout=int(params.get("timeout", _default_timeout_for(cmd))))
         out = []
         if r.stdout:
             out.append(r.stdout[:_MAX_OUTPUT_CHARS])
@@ -172,7 +179,7 @@ register_tool(ToolSpec(
     "ممنوع: sudo، حذف جذري، أوامر destructive. النتيجة تُقرأ تلقائياً وتُعاد لك.",
     {"type": "object", "properties": {
         "cmd": {"type": "string", "description": "الأمر كاملاً، مثال: python3 -m py_compile ai/agent_loop.py"},
-        "timeout": {"type": "integer", "description": "مهلة ثوانٍ (اختياري، افتراضي 90)"},
+        "timeout": {"type": "integer", "description": "مهلة ثوانٍ (اختياري — افتراضي 90، وأوامر مثل git clone وkaggle output تلقائيًا 600)"},
     }, "required": ["cmd"]},
     _exec_shell, dangerous=True,
 ))

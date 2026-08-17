@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional, Tuple
 ROOT = Path(__file__).resolve().parent.parent
 _LOG = ROOT / "memory" / "terminal_sessions.jsonl"
 _DEFAULT_TIMEOUT = 45
+_MAX_TIMEOUT = 3600  # 🆕 سقف الأوامر الطويلة (clone ضخم، تجميع، تدريب خفيف) — كان 300
 _MAX_OUTPUT = 24_000
 _MAX_HISTORY = 200
 
@@ -801,7 +802,7 @@ class NSMTerminal:
                 shell=True,
                 capture_output=True,
                 text=True,
-                timeout=max(5, min(int(timeout), 300)),
+                timeout=max(5, min(int(timeout), _MAX_TIMEOUT)),
                 cwd=sess.cwd,
                 env=env,
             )

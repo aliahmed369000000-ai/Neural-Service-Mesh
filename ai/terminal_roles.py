@@ -120,16 +120,16 @@ class RolePermissions:
 DEFAULT_ROLES: Dict[str, RolePermissions] = {
     "owner": RolePermissions(
         role="owner", default_safe_prefixes_only=False, allow_shell_operators=True,
-        max_timeout_seconds=300, can_use_kaggle_cli=True, can_run_background=True,
+        max_timeout_seconds=3600, can_use_kaggle_cli=True, can_run_background=True,
         can_override_mode=True,
     ),
     "admin": RolePermissions(
         role="admin", default_safe_prefixes_only=False, allow_shell_operators=True,
-        max_timeout_seconds=120, can_use_kaggle_cli=True, can_run_background=True,
+        max_timeout_seconds=3600, can_use_kaggle_cli=True, can_run_background=True,
     ),
     "agent": RolePermissions(
         role="agent", default_safe_prefixes_only=True, allow_shell_operators=False,
-        max_timeout_seconds=60, can_use_kaggle_cli=True, can_run_background=True,
+        max_timeout_seconds=1800, can_use_kaggle_cli=True, can_run_background=True,
     ),
     "sandbox": RolePermissions(
         role="sandbox", default_safe_prefixes_only=True, allow_shell_operators=False,

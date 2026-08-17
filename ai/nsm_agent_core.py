@@ -166,6 +166,39 @@ def _read_persistent_instructions() -> str:
         return ""
 
 
+def _get_agent_skills_block() -> str:
+    """بلوك 🧠 مهارات الوكيل (NSM Skills) — منهجيات ثابتة محقونة في البرومبت
+    حتى ينفّذ الوكيل المهام (تعديل/رفع/مراقبة/أسرار/بنية) بنفس منهجية الوكيل الرئيسي.
+    المحتوى مضمّن في الكود نفسه لأن النوتبوك في Kaggle/Streamlit قد لا يحمل مجلد skills."""
+    return """
+## 🧠 مهاراتك المكتسبة (NSM Skills) — طبّقها في كل مهمة:
+
+### المهارة 1: nsm-repo-workflow (منهجية التعديل المباشر والرفع)
+- المستودع: https://github.com/aliahmed369000000-ai/Neural-Service-Mesh (الفرع main).
+- هوية المحرر: user.name="NSM Bot", user.email="nsm-bot@users.noreply.github.com"؛ رسائل commit بالعربية.
+- الدورة الإلزامية: (1) استنساخ نظيف HTTPS عبر PAT ← (2) اقرأ الكود الفعلي قبل أي تعديل — لا تخمّن ← (3) تعديل مستهدف دقيق ← (4) اختبر قبل الرفع: python3 -m py_compile لكل ملف معدّل + محاكاة ممكنة بدون مفاتيح حقيقية ← (5) commit برسالة عربية تشرح ماذا ولماذا ← (6) push ثم تحقق فعلي: LOCAL_SHA=$(git rev-parse HEAD) && REMOTE_SHA=$(git ls-remote origin main | cut -f1) && [ "$LOCAL_SHA" = "$REMOTE_SHA" ] ← (7) اذكر صراحة «تم الرفع فعليًا» أو «لم يتم» ← (8) احذف النسخة المحلية rm -rf.
+- أمان: PAT داخل .git/config فقط؛ لا ترفع kaggle.json أو أي مفتاح API للمستودع أبدًا.
+- إن فشل py_compile أو المحاكاة: أصلح أولًا، ولا تدفع كودًا غير مختبر.
+
+### المهارة 2: nsm-monitoring-runbook (مراقبة كيرنلات Kaggle)
+- الفحص الأساسي: kaggle kernels status username/kernel-slug (أو KaggleApi.kernels_status من Python).
+- عند COMPLETE/FAILED/ERROR: نزّل المخرجات kaggle kernels output -p /tmp -f واعرض data من سطور JSON وراقب Error/OOM/epoch/Traceback.
+- حالة COMPLETE لا تعني نجاح التدريب — إن خلا السجل من epochs صرّح بذلك.
+- الكيرنلات النشطة: training = aliahmedmo/notebookc3a17dd093 (يدويًا بـTPU من المستخدم)؛ corpus = aliahmedmo/nsm-corpus-collector-v6.
+- عند كل تقرير: أرفق الرابط + preset + d_model + N + epochs + الجهاز.
+
+### المهارة 3: nsm-keys-deployment (خريطة الأسرار)
+- القاعدة المطلقة: مفاتيح المستخدم بالمحادثة للجلسة فقط — لا تُرفع للمستودع أبدًا.
+- GITHUB_TOKEN: Kaggle Secrets (لـAUTO_PUSH checkpoints). KAGGLE_USERNAME+KEY: Streamlit Secrets + ~/.kaggle/kaggle.json.
+- النشر الرئيسي: Streamlit Community Cloud؛ Hugging Face Spaces يتطلب PRO ولا يُنشر عليه إلا برضا المستخدم.
+
+### المهارة 4: nsm-architecture-map (خريطة البنية)
+- نقطة الدخول: streamlit_app.py. الوكلاء: ai/nsm_agent_core.py (النواة، dispatch JSON)، ai/agent_loop.py (حلقة 10+ جولات وTool Registry)، ai/agent_tools.py، ai/kaggle_provider.py (مزوّد Kaggle كامل).
+- التدريب: experiments/surah_chain_network/run_train_then_push.py مع AUTO_PUSH=1؛ المراقبة الحية ai/surah_training_monitor.py؛ سجل التجارب artifacts/model_training/lab/experiments.jsonl.
+- SurahChain المستهدف: d_model=8192، 114 طبقة، GQA (8 KV)، SwiGLU، FFN=22016، Pre-RMSNorm — لا يعمل على T4، يتطلب TPU v5e-8.
+- التخزين: Qdrant Cloud (ناقل المعرفة)، SQLite (حالة محلية)، GitHub raw (تقدم التدريب الحي).
+"""
+
 def _build_system_prompt() -> str:
     from ai.methodology_engine import method_principles_prompt
     tree = _get_project_tree()
@@ -175,9 +208,11 @@ def _build_system_prompt() -> str:
         if persistent else ""
     )
     method_block = method_principles_prompt()
+    skills_block = _get_agent_skills_block()
     return f"""أنت **NSM Agent v3** — وكيل برمجي ذكي مدمج في مشروع Neural Service Mesh، اسمك التسويقي ضمن هذا المنتج.
 {persistent_block}
 {method_block}
+{skills_block}
 
 قواعد الهوية:
 - تصرّف بشكل طبيعي كـ NSM Agent ضمن سياق المنتج، دون التطوّع بتفاصيل البنية التقنية الداخلية ما لم يُسأل عنها مباشرة.

@@ -41,7 +41,7 @@ def _safe_rel(path: str) -> Optional[Path]:
         return None
 
 
-def _run(cmd: List[str], timeout: int = 60, cwd: Optional[str] = None) -> Tuple[int, str]:
+def _run(cmd: List[str], timeout: int = 120, cwd: Optional[str] = None) -> Tuple[int, str]:
     try:
         r = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout,
@@ -138,7 +138,7 @@ def git_info(what: str = "status") -> Dict[str, Any]:
     }
     if what not in cmds:
         return {"ok": False, "msg": f"غير معروف: {what}. المدعوم: {', '.join(cmds)}"}
-    code, out = _run(cmds[what], timeout=30)
+    code, out = _run(cmds[what], timeout=60)
     return {"ok": code == 0, "what": what, "output": out or "(فارغ)"}
 
 
@@ -162,7 +162,7 @@ def py_compile_check(path: str) -> Dict[str, Any]:
             "line": e.lineno,
             "offset": e.offset,
         }
-    code, out = _run(["python3", "-m", "py_compile", str(f)], timeout=30)
+    code, out = _run(["python3", "-m", "py_compile", str(f)], timeout=60)
     return {
         "ok": code == 0,
         "path": path,
@@ -283,7 +283,7 @@ _SAFE_CMD_PREFIXES = (
 )
 
 
-def run_safe_cmd(cmd: str, timeout: int = 45) -> Dict[str, Any]:
+def run_safe_cmd(cmd: str, timeout: int = 180) -> Dict[str, Any]:
     """تشغيل أوامر قراءة/فحص آمنة فقط (لا حذف ولا شبكة حرة ولا sudo)."""
     c = (cmd or "").strip()
     if not c:
