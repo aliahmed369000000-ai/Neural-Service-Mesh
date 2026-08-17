@@ -13,8 +13,8 @@ NSM Backend Data Panel
 التحميل كسول (lazy) ضمن آلية Cold Start في streamlit_app.py.
 """
 from __future__ import annotations
-
 import json
+from datetime import datetime
 import sys
 from typing import Any, Dict
 
@@ -141,15 +141,55 @@ def render_backend_data_panel() -> None:
 
     # ── رسم تفاعلي: تطور استجابة الخدمات المصغرة ──────────────────────
     if go is not None:
+        _svc_range_opts = [
+            ("مخصص", "custom"), ("آخر 5 دقائق", "5m"), ("آخر 15 دقيقة", "15m"),
+            ("آخر 30 دقيقة", "30m"), ("آخر ساعة", "1h"),
+            ("اليوم", "day"), ("الأسبوع", "week"),
+        ]
+        _svc_range_choice = st.radio(
+            "النطاق الزمني لاستجابة الخدمات",
+            options=[label for label, _ in _svc_range_opts],
+            horizontal=True, label_visibility="collapsed",
+            index=0, key="nsm_svc_range_radio")
+        _svc_range_name = ""
+        _svc_range_from = _svc_range_to = None
+        for label, key in _svc_range_opts:
+            if label == _svc_range_choice:
+                _svc_range_name = key
+                break
+        if _svc_range_name == "custom":
+            col_from, col_to = st.columns(2)
+            with col_from:
+                _svc_range_from = st.text_input(
+                    "من (ISO 8601: 2026-08-17T00:00:00)",
+                    key="nsm_svc_range_from") or None
+            with col_to:
+                _svc_range_to = st.text_input(
+                    "إلى (ISO 8601: 2026-08-17T23:59:59)",
+                    key="nsm_svc_range_to") or None
         svc_timeline = _safe(ms.service_timeline, 200) or []
+        if svc_timeline:
+            svc_timeline = _safe(ms.filter_service_timeline, svc_timeline,
+                                 range_name=_svc_range_name or None,
+                                 from_iso=_svc_range_from,
+                                 to_iso=_svc_range_to) or []
         if len(svc_timeline) >= 2:
             _services = sorted({r.get("service", "?") for r in svc_timeline})
             _colors = ["#38bdf8", "#4ade80", "#facc15", "#f472b6",
                        "#a78bfa", "#fb923c", "#f87171", "#94a3b8"]
             _fig_svc = go.Figure()
+            def _svc_epoch_ts(_row: Any) -> str:
+                try:
+                    _ep = float(_row.get("epoch_float") or 0.0)
+                    if _ep > 0:
+                        return datetime.utcfromtimestamp(_ep) \
+                            .strftime("%H:%M")
+                except (TypeError, ValueError, OSError):
+                    pass
+                return str(_row.get("ts") or "")
             for i_, svc_name in enumerate(_services):
                 _rows = [r for r in svc_timeline if r.get("service") == svc_name]
-                _idx = list(range(1, len(_rows) + 1))
+                _idx = [_svc_epoch_ts(r) for r in _rows]
                 _fig_svc.add_trace(go.Scatter(
                     x=_idx, y=[r.get("latency_ms", 0) for r in _rows],
                     mode="lines+markers", name=svc_name,
@@ -157,7 +197,7 @@ def render_backend_data_panel() -> None:
             _fig_svc.update_layout(
                 title=dict(text="زمن استجابة الخدمات المصغرة عبر الاستدعاءات",
                            x=0.5, xanchor="center", font=dict(size=14)),
-                xaxis_title="رقم الاستدعاء لكل خدمة (الأحدث أخيرًا)",
+                xaxis_title="وقت الاستدعاء (UTC) لكل خدمة — الأحدث أخيرًا",
                 yaxis_title="ملّي ثانية",
                 template="plotly_dark",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02),

@@ -479,6 +479,47 @@ class TestServiceTimeline:
         assert svc_rows and svc_rows[-1]["ok"] is False
         ms.reset_service_metrics()
 
+    def test_timeline_epoch_float_recorded(self, _data_dirs):
+        from ai import microservices as ms
+        ms.reset_service_metrics()
+        ms.call_service("meta", "list_services", {})
+        rows = ms.service_timeline(limit=60)
+        assert rows and isinstance(rows[-1].get("epoch_float"), float)
+        assert rows[-1]["epoch_float"] > 0
+        ms.reset_service_metrics()
+
+    def test_filter_service_timeline_named_and_custom(self, _data_dirs,
+                                                    monkeypatch):
+        from ai import microservices as ms
+        now = 1700000000.0
+        monkeypatch.setattr(ms.time, "time", lambda: now)
+        rows = [
+            {"ts": "00:00:01", "epoch_float": now - 7200,
+             "service": "meta", "latency_ms": 10.0, "ok": True},
+            {"ts": "00:00:02", "epoch_float": now - 600,
+             "service": "harm", "latency_ms": 5.0, "ok": True},
+            {"ts": "00:00:03", "epoch_float": now - 60,
+             "service": "meta", "latency_ms": 8.0, "ok": True},
+        ]
+        # نطاق مسمّى
+        kept = ms.filter_service_timeline(rows, range_name="15m")
+        assert [r["service"] for r in kept] == ["harm", "meta"]
+        # نطاق مخصص من/إلى
+        from datetime import datetime
+        frm = datetime.utcfromtimestamp(now - 700) \
+            .strftime("%Y-%m-%dT%H:%M:%S")
+        to = datetime.utcfromtimestamp(now - 50) \
+            .strftime("%Y-%m-%dT%H:%M:%S")
+        kept2 = ms.filter_service_timeline(rows, from_iso=frm, to_iso=to)
+        # harm (now-600) وmeta (now-60) داخل [now-700, now-50]،
+        # meta (now-7200) أقدم من البداية فلا يظهر
+        assert [r["service"] for r in kept2] == ["harm", "meta"]
+        # fallback لآخر صف عند فراغ النتيجة (time.time مرقّع أدناه)
+        empty = ms.filter_service_timeline(rows, range_name="5m")
+        assert len(empty) == 1
+        # نطاق غير صالح = بدون تصفية
+        assert ms.filter_service_timeline(rows, range_name="zz") == rows
+
 
 class TestTimelineApiEndpoints:
     @pytest.fixture(autouse=True)
@@ -508,4 +549,33 @@ class TestTimelineApiEndpoints:
         assert r.status_code == 200 and r.json()["ok"]
         rows = r.json()["timeline"]
         assert any(row["service"] == "meta" for row in rows)
+        ms.reset_service_metrics()
+
+    def test_timelines_support_range_and_service_filters(self):
+        """نقطتا timeline تقبلان range= وfrom/to= وservice= وتبقى fail-closed."""
+        from ai import microservices as ms
+        ms.reset_service_metrics()
+        ms.call_service("meta", "list_services", {})
+        ms.call_service("harm", "classify", {"text": "hi"})
+        headers = {"X-API-Key": "test-secret-key"}
+        # نطاق غير معروف يمرر كل الصفوف + حقل range في الاستجابة
+        r = self.c.get("/performance/timeline?range=99z",
+                        headers=headers)
+        assert r.status_code == 200 and r.json()["ok"]
+        assert r.json()["timeline"]
+        # فلتر service يعمل على services/timeline
+        r2 = self.c.get("/services/timeline?service=meta",
+                        headers=headers)
+        assert r2.status_code == 200
+        rows2 = r2.json()["timeline"]
+        assert all(row["service"] == "meta" for row in rows2)
+        assert r2.json().get("service") == "meta"
+        # service غير مسجل = 0 صف وليس خطأ
+        r3 = self.c.get("/services/timeline?service=no-such-service",
+                        headers=headers)
+        assert r3.status_code == 200 and r3.json()["ok"]
+        # من/إلى غير صالحة لا تكسر نقطة النهاية
+        r4 = self.c.get("/services/timeline?from=bad&to=also-bad",
+                        headers=headers)
+        assert r4.status_code == 200 and r4.json()["ok"]
         ms.reset_service_metrics()

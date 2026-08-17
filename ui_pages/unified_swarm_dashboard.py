@@ -112,11 +112,48 @@ def render_unified_swarm_dashboard() -> None:
 
     # ── رسوم بيانية تفاعلية: تطور الأداء بمرور الوقت ──────────
     render_section_header("تطور الأداء بمرور الوقت", "قياسات متسلسلة (تُحدَّث كل خمس ثوانٍ) — استخدم التكبير والتحريك للتحكم")
-    from ai.unified_swarm_dashboard import performance_timeline
+    from ai.unified_swarm_dashboard import (filter_timeline,
+                                            performance_timeline)
+    _range_opts = [
+        ("مخصص", "custom"), ("آخر 5 دقائق", "5m"), ("آخر 15 دقيقة", "15m"),
+        ("آخر 30 دقيقة", "30m"), ("آخر ساعة", "1h"),
+        ("اليوم", "day"), ("الأسبوع", "week"),
+    ]
+    _range_choice = st.radio(
+        "النطاق الزمني",
+        options=[label for label, _ in _range_opts],
+        horizontal=True, label_visibility="collapsed",
+        index=0, key="nsm_perf_range_radio")
+    _range_name = ""
+    _range_from = _range_to = None
+    for label, key in _range_opts:
+        if label == _range_choice:
+            _range_name = key
+            break
+    if _range_name == "custom":
+        col_from, col_to = st.columns(2)
+        with col_from:
+            _range_from = st.text_input("من (ISO 8601: 2026-08-17T00:00:00)",
+                                        key="nsm_perf_range_from") or None
+        with col_to:
+            _range_to = st.text_input("إلى (ISO 8601: 2026-08-17T23:59:59)",
+                                      key="nsm_perf_range_to") or None
     timeline = performance_timeline(limit=60)
     if timeline:
-        _ts = [row.get("ts") for row in timeline]
-        _idx = list(range(1, len(timeline) + 1))
+        timeline = filter_timeline(timeline, range_name=_range_name or None,
+                                   from_iso=_range_from, to_iso=_range_to)
+    if timeline:
+        def _epoch_ts(_row: Any) -> str:
+            try:
+                _ep = float(_row.get("epoch_float") or 0.0)
+                if _ep > 0:
+                    from datetime import datetime as _dt, timezone as _tz
+                    return _dt.utcfromtimestamp(_ep).strftime("%H:%M")
+            except (TypeError, ValueError, OSError):
+                pass
+            return str(_row.get("ts") or "")
+        _ts = [_epoch_ts(row) for row in timeline]
+        _idx = _ts
         _mem = [row.get("memory_mb") for row in timeline]
         _peak = [row.get("peak_rss_mb") for row in timeline]
         _avg = [row.get("avg_ms") for row in timeline]
@@ -134,7 +171,7 @@ def render_unified_swarm_dashboard() -> None:
             _fig_mem.update_layout(
                 title=dict(text="استهلاك الذاكرة عبر القياسات", x=0.5,
                            xanchor="center", font=dict(size=14)),
-                xaxis_title="رقم القياس (الأحدث أخيرًا)",
+                xaxis_title="وقت القياس (UTC) — الأحدث أخيرًا",
                 yaxis_title="ميغابايت",
                 template="plotly_dark",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02),
@@ -154,7 +191,7 @@ def render_unified_swarm_dashboard() -> None:
             _fig_resp.update_layout(
                 title=dict(text="زمن استجابة الوكلاء عبر القياسات", x=0.5,
                            xanchor="center", font=dict(size=14)),
-                xaxis_title="رقم القياس (الأحدث أخيرًا)",
+                xaxis_title="وقت القياس (UTC) — الأحدث أخيرًا",
                 yaxis_title="ملّي ثانية / عدد",
                 template="plotly_dark",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02),

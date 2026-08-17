@@ -479,15 +479,20 @@ async def performance_system(request: Request):
 @app.get("/performance/timeline")
 async def performance_timeline_ep(request: Request):
     """سلسلة زمنية لمؤشرات الأداء: تطوير الذاكرة والاستجابة بمرور الوقت
-    (?limit=60) — للرسوم البيانية التفاعلية في اللوحة."""
+    (?limit=60&range=1h|day|week|...&from=ISO&to=ISO) — للرسوم التفاعلية."""
     auth = _nsm_key_check(request)
     if auth is not None:
         return auth
     try:
-        from ai.unified_swarm_dashboard import performance_timeline
+        from ai.unified_swarm_dashboard import (filter_timeline,
+                                                performance_timeline)
+        q = request.query_params
+        rows = performance_timeline(limit=int(q.get("limit", "60")))
         return {"ok": True,
-                "timeline": performance_timeline(
-                    limit=int(request.query_params.get("limit", "60")))}
+                "range": q.get("range") or "",
+                "timeline": filter_timeline(
+                    rows, range_name=q.get("range"),
+                    from_iso=q.get("from"), to_iso=q.get("to"))}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -495,15 +500,24 @@ async def performance_timeline_ep(request: Request):
 @app.get("/services/timeline")
 async def services_timeline_ep(request: Request):
     """سلسلة زمنية لاستجابة الخدمات المصغرة: كل استدعاء بوقت وخدمة ومدة
-    (?limit=60) — للرسوم البيانية التفاعلية في مركز البيانات."""
+    (?limit=60&range=1h|day|week|...&from=ISO&to=ISO) — للرسوم التفاعلية."""
     auth = _nsm_key_check(request)
     if auth is not None:
         return auth
     try:
-        from ai.microservices import service_timeline
+        from ai.microservices import (filter_service_timeline,
+                                     service_timeline)
+        q = request.query_params
+        rows = service_timeline(limit=int(q.get("limit", "60")))
         return {"ok": True,
-                "timeline": service_timeline(
-                    limit=int(request.query_params.get("limit", "60")))}
+                "range": q.get("range") or "",
+                "service": q.get("service") or "",
+                "timeline": filter_service_timeline(
+                    [r for r in rows
+                     if not q.get("service")
+                     or r.get("service") == q.get("service")],
+                    range_name=q.get("range"),
+                    from_iso=q.get("from"), to_iso=q.get("to"))}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 

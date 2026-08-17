@@ -310,8 +310,10 @@ def _record_metric(service: str, latency_ms: float, ok: bool,
             row["latencies"] = row["latencies"][-250:]
     # السلسلة الزمنية للرسوم البيانية التفاعلية (لكل استدعاء خدمة)
     with _TIMELINE_LOCK:
+        _now_utc = datetime.now(timezone.utc)
         _TIMELINE.append({
-            "ts": datetime.now(timezone.utc).strftime("%H:%M:%S"),
+            "ts": _now_utc.strftime("%H:%M:%S"),
+            "epoch_float": _now_utc.timestamp(),
             "service": str(service), "latency_ms": round(latency_ms, 2),
             "ok": bool(ok)})
         if len(_TIMELINE) > _TIMELINE_LIMIT:
@@ -395,13 +397,79 @@ def reset_service_metrics() -> None:
 def service_timeline(limit: int = 60) -> List[Dict[str, Any]]:
     """سلسلة زمنية لاستجابة الخدمات المصغرة بمرور الوقت.
 
-    كل استدعاء خدمة يسجّل صفًا: {ts (HH:MM:SS)، service، latency_ms، ok}.
-    السجل بحد أقصى `_TIMELINE_LIMIT` صفًا (أحدثها أولًا للعرض).
+    كل استدعاء خدمة يسجّل صفًا: {ts (HH:MM:SS)، epoch_float (UTC)،
+    service، latency_ms، ok}. السجل بحد أقصى `_TIMELINE_LIMIT` صفًا.
     بدون مفاتيح API، ويُعاد ضبطه عبر reset_service_metrics().
     """
     with _TIMELINE_LOCK:
         rows = _TIMELINE[-max(1, int(limit)):]
     return list(rows)
+
+
+_TIMELINE_RANGES = {
+    "5m": 300.0, "15m": 900.0, "30m": 1800.0,
+    "1h": 3600.0, "day": 86400.0, "week": 604800.0,
+}
+
+
+def _svc_epoch_from_row(row: Dict[str, Any]) -> Optional[float]:
+    """قراءة طابع زمني كامل: epoch_float (مفضل) أو التحليل من ts المقروء."""
+    epoch = row.get("epoch_float")
+    if isinstance(epoch, (int, float)) and epoch > 0:
+        return float(epoch)
+    ts = row.get("ts")
+    if not isinstance(ts, str) or len(ts) < 8:
+        return None
+    try:
+        return datetime.strptime(ts, "%H:%M:%S").replace(
+            tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return None
+
+
+def filter_service_timeline(rows: List[Dict[str, Any]],
+                            range_name: Optional[str] = None,
+                            from_iso: Optional[str] = None,
+                            to_iso: Optional[str] = None) -> List[Dict[str, Any]]:
+    """تصفية سلسلة زمنية للخدمات بنطاق مخصص.
+
+    النطاقات المسماة: 5m / 15m / 30m / 1h / day / week (من الآن رجوعًا).
+    أو نطاق مخصص: from_iso/to_iso بصيغة ISO 8601 (YYYY-MM-DDTHH:MM:SS)
+    — بدون منطقة زمنية تُفسَّر UTC.
+    الصفوف دون طابع زمني صالح تُستبعد (بجانب صف أخير وحيد إن وُجد).
+    """
+    out: List[Dict[str, Any]] = []
+    now = time.time()
+    lo = to = None
+    if range_name and range_name in _TIMELINE_RANGES:
+        lo = now - _TIMELINE_RANGES[range_name]
+        to = now + 1.0
+    else:
+        for label, raw in (("from_iso", from_iso), ("to_iso", to_iso)):
+            if not raw or not isinstance(raw, str):
+                continue
+            try:
+                dt = datetime.fromisoformat(str(raw).strip())
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                if label == "from_iso":
+                    lo = dt.timestamp()
+                else:
+                    to = dt.timestamp()
+            except (ValueError, TypeError, OSError):
+                pass
+    for row in rows:
+        epoch = _svc_epoch_from_row(row)
+        if epoch is None:
+            continue
+        if lo is not None and epoch < lo:
+            continue
+        if to is not None and epoch > to:
+            continue
+        out.append(row)
+    if not out and rows:
+        out = [rows[-1]]
+    return out
 
 
 def system_memory() -> Dict[str, Any]:

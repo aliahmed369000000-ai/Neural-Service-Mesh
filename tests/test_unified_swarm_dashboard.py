@@ -395,3 +395,74 @@ class TestPerformanceTimeline:
         rows = performance_timeline(limit=10)
         assert isinstance(rows, list)
         assert all(isinstance(r, dict) for r in rows)
+
+    def test_timeline_epoch_float_recorded(self):
+        from ai.unified_swarm_dashboard import (
+            performance_timeline,
+            reset_performance_timeline,
+        )
+        reset_performance_timeline()
+        rows = performance_timeline(limit=60)
+        assert rows and isinstance(rows[-1].get("epoch_float"), float)
+        assert rows[-1]["epoch_float"] > 0
+        reset_performance_timeline()
+
+
+class TestTimelineRangeFiltering:
+    """تصفية النطاق الزمني للرسوم البيانية (النطاقات المسماة + المخصصة)."""
+
+    def test_filter_named_range(self, monkeypatch):
+        from ai import unified_swarm_dashboard as mod
+        now = 1700000000.0
+        monkeypatch.setattr(mod.time, "time", lambda: now)
+        rows = [
+            {"ts": "00:00:01", "epoch_float": now - 3600},
+            {"ts": "00:00:02", "epoch_float": now - 600},   # ضمن 15m
+            {"ts": "00:00:03", "epoch_float": now - 60},    # ضمن 15m
+            {"ts": "00:00:04", "epoch_float": now + 10},    # في المستقبل القريب
+        ]
+        kept = mod.filter_timeline(rows, range_name="15m")
+        epochs = [r["epoch_float"] for r in kept]
+        # صف الآن+10 خارج النطاق (نهايته الآن+1) فلا يظهر
+        assert epochs == [now - 600, now - 60]
+
+    def test_filter_custom_range(self, monkeypatch):
+        from ai import unified_swarm_dashboard as mod
+        from datetime import datetime, timezone
+        now = 1700000000.0
+        monkeypatch.setattr(mod.time, "time", lambda: now)
+        rows = [
+            {"ts": "00:00:01", "epoch_float": now - 7200},
+            {"ts": "00:00:02", "epoch_float": now - 1800},
+            {"ts": "00:00:03", "epoch_float": now - 300},
+        ]
+        # من (الآن - 2500 ثانية) إلى (الآن - 500 ثانية)
+        frm = datetime.utcfromtimestamp(now - 2500).strftime(
+            "%Y-%m-%dT%H:%M:%S")
+        to = datetime.utcfromtimestamp(now - 500).strftime("%Y-%m-%dT%H:%M:%S")
+        kept = mod.filter_timeline(rows, from_iso=frm, to_iso=to)
+        assert [r["epoch_float"] for r in kept] == [now - 1800]
+
+    def test_filter_fallback_to_last_row(self, monkeypatch):
+        from ai import unified_swarm_dashboard as mod
+        now = 1700000000.0
+        monkeypatch.setattr(mod.time, "time", lambda: now)
+        rows = [{"ts": "00:00:01", "epoch_float": 100.0}]
+        # نطاق قديم جدًا لا يحتوي أي صف — يعود بآخر صف وحيد
+        kept = mod.filter_timeline(rows, from_iso="1970-01-02T00:00:00",
+                                   to_iso="1970-01-02T00:01:00")
+        assert kept == rows
+        # صفوف بلا طابع زمني صالح لا تدخل القائمة النشطة، لكن
+        # fallback الدفاعي يعيد الصف الأخير الوحيد (السلوك المقصود)
+        fallback = mod.filter_timeline([{"ts": "??"}], range_name="5m")
+        assert fallback == [{"ts": "??"}]
+
+    def test_filter_invalid_range_passthrough(self, monkeypatch):
+        from ai import unified_swarm_dashboard as mod
+        now = 1700000000.0
+        monkeypatch.setattr(mod.time, "time", lambda: now)
+        rows = [{"ts": "00:00:01", "epoch_float": 1.0}]
+        # نطاق غير معروف + قيمة من غير صالحة = بدون تصفية
+        kept = mod.filter_timeline(rows, range_name="99z",
+                                   from_iso="not-a-date")
+        assert kept == rows
