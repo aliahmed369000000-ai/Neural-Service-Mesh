@@ -866,6 +866,55 @@ async def connectors_call(request: Request):
         return JSONResponse({"ok": False, "error": str(e)},
                             status_code=500)
 
+# ── مؤشرات أداء الخدمات المصغرة (KPIs) ──────────────────────────
+@app.get("/services/metrics")
+async def services_metrics(request: Request):
+    """مؤشرات وقت الاستجابة الجماعية للخدمات المصغرة
+    (count/avg/max/last/slow_count). عتبة البطء القياسية 2000ms.
+    GET /services/metrics?threshold_ms=3000&limit=100"""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.microservices import service_metrics
+        params = request.query_params
+        return {"ok": True,
+                "metrics": service_metrics(
+                    threshold_ms=float(params["threshold_ms"])
+                    if params.get("threshold_ms") else None,
+                    limit=int(params["limit"])
+                    if params.get("limit") else 60)}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)},
+                            status_code=500)
+
+@app.get("/services/usage")
+async def services_usage(request: Request):
+    """مؤشرات كل الخدمات المصغرة (calls/ok/failed/latencies/health)."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.microservices import all_service_usage
+        return {"ok": True, "usage": all_service_usage()}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)},
+                            status_code=500)
+
+@app.get("/services/memory")
+async def services_memory(request: Request):
+    """مؤشرات استخدام الذاكرة (بدون اعتماديات خارجية — stdlib فقط):
+    ذاكرة العملية (VmRSS)، نسبة النظام، وذروة RSS منذ التشغيل."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    try:
+        from ai.microservices import system_memory
+        return {"ok": True, "memory": system_memory()}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)},
+                            status_code=500)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("api_server:app", host="0.0.0.0", port=5000, reload=True)

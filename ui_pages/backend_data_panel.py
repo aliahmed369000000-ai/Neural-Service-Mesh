@@ -90,6 +90,51 @@ def render_backend_data_panel() -> None:
              "value": counts["counts"].get("kv", 0)},
         ])
 
+    # ── مؤشرات أداء الخدمات المصغرة (KPIs) ─────────────────────────────
+    ms = _microservices()
+    mem_info = _safe(ms.system_memory) or {}
+    perf = _safe(ms.service_metrics) or {}
+    usage = _safe(ms.all_service_usage) or {}
+    kpi_row = [
+        {"label": "ذاكرة العملية MB",
+         "value": mem_info.get("memory_used_mb", "—")},
+        {"label": "ذاكرة النظام MB",
+         "value": mem_info.get("memory_total_mb", "—")},
+        {"label": "نسبة الذاكرة %",
+         "value": mem_info.get("memory_percent", "—")},
+        {"label": "ذروة RSS MB",
+         "value": mem_info.get("peak_rss_mb", "—")},
+    ]
+    if perf.get("count"):
+        kpi_row += [
+            {"label": "استدعاءات خدمات",
+             "value": perf.get("count", 0)},
+            {"label": "متوسط الاستجابة ms",
+             "value": perf.get("avg_ms", "—")},
+            {"label": "أبطأ استجابة ms",
+             "value": perf.get("max_ms", "—")},
+            {"label": "آخر استجابة ms",
+             "value": perf.get("last_ms", "—")},
+            {"label": "استدعاءات بطيئة ⚠️",
+             "value": perf.get("slow_count", 0),
+             "delta": ("🐢" if (perf.get("slow_count") or 0) > 0 else None)},
+        ]
+    render_kpi_cards(kpi_row)
+
+    svc_rows = (usage.get("services") or [])
+    if svc_rows:
+        render_section_header("أداء كل خدمة", "service KPIs", live=True)
+        st.dataframe(
+            [{"الخدمة": r.get("service"), "استدعاءات": r.get("calls", 0),
+              "نجاح": r.get("ok", 0), "فشل": r.get("failed", 0),
+              "متوسط ms": r.get("avg_latency_ms", "—"),
+              "ذروة ms": r.get("max_latency_ms", "—"),
+              "آخر ms": r.get("last_latency_ms", "—"),
+              "بطيئة": r.get("slow_count", 0), "الحالة": r.get("health", "—")}
+             for r in svc_rows],
+            use_container_width=True,
+            hide_index=True)
+
     # ── التبويبات الرئيسية ──────────────────────────────────────────────
     tabs = st.tabs([
         "🤖 الوكلاء", "📋 المهام", "🧠 الذاكرة",
@@ -319,3 +364,28 @@ def render_backend_data_panel() -> None:
                               {"service": svc3}))
                 else:
                     st.warning("اختر خدمة")
+        # مؤشرات خدمة محددة
+        c1, c2, c3 = st.columns([2, 3, 2])
+        with c1:
+            svc4 = st.selectbox("مؤشرات خدمة", svcs if svcs else [],
+                                key="svc_metrics")
+        with c2:
+            st.write(" ")
+            if st.button("عرض المؤشرات", use_container_width=True):
+                if svc4:
+                    info = _safe(ms.service_usage, svc4)
+                    if info is None:
+                        st.info("لا بيانات أداء لهذه الخدمة بعد")
+                    else:
+                        _show_result(f"مؤشرات {svc4}", info)
+                else:
+                    st.warning("اختر خدمة")
+        with c3:
+            st.write(" ")
+            if st.button("إعادة ضبط المؤشرات", use_container_width=True):
+                ms.reset_service_metrics()
+                st.rerun()
+        if perf.get("count"):
+            st.caption(
+                f"عتبة البطء الحالية: {perf.get('slow_ms_threshold')}ms"
+                f" — إجمالي الاستدعاءات: {usage.get('total_calls', 0)}")

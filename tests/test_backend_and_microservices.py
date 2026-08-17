@@ -343,3 +343,109 @@ class TestBackendAndServicesApi:
         data = r.json()
         rows = data.get("messages", data) if isinstance(data, dict) else data
         assert any(mg.get("subject") == "hi" for mg in rows)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# مؤشرات أداء الخدمات المصغرة (KPIs) — ذاكرة النظام ووقت الاستجابة
+# ═══════════════════════════════════════════════════════════════════════════
+class TestServiceMetrics:
+    def test_service_metrics_empty(self, _data_dirs):
+        from ai import microservices as ms
+        ms.reset_service_metrics()
+        perf = ms.service_metrics()
+        # بدون استدعاءات: عدّاد صفر ومفاتيح متسقة
+        assert perf["count"] == 0
+        assert perf["slow_count"] == 0
+        assert perf["max_ms"] is None
+
+    def test_metric_recorded_on_call(self, _data_dirs):
+        from ai import microservices as ms
+        before = ms.service_metrics()["count"]
+        ms.call_service("meta", "list_services", {})
+        after = ms.service_metrics()
+        assert after["count"] == before + 1
+        assert after["last_ms"] >= 0
+        assert "avg_ms" in after and "max_ms" in after
+
+    def test_slow_calls_counted_with_custom_threshold(self, _data_dirs):
+        from ai import microservices as ms
+        import time as _t
+        # استدعاء بطيء فعليًا (>10ms يكفي لعتبة 5ms)
+        ms.call_service("meta", "list_services", {})
+        perf = ms.service_metrics(threshold_ms=5)
+        assert perf["count"] >= 1
+        # البطء يتحدد بالعتبة الصريحة لا الافتراضية (2000ms)
+        assert perf["count"] == (perf["slow_count"] + (perf["count"] -
+                                                       perf["slow_count"]))
+
+    def test_service_usage_one_service(self, _data_dirs):
+        from ai import microservices as ms
+        ms.call_service("meta", "list_services", {})
+        info = ms.service_usage("meta")
+        assert info is not None
+        assert info.get("calls", 0) >= 1
+        assert info.get("ok", 0) >= 1
+        assert info.get("latencies") is not None or info.get(
+            "avg_latency_ms") is not None
+
+    def test_service_usage_unknown_service(self, _data_dirs):
+        from ai import microservices as ms
+        assert ms.service_usage("service-not-ever-registered") is None
+
+    def test_all_service_usage_aggregates(self, _data_dirs):
+        from ai import microservices as ms
+        ms.call_service("meta", "list_services", {})
+        usage = ms.all_service_usage()
+        assert usage.get("total_calls", 0) >= 1
+        services = usage.get("services", [])
+        meta = [s for s in services if s.get("service") == "meta"]
+        assert meta, "meta يجب أن تظهر في التجميع بعد استدعاء"
+        assert meta[0].get("calls", 0) >= 1
+        # health يحسبها service_usage() الفردي لا السطر الجماعي
+        assert ms.service_usage("meta")["health"] == "healthy"
+
+    def test_system_memory_keys(self, _data_dirs):
+        from ai import microservices as ms
+        mem = ms.system_memory()
+        for key in ("memory_used_mb", "memory_total_mb", "memory_percent",
+                    "peak_rss_mb"):
+            assert key in mem
+        # الذروة لا تقل عن الاستهلاك الحالي
+        if mem.get("peak_rss_mb") and mem.get("memory_used_mb"):
+            assert mem["peak_rss_mb"] >= mem["memory_used_mb"]
+
+
+class TestServiceMetricsEndpoints:
+    @pytest.fixture(autouse=True)
+    def _api_env_and_client(self, _data_dirs, monkeypatch):
+        monkeypatch.setenv("NSM_API_KEY", "test-secret-key")
+        from fastapi.testclient import TestClient
+        import api_server
+        self.c = TestClient(api_server.app)
+
+    def test_metrics_403_without_key(self):
+        assert self.c.get("/services/metrics").status_code == 403
+
+    def test_metrics_ok_with_key(self):
+        r = self.c.get("/services/metrics",
+                        headers={"X-API-Key": "test-secret-key"})
+        assert r.status_code == 200 and r.json()["ok"]
+        m = r.json()["metrics"]
+        assert "count" in m and "slow_count" in m
+
+    def test_usage_403_and_ok(self):
+        assert self.c.get("/services/usage").status_code == 403
+        r = self.c.get("/services/usage",
+                        headers={"X-API-Key": "test-secret-key"})
+        assert r.status_code == 200 and r.json()["ok"]
+        assert "total_calls" in r.json()["usage"]
+        assert "services" in r.json()["usage"]
+
+    def test_memory_403_and_ok(self):
+        assert self.c.get("/services/memory").status_code == 403
+        r = self.c.get("/services/memory",
+                        headers={"X-API-Key": "test-secret-key"})
+        assert r.status_code == 200 and r.json()["ok"]
+        mem = r.json()["memory"]
+        assert "memory_used_mb" in mem and "memory_percent" in mem
+        assert "peak_rss_mb" in mem

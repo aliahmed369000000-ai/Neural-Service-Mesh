@@ -36,6 +36,22 @@ _REGISTRY_LOCK = threading.Lock()
 SCHEMA_VERSION = "nsm-ms/1.0"
 DEFAULT_TIMEOUT_MS = 5000
 
+# ── مؤشرات أداء الخدمات (KPIs: ذاكرة + وقت الاستجابة) ─────────
+_METRICS: Dict[str, Dict[str, Any]] = {}  # {service: {calls, ok, failed,
+#            latencies: [ms], last_latency_ms, max_latency_ms, slow_count}}
+_METRICS_LOCK = threading.Lock()
+_DEFAULT_SLOW_THRESHOLD_MS = 2000.0  # عتبة بطء الخدمة (ms)
+
+
+def set_service_slow_threshold(threshold_ms: float) -> None:
+    """تغيير عتبة البطء القياسية لمؤشرات الخدمات (مستقلة عن عتبة الوكلاء)."""
+    global _DEFAULT_SLOW_THRESHOLD_MS
+    _DEFAULT_SLOW_THRESHOLD_MS = float(threshold_ms)
+
+
+def get_service_slow_threshold() -> float:
+    return float(_DEFAULT_SLOW_THRESHOLD_MS)
+
 
 def _make_response(ok: bool, service: str, action: str,
                    request_id: str, result: Any = None,
@@ -248,12 +264,155 @@ def call_service(service: str, action: str,
     resp = _make_response(result.get("ok", True), service, action,
                           request_id or _make_request_id(),
                           result=result, latency_ms=latency)
+    _record_metric(service, latency,
+                   resp.get("ok", False),
+                   _DEFAULT_SLOW_THRESHOLD_MS)
     _emit_service_event(service, action, resp, requested_by)
     return resp
 
 
 def _make_request_id() -> str:
     return f"ms_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
+
+
+# ── مؤشرات الأداء ──────────────────────────────────────────────
+def _record_metric(service: str, latency_ms: float, ok: bool,
+                   slow_threshold_ms: float) -> None:
+    """تسجيل قياس أداء واحد للخدمة (يُستدعى بعد كل استدعاء ناجح)."""
+    with _METRICS_LOCK:
+        row = _METRICS.setdefault(str(service), {
+            "service": str(service), "calls": 0, "ok": 0, "failed": 0,
+            "latencies": [], "last_latency_ms": None, "max_latency_ms": None,
+            "avg_latency_ms": None, "slow_count": 0,
+            "slow_threshold_ms": slow_threshold_ms})
+        row["calls"] += 1
+        if ok:
+            row["ok"] += 1
+        else:
+            row["failed"] += 1
+        row["latencies"].append(latency_ms)
+        if len(row["latencies"]) > 500:
+            row["latencies"] = row["latencies"][-250:]
+        row["last_latency_ms"] = round(latency_ms, 2)
+        prev_max = row["max_latency_ms"]
+        if prev_max is None or latency_ms > prev_max:
+            row["max_latency_ms"] = round(latency_ms, 2)
+        n = len(row["latencies"])
+        row["avg_latency_ms"] = round(sum(row["latencies"]) / n, 2)
+        if latency_ms >= slow_threshold_ms:
+            row["slow_count"] += 1
+
+
+def service_metrics(threshold_ms: Optional[float] = None,
+                    limit: int = 60) -> Dict[str, Any]:
+    """مؤشرات وقت الاستجابة الجماعية للخدمات المصغرة.
+
+    يعيد: count / avg_ms / max_ms / last_ms / slow_count /
+    slow_ms_threshold — من آخر `limit` استدعاء مسجّل.
+    """
+    out: Dict[str, Any] = {"count": 0, "avg_ms": None, "max_ms": None,
+                           "last_ms": None, "slow_count": 0}
+    thr = float(threshold_ms) if threshold_ms is not None \
+        else _DEFAULT_SLOW_THRESHOLD_MS
+    out["slow_ms_threshold"] = thr
+    with _METRICS_LOCK:
+        rows = list(_METRICS.values())
+    flat: List[float] = []
+    for row in rows:
+        flat.extend(row["latencies"][-1000:])
+    flat = flat[-limit:]
+    out["count"] = len(flat)
+    if flat:
+        out["avg_ms"] = round(sum(flat) / len(flat), 2)
+        out["max_ms"] = round(max(flat), 2)
+        out["last_ms"] = round(flat[-1], 2)
+        out["slow_count"] = sum(1 for v in flat if v >= thr)
+    return out
+
+
+def service_usage(service: str) -> Optional[Dict[str, Any]]:
+    """مؤشرات خدمة واحدة: عدد الاستدعاءات/النجاح/الفشل/الاستجابة/الذروة."""
+    with _METRICS_LOCK:
+        row = _METRICS.get(str(service))
+    if row is None:
+        return None
+    return {"service": row["service"], "calls": row["calls"],
+            "ok": row["ok"], "failed": row["failed"],
+            "avg_latency_ms": row["avg_latency_ms"],
+            "max_latency_ms": row["max_latency_ms"],
+            "last_latency_ms": row["last_latency_ms"],
+            "slow_count": row["slow_count"],
+            "slow_threshold_ms": row["slow_threshold_ms"],
+            "health": "healthy" if not row["slow_count"]
+            else ("degraded" if row["slow_count"] < row["calls"] * 0.5
+                  else "critical")}
+
+
+def all_service_usage() -> Dict[str, Any]:
+    """مؤشرات كل الخدمات المسجّلة مرتبة بالاستخدام."""
+    with _METRICS_LOCK:
+        rows = sorted(_METRICS.values(), key=lambda r: r["calls"],
+                      reverse=True)
+    return {"services": [{k: v for k, v in row.items()}
+                          for row in rows],
+            "total_services": len(rows),
+            "total_calls": sum(r["calls"] for r in rows),
+            "total_slow": sum(r["slow_count"] for r in rows),
+            "slow_ms_threshold": _DEFAULT_SLOW_THRESHOLD_MS}
+
+
+def reset_service_metrics() -> None:
+    """إعادة ضبط كل مؤشرات الأداء (للاختبارات والصيانة)."""
+    with _METRICS_LOCK:
+        _METRICS.clear()
+
+
+def system_memory() -> Dict[str, Any]:
+    """مؤشرات استخدام الذاكرة دون اعتماديات خارجية (stdlib فقط).
+
+    VmRSS الفعلية من /proc/self/status، الإجمالي/المتاح من /proc/meminfo،
+    وأقصى RSS من resource.getrusage. كل قراءة تتسامح مع فشل فردي.
+    """
+    result: Dict[str, Any] = {"memory_used_mb": None,
+                              "memory_total_mb": None,
+                              "memory_percent": None,
+                              "peak_rss_mb": None}
+    try:
+        with open("/proc/self/status", "r", encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("VmRSS:"):
+                    result["memory_used_mb"] = round(
+                        int(line.split()[1]) / 1024.0, 1)
+                    break
+    except (OSError, IndexError, ValueError):
+        pass
+    try:
+        info: Dict[str, int] = {}
+        with open("/proc/meminfo", "r", encoding="utf-8") as fh:
+            for line in fh:
+                parts = line.split()
+                if len(parts) >= 2 and parts[-1] == "kB":
+                    info[parts[0].rstrip(":")] = int(parts[1])
+        total_kb = info.get("MemTotal")
+        available_kb = info.get("MemAvailable")
+        if total_kb:
+            result["memory_total_mb"] = round(total_kb / 1024.0, 1)
+            used_mb = result.get("memory_used_mb")
+            if available_kb is not None:
+                result["memory_percent"] = round(
+                    100.0 * (total_kb - available_kb) / total_kb, 1)
+            elif used_mb is not None:
+                result["memory_percent"] = round(
+                    100.0 * (used_mb * 1024.0) / total_kb, 1)
+    except (OSError, IndexError, ValueError):
+        pass
+    try:
+        import resource as _res
+        result["peak_rss_mb"] = round(
+            _res.getrusage(_res.RUSAGE_SELF).ru_maxrss / 1024.0, 1)
+    except Exception:
+        pass
+    return result
 
 
 def _emit_service_event(service: str, action: str,
