@@ -12,39 +12,91 @@ from __future__ import annotations
 
 from app_core import *  # noqa: F401,F403 — كل الثوابت والدوال المساعدة المشتركة
 from ui_components import inject_design_system, render_brand_bar, render_status_bar
-
 from ui_pages.home import render_home
-from ui_pages.search import render_search
-from ui_pages.quran import render_quran
-from ui_pages.qa import render_qa
-from ui_pages.higgsfield import render_higgsfield, _render_hf_result
-from ui_pages.training import render_training, render_nsm_routing
-from ui_pages.training_notebook import render_training_notebook
-from ui_pages.scheduler_hub import render_scheduler_hub
-from ui_pages.aiaas_console import render_aiaas_console
-from ui_pages.economic_engine import render_economic_engine, render_aiaas_economy_hub
-from ui_pages.training_ops_dashboard import render_training_ops_dashboard
-from ui_pages.training_monitor import render_training_monitor
-from ui_pages.moe_agent_studio import render_moe_agent_studio
-from ui_pages.memory import render_memory
-from ui_pages.health import render_health
-from ui_pages.advanced_api import render_advanced_api
-from ui_pages.artifacts_studio import render_artifacts_studio
-from ui_pages.dev_console import render_dev_console
-from ui_pages.nsm_terminal import render_nsm_terminal
-from ui_pages.nsm_terminal_live import render_nsm_terminal_live
-from ui_pages.product_info import render_product_info
-from ui_pages.ultraplinian import render_ultraplinian
-from ui_pages.fable import render_fable
-from ui_pages.translate import render_translate
-from ui_pages.chat import render_chat
-from ui_pages.social_agent import render_social_agent
-from ui_pages.unified_agent import render_unified_agent
-from ui_pages.agents_hub import render_agents_hub, _render_agent_page
-from ui_pages.system_core import render_system_core
-from ui_pages.agent_orchestrator import render_agent_orchestrator
-from ui_pages.agent_monitor import render_agent_monitor
-from ui_pages.swarm_studio import render_swarm_studio
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 🚀 تحميل كسول (Lazy Loading) للصفحات غير الرئيسية — معالجة البداية الباردة
+# ─────────────────────────────────────────────────────────────────────────
+# المشكلة: قبل هذا الإصلاح كان كل تبويب (32 صفحة ui_pages) يُستورد عند بدء
+# التطبيق، وكل استيراد يستورد app_core (~1.2 ثانية لكل صفحة عند أول استيراد)
+# ما يجعل boot الأول بطيئًا ومستهلكًا للذاكرة على Community Cloud المحدودة.
+# الحل: wrapper يستورد الوحدة عند أول استدعاء فعلي للوظيفة فقط — الصفحة
+# الرئيسية تبقى استيرادًا مباشرًا لأنها تُعرض فورًا لكل زائر، وبقية الصفحات
+# تُستورد عند أول نقرة على تبويبها فقط، ثم تُخزَّن في الذاكرة (cache) forever.
+# ═══════════════════════════════════════════════════════════════════════════
+_lazy_module_cache: Dict[str, Any] = {}
+
+def _lazy_page(module_path: str, func_name: str):
+    """يعيد wrapper يستورد الوحدة/الوظيفة عند أول استدعاء فقط (مخزنة بعد ذلك)."""
+    def _wrapper(*args, **kwargs):
+        if module_path not in _lazy_module_cache:
+            _lazy_module_cache[module_path] = __import__(module_path, fromlist=[func_name])
+        return getattr(_lazy_module_cache[module_path], func_name)(*args, **kwargs)
+    _wrapper.__name__ = func_name
+    _wrapper.__doc__ = "(lazy import) " + module_path
+    return _wrapper
+
+render_search = _lazy_page("ui_pages.search", "render_search")
+render_quran = _lazy_page("ui_pages.quran", "render_quran")
+render_qa = _lazy_page("ui_pages.qa", "render_qa")
+render_higgsfield = _lazy_page("ui_pages.higgsfield", "render_higgsfield")
+_training_mod = None  # import كامل عند أول طلب (الوحدة فيها دالتان render)
+def render_training(*a, **kw):
+    global _training_mod
+    if _training_mod is None:
+        _training_mod = __import__("ui_pages.training", fromlist=["render_training", "render_nsm_routing"])
+    return _training_mod.render_training(*a, **kw)
+def render_nsm_routing(*a, **kw):
+    global _training_mod
+    if _training_mod is None:
+        _training_mod = __import__("ui_pages.training", fromlist=["render_training", "render_nsm_routing"])
+    return _training_mod.render_nsm_routing(*a, **kw)
+render_training_notebook = _lazy_page("ui_pages.training_notebook", "render_training_notebook")
+render_scheduler_hub = _lazy_page("ui_pages.scheduler_hub", "render_scheduler_hub")
+render_aiaas_console = _lazy_page("ui_pages.aiaas_console", "render_aiaas_console")
+_econ_mod = None
+def render_economic_engine(*a, **kw):
+    global _econ_mod
+    if _econ_mod is None:
+        _econ_mod = __import__("ui_pages.economic_engine", fromlist=["render_economic_engine", "render_aiaas_economy_hub"])
+    return _econ_mod.render_economic_engine(*a, **kw)
+def render_aiaas_economy_hub(*a, **kw):
+    global _econ_mod
+    if _econ_mod is None:
+        _econ_mod = __import__("ui_pages.economic_engine", fromlist=["render_economic_engine", "render_aiaas_economy_hub"])
+    return _econ_mod.render_aiaas_economy_hub(*a, **kw)
+render_training_ops_dashboard = _lazy_page("ui_pages.training_ops_dashboard", "render_training_ops_dashboard")
+render_training_monitor = _lazy_page("ui_pages.training_monitor", "render_training_monitor")
+render_moe_agent_studio = _lazy_page("ui_pages.moe_agent_studio", "render_moe_agent_studio")
+render_memory = _lazy_page("ui_pages.memory", "render_memory")
+render_health = _lazy_page("ui_pages.health", "render_health")
+render_advanced_api = _lazy_page("ui_pages.advanced_api", "render_advanced_api")
+render_artifacts_studio = _lazy_page("ui_pages.artifacts_studio", "render_artifacts_studio")
+render_dev_console = _lazy_page("ui_pages.dev_console", "render_dev_console")
+render_nsm_terminal = _lazy_page("ui_pages.nsm_terminal", "render_nsm_terminal")
+render_nsm_terminal_live = _lazy_page("ui_pages.nsm_terminal_live", "render_nsm_terminal_live")
+render_product_info = _lazy_page("ui_pages.product_info", "render_product_info")
+render_ultraplinian = _lazy_page("ui_pages.ultraplinian", "render_ultraplinian")
+render_fable = _lazy_page("ui_pages.fable", "render_fable")
+render_translate = _lazy_page("ui_pages.translate", "render_translate")
+render_chat = _lazy_page("ui_pages.chat", "render_chat")
+render_social_agent = _lazy_page("ui_pages.social_agent", "render_social_agent")
+render_unified_agent = _lazy_page("ui_pages.unified_agent", "render_unified_agent")
+_agents_mod = None
+def render_agents_hub(*a, **kw):
+    global _agents_mod
+    if _agents_mod is None:
+        _agents_mod = __import__("ui_pages.agents_hub", fromlist=["render_agents_hub", "_render_agent_page"])
+    return _agents_mod.render_agents_hub(*a, **kw)
+def _render_agent_page(*a, **kw):
+    global _agents_mod
+    if _agents_mod is None:
+        _agents_mod = __import__("ui_pages.agents_hub", fromlist=["render_agents_hub", "_render_agent_page"])
+    return _agents_mod._render_agent_page(*a, **kw)
+render_system_core = _lazy_page("ui_pages.system_core", "render_system_core")
+render_agent_orchestrator = _lazy_page("ui_pages.agent_orchestrator", "render_agent_orchestrator")
+render_agent_monitor = _lazy_page("ui_pages.agent_monitor", "render_agent_monitor")
+render_swarm_studio = _lazy_page("ui_pages.swarm_studio", "render_swarm_studio")
 
 
 

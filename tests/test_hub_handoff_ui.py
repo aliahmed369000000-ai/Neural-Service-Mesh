@@ -91,4 +91,6 @@ check("حُذفت بيانات اختبار الواجهة", job_id not in [h.ge
 
 print("=" * 50)
 print(f"النتيجة: {PASS} نجاح / {FAIL} فشل")
-sys.exit(1 if FAIL else 0)
+assert FAIL == 0, f"اختبار واجهة تبديل الحسابات: {FAIL} فشل / {PASS} نجاح"
+if __name__ == "__main__" and FAIL:  # تشغيل مستقل: خطأ عند الفشل
+    raise SystemExit(1)
