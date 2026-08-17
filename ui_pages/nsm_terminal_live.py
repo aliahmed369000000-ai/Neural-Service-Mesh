@@ -21,6 +21,7 @@ from __future__ import annotations
 import re
 import threading
 import time
+from pathlib import Path
 from typing import Any, Dict, List
 
 import streamlit as st
@@ -463,8 +464,61 @@ def _render_smart(term, sess, sid):
             st.toast(f"✅ استُعيدت {n} جلسة", icon="✅")
             st.rerun()
 
+    # 🆕 v4: رفع وتنزيل الملفات — الملفات تُرفع إلى مجلد الجلسة الحالي (cwd) وتُشترك
+    # بين كل نوافذ المتصفح لأن الطرفية والجلسات مشتركة على الخادم
+    st.markdown("**📁 الملفات — رفع/تنزيل**")
+    if st.button("📂 تحديث قائمة cwd", use_container_width=True, key="nsm_live_files_refresh"):
+        st.session_state.setdefault("nsm_live_files", {}).clear()
+        st.rerun()
+    files = _term_list_files(term, sess)
+    if files:
+        f1, f2 = st.columns(2)
+        with f1:
+            st.markdown("**الموجود في cwd:**")
+            for f in files[:30]:
+                fp = Path(sess.cwd) / f
+                if fp.is_file():
+                    st.download_button(f"⬇️ {f}", data=fp.read_bytes(),
+                                       file_name=f,
+                                       mime="application/octet-stream",
+                                       key=f"nsm_live_fdl_{f}")
+        with f2:
+            st.caption(f"(30 ملفًا كحد أقصى — مجلد: `{sess.cwd}`)")
+    up_files = st.file_uploader("⬆️ رفع ملفات إلى cwd", accept_multiple_files=True,
+                                key="nsm_live_file_up")
+    if up_files:
+        n_ok, n_err = 0, 0
+        for f in up_files:
+            try:
+                dest = Path(sess.cwd) / f.name
+                try:
+                    dest.resolve().relative_to(term.root.resolve())
+                except ValueError:
+                    dest = term.root / f.name
+                dest.write_bytes(f.read())
+                n_ok += 1
+            except Exception:
+                n_err += 1
+        st.toast(f"✅ رفعت {n_ok}" + (f" · ❌ فشلت {n_err}" if n_err else ""))
+        st.rerun()
+
     st.caption("ملاحظة: السجل الكامل (التدقيق) محفوظ في ai/nsm_terminal.py ويُقرأ "
-               "عبر امر `audit` داخل التيرمنال.")
+               "عبر امر `audit` داخل التيرمنال.\n"
+               "ملاحظة: الجلسات والمجلدات مشتركة بين كل نوافذ المتصفح — الملفات المرفوعة "
+               "متاحة لكل طرفية فورًا.")
+
+
+def _term_list_files(term, sess) -> list:
+    """🆕 v4: قائمة ملفات cwd بأمان — يعيد أسماء ملفات فقط ويحدّ المجلد بالجذر."""
+    try:
+        p = Path(sess.cwd)
+        try:
+            p.resolve().relative_to(term.root.resolve())
+        except ValueError:
+            p = term.root
+        return sorted(x.name for x in p.iterdir() if x.is_file())[:60]
+    except Exception:
+        return []
 
 
 # ══════════════════════ 4. الوكلاء ══════════════════════

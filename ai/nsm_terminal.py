@@ -283,6 +283,28 @@ class NSMTerminal:
             register_default_agents()
         except Exception:
             pass
+        # 🆕 v4: استعادة تلقائية من آخر snapshot عند بدء الطرفية (بعد استكمال التهيئة)
+        try:
+            self.restore_sessions_snapshot()
+        except Exception:
+            pass
+        # 🆕 v4: حفظ دوري تلقائي كل 5 دقائق (جلسات + aliases) ليعمل كخطة نجاة عند إعادة التشغيل
+        self._autosave_timer: Optional[threading.Timer] = None
+        try:
+            self._start_autosave()
+        except Exception:
+            pass
+
+    def _start_autosave(self) -> None:
+        """مؤقت داخلي: يحفظ snapshot تلقائيًا كل 5 دقائق. لا يؤثر على السجل."""
+        try:
+            self.save_sessions_snapshot()
+            self.save_aliases()
+        except Exception:
+            pass
+        self._autosave_timer = threading.Timer(300.0, self._start_autosave)
+        self._autosave_timer.daemon = True
+        self._autosave_timer.start()
 
     # ─────────────── 🆕 aliases + حفظ/استعادة ───────────────
     def _load_aliases(self) -> None:
@@ -328,7 +350,8 @@ class NSMTerminal:
         return cmd
 
     def save_sessions_snapshot(self) -> bool:
-        """يحفظ حالة الجلسات الحالية (بدون السجل الكامل) لاستعادتها عند إعادة التشغيل."""
+        """يحفظ حالة الجلسات الحالية (بدون السجل الكامل) لاستعادتها عند إعادة التشغيل.
+        🆕 v4: الاستعادة تلقائية الآن عند كل بدء للطرفية — هذا الحفظ دوري كل 5 دقائق."""
         try:
             data = [{"id": s.id, "cwd": s.cwd, "mode": s.mode, "agent": s.agent,
                      "env": dict(s.env), "created_at": s.created_at}

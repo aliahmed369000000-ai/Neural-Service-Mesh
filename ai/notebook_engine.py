@@ -175,21 +175,22 @@ def import_ipynb(path: str | Path, name: Optional[str] = None) -> Notebook:
         src = c.get("source") or ""
         if isinstance(src, list):
             src = "".join(src)
+        meta = dict(c.get("metadata") or {})
         ctype = c.get("cell_type") or "code"
         if ctype == "markdown":
             ntype = "markdown"
         else:
-            # كشف bash / train تقريبي
-            if src.lstrip().startswith("!") or "subprocess" in src[:200]:
-                ntype = "code"  # نبقي code لأن ! لا يعمل محلياً كما في IPython
-            else:
+            # 🆕 v4: استعادة نوع خلية NSM الأصلي إن حُفظ في metadata عند التصدير
+            ntype = meta.pop("nsm_type", None) or "code"
+            if ntype not in ("code", "bash", "train", "sql", "http"):
                 ntype = "code"
+            meta.pop("nsm_id", None)
         cell = Cell(
             id=uuid.uuid4().hex[:8],
             type=ntype,
             source=src,
             execution_count=c.get("execution_count"),
-            metadata={"from_ipynb": True, **(c.get("metadata") or {})},
+            metadata={"from_ipynb": True, **meta},
         )
         # لا ننسخ مخرجات ضخمة
         cells.append(cell)
@@ -197,6 +198,61 @@ def import_ipynb(path: str | Path, name: Optional[str] = None) -> Notebook:
     nb = Notebook(id=uuid.uuid4().hex[:10], name=title, cells=cells, provider="kaggle")
     save_notebook(nb)
     return nb
+
+
+def export_ipynb(nb: Notebook) -> str:
+    """يصدّر الدفتر كـ ipynb قياسي (nbformat 4.5) قابل للفتح في Colab/Jupyter.
+    يتضمن المخرجات النصية لكل خلية، ويحفظ نوع خلية NSM في metadata لاستعادة دقيقة عند الاستيراد."""
+    cells_out: List[Dict[str, Any]] = []
+    for cell in nb.cells:
+        kind = "code" if cell.type in ("code", "bash", "train", "sql", "http") else "markdown"
+        outputs: List[Dict[str, Any]] = []
+        for out in (cell.outputs or []):
+            if out.get("type") == "stream":
+                outputs.append({"output_type": "stream", "name": "stdout",
+                                "text": ["".join(out.get("text") or [])]})
+            elif out.get("type") == "error":
+                outputs.append({"output_type": "error",
+                                "ename": out.get("ename") or "Error",
+                                "evalue": out.get("evalue") or "",
+                                "traceback": list(out.get("traceback") or []),
+                                "execution_count": cell.execution_count})
+            elif out.get("type") in ("display", "execute_result"):
+                data = out.get("data") or out.get("text")
+                if data is None:
+                    continue
+                if isinstance(data, dict):
+                    # dict قد يحوي text/plain مباشرة أو مفاتيح MIME
+                    txt = ""
+                    for m in ("text/plain", "text/html", "text/markdown"):
+                        if m in data:
+                            v = data[m]
+                            txt = "".join(v) if isinstance(v, list) else str(v)
+                            break
+                    if not txt:
+                        txt = str(data)[:_MAX_OUTPUT]
+                elif isinstance(data, list):
+                    txt = "".join(str(x) for x in data)
+                else:
+                    txt = str(data)
+                outputs.append({"output_type": "execute_result",
+                                "data": {"text/plain": [txt[:_MAX_OUTPUT]]},
+                                "metadata": {},
+                                "execution_count": cell.execution_count})
+        cells_out.append({
+            "cell_type": kind,
+            "metadata": {"nsm_type": cell.type, "nsm_id": cell.id},
+            "source": cell.source.splitlines(keepends=True) if cell.source else [],
+            "outputs": outputs,
+            "execution_count": cell.execution_count,
+        })
+    nbj = {"nbformat": 4, "nbformat_minor": 5,
+           "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python",
+                                       "name": "python3"},
+                        "language_info": {"name": "python", "version": "3.12"},
+                        "nsm_notebook": {"id": nb.id, "name": nb.name}},
+           "cells": cells_out}
+    return json.dumps(nbj, ensure_ascii=False, indent=1)
 
 
 def _surahchain_kaggle_cells() -> List[Cell]:
@@ -1450,112 +1506,3 @@ def run_all(nb: Notebook, timeout: int = _DEFAULT_TIMEOUT, stop_on_error: bool =
             if stop_on_error:
                 break
     return results
-
-
-def export_ipynb(nb: Notebook) -> dict:
-    """تصدير شبه Jupyter nbformat 4."""
-    cells_out = []
-    for c in nb.cells:
-        if c.type == "markdown":
-            cells_out.append({
-                "cell_type": "markdown",
-                "metadata": {},
-                "source": c.source.splitlines(keepends=True) or [""],
-            })
-        else:
-            cells_out.append({
-                "cell_type": "code",
-                "execution_count": c.execution_count,
-                "metadata": {"nsm_type": c.type, **(c.metadata or {})},
-                "source": c.source.splitlines(keepends=True) or [""],
-                "outputs": _export_cell_outputs(c.outputs),
-            })
-    return {
-        "nbformat": 4,
-        "nbformat_minor": 5,
-        "metadata": {
-            "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
-            "language_info": {"name": "python", "version": "3.12"},
-            "nsm": {"id": nb.id, "provider": nb.provider, "name": nb.name},
-        },
-        "cells": cells_out,
-    }
-
-
-def _export_cell_outputs(outputs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """🆕 تحويل مخرجات kernel إلى صيغة nbformat 4 القابلة للاستيراد في
-    Colab/Kaggle. المخرجات القديمة (subprocess stream dict) تُحوَّل أيضًا."""
-    out: List[Dict[str, Any]] = []
-    for o in outputs or []:
-        otype = o.get("type", "")
-        if otype == "markdown":
-            continue
-        if otype == "stream":
-            if "stdout" in o or "stderr" in o:
-                # البنية القديمة من subprocess
-                if o.get("stdout"):
-                    out.append({"output_type": "stream", "name": "stdout",
-                                "text": o["stdout"].splitlines(keepends=True)})
-                if o.get("stderr"):
-                    out.append({"output_type": "stream", "name": "stderr",
-                                "text": o["stderr"].splitlines(keepends=True)})
-            else:
-                # البنية ipynb-native من kernel
-                out.append({"output_type": "stream", "name": o.get("name", "stdout"),
-                            "text": (o.get("text") or "").splitlines(keepends=True)})
-        elif otype in ("display_data", "execute_result"):
-            data = o.get("data") or {}
-            if not data:
-                continue
-            payload: Dict[str, Any] = {
-                "output_type": otype,
-                "metadata": dict(o.get("metadata") or {}),
-                "data": {},
-            }
-            for mime, val in data.items():
-                if isinstance(val, str):
-                    payload["data"][mime] = val.splitlines(keepends=True)
-                else:
-                    payload["data"][mime] = val
-            if "execution_count" in o and o["execution_count"] is not None:
-                payload["execution_count"] = o["execution_count"]
-            out.append(payload)
-        elif otype == "error":
-            out.append({
-                "output_type": "error",
-                "ename": o.get("ename", "Error"),
-                "evalue": o.get("evalue", ""),
-                "traceback": list(o.get("traceback") or []),
-            })
-        elif otype == "sql_result":
-            # جدول نتائج SQL — يعرَّض كـHTML في التصدير
-            rows_html = []
-            for _res in o.get("results") or []:
-                _cols = _res.get("cols") or []
-                _rows = _res.get("rows") or []
-                rows_html.append("<table border='1'>"
-                                 + "<tr>" + "".join(
-                                     f"<th>{str(_c)}</th>" for _c in _cols)
-                                 + "</tr>" + "".join(
-                    "<tr>" + "".join(f"<td>{_truncate(str(_v))}</td>"
-                                     for _v in _row) + "</tr>"
-                    for _row in _rows)
-                                 + "</table>")
-            if rows_html:
-                out.append({"output_type": "display_data",
-                            "metadata": {"nsm_sql": True},
-                            "data": {"text/html": rows_html}})
-        elif otype == "http_result":
-            _lines = [f"HTTP status: {o.get('status')}"]
-            for _hk, _hv in (o.get("headers") or {}).items():
-                _lines.append(f"{str(_hk)}: {str(_hv)}")
-            _lines.append("")
-            _lines.append((o.get("body") or "")[:20_000])
-            out.append({"output_type": "stream", "name": "stdout",
-                        "text": "\n".join(_lines).splitlines(keepends=True)})
-        elif otype == "markdown_ex":
-            out.append({"output_type": "display_data",
-                        "metadata": {"nsm_md_ex": True},
-                        "data": {"text/html": o.get("html", "")}})
-        # أي بنية غير معروفة تُتجاهل بأمان
-    return out

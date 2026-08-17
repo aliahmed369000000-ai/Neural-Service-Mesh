@@ -511,6 +511,22 @@ def render_training_notebook():
                 if st.button("إلغاء", use_container_width=True, key="nb_import_cancel"):
                     st.session_state.pop("nb_show_import", None)
                     st.rerun()
+            # 🆕 v4: تصدير الدفتر كـ ipynb قياسي (يفتح في Colab/Jupyter)
+            if st.button("⬇️ تصدير ipynb", use_container_width=True, key="nb_export_ask"):
+                st.session_state["nb_show_export"] = True
+                st.rerun()
+            if st.session_state.get("nb_show_export"):
+                from ai.notebook_engine import export_ipynb as _export
+                ipynb_text = _export(nb)
+                safe_name = re.sub(r"[^A-Za-z0-9_\u0600-\u06FF\-]", "_", nb.name)[:60] or "nsm_lab"
+                st.download_button("⬇️ تنزيل {}.ipynb".format(safe_name),
+                                   data=ipynb_text,
+                                   file_name=f"{safe_name}.ipynb",
+                                   mime="application/x-ipynb+json",
+                                   use_container_width=True, key="nb_export_dl")
+                if st.button("إغلاق", use_container_width=True, key="nb_export_close"):
+                    st.session_state.pop("nb_show_export", None)
+                    st.rerun()
             if st.button("⎘ استنساخ", use_container_width=True, key="nb_dup_ask"):
                 dup = duplicate_notebook(nb)
                 st.session_state.nsm_nb_id = dup.id
