@@ -1072,9 +1072,9 @@ def generate_surahchain_kernel_script(
             try:
                 import torch
                 import torch_xla
-                import torch_xla.core.xla_model as xm
                 print("torch", torch.__version__, "torch_xla", torch_xla.__version__)
-                print("XLA device:", xm.xla_device())
+                # لا نستدعي xm.xla_device() هنا — تهيئة XLA تتم مرة واحدة فقط
+                # داخل سكربت التدريب (إصلاح انهيار SIGABRT: double-init).
             except Exception as _xe:
                 print("⚠ torch_xla غير متوفر:", _xe)
         else:
@@ -1122,6 +1122,8 @@ def generate_surahchain_kernel_script(
             "SCN_GRAD_ACCUM": "8" if SCN_TPU == "1" else "2",
             "SCN_COMPILE": "0",
             "XLA_USE_BF16": "1" if SCN_TPU == "1" else "0",
+            "XLA_USE_SPMD": "0",
+            "XLA_LOG_LEVEL": "0",
         })
         script = work / "experiments/surah_chain_network/run_train_then_push.py"
         print("▶", script)

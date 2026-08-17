@@ -52,6 +52,10 @@ def get_device() -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+_XLA_DEVICE_CACHE: Optional[torch.device] = None
+_XLA_DEVICE_TRIED: bool = False
+
+
 def _xla_available() -> bool:
     """هل PyTorch/XLA (TPU) متاح في بيئة التشغيل؟"""
     try:
@@ -66,14 +70,28 @@ def get_xla_device() -> Optional[torch.device]:
 
     على Kaggle TPU v5e-8: صور TPUVM تأتي مع torch_xla مثبتًا. تفعيل
     SCN_TPU=1 يحرك التدريب إلى xm.xla_device() مع mark_step() بعد كل خطوة.
+
+    إصلاح انهيار SIGABRT ("InitializeComputationClient() can only be called
+    once"): جهاز XLA يُهيَّأ مرة واحدة فقط ويُخزَّن في cache داخل الوحدة،
+    حتى لا تتكرر تهيئة XLAGuardImpl/GetComputationClient من استيرادات
+    xm متعددة داخل الدوال أو من torch.autograd.Engine عند النقل إلى xla.
     """
+    global _XLA_DEVICE_CACHE, _XLA_DEVICE_TRIED
     if os.environ.get("SCN_TPU", "0") != "1":
+        return None
+    if _XLA_DEVICE_TRIED:
+        return _XLA_DEVICE_CACHE
+    _XLA_DEVICE_TRIED = True
+    try:
+        import torch_xla  # noqa: F401  (تهيئة واحدة عبر import الجذر)
+    except Exception:
         return None
     if not _xla_available():
         return None
     try:
         import torch_xla.core.xla_model as xm
         dev = xm.xla_device()
+        _XLA_DEVICE_CACHE = dev
         return dev
     except Exception:
         return None
@@ -85,7 +103,7 @@ def xla_mark_step(device: Optional[torch.device]) -> None:
         return
     try:
         import torch_xla.core.xla_model as xm
-        xm.mark_step()
+        xm.mark_step(device)
     except Exception:
         pass
 
