@@ -193,7 +193,27 @@ if TAG in ("d128_s1", "d128_s1p0") or (D_MODEL == 128 and CHAIN_SCALE == 1.0 and
 
 
 def load_pretrain_sentences(max_n: int) -> list:
-    """يحمّل من الكاش؛ إن لم يوجد أو كان أصغر من المطلوب يشغّل التحضير."""
+    """يحمّل من الكاش؛ إن لم يوجد أو كان أصغر من المطلوب يشغّل التحضير.
+
+    وضع العامل الموزّع: SCN_WORKER_CACHE=<مسار cache.pkl منفصل للعامل>
+    يتجاوز الكاش المشترك كليًا حتى لا يحصل كل عامل على نفس البيانات.
+    """
+    worker_cache = os.environ.get("SCN_WORKER_CACHE", "").strip()
+    if worker_cache:
+        from pathlib import Path as _P
+        wcp = _P(worker_cache)
+        if wcp.is_file():
+            try:
+                with open(wcp, "rb") as f:
+                    data = pickle.load(f)
+                if isinstance(data, list):
+                    out = [s.strip() for s in data if isinstance(s, str) and len(s.strip()) >= 20]
+                    random.Random(0).shuffle(out)
+                    print(f"كاش العامل ({worker_cache}): {len(out)} مقطع")
+                    return out[:max_n]
+            except Exception as e:
+                print(f"كاش العامل فشل: {e}")
+        return []  # لا fallback للكاش المشترك — العامل يحمّل بياناته بنفسه
     if PRETRAIN_CACHE.exists():
         with open(PRETRAIN_CACHE, "rb") as f:
             data = pickle.load(f)
