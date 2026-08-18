@@ -1,12 +1,12 @@
 {
-  "epochs_done": 2,
+  "epochs_done": 1,
   "last_loss": 0.0,
-  "round": 2,
-  "n_texts": 50000,
-  "batch": 128,
+  "round": 1,
+  "n_texts": 100000,
+  "batch": 64,
   "preset": "medium",
   "worker_id": "kaggle",
   "branch": "dist-worker-kaggle",
-  "updated_at": "2026-08-18T20:52:43.721102+00:00",
+  "updated_at": "2026-08-18T21:12:01.624944+00:00",
   "d_model": 256
 }
