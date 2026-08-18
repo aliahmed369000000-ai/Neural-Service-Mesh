@@ -4,7 +4,6 @@
 # الملفات الموجودة مسبقاً في التاريخ تبقى عادية حتى تُهاجَر بـ:
 #   git lfs migrate import --include="*.pkl,*.npy,..." --everything
 # أو من جهاز بوصول شبكة كامل: git add --renormalize . بعد تحديث هذا الملف.
-
 # ── أوزان ونماذج الشبكات العصبية ──────────────────────────────────────────
 *.npy filter=lfs diff=lfs merge=lfs -text
 *.npz filter=lfs diff=lfs merge=lfs -text
