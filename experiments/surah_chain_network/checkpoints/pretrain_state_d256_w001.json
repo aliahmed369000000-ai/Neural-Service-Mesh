@@ -1,10 +1,10 @@
 {
   "data_source": "Jr23xd23/ArabicText-Large (pretrain)",
   "n_sentences": 2000,
-  "epochs_completed": 2,
-  "epochs_this_run": 2,
+  "epochs_completed": 18,
+  "epochs_this_run": 0,
   "epochs_planned": 2,
-  "best_loss": 3.6925379161834715,
+  "best_loss": 1.3465,
   "history": [
     {
       "epoch": 1,
