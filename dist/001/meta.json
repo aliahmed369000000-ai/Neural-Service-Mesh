@@ -3,10 +3,10 @@
   "last_loss": 3.6925379161834715,
   "round": 1,
   "n_texts": 12000,
-  "batch": 32,
+  "batch": 16,
   "preset": "medium",
   "worker_id": "001",
   "branch": "dist-worker-001",
-  "updated_at": "2026-08-18T06:24:56.128846+00:00",
+  "updated_at": "2026-08-18T06:32:55.136033+00:00",
   "d_model": 256
 }
