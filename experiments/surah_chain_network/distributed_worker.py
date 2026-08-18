@@ -233,7 +233,9 @@ def _train_round(texts: list, start_from: Path | None, round_idx: int) -> dict:
         "SCN_RESUME": "none",           # لا استئناف من GitHub — worker يدير أوزانه بنفسه
         "SCN_CHECKPOINT_EVERY": "1",
         "SCN_UPLOAD_RETRIES": "1",      # لا نرفع داخل التدريب — worker يرفع بنفسه
+        "SCN_GRAD_ACCUM": "4",          # effective batch = BATCH×4
         "SCN_WORKER_CACHE": str(WORK_DIR / "cache.pkl"),  # كاش العامل المنفصل
+        "SCN_TOKEN_CACHE": str(WORK_DIR / "tokens.pkl"),  # كاش التسلسلات (tokens.pkl)
         "PYTHONUNBUFFERED": "1",
         "TOKENIZERS_PARALLELISM": "false",
         "HF_DATASETS_NUM_PROC": "1",

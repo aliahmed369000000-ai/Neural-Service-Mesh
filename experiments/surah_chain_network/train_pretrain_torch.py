@@ -613,6 +613,7 @@ def main():
             for t in texts:
                 ids = m.tokenizer.encode(t, MAX_LEN)
                 token_seqs.append(ids.tolist() if hasattr(ids, "tolist") else list(ids))
+            Path(token_cache_path).parent.mkdir(parents=True, exist_ok=True)
             with open(token_cache_path, "wb") as f:
                 pickle.dump((token_seqs, MAX_LEN), f, protocol=pickle.HIGHEST_PROTOCOL)
             print(f"✅ pre-tokenize: {len(token_seqs)} تسلسل في {time.time() - t0:.1f}ث — {token_cache_path}")
