@@ -60,11 +60,10 @@ def _read_worker(tmp: Path, wid: str) -> dict | None:
         return None
     work = tmp / "workers" / wid
     work.mkdir(parents=True, exist_ok=True)
-    r = _run(["git", "-C", str(work), "init", "-q"], check=False) if not (work / ".git").exists() else _run(["true"])
-    # checkout via worktree بسيط: clone فرعي
     sub = tmp / "sub" / wid
+    # clone فرعي من origin مباشرة (tmp قد لا يحتوي الفرع محليًا)
     r = _run(["git", "clone", "-q", "-b", f"dist-worker-{wid}", "--single-branch",
-              str(tmp), str(sub)], check=False)
+              f"https://x-access-token:{TOKEN}@github.com/{REPO}.git", str(sub)], check=False)
     if r.returncode != 0:
         print(f"[agg] عامل {wid}: checkout فشل")
         return None
