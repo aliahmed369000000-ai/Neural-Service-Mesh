@@ -83,6 +83,11 @@ EXPAND_WARMUP_RUN = int(os.environ.get("SCN_EXPAND_WARMUP_RUN", "4"))  # عصو�
 EXPAND_FLAT_REL = float(os.environ.get("SCN_EXPAND_FLAT_REL", "0.015"))  # هضبة: تذبذب نسبي صغير
 STOP_PATIENCE = int(os.environ.get("SCN_STOP_PATIENCE", "0"))
 UNTIL_END = os.environ.get("SCN_UNTIL_END", "0") == "1"
+# ── Pre-tokenization (تسريع CPU 2-4×): SCN_PRE_TOKENIZE=1 يشفر كل النصوص
+#     مرة واحدة في البداية ويحفظ التسلسلات (tokens.pkl) — في كل خطوة
+#     يُبنى الـbatch من تسلسلات جاهزة بدل إعادة tokenize نص خام ──
+PRE_TOKENIZE = os.environ.get("SCN_PRE_TOKENIZE", "0").strip() == "1"
+TOKEN_CACHE = os.environ.get("SCN_TOKEN_CACHE", "").strip()
 FRESH = os.environ.get("SCN_FRESH", "0") == "1"
 RESUME_PATH = os.environ.get("SCN_RESUME_PATH", "").strip()
 # ── NSM resume ذكي: "auto" يستأنف تلقائيًا من آخر checkpoint مرفوع على GitHub
@@ -573,6 +578,45 @@ def main():
         m.tokenizer.save(str(VOCAB_PATH))
         print(f"قاموس: {n_vocab}")
 
+    # ── Pre-tokenization: تشفير كل النصوص مرة واحدة (تسريع 2-4× على CPU) ─
+    token_seqs = None
+    if PRE_TOKENIZE:
+        # مسار كاش التسلسلات: SCN_TOKEN_CACHE ثم الكاش المنفصل للعامل ثم افتراضي
+        token_cache_path = TOKEN_CACHE
+        if not token_cache_path:
+            wcache = os.environ.get("SCN_WORKER_CACHE", "").strip()
+            if wcache:
+                token_cache_path = wcache.replace("cache.pkl", "tokens.pkl")
+            else:
+                token_cache_path = str(_HERE / f"pretrain_tokens_{TAG}.pkl")
+        if Path(token_cache_path).is_file():
+            try:
+                with open(token_cache_path, "rb") as f:
+                    token_seqs, saved_len = pickle.load(f)
+                if isinstance(token_seqs, list) and len(token_seqs) == len(texts):
+                    print(f"✅ pre-tokenize: حُمّلت {len(token_seqs)} تسلسلات من الكاش")
+                else:
+                    print(f"⚠ كاش التسلسلات لا يطابق عدد المقاطع — يُعاد بناؤه")
+                    token_seqs = None
+            except Exception as e:
+                print(f"⚠ قراءة كاش التسلسلات فشلت ({e}) — يُعاد بناؤه")
+                token_seqs = None
+        if token_seqs is None:
+            print(f"pre-tokenize: تشفير {len(texts)} مقطع مرة واحدة (max_len={MAX_LEN})...")
+            t0 = time.time()
+            token_seqs = []
+            for t in texts:
+                ids = m.tokenizer.encode(t, MAX_LEN)
+                token_seqs.append(ids.tolist() if hasattr(ids, "tolist") else list(ids))
+            with open(token_cache_path, "wb") as f:
+                pickle.dump((token_seqs, MAX_LEN), f, protocol=pickle.HIGHEST_PROTOCOL)
+            print(f"✅ pre-tokenize: {len(token_seqs)} تسلسل في {time.time() - t0:.1f}ث — {token_cache_path}")
+        # استبدال النصوص الخام بالتسلسلات المشفرة — _encode_batch يقبل الاثنين
+        train_data = token_seqs
+        print(f"✅ وضع pre-tokenized: كل خطوة تُبنى من تسلسلات جاهزة (بلا tokenize حي)")
+    else:
+        train_data = texts
+
     print("params:", m.param_count())
 
     steps_per_epoch = max(1, (len(texts) + BATCH - 1) // BATCH)
@@ -625,7 +669,7 @@ def main():
         print(f"✅ gradient accumulation: {GRAD_ACCUM} micro-batches/step")
     stop_reason = ""
     for ep in range(start_epoch + 1, end_epoch + 1):
-        order = list(texts)
+        order = list(train_data)
         random.shuffle(order)
         ep_losses = []
         micro_buf = []

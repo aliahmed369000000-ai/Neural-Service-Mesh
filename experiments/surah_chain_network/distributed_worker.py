@@ -234,14 +234,15 @@ def _train_round(texts: list, start_from: Path | None, round_idx: int) -> dict:
         "TOKENIZERS_PARALLELISM": "false",
         "HF_DATASETS_NUM_PROC": "1",
     })
-    # إن أردنا الاستئناف من نموذج موحّد: ننسخه لموقع checkpoint
+    # إن أردنا الاستئناف من نموذج موحّد/محلي: نتأكد أنه في موقع checkpoint
     if start_from and start_from.exists():
         tag = os.environ.get("SCN_TAG", f"d{D_MODEL}_w{WORKER_ID}")
         dest = _HERE / "checkpoints" / f"latest_pretrain_{tag}.pt"
         dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(str(start_from), str(dest))
+        if Path(start_from).resolve() != dest.resolve():
+            shutil.copy(str(start_from), str(dest))
         env["SCN_FRESH"] = "0"
-        print(f"[worker-{WORKER_ID}] استئناف من نموذج موحّد → {dest.name}")
+        print(f"[worker-{WORKER_ID}] استئناف → {dest.name}")
     tag = os.environ.get("SCN_TAG", f"d{D_MODEL}_w{WORKER_ID}")
     env["SCN_TAG"] = tag
     print(f"[worker-{WORKER_ID}] بدء round {round_idx + 1}/{ROUNDS} (epochs={EPOCHS})...")
@@ -281,6 +282,28 @@ def main() -> int:
         if not _clone_branch(tmp):
             return 1
         start_from = _fetch_global_weights(tmp)
+
+        # ── استئناف محلي عند إعادة التشغيل (حماية من OOM/انقطاع الجلسة):
+        #     آخر وزن محلي يتفوق على global إن كان أحدث ──
+        tag = os.environ.get("SCN_TAG", f"d{D_MODEL}_w{WORKER_ID}")
+        local_latest = _HERE / "checkpoints" / f"latest_pretrain_{tag}.pt"
+        if local_latest.is_file():
+            lm = local_latest.stat().st_mtime
+            gm = Path(start_from).stat().st_mtime if (start_from and Path(start_from).is_file()) else 0.0
+            if lm > gm:
+                print(f"[worker-{WORKER_ID}] استئناف من الوزن المحلي الأحدث "
+                      f"(محلي {time.strftime('%H:%M', time.localtime(lm))} > "
+                      f"global {time.strftime('%H:%M', time.localtime(gm)) if gm else 'لا يوجد'})")
+                start_from = local_latest
+                ls = Path(_HERE / "checkpoints" / f"pretrain_state_{tag}.json")
+                if ls.is_file():
+                    try:
+                        sd = json.loads(ls.read_text())
+                        el = sd.get("epochs_completed") or sd.get("epochs_this_run") or 0
+                        if el:
+                            print(f"[worker-{WORKER_ID}] epochs مكتملة محليًا: {el}")
+                    except Exception:
+                        pass
 
         last_loss = 0.0
         for r_idx in range(ROUNDS):
