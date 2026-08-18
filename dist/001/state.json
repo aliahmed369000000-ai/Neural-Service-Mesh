@@ -1,10 +1,10 @@
 {
   "data_source": "Jr23xd23/ArabicText-Large (pretrain)",
   "n_sentences": 2000,
-  "epochs_completed": 18,
+  "epochs_completed": 46,
   "epochs_this_run": 0,
   "epochs_planned": 2,
-  "best_loss": 1.3465,
+  "best_loss": 0.5826,
   "history": [
     {
       "epoch": 1,
@@ -33,9 +33,9 @@
   "expand_log": [],
   "no_ckg": true,
   "resumed_from": null,
-  "global_step": 500,
+  "global_step": 34500,
   "stopped_early": false,
-  "stop_reason": null,
+  "stop_reason": "",
   "until_end": false,
   "stop_patience": 0,
   "use_8bit_adam": false,
