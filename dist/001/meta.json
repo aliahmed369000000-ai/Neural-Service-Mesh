@@ -1,5 +1,5 @@
 {
-  "epochs_done": 1,
+  "epochs_done": 18,
   "last_loss": 1.3465,
   "round": 1,
   "n_texts": 12000,
@@ -7,6 +7,7 @@
   "preset": "medium",
   "worker_id": "001",
   "branch": "dist-worker-001",
-  "updated_at": "2026-08-18T10:40:42.329112+00:00",
-  "d_model": 256
+  "d_model": 256,
+  "updated_at": "2026-08-18T10:50:00+00:00",
+  "note": "recovered epoch 18 after OOM SIGTERM — best locally"
 }
