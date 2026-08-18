@@ -1,0 +1,59 @@
+{
+  "data_source": "Jr23xd23/ArabicText-Large (pretrain)",
+  "n_sentences": 2000,
+  "epochs_completed": 2,
+  "epochs_this_run": 2,
+  "epochs_planned": 2,
+  "best_loss": 3.6925379161834715,
+  "history": [
+    {
+      "epoch": 1,
+      "loss": 4.862426606178284,
+      "lr": 0.000315616807681376
+    },
+    {
+      "epoch": 2,
+      "loss": 3.6925379161834715,
+      "lr": 5.0005483091286185e-05
+    }
+  ],
+  "seconds_this_run": 330.6,
+  "total_seconds": 330.6,
+  "d_model": 256,
+  "n_heads": 8,
+  "n_pre": 4,
+  "n_post": 4,
+  "chain_scale": 1.0,
+  "preset": "medium",
+  "tag": "d256_w001",
+  "device": "cpu",
+  "backend": "pytorch",
+  "real_batch": true,
+  "n_expands": 0,
+  "expand_log": [],
+  "no_ckg": true,
+  "resumed_from": null,
+  "global_step": 500,
+  "stopped_early": false,
+  "stop_reason": null,
+  "until_end": false,
+  "stop_patience": 0,
+  "use_8bit_adam": false,
+  "grad_accum": 1,
+  "params": {
+    "total": 12332563,
+    "chain": 1690316,
+    "d_model": 256,
+    "vocab_size": 8192,
+    "chain_width": 7,
+    "chain_scale": 1.0,
+    "use_qk_norm": true,
+    "use_gated_attn": true,
+    "n_kv_heads": 8,
+    "d_head": 32,
+    "d_ff": 1024,
+    "device": "cpu",
+    "compiled": false,
+    "tokenizer": "StrongTokenizer"
+  }
+}
