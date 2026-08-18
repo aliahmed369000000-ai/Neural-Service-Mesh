@@ -328,19 +328,24 @@ def _upload_checkpoint_once(token: str, repo: str, branch: str, tmp: Path,
     import subprocess
     shutil.rmtree(str(tmp), ignore_errors=True)
     try:
+        # إصلاح timeout: sparse checkout ضحل (فقط checkpoints) + timeout=900
         r = subprocess.run(
-            ["git", "clone", "-q", "--branch", branch,
+            ["git", "clone", "-q", "--depth", "1", "--single-branch",
+             "--branch", branch, "--filter=blob:none", "--sparse",
              f"https://x-access-token:{token}@github.com/{repo}.git", str(tmp)],
-            capture_output=True, text=True, timeout=300,
+            capture_output=True, text=True, timeout=900,
         )
         if r.returncode != 0:
             print(f"[checkpoint] clone فشل: {r.stderr[-200:]}")
             return "clone failed"
+        # sparse: جلب checkpoints فقط (بدون باقي المستودع)
+        subprocess.run(["git", "-C", str(tmp), "sparse-checkout", "set",
+                        "experiments/surah_chain_network/checkpoints"],
+                       capture_output=True, check=False)
         dest = tmp / "experiments" / "surah_chain_network" / "checkpoints"
         dest.mkdir(parents=True, exist_ok=True)
+        # رفع state + vocab فقط — الأوزان الثقيلة (.pt) تُرفع عبر distributed_worker.py على فرع dist
         files = [
-            (CKPT_LATEST, f"latest_pretrain_{TAG}.pt"),
-            (CKPT_BEST, f"best_pretrain_{TAG}.pt"),
             (STATE_FILE, f"pretrain_state_{TAG}.json"),
             (VOCAB_PATH, f"tokenizer_vocab_pretrain_{TAG}.json"),
         ]

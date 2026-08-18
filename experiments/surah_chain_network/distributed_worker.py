@@ -136,22 +136,26 @@ def _load_texts(n: int, seed: int) -> list:
 # ── التواصل مع GitHub ──────────────────────────────────────────────────────
 def _clone_branch(tmp: Path) -> bool:
     shutil.rmtree(str(tmp), ignore_errors=True)
-    r = _run(["git", "clone", "-q", f"https://x-access-token:{TOKEN}@github.com/{REPO}.git", str(tmp)])
+    # إصلاح timeout: clone ضحل + fetch branch محدد فقط (بدون تحميل كل الفروع)
+    r = _run(["git", "clone", "-q", "--depth", "1", "--single-branch",
+              "--branch", "main", "--filter=blob:none", "--sparse",
+              f"https://x-access-token:{TOKEN}@github.com/{REPO}.git", str(tmp)], timeout=1200)
     if r.returncode != 0:
         print(f"[worker-{WORKER_ID}] clone فشل: {(r.stderr or '')[-200:]}")
         return False
-    # clone يجلب كل الفروع: branch local سيعتبر branch tracking لـ origin/branch إن وجد
-    r = _run(["git", "-C", str(tmp), "checkout", "-q", "-B", BRANCH, f"origin/{BRANCH}"], check=False)
-    if r.returncode != 0:
-        r = _run(["git", "-C", str(tmp), "checkout", "-q", "-b", BRANCH, "origin/main"], check=False)
-        if r.returncode != 0:
-            r = _run(["git", "-C", str(tmp), "checkout", "-q", "-b", BRANCH], check=False)
+    # sparse: جلب dist/worker-id فقط
+    _run(["git", "-C", str(tmp), "sparse-checkout", "set", f"dist/{WORKER_ID}", "dist/global.pt", "dist/global_meta.json"], timeout=120)
+    # جلب فرع العامل الحالي إن وُجد
+    r = _run(["git", "-C", str(tmp), "fetch", "-q", "--depth", "1", "origin", BRANCH], timeout=300)
+    if r.returncode == 0:
+        _run(["git", "-C", str(tmp), "checkout", "-q", "-B", BRANCH, f"FETCH_HEAD"], timeout=60)
     else:
-        _run(["git", "-C", str(tmp), "pull", "-q", "--ff-only"], check=False)
+        _run(["git", "-C", str(tmp), "checkout", "-q", "-b", BRANCH], timeout=60)
+    _run(["git", "-C", str(tmp), "pull", "-q", "--ff-only", "-X", "ours"], timeout=120)
     # Git LFS للملفات الكبيرة (weights.pt > 100MB يُرفض بدون LFS)
-    _run(["git", "-C", str(tmp), "lfs", "install", "--local"], check=False)
-    _run(["git", "-C", str(tmp), "lfs", "track", "*.pt"], check=False)
-    _run(["git", "-C", str(tmp), "add", "-f", ".gitattributes"], check=False)
+    _run(["git", "-C", str(tmp), "lfs", "install", "--local"], timeout=60)
+    _run(["git", "-C", str(tmp), "lfs", "track", "*.pt"], timeout=60)
+    _run(["git", "-C", str(tmp), "add", "-f", ".gitattributes"], timeout=60)
     return True
 
 
