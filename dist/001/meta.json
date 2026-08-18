@@ -2,11 +2,11 @@
   "epochs_done": 1,
   "last_loss": 3.6925379161834715,
   "round": 1,
-  "n_texts": 8000,
+  "n_texts": 30000,
   "batch": 32,
   "preset": "medium",
   "worker_id": "001",
   "branch": "dist-worker-001",
-  "updated_at": "2026-08-18T05:50:49.831861+00:00",
+  "updated_at": "2026-08-18T06:08:09.045716+00:00",
   "d_model": 256
 }
