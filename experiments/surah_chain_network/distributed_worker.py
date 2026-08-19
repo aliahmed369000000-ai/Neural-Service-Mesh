@@ -39,7 +39,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
-ROOT = _HERE.parent.parent
+_ROOT = _HERE.parent.parent
+
+# إضافة ROOT إلى sys.path حتى يمكن استيراد ai.agent_auto_heal
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 
 # ── إعدادات ────────────────────────────────────────────────────────────────
@@ -220,27 +224,93 @@ def _fetch_global_weights(tmp: Path) -> Path | None:
     return None
 
 
-# ── تشغيل التدريب المحلي للround ────────────────────────────────────────────
-def _train_round(texts: list, start_from: Path | None, round_idx: int) -> dict:
-    """يشغّل train_pretrain_torch.py بجولة عصور محددة عبر SCN_TAG الخاص بالعامل."""
+# ── AutoHeal: إصلاح تلقائي عند فشل التدريب ─────────────────────────────────
+def _train_round_with_healing(
+    texts: list, start_from: Path | None, round_idx: int, current_batch: int,
+) -> dict:
+    """يشغّل train_pretrain_torch.py مع AutoHeal — عند فشل (OOM/timeout/...) يقلل
+    batch ويعيد المحاولة تلقائيًا حتى max_rounds."""
+    try:
+        from ai.agent_auto_heal import AutoHeal
+        healer = AutoHeal(max_rounds=3)
+    except ImportError:
+        # ai/ قد لا تكون موجودة في بيئة Kaggle — fallback بدون healing
+        return _train_round_bare(texts, start_from, round_idx, current_batch)
+
+    def run_fn(cmd: str, batch_size: int, timeout: int, extra_env: dict) -> dict:
+        """دالة التدريب القابلة للإصلاح — AutoHeal يعدّل batch_size/timeout عند الفشل."""
+        env = dict(extra_env)
+        env["SCN_BATCH"] = str(batch_size)
+        proc = subprocess.run(
+            [sys.executable, "-u", cmd],
+            cwd=str(ROOT), env=env, timeout=timeout,
+        )
+        if proc.returncode == 0:
+            return {"ok": True, "rc": 0, "batch": batch_size, "timeout": timeout}
+        # تشخيص الخطأ من stderr
+        err = proc.stderr if proc.stderr else ""
+        if proc.returncode == -9:
+            err = "Killed (SIGKILL) — probable OOM"
+        return {"ok": False, "rc": proc.returncode,
+                "error": err, "batch": batch_size, "timeout": timeout}
+
+    env = _build_train_env(texts, start_from)
+    tag = env["SCN_TAG"]
+
+    print(f"[worker-{WORKER_ID}] round {round_idx + 1}/{ROUNDS} — AutoHeal نشط (batch={current_batch})")
+
+    attempt = 0
+    last_result = {"ok": False}
+    timeout = int(os.environ.get("SCN_TRAIN_TIMEOUT", "14400"))  # 4h default
+
+    while attempt < 3:
+        attempt += 1
+        result = run_fn(str(_HERE / "train_pretrain_torch.py"), current_batch, timeout, env)
+        if result["ok"]:
+            return {"rc": 0, "tag": tag, "batch": current_batch,
+                    "healed": attempt > 1, "attempts": attempt}
+
+        # تشخيص + إصلاح
+        diag = healer.diagnose(result.get("error", ""))
+        if diag:
+            print(f"[worker-{WORKER_ID}] AutoHeal diagnosed: {diag['strategy']} — {diag['desc']}")
+            if diag["strategy"] == "reduce_batch":
+                current_batch = max(1, current_batch // 2)
+                print(f"[worker-{WORKER_ID}] تقليل batch → {current_batch}")
+            elif diag["strategy"] == "increase_timeout":
+                timeout = min(timeout * 3, 43200)
+                print(f"[worker-{WORKER_ID}] زيادة timeout → {timeout}s")
+        else:
+            # خطأ غير معروف — تقليل batch كإجراء وقائي
+            current_batch = max(1, current_batch // 2)
+            print(f"[worker-{WORKER_ID}] خطأ غير معروف — تقليل batch → {current_batch} (إجراء وقائي)")
+
+        last_result = result
+        time.sleep(2)
+
+    print(f"[worker-{WORKER_ID}] AutoHeal أعطى بعد {attempt} محاولات (batch={current_batch})")
+    return {"rc": last_result.get("rc", 1), "tag": tag, "batch": current_batch,
+            "healed": False, "attempts": attempt}
+
+
+def _build_train_env(texts: list, start_from: Path | None) -> dict:
+    """بناء environment dict لـ train_pretrain_torch.py."""
     env = os.environ.copy()
     env.update({
         "SCN_PRESET": PRESET,
         "SCN_N": str(len(texts)),
         "SCN_EPOCHS": str(EPOCHS),
-        "SCN_BATCH": str(BATCH),
         "SCN_FRESH": "0" if (start_from and start_from.exists()) else "1",
-        "SCN_RESUME": "none",           # لا استئناف من GitHub — worker يدير أوزانه بنفسه
+        "SCN_RESUME": "none",
         "SCN_CHECKPOINT_EVERY": "1",
-        "SCN_UPLOAD_RETRIES": "1",      # لا نرفع داخل التدريب — worker يرفع بنفسه
-        "SCN_GRAD_ACCUM": "4",          # effective batch = BATCH×4
-        "SCN_WORKER_CACHE": str(WORK_DIR / "cache.pkl"),  # كاش العامل المنفصل
-        "SCN_TOKEN_CACHE": str(WORK_DIR / "tokens.pkl"),  # كاش التسلسلات (tokens.pkl)
+        "SCN_UPLOAD_RETRIES": "1",
+        "SCN_GRAD_ACCUM": "4",
+        "SCN_WORKER_CACHE": str(WORK_DIR / "cache.pkl"),
+        "SCN_TOKEN_CACHE": str(WORK_DIR / "tokens.pkl"),
         "PYTHONUNBUFFERED": "1",
         "TOKENIZERS_PARALLELISM": "false",
         "HF_DATASETS_NUM_PROC": "1",
     })
-    # إن أردنا الاستئناف من نموذج موحّد/محلي: نتأكد أنه في موقع checkpoint
     if start_from and start_from.exists():
         tag = os.environ.get("SCN_TAG", f"d{D_MODEL}_w{WORKER_ID}")
         dest = _HERE / "checkpoints" / f"latest_pretrain_{tag}.pt"
@@ -251,12 +321,32 @@ def _train_round(texts: list, start_from: Path | None, round_idx: int) -> dict:
         print(f"[worker-{WORKER_ID}] استئناف → {dest.name}")
     tag = os.environ.get("SCN_TAG", f"d{D_MODEL}_w{WORKER_ID}")
     env["SCN_TAG"] = tag
+    return env
+
+
+def _train_round_bare(texts: list, start_from: Path | None, round_idx: int,
+                       current_batch: int) -> dict:
+    """fallback: بدون AutoHeal — تشغيل مباشر (لبيئات بدون ai/)."""
+    env = _build_train_env(texts, start_from)
+    tag = env["SCN_TAG"]
+    env["SCN_BATCH"] = str(current_batch)
     print(f"[worker-{WORKER_ID}] بدء round {round_idx + 1}/{ROUNDS} (epochs={EPOCHS})...")
     r = subprocess.run(
         [sys.executable, "-u", str(_HERE / "train_pretrain_torch.py")],
         cwd=str(ROOT), env=env,
     )
-    return {"rc": r.returncode, "tag": tag}
+    return {"rc": r.returncode, "tag": tag, "batch": current_batch}
+
+
+# ── تشغيل التدريب المحلي للround (واجهة موحدة) ─────────────────────────────
+def _train_round(texts: list, start_from: Path | None, round_idx: int) -> dict:
+    """يشغّل train_pretrain_torch.py مع AutoHeal — عند OOM يقلل batch ويعيد المحاولة."""
+    current_batch = BATCH
+    result = _train_round_with_healing(texts, start_from, round_idx, current_batch)
+    if result.get("healed"):
+        print(f"[worker-{WORKER_ID}] round {round_idx + 1} نجا من فشل بعد "
+              f"{result.get('attempts', 0)} محاولات (batch={result.get('batch', BATCH)})")
+    return result
 
 
 def _read_state(tag: str) -> dict:
@@ -314,14 +404,17 @@ def main() -> int:
         last_loss = 0.0
         for r_idx in range(ROUNDS):
             res = _train_round(texts, start_from, r_idx)
+            tag = res["tag"]
             if res["rc"] != 0:
                 print(f"[worker-{WORKER_ID}] round {r_idx + 1} فشل (rc={res['rc']}) — نحاول الرفع بما لدينا")
-            state = _read_state(res["tag"])
+                # AutoHeal: استخدم آخر checkpoint محلي موجود (لم يضيع كل العمل)
+                local_ckpts = list((_HERE / "checkpoints").glob(f"latest_pretrain_{tag}.pt"))
+                if local_ckpts and local_ckpts[0].is_file():
+                    print(f"[worker-{WORKER_ID}] يوجد checkpoint محلي: {local_ckpts[0].name} — سيُرفع")
+            state = _read_state(tag)
             ep = state.get("epoch", r_idx + 1)
             loss = state.get("best_loss") or state.get("last_loss") or last_loss
             last_loss = float(loss) if loss else last_loss
-
-            tag = res["tag"]
             files = {
                 "weights.pt": _HERE / "checkpoints" / f"latest_pretrain_{tag}.pt",
                 "state.json": _HERE / "checkpoints" / f"pretrain_state_{tag}.json",
