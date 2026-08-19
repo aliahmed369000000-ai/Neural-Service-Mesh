@@ -41,10 +41,63 @@ class AutoReplyAgent:
         self.rules = []
         self.stop_event = threading.Event()
         self.replied_ids = set()  # منع الرد مرتين
+        self.blacklist = set()  # عناوين مرفوضة — لن يرد عليها أبدًا
 
     @property
     def available(self) -> bool:
         return bool(self.token)
+
+    def add_blacklist(self, email_or_domain: str) -> None:
+        """
+        إضافة عنوان أو نطاق إلى القائمة السوداء — لن يرد عليها أبدًا.
+
+        Args:
+            email_or_domain: عنوان كامل (user@example.com) أو نطاق (example.com)
+        """
+        self.blacklist.add(email_or_domain.lower().strip())
+
+    def remove_blacklist(self, email_or_domain: str) -> bool:
+        """إزالة عنوان/نطاق من القائمة السوداء."""
+        addr = email_or_domain.lower().strip()
+        if addr in self.blacklist:
+            self.blacklist.discard(addr)
+            return True
+        return False
+
+    def is_blacklisted(self, email_address: str) -> bool:
+        """
+        هل العنوان في القائمة السوداء؟ يدعم:
+        - تطابق كامل: user@example.com
+        - تطابق نطاق: example.com (يطابق user@example.com)
+        - تطابق بادئة: *@domain.com
+        """
+        addr = email_address.lower().strip()
+
+        # استخراج النطاق من العنوان
+        if "@" in addr:
+            domain = addr.split("@")[1]
+            user_part = addr.split("@")[0]
+        else:
+            domain = addr
+            user_part = ""
+
+        # تطابق كامل
+        if addr in self.blacklist:
+            return True
+
+        # تطابق نطاق
+        if domain in self.blacklist:
+            return True
+
+        # تطابق *@domain
+        if f"*@{domain}" in self.blacklist:
+            return True
+
+        # تطابق wildcard user@*
+        if f"{user_part}@*" in self.blacklist:
+            return True
+
+        return False
 
     def add_rule(self, from_contains: str = None, subject_contains: str = None,
                  body_contains: str = None, reply_template: str = None,
@@ -279,6 +332,11 @@ class AutoReplyAgent:
             msg = self._get_message(msg_id)
             if "error" in msg:
                 continue
+
+            # ── Blacklist Check ──────────────────────────────────
+            sender_addr = msg.get("from", "")
+            if self.is_blacklisted(sender_addr):
+                continue  # تجاهل — لا رد ولا تسجيل
 
             # مطابقة القواعد
             matched_rule = None
