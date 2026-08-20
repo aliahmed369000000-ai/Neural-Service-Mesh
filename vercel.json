@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "builds": [
+    {"src": "api/main.py", "use": "@vercel/python"}
+  ],
+  "routes": [
+    {"src": "/api/(.*)", "dest": "/api/main.py"},
+    {"src": "/(.*)", "dest": "/public/$1"}
+  ],
+  "env": {
+    "NSM_GITHUB_TOKEN": "@nsm-github-token",
+    "NSM_GROQ_API_KEY": "@nsm-groq-key"
+  }
+}
