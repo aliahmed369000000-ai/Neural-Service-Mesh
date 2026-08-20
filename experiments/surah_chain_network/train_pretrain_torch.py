@@ -159,6 +159,33 @@ elif PRESET == "xlarge":
             f"torch.compile معطّل (XLA JIT) | BATCH={BATCH} × "
             f"accum={GRAD_ACCUM} → effective_batch={BATCH * GRAD_ACCUM}"
         )
+elif PRESET in ("xlarge-6144", "xlarge6144"):
+    # معمارية نماذج كبيرة مخفّفة: d=6144 (48 رأس × 128/رأس، 6 KV heads، FFN=21504)
+    # ~4.2B params | bf16 أوزان ≈ 8.4GB | ~25GB إجمالي تدريب على TPU
+    # أخف من d=8192 بـ 44% → يعمل بشكل مريح على شريحة TPU v5e واحدة
+    D_MODEL, N_HEADS, N_PRE, N_POST = 6144, 48, 8, 8
+    N_KV_HEADS, D_HEAD = 6, 128
+    D_FF = int(os.environ.get("SCN_D_FF", "21504"))
+    CHAIN_SCALE = float(os.environ.get("SCN_CHAIN_SCALE", "1"))
+    N = max(N, int(os.environ.get("SCN_N", "25000")))
+    BATCH = int(os.environ.get("SCN_BATCH", "4"))
+    BASE_LR = float(os.environ.get("SCN_LR", "1e-4"))
+    MAX_LEN = int(os.environ.get("SCN_MAX_LEN", "64"))
+    COMPILE = os.environ.get("SCN_COMPILE", "0") == "1"
+    USE_8BIT_ADAM = os.environ.get("SCN_USE_8BIT_ADAM", "1") == "1"
+    GRAD_ACCUM = max(1, int(os.environ.get("SCN_GRAD_ACCUM", "4")))
+    MAX_EXPANDS = int(os.environ.get("SCN_MAX_EXPANDS", "5"))
+    SCN_TPU = os.environ.get("SCN_TPU", "0") == "1"
+    if SCN_TPU:
+        USE_8BIT_ADAM = False
+        COMPILE = False
+        # d=6144 أخف → دفعات أكبر على TPU
+        BATCH = int(os.environ.get("SCN_BATCH", "8"))
+        GRAD_ACCUM = max(1, int(os.environ.get("SCN_GRAD_ACCUM", "4")))
+        print(
+            f"✅ وضع TPU d=6144 (SCN_TPU=1): bf16 | BATCH={BATCH} × "
+            f"accum={GRAD_ACCUM} → effective_batch={BATCH * GRAD_ACCUM}"
+        )
 
 if N_KV_HEADS is not None and N_HEADS % N_KV_HEADS != 0:
     raise ValueError(f"n_heads ({N_HEADS}) يجب أن يقبل القسمة على n_kv_heads ({N_KV_HEADS})")
