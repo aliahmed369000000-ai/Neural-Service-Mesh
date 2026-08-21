@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "total_unique": 350002,
+  "batches": [
+    {
+      "at": "2026-08-21T22:15:31.556986+00:00",
+      "source_files": [
+        {
+          "file": "v2_mo_350k.pkl",
+          "rows": 350002,
+          "new": 350002
+        }
+      ],
+      "added": 350002,
+      "total_after": 350002
+    }
+  ],
+  "hashes": [],
+  "updated_at": "2026-08-21T22:15:31.575811+00:00",
+  "last_hash_count": 350002,
+  "kaggle_dataset": "aliahmedmo/nsm-ar-shards-mo-wiki",
+  "local_pkl_note": "pretrain_sentences.pkl ~152MB — يُرفع عبر Git LFS من بيئة فيها git-lfs؛ النسخة المؤمّنة على Kaggle Dataset"
+}
