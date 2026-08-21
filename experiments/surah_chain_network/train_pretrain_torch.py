@@ -94,6 +94,8 @@ RESUME_PATH = os.environ.get("SCN_RESUME_PATH", "").strip()
 #     حتى مع SCN_FRESH=1 — حتى لا يضيع التدريب عند انقطاع الجلسة ──
 SCN_RESUME = os.environ.get("SCN_RESUME", "").strip().lower()
 CHECKPOINT_EVERY = int(os.environ.get("SCN_CHECKPOINT_EVERY", "2"))  # حفظ مرفوع كل كذا عصر
+# حد زمني للجلسة (ساعات) — أقل من حد Kaggle 12س حتى لا يُقطع العمل دون حفظ
+MAX_HOURS = float(os.environ.get("SCN_MAX_HOURS", "0") or 0)  # 0 = بلا حد
 # ── رفع سريع أول الجولة: epoch الأول والثاني يُرفعان فورًا —
 #     أقصى حماية من موت مبكر قبل أول رفع دوري ──
 FIRST_FAST = os.environ.get("SCN_FIRST_FAST", "1").strip().lower() in ("1", "true", "yes")
@@ -885,6 +887,18 @@ def main():
             "lr": m.lr, "global_step": global_step,
             "started_at": t0, "elapsed": time.time() - t0, "mark": mark or None,
         })
+        # إيقاف آمن قبل حد Kaggle 12 ساعة
+        if MAX_HOURS > 0 and (time.time() - t0) / 3600.0 >= MAX_HOURS:
+            print(f"⏹ تجاوز الحد الزمني SCN_MAX_HOURS={MAX_HOURS}h — حفظ وإيقاف آمن")
+            train_meta["best_loss"] = best
+            train_meta["stopped_early"] = True
+            train_meta["stop_reason"] = "max_hours"
+            m.save(str(CKPT_LATEST), train_meta=train_meta)
+            _upload_checkpoint(ep)
+            stopped_early = True
+            stop_reason = "max_hours"
+            final_epoch = ep
+            break
 
     elapsed = time.time() - t0
     state = {
