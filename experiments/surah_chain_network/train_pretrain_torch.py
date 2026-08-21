@@ -229,6 +229,9 @@ def load_pretrain_sentences(max_n: int) -> list:
 
     وضع العامل الموزّع: SCN_WORKER_CACHE=<مسار cache.pkl منفصل للعامل>
     يتجاوز الكاش المشترك كليًا حتى لا يحصل كل عامل على نفس البيانات.
+
+    SCN_RESPECT_CURSOR=1: يتجاوز الجمل التي سجّلها training_cursor.json كمستخدمة
+    حتى لا يُعاد تدريب نفس الشريحة في جولة لاحقة (بعد دمج بيانات جديدة).
     """
     worker_cache = os.environ.get("SCN_WORKER_CACHE", "").strip()
     if worker_cache:
@@ -251,6 +254,20 @@ def load_pretrain_sentences(max_n: int) -> list:
             data = pickle.load(f)
         if isinstance(data, list):
             out = [s.strip() for s in data if isinstance(s, str) and len(s.strip()) >= 20]
+            # احترام مؤشر التدريب: تخطّي الجمل المستخدمة سابقاً
+            if os.environ.get("SCN_RESPECT_CURSOR", "0") == "1":
+                cursor_path = _HERE / "data" / "training_cursor.json"
+                used = 0
+                if cursor_path.exists():
+                    try:
+                        used = int(json.loads(cursor_path.read_text(encoding="utf-8")).get("used_count") or 0)
+                    except Exception:
+                        used = 0
+                if used > 0 and used < len(out):
+                    print(f"مؤشر التدريب: تخطّي أول {used} جملة مستخدمة سابقاً")
+                    out = out[used:]
+                elif used >= len(out):
+                    print(f"تحذير: used_count={used} >= المتاح {len(out)} — استخدام كامل المجموعة")
             random.Random(0).shuffle(out)
             if len(out) >= max_n:
                 return out[:max_n]
@@ -904,6 +921,39 @@ def main():
         "params": m.param_count(),
     }
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2))
+    # تحديث مؤشر التدريب حتى لا تُعاد نفس الجمل في الجولة التالية
+    try:
+        cursor_path = _HERE / "data" / "training_cursor.json"
+        cursor_path.parent.mkdir(parents=True, exist_ok=True)
+        cur = {}
+        if cursor_path.exists():
+            try:
+                cur = json.loads(cursor_path.read_text(encoding="utf-8"))
+            except Exception:
+                cur = {}
+        prev = int(cur.get("used_count") or 0)
+        # عند SCN_RESPECT_CURSOR=1 نضيف فقط ما درّبنا عليه هذه الجولة
+        # وإلا نعتبر أننا استخدمنا len(texts) من بداية الملف
+        add_n = len(texts) if os.environ.get("SCN_RESPECT_CURSOR", "0") != "1" else len(texts)
+        cur["version"] = 1
+        cur["used_count"] = prev + add_n if os.environ.get("SCN_RESPECT_CURSOR", "0") == "1" else max(prev, len(texts))
+        cur["last_train_at"] = __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        ).isoformat()
+        runs = cur.get("runs") or []
+        runs.append({
+            "at": cur["last_train_at"],
+            "used_this_run": len(texts),
+            "used_total": cur["used_count"],
+            "tag": TAG,
+            "preset": PRESET or None,
+            "epochs": final_epoch,
+        })
+        cur["runs"] = runs[-50:]
+        cursor_path.write_text(json.dumps(cur, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"مؤشر التدريب → used_count={cur['used_count']} (كان {prev})")
+    except Exception as _ce:
+        print(f"تحذير: تعذّر تحديث training_cursor: {_ce}")
     print("-" * 50)
     print(f"أفضل loss={best:.4f}  زمن_هذه_الجولة={elapsed:.1f}s  device={m.device}")
     print(
