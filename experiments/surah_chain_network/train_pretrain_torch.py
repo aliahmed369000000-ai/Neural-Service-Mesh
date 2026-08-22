@@ -96,6 +96,9 @@ SCN_RESUME = os.environ.get("SCN_RESUME", "").strip().lower()
 CHECKPOINT_EVERY = int(os.environ.get("SCN_CHECKPOINT_EVERY", "2"))  # حفظ مرفوع كل كذا عصر
 # حد زمني للجلسة (ساعات) — أقل من حد Kaggle 12س حتى لا يُقطع العمل دون حفظ
 MAX_HOURS = float(os.environ.get("SCN_MAX_HOURS", "0") or 0)  # 0 = بلا حد
+# حفظ وطباعة أثناء العصر (حتى لا تضيع ساعات بلا checkpoint إذا أُلغي الكيرنل)
+SAVE_EVERY_STEPS = int(os.environ.get("SCN_SAVE_EVERY_STEPS", "0") or 0)  # 0 = فقط نهاية العصر
+LOG_EVERY_STEPS = int(os.environ.get("SCN_LOG_EVERY_STEPS", "0") or 0)
 # ── رفع سريع أول الجولة: epoch الأول والثاني يُرفعان فورًا —
 #     أقصى حماية من موت مبكر قبل أول رفع دوري ──
 FIRST_FAST = os.environ.get("SCN_FIRST_FAST", "1").strip().lower() in ("1", "true", "yes")
@@ -775,6 +778,34 @@ def main():
                 if loss == loss:  # not NaN
                     ep_losses.append(loss)
             global_step += 1
+            # طباعة دورية أثناء العصر
+            if LOG_EVERY_STEPS > 0 and global_step % LOG_EVERY_STEPS == 0 and ep_losses:
+                recent = ep_losses[-min(20, len(ep_losses)):]
+                print(
+                    f"  step {global_step} ep={ep} loss≈{sum(recent)/len(recent):.4f} "
+                    f"lr={m.lr:.6f}",
+                    flush=True,
+                )
+            # حفظ منتصف-العصر حتى لا يضيع الجهد عند إلغاء الجلسة
+            if SAVE_EVERY_STEPS > 0 and global_step % SAVE_EVERY_STEPS == 0:
+                mid_meta = {
+                    "epoch": ep,
+                    "best_loss": best,
+                    "history": history,
+                    "global_step": global_step,
+                    "n_expands": n_expands,
+                    "expand_log": expand_log,
+                    "n_sentences": len(texts),
+                    "d_model": D_MODEL,
+                    "mid_epoch": True,
+                    "total_seconds": total_seconds_prev + (time.time() - t0),
+                }
+                try:
+                    m.save(str(CKPT_LATEST), train_meta=mid_meta)
+                    print(f"  💾 mid-save step={global_step} → {CKPT_LATEST.name}", flush=True)
+                    _upload_checkpoint(ep)
+                except Exception as _se:
+                    print(f"  ⚠ mid-save failed: {_se}", flush=True)
         mean_l = sum(ep_losses) / max(1, len(ep_losses))
         history.append({"epoch": ep, "loss": mean_l, "lr": m.lr})
         mark = ""
