@@ -164,6 +164,31 @@ elif PRESET == "xlarge":
             f"torch.compile معطّل (XLA JIT) | BATCH={BATCH} × "
             f"accum={GRAD_ACCUM} → effective_batch={BATCH * GRAD_ACCUM}"
         )
+elif PRESET in ("xlarge-4096", "xlarge4096", "d4096"):
+    # d=4096: وسط بين large و6144 — أنسب لشريحة TPU ~16GB HBM
+    # 32 رأس × 128 | GQA 4 KV | FFN≈2×d افتراضياً قابل للضبط
+    D_MODEL, N_HEADS, N_PRE, N_POST = 4096, 32, 4, 4
+    N_KV_HEADS, D_HEAD = 4, 128
+    D_FF = int(os.environ.get("SCN_D_FF", "11008"))
+    CHAIN_SCALE = float(os.environ.get("SCN_CHAIN_SCALE", "0.5"))
+    N = max(N, int(os.environ.get("SCN_N", "50000")))
+    BATCH = int(os.environ.get("SCN_BATCH", "2"))
+    BASE_LR = float(os.environ.get("SCN_LR", "1.5e-4"))
+    MAX_LEN = int(os.environ.get("SCN_MAX_LEN", "64"))
+    COMPILE = os.environ.get("SCN_COMPILE", "0") == "1"
+    USE_8BIT_ADAM = os.environ.get("SCN_USE_8BIT_ADAM", "0") == "1"
+    GRAD_ACCUM = max(1, int(os.environ.get("SCN_GRAD_ACCUM", "8")))
+    MAX_EXPANDS = int(os.environ.get("SCN_MAX_EXPANDS", "5"))
+    SCN_TPU = os.environ.get("SCN_TPU", "0") == "1"
+    if SCN_TPU:
+        USE_8BIT_ADAM = False
+        COMPILE = False
+        BATCH = int(os.environ.get("SCN_BATCH", "2"))
+        GRAD_ACCUM = max(1, int(os.environ.get("SCN_GRAD_ACCUM", "8")))
+        print(
+            f"✅ وضع TPU d=4096 (SCN_TPU=1): bf16 | BATCH={BATCH} × "
+            f"accum={GRAD_ACCUM} → effective_batch={BATCH * GRAD_ACCUM}"
+        )
 elif PRESET in ("xlarge-6144", "xlarge6144"):
     # معمارية نماذج كبيرة مخفّفة: d=6144 (48 رأس × 128/رأس، 6 KV heads، FFN=21504)
     # ~4.2B params | bf16 أوزان ≈ 8.4GB | ~25GB إجمالي تدريب على TPU
