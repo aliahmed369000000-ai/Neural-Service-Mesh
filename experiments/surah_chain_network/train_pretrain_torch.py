@@ -189,7 +189,16 @@ elif PRESET in ("xlarge-6144", "xlarge6144"):
             f"accum={GRAD_ACCUM} → effective_batch={BATCH * GRAD_ACCUM}"
         )
 
+# تجاوز اختياري بعد الـpreset (لتقليل الذاكرة على TPU)
+if os.environ.get("SCN_N_PRE", "").strip():
+    N_PRE = int(os.environ["SCN_N_PRE"])
+if os.environ.get("SCN_N_POST", "").strip():
+    N_POST = int(os.environ["SCN_N_POST"])
+if os.environ.get("SCN_CHAIN_SCALE", "").strip() and PRESET:
+    CHAIN_SCALE = float(os.environ["SCN_CHAIN_SCALE"])
+
 if N_KV_HEADS is not None and N_HEADS % N_KV_HEADS != 0:
+
     raise ValueError(f"n_heads ({N_HEADS}) يجب أن يقبل القسمة على n_kv_heads ({N_KV_HEADS})")
 
 if UNTIL_END:
