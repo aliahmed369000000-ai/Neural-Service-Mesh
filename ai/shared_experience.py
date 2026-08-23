@@ -21,12 +21,12 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 logger = logging.getLogger("NSM.SharedExperience")
 
 class SharedExperienceManager:
-    def __init__(self, storage_path: str = "artifacts/learning/shared_knowledge.json", remote_url: Optional[str] = None, encryption_key: Optional[str] = None):
+    def __init__(self, storage_path: str = "artifacts/learning/shared_knowledge.json", remote_url: Optional[str] = None, encryption_key: Optional[str] = None, api_key: Optional[str] = None):
         self.storage_path = Path(storage_path)
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self.remote_url = remote_url
-        self.api_key = "nsm_secret_key_2026"
+        self.api_key = api_key or "nsm_worker_token_2026" # التوكن الافتراضي
         self.knowledge = self._load_knowledge()
         
         # إعداد التشفير مع دعم التدوير

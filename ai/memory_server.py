@@ -14,14 +14,38 @@ from pathlib import Path
 
 app = FastAPI(title="NSM Shared Memory Server")
 
-# أمان بسيط باستخدام API Key
-API_KEY = "nsm_secret_key_2026"
+# نظام RBAC: تعريف الأدوار والصلاحيات
+ROLES = {
+    "admin": ["read", "write", "delete", "manage"],
+    "expert": ["read", "write"],
+    "viewer": ["read"],
+    "worker": ["read", "write"]
+}
+
+# سجل الوكلاء المعتمدين (يمكن نقله لقاعدة بيانات لاحقاً)
+AGENT_REGISTRY = {
+    "Admin_Agent_01": {"role": "admin", "token": "nsm_admin_token_2026"},
+    "Expert_Agent_Alpha": {"role": "expert", "token": "nsm_expert_token_2026"},
+    "Worker_Agent_Beta": {"role": "worker", "token": "nsm_worker_token_2026"},
+    "Viewer_Agent_Gamma": {"role": "viewer", "token": "nsm_viewer_token_2026"}
+}
+
 api_key_header = APIKeyHeader(name="X-NSM-Token")
 
-def get_api_key(api_key: str = Security(api_key_header)):
-    if api_key == API_KEY:
-        return api_key
-    raise HTTPException(status_code=403, detail="Could not validate credentials")
+def get_current_agent(api_key: str = Security(api_key_header)):
+    for agent_id, data in AGENT_REGISTRY.items():
+        if data["token"] == api_key:
+            return {"agent_id": agent_id, "role": data["role"]}
+    raise HTTPException(status_code=403, detail="Invalid Agent Token")
+
+def check_permission(agent: dict, required_permission: str):
+    permissions = ROLES.get(agent["role"], [])
+    if required_permission not in permissions:
+        raise HTTPException(
+            status_code=403, 
+            detail=f"Role '{agent['role']}' does not have '{required_permission}' permission"
+        )
+    return True
 
 # تخزين الذاكرة (في الذاكرة حالياً مع دعم التحميل من ملف)
 STORAGE_PATH = Path("artifacts/learning/distributed_knowledge.json")
@@ -118,8 +142,9 @@ def health():
     return {"status": "online", "version": "1.0.0"}
 
 @app.post("/share")
-def share_fact(fact: Fact, api_key: str = Depends(get_api_key)):
-    metrics.log_request("share", fact.agent_id)
+def share_fact(fact: Fact, agent: dict = Depends(get_current_agent)):
+    check_permission(agent, "write")
+    metrics.log_request("share", agent["agent_id"])
     # استخدام معرف ثابت يعتمد على المحتوى
     import hashlib
     fact_id = f"shared_{hashlib.md5(fact.content.encode()).hexdigest()[:8]}"
@@ -135,12 +160,14 @@ def share_fact(fact: Fact, api_key: str = Depends(get_api_key)):
     return {"status": "success", "fact_id": fact_id}
 
 @app.get("/sync")
-def sync_facts(agent_id: Optional[str] = None, api_key: str = Depends(get_api_key)):
-    if agent_id: metrics.log_request("sync", agent_id)
+def sync_facts(agent: dict = Depends(get_current_agent)):
+    check_permission(agent, "read")
+    metrics.log_request("sync", agent["agent_id"])
     return memory.data["shared_facts"]
 
 @app.post("/queries/ask")
-def ask_query(q: Query, api_key: str = Depends(get_api_key)):
+def ask_query(q: Query, agent: dict = Depends(get_current_agent)):
+    check_permission(agent, "write")
     import uuid
     query_id = f"q_{uuid.uuid4().hex[:6]}"
     memory.data["active_queries"][query_id] = {
@@ -155,12 +182,14 @@ def ask_query(q: Query, api_key: str = Depends(get_api_key)):
     return {"status": "success", "query_id": query_id}
 
 @app.get("/queries/pending")
-def get_queries(api_key: str = Depends(get_api_key)):
+def get_queries(agent: dict = Depends(get_current_agent)):
+    check_permission(agent, "read")
     return memory.data["active_queries"]
 
 @app.post("/queries/answer")
-def answer_query(a: Answer, api_key: str = Depends(get_api_key)):
-    metrics.log_request("answer", a.agent_id)
+def answer_query(a: Answer, agent: dict = Depends(get_current_agent)):
+    check_permission(agent, "write")
+    metrics.log_request("answer", agent["agent_id"])
     if a.query_id in memory.data["active_queries"]:
         memory.data["active_queries"][a.query_id]["answers"].append({
             "answer": a.answer,
@@ -173,7 +202,8 @@ def answer_query(a: Answer, api_key: str = Depends(get_api_key)):
     raise HTTPException(status_code=404, detail="Query not found")
 
 @app.get("/metrics")
-def get_metrics(api_key: str = Depends(get_api_key)):
+def get_metrics(agent: dict = Depends(get_current_agent)):
+    check_permission(agent, "manage")
     uptime = time.time() - metrics.start_time
     process = psutil.Process(os.getpid())
     ram_usage_mb = process.memory_info().rss / (1024 * 1024)
@@ -197,7 +227,8 @@ def get_metrics(api_key: str = Depends(get_api_key)):
     }
 
 @app.post("/system/gc")
-def trigger_gc(api_key: str = Depends(get_api_key)):
+def trigger_gc(agent: dict = Depends(get_current_agent)):
+    check_permission(agent, "manage")
     initial_obj = len(gc.get_objects())
     gc.collect()
     final_obj = len(gc.get_objects())
