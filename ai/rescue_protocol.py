@@ -21,21 +21,36 @@ class RescueProtocol:
         return []
 
     def attempt_rescue(self, target_agent_id: str) -> str:
-        """محاولة إنقاذ وكيل فاشل عبر استعادة مهمته."""
+        """محاولة إنقاذ وكيل فاشل عبر استعادة مهمته مع ضمان التوافق."""
+        resource_id = f"rescue:{target_agent_id}"
         try:
-            # 1. التحقق من حالة العقدة
+            # 1. طلب قفل التوافق (Consensus Lock) لمنع وكلاء آخرين من الإنقاذ المتزامن
+            lock_resp = requests.post(
+                f"{self.memory_url}/consensus/lock",
+                json={"resource_id": resource_id, "agent_id": self.agent_id, "ttl": 60},
+                headers=self.headers,
+                timeout=5
+            )
+            
+            if lock_resp.status_code != 200 or lock_resp.json().get("status") != "locked":
+                reason = lock_resp.json().get("reason", "Unknown conflict")
+                return f"⚠️ [Consensus]: فشل الحصول على إذن الإنقاذ. السبب: {reason}"
+
+            # 2. التحقق من حالة العقدة
             resp = requests.get(f"{self.memory_url}/nodes", headers=self.headers, timeout=5)
             data = resp.json()
             nodes = data.get("nodes", data) if isinstance(data, dict) else data
-            # في الاختبار، قد تكون العقدة offline أو active ولكننا نريد الإنقاذ
             node = next((n for n in nodes if isinstance(n, dict) and n.get("agent_id") == target_agent_id), None)
+            
             if not node:
+                self.release_lock(resource_id)
                 return f"❌ [Rescue]: الوكيل {target_agent_id} غير موجود في سجل الشبكة."
-            if node.get("status") == "online":
-                 # السماح بالإنقاذ في بيئة الاختبار
-                 pass
+            
+            if node.get("status") == "migrated":
+                self.release_lock(resource_id)
+                return f"✅ [Rescue]: المهمة تم إنقاذها بالفعل من قبل وكيل آخر."
 
-            # 2. محاولة جلب آخر نقطة تفتيش
+            # 3. محاولة جلب آخر نقطة تفتيش
             resp = requests.get(
                 f"{self.memory_url}/checkpoint/task_{target_agent_id}", 
                 headers=self.headers, 
@@ -43,12 +58,12 @@ class RescueProtocol:
             )
             
             if resp.status_code != 200:
+                self.release_lock(resource_id)
                 return f"❌ [Rescue]: لم يتم العثور على نقطة تفتيش للوكيل {target_agent_id}. لا يمكن الاستعادة التلقائية."
 
             checkpoint = resp.json()
             
-            # 3. محاكاة عملية الاستلام (Takeover)
-            # في بيئة حقيقية، سيقوم الوكيل الحالي ببدء حلقة جديدة بنفس السياق
+            # 4. محاكاة عملية الاستلام (Takeover)
             log = [
                 f"🚨 [Rescue]: بدء عملية الإنقاذ للوكيل {target_agent_id}...",
                 f"📦 [Data]: تم استعادة نقطة التفتيش (الجولة: {checkpoint.get('round')})",
@@ -63,9 +78,26 @@ class RescueProtocol:
                 headers=self.headers
             )
             
+            # تحرير القفل بعد النجاح
+            self.release_lock(resource_id)
+            
             return "\n".join(log)
         except Exception as e:
+            # تحرير القفل في حالة حدوث خطأ غير متوقع
+            self.release_lock(resource_id)
             return f"❌ [Rescue]: فشل بروتوكول الإنقاذ: {e}"
+
+    def release_lock(self, resource_id: str):
+        """تحرير القفل الموزع."""
+        try:
+            requests.post(
+                f"{self.memory_url}/consensus/unlock",
+                json={"resource_id": resource_id, "agent_id": self.agent_id},
+                headers=self.headers,
+                timeout=5
+            )
+        except:
+            pass
 
 def rescue_agent(params: Dict[str, Any]) -> str:
     """أداة للبحث عن الوكلاء المتعثرين ومحاولة إنقاذ مهامهم."""

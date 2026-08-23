@@ -132,6 +132,36 @@ class MetricsState:
         self.agent_stats = {}
         self.start_time = time.time()
         self.node_status = {} # 🆕 حالة العقد الموزعة
+        self.active_locks = {} # 🆕 الأقفال الموزعة {resource_id: {agent_id, expires_at}}
+        self._lock = threading.Lock()
+
+    def acquire_lock(self, resource_id: str, agent_id: str, ttl: int = 30) -> bool:
+        """محاولة الحصول على قفل لمورد معين مع ضمان الذرية."""
+        with self._lock:
+            now = time.time()
+            # التحقق من وجود قفل نشط وغير منتهي الصلاحية لوكيل آخر
+            if resource_id in self.active_locks:
+                lock = self.active_locks[resource_id]
+                if now < lock["expires_at"]:
+                    if lock["agent_id"] == agent_id:
+                        # تجديد القفل لنفس الوكيل
+                        lock["expires_at"] = now + ttl
+                        return True
+                    return False # محجوز لوكيل آخر
+            
+            # منح القفل (لا يوجد قفل أو انتهت صلاحيته)
+            self.active_locks[resource_id] = {
+                "agent_id": agent_id,
+                "expires_at": now + ttl
+            }
+            return True
+
+    def release_lock(self, resource_id: str, agent_id: str):
+        """تحرير قفل مورد."""
+        with self._lock:
+            if resource_id in self.active_locks:
+                if self.active_locks[resource_id]["agent_id"] == agent_id:
+                    del self.active_locks[resource_id]
 
     def log_request(self, type: str, agent_id: str):
         self.request_counts[type] = self.request_counts.get(type, 0) + 1
@@ -185,6 +215,11 @@ class ToolVote(BaseModel):
     vote: str # "up" or "down"
     comment: Optional[str] = None
     trust_score: float = 1.0
+
+class LockRequest(BaseModel):
+    resource_id: str
+    agent_id: str
+    ttl: int = 30
 
 class Heartbeat(BaseModel):
     agent_id: str
@@ -281,6 +316,22 @@ def get_checkpoint(task_id: str, agent: dict = Depends(get_current_agent)):
         return checkpoints[task_id]["data"]
     raise HTTPException(status_code=404, detail="Checkpoint not found")
 
+@app.post("/consensus/lock")
+def acquire_resource_lock(req: LockRequest, agent: dict = Depends(get_current_agent)):
+    """طلب قفل موزّع لمورد (مثل إنقاذ وكيل أو تعديل كود)."""
+    check_permission(agent, "write")
+    success = metrics.acquire_lock(req.resource_id, req.agent_id, req.ttl)
+    if success:
+        return {"status": "locked", "resource": req.resource_id}
+    return {"status": "denied", "reason": "Resource is currently locked by another agent"}
+
+@app.post("/consensus/unlock")
+def release_resource_lock(req: LockRequest, agent: dict = Depends(get_current_agent)):
+    """تحرير قفل موزّع."""
+    check_permission(agent, "write")
+    metrics.release_lock(req.resource_id, req.agent_id)
+    return {"status": "unlocked"}
+
 @app.post("/share")
 def share_fact(fact: Fact, agent: dict = Depends(get_current_agent)):
     check_permission(agent, "write")
@@ -368,7 +419,7 @@ def publish_tool(tool: ToolDefinition, agent: dict = Depends(get_current_agent))
 
 @app.post("/tools/vote")
 def vote_tool(v: ToolVote, agent: dict = Depends(get_current_agent)):
-    """التصويت على أداة ومراجعتها من قبل الأقران."""
+    """التصويت المرجح بالثقة على أداة ومراجعتها من قبل الأقران."""
     check_permission(agent, "write")
     tools = memory.data.get("shared_tools", {})
     if v.tool_id not in tools:
@@ -376,27 +427,42 @@ def vote_tool(v: ToolVote, agent: dict = Depends(get_current_agent)):
     
     tool = tools[v.tool_id]
     
-    # تحديث التصويت
+    # منع التصويت المتكرر من نفس الوكيل
+    if any(r["reviewer"] == agent["agent_id"] for r in tool.get("reviews", [])):
+        raise HTTPException(status_code=400, detail="Agent has already voted for this tool")
+
+    # جلب نقاط الثقة للوكيل (افتراضي 1.0 للأدوار العادية، 5.0 للأدمن)
+    agent_trust = 5.0 if agent["role"] == "admin" else memory.data["trust_scores"].get(agent["agent_id"], 1.0)
+    
+    # تحديث التصويت المرجح
+    vote_weight = agent_trust
     if v.vote == "up":
-        tool["votes"]["up"] += 1
+        tool["votes"]["up"] += vote_weight
     else:
-        tool["votes"]["down"] += 1
+        tool["votes"]["down"] += vote_weight
         
-    # إضافة مراجعة
+    # إضافة مراجعة مفصلة
     tool["reviews"].append({
-        "reviewer": v.agent_id,
+        "reviewer": agent["agent_id"],
         "vote": v.vote,
         "comment": v.comment,
         "timestamp": time.time(),
-        "trust_score": v.trust_score
+        "trust_score": agent_trust
     })
     
-    # 🆕 معيار الاعتماد التلقائي: 3 أصوات إيجابية
-    if tool["votes"]["up"] >= 3 and tool["status"] == "pending":
+    # 🆕 معيار الاعتماد الموزون: مجموع أوزان الثقة >= 10.0
+    if tool["votes"]["up"] >= 10.0 and tool["status"] == "pending":
         tool["status"] = "approved"
+    elif tool["votes"]["down"] >= 5.0 and tool["status"] == "pending":
+        tool["status"] = "rejected"
         
     memory.save()
-    return {"status": "success", "current_status": tool["status"]}
+    return {
+        "status": "success", 
+        "current_status": tool["status"], 
+        "weighted_votes": tool["votes"],
+        "your_trust_weight": agent_trust
+    }
 
 @app.get("/tools/list")
 def list_tools(agent: dict = Depends(get_current_agent)):

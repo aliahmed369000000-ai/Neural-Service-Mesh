@@ -103,3 +103,9 @@ artifacts/model_training/notebooks/
 logs/
 artifacts/model_training/alerts/
 reqtest/
+
+# NSM Runtime Artifacts & Cache
+artifacts/cache/
+artifacts/agent_loop/audit/
+artifacts/learning/distributed_knowledge.json
+tests/test_consensus.py
