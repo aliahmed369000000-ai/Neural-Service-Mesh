@@ -860,6 +860,14 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                             _emit({"type": "tool", "tool": tname, "params": params})
                             
                             if spec:
+                                # فحص أمني استباقي قبل التنفيذ
+                                from ai.security_guardian import security_guardian
+                                is_safe, msg = security_guardian.inspect_tool_call(target_agent_id, tname, params)
+                                if not is_safe:
+                                    obs_round.append(f"[{tname}] {msg}")
+                                    _emit({"type": "result", "tool": tname, "output": msg})
+                                    continue
+
                                 # محاولة جلب النتيجة من الكاش أولاً
                                 cached_res = agent_cache.get(tname, params)
                                 if cached_res:
@@ -916,6 +924,15 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                         
                         if not spec: obs = f"❌ أداة غير معروفة: {tname}"
                         else:
+                            # فحص أمني استباقي قبل التنفيذ
+                            from ai.security_guardian import security_guardian
+                            is_safe, msg = security_guardian.inspect_tool_call(target_agent_id, tname, params)
+                            if not is_safe:
+                                obs = msg
+                                obs_round.append(f"[{tname}] {obs}")
+                                _emit({"type": "result", "tool": tname, "output": obs})
+                                continue
+
                             # محاولة جلب النتيجة من الكاش
                             cached_res = agent_cache.get(tname, params)
                             if cached_res:
