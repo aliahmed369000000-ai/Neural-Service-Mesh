@@ -2,8 +2,11 @@ import os
 from typing import List, Dict, Any, Optional
 from ai.video_indexer import video_indexer
 from ai.stt_engine import transcribe_audio
+from ai.drift_corrector import DriftCorrector
 
 class MultimodalSyncManager:
+    def __init__(self):
+        self.drift_corrector = DriftCorrector()
     """إدارة المزامنة بين المسار الصوتي والإطارات المرئية في الفيديو."""
     
     def sync_video_audio(self, video_id: str, audio_path: str) -> Dict[str, Any]:
@@ -22,11 +25,20 @@ class MultimodalSyncManager:
         if not index:
             return {"ok": False, "error": "الفهرس البصري للفيديو غير موجود."}
             
-        # 3. المحاذاة (Alignment)
+        # 3. المحاذاة (Alignment) مع تصحيح الانحراف
         synced_data = []
         for kf in index.get("keyframes", []):
-            ts = kf["timestamp"]
-            # البحث عن الكلام الذي قيل في نفس وقت الإطار
+            raw_ts = kf["timestamp"]
+            
+            # محاكاة قياس الانحراف (في الإنتاج الحقيقي يتم قياسه من المزامنة الفيزيائية)
+            # هنا نفترض وجود انحراف بسيط يتزايد مع الزمن
+            measured_offset = raw_ts * 0.005  
+            
+            # تصحيح الطابع الزمني
+            correction = self.drift_corrector.correct(raw_ts, measured_offset)
+            ts = correction["corrected_timestamp"]
+            
+            # البحث عن الكلام الذي قيل في نفس وقت الإطار المصحح
             relevant_text = [
                 s["text"] for s in segments 
                 if s["start"] <= ts <= s["end"]
