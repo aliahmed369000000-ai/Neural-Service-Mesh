@@ -20,6 +20,7 @@ import uuid
 import concurrent.futures
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
+from ai.cache_manager import agent_cache
 
 logger = logging.getLogger("NeuralServiceMesh.AgentLoop")
 
@@ -333,6 +334,15 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                             _emit({"type": "tool", "tool": tname, "params": params})
                             
                             if spec:
+                                # محاولة جلب النتيجة من الكاش أولاً
+                                cached_res = agent_cache.get(tname, params)
+                                if cached_res:
+                                    obs = _truncate_obs(cached_res)
+                                    obs_round.append(f"[{tname}] {obs} (⚡ cached)")
+                                    _emit({"type": "result", "tool": tname, "output": f"{obs} (⚡ cached)"})
+                                    state.tools_used += 1
+                                    continue
+                                
                                 future = executor.submit(spec.executor, params)
                                 future_to_tool[future] = t_req
                             else:
@@ -343,7 +353,11 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                             t_req = future_to_tool[future]
                             tname = t_req.get("tool")
                             try:
-                                obs = _truncate_obs(future.result())
+                                raw_res = future.result()
+                                obs = _truncate_obs(raw_res)
+                                # حفظ النتيجة في الكاش للطلبات المستقبلية
+                                agent_cache.set(tname, t_req.get("params", {}), raw_res)
+                                
                                 if str(obs).startswith("SIGNAL_SLEEP:"):
                                     sleep_requested = True
                                     target_agent_id = str(obs).split(":")[1]
@@ -365,7 +379,15 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                         
                         if not spec: obs = f"❌ أداة غير معروفة: {tname}"
                         else:
-                            obs = _truncate_obs(spec.executor(params))
+                            # محاولة جلب النتيجة من الكاش
+                            cached_res = agent_cache.get(tname, params)
+                            if cached_res:
+                                obs = _truncate_obs(cached_res) + " (⚡ cached)"
+                            else:
+                                raw_res = spec.executor(params)
+                                obs = _truncate_obs(raw_res)
+                                agent_cache.set(tname, params, raw_res)
+                            
                             if str(obs).startswith("SIGNAL_SLEEP:"):
                                 sleep_requested = True
                                 target_agent_id = str(obs).split(":")[1]
