@@ -58,6 +58,10 @@ class SwarmManager:
         # 🆕 إدارة حالة النوم
         self.sleeping_agents: Dict[str, Dict[str, Any]] = {}
 
+        # 🆕 نظام مراقبة واكتشاف التسلل (IDS)
+        from ai.ids_manager import IDSManager
+        self.ids = IDSManager(storage_dir=str(self.storage_dir / "ids"))
+
     def set_agent_sleep(self, agent_id: str, snapshot_path: str):
         """تحديث حالة الوكيل إلى 'نائم' وتخزين مسار لقطة الوعي."""
         if agent_id in self.workers:
@@ -77,26 +81,32 @@ class SwarmManager:
                 del self.sleeping_agents[agent_id]
             logger.info(f"🌅 Agent {agent_id} has awakened.")
 
-    def check_permission(self, agent_id: str, action: str) -> bool:
-        """التحقق من صلاحيات الوكيل بناءً على الدور ومستوى الثقة."""
+    def check_permission(self, agent_id: str, action: str, params: Optional[Dict[str, Any]] = None) -> bool:
+        """التحقق من صلاحيات الوكيل بناءً على الدور ومستوى الثقة مع مراقبة IDS."""
+        # 1. التحقق من الحجر الصحي (IDS)
+        if self.ids.is_quarantined(agent_id):
+            logger.error(f"🚨 Access Denied: Agent {agent_id} is in QUARANTINE.")
+            return False
+
+        # 2. مراقبة الفعل عبر IDS
+        ids_res = self.ids.monitor_action(agent_id, action, params or {})
+        if ids_res["status"] == "blocked":
+            return False
+
         if agent_id not in self.workers:
-            # الوكلاء غير المسجلين لديهم صلاحيات Observer فقط افتراضياً
             role = "observer"
             trust_score = 0.5
         else:
             worker = self.workers[agent_id]
             role = worker.get("role", "observer")
-            # جلب مستوى الثقة من قاعدة البيانات (افتراضياً 0.5 إذا لم يوجد)
             trust_score = worker.get("trust_score", 0.5)
 
         role_info = self.roles_config.get(role, self.roles_config["observer"])
         
-        # 1. التحقق من وجود الصلاحية في الدور
         if action not in role_info["permissions"]:
             logger.warning(f"🚫 Permission Denied: Agent {agent_id} ({role}) tried to {action}")
             return False
             
-        # 2. التحقق من قيود الثقة الديناميكية
         if trust_score < role_info["trust_min"]:
             logger.warning(f"⚠️ Trust Constraint: Agent {agent_id} trust {trust_score} below required {role_info['trust_min']} for {role}")
             return False
