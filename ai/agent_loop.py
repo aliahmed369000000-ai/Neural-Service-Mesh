@@ -810,6 +810,13 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                 try:
                     monitor.record_activity()
                     
+                    # مراقبة الموارد وحقن تنبيهات سيادية إذا لزم الأمر
+                    from ai.self_resource_optimizer import resource_optimizer
+                    metrics = resource_optimizer.get_current_metrics()
+                    if metrics["mem_usage"] > 85.0 or metrics["cpu_usage"] > 90.0:
+                        resource_alert = f"⚠️ تنبيه سيادي: الموارد محدودة (CPU: {metrics['cpu_usage']}%, RAM: {metrics['mem_usage']}%). يرجى تحسين استهلاك الأدوات."
+                        history.append({"role": "system", "content": resource_alert})
+                    
                     # حقن التفكير التكراري قبل استدعاء LLM
                     reflection = state.reflect(history)
                     if reflection:
