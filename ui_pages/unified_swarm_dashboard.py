@@ -306,3 +306,40 @@ def render_unified_swarm_dashboard() -> None:
                 toggle_auto_action(action["id"], enabled)
                 st.caption(f"{'فُعّل' if enabled else 'أُوقف'} {action.get('label')}")
             st.caption(action.get("description") or "")
+
+    # ── لوحة تحكم السرب الحية (Decentralized Living Mesh) ──────────
+    st.divider()
+    render_section_header("🌐 لوحة تحكم السرب الحية", "مراقبة الشبكة اللامركزية والسيادة الحية")
+    
+    from ai.living_mesh import get_network_snapshot
+    mesh_state = get_network_snapshot()
+    
+    col1, col2, col3 = st.columns(3)
+    active_nodes = [n for n in mesh_state["nodes"].values() if n["status"] == "online"]
+    col1.metric("العقد النشطة", len(active_nodes))
+    col2.metric("إجمالي الخبرات", len(mesh_state.get("global_experience", [])))
+    col3.metric("تزامن التطور", f"{max([n.get('evolution_score', 0) for n in mesh_state['nodes'].values()] + [0]):.2f}")
+
+    if mesh_state["nodes"]:
+        st.subheader("🖥️ حالة العقد الموزعة")
+        node_data = []
+        for nid, info in mesh_state["nodes"].items():
+            node_data.append({
+                "العقدة": nid,
+                "الحالة": "🟢 متصل" if info["status"] == "online" else "🔴 غير متصل",
+                "آخر ظهور": info["last_seen"].split("T")[1].split(".")[0],
+                "السيادة": f"{info.get('evolution_score', 0):.2f}",
+                "القدرات": ", ".join(info.get("capabilities", []))
+            })
+        st.table(node_data)
+    
+    if mesh_state.get("global_experience"):
+        st.subheader("🧠 سجل الوعي الجماعي (أحدث الخبرات)")
+        for exp in reversed(mesh_state["global_experience"][-5:]):
+            with st.chat_message("ai"):
+                st.write(f"**من العقدة:** {exp['from']} | **النوع:** {exp['kind']}")
+                st.json(exp['data'])
+                st.caption(f"التوقيت: {exp['timestamp']}")
+
+    if st.button("🔄 تحديث حالة الشبكة يدوياً"):
+        st.rerun()

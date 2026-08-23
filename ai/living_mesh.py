@@ -131,6 +131,15 @@ class LivingMeshNode:
     def _save_state(self, state: Dict[str, Any]):
         NETWORK_STATE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
+def get_network_snapshot() -> Dict[str, Any]:
+    """الحصول على لقطة كاملة لحالة الشبكة للعرض في الواجهة."""
+    if not NETWORK_STATE.is_file():
+        return {"nodes": {}, "global_experience": [], "active_tasks": []}
+    try:
+        return json.loads(NETWORK_STATE.read_text(encoding="utf-8"))
+    except:
+        return {"nodes": {}, "global_experience": [], "active_tasks": []}
+
 # ───────────────────────────────────────────────────────────────────────────
 # بروتوكول السيادة التطورية (Sovereign Evolution Protocol)
 # ───────────────────────────────────────────────────────────────────────────

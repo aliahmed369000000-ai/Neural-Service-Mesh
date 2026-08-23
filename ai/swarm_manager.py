@@ -124,33 +124,26 @@ class SwarmManager:
             logger.info(f"⚖️ Trust Update for {agent_id}: {old:.2f} -> {self.workers[agent_id]['trust_score']:.2f}")
 
     # 🛒 Marketplace APIs
-    def post_marketplace_task(self, task_id_or_proposer: str, description: str = "", requirements: Any = None):
+    def post_marketplace_task(self, **kwargs):
         """
-        طرح مهمة في السوق.
-        ملاحظة: agent_loop يمرر (task_id, desc, reqs).
-        بينما الكود القديم قد يمرر (proposer, task_name, desc).
-        سندعم كلا التوقيعين عبر التحقق من النوع.
+        طرح مهمة في السوق. يدعم وسائط مرنة.
         """
-        if isinstance(requirements, float): # التوقيع القديم: (proposer, name, desc, reward)
-            proposer = task_id_or_proposer
-            task_name = description
-            desc = str(requirements)
-            task_id = f"task_{uuid.uuid4().hex[:6]}"
-        else: # التوقيع الجديد: (task_id, description, requirements)
-            task_id = task_id_or_proposer
-            desc = description
-            task_name = task_id
-            
+        task_id = kwargs.get("task_id") or f"task_{uuid.uuid4().hex[:6]}"
+        title = kwargs.get("title") or kwargs.get("task_name") or task_id
+        description = kwargs.get("description") or kwargs.get("desc") or ""
+        reward = kwargs.get("reward") or 0
+        
         task = {
             "id": task_id,
-            "name": task_name,
-            "description": desc,
+            "name": title,
+            "description": description,
+            "reward": reward,
             "status": "open",
             "bids": [],
             "created_at": time.time()
         }
         self.marketplace_tasks[task_id] = task
-        logger.info(f"🛒 New Marketplace Task: {task_id}")
+        logger.info(f"🛒 New Marketplace Task: {task_id} - {title}")
         return task_id
 
     def submit_bid(self, task_id: str, agent_id: str, cost: int = 0, time_est: float = 0.0, trust: float = 0.0):
