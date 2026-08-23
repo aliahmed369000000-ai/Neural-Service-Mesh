@@ -265,9 +265,37 @@ def _tool_video_sync(params: Dict[str, Any]) -> str:
     except Exception as e:
         return f"❌ video_sync (System Error): {e}"
 
-register_tool(ToolSpec("video_sync", "مزامنة الصوت والصورة وتصحيح الانحراف", 
+register_tool(ToolSpec("video_sync", "مزامنة الصوت والصورة وتصحيح الانحراف مع الفهرسة الدلالية", 
                         {"type": "object", "properties": {"video_id": {"type": "string"}, "audio_path": {"type": "string"}}}, 
                         _tool_video_sync))
+
+def _tool_video_search(params: Dict[str, Any]) -> str:
+    """البحث الدلالي في سياق الفيديو المزامَن."""
+    video_id = str(params.get("video_id", ""))
+    query = str(params.get("query", ""))
+    semantic = bool(params.get("semantic", True))
+    
+    if not video_id or not query:
+        return "❌ video_search: يجب توفير video_id و query."
+        
+    try:
+        results = multimodal_sync.query_context(video_id, query, semantic=semantic)
+        return json.dumps({
+            "ok": True,
+            "query": query,
+            "results_count": len(results),
+            "top_results": results[:3] # إرجاع أفضل 3 نتائج لتوفير السياق
+        }, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return f"❌ video_search Error: {e}"
+
+register_tool(ToolSpec("video_search", "البحث الدلالي في سياق الفيديو المزامَن", 
+                        {"type": "object", "properties": {
+                            "video_id": {"type": "string"}, 
+                            "query": {"type": "string"},
+                            "semantic": {"type": "boolean"}
+                        }}, 
+                        _tool_video_search))
 
 # ═════════════════════════ محرك الحلقة ═════════════════════════════
 _SYSTEM_PROMPT = """أنت الوكيل التنفيذي لـ NSM. رد JSON فقط:

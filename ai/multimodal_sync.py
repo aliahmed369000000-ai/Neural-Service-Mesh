@@ -9,8 +9,16 @@ class MultimodalSyncManager:
         self.drift_corrector = DriftCorrector()
     """إدارة المزامنة بين المسار الصوتي والإطارات المرئية في الفيديو."""
     
+    def _generate_embedding(self, text: str) -> List[float]:
+        """توليد تضمين دلالي (Semantic Embedding) للنص (محاكاة متجهة)."""
+        # في الإنتاج يتم استخدام OpenAI Embeddings أو نموذج محلي مثل BERT
+        # هنا نستخدم محاكاة متجهة بناءً على القيم الرقمية للأحرف لضمان الاتساق
+        if not text: return [0.0] * 8
+        seed = sum(ord(c) for c in text) % 100
+        return [round((seed + i) / 150.0, 4) for i in range(8)]
+
     def sync_video_audio(self, video_id: str, audio_path: str, retry_count: int = 0) -> Dict[str, Any]:
-        """مزامنة الكلام مع الإطارات المرئية للفيديو مع استراتيجيات التعافي."""
+        """مزامنة الكلام مع الإطارات المرئية للفيديو مع الفهرسة الدلالية واستراتيجيات التعافي."""
         # 1. الحصول على التفريغ الصوتي مع الطوابع الزمنية
         print(f"🎙️ محاولة المزامنة (محاولة {retry_count + 1}) لـ: {audio_path}...")
         try:
@@ -54,11 +62,21 @@ class MultimodalSyncManager:
                 if s["start"] <= ts <= s["end"]
             ]
             
+            spoken_text = " ".join(relevant_text) if relevant_text else ""
+            
+            # توليد الفهرس الدلالي
+            semantic_vector = self._generate_embedding(f"{kf['description']} {spoken_text}")
+            
             synced_item = {
                 "timestamp": ts,
                 "visual_description": kf["description"],
-                "spoken_text": " ".join(relevant_text) if relevant_text else None,
-                "frame_path": kf["frame_path"]
+                "spoken_text": spoken_text if spoken_text else None,
+                "frame_path": kf["frame_path"],
+                "semantic_index": {
+                    "vector": semantic_vector,
+                    "version": "v1-sim",
+                    "tags": list(set(spoken_text.split() + kf["description"].split()))[:5]
+                }
             }
             synced_data.append(synced_item)
             
@@ -72,19 +90,34 @@ class MultimodalSyncManager:
             "segments_count": len(segments)
         }
 
-    def query_context(self, video_id: str, keyword: str) -> List[Dict[str, Any]]:
-        """البحث عن سياق سمعي بصري باستخدام كلمة مفتاحية."""
+    def query_context(self, video_id: str, query: str, semantic: bool = True) -> List[Dict[str, Any]]:
+        """البحث عن سياق سمعي بصري باستخدام كلمة مفتاحية أو بحث دلالي."""
         index = video_indexer.load_index(video_id)
         if not index or "multimodal_sync" not in index:
             return []
             
         results = []
+        query_vec = self._generate_embedding(query) if semantic else None
+        
         for item in index["multimodal_sync"]:
-            text_match = keyword.lower() in (item["spoken_text"] or "").lower()
-            visual_match = keyword.lower() in (item["visual_description"] or "").lower()
+            # 1. البحث النصي التقليدي
+            text_match = query.lower() in (item["spoken_text"] or "").lower()
+            visual_match = query.lower() in (item["visual_description"] or "").lower()
             
-            if text_match or visual_match:
-                results.append(item)
+            # 2. البحث الدلالي (Cosine Similarity محاكى)
+            semantic_score = 0
+            if semantic and "semantic_index" in item:
+                item_vec = item["semantic_index"]["vector"]
+                # محاكاة تشابه جيب التمام
+                semantic_score = sum(a * b for a, b in zip(query_vec, item_vec))
+            
+            if text_match or visual_match or semantic_score > 0.8:
+                item_copy = item.copy()
+                item_copy["search_score"] = 1.0 if (text_match or visual_match) else semantic_score
+                results.append(item_copy)
+                
+        # ترتيب النتائج حسب القوة
+        results.sort(key=lambda x: x.get("search_score", 0), reverse=True)
         return results
 
 multimodal_sync = MultimodalSyncManager()
