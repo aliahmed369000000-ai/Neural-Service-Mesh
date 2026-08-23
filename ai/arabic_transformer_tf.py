@@ -225,7 +225,43 @@ class ArabicTransformerTF(tf.keras.Model):
             
         X = self.ln_f(X)
         logits = self.head(X)
-        return logits
+        # Return same signature as NumPy version: (logits, hidden, risk, intent)
+        return logits, X, tf.constant(0.0, dtype=tf.float32), tf.constant("neutral", dtype=tf.string)
+
+    def _forward(self, ids, mask=None, image_feats=None, audio_feats=None, video_feats=None, past_kv=None, use_cache=False):
+        """توقيع متوافق مع NumPy لاستدعائه من قبل الوكلاء والواجهات."""
+        if not isinstance(ids, tf.Tensor):
+            ids_t = tf.convert_to_tensor(ids, dtype=tf.int32)
+            if len(ids_t.shape) == 1: ids_t = tf.expand_dims(ids_t, 0)
+        else:
+            ids_t = ids
+            
+        # تحويل الوسائط إذا كانت NumPy
+        img_t = tf.convert_to_tensor(image_feats, dtype=tf.float32) if image_feats is not None else None
+        aud_t = tf.convert_to_tensor(audio_feats, dtype=tf.float32) if audio_feats is not None else None
+        vid_t = tf.convert_to_tensor(video_feats, dtype=tf.float32) if video_feats is not None else None
+        
+        logits, hidden, risk, intent = self.call(ids_t, img_t, aud_t, vid_t, past_kv, use_cache)
+        
+        # تحويل النتائج إلى NumPy لضمان عدم كسر call sites الحالية التي تتوقع مصفوفات NumPy
+        return logits[0].numpy(), hidden[0].numpy(), float(risk.numpy()), str(intent.numpy())
+
+    def generate_ids(self, text: str, tokenizer, max_new=20, **kwargs) -> np.ndarray:
+        """نسخة TensorFlow من generate_ids مع دعم الـ Caching."""
+        from ai.arabic_transformer import ArabicTransformer
+        # محاكاة لنموذج NumPy لاستخدام منطق التوليد الخاص به مع محرك TF
+        class TFProxyModel:
+            def __init__(self, tf_model, tokenizer):
+                self.tf_model = tf_model
+                self.tokenizer = tokenizer
+                self.max_seq = MAX_SEQ_LEN
+            def _forward(self, *args, **kwargs):
+                return self.tf_model._forward(*args, **kwargs)
+            def generate_ids(self, text, **gen_kwargs):
+                return ArabicTransformer.generate_ids(self, text, **gen_kwargs)
+        
+        proxy = TFProxyModel(self, tokenizer)
+        return proxy.generate_ids(text, max_new=max_new, **kwargs)
 
     def load_numpy_weights(self, weights_dir: str):
         """تحميل الأوزان من ملفات .npy الخاصة بـ NumPy إلى TensorFlow."""

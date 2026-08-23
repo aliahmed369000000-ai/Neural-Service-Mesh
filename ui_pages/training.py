@@ -250,13 +250,27 @@ def render_training():
             if st.button("توليد", key="tf_gen_btn"):
                 try:
                     with st.spinner("تحميل النموذج وتوليد…"):
-                        from ai.arabic_transformer import ArabicTransformer
-                        _m = ArabicTransformer(
-                            d_model=1216, n_heads=16, d_ff=2560, n_layers=8,
-                            weights_dir="models/transformer_ckg_v3",
-                        )
-                        _m.load("models/transformer_ckg_v3")
-                        _out = _m.generate(_g_prompt, max_new=12, temp=0.9)
+                        # خيار لاختيار المحرك (افتراضياً NumPy للتوافق، أو TF للسرعة)
+                        use_tf = st.checkbox("استخدام محرك TensorFlow (أسرع)", value=False, key="use_tf_gen")
+                        if use_tf:
+                            from ai.arabic_transformer_tf import ArabicTransformerTF
+                            _m = ArabicTransformerTF(
+                                d_model=1216, n_heads=16, d_ff=2560, n_layers=8
+                            )
+                            _m.load_numpy_weights("models/transformer_ckg_v3")
+                            # ملاحظة: generate في TF تتطلب تمرير tokenizer
+                            from ai.arabic_transformer import ArabicTransformer
+                            _dummy = ArabicTransformer(d_model=1216)
+                            _out = _m.generate_ids(_g_prompt, tokenizer=_dummy.tokenizer, max_new=12, temp=0.9)
+                            _out = _dummy.tokenizer.decode(_out)
+                        else:
+                            from ai.arabic_transformer import ArabicTransformer
+                            _m = ArabicTransformer(
+                                d_model=1216, n_heads=16, d_ff=2560, n_layers=8,
+                                weights_dir="models/transformer_ckg_v3",
+                            )
+                            _m.load("models/transformer_ckg_v3")
+                            _out = _m.generate(_g_prompt, max_new=12, temp=0.9)
                     st.success(_out)
                 except Exception as _ge:
                     st.warning(f"تعذّر التوليد: {_ge}")
