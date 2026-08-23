@@ -5,6 +5,8 @@ from typing import Dict, List, Any, Optional
 import json
 import time
 import uvicorn
+import asyncio
+import threading
 from pathlib import Path
 
 app = FastAPI(title="NSM Shared Memory Server")
@@ -25,16 +27,29 @@ STORAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
 class MemoryState:
     def __init__(self):
         self.data = self._load()
+        self._lock = threading.Lock()
+        self._save_pending = False
     
     def _load(self):
         if STORAGE_PATH.exists():
-            with open(STORAGE_PATH, "r") as f:
-                return json.load(f)
+            try:
+                with open(STORAGE_PATH, "r") as f:
+                    return json.load(f)
+            except: pass
         return {"shared_facts": {}, "active_queries": {}, "trust_scores": {}}
     
     def save(self):
-        with open(STORAGE_PATH, "w") as f:
-            json.dump(self.data, f, indent=2)
+        """حفظ البيانات بشكل غير متزامن لتجنب حظر الطلبات."""
+        if self._save_pending: return
+        self._save_pending = True
+        threading.Thread(target=self._save_worker).start()
+
+    def _save_worker(self):
+        time.sleep(1) # تجميع الطلبات (Debounce)
+        with self._lock:
+            with open(STORAGE_PATH, "w") as f:
+                json.dump(self.data, f, indent=2)
+        self._save_pending = False
 
 memory = MemoryState()
 
@@ -110,4 +125,6 @@ def answer_query(a: Answer, api_key: str = Depends(get_api_key)):
     raise HTTPException(status_code=404, detail="Query not found")
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    import os
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
