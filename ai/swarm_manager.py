@@ -97,10 +97,16 @@ class SwarmManager:
         logger.info(f"👷 Worker Registered: {agent_id} as {role} (Trust: {trust_score})")
 
     def heartbeat(self, agent_id: str):
-        """تحديث نبض القلب للوكيل لضمان أنه لا يزال نشطاً."""
+        """تحديث نبض القلب للوكيل لضمان أنه لا يزال نشطاً، مع تعافي تدريجي للثقة."""
         if agent_id in self.workers:
-            self.workers[agent_id]["last_seen"] = time.time()
-            self.workers[agent_id]["status"] = "active"
+            worker = self.workers[agent_id]
+            worker["last_seen"] = time.time()
+            worker["status"] = "active"
+            
+            # 🆕 تعافي تدريجي للثقة (Passive Recovery)
+            # إذا كانت الثقة منخفضة، تزيد بنسبة ضئيلة جداً مع كل نبضة قلب (دليل استقرار)
+            if worker["trust_score"] < 0.5:
+                worker["trust_score"] = min(0.5, worker["trust_score"] + 0.001)
 
     def get_active_workers(self) -> List[str]:
         """الحصول على قائمة الوكلاء الذين أرسلوا نبضات قلب مؤخراً."""
@@ -115,20 +121,25 @@ class SwarmManager:
                     logger.warning(f"⚠️ Worker {aid} went offline (Timeout)")
         return active
 
-    def report_result(self, agent_id: str, task: str, result: str):
-        """تسجيل نتيجة مهمة من وكيل فرعي."""
+    def report_result(self, agent_id: str, task: str, result: str, success: bool = True):
+        """تسجيل نتيجة مهمة من وكيل فرعي مع تحديث الثقة تلقائياً."""
         entry = {
             "agent_id": agent_id,
             "task": task,
             "result": result,
+            "success": success,
             "ts": time.time()
         }
         self.results.append(entry)
+        
+        # 🆕 تحديث الثقة: مكافأة أو جزاء
+        self._update_trust(agent_id, 0.05 if success else -0.1)
+        
         # حفظ النتيجة في ملف سجل السرب
         res_path = self.storage_dir / "swarm_results.jsonl"
         with open(res_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        logger.info(f"✅ Result Reported by {agent_id}")
+        logger.info(f"✅ Result Reported by {agent_id} (Success: {success})")
 
     def get_swarm_status(self) -> Dict[str, Any]:
         """الحصول على نظرة عامة على حالة السرب الحالي."""
@@ -218,8 +229,23 @@ class SwarmManager:
             
         return {"status": "pending", "score": score}
 
+    def _update_trust(self, agent_id: str, delta: float):
+        """تعديل مستوى الثقة لوكيل معين مع ضمان البقاء في النطاق [0.0, 1.0]."""
+        if agent_id in self.workers:
+            old_score = self.workers[agent_id]["trust_score"]
+            new_score = max(0.0, min(1.0, old_score + delta))
+            self.workers[agent_id]["trust_score"] = new_score
+            if abs(delta) > 0.01:
+                logger.info(f"⚖️ Trust Update for {agent_id}: {old_score:.2f} -> {new_score:.2f}")
+
     def _save_proposal(self, proposal: SwarmProposal):
-        """حفظ حالة المقترح في القرص للمراجعة والتدقيق."""
+        """حفظ حالة المقترح في القرص للمراجعة والتدقيق، وتحديث الثقة عند الإغلاق."""
+        # تحديث الثقة عند الموافقة أو الرفض
+        if proposal.status == "approved":
+            self._update_trust(proposal.proposer, 0.1) # مكافأة للمقترح الناجح
+        elif proposal.status == "rejected":
+            self._update_trust(proposal.proposer, -0.05) # جزاء بسيط للمقترح المرفوض
+
         p_path = self.storage_dir / f"{proposal.proposal_id}.json"
         data = {
             "id": proposal.proposal_id,

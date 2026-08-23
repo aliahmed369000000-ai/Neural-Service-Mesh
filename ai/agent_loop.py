@@ -1174,6 +1174,12 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                                 # حفظ النتيجة في الكاش للطلبات المستقبلية
                                 agent_cache.set(tname, t_req.get("params", {}), raw_res)
                                 
+                                # 🆕 إبلاغ مدير السرب بالنجاح لتحديث الثقة
+                                try:
+                                    from ai.swarm_manager import swarm_manager
+                                    swarm_manager.report_result(state.agent_id, f"tool:{tname}", "Success", success=True)
+                                except: pass
+                                
                                 # معالجة الإشارات الخاصة قبل الاقتطاع أو التحويل
                                 if str(raw_res).startswith("SIGNAL_SLEEP:"):
                                     sleep_requested = True
@@ -1225,6 +1231,12 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                                         obs = f"❌ خطأ تنفيذ: {e}"
                                 except:
                                     obs = f"❌ خطأ تنفيذ: {e}"
+                                
+                                # 🆕 إبلاغ مدير السرب بالفشل لتحديث الثقة (الجزاء)
+                                try:
+                                    from ai.swarm_manager import swarm_manager
+                                    swarm_manager.report_result(state.agent_id, f"tool:{tname}", f"Error: {e}", success=False)
+                                except: pass
                             
                             obs_round.append(f"[{tname}] {obs}")
                             _emit({"type": "result", "tool": tname, "output": obs})
