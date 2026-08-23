@@ -1,0 +1,198 @@
+{
+  "nodes": {
+    "mesh_4d894abd": {
+      "status": "online",
+      "last_seen": "2026-08-23T20:59:07.941296+00:00",
+      "evolution_score": 0.0,
+      "capabilities": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "tf_engine"
+      ]
+    },
+    "mesh_ef027f11": {
+      "status": "online",
+      "last_seen": "2026-08-23T20:59:07.946692+00:00",
+      "evolution_score": 0.0,
+      "capabilities": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "tf_engine"
+      ]
+    },
+    "mesh_efcaddb1": {
+      "status": "online",
+      "last_seen": "2026-08-23T20:59:16.221324+00:00",
+      "evolution_score": 0.0,
+      "capabilities": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "tf_engine"
+      ]
+    },
+    "mesh_327057ad": {
+      "status": "online",
+      "last_seen": "2026-08-23T20:59:16.222753+00:00",
+      "evolution_score": 0.0,
+      "capabilities": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "tf_engine"
+      ]
+    },
+    "mesh_bd542c77": {
+      "status": "online",
+      "last_seen": "2026-08-23T20:59:25.212280+00:00",
+      "evolution_score": 0.0,
+      "capabilities": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "tf_engine"
+      ]
+    },
+    "mesh_3a86b164": {
+      "status": "online",
+      "last_seen": "2026-08-23T20:59:25.213826+00:00",
+      "evolution_score": 0.0,
+      "capabilities": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "tf_engine"
+      ]
+    },
+    "mesh_0115b9cf": {
+      "status": "online",
+      "last_seen": "2026-08-23T20:59:44.452591+00:00",
+      "evolution_score": 0.0,
+      "capabilities": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "tf_engine"
+      ]
+    },
+    "mesh_c74af97c": {
+      "status": "online",
+      "last_seen": "2026-08-23T20:59:47.360927+00:00",
+      "evolution_score": 0.0,
+      "capabilities": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "tf_engine"
+      ]
+    },
+    "mesh_644d8469": {
+      "status": "online",
+      "last_seen": "2026-08-23T21:00:05.945462+00:00",
+      "evolution_score": 0.0,
+      "capabilities": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "tf_engine"
+      ]
+    },
+    "mesh_98573eb4": {
+      "status": "online",
+      "last_seen": "2026-08-23T21:00:05.946838+00:00",
+      "evolution_score": 0.0,
+      "capabilities": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "tf_engine"
+      ]
+    },
+    "mesh_c521fc60": {
+      "status": "online",
+      "last_seen": "2026-08-23T21:00:58.232962+00:00",
+      "evolution_score": 0.0,
+      "capabilities": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "tf_engine"
+      ]
+    },
+    "mesh_031e18ad": {
+      "status": "online",
+      "last_seen": "2026-08-23T21:00:58.234020+00:00",
+      "evolution_score": 0.0,
+      "capabilities": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "tf_engine"
+      ]
+    },
+    "mesh_ebdb6e16": {
+      "status": "online",
+      "last_seen": "2026-08-23T21:02:07.654201+00:00",
+      "evolution_score": 0.0,
+      "capabilities": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "tf_engine"
+      ]
+    },
+    "mesh_c2a457d7": {
+      "status": "online",
+      "last_seen": "2026-08-23T21:02:07.654564+00:00",
+      "evolution_score": 0.0,
+      "capabilities": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "tf_engine"
+      ]
+    },
+    "mesh_7268f3cc": {
+      "status": "online",
+      "last_seen": "2026-08-23T21:02:14.887469+00:00",
+      "evolution_score": 0.0,
+      "capabilities": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "tf_engine"
+      ]
+    },
+    "mesh_c59b602c": {
+      "status": "online",
+      "last_seen": "2026-08-23T21:02:14.887841+00:00",
+      "evolution_score": 0.0,
+      "capabilities": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "tf_engine"
+      ]
+    }
+  },
+  "global_experience": [],
+  "created_at": "2026-08-23T20:59:07.941284+00:00"
+}
