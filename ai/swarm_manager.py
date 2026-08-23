@@ -171,12 +171,39 @@ class SwarmManager:
         return False
 
     def award_task(self, task_id: str) -> Optional[str]:
+        """تخصيص المهام بناءً على الأوزان التطورية والسيادة."""
         if task_id not in self.marketplace_tasks or not self.marketplace_tasks[task_id]["bids"]:
             return None
-        # اختيار صاحب أعلى ثقة معلنة
-        winner = max(self.marketplace_tasks[task_id]["bids"], key=lambda x: x["trust_claim"])["agent_id"]
-        self.assign_task("system", task_id, winner)
-        return winner
+            
+        task = self.marketplace_tasks[task_id]
+        mesh_state = self.mesh_node._load_state()
+        
+        best_agent = None
+        highest_score = -1.0
+        
+        for bid in task["bids"]:
+            aid = bid["agent_id"]
+            # جلب الأوزان التطورية للعقدة من الشبكة
+            node_info = mesh_state["nodes"].get(aid, {})
+            weights = node_info.get("behavioral_weights", {})
+            
+            # حساب نتيجة الجدارة (Evolutionary Merit Score)
+            # تعتمد على الكفاءة، الابتكار، والثقة المعلنة
+            efficiency = weights.get("processing_efficiency", 1.0)
+            innovation = weights.get("innovation_rate", 1.0)
+            trust = bid.get("trust_claim", 0.5)
+            
+            merit_score = (efficiency * 0.4) + (innovation * 0.3) + (trust * 0.3)
+            
+            if merit_score > highest_score:
+                highest_score = merit_score
+                best_agent = aid
+        
+        if best_agent:
+            self.assign_task("system", task_id, best_agent)
+            logger.info(f"🏆 Task {task_id} awarded to {best_agent} with Merit Score: {highest_score:.2f}")
+            return best_agent
+        return None
 
     # ⚔️ Competition APIs
     def start_competition(self, comp_id: str, task_description: str, competitors: List[str]):

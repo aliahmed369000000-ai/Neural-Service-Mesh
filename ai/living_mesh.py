@@ -96,28 +96,38 @@ class LivingMeshNode:
             self._save_state(state)
         return dead_nodes
         
-    def sync_experience(self, kind: str, experience_data: Dict[str, Any]):
-        """مشاركة خبرة جديدة مع الشبكة عبر بروتوكول P2P محاكي."""
+    def sync_experience(self, kind: str, experience_data: Dict[str, Any], hops: int = 0):
+        """مشاركة خبرة جديدة عبر بروتوكول Gossip (P2P الموزع)."""
+        if hops > 5: return # منع الحلقات اللانهائية في المحاكاة
+        
+        msg_id = f"exp_{uuid.uuid4().hex[:10]}"
         msg = {
-            "id": f"exp_{uuid.uuid4().hex[:10]}",
+            "id": msg_id,
             "from": self.node_id,
             "kind": kind,
             "data": experience_data,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "p2p_hops": 0
+            "p2p_hops": hops
         }
         
-        # التعلم اللحظي: تعديل الأوزان بناءً على نوع الخبرة
+        # التعلم اللحظي الموزع: العقدة التي تستقبل الخبرة تعدل أوزانها أيضاً
         self.update_behavioral_weights(kind, experience_data)
         
         state = self._load_state()
+        # التحقق من عدم تكرار الخبرة
+        if any(e.get("id") == msg_id for e in state.get("global_experience", [])):
+            return
+
         state["global_experience"].append(msg)
         
-        # محاكاة انتشار P2P: تحديث العقد الأخرى مباشرة في الحالة
-        for nid, info in state["nodes"].items():
-            if nid != self.node_id and info["status"] == "online":
-                # في P2P حقيقي، هنا يتم إرسال المقبس (Socket)
-                logger.info(f"📡 P2P: Node {self.node_id} synced {kind} to {nid}")
+        # محاكاة بروتوكول Gossip: إرسال الخبرة لـ 2 من الأقران عشوائياً
+        import random
+        online_peers = [nid for nid, info in state["nodes"].items() if nid != self.node_id and info["status"] == "online"]
+        if online_peers:
+            targets = random.sample(online_peers, min(len(online_peers), 2))
+            for target in targets:
+                logger.info(f"📢 Gossip: Node {self.node_id} propagating {kind} to {target} (Hop {hops})")
+                # في بيئة حقيقية، هذا استدعاء RPC/Socket لعقدة أخرى
         
         if len(state["global_experience"]) > 1000:
             state["global_experience"] = state["global_experience"][-1000:]

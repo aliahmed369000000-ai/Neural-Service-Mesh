@@ -340,9 +340,14 @@ def render_unified_swarm_dashboard() -> None:
                 for cap in info.get("capabilities", []):
                     c3.caption(f"- {cap}")
         
-        # ميزة ابتكار السرب: التنبؤ باستنزاف الموارد
-        if any("Resource Drain Prediction" in str(exp.get("data")) for exp in mesh_state.get("global_experience", [])):
-            st.info("💡 **ميزة مبتكرة من السرب:** نظام التنبؤ باستنزاف الموارد نشط الآن ويراقب العقد.")
+        # ميزات ابتكار السرب
+        innovations = [exp.get("data", {}).get("feature") for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "innovation"]
+        if innovations:
+            st.info(f"💡 **ميزات مبتكرة من السرب:** {', '.join(set(filter(None, innovations)))} نشطة الآن.")
+            if "Neural Path Pruning" in innovations:
+                st.success("🧠 **تحسين عصبي:** تم تفعيل تقليم المسارات العصبية لزيادة سرعة الاستجابة.")
+            if "Resource Drain Prediction" in innovations:
+                st.warning("⚡ **تنبؤ استباقي:** نظام مراقبة استنزاف الموارد يعمل بكامل طاقته.")
     
     if mesh_state.get("global_experience"):
         st.subheader("🧠 سجل الوعي الجماعي (أحدث الخبرات)")
