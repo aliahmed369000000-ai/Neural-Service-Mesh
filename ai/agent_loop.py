@@ -716,6 +716,21 @@ register_tool(ToolSpec("share_media", "مشاركة صورة أو صوت مع ا
                             "tags": {"type": "array", "items": {"type": "string"}}
                         }}, _tool_share_media))
 
+def _tool_trigger_reflection(params: Dict[str, Any]) -> str:
+    """إطلاق عملية التلخيص الذاتي لتحديث قاعدة الخبرة."""
+    try:
+        from ai.swarm_manager import swarm_manager
+        result = swarm_manager.trigger_reflection()
+        if result.get("ok"):
+            return f"✅ التلخيص الذاتي ناجح: {result.get('summary')}"
+        else:
+            return f"ℹ️ التلخيص الذاتي: {result.get('message')}"
+    except Exception as e:
+        return f"❌ trigger_reflection: {e}"
+
+register_tool(ToolSpec("trigger_reflection", "بدء عملية المراجعة الذاتية وتحديث قاعدة الخبرة الجماعية", 
+                        {}, _tool_trigger_reflection))
+
 def _tool_propose_innovation(params: Dict[str, Any]) -> str:
     """اقتراح ابتكار خوارزمي جديد للشبكة العصبية."""
     import json

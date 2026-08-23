@@ -100,6 +100,15 @@ class SwarmManager:
             "recent_results": self.results[-5:] if self.results else []
         }
 
+    def trigger_reflection(self) -> Dict[str, Any]:
+        """بدء عملية التلخيص الذاتي بناءً على الأنشطة الأخيرة."""
+        from ai.self_reflection import reflection_engine
+        # نأخذ آخر 20 نتيجة لمراجعتها
+        recent_activity = self.results[-20:]
+        result = reflection_engine.reflect_on_activity(recent_activity)
+        logger.info(f"🧠 Self-Reflection Triggered: {result.get('summary')}")
+        return result
+
     def create_proposal(self, proposer: str, action_type: str, data: Dict[str, Any]) -> str:
         """إنشاء مقترح جديد للمراجعة الجماعية."""
         p_id = f"prop_{uuid.uuid4().hex[:8]}"
