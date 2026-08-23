@@ -331,6 +331,40 @@ register_tool(ToolSpec("video_sentiment", "تحليل الحالة العاطف�
                         {"type": "object", "properties": {"video_id": {"type": "string"}}}, 
                         _tool_video_sentiment))
 
+def _tool_memory_search(params: Dict[str, Any]) -> str:
+    """البحث الدلالي في ذاكرة الوكيل (الحقائق والأحداث)."""
+    query = str(params.get("query", ""))
+    agent_id = str(params.get("agent_id", "default"))
+    
+    if not query:
+        return "❌ memory_search: يجب توفير query."
+        
+    try:
+        from ai.agent_hibernation import wake_up_agent
+        agent_state = wake_up_agent(agent_id)
+        
+        if not agent_state:
+            return "❌ فشل الوصول إلى ذاكرة الوكيل."
+            
+        semantic_results = agent_state.search_semantic(query)
+        episodic_results = agent_state.search_episodic(query)
+        
+        return json.dumps({
+            "ok": True,
+            "query": query,
+            "semantic_facts": [r["content"] for r in semantic_results[:3]],
+            "episodic_events": [r["summary"] for r in episodic_results[:2]]
+        }, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return f"❌ memory_search Error: {e}"
+
+register_tool(ToolSpec("memory_search", "البحث الدلالي في ذاكرة الوكيل (الحقائق والأحداث)", 
+                        {"type": "object", "properties": {
+                            "query": {"type": "string"},
+                            "agent_id": {"type": "string"}
+                        }}, 
+                        _tool_memory_search))
+
 # ═════════════════════════ محرك الحلقة ═════════════════════════════
 _SYSTEM_PROMPT = """أنت الوكيل التنفيذي لـ NSM. رد JSON فقط:
 {"thinking": "...", "tools": [{"tool": "...", "params": {...}}], "finish": "...", "end": true/false}"""

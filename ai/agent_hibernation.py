@@ -58,7 +58,7 @@ class AgentState:
             facts.extend([f"قرار: {d.strip()}" for d in decisions])
             
             # استخراج SHA ورموز الالتزام
-            shas = re.findall(r"SHA:\s*([a-f0-9]{7,40})", content)
+            shas = re.findall(r"SHA\s*(?:هو|:)?\s*([a-f0-9]{7,40})", content, re.IGNORECASE)
             for s in shas: facts.append(f"SHA التزام: {s}")
             
             # استخراج النتائج الرقمية
@@ -67,20 +67,36 @@ class AgentState:
             
         return list(set(facts))
 
-    def _auto_summarize_episodic(self):
+    def _auto_summarize_episodic(self, force: bool = False):
         """تحويل الذاكرة العاملة القديمة إلى ذاكرة أحداثية ملخصة مع دعم ANN والكيانات."""
-        if len(self.context) <= 15: return
+        if not force and len(self.context) <= 15: return
         
         # استخراج الرسائل القديمة (ما عدا النظام وآخر 5 رسائل)
-        to_summarize = self.context[1:-5]
+        # إذا كانت القائمة قصيرة، نأخذ ما هو متاح ما عدا رسالة النظام
+        if len(self.context) <= 6:
+            to_summarize = self.context[1:]
+        else:
+            to_summarize = self.context[1:-5]
+            
         if not to_summarize: return
         
         # 1. استخراج الحقائق الدقيقة قبل التلخيص
         extracted_facts = self._extract_facts(to_summarize)
+        from ai.multimodal_sync import MultimodalSyncManager
+        sync_manager = MultimodalSyncManager()
+        
         for fact in extracted_facts:
+            # توليد هاش دلالي للحقيقة (ANN Support)
+            embedding = sync_manager._generate_embedding(fact)
+            lsh_hash = sync_manager._generate_lsh_hash(embedding)
+            
             # حفظ الحقائق في الذاكرة الدلالية (Semantic Memory)
             fact_id = f"fact_{int(time.time())}_{hash(fact)%1000}"
-            self.semantic_memory[fact_id] = {"content": fact, "timestamp": time.time()}
+            self.semantic_memory[fact_id] = {
+                "content": fact, 
+                "timestamp": time.time(),
+                "semantic_hash": lsh_hash
+            }
         
         # 2. محاكاة التلخيص الهيكلي
         summary_text = f"أرشفة {len(to_summarize)} رسالة. تم استخراج {len(extracted_facts)} حقيقة دقيقة."
@@ -108,10 +124,10 @@ class AgentState:
         self.context = [system_msg] + recent
         logger.info(f"🧠 تم أرشفة {len(to_summarize)} رسالة في الذاكرة الأحداثية.")
 
-    def compress(self, target_size_kb: int = 100):
+    def compress(self, target_size_kb: int = 100, force_summarize: bool = False):
         """ضغط الذاكرة لتقليل حجم الحالة المحفوظة."""
         # محاولة التلخيص التلقائي أولاً قبل الضغط الفيزيائي
-        self._auto_summarize_episodic()
+        self._auto_summarize_episodic(force=force_summarize)
         
         initial_size = len(json.dumps(self.to_dict())) / 1024
         if initial_size <= target_size_kb: return
@@ -155,9 +171,30 @@ class AgentState:
             # حساب مسافة هاملينج (ANN Filter)
             distance = sum(c1 != c2 for c1, c2 in zip(query_hash, e_hash))
             if distance <= 2: # عتبة التشابه
+                episode["score"] = 1.0 - (distance / len(query_hash))
                 results.append(episode)
         
-        return sorted(results, key=lambda x: x["timestamp"], reverse=True)
+        return sorted(results, key=lambda x: x.get("score", 0), reverse=True)
+
+    def search_semantic(self, query: str) -> List[Dict[str, Any]]:
+        """البحث الدلالي في الذاكرة الدلالية (الحقائق) باستخدام ANN."""
+        from ai.multimodal_sync import MultimodalSyncManager
+        sync_manager = MultimodalSyncManager()
+        query_vec = sync_manager._generate_embedding(query)
+        query_hash = sync_manager._generate_lsh_hash(query_vec)
+        
+        results = []
+        for fact_id, fact in self.semantic_memory.items():
+            f_hash = fact.get("semantic_hash")
+            if not f_hash: continue
+            
+            # حساب مسافة هاملينج
+            distance = sum(c1 != c2 for c1, c2 in zip(query_hash, f_hash))
+            if distance <= 2:
+                fact["score"] = 1.0 - (distance / len(query_hash))
+                results.append(fact)
+        
+        return sorted(results, key=lambda x: x.get("score", 0), reverse=True)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -199,13 +236,14 @@ def hibernate_agent(agent_id: str, context: List[Dict[str, Any]], plan: Dict[str
                     metadata: Dict[str, Any] = None, memory_snapshot: Dict[str, Any] = None,
                     pending_tasks: List[str] = None, memory_shards: Dict[str, str] = None,
                     visual_context: Dict[str, Any] = None, audio_context: Dict[str, Any] = None,
-                    multimodal_memory: Dict[str, Any] = None, compress: bool = True) -> bool:
+                    multimodal_memory: Dict[str, Any] = None, compress: bool = True,
+                    force_summarize: bool = False) -> bool:
     """حفظ حالة الوكيل في ملف محلي لدخول وضع النوم مع دعم الضغط التلقائي."""
     try:
         state = AgentState(agent_id, context, plan, metadata, memory_snapshot, pending_tasks, memory_shards, visual_context, audio_context, multimodal_memory)
         
         if compress:
-            state.compress(target_size_kb=50) # ضغط إذا تجاوز 50KB
+            state.compress(target_size_kb=50, force_summarize=force_summarize) # ضغط إذا تجاوز 50KB
             
         file_path = SLEEP_DIR / f"{agent_id}_sleep.json"
         with open(file_path, "w", encoding="utf-8") as f:
