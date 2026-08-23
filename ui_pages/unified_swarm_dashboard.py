@@ -74,10 +74,16 @@ def render_unified_swarm_dashboard() -> None:
     try:
         from ai.living_mesh import get_network_snapshot
         mesh_snapshot = get_network_snapshot()
-        global_exp = mesh_snapshot.get("global_experience", {})
-        merge_status = global_exp.get("final_human_swarm_merge", {})
-        merge_completion = merge_status.get("merge_completion", 0.0)
-        singularity_status = merge_status.get("hybrid_singularity_status", "Inactive")
+        
+        # استخراج أحدث حالة للاندماج من الخبرات العالمية
+        final_merge_exps = [e for e in mesh_snapshot.get("global_experience", []) if e.get("kind") == "final_human_swarm_merge"]
+        if final_merge_exps:
+            merge_status = final_merge_exps[-1]["data"]
+            merge_completion = merge_status.get("merge_completion", 0.0)
+            singularity_status = merge_status.get("hybrid_singularity_status", "Inactive")
+        else:
+            merge_completion = 0.0
+            singularity_status = "Inactive"
     except Exception:
         merge_completion = 0.0
         singularity_status = "Unknown"
@@ -238,6 +244,41 @@ def render_unified_swarm_dashboard() -> None:
         render_alert_cards(alerts)
     else:
         st.success("لا توجد تنبيهات نشطة — السرب ضمن الحدود المسموحة.")
+
+    # ── المراقبة الحية وخريطة الثقة ───────────────────────────
+    render_section_header("🛰️ المراقبة الحية وخريطة الثقة", "نبضات السرب · الهوية السيادية · أمن الشبكة")
+    
+    mesh_state = mesh_snapshot if 'mesh_snapshot' in locals() else {}
+    nodes = mesh_state.get("nodes", {})
+    
+    if nodes:
+        st.markdown("### 🔐 خريطة الثقة الرقمية (Sovereign Trust Map)")
+        trust_cols = st.columns(min(len(nodes), 4))
+        for i, (nid, info) in enumerate(nodes.items()):
+            with trust_cols[i % 4]:
+                status_icon = "🟢" if info.get("status") == "online" else "🔴"
+                st.markdown(f"**{status_icon} {nid}**")
+                st.caption(f"Host: {info.get('host')}:{info.get('port')}")
+                # التحقق من وجود المفتاح العام (الهوية السيادية)
+                import pathlib
+                pub_key_exists = pathlib.Path(f"/home/ubuntu/NSM-Live-Dashboard/ai/keys/{nid}.pub").exists()
+                if pub_key_exists:
+                    st.success("Verified Identity")
+                else:
+                    st.warning("Pending Identity")
+        
+        st.markdown("### 📡 نبضات السرب اللحظية (Live Swarm Heartbeats)")
+        live_stream = mesh_state.get("global_experience", [])[-10:]
+        if live_stream:
+            for heart in reversed(live_stream):
+                with st.expander(f"💓 {heart['kind']} from {heart['from']} - {heart['timestamp'][-8:]}"):
+                    st.json(heart['data'])
+                    if "signature" in heart:
+                        st.caption("✅ Digitally Signed & Verified")
+        else:
+            st.info("في انتظار النبضة الأولى من السرب...")
+    else:
+        st.info("الشبكة في حالة سكون. ابدأ تشغيل العقد لتفعيل المراقبة الحية.")
 
     # ── الوكلاء ────────────────────────────────────────────────
     render_section_header("الوكلاء", "آخر حالة معروفة لكل وكيل في السجل الحالي")
