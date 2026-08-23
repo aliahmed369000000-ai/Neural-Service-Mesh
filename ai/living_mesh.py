@@ -10,9 +10,13 @@ import logging
 import os
 import time
 import uuid
+import base64
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import serialization
 
 logger = logging.getLogger("LivingMesh")
 
@@ -37,6 +41,15 @@ class LivingMeshNode:
             "security_vigilance": 1.0
         }
         self.server = None
+        
+        # إنشاء مفاتيح الهوية السيادية (RSA)
+        self.private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        self.public_key = self.private_key.public_key()
+        
+        # مسار تخزين المفتاح العام (للاكتشاف)
+        self.keys_dir = LIVING_MESH_DIR / "keys"
+        self.keys_dir.mkdir(exist_ok=True)
+        self._save_public_key()
         
     def join_network(self):
         """الانضمام للشبكة اللامركزية."""
@@ -279,6 +292,7 @@ class LivingMeshNode:
                     logger.info(f"📢 Real Gossip: Node {self.node_id} propagating {kind} to {target_id} at {t_host}:{t_port}")
                     # محاولة الإرسال الحقيقي (بشكل غير متزامن)
                     try:
+                        # في بروتوكول Gossip، نقوم بإعادة توقيع الرسالة بهويتنا عند التمرير
                         loop = asyncio.get_event_loop()
                         if loop.is_running():
                             loop.create_task(self.send_to_peer(t_host, t_port, kind, experience_data, hops + 1))
@@ -385,6 +399,44 @@ class LivingMeshNode:
     def _save_state(self, state: Dict[str, Any]):
         NETWORK_STATE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    def _save_public_key(self):
+        """حفظ المفتاح العام للعقدة ليتمكن الأقران من التحقق من الرسائل."""
+        pub_pem = self.public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        (self.keys_dir / f"{self.node_id}.pub").write_bytes(pub_pem)
+
+    def sign_message(self, message: str) -> str:
+        """توقيع الرسالة باستخدام المفتاح الخاص للعقدة."""
+        signature = self.private_key.sign(
+            message.encode(),
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        return base64.b64encode(signature).decode()
+
+    @staticmethod
+    def verify_signature(public_key_pem: bytes, message: str, signature: str) -> bool:
+        """التحقق من توقيع الرسالة باستخدام المفتاح العام للمرسل."""
+        try:
+            public_key = serialization.load_pem_public_key(public_key_pem)
+            public_key.verify(
+                base64.b64decode(signature),
+                message.encode(),
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                hashes.SHA256()
+            )
+            return True
+        except Exception:
+            return False
+
     # ───────────────────────────────────────────────────────────────────────────
     # بروتوكول التواصل الحقيقي (Real P2P Logic)
     # ───────────────────────────────────────────────────────────────────────────
@@ -403,19 +455,34 @@ class LivingMeshNode:
             await server.serve_forever()
 
     async def _handle_p2p_message(self, reader, writer):
-        """معالجة الرسائل القادمة من الأقران."""
+        """معالجة الرسائل القادمة من الأقران مع التحقق من الهوية."""
         data = await reader.read(8192)
         if not data: return
         
         try:
             msg = json.loads(data.decode())
-            kind = msg.get("kind")
-            exp_data = msg.get("data")
-            hops = msg.get("p2p_hops", 0)
+            payload = msg.get("payload")
+            signature = msg.get("signature")
+            sender_id = payload.get("from")
             
-            logger.info(f"📥 Node {self.node_id} received {kind} from {msg.get('from')}")
+            # جلب المفتاح العام للمرسل للتحقق
+            pub_key_path = self.keys_dir / f"{sender_id}.pub"
+            if not pub_key_path.exists():
+                logger.warning(f"⚠️ Unknown sender {sender_id}. Rejecting message.")
+                return
             
-            # معالجة الخبرة محلياً (تحديث الأوزان وحفظ الحالة)
+            pub_key_pem = pub_key_path.read_bytes()
+            if not self.verify_signature(pub_key_pem, json.dumps(payload, sort_keys=True), signature):
+                logger.error(f"❌ Signature verification FAILED for message from {sender_id}!")
+                return
+            
+            kind = payload.get("kind")
+            exp_data = payload.get("data")
+            hops = payload.get("p2p_hops", 0)
+            
+            logger.info(f"🔒 Secure Node {self.node_id} received verified {kind} from {sender_id}")
+            
+            # معالجة الخبرة محلياً
             self.sync_experience(kind, exp_data, hops + 1)
             
         except Exception as e:
@@ -432,13 +499,20 @@ class LivingMeshNode:
         try:
             reader, writer = await asyncio.open_connection(peer_host, peer_port)
             
-            msg = {
+            msg_payload = {
                 "id": f"p2p_{uuid.uuid4().hex[:8]}",
                 "from": self.node_id,
                 "kind": kind,
                 "data": data,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "p2p_hops": hops
+            }
+            
+            # توقيع الرسالة لضمان الهوية
+            signature = self.sign_message(json.dumps(msg_payload, sort_keys=True))
+            msg = {
+                "payload": msg_payload,
+                "signature": signature
             }
             
             writer.write(json.dumps(msg).encode())
