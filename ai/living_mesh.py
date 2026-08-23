@@ -42,8 +42,15 @@ class LivingMeshNode:
         
         # تحديد القدرات بناءً على نوع العقدة
         capabilities = ["text", "image", "audio", "video", "tf_engine"]
-        if "zeta" in self.node_id.lower():
+        nid_lower = self.node_id.lower()
+        if "zeta" in nid_lower:
             capabilities += ["quantum_compute", "distributed_qubits", "entanglement_sync"]
+        elif "eta" in nid_lower:
+            capabilities += ["cyber_defense", "intrusion_detection", "neural_firewall"]
+        elif "theta" in nid_lower:
+            capabilities += ["data_synthesis", "knowledge_graph", "cross_modal_fusion"]
+        elif "iota" in nid_lower:
+            capabilities += ["human_interaction", "emotional_intelligence", "natural_dialogue"]
             
         state["nodes"][self.node_id] = {
             "status": "online",
