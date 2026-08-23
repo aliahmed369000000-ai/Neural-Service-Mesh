@@ -36,12 +36,24 @@ class SharedExperienceManager:
             logger.error(f"فشل حفظ المعرفة الجماعية: {e}")
 
     def share_fact(self, agent_id: str, fact: Dict[str, Any]):
-        """مشاركة حقيقة إذا كانت أهميتها تتجاوز الحد المسموح."""
+        """مشاركة حقيقة إذا كانت أهميتها تتجاوز الحد المسموح واجتازت التقييم الذاتي."""
         importance = fact.get("strength", 0)
-        if importance < 0.7:  # مشاركة الحقائق المهمة فقط
+        content = fact.get("content", "")
+        
+        # 1. التحقق من الحد الأدنى للأهمية
+        if importance < 0.7:
             return False
             
-        fact_id = f"shared_{hash(fact['content']) % 10000}"
+        # 2. التقييم الذاتي للحلول البرمجية (إذا كان المحتوى كوداً)
+        if "```" in content or "import " in content or "def " in content:
+            from ai.learning_engine import learning_engine
+            eval_res = learning_engine.evaluate_solution(content)
+            if not eval_res["approved"]:
+                logger.warning(f"🛡️ رفض مشاركة حل برمجي ضعيف من {agent_id}: {eval_res['reasons']}")
+                return False
+            importance = (importance + eval_res["score"]) / 2 # دمج تقييم الكفاءة مع الأهمية
+            
+        fact_id = f"shared_{hash(content) % 10000}"
         if fact_id not in self.knowledge["shared_facts"]:
             self.knowledge["shared_facts"][fact_id] = {
                 "content": fact["content"],

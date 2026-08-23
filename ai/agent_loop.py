@@ -397,6 +397,20 @@ def _tool_memory_reflection(params: Dict[str, Any]) -> str:
 
 register_tool(ToolSpec("memory_reflection", "استعراض تقييمات التفكير الذاتي للذاكرة", {"type": "object", "properties": {"agent_id": {"type": "string"}}}, _tool_memory_reflection))
 
+def _tool_code_review(params: Dict[str, Any]) -> str:
+    """تقييم كفاءة وأمان الكود البرمجي المقترح قبل اعتماده."""
+    code = str(params.get("code", ""))
+    context = str(params.get("context", ""))
+    try:
+        from ai.learning_engine import learning_engine
+        result = learning_engine.evaluate_solution(code, context)
+        status = "✅ مقبول" if result["approved"] else "❌ مرفوض"
+        reasons = "\n- ".join(result["reasons"])
+        return f"🔍 مراجعة الكود ({status}):\n- النتيجة: {result['score']}/1.0\n- الملاحظات:\n- {reasons}"
+    except Exception as e: return f"❌ code_review: {e}"
+
+register_tool(ToolSpec("code_review", "تقييم كفاءة وأمان الكود البرمجي", {"type": "object", "properties": {"code": {"type": "string"}, "context": {"type": "string"}}}, _tool_code_review))
+
 # ═════════════════════════ محرك الحلقة ═════════════════════════════
 _SYSTEM_PROMPT = """أنت الوكيل التنفيذي لـ NSM. رد JSON فقط:
 {"thinking": "...", "tools": [{"tool": "...", "params": {...}}], "finish": "...", "end": true/false}"""

@@ -55,6 +55,44 @@ class LearningEngine:
                 return False
         return True
 
+    def evaluate_solution(self, code: str, context: str = "") -> Dict[str, Any]:
+        """
+        تقييم جودة وكفاءة الحل البرمجي المقترح.
+        يحلل التعقيد الخوارزمي، الأمان، وكفاءة الموارد.
+        """
+        score = 1.0
+        reasons = []
+        
+        # 1. تحليل التعقيد الخوارزمي (Big O)
+        if "for " in code and "for " in code.split("for ", 1)[1]:
+            score -= 0.2
+            reasons.append("تعقيد O(n^2) محتمل بسبب الحلقات المتداخلة")
+        
+        if "faiss" in code or "HNSW" in code or "IndexIVFPQ" in code:
+            score += 0.2
+            reasons.append("استخدام فهرسة ANN عالية الكفاءة (O(log n))")
+            
+        # 2. تحليل الأمان
+        if "eval(" in code or "exec(" in code:
+            score -= 0.5
+            reasons.append("مخاطر أمنية عالية: استخدام eval/exec")
+            
+        # 3. كفاءة الموارد
+        if "batch_size=1" in code or "accumulation" in code.lower():
+            score += 0.1
+            reasons.append("تحسين استهلاك الذاكرة (Memory Efficiency)")
+            
+        if "1,000,000" in context and "quantization" not in code.lower():
+            score -= 0.3
+            reasons.append("الحل قد لا يتوسع لـ 1 مليون متجه بدون تكميم (Quantization)")
+            
+        final_score = max(0.0, min(1.0, score))
+        return {
+            "score": round(final_score, 2),
+            "reasons": reasons,
+            "approved": final_score >= 0.7
+        }
+
     def record_experience(self, task: str, outcome: str, lesson: str, success: bool, agent_id: str = "global"):
         """تسجيل خبرة جديدة مع التحقق من الثقة والمراجعة التلقائية."""
         # 1. مراجعة المحتوى
