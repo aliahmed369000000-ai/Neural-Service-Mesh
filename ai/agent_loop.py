@@ -123,11 +123,29 @@ def _exec_shell(params: Dict[str, Any]) -> str:
     if not ok: return f"❌ shell: {why}"
     try:
         from ai.nsm_terminal import get_terminal
-        r = get_terminal().run_agent("agent_loop", cmd, timeout=int(params.get("timeout", _default_timeout_for(cmd))))
+        term = get_terminal()
+        r = term.run_agent("agent_loop", cmd, timeout=int(params.get("timeout", _default_timeout_for(cmd))))
+        
+        # 🆕 منطق التعافي التلقائي (Auto-Heal) عند فشل الأوامر الحرجة
+        if not r.ok and r.exit_code != 0:
+            critical_prefixes = ("python", "pytest", "git push", "pip install")
+            if any(cmd.startswith(p) for p in critical_prefixes):
+                try:
+                    from ai.auto_runtime import trigger_auto_heal
+                    trigger_auto_heal(context={"cmd": cmd, "exit_code": r.exit_code, "stderr": r.stderr})
+                except Exception: pass
+        
         out = []
         if r.stdout: out.append(r.stdout[:_MAX_OUTPUT_CHARS])
-        if r.stderr: out.append("[stderr]\n" + r.stderr[:_MAX_OUTPUT_CHARS])
-        return ("\n".join(out) or "تم التنفيذ")[:_MAX_OUTPUT_CHARS]
+        if r.stderr: 
+            err_msg = r.stderr[:_MAX_OUTPUT_CHARS]
+            # 🆕 ذكاء تنفيذي: اقتراح حل للخطأ إذا كان معروفاً
+            if "ModuleNotFoundError" in err_msg:
+                module = re.search(r"No module named '([^']+)'", err_msg)
+                if module: out.append(f"\n💡 اقتراح: حاول تثبيت المكتبة عبر `pip install {module.group(1)}`")
+            out.append("[stderr]\n" + err_msg)
+            
+        return ("\n".join(out) or "تم التنفيذ بنجاح")[:_MAX_OUTPUT_CHARS]
     except Exception as e: return f"❌ shell: {e}"
 
 register_tool(ToolSpec("shell", "تنفيذ أمر shell", {"type": "object", "properties": {"cmd": {"type": "string"}}}, _exec_shell, dangerous=True))

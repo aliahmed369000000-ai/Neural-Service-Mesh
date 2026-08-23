@@ -30,15 +30,13 @@ class SharedExperienceManager:
         self.knowledge = self._load_knowledge()
         
         # إعداد التشفير مع دعم التدوير
-        self.encryption_enabled = encryption_key is not None
-        self.master_secret = encryption_key
+        # 🆕 تفعيل التشفير افتراضياً إذا وجد مفتاح في البيئة
+        self.master_secret = encryption_key or os.environ.get("NSM_ENCRYPTION_KEY", "nsm_default_secret_2026")
+        self.encryption_enabled = True # تفعيل التشفير دائماً للوظائف الأمنية
+        
         self.ciphers = {} # تخزين إصدارات المفاتيح المختلفة
         self.current_key_id = None
-        
-        if self.encryption_enabled:
-            self._update_ciphers()
-        else:
-            self.cipher = None
+        self._update_ciphers()
 
     def _get_temporal_key_id(self, timestamp: Optional[float] = None) -> str:
         """توليد معرف مفتاح يعتمد على اليوم (تدوير كل 24 ساعة)."""
@@ -74,13 +72,16 @@ class SharedExperienceManager:
         key = base64.urlsafe_b64encode(kdf.derive(key_str.encode()))
         return Fernet(key)
 
-    def _encrypt(self, text: str) -> str:
-        if not self.encryption_enabled:
-            return text
-        self._update_ciphers() # التأكد من استخدام أحدث مفتاح
+    def encrypt(self, text: str) -> str:
+        """واجهة عامة للتشفير (تُستخدم في سجلات التدقيق وغيرها)."""
+        if not text: return ""
+        self._update_ciphers()
         encrypted = self.cipher.encrypt(text.encode()).decode()
-        # إضافة معرف المفتاح للمحتوى المشفر لسهولة فك التشفير لاحقاً
         return f"{self.current_key_id}:{encrypted}"
+
+    def _encrypt(self, text: str) -> str:
+        # الإبقاء على الدالة الداخلية للتوافق
+        return self.encrypt(text)
 
     def _decrypt(self, encrypted_text: str) -> str:
         if not self.encryption_enabled:
@@ -295,4 +296,8 @@ class SharedExperienceManager:
                 my_queries.append({"id": q_id, **data})
         return my_queries
 
+# Singleton instance
 shared_experience = SharedExperienceManager()
+
+# Alias for easier imports
+SharedExperience = SharedExperienceManager

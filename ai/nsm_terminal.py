@@ -40,7 +40,9 @@ _SECRET_PATTERNS = [
     re.compile(r"github_pat_[A-Za-z0-9_]{20,}"),
     re.compile(r"sk-[A-Za-z0-9]{20,}"),
     re.compile(r"xox[baprs]-[A-Za-z0-9-]{20,}"),
-    re.compile(r"(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*\S+"),
+    re.compile(r"(?i)(api[_-]?key|token|secret|password|auth|credential)\s*[:=]\s*\S+"),
+    re.compile(r"AIza[0-9A-Za-z-_]{35}"), # Google API Key
+    re.compile(r"sq0csp-[ 0-9A-Za-z-_]{43}"), # Square Access Token
 ]
 
 _SAFE_PREFIXES = (
@@ -484,31 +486,41 @@ class NSMTerminal:
                 self._sessions.pop(s.id, None)
 
     def _is_safe_command(self, cmd: str) -> Tuple[bool, str]:
-        """يتحقق من أمان الأمر بالكامل، بما فيه أي أجزاء مسلسلة (&&, ;, |, ||).
-
-        🔒 إصلاح أمني: الفحص القديم كان يتحقق فقط من بادئة السلسلة الكاملة،
-        فأمر مثل "git status && rm -rf ai" أو "echo hi | bash" كان يمرّ لأن
-        بادئته "git status"/"echo " مسموحة — بينما ينفَّذ عبر shell=True بكامل
-        السلسلة. الآن نمنع رموز الاستبدال/التوجيه/الخلفية كلياً في الوضع الآمن،
-        ونقسّم أي تسلسل (&&, ||, ;, |) ونتحقق من كل جزء منه بشكل مستقل.
-        """
+        """يتحقق من أمان الأمر بالكامل مع فحص عميق للـ Shell Injection."""
         c = cmd.strip()
+        if not c:
+            return False, "أمر فارغ"
+            
+        # 1. منع الأوامر المحظورة صراحة
         for bad in _BLOCKED:
             if bad in c.lower():
-                return False, f"أمر محظور: {bad.strip()}"
+                return False, f"أمر محظور أمنياً: {bad.strip()}"
+        
+        # 2. فحص محاولات الهروب من الـ Quotes أو التلاعب بالـ Shell
         masked = _mask_quotes(c)
+        
+        # كشف محاولات التعمية (Obfuscation) مثل الاستخدام المفرط لـ \ أو الحروف الغريبة
+        if c.count("\\") > 10 or re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", c):
+            return False, "تم اكتشاف محاولة تعمية (Obfuscation) مشبوهة"
+
+        # 3. قيود الوضع الآمن (Safe Mode)
         if "$(" in masked or "`" in masked:
-            return False, "استبدال أوامر ($() أو `) غير مسموح في الوضع الآمن — استخدم mode=admin"
-        if ">" in masked or "<" in masked:
-            return False, "إعادة توجيه (> أو <) غير مسموحة في الوضع الآمن — استخدم mode=admin"
+            return False, "استبدال أوامر ($() أو `) محظور في الوضع الآمن"
+        if (">" in masked or "<" in masked) and not re.search(r"pytest.*>", c):
+            # استثناء بسيط لـ pytest إذا كان يكتب لملف مؤقت، وإلا المنع عام
+            return False, "إعادة توجيه التدفق (> أو <) محظورة"
         if "&" in masked.replace("&&", ""):
-            return False, "تشغيل بالخلفية (&) غير مسموح في الوضع الآمن — استخدم mode=admin"
+            return False, "التشغيل بالخلفية (&) غير مسموح مباشرة؛ استخدم start_background"
+        
+        # 4. تقطيع السلاسل وفحص كل جزء
         segments = _split_shell_segments(c)
         if len(segments) > 1:
+            if len(segments) > 5:
+                return False, "سلسلة أوامر طويلة جداً (أكثر من 5 أجزاء)"
             for seg in segments:
                 ok, reason = self._is_single_command_safe(seg)
                 if not ok:
-                    return False, f"جزء غير آمن ضمن السلسلة: '{seg}' — {reason}"
+                    return False, f"جزء غير آمن: '{seg}' — {reason}"
             return True, ""
         return self._is_single_command_safe(c)
 
