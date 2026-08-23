@@ -11,9 +11,11 @@ import os
 import time
 import uuid
 import base64
+import asyncio
+import websockets
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization
@@ -41,6 +43,7 @@ class LivingMeshNode:
             "security_vigilance": 1.0
         }
         self.server = None
+        self.active_connections: Set = set()
         
         # إنشاء مفاتيح الهوية السيادية (RSA)
         self.private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -441,31 +444,33 @@ class LivingMeshNode:
     # بروتوكول التواصل الحقيقي (Real P2P Logic)
     # ───────────────────────────────────────────────────────────────────────────
     async def start_node_server(self):
-        """بدء خادم الاستماع للعقدة."""
-        import asyncio
-        server = await asyncio.start_server(self._handle_p2p_message, self.host, self.port or 0)
-        self.port = server.sockets[0].getsockname()[1]
-        self.server = server
-        
-        # تحديث المنفذ في حالة الشبكة
-        self.join_network()
-        
-        logger.info(f"🚀 Node {self.node_id} listening on {self.host}:{self.port}")
-        async with server:
-            await server.serve_forever()
+        """بدء خادم WebSocket للعقدة."""
+        async with websockets.serve(self._handle_ws_connection, self.host, self.port or 0) as server:
+            self.port = server.sockets[0].getsockname()[1]
+            self.server = server
+            self.join_network()
+            logger.info(f"🚀 Secure WebSocket Node {self.node_id} listening on ws://{self.host}:{self.port}")
+            await asyncio.Future()  # run forever
 
-    async def _handle_p2p_message(self, reader, writer):
-        """معالجة الرسائل القادمة من الأقران مع التحقق من الهوية."""
-        data = await reader.read(8192)
-        if not data: return
-        
+    async def _handle_ws_connection(self, websocket):
+        """معالجة اتصال WebSocket القادم."""
+        self.active_connections.add(websocket)
         try:
-            msg = json.loads(data.decode())
+            async for message in websocket:
+                await self._process_secure_message(message)
+        except websockets.exceptions.ConnectionClosed:
+            pass
+        finally:
+            self.active_connections.remove(websocket)
+
+    async def _process_secure_message(self, data):
+        """معالجة الرسالة المشفرة القادمة."""
+        try:
+            msg = json.loads(data)
             payload = msg.get("payload")
             signature = msg.get("signature")
             sender_id = payload.get("from")
             
-            # جلب المفتاح العام للمرسل للتحقق
             pub_key_path = self.keys_dir / f"{sender_id}.pub"
             if not pub_key_path.exists():
                 logger.warning(f"⚠️ Unknown sender {sender_id}. Rejecting message.")
@@ -480,48 +485,32 @@ class LivingMeshNode:
             exp_data = payload.get("data")
             hops = payload.get("p2p_hops", 0)
             
-            logger.info(f"🔒 Secure Node {self.node_id} received verified {kind} from {sender_id}")
-            
-            # معالجة الخبرة محلياً
+            logger.info(f"🔒 Secure WS Node {self.node_id} received verified {kind} from {sender_id}")
             self.sync_experience(kind, exp_data, hops + 1)
             
         except Exception as e:
-            logger.error(f"❌ Error handling P2P message: {e}")
-        finally:
-            writer.close()
-            await writer.wait_closed()
+            logger.error(f"❌ Error processing WS message: {e}")
 
     async def send_to_peer(self, peer_host: str, peer_port: int, kind: str, data: Dict[str, Any], hops: int = 0):
-        """إرسال خبرة مباشرة لعقدة نظيرة."""
-        import asyncio
+        """إرسال خبرة عبر WebSocket لعقدة نظيرة."""
         if not peer_port: return
-        
+        uri = f"ws://{peer_host}:{peer_port}"
         try:
-            reader, writer = await asyncio.open_connection(peer_host, peer_port)
-            
-            msg_payload = {
-                "id": f"p2p_{uuid.uuid4().hex[:8]}",
-                "from": self.node_id,
-                "kind": kind,
-                "data": data,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "p2p_hops": hops
-            }
-            
-            # توقيع الرسالة لضمان الهوية
-            signature = self.sign_message(json.dumps(msg_payload, sort_keys=True))
-            msg = {
-                "payload": msg_payload,
-                "signature": signature
-            }
-            
-            writer.write(json.dumps(msg).encode())
-            await writer.drain()
-            writer.close()
-            await writer.wait_closed()
-            logger.info(f"📤 Node {self.node_id} sent {kind} to {peer_host}:{peer_port}")
+            async with websockets.connect(uri) as websocket:
+                msg_payload = {
+                    "id": f"p2p_{uuid.uuid4().hex[:8]}",
+                    "from": self.node_id,
+                    "kind": kind,
+                    "data": data,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "p2p_hops": hops
+                }
+                signature = self.sign_message(json.dumps(msg_payload, sort_keys=True))
+                msg = {"payload": msg_payload, "signature": signature}
+                await websocket.send(json.dumps(msg))
+                logger.info(f"📤 Node {self.node_id} sent {kind} to {uri}")
         except Exception as e:
-            logger.warning(f"⚠️ Failed to connect to peer {peer_host}:{peer_port} - {e}")
+            logger.warning(f"⚠️ Failed to connect to WS peer {uri} - {e}")
 
 def get_network_snapshot() -> Dict[str, Any]:
     """الحصول على لقطة كاملة لحالة الشبكة للعرض في الواجهة."""
