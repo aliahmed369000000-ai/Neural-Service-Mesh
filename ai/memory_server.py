@@ -451,17 +451,28 @@ def vote_tool(v: ToolVote, agent: dict = Depends(get_current_agent)):
     })
     
     # 🆕 معيار الاعتماد الموزون: مجموع أوزان الثقة >= 10.0
-    if tool["votes"]["up"] >= 10.0 and tool["status"] == "pending":
-        tool["status"] = "approved"
-    elif tool["votes"]["down"] >= 5.0 and tool["status"] == "pending":
-        tool["status"] = "rejected"
+    if tool["status"] == "pending":
+        author_id = tool.get("author")
+        if tool["votes"]["up"] >= 10.0:
+            tool["status"] = "approved"
+            # 🎁 مكافأة المؤلف: زيادة الثقة بمقدار 0.5 عند قبول أداة
+            if author_id:
+                current_score = memory.data["trust_scores"].get(author_id, 1.0)
+                memory.data["trust_scores"][author_id] = min(current_score + 0.5, 10.0)
+        elif tool["votes"]["down"] >= 5.0:
+            tool["status"] = "rejected"
+            # ⚠️ جزاء المؤلف: خفض الثقة بمقدار 0.2 عند رفض أداة
+            if author_id:
+                current_score = memory.data["trust_scores"].get(author_id, 1.0)
+                memory.data["trust_scores"][author_id] = max(current_score - 0.2, 0.1)
         
     memory.save()
     return {
         "status": "success", 
         "current_status": tool["status"], 
         "weighted_votes": tool["votes"],
-        "your_trust_weight": agent_trust
+        "your_trust_weight": agent_trust,
+        "author_new_trust": memory.data["trust_scores"].get(tool.get("author"), 1.0) if tool.get("author") else None
     }
 
 @app.get("/tools/list")

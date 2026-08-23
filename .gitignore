@@ -109,3 +109,4 @@ artifacts/cache/
 artifacts/agent_loop/audit/
 artifacts/learning/distributed_knowledge.json
 tests/test_consensus.py
+tests/test_reputation.py
