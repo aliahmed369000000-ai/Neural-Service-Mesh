@@ -401,11 +401,15 @@ class CoreMatrixLayer:
         self._loaded  = False
 
         # رؤوس الإسقاط متعددة الوسائط (Multimodal Projection Heads)
-        # تحويل الصور والصوت إلى فضاء الـ d_model قبل الدخول للجوهر
         self.W_img = _xavier(d_model, image_dim)
         self.b_img = np.zeros(d_model)
         self.W_aud = _xavier(d_model, audio_dim)
         self.b_aud = np.zeros(d_model)
+
+        # أوزان الانتباه المتقاطع (Cross-Attention) لدمج الوسائط
+        self.Wq_cross = _xavier(d_model, d_model)
+        self.Wk_cross = _xavier(d_model, d_model)
+        self.Wv_cross = _xavier(d_model, d_model)
 
         self.W_up   = _xavier(self.core_dim, d_model)
         self.W_down = _xavier(d_model, self.core_dim)
@@ -440,6 +444,23 @@ class CoreMatrixLayer:
     def _core(self) -> np.ndarray:
         return self._W_core
 
+    def _sparse_cross_attention(self, Q_text: np.ndarray, K_mod: np.ndarray, V_mod: np.ndarray, k_ratio: float = 0.25) -> np.ndarray:
+        """
+        تطبيق انتباه متفرق (Sparse Cross-Attention) بين النص والوسائط.
+        """
+        d_k = Q_text.shape[-1]
+        scores = (Q_text @ K_mod.T) / np.sqrt(d_k)
+        
+        # تطبيق التفرقة (Top-K)
+        k = max(1, int(K_mod.shape[0] * k_ratio))
+        if k < K_mod.shape[0]:
+            # الحصول على قيمة العتبة (الـ k-th الأكبر) لكل صف
+            thresh = np.partition(scores, -k, axis=-1)[:, [-k]]
+            scores[scores < thresh] = -1e9
+            
+        attn = _softmax(scores)
+        return attn @ V_mod
+
     def forward(self, X: np.ndarray, image_feats: Optional[np.ndarray] = None, 
                 audio_feats: Optional[np.ndarray] = None) -> np.ndarray:
         """
@@ -447,22 +468,28 @@ class CoreMatrixLayer:
         image_feats: (num_images, image_dim) اختياري
         audio_feats: (num_audio, audio_dim) اختياري
         """
-        # دمج الوسائط الأخرى في فضاء الـ d_model
-        multimodal_add = np.zeros_like(X)
+        # دمج الوسائط ديناميكياً عبر Cross-Attention
+        multimodal_context = np.zeros_like(X)
         
+        # جمع ميزات الوسائط بعد الإسقاط
+        modality_embeddings = []
         if image_feats is not None:
-            img_proj = image_feats @ self.W_img.T + self.b_img
-            # دمج ميزات الصورة في بداية التسلسل (أو حسب التنسيق المطلوب)
-            n_img = min(len(img_proj), len(X))
-            multimodal_add[:n_img] += img_proj[:n_img]
-            
+            modality_embeddings.append(image_feats @ self.W_img.T + self.b_img)
         if audio_feats is not None:
-            aud_proj = audio_feats @ self.W_aud.T + self.b_aud
-            n_aud = min(len(aud_proj), len(X))
-            multimodal_add[:n_aud] += aud_proj[:n_aud]
+            modality_embeddings.append(audio_feats @ self.W_aud.T + self.b_aud)
             
-        # X المدمج
-        X_fused = X + multimodal_add
+        if modality_embeddings:
+            M = np.concatenate(modality_embeddings, axis=0) # (total_modality_tokens, d_model)
+            
+            # حساب Q, K, V للانتباه المتقاطع
+            Q = X @ self.Wq_cross.T
+            K = M @ self.Wk_cross.T
+            V = M @ self.Wv_cross.T
+            
+            multimodal_context = self._sparse_cross_attention(Q, K, V)
+            
+        # X المدمج (النص + سياق الوسائط المختار بالانتباه)
+        X_fused = X + multimodal_context
         
         self._cx  = X_fused
         up        = X_fused @ self.W_up.T + self.b_up          # (seq,784)
@@ -522,17 +549,22 @@ class CoreMatrixLayer:
         np.save(f"{prefix}_bu.npy",   self.b_up)
         np.save(f"{prefix}_bd.npy",   self.b_down)
         np.save(f"{prefix}_core.npy", self._W_core)
-        # حفظ رؤوس الوسائط
+        # حفظ رؤوس الوسائط وأوزان الانتباه
         np.save(f"{prefix}_Wimg.npy", self.W_img)
         np.save(f"{prefix}_bimg.npy", self.b_img)
         np.save(f"{prefix}_Waud.npy", self.W_aud)
         np.save(f"{prefix}_baud.npy", self.b_aud)
+        np.save(f"{prefix}_Wq_cross.npy", self.Wq_cross)
+        np.save(f"{prefix}_Wk_cross.npy", self.Wk_cross)
+        np.save(f"{prefix}_Wv_cross.npy", self.Wv_cross)
 
     def load(self, prefix: str):
         for attr, fname in [("W_up","Wu"),("W_down","Wd"),
                              ("b_up","bu"),("b_down","bd"),
                              ("W_img","Wimg"),("b_img","bimg"),
-                             ("W_aud","Waud"),("b_aud","baud")]:
+                             ("W_aud","Waud"),("b_aud","baud"),
+                             ("Wq_cross","Wq_cross"),("Wk_cross","Wk_cross"),
+                             ("Wv_cross","Wv_cross")]:
             p = f"{prefix}_{fname}.npy"
             if os.path.exists(p):
                 setattr(self, attr, np.load(p).astype(np.float64))
