@@ -31,7 +31,41 @@ class SwarmManager:
         self.storage_dir = Path(storage_dir) if storage_dir else self.root / "artifacts" / "swarm"
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.proposals: Dict[str, SwarmProposal] = {}
+        self.workers: Dict[str, Dict[str, Any]] = {}
+        self.results: List[Dict[str, Any]] = []
         self.threshold = 0.66  # عتبة التوافق (66%)
+
+    def register_worker(self, agent_id: str, role: str):
+        """تسجيل وكيل جديد في السرب."""
+        self.workers[agent_id] = {
+            "role": role,
+            "status": "active",
+            "joined_at": time.time()
+        }
+        logger.info(f"👷 Worker Registered: {agent_id} as {role}")
+
+    def report_result(self, agent_id: str, task: str, result: str):
+        """تسجيل نتيجة مهمة من وكيل فرعي."""
+        entry = {
+            "agent_id": agent_id,
+            "task": task,
+            "result": result,
+            "ts": time.time()
+        }
+        self.results.append(entry)
+        # حفظ النتيجة في ملف سجل السرب
+        res_path = self.storage_dir / "swarm_results.jsonl"
+        with open(res_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        logger.info(f"✅ Result Reported by {agent_id}")
+
+    def get_swarm_status(self) -> Dict[str, Any]:
+        """الحصول على نظرة عامة على حالة السرب الحالي."""
+        return {
+            "active_workers": len(self.workers),
+            "completed_tasks": len(self.results),
+            "recent_results": self.results[-5:] if self.results else []
+        }
 
     def create_proposal(self, proposer: str, action_type: str, data: Dict[str, Any]) -> str:
         """إنشاء مقترح جديد للمراجعة الجماعية."""
