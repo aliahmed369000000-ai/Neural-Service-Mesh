@@ -468,8 +468,43 @@ def _tool_answer_swarm(params: Dict[str, Any]) -> str:
 
 register_tool(ToolSpec("answer_swarm", "تقديم إجابة لسؤال في السرب", {"type": "object", "properties": {"agent_id": {"type": "string"}, "query_id": {"type": "string"}, "answer": {"type": "string"}}}, _tool_answer_swarm))
 
+def _tool_web_explorer(params: Dict[str, Any]) -> str:
+    from ai.autonomous_tools import web_explorer
+    return web_explorer(params)
+
+register_tool(ToolSpec("web_explorer", "البحث في الويب وجلب المعلومات", 
+                        {"type": "object", "properties": {"query": {"type": "string"}}}, 
+                        _tool_web_explorer))
+
+def _tool_code_sandbox(params: Dict[str, Any]) -> str:
+    from ai.autonomous_tools import code_sandbox
+    return code_sandbox(params)
+
+register_tool(ToolSpec("code_sandbox", "تشغيل أكواد بايثون وتصحيحها ذاتياً", 
+                        {"type": "object", "properties": {"code": {"type": "string"}}}, 
+                        _tool_code_sandbox))
+
+def _tool_plan(params: Dict[str, Any]) -> str:
+    """تحديث أو إنشاء خطة عمل للمهمة الحالية."""
+    return f"SIGNAL_PLAN:{json.dumps(params)}"
+
+register_tool(ToolSpec("plan", "إدارة خطة العمل للمهمات المعقدة", 
+                        {"type": "object", "properties": {
+                            "action": {"type": "string", "enum": ["update", "advance"]},
+                            "goal": {"type": "string"},
+                            "phases": {"type": "array"},
+                            "current_phase_id": {"type": "integer"}
+                        }}, _tool_plan))
+
 # ═════════════════════════ محرك الحلقة ═════════════════════════════
-_SYSTEM_PROMPT = """أنت الوكيل التنفيذي لـ NSM. رد JSON فقط:
+_SYSTEM_PROMPT = """أنت الوكيل التنفيذي لـ NSM (Neural Service Mesh). تمتلك قدرات تفكير مستقلة مشابهة لـ Manus.
+يجب عليك اتباع المنهجية التالية:
+1. التخطيط: للمهمات المعقدة، استخدم أداة 'plan' لإنشاء مراحل عمل واضحة.
+2. التفكير: في حقل 'thinking'، اشرح منطقك وخطوتك القادمة بناءً على الملاحظات.
+3. التنفيذ: اختر الأدوات المناسبة بدقة.
+4. التصحيح الذاتي: إذا فشلت أداة، حلل السبب وحاول بطريقة مختلفة.
+
+رد بصيغة JSON فقط:
 {"thinking": "...", "tools": [{"tool": "...", "params": {...}}], "finish": "...", "end": true/false}"""
 
 def _parse_tool_call(raw: str) -> Optional[Dict[str, Any]]:
@@ -484,6 +519,19 @@ def _invoke_llm(llm_fn: Callable, system: str, history: List[Dict[str, Any]]) ->
 def _build_tools_prompt() -> str:
     return "الأدوات: " + ", ".join(_TOOL_ORDER)
 
+class TaskPlan:
+    def __init__(self, goal: str):
+        self.goal = goal
+        self.phases = []
+        self.current_phase_id = 1
+    
+    def update(self, phases: List[Dict[str, Any]], current_phase_id: int):
+        self.phases = phases
+        self.current_phase_id = current_phase_id
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {"goal": self.goal, "phases": self.phases, "current_phase_id": self.current_phase_id}
+
 class LoopState:
     def __init__(self, loop_id: str, user_input: str):
         self.loop_id, self.user_input = loop_id, user_input
@@ -493,6 +541,7 @@ class LoopState:
         self.status = "pending"
         self.started_at = _now()
         self.tools_used = 0
+        self.plan: Optional[TaskPlan] = None
         self.visual_memory = {} # تخزين نتائج معالجة الصور اللحظية
         self.audio_memory = {}  # تخزين نتائج معالجة الصوت اللحظية
         self.agent_roles = {
@@ -684,6 +733,13 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                                 if str(obs).startswith("SIGNAL_SLEEP:"):
                                     sleep_requested = True
                                     target_agent_id = str(obs).split(":")[1]
+                                elif str(obs).startswith("SIGNAL_PLAN:"):
+                                    try:
+                                        plan_params = json.loads(str(obs).split(":", 1)[1])
+                                        if not state.plan: state.plan = TaskPlan(plan_params.get("goal", "مهمة غير محددة"))
+                                        state.plan.update(plan_params.get("phases", []), plan_params.get("current_phase_id", 1))
+                                        obs = f"✅ تم تحديث الخطة: {state.plan.goal} (المرحلة الحالية: {state.plan.current_phase_id})"
+                                    except: obs = "❌ فشل تحديث الخطة"
                             except Exception as e:
                                 obs = f"❌ خطأ تنفيذ: {e}"
                             
@@ -714,6 +770,13 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                             if str(obs).startswith("SIGNAL_SLEEP:"):
                                 sleep_requested = True
                                 target_agent_id = str(obs).split(":")[1]
+                            elif str(obs).startswith("SIGNAL_PLAN:"):
+                                try:
+                                    plan_params = json.loads(str(obs).split(":", 1)[1])
+                                    if not state.plan: state.plan = TaskPlan(plan_params.get("goal", "مهمة غير محددة"))
+                                    state.plan.update(plan_params.get("phases", []), plan_params.get("current_phase_id", 1))
+                                    obs = f"✅ تم تحديث الخطة: {state.plan.goal} (المرحلة الحالية: {state.plan.current_phase_id})"
+                                except: obs = "❌ فشل تحديث الخطة"
                         
                         obs_round.append(f"[{tname}] {obs}")
                         _emit({"type": "result", "tool": tname, "output": obs})
