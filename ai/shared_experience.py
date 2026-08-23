@@ -8,6 +8,7 @@ ai/shared_experience.py
 import json
 import logging
 import time
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -17,6 +18,7 @@ class SharedExperienceManager:
     def __init__(self, storage_path: str = "artifacts/learning/shared_knowledge.json"):
         self.storage_path = Path(storage_path)
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
         self.knowledge = self._load_knowledge()
         
     def _load_knowledge(self) -> Dict[str, Any]:
@@ -29,13 +31,18 @@ class SharedExperienceManager:
         return {"shared_facts": {}, "active_queries": {}, "global_metrics": {}, "version": "1.1"}
 
     def _save_knowledge(self):
-        try:
-            with open(self.storage_path, "w", encoding="utf-8") as f:
-                json.dump(self.knowledge, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f"فشل حفظ المعرفة الجماعية: {e}")
+        with self._lock:
+            try:
+                with open(self.storage_path, "w", encoding="utf-8") as f:
+                    json.dump(self.knowledge, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                logger.error(f"فشل حفظ المعرفة الجماعية: {e}")
 
     def share_fact(self, agent_id: str, fact: Dict[str, Any]):
+        with self._lock:
+            return self._share_fact_locked(agent_id, fact)
+
+    def _share_fact_locked(self, agent_id: str, fact: Dict[str, Any]):
         """مشاركة حقيقة إذا كانت أهميتها تتجاوز الحد المسموح واجتازت التقييم الذاتي."""
         importance = fact.get("strength", 0)
         content = fact.get("content", "")
@@ -75,7 +82,10 @@ class SharedExperienceManager:
     def sync_agent_memory(self, agent_memory: Any):
         """مزامنة ذاكرة الوكيل مع المعرفة الجماعية."""
         new_facts_count = 0
-        for fact_id, fact in self.knowledge["shared_facts"].items():
+        with self._lock:
+            knowledge_copy = list(self.knowledge["shared_facts"].items())
+            
+        for fact_id, fact in knowledge_copy:
             # إذا لم تكن الحقيقة موجودة لدى الوكيل، أضفها
             exists = any(f["content"] == fact["content"] for f in agent_memory.ltm_semantic.values())
             if not exists:
@@ -95,29 +105,37 @@ class SharedExperienceManager:
         from ai.learning_engine import learning_engine
         domain = learning_engine.classify_domain(query + " " + context)
         
-        # البحث عن أفضل خبير في هذا المجال
-        best_expert = None
-        best_score = 0.6 # الحد الأدنى لاعتبار الوكيل خبيراً
-        
-        for a_id, expertise in learning_engine.trust_scores.items():
-            if a_id != agent_id:
-                score = expertise.get(domain, 0)
-                if score > best_score:
-                    best_score = score
-                    best_expert = a_id
-        
-        query_id = f"q_{hash(query + str(time.time())) % 10000}"
-        self.knowledge["active_queries"][query_id] = {
-            "query": query,
-            "context": context,
-            "asker": agent_id,
-            "target_expert": best_expert,
-            "domain": domain,
-            "timestamp": time.time(),
-            "status": "open",
-            "answers": []
-        }
-        self._save_knowledge()
+        with self._lock:
+            # البحث عن أفضل خبير في هذا المجال
+            best_expert = None
+            best_score = 0.6 # الحد الأدنى لاعتبار الوكيل خبيراً
+            
+            for a_id, expertise in learning_engine.trust_scores.items():
+                if a_id != agent_id:
+                    score = expertise.get(domain, 0)
+                    if score > best_score:
+                        best_score = score
+                        best_expert = a_id
+            
+            # استخدام UUID لتجنب التصادم عند التزامن العالي
+            import uuid
+            query_id = f"q_{uuid.uuid4().hex[:6]}"
+            self.knowledge["active_queries"][query_id] = {
+                "query": query,
+                "context": context,
+                "asker": agent_id,
+                "target_expert": best_expert,
+                "domain": domain,
+                "timestamp": time.time(),
+                "status": "open",
+                "answers": []
+            }
+            # حفظ يدوي داخل القفل لضمان الذرية
+            try:
+                with open(self.storage_path, "w", encoding="utf-8") as f:
+                    json.dump(self.knowledge, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                logger.error(f"فشل حفظ المعرفة الجماعية: {e}")
         
         target_msg = f"موجه إلى {best_expert}" if best_expert else "موجه للجميع"
         logger.info(f"❓ سؤال جديد [{domain}] من {agent_id} ({target_msg}): {query}")
