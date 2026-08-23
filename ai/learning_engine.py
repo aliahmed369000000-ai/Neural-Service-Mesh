@@ -35,13 +35,39 @@ class LearningEngine:
         except Exception as e:
             logger.error(f"❌ خطأ حفظ قاعدة الخبرة: {e}")
 
-    def _load_trust_scores(self) -> Dict[str, float]:
+    def _load_trust_scores(self) -> Dict[str, Dict[str, float]]:
+        """تحميل نقاط الثقة (العامة والمجالات المتخصصة)."""
         if self.trust_scores_file.exists():
             try:
                 with open(self.trust_scores_file, "r") as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    # ضمان أن كل مدخل هو قاموس وليس رقماً عائماً قديماً
+                    sanitized = {}
+                    for k, v in data.items():
+                        if isinstance(v, dict):
+                            sanitized[k] = v
+                        else:
+                            sanitized[k] = {"general": float(v)}
+                    return sanitized
             except: pass
         return {}
+
+    def get_agent_expertise(self, agent_id: str) -> Dict[str, float]:
+        """جلب مجالات خبرة الوكيل ونقاط قوته فيها."""
+        return self.trust_scores.get(agent_id, {"general": 0.5})
+
+    def classify_domain(self, text: str) -> str:
+        """تصنيف مجال النص (بنية تحتية، خوارزميات، برمجة، إلخ)."""
+        text = text.lower()
+        domains = {
+            "infra": ["oom", "memory", "latency", "scaling", "server", "infra"],
+            "algo": ["faiss", "hnsw", "quantization", "algorithm", "complexity", "big o"],
+            "dev": ["python", "code", "def ", "class", "fix", "bug", "implement"]
+        }
+        for domain, keywords in domains.items():
+            if any(k in text for k in keywords):
+                return domain
+        return "general"
 
     def _save_trust_scores(self):
         with open(self.trust_scores_file, "w") as f:
@@ -100,14 +126,22 @@ class LearningEngine:
             logger.warning(f"🛡️ حظر درس ضار محتمل من الوكيل {agent_id}")
             return
 
-        # 2. تحديث نقاط الثقة
-        current_trust = self.trust_scores.get(agent_id, 0.5)
+        # 2. تحديث نقاط الثقة (العامة والمتخصصة)
+        domain = self.classify_domain(lesson + " " + task)
+        agent_trust = self.trust_scores.get(agent_id, {"general": 0.5})
+        
+        current_val = agent_trust.get(domain, agent_trust.get("general", 0.5))
         if success:
-            new_trust = min(1.0, current_trust + 0.05)
+            new_val = min(1.0, current_val + 0.05)
         else:
-            new_trust = max(0.0, current_trust - 0.1)
-        self.trust_scores[agent_id] = new_trust
+            new_val = max(0.0, current_val - 0.1)
+            
+        agent_trust[domain] = new_val
+        agent_trust["general"] = sum(agent_trust.values()) / len(agent_trust) # تحديث المعدل العام
+        self.trust_scores[agent_id] = agent_trust
         self._save_trust_scores()
+        
+        new_trust = agent_trust["general"]
 
         # 3. حماية: رفض الخبرات من الوكلاء غير الموثوقين
         if new_trust < 0.3 and agent_id != "expert_seed":

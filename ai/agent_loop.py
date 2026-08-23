@@ -429,14 +429,15 @@ def _tool_check_swarm_queries(params: Dict[str, Any]) -> str:
     agent_id = str(params.get("agent_id", "default"))
     try:
         from ai.shared_experience import shared_experience
-        pending = shared_experience.get_pending_queries()
+        pending = shared_experience.get_pending_queries(agent_id)
         my_answers = shared_experience.check_my_answers(agent_id)
         
         report = "📋 تقرير السرب:\n"
         if pending:
             report += "\n❓ أسئلة تحتاج إجابة:\n"
             for q in pending:
-                report += f"- [{q['id']}] من {q['asker']}: {q['query']}\n"
+                priority = f" 🔥 {q['priority']}" if "priority" in q else ""
+                report += f"- [{q['id']}] من {q['asker']}: {q['query']}{priority}\n"
         
         if my_answers:
             report += "\n💡 إجابات واردة لأسئلتك:\n"

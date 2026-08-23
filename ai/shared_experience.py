@@ -91,18 +91,36 @@ class SharedExperienceManager:
         return new_facts_count
 
     def ask_swarm(self, agent_id: str, query: str, context: str = ""):
-        """طرح سؤال توضيحي على السرب."""
+        """طرح سؤال توضيحي على السرب مع توجيه ذكي للخبير."""
+        from ai.learning_engine import learning_engine
+        domain = learning_engine.classify_domain(query + " " + context)
+        
+        # البحث عن أفضل خبير في هذا المجال
+        best_expert = None
+        best_score = 0.6 # الحد الأدنى لاعتبار الوكيل خبيراً
+        
+        for a_id, expertise in learning_engine.trust_scores.items():
+            if a_id != agent_id:
+                score = expertise.get(domain, 0)
+                if score > best_score:
+                    best_score = score
+                    best_expert = a_id
+        
         query_id = f"q_{hash(query + str(time.time())) % 10000}"
         self.knowledge["active_queries"][query_id] = {
             "query": query,
             "context": context,
             "asker": agent_id,
+            "target_expert": best_expert,
+            "domain": domain,
             "timestamp": time.time(),
             "status": "open",
             "answers": []
         }
         self._save_knowledge()
-        logger.info(f"❓ سؤال جديد من {agent_id}: {query}")
+        
+        target_msg = f"موجه إلى {best_expert}" if best_expert else "موجه للجميع"
+        logger.info(f"❓ سؤال جديد [{domain}] من {agent_id} ({target_msg}): {query}")
         return query_id
 
     def answer_query(self, agent_id: str, query_id: str, answer: str):
@@ -119,13 +137,17 @@ class SharedExperienceManager:
             return True
         return False
 
-    def get_pending_queries(self) -> List[Dict[str, Any]]:
-        """جلب الأسئلة التي تحتاج إلى إجابات."""
-        return [
-            {"id": q_id, **data} 
-            for q_id, data in self.knowledge["active_queries"].items() 
-            if data["status"] == "open"
-        ]
+    def get_pending_queries(self, agent_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """جلب الأسئلة التي تحتاج إلى إجابات (مع إبراز الأسئلة الموجهة لوكيل معين)."""
+        pending = []
+        for q_id, data in self.knowledge["active_queries"].items():
+            if data["status"] == "open":
+                q_info = {"id": q_id, **data}
+                # وسم السؤال إذا كان موجهاً خصيصاً لهذا الوكيل
+                if agent_id and data.get("target_expert") == agent_id:
+                    q_info["priority"] = "HIGH (Direct Expert Request)"
+                pending.append(q_info)
+        return pending
 
     def check_my_answers(self, agent_id: str) -> List[Dict[str, Any]]:
         """التحقق من وجود إجابات لأسئلة وكيل معين."""
