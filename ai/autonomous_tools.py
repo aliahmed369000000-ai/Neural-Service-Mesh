@@ -99,6 +99,26 @@ def security_scanner(params: Dict[str, Any]) -> str:
             "description": "استخدام pickle قد يؤدي لتنفيذ أكواد غير مصرح بها عند فك التسلسل."
         })
 
+    # 4. كشف تقنيات التمويه (Obfuscation)
+    obfuscation_indicators = [r"base64\.b64decode\(", r"getattr\(.*,.*['\"]__import__['\"]", r"eval\(.*\.decode\("]
+    for pattern in obfuscation_indicators:
+        if re.search(pattern, code):
+            vulnerabilities.append({
+                "type": "Code Obfuscation",
+                "severity": "HIGH",
+                "description": "تم اكتشاف محاولة لتمويه الكود باستخدام تشفير أو استدعاءات غير مباشرة، مما يشير إلى سلوك مشبوه."
+            })
+
+    # 5. كشف محاولات تسريب البيانات (Data Exfiltration)
+    exfiltration_indicators = [r"requests\.(post|get)\(.*url=.*", r"socket\.connect\(", r"urllib\.request\.urlopen\("]
+    for pattern in exfiltration_indicators:
+        if re.search(pattern, code) and ("http" in code or "ftp" in code):
+            vulnerabilities.append({
+                "type": "Data Exfiltration",
+                "severity": "CRITICAL",
+                "description": "تم اكتشاف محاولة لإرسال بيانات إلى خادم خارجي، مما قد يشير إلى محاولة تسريب معلومات حساسة."
+            })
+
     return json.dumps({
         "safe": len(vulnerabilities) == 0,
         "vulnerabilities": vulnerabilities,

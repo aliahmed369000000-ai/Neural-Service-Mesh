@@ -704,6 +704,11 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                 parsed = _parse_tool_call(raw)
                 if not parsed: continue
 
+                thinking = parsed.get("thinking")
+                if thinking:
+                    _emit({"type": "thinking", "content": thinking})
+                    yield from _flush()
+
                 tools = parsed.get("tools") or []
                 obs_round = []
                 sleep_requested = False
