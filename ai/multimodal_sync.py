@@ -14,7 +14,7 @@ class MultimodalSyncManager:
         """توليد تضمين دلالي (Semantic Embedding) للنص (محاكاة متجهة)."""
         # في الإنتاج يتم استخدام OpenAI Embeddings أو نموذج محلي مثل BERT
         # هنا نستخدم محاكاة متجهة بناءً على القيم الرقمية للأحرف لضمان الاتساق
-        if not text: return [0.0] * 8
+        if not text or not isinstance(text, str): return [0.0] * 8
         seed = sum(ord(c) for c in text) % 100
         return [round((seed + i) / 150.0, 4) for i in range(8)]
 

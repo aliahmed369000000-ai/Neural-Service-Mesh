@@ -25,6 +25,12 @@ class MemoryManager:
         self.ltm_semantic = {}  # الذاكرة الدلالية طويلة الأجل (Semantic LTM - Facts)
         self.stm_limit = 15  # حد الرسائل في الذاكرة العاملة قبل الترحيل
         
+        # إعدادات منحنى النسيان (Ebbinghaus Forgetting Curve)
+        self.forgetting_enabled = True
+        self.decay_rate = 0.0001  # معدل التلاشي (يمكن تعديله حسب الحاجة)
+        self.prune_threshold = 0.2  # حد القوة الذي عنده يتم حذف الذكرى
+        self.boost_factor = 0.2  # مقدار زيادة القوة عند كل استرجاع ناجح
+        
     def add_to_stm(self, message: Dict[str, Any]):
         """إضافة رسالة إلى الذاكرة قصيرة الأجل مع التحقق من الحدود."""
         self.stm.append(message)
@@ -82,21 +88,31 @@ class MemoryManager:
             
         return list(set(facts))
 
-    def _store_in_semantic(self, facts: List[str]):
-        """حفظ الحقائق في الذاكرة الدلالية مع دعم ANN."""
-        from ai.multimodal_sync import MultimodalSyncManager
-        sync_manager = MultimodalSyncManager()
-        
-        for fact in facts:
-            embedding = sync_manager._generate_embedding(fact)
-            lsh_hash = sync_manager._generate_lsh_hash(embedding)
+    def add_fact(self, fact_content: str, semantic_hash: Optional[str] = None):
+        """إضافة حقيقة مفردة إلى الذاكرة الدلالية."""
+        if not semantic_hash:
+            from ai.multimodal_sync import MultimodalSyncManager
+            sync_manager = MultimodalSyncManager()
+            embedding = sync_manager._generate_embedding(fact_content)
+            semantic_hash = sync_manager._generate_lsh_hash(embedding)
             
-            fact_id = f"fact_{int(time.time())}_{hash(fact)%1000}"
-            self.ltm_semantic[fact_id] = {
-                "content": fact,
-                "timestamp": time.time(),
-                "semantic_hash": lsh_hash
-            }
+        # ضمان أن fact_content سلسلة نصية لـ hash()
+        content_str = str(fact_content)
+        fact_id = f"fact_{int(time.time())}_{hash(content_str)%1000}"
+        self.ltm_semantic[fact_id] = {
+            "content": fact_content,
+            "timestamp": time.time(),
+            "last_access": time.time(),
+            "strength": 1.0,
+            "access_count": 0,
+            "semantic_hash": semantic_hash
+        }
+        return fact_id
+
+    def _store_in_semantic(self, facts: List[str]):
+        """حفظ مجموعة حقائق في الذاكرة الدلالية."""
+        for fact in facts:
+            self.add_fact(fact)
 
     def _store_in_episodic(self, messages: List[Dict[str, Any]], facts: List[str]):
         """حفظ ملخص التجربة في الذاكرة الأحداثية."""
@@ -110,6 +126,9 @@ class MemoryManager:
         
         episode = {
             "timestamp": time.time(),
+            "last_access": time.time(),
+            "strength": 1.0,
+            "access_count": 0,
             "summary": summary,
             "raw_count": len(messages),
             "semantic_hash": lsh_hash,
@@ -117,14 +136,26 @@ class MemoryManager:
         }
         self.ltm_episodic.append(episode)
 
+    def _calculate_current_strength(self, memory: Dict[str, Any]) -> float:
+        """حساب القوة الحالية للذكرى بناءً على منحنى النسيان."""
+        if not self.forgetting_enabled:
+            return memory.get("strength", 1.0)
+            
+        elapsed = time.time() - memory.get("last_access", time.time())
+        # R = e^(-t/S) -> هنا نستخدم تبسيطاً: strength = strength * exp(-decay * elapsed)
+        import math
+        current_strength = memory.get("strength", 1.0) * math.exp(-self.decay_rate * elapsed)
+        return max(0.0, current_strength)
+
     def search(self, query: str, limit: int = 3) -> Dict[str, List[Dict[str, Any]]]:
-        """البحث النشط (Active Retrieval) في LTM."""
+        """البحث النشط (Active Retrieval) في LTM مع تطبيق منحنى النسيان."""
         from ai.multimodal_sync import MultimodalSyncManager
         sync_manager = MultimodalSyncManager()
         query_vec = sync_manager._generate_embedding(query)
         query_hash = sync_manager._generate_lsh_hash(query_vec)
         
         results = {"episodic": [], "semantic": []}
+        now = time.time()
         
         # البحث في الأحداث
         for ep in self.ltm_episodic:
@@ -132,6 +163,11 @@ class MemoryManager:
             if not e_hash: continue
             dist = sum(c1 != c2 for c1, c2 in zip(query_hash, e_hash))
             if dist <= 2:
+                # تحديث القوة عند الاسترجاع
+                ep["strength"] = min(1.0, self._calculate_current_strength(ep) + self.boost_factor)
+                ep["last_access"] = now
+                ep["access_count"] = ep.get("access_count", 0) + 1
+                
                 ep["score"] = 1.0 - (dist / len(query_hash))
                 results["episodic"].append(ep)
         
@@ -141,6 +177,11 @@ class MemoryManager:
             if not f_hash: continue
             dist = sum(c1 != c2 for c1, c2 in zip(query_hash, f_hash))
             if dist <= 2:
+                # تحديث القوة عند الاسترجاع
+                fact["strength"] = min(1.0, self._calculate_current_strength(fact) + self.boost_factor)
+                fact["last_access"] = now
+                fact["access_count"] = fact.get("access_count", 0) + 1
+                
                 fact["score"] = 1.0 - (dist / len(query_hash))
                 results["semantic"].append(fact)
                 
@@ -148,7 +189,30 @@ class MemoryManager:
         results["episodic"] = sorted(results["episodic"], key=lambda x: x.get("score", 0), reverse=True)[:limit]
         results["semantic"] = sorted(results["semantic"], key=lambda x: x.get("score", 0), reverse=True)[:limit]
         
+        # تنظيف الذاكرة دورياً (Pruning)
+        self.prune()
+        
         return results
+
+    def prune(self):
+        """تنظيف الذكريات الضعيفة جداً بناءً على منحنى النسيان."""
+        if not self.forgetting_enabled:
+            return
+
+        # تنظيف الأحداث
+        initial_ep = len(self.ltm_episodic)
+        self.ltm_episodic = [ep for ep in self.ltm_episodic if self._calculate_current_strength(ep) > self.prune_threshold]
+        
+        # تنظيف الحقائق
+        initial_sem = len(self.ltm_semantic)
+        self.ltm_semantic = {f_id: fact for f_id, fact in self.ltm_semantic.items() 
+                             if self._calculate_current_strength(fact) > self.prune_threshold}
+        
+        diff_ep = initial_ep - len(self.ltm_episodic)
+        diff_sem = initial_sem - len(self.ltm_semantic)
+        
+        if diff_ep > 0 or diff_sem > 0:
+            logger.info(f"🧹 تم تنظيف الذاكرة: حذف {diff_ep} حدث و {diff_sem} حقيقة ضعيفة.")
 
     def to_dict(self) -> Dict[str, Any]:
         """تصدير الذاكرة كقاموس للحفظ."""
