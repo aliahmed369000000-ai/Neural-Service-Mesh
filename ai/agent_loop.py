@@ -433,7 +433,8 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                         task=user_input[:100],
                         outcome=finish_text[:200],
                         lesson="المهمة اكتملت بنجاح.",
-                        success=True
+                        success=True,
+                        agent_id=f"agent_{loop_id}"
                     )
                     _emit({"type": "answer", "text": finish_text})
                     done = True

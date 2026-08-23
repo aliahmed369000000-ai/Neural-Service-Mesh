@@ -33,9 +33,10 @@ class LearningEngine:
         except Exception as e:
             logger.error(f"❌ خطأ حفظ قاعدة الخبرة: {e}")
 
-    def record_experience(self, task: str, outcome: str, lesson: str, success: bool):
-        """تسجيل خبرة جديدة."""
+    def record_experience(self, task: str, outcome: str, lesson: str, success: bool, agent_id: str = "global"):
+        """تسجيل خبرة جديدة مع دعم هوية الوكيل."""
         experience = {
+            "agent_id": agent_id,
             "task_type": task,
             "outcome": outcome,
             "lesson": lesson,
@@ -50,24 +51,40 @@ class LearningEngine:
         self._save_db()
 
     def get_relevant_lessons(self, current_task: str) -> str:
-        """جلب الدروس المستفادة ذات الصلة بالمهمة الحالية."""
-        # مطابقة مرنة للكلمات المفتاحية
+        """جلب الدروس المستفادة ذات الصلة بالمهمة الحالية (جماعياً)."""
         current_keywords = set(current_task.lower().split())
         relevant = []
         for exp in self.experience_db:
-            exp_keywords = set(exp["task_type"].lower().split())
-            # إذا كان هناك تقاطع في الكلمات المفتاحية
+            task_type = exp.get("task_type", "")
+            exp_keywords = set(task_type.lower().split())
             if current_keywords.intersection(exp_keywords):
                 relevant.append(exp)
         
         if not relevant:
             return ""
         
-        summary = "\n💡 دروس مستفادة من خبرات سابقة:\n"
-        for exp in relevant[-3:]: # جلب آخر 3 دروس ذات صلة
-            status = "✅" if exp["success"] else "❌"
-            summary += f"- {status} في مهمة '{exp['task_type']}': {exp['lesson']}\n"
+        summary = "\n💡 دروس مستفادة من المعرفة الجماعية (Collective Knowledge):\n"
+        for exp in relevant[-5:]: # زيادة عدد الدروس المسترجعة للتنوع
+            status = "✅" if exp.get("success") else "❌"
+            origin = f" [الوكيل: {exp.get('agent_id', 'global')}]"
+            summary += f"- {status}{origin} في مهمة '{exp.get('task_type')}': {exp.get('lesson')}\n"
         return summary
+
+    def import_expert_seeds(self, seeds_file: str):
+        """استيراد بذور خبرة خارجية من ملف JSON."""
+        try:
+            path = Path(seeds_file)
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    seeds = json.load(f)
+                    for seed in seeds:
+                        seed["agent_id"] = seed.get("agent_id", "expert_seed")
+                        seed["timestamp"] = seed.get("timestamp", time.time())
+                        self.experience_db.append(seed)
+                self._save_db()
+                logger.info(f"✅ تم استيراد {len(seeds)} خبرة خبيرة.")
+        except Exception as e:
+            logger.error(f"❌ خطأ استيراد البذور: {e}")
 
 # نسخة عالمية واحدة
 learning_engine = LearningEngine()
