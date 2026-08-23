@@ -26,6 +26,12 @@ class MultimodalSyncManager:
         """إعادة المتجه المكمم إلى تنسيق Float32."""
         return [round(v / 255.0, 4) for v in q_vector]
 
+    def _generate_lsh_hash(self, vector: List[float]) -> str:
+        """توليد هاش حساس للموقع (LSH) للبحث السريع ANN."""
+        # محاكاة LSH عبر تحويل القيم إلى بتات (Bits) بناءً على متوسطها
+        avg = sum(vector) / len(vector)
+        return "".join(["1" if v > avg else "0" for v in vector])
+
     def _analyze_sentiment(self, text: str, visual_desc: str) -> Dict[str, Any]:
         """تحليل المشاعر المتزامن (محاكاة تعتمد على الكلمات المفتاحية والسياق)."""
         # في الإنتاج يتم استدعاء نموذج NLP متخصص
@@ -108,8 +114,9 @@ class MultimodalSyncManager:
                 "sentiment": sentiment,
                 "semantic_index": {
                     "vector": semantic_vector,
+                    "lsh_hash": self._generate_lsh_hash(raw_vector),
                     "quantized": True,
-                    "version": "v2-quantized",
+                    "version": "v3-ann",
                     "tags": list(set(spoken_text.split() + kf["description"].split()))[:5]
                 }
             }
@@ -133,13 +140,23 @@ class MultimodalSyncManager:
             
         results = []
         query_vec = self._generate_embedding(query) if semantic else None
+        query_hash = self._generate_lsh_hash(query_vec) if semantic else None
         
         for item in index["multimodal_sync"]:
-            # 1. البحث النصي التقليدي
+            # 1. فلترة ANN سريعة باستخدام LSH (Hamming Distance)
+            if semantic and "semantic_index" in item:
+                item_hash = item["semantic_index"].get("lsh_hash")
+                if item_hash and query_hash:
+                    # حساب مسافة هاملينج (عدد البتات المختلفة)
+                    hamming_dist = sum(c1 != c2 for c1, c2 in zip(query_hash, item_hash))
+                    # تخطي العناصر البعيدة جداً (أكثر من 2 بت اختلاف)
+                    if hamming_dist > 2: continue
+
+            # 2. البحث النصي التقليدي
             text_match = query.lower() in (item["spoken_text"] or "").lower()
             visual_match = query.lower() in (item["visual_description"] or "").lower()
             
-            # 2. البحث الدلالي (Cosine Similarity محاكى)
+            # 3. البحث الدلالي الدقيق (للعناصر المرشحة فقط)
             semantic_score = 0
             if semantic and "semantic_index" in item:
                 item_vec = item["semantic_index"]["vector"]
