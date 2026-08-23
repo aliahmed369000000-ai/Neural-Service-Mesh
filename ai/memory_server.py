@@ -101,6 +101,7 @@ class Fact(BaseModel):
     content: str
     importance: float
     semantic_hash: Optional[str] = None
+    is_encrypted: bool = False
 
 class Query(BaseModel):
     agent_id: str
@@ -127,7 +128,8 @@ def share_fact(fact: Fact, api_key: str = Depends(get_api_key)):
         "origin_agent": fact.agent_id,
         "shared_at": time.time(),
         "importance": fact.importance,
-        "semantic_hash": fact.semantic_hash
+        "semantic_hash": fact.semantic_hash,
+        "is_encrypted": fact.is_encrypted
     }
     memory.save()
     return {"status": "success", "fact_id": fact_id}
