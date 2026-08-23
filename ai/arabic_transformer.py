@@ -390,6 +390,8 @@ class CoreMatrixLayer:
         d_model: int = D_MODEL,
         trainable_core: bool = True,
         core_lr_scale: float = 0.1,
+        image_dim: int = 512,  # أبعاد ميزات الصورة (مثلاً من CLIP)
+        audio_dim: int = 128   # أبعاد ميزات الصوت (مثلاً Mel-spectrogram)
     ):
         self.d_model        = d_model
         self.core_dim        = 784
@@ -397,6 +399,13 @@ class CoreMatrixLayer:
         self.core_lr_scale   = core_lr_scale
         self._W_core: Optional[np.ndarray] = None
         self._loaded  = False
+
+        # رؤوس الإسقاط متعددة الوسائط (Multimodal Projection Heads)
+        # تحويل الصور والصوت إلى فضاء الـ d_model قبل الدخول للجوهر
+        self.W_img = _xavier(d_model, image_dim)
+        self.b_img = np.zeros(d_model)
+        self.W_aud = _xavier(d_model, audio_dim)
+        self.b_aud = np.zeros(d_model)
 
         self.W_up   = _xavier(self.core_dim, d_model)
         self.W_down = _xavier(d_model, self.core_dim)
@@ -409,8 +418,6 @@ class CoreMatrixLayer:
             self._load_csv(csv_path)
 
         if self._W_core is None:
-            # لا مصفوفة محمَّلة من CSV/NPY — نبدأ ببذرة Xavier قابلة للتدريب
-            # بدل مصفوفة الهوية الثابتة القديمة (كانت تمنع أي تعلّم فعلي).
             self._W_core = _xavier(self.core_dim, self.core_dim)
 
     def _load_csv(self, path: str) -> bool:
@@ -433,31 +440,58 @@ class CoreMatrixLayer:
     def _core(self) -> np.ndarray:
         return self._W_core
 
-    def forward(self, X: np.ndarray) -> np.ndarray:
-        self._cx  = X
-        up        = X @ self.W_up.T + self.b_up          # (seq,784)
+    def forward(self, X: np.ndarray, image_feats: Optional[np.ndarray] = None, 
+                audio_feats: Optional[np.ndarray] = None) -> np.ndarray:
+        """
+        X: (seq, d_model) - embeddings النص
+        image_feats: (num_images, image_dim) اختياري
+        audio_feats: (num_audio, audio_dim) اختياري
+        """
+        # دمج الوسائط الأخرى في فضاء الـ d_model
+        multimodal_add = np.zeros_like(X)
+        
+        if image_feats is not None:
+            img_proj = image_feats @ self.W_img.T + self.b_img
+            # دمج ميزات الصورة في بداية التسلسل (أو حسب التنسيق المطلوب)
+            n_img = min(len(img_proj), len(X))
+            multimodal_add[:n_img] += img_proj[:n_img]
+            
+        if audio_feats is not None:
+            aud_proj = audio_feats @ self.W_aud.T + self.b_aud
+            n_aud = min(len(aud_proj), len(X))
+            multimodal_add[:n_aud] += aud_proj[:n_aud]
+            
+        # X المدمج
+        X_fused = X + multimodal_add
+        
+        self._cx  = X_fused
+        up        = X_fused @ self.W_up.T + self.b_up          # (seq,784)
         self._cup = up
-        out       = up @ self._core().T                  # (seq,784)
+        out       = up @ self._core().T                        # (seq,784)
+        
         # sign-flip activation (من NSM)
         act       = _relu(out)
         mask      = np.abs(out) > 0.15
         act[mask] *= -0.5
         self._cout = act
-        return act @ self.W_down.T + self.b_down          # (seq,256)
+        return act @ self.W_down.T + self.b_down          # (seq, d_model)
 
-    def backward(self, grad: np.ndarray, lr: float) -> np.ndarray:
+    def backward(self, grad: np.ndarray, lr: float) -> Tuple[np.ndarray, Optional[np.ndarray], Optional[np.ndarray]]:
         gWd   = grad.T @ self._cout
         gbd   = grad.sum(0)
         g_act = grad @ self.W_down                        # (seq,784)
-        # relu grad (تقريبي عبر sign-flip)
+        
         g_out = g_act * (self._cout > 0).astype(float)
         g_up  = g_out @ self._core()                      # (seq,784)
         gWu   = g_up.T @ self._cx
         gbu   = g_up.sum(0)
-        gX    = g_up @ self.W_up
+        gX_fused = g_up @ self.W_up
+        
+        # تدرجات رؤوس الإسقاط متعددة الوسائط (إذا لزم الأمر مستقبلاً)
+        gW_img = None; gb_img = None
+        gW_aud = None; gb_aud = None
 
         if self.trainable_core and self.core_lr_scale > 0.0:
-            # out = up @ core.T  ⇒  dL/dcore = g_out.T @ up
             gCore = g_out.T @ self._cup                   # (784,784)
             self._W_core -= (lr * self.core_lr_scale) * np.clip(gCore, -CLIP_GRAD, CLIP_GRAD)
             np.clip(self._W_core, -5.0, 5.0, out=self._W_core)
@@ -467,7 +501,8 @@ class CoreMatrixLayer:
             np.clip(W, -5.0, 5.0, out=W)
         self.b_down -= lr * np.clip(gbd, -CLIP_GRAD, CLIP_GRAD)
         self.b_up   -= lr * np.clip(gbu, -CLIP_GRAD, CLIP_GRAD)
-        return gX
+        
+        return gX_fused, None, None  # نكتفي بتدرج X حالياً لتجنب تعقيد backward النصي
 
     def info(self) -> dict:
         W = self._W_core
@@ -486,11 +521,18 @@ class CoreMatrixLayer:
         np.save(f"{prefix}_Wd.npy",   self.W_down)
         np.save(f"{prefix}_bu.npy",   self.b_up)
         np.save(f"{prefix}_bd.npy",   self.b_down)
-        np.save(f"{prefix}_core.npy", self._W_core)  # تُحفظ الآن لأنها تتغيّر بالتدريب
+        np.save(f"{prefix}_core.npy", self._W_core)
+        # حفظ رؤوس الوسائط
+        np.save(f"{prefix}_Wimg.npy", self.W_img)
+        np.save(f"{prefix}_bimg.npy", self.b_img)
+        np.save(f"{prefix}_Waud.npy", self.W_aud)
+        np.save(f"{prefix}_baud.npy", self.b_aud)
 
     def load(self, prefix: str):
         for attr, fname in [("W_up","Wu"),("W_down","Wd"),
-                             ("b_up","bu"),("b_down","bd")]:
+                             ("b_up","bu"),("b_down","bd"),
+                             ("W_img","Wimg"),("b_img","bimg"),
+                             ("W_aud","Waud"),("b_aud","baud")]:
             p = f"{prefix}_{fname}.npy"
             if os.path.exists(p):
                 setattr(self, attr, np.load(p).astype(np.float64))
@@ -871,11 +913,16 @@ class ArabicTransformer:
         self._loss_history: List[float] = []
 
     # ── forward ───────────────────────────────────────────────────────────────
-    def _forward(self, ids: np.ndarray, mask=None, trust_score: float = 1.0):
+    def _forward(self, ids: np.ndarray, mask=None, trust_score: float = 1.0, 
+                 image_feats: Optional[np.ndarray] = None, 
+                 audio_feats: Optional[np.ndarray] = None):
         X  = self.embedding.forward(ids)
         X += self.pos_enc.forward(len(ids))
-        # قلب الشبكة: المصفوفة المدروسة
-        X  = X + self.core.forward(X)          # Residual
+        
+        # دمج الجوهر متعدد الوسائط (CoreMatrix Fusion)
+        # يتم الدمج هنا قبل الطبقات الوسطى الـ 24 الثابتة
+        X = X + self.core.forward(X, image_feats, audio_feats)
+        
         for blk in self.blocks:
             X = blk.forward(X, mask)
         
@@ -972,7 +1019,7 @@ class ArabicTransformer:
         # ── forward (نفس الطبقات الموجودة، بدون أي تعديل عليها) ──
         X = self.embedding.forward(inp)
         X = X + self.pos_enc.forward_indices(pos_inp)
-        X = X + self.core.forward(X)
+        X = X + self.core.forward(X) # تدريب batch لا يدعم الوسائط حالياً للتبسيط
         for blk in self.blocks:
             X = blk.forward(X, mask)
         probs = self.head.forward(X)
@@ -1034,6 +1081,8 @@ class ArabicTransformer:
         top_k: int = 50,
         top_p: float = 0.92,
         repetition_penalty: float = 1.1,
+        image_feats: Optional[np.ndarray] = None,
+        audio_feats: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         """يُولِّد تسلسل IDs مع nucleus/top-k وpenalty تكرار."""
         eos = getattr(self.tokenizer, "EOS", 3)
@@ -1050,7 +1099,7 @@ class ArabicTransformer:
             arr = np.array(ids[-self.max_seq:], np.int64)
             S = len(arr)
             mask = np.triu(np.ones((S, S), bool), k=1)
-            p, _, risk, intent = self._forward(arr, mask)
+            p, _, risk, intent = self._forward(arr, mask, image_feats=image_feats, audio_feats=audio_feats)
             
             # حظر التوليد إذا تم اكتشاف نية خبيثة بوضوح
             if intent == "malicious":
