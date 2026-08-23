@@ -53,6 +53,21 @@ class MemoryState:
 
 memory = MemoryState()
 
+class MetricsState:
+    def __init__(self):
+        self.request_counts = {"share": 0, "sync": 0, "ask": 0, "answer": 0}
+        self.agent_stats = {}
+        self.start_time = time.time()
+
+    def log_request(self, type: str, agent_id: str):
+        self.request_counts[type] = self.request_counts.get(type, 0) + 1
+        if agent_id not in self.agent_stats:
+            self.agent_stats[agent_id] = {"requests": 0, "last_seen": 0}
+        self.agent_stats[agent_id]["requests"] += 1
+        self.agent_stats[agent_id]["last_seen"] = time.time()
+
+metrics = MetricsState()
+
 class Fact(BaseModel):
     agent_id: str
     content: str
@@ -75,6 +90,7 @@ def health():
 
 @app.post("/share")
 def share_fact(fact: Fact, api_key: str = Depends(get_api_key)):
+    metrics.log_request("share", fact.agent_id)
     # استخدام معرف ثابت يعتمد على المحتوى
     import hashlib
     fact_id = f"shared_{hashlib.md5(fact.content.encode()).hexdigest()[:8]}"
@@ -89,7 +105,8 @@ def share_fact(fact: Fact, api_key: str = Depends(get_api_key)):
     return {"status": "success", "fact_id": fact_id}
 
 @app.get("/sync")
-def sync_facts(api_key: str = Depends(get_api_key)):
+def sync_facts(agent_id: Optional[str] = None, api_key: str = Depends(get_api_key)):
+    if agent_id: metrics.log_request("sync", agent_id)
     return memory.data["shared_facts"]
 
 @app.post("/queries/ask")
@@ -113,6 +130,7 @@ def get_queries(api_key: str = Depends(get_api_key)):
 
 @app.post("/queries/answer")
 def answer_query(a: Answer, api_key: str = Depends(get_api_key)):
+    metrics.log_request("answer", a.agent_id)
     if a.query_id in memory.data["active_queries"]:
         memory.data["active_queries"][a.query_id]["answers"].append({
             "answer": a.answer,
@@ -123,6 +141,21 @@ def answer_query(a: Answer, api_key: str = Depends(get_api_key)):
         memory.save()
         return {"status": "success"}
     raise HTTPException(status_code=404, detail="Query not found")
+
+@app.get("/metrics")
+def get_metrics(api_key: str = Depends(get_api_key)):
+    uptime = time.time() - metrics.start_time
+    return {
+        "uptime_seconds": uptime,
+        "total_requests": sum(metrics.request_counts.values()),
+        "request_breakdown": metrics.request_counts,
+        "active_agents_count": len(metrics.agent_stats),
+        "agent_details": metrics.agent_stats,
+        "memory_usage": {
+            "facts_count": len(memory.data["shared_facts"]),
+            "queries_count": len(memory.data["active_queries"])
+        }
+    }
 
 if __name__ == "__main__":
     import os

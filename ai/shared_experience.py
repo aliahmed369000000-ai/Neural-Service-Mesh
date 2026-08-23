@@ -103,7 +103,7 @@ class SharedExperienceManager:
         new_facts_count = 0
         
         if self.remote_url:
-            remote_facts = self._request("GET", "/sync")
+            remote_facts = self._request("GET", f"/sync?agent_id={agent_memory.agent_id}")
             if remote_facts:
                 self.knowledge["shared_facts"].update(remote_facts)
 
