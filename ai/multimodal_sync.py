@@ -18,10 +18,12 @@ class MultimodalSyncManager:
         # استخراج الكلمات المفتاحية الدلالية (محاكاة دلالية)
         keywords = re.findall(r"\w{4,}", text.lower())
         vector = [0.0] * 16
-        for i, word in enumerate(keywords[:16]):
-            # استخدام hash ثابت للكلمة لضمان أن الكلمات المتشابهة تعطي نفس النتيجة
-            h = hash(word) % 1000
-            vector[i % 16] = round(h / 1000.0, 4)
+        for word in keywords:
+            # استخدام hash ثابت للكلمة (Python hash() غير ثابت عبر الجلسات، نستخدم مجموع ord)
+            word_hash = sum(ord(c) * (i+1) for i, c in enumerate(word))
+            idx = word_hash % 16
+            val = (word_hash % 100) / 100.0
+            vector[idx] = min(1.0, vector[idx] + val)
             
         # إضافة وزن للأهمية التقنية
         if re.search(r"```|sha|error|fix|done", text.lower()):
@@ -40,9 +42,9 @@ class MultimodalSyncManager:
 
     def _generate_lsh_hash(self, vector: List[float]) -> str:
         """توليد هاش حساس للموقع (LSH) للبحث السريع ANN."""
-        # محاكاة LSH عبر تحويل القيم إلى بتات (Bits) بناءً على متوسطها
-        avg = sum(vector) / len(vector)
-        return "".join(["1" if v > avg else "0" for v in vector])
+        # محاكاة LSH عبر تحويل القيم إلى بتات (Bits) بناءً على عتبة ثابتة
+        # هذا يضمن أن الأبعاد التي تحتوي على معلومات (غير صفرية) تظهر في الهاش
+        return "".join(["1" if v > 0.1 else "0" for v in vector])
 
     def _analyze_sentiment(self, text: str, visual_desc: str) -> Dict[str, Any]:
         """تحليل المشاعر المتزامن (محاكاة تعتمد على الكلمات المفتاحية والسياق)."""

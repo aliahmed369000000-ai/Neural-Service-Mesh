@@ -212,13 +212,18 @@ class MemoryManager:
             f_hash = fact.get("semantic_hash")
             if not f_hash: continue
             dist = sum(c1 != c2 for c1, c2 in zip(query_hash, f_hash))
-            if dist <= 2:
+            
+            # حساب تشابه جيب التمام (Cosine Similarity) مبسط للمتجهات الأصلية إذا توفرت
+            # أو الاعتماد على LSH مع عتبة أكثر مرونة
+            score = 1.0 - (dist / len(query_hash))
+            
+            if dist <= 8: # رفع العتبة لزيادة التسامح في البحث الدلالي المحاكي (50% من طول الهاش)
                 # تحديث القوة عند الاسترجاع
                 fact["strength"] = min(1.0, self._calculate_current_strength(fact) + self.boost_factor)
                 fact["last_access"] = now
                 fact["access_count"] = fact.get("access_count", 0) + 1
                 
-                fact["score"] = 1.0 - (dist / len(query_hash))
+                fact["score"] = score
                 results["semantic"].append(fact)
                 
         # ترتيب النتائج

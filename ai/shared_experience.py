@@ -48,7 +48,8 @@ class SharedExperienceManager:
                 "origin_agent": agent_id,
                 "shared_at": time.time(),
                 "importance": importance,
-                "verification_count": 1
+                "verification_count": 1,
+                "semantic_hash": fact.get("semantic_hash")
             }
             self._save_knowledge()
             logger.info(f"🌐 تم نشر حقيقة جماعية جديدة من الوكيل {agent_id}")
@@ -68,7 +69,8 @@ class SharedExperienceManager:
             if not exists:
                 agent_memory.add_fact(
                     fact["content"], 
-                    importance=fact["importance"] * 0.9 # تقليل بسيط للأهمية عند النقل
+                    semantic_hash=fact.get("semantic_hash"),
+                    importance=fact["importance"] * 0.9
                 )
                 new_facts_count += 1
         
