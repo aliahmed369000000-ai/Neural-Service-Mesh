@@ -20,16 +20,18 @@ SLEEP_DIR = ROOT / "artifacts" / "agent_sleep"
 SLEEP_DIR.mkdir(parents=True, exist_ok=True)
 
 class AgentState:
-    """تمثيل لحالة الوكيل القابلة للحفظ مع دعم الذاكرة الهيكلية."""
+    """تمثيل لحالة الوكيل القابلة للحفظ مع دعم الذاكرة الهيكلية والبصرية."""
     def __init__(self, agent_id: str, context: List[Dict[str, Any]], plan: Dict[str, Any], 
                  metadata: Dict[str, Any] = None, memory_snapshot: Dict[str, Any] = None,
-                 pending_tasks: List[str] = None, memory_shards: Dict[str, str] = None):
+                 pending_tasks: List[str] = None, memory_shards: Dict[str, str] = None,
+                 visual_context: Dict[str, Any] = None):
         self.agent_id = agent_id
         self.context = context
         self.plan = plan
         self.memory_snapshot = memory_snapshot or {}
         self.pending_tasks = pending_tasks or []
-        self.memory_shards = memory_shards or {} # روابط لملفات بيانات ضخمة
+        self.memory_shards = memory_shards or {}
+        self.visual_context = visual_context or {} # وصف الصور، نتائج OCR، وميتاداتا بصرية
         self.metadata = metadata or {}
         self.timestamp = time.time()
 
@@ -41,6 +43,7 @@ class AgentState:
             "memory_snapshot": self.memory_snapshot,
             "pending_tasks": self.pending_tasks,
             "memory_shards": self.memory_shards,
+            "visual_context": self.visual_context,
             "metadata": self.metadata,
             "timestamp": self.timestamp
         }
@@ -54,17 +57,19 @@ class AgentState:
             data.get("metadata", {}),
             data.get("memory_snapshot", {}),
             data.get("pending_tasks", []),
-            data.get("memory_shards", {})
+            data.get("memory_shards", {}),
+            data.get("visual_context", {})
         )
         state.timestamp = data.get("timestamp", time.time())
         return state
 
 def hibernate_agent(agent_id: str, context: List[Dict[str, Any]], plan: Dict[str, Any], 
                     metadata: Dict[str, Any] = None, memory_snapshot: Dict[str, Any] = None,
-                    pending_tasks: List[str] = None, memory_shards: Dict[str, str] = None) -> bool:
+                    pending_tasks: List[str] = None, memory_shards: Dict[str, str] = None,
+                    visual_context: Dict[str, Any] = None) -> bool:
     """حفظ حالة الوكيل في ملف محلي لدخول وضع النوم."""
     try:
-        state = AgentState(agent_id, context, plan, metadata, memory_snapshot, pending_tasks, memory_shards)
+        state = AgentState(agent_id, context, plan, metadata, memory_snapshot, pending_tasks, memory_shards, visual_context)
         file_path = SLEEP_DIR / f"{agent_id}_sleep.json"
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(state.to_dict(), f, ensure_ascii=False, indent=2)

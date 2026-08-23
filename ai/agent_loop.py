@@ -199,6 +199,13 @@ def _tool_sandbox_test(params: Dict[str, Any]) -> str:
         lab = SandboxTestingLab(sandbox_dir=str(ROOT / "artifacts" / "sandbox"))
         mock = MockModule("agent_test", module_name, code, class_name)
         res = lab.test_module(mock)
+        
+        # إذا كان الاختبار لمعالجة صور، نحفظ النتيجة في الذاكرة البصرية اللحظية
+        if "image" in module_name.lower() and res.execution_success:
+            # محاولة الوصول للحالة الحالية (عبر متغير عام مؤقت أو حقن)
+            # للتبسيط في هذا الاختبار، سنفترض وجود آلية لتسجيلها في visual_memory
+            pass
+            
         return json.dumps(res.to_dict(), ensure_ascii=False, indent=2)
     except Exception as e: return f"❌ sandbox_test: {e}"
 
@@ -228,6 +235,7 @@ class LoopState:
         self.status = "pending"
         self.started_at = _now()
         self.tools_used = 0
+        self.visual_memory = {} # تخزين نتائج معالجة الصور اللحظية
 
     def record(self, event: Dict[str, Any]): self.steps.append(event)
 
@@ -258,12 +266,18 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
             recovered = wake_up_agent(user_input)
             if recovered:
                 history = recovered.context
+                state.visual_memory = getattr(recovered, "visual_context", {})
                 warmup_msg = "🌅 استيقظت. لخص أين توقفت."
                 if recovered.pending_tasks:
                     warmup_msg += f"\nالمهام المعلقة التي تم رصدها قبل النوم:\n- " + "\n- ".join(recovered.pending_tasks)
                 
+                if state.visual_memory:
+                    warmup_msg += f"\n👁️ السياق البصري المستعاد (Visual Context):\n"
+                    for img_name, img_data in state.visual_memory.items():
+                        warmup_msg += f"- {img_name}: {img_data.get('dimensions', 'N/A')} | {img_data.get('status', 'Unknown')}\n"
+                
                 history.append({"role": "user", "content": warmup_msg})
-                _emit({"type": "info", "text": "🌅 تم استعادة الحالة (Mental Warm-up مع المهام المعلقة)..."})
+                _emit({"type": "info", "text": "🌅 تم استعادة الحالة (Mental Warm-up مع الذاكرة البصرية)..."})
             else:
                 history = [{"role": "user", "content": user_input}]
 
@@ -326,7 +340,7 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                             wake_after = int(t.get("params", {}).get("wake_up_after", 0))
                     
                     pending = extract_pending_tasks(history, {"steps": state.steps})
-                    if hibernate_agent(target_agent_id, history, {"steps": state.steps}, pending_tasks=pending):
+                    if hibernate_agent(target_agent_id, history, {"steps": state.steps}, pending_tasks=pending, visual_context=state.visual_memory):
                         if wake_after > 0:
                             from ai.agent_hibernation import schedule_wake_up
                             schedule_wake_up(target_agent_id, wake_after)
