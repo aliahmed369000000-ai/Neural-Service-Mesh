@@ -17,6 +17,15 @@ class MultimodalSyncManager:
         seed = sum(ord(c) for c in text) % 100
         return [round((seed + i) / 150.0, 4) for i in range(8)]
 
+    def _quantize_vector(self, vector: List[float]) -> List[int]:
+        """تكميم المتجه من Float32 إلى Int8 لتقليل الحجم بنسبة 75%."""
+        # تحويل القيم من نطاق [0, 1] إلى [0, 255]
+        return [int(v * 255) for v in vector]
+
+    def _dequantize_vector(self, q_vector: List[int]) -> List[float]:
+        """إعادة المتجه المكمم إلى تنسيق Float32."""
+        return [round(v / 255.0, 4) for v in q_vector]
+
     def _analyze_sentiment(self, text: str, visual_desc: str) -> Dict[str, Any]:
         """تحليل المشاعر المتزامن (محاكاة تعتمد على الكلمات المفتاحية والسياق)."""
         # في الإنتاج يتم استدعاء نموذج NLP متخصص
@@ -84,8 +93,9 @@ class MultimodalSyncManager:
             
             spoken_text = " ".join(relevant_text) if relevant_text else ""
             
-            # توليد الفهرس الدلالي
-            semantic_vector = self._generate_embedding(f"{kf['description']} {spoken_text}")
+            # توليد الفهرس الدلالي (مع التكميم لتقليل الحجم)
+            raw_vector = self._generate_embedding(f"{kf['description']} {spoken_text}")
+            semantic_vector = self._quantize_vector(raw_vector)
             
             # تحليل المشاعر المتزامن
             sentiment = self._analyze_sentiment(spoken_text, kf["description"])
@@ -98,7 +108,8 @@ class MultimodalSyncManager:
                 "sentiment": sentiment,
                 "semantic_index": {
                     "vector": semantic_vector,
-                    "version": "v1-sim",
+                    "quantized": True,
+                    "version": "v2-quantized",
                     "tags": list(set(spoken_text.split() + kf["description"].split()))[:5]
                 }
             }
@@ -132,6 +143,11 @@ class MultimodalSyncManager:
             semantic_score = 0
             if semantic and "semantic_index" in item:
                 item_vec = item["semantic_index"]["vector"]
+                
+                # التعامل مع المتجهات المكممة (Int8)
+                if isinstance(item_vec[0], int):
+                    item_vec = self._dequantize_vector(item_vec)
+                
                 # محاكاة تشابه جيب التمام
                 semantic_score = sum(a * b for a, b in zip(query_vec, item_vec))
             
