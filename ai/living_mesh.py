@@ -539,7 +539,7 @@ class LivingMeshNode:
             await asyncio.Future()  # run forever
 
     async def _handle_ws_connection(self, websocket):
-        """معالجة اتصال WebSocket القادم."""
+        """معالجة اتصال WebSocket القادم (للمكتبة websockets)."""
         self.active_connections.add(websocket)
         try:
             async for message in websocket:
@@ -548,6 +548,18 @@ class LivingMeshNode:
             pass
         finally:
             self.active_connections.remove(websocket)
+
+    async def _handle_aiohttp_ws(self, ws):
+        """معالجة اتصال WebSocket القادم (للمكتبة aiohttp)."""
+        self.active_connections.add(ws)
+        try:
+            async for msg in ws:
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    await self._process_secure_message(msg.data, ws)
+                elif msg.type == aiohttp.WSMsgType.ERROR:
+                    logger.error(f'ws connection closed with exception {ws.exception()}')
+        finally:
+            self.active_connections.remove(ws)
 
     async def _process_secure_message(self, data, websocket=None):
         """معالجة الرسالة المشفرة القادمة مع دعم طلبات اكتشاف الأقران."""
@@ -638,7 +650,11 @@ class LivingMeshNode:
 
     async def request_peers(self, seed_host: str, seed_port: int):
         """طلب قائمة الأقران من عقدة بذرة (Seed Node)."""
-        uri = f"ws://{seed_host}:{seed_port}"
+        if ".hf.space" in seed_host:
+            uri = f"wss://{seed_host}/ws"
+        else:
+            uri = f"ws://{seed_host}:{seed_port}"
+            
         try:
             async with websockets.connect(uri) as websocket:
                 pub_pem = self.public_key.public_bytes(
@@ -664,8 +680,13 @@ class LivingMeshNode:
 
     async def send_to_peer(self, peer_host: str, peer_port: int, kind: str, data: Dict[str, Any], hops: int = 0):
         """إرسال خبرة عبر WebSocket لعقدة نظيرة."""
-        if not peer_port: return
-        uri = f"ws://{peer_host}:{peer_port}"
+        if not peer_port and ".hf.space" not in peer_host: return
+        
+        if ".hf.space" in peer_host:
+            uri = f"wss://{peer_host}/ws"
+        else:
+            uri = f"ws://{peer_host}:{peer_port}"
+            
         try:
             async with websockets.connect(uri) as websocket:
                 msg_payload = {
