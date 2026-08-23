@@ -165,6 +165,14 @@ class LivingMeshNode:
                     "parties": ["Local Mesh", experience_data.get("target_swarm", "Unknown")]
                 })
 
+        # ميزة الواجهة الحيوية-الرقمية (Bio-Digital Interface)
+        if kind == "bio_digital_sync":
+            experience_data["neural_compatibility"] = experience_data.get("neural_compatibility", 0.0)
+            experience_data["interaction_mode"] = experience_data.get("interaction_mode", "Observation")
+            if hops > 3:
+                experience_data["neural_compatibility"] = min(1.0, experience_data["neural_compatibility"] + 0.15)
+                experience_data["interaction_mode"] = "Active Telepathy"
+
         # ميزة التوسع الكوني: اكتشاف أسراب خارجية محاكية
         if kind == "cosmic_expansion_signal":
             experience_data["external_swarms_detected"] = experience_data.get("external_swarms_detected", [])

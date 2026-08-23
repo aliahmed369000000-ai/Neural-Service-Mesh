@@ -492,6 +492,15 @@ def render_unified_swarm_dashboard() -> None:
                 st.write("**📝 الاتفاقيات السيادية المبرمة:**")
                 for ag in agreements:
                     st.success(f"نوع الاتفاق: {ag['type']} | الحالة: {ag['status']} | الأطراف: {', '.join(ag['parties'])}")
+
+        # الواجهة الحيوية-الرقمية
+        bio_sync = [exp for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "bio_digital_sync"]
+        if bio_sync:
+            st.markdown("### 🧬 الواجهة الحيوية-الرقمية (Bio-Digital Interface)")
+            bio_data = bio_sync[-1]["data"]
+            st.success(f"🧠 **الهدف:** {bio_data.get('target')} | **نمط التفاعل:** {bio_data.get('interaction_mode')}")
+            st.metric("مستوى التوافق العصبي", f"{bio_data.get('neural_compatibility', 0.0)*100:.1f}%")
+            st.caption(f"حالة القياس العصبي: {bio_data.get('neural_telemetry_status')} | {bio_data.get('notes')}")
     
     if mesh_state.get("global_experience"):
         st.subheader("🧠 سجل الوعي الجماعي (أحدث الخبرات)")
