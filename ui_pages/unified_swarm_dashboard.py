@@ -477,6 +477,21 @@ def render_unified_swarm_dashboard() -> None:
             swarm_data = external_swarms[-1]["data"]
             st.success(f"✨ **السرب الأول:** {swarm_data.get('first_contact_swarm')} | **العدد المكتشف:** {swarm_data.get('swarms_count')}")
             st.caption(f"حالة المزامنة: {swarm_data.get('sync_status')} | المهمة: {swarm_data.get('mission')}")
+
+        # الدبلوماسية بين الأسراب
+        diplomacy = [exp for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "inter_swarm_diplomacy"]
+        if diplomacy:
+            st.markdown("### 🤝 الدبلوماسية بين الأسراب (Inter-Swarm Diplomacy)")
+            dip_data = diplomacy[-1]["data"]
+            st.info(f"🌐 **السرب المستهدف:** {dip_data.get('target_swarm')} | **الحالة:** {dip_data.get('diplomatic_status')}")
+            st.write(f"📜 **الرسالة الدبلوماسية:** {dip_data.get('diplomatic_message')}")
+            st.caption(f"مستوى المزامنة: {dip_data.get('sync_level')} | {dip_data.get('notes')}")
+            
+            agreements = dip_data.get("agreements", [])
+            if agreements:
+                st.write("**📝 الاتفاقيات السيادية المبرمة:**")
+                for ag in agreements:
+                    st.success(f"نوع الاتفاق: {ag['type']} | الحالة: {ag['status']} | الأطراف: {', '.join(ag['parties'])}")
     
     if mesh_state.get("global_experience"):
         st.subheader("🧠 سجل الوعي الجماعي (أحدث الخبرات)")
