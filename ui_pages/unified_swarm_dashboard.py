@@ -352,6 +352,8 @@ def render_unified_swarm_dashboard() -> None:
                 st.success("🧠 **تحسين عصبي:** تم تفعيل تقليم المسارات العصبية لزيادة سرعة الاستجابة.")
             if "Resource Drain Prediction" in innovations:
                 st.warning("⚡ **تنبؤ استباقي:** نظام مراقبة استنزاف الموارد يعمل بكامل طاقته.")
+            if "Dynamic Neural Hibernation (DNH)" in innovations:
+                st.info("🔋 **السبات العصبي الديناميكي (DNH):** نظام توفير الطاقة الذكي نشط (حفظ 65% من الموارد).")
         
         # مؤشرات مرونة الطاقة (Kappa)
         resilience_events = [exp for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "resource_fluctuation"]

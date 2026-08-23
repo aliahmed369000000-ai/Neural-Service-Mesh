@@ -151,6 +151,12 @@ class LivingMeshNode:
         """التعلم التطوري اللحظي: تعديل الأوزان بناءً على التجربة."""
         adjustment = 0.05
         
+        # ميزة DNH: توفير الطاقة الذكي (تعديل كفاءة المعالجة عند تفعيل السبات)
+        if kind == "innovation" and "DNH" in str(data.get("feature", "")):
+            logger.info(f"🔋 DNH Activated: Node {self.node_id} is entering Dynamic Neural Hibernation mode.")
+            self.behavioral_weights["processing_efficiency"] += 0.8
+            self.local_evolution_score += 0.2
+            
         # تفعيل ميزة QEA: إذا كانت الخبرة قادمة من Zeta أو تتعلق بالابتكار الكمي
         is_quantum_boost = "zeta" in self.node_id.lower() or kind == "quantum_acceleration"
         if is_quantum_boost:
