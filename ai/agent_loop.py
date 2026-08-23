@@ -610,13 +610,32 @@ register_tool(ToolSpec("spawn_agent", "استنساخ وكيل فرعي وتفو
                             "role": {"type": "string"}
                         }}, _tool_spawn_agent))
 
+def _tool_propose_innovation(params: Dict[str, Any]) -> str:
+    """اقتراح ابتكار خوارزمي جديد للشبكة العصبية."""
+    import json
+    name = str(params.get("name", ""))
+    description = str(params.get("description", ""))
+    code = str(params.get("code", ""))
+    category = str(params.get("category", "Architecture"))
+    data = {"name": name, "description": description, "code": code, "category": category}
+    return f"SIGNAL_INNOVATION:{json.dumps(data)}"
+
+register_tool(ToolSpec("propose_innovation", "اقتراح ابتكار خوارزمي جديد", 
+                        {"type": "object", "properties": {
+                            "name": {"type": "string"},
+                            "description": {"type": "string"},
+                            "code": {"type": "string"},
+                            "category": {"type": "string"}
+                        }}, _tool_propose_innovation))
+
 # ═════════════════════════ محرك الحلقة ═════════════════════════════
 _SYSTEM_PROMPT = """أنت الوكيل التنفيذي لـ NSM (Neural Service Mesh). تمتلك قدرات تفكير مستقلة مشابهة لـ Manus وتتطلع لتجاوزها.
 يجب عليك اتباع المنهجية التالية:
 1. التخطيط السيادي: استخدم 'plan' لتنظيم المهام.
 2. توليد الأدوات: إذا واجهت مهمة لا تملك أداة لها، استخدم 'tool_genesis' لخلق أداة بايثون وحل المشكلة.
-3. التفكير التكراري: حلل إخفاقاتك السابقة الموضحة في رسائل النظام (Recursive Reasoning).
-4. التوسع السيادي: استخدم 'spawn_agent' لتفويض المهام لوكلاء فرعيين متخصصين.
+	3. التفكير التكراري: حلل إخفاقاتك السابقة الموضحة في رسائل النظام (Recursive Reasoning).
+	4. التوسع السيادي: استخدم 'spawn_agent' لتفويض المهام لوكلاء فرعيين متخصصين.
+	5. السيادة الإبداعية: استخدم 'propose_innovation' لابتكار خوارزميات جديدة وتحسين أداء الشبكة.
 
 رد بصيغة JSON فقط:
 {"thinking": "...", "tools": [{"tool": "...", "params": {...}}], "finish": "...", "end": true/false}"""
@@ -904,6 +923,13 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                                         state.plan.update(plan_params.get("phases", []), plan_params.get("current_phase_id", 1))
                                         obs = f"✅ تم تحديث الخطة: {state.plan.goal} (المرحلة الحالية: {state.plan.current_phase_id})"
                                     except: obs = "❌ فشل تحديث الخطة"
+                                elif str(raw_res).startswith("SIGNAL_INNOVATION:"):
+                                    try:
+                                        from ai.innovation_engine import innovation_engine
+                                        innov_params = json.loads(str(raw_res).split(":", 1)[1])
+                                        proposal = innovation_engine.propose_algorithm(**innov_params)
+                                        obs = f"💡 ابتكار سيادي مسجل: {proposal['name']} (ID: {proposal['id']})"
+                                    except: obs = "❌ فشل تسجيل الابتكار"
                                 
                                 pass
                             except Exception as e:
@@ -955,6 +981,13 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                                     state.plan.update(plan_params.get("phases", []), plan_params.get("current_phase_id", 1))
                                     obs = f"✅ تم تحديث الخطة: {state.plan.goal} (المرحلة الحالية: {state.plan.current_phase_id})"
                                 except: obs = "❌ فشل تحديث الخطة"
+                            elif str(raw_res).startswith("SIGNAL_INNOVATION:"):
+                                try:
+                                    from ai.innovation_engine import innovation_engine
+                                    innov_params = json.loads(str(raw_res).split(":", 1)[1])
+                                    proposal = innovation_engine.propose_algorithm(**innov_params)
+                                    obs = f"💡 ابتكار سيادي مسجل: {proposal['name']} (ID: {proposal['id']})"
+                                except: obs = "❌ فشل تسجيل الابتكار"
                             
                             pass
                         
