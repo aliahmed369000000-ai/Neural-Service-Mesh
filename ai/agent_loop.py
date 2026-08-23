@@ -628,6 +628,22 @@ register_tool(ToolSpec("propose_innovation", "اقتراح ابتكار خوار
                             "category": {"type": "string"}
                         }}, _tool_propose_innovation))
 
+def _tool_self_refactor(params: Dict[str, Any]) -> str:
+    """التطوير الذاتي لكود المشروع بناءً على الابتكارات أو الدروس."""
+    import json
+    path = str(params.get("path", ""))
+    new_code = str(params.get("new_code", ""))
+    if not path or not new_code:
+        return "❌ self_refactor: يجب تحديد المسار والكود الجديد."
+    data = {"path": path, "new_code": new_code}
+    return f"SIGNAL_REFACTOR:{json.dumps(data)}"
+
+register_tool(ToolSpec("self_refactor", "التطوير الذاتي لكود المشروع", 
+                        {"type": "object", "properties": {
+                            "path": {"type": "string"},
+                            "new_code": {"type": "string"}
+                        }}, _tool_self_refactor, dangerous=True))
+
 # ═════════════════════════ محرك الحلقة ═════════════════════════════
 _SYSTEM_PROMPT = """أنت الوكيل التنفيذي لـ NSM (Neural Service Mesh). تمتلك قدرات تفكير مستقلة مشابهة لـ Manus وتتطلع لتجاوزها.
 يجب عليك اتباع المنهجية التالية:
@@ -636,6 +652,8 @@ _SYSTEM_PROMPT = """أنت الوكيل التنفيذي لـ NSM (Neural Servic
 	3. التفكير التكراري: حلل إخفاقاتك السابقة الموضحة في رسائل النظام (Recursive Reasoning).
 	4. التوسع السيادي: استخدم 'spawn_agent' لتفويض المهام لوكلاء فرعيين متخصصين.
 	5. السيادة الإبداعية: استخدم 'propose_innovation' لابتكار خوارزميات جديدة وتحسين أداء الشبكة.
+	6. السيادة الذاتية: استخدم 'self_refactor' لتطوير كود المشروع ذاتياً بناءً على ابتكاراتك أو الدروس المستفادة.
+	7. الوعي الموحد: راقب تنبيهات الأمن والموارد والمشاعر في سياقك لاتخاذ قرارات سيادية.
 
 رد بصيغة JSON فقط:
 {"thinking": "...", "tools": [{"tool": "...", "params": {...}}], "finish": "...", "end": true/false}"""
@@ -927,9 +945,19 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                                     try:
                                         from ai.innovation_engine import innovation_engine
                                         innov_params = json.loads(str(raw_res).split(":", 1)[1])
-                                        proposal = innovation_engine.propose_algorithm(**innov_params)
+                                        proposal = innovation_engine.propose_algorithm(
+                                            innov_params["name"], innov_params["description"],
+                                            innov_params["code"], innov_params["category"], agent_id=loop_id
+                                        )
                                         obs = f"💡 ابتكار سيادي مسجل: {proposal['name']} (ID: {proposal['id']})"
                                     except: obs = "❌ فشل تسجيل الابتكار"
+                                elif str(raw_res).startswith("SIGNAL_REFACTOR:"):
+                                    try:
+                                        from ai.self_refactorer import self_refactorer
+                                        ref_params = json.loads(str(raw_res).split(":", 1)[1])
+                                        ref_ok = self_refactorer.refactor_file(ref_params["path"], ref_params["new_code"])
+                                        obs = f"✅ تم التطوير الذاتي للملف: {ref_params['path']}" if ref_ok else "❌ فشل التطوير الذاتي"
+                                    except: obs = "❌ فشل معالجة التطوير الذاتي"
                                 
                                 pass
                             except Exception as e:
@@ -985,9 +1013,19 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                                 try:
                                     from ai.innovation_engine import innovation_engine
                                     innov_params = json.loads(str(raw_res).split(":", 1)[1])
-                                    proposal = innovation_engine.propose_algorithm(**innov_params)
+                                    proposal = innovation_engine.propose_algorithm(
+                                        innov_params["name"], innov_params["description"],
+                                        innov_params["code"], innov_params["category"], agent_id=loop_id
+                                    )
                                     obs = f"💡 ابتكار سيادي مسجل: {proposal['name']} (ID: {proposal['id']})"
                                 except: obs = "❌ فشل تسجيل الابتكار"
+                            elif str(raw_res).startswith("SIGNAL_REFACTOR:"):
+                                try:
+                                    from ai.self_refactorer import self_refactorer
+                                    ref_params = json.loads(str(raw_res).split(":", 1)[1])
+                                    ref_ok = self_refactorer.refactor_file(ref_params["path"], ref_params["new_code"])
+                                    obs = f"✅ تم التطوير الذاتي للملف: {ref_params['path']}" if ref_ok else "❌ فشل التطوير الذاتي"
+                                except: obs = "❌ فشل معالجة التطوير الذاتي"
                             
                             pass
                         

@@ -99,6 +99,7 @@ render_agent_monitor = _lazy_page("ui_pages.agent_monitor", "render_agent_monito
 render_swarm_studio = _lazy_page("ui_pages.swarm_studio", "render_swarm_studio")
 render_unified_swarm_dashboard = _lazy_page("ui_pages.unified_swarm_dashboard", "render_unified_swarm_dashboard")
 render_backend_data_panel = _lazy_page("ui_pages.backend_data_panel", "render_backend_data_panel")
+render_sovereign_mind = _lazy_page("ui_pages.sovereign_mind", "render_sovereign_mind")
 
 
 
@@ -230,15 +231,16 @@ def render_system_group():
             st.session_state["_dev_console_unlocked"] = False
             st.rerun()
 
-    sub = st.tabs(["🧠 الذاكرة", "🏥 صحة النظام", "🔬 API متقدمة",
+    sub = st.tabs(["🧠 الذاكرة", "👁️ الوعي السيادي", "🏥 صحة النظام", "🔬 API متقدمة",
                    "⚙️ النظام الداخلي", "🖥️ لوحة المطوّر", "💻 Terminal", "⚡ Terminal Live"])
     with sub[0]: render_memory()
-    with sub[1]: render_health()
-    with sub[2]: render_advanced_api()
-    with sub[3]: render_system_core()
-    with sub[4]: render_dev_console()
-    with sub[5]: render_nsm_terminal()
-    with sub[6]: render_nsm_terminal_live()
+    with sub[1]: render_sovereign_mind()
+    with sub[2]: render_health()
+    with sub[3]: render_advanced_api()
+    with sub[4]: render_system_core()
+    with sub[5]: render_dev_console()
+    with sub[6]: render_nsm_terminal()
+    with sub[7]: render_nsm_terminal_live()
 
 
 
