@@ -415,8 +415,9 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                 # Auto-Save
                 if state.round % 5 == 0:
                     from ai.agent_hibernation import hibernate_agent
-                    hibernate_agent(f"{loop_id}_autosave", history, {"steps": state.steps})
-                    _emit({"type": "info", "text": "💾 حفظ تلقائي."})
+                    # تفعيل الضغط في الحفظ التلقائي لتوفير المساحة
+                    hibernate_agent(f"{loop_id}_autosave", history, {"steps": state.steps}, compress=True)
+                    _emit({"type": "info", "text": "💾 حفظ تلقائي (مع الضغط الديناميكي)."})
                 
                 target_agent_id = f"agent_{loop_id}"
                 try:
@@ -522,7 +523,7 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                     pending = extract_pending_tasks(history, {"steps": state.steps})
                     if hibernate_agent(target_agent_id, history, {"steps": state.steps}, pending_tasks=pending, 
                                        visual_context=state.visual_memory, audio_context=state.audio_memory,
-                                       multimodal_memory=state.multimodal_memory):
+                                       multimodal_memory=state.multimodal_memory, compress=True):
                         if wake_after > 0:
                             from ai.agent_hibernation import schedule_wake_up
                             schedule_wake_up(target_agent_id, wake_after)

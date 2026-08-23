@@ -38,6 +38,35 @@ class AgentState:
         self.metadata = metadata or {}
         self.timestamp = time.time()
 
+    def compress(self, target_size_kb: int = 100):
+        """ضغط الذاكرة لتقليل حجم الحالة المحفوظة."""
+        initial_size = len(json.dumps(self.to_dict())) / 1024
+        if initial_size <= target_size_kb: return
+        
+        logger.info(f"🗜️ بدء ضغط الذاكرة (الحجم الحالي: {initial_size:.1f}KB)...")
+        
+        # 1. ضغط السياق (الاحتفاظ برسالة النظام وأهم الرسائل الأخيرة)
+        if len(self.context) > 10:
+            system_msg = [m for m in self.context if m.get("role") == "system"]
+            recent = self.context[-8:]
+            self.context = system_msg + recent
+            
+        # 2. ضغط الذاكرة متعددة الوسائط (الاحتفاظ بنقاط المزامنة ذات الثقة العالية فقط)
+        for vid_id in list(self.multimodal_memory.keys()):
+            sync_data = self.multimodal_memory[vid_id].get("multimodal_sync", [])
+            if len(sync_data) > 20:
+                # ترتيب حسب الأهمية (هنا نفترض وجود semantic_index أو نقاط زمنية مفتاحية)
+                # للتبسيط: نأخذ عينات منتظمة (Downsampling)
+                step = len(sync_data) // 15
+                self.multimodal_memory[vid_id]["multimodal_sync"] = sync_data[::step]
+                self.multimodal_memory[vid_id]["compressed"] = True
+
+        # 3. إزالة الميتاداتا غير الضرورية
+        self.metadata = {k: v for k, v in self.metadata.items() if k in ["lazy_loaded", "agent_type"]}
+        
+        final_size = len(json.dumps(self.to_dict())) / 1024
+        logger.info(f"✅ تم الضغط: {initial_size:.1f}KB -> {final_size:.1f}KB")
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "agent_id": self.agent_id,
@@ -74,10 +103,14 @@ def hibernate_agent(agent_id: str, context: List[Dict[str, Any]], plan: Dict[str
                     metadata: Dict[str, Any] = None, memory_snapshot: Dict[str, Any] = None,
                     pending_tasks: List[str] = None, memory_shards: Dict[str, str] = None,
                     visual_context: Dict[str, Any] = None, audio_context: Dict[str, Any] = None,
-                    multimodal_memory: Dict[str, Any] = None) -> bool:
-    """حفظ حالة الوكيل في ملف محلي لدخول وضع النوم."""
+                    multimodal_memory: Dict[str, Any] = None, compress: bool = True) -> bool:
+    """حفظ حالة الوكيل في ملف محلي لدخول وضع النوم مع دعم الضغط التلقائي."""
     try:
         state = AgentState(agent_id, context, plan, metadata, memory_snapshot, pending_tasks, memory_shards, visual_context, audio_context, multimodal_memory)
+        
+        if compress:
+            state.compress(target_size_kb=50) # ضغط إذا تجاوز 50KB
+            
         file_path = SLEEP_DIR / f"{agent_id}_sleep.json"
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(state.to_dict(), f, ensure_ascii=False, indent=2)
