@@ -36,9 +36,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # تثبيت متطلبات بايثون في طبقة منفصلة (كاش أسرع عند تعديل الكود فقط)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir fastapi uvicorn requests aiohttp
 
 # نسخ بقية المشروع
 COPY . .
+
+# إنشاء المجلدات اللازمة للبيانات
+RUN mkdir -p artifacts/learning artifacts/memory artifacts/video_index
 
 # .streamlit/config.toml في المستودع مضبوط مسبقاً: headless=true, address=0.0.0.0
 EXPOSE 8501
@@ -46,4 +50,5 @@ EXPOSE 8501
 HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
     CMD curl -f http://localhost:8501/_stcore/health || exit 1
 
+# القيمة الافتراضية هي تشغيل Streamlit، ولكن يمكن تجاوزها في docker-compose
 CMD ["streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]

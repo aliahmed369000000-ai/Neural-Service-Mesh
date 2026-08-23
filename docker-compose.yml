@@ -14,6 +14,19 @@
 #   NSM_LOCAL_MODEL=qwen2.5:7b-instruct-q4_K_M
 
 services:
+  # خادم الذاكرة الجماعية المركزي (Distributed Swarm)
+  memory-server:
+    build: .
+    container_name: nsm-memory-server
+    command: python ai/memory_server.py
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+    volumes:
+      - nsm_artifacts:/app/artifacts
+    restart: unless-stopped
+
   ollama:
     image: ollama/ollama:latest
     container_name: nsm-ollama
@@ -57,10 +70,20 @@ services:
       - "8501:8501"
     environment:
       - NSM_OFFLINE_MODE=1
+      - NSM_DISTRIBUTED_MODE=1
+      - NSM_MEMORY_SERVER_URL=http://memory-server:8080
       - NSM_LOCAL_LLM_URL=http://ollama:11434
       - NSM_LOCAL_MODEL=${NSM_LOCAL_MODEL:-qwen2.5:7b-instruct-q4_K_M}
     volumes:
       - nsm_memory:/app/memory
+      - nsm_artifacts:/app/artifacts
+    depends_on:
+      ollama:
+        condition: service_started
+      ollama-pull:
+        condition: service_completed_successfully
+      memory-server:
+        condition: service_started
 
 
   # بيئة تدريب معزولة لوكيل النماذج (بدون Streamlit)
@@ -108,3 +131,4 @@ services:
 volumes:
   ollama_data:
   nsm_memory:
+  nsm_artifacts:
