@@ -55,8 +55,8 @@ class VideoTemporalIndexer:
         
         return [kf for kf in index["keyframes"] if tag.lower() in [t.lower() for t in kf["tags"]]]
 
-    def load_index(self, video_id: str) -> Optional[Dict]:
-        """تحميل فهرس من القرص مع دعم التحميل التجميعي للأجزاء."""
+    def load_index(self, video_id: str, lazy: bool = False) -> Optional[Dict]:
+        """تحميل فهرس من القرص مع خيار التحميل اللحظي (Lazy Loading) للأجزاء."""
         if video_id in self.active_indices:
             return self.active_indices[video_id]
             
@@ -65,11 +65,15 @@ class VideoTemporalIndexer:
             with open(path, "r") as f:
                 index = json.load(f)
                 
-                # إذا كان الفهرس مجزأً، نقوم بتحميل الأجزاء ودمجها
-                if index.get("is_sharded"):
+                # إذا كان الفهرس مجزأً وليس تحميلاً لحظياً، نقوم بتحميل الأجزاء ودمجها
+                if index.get("is_sharded") and not lazy:
                     index["keyframes"] = []
+                    index["multimodal_sync"] = []
                     for i in range(index["shard_count"]):
-                        index["keyframes"].extend(self.load_shard(video_id, i))
+                        shard = self.load_shard(video_id, i)
+                        if isinstance(shard, dict):
+                            index["keyframes"].extend(shard.get("keyframes", []))
+                            index["multimodal_sync"].extend(shard.get("multimodal_sync", []))
                 
                 self.active_indices[video_id] = index
                 return index
@@ -86,12 +90,15 @@ class VideoTemporalIndexer:
         shard_size = 100
         keyframes = index.get("keyframes", [])
         
-        if len(keyframes) > shard_size:
+        sync_data = index.get("multimodal_sync", [])
+        total_items = max(len(keyframes), len(sync_data))
+        
+        if total_items > shard_size:
             index["is_sharded"] = True
-            index["shard_count"] = (len(keyframes) + shard_size - 1) // shard_size
+            index["shard_count"] = (total_items + shard_size - 1) // shard_size
             
-            # حفظ الملف الرئيسي بدون الإطارات
-            main_index = {k: v for k, v in index.items() if k != "keyframes"}
+            # حفظ الملف الرئيسي بدون البيانات الكبيرة
+            main_index = {k: v for k, v in index.items() if k not in ["keyframes", "multimodal_sync"]}
             with open(base_path, "w") as f:
                 json.dump(main_index, f, indent=2)
             
@@ -100,7 +107,10 @@ class VideoTemporalIndexer:
             os.makedirs(shard_dir, exist_ok=True)
             
             for i in range(index["shard_count"]):
-                shard_data = keyframes[i*shard_size : (i+1)*shard_size]
+                shard_data = {
+                    "keyframes": keyframes[i*shard_size : (i+1)*shard_size],
+                    "multimodal_sync": sync_data[i*shard_size : (i+1)*shard_size]
+                }
                 shard_path = os.path.join(shard_dir, f"shard_{i}.json")
                 with open(shard_path, "w") as f:
                     json.dump(shard_data, f, indent=2)

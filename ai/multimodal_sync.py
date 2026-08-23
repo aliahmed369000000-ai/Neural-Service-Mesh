@@ -5,8 +5,9 @@ from ai.stt_engine import transcribe_audio
 from ai.drift_corrector import DriftCorrector
 
 class MultimodalSyncManager:
-    def __init__(self):
+    def __init__(self, indexer=None):
         self.drift_corrector = DriftCorrector()
+        self.video_indexer = indexer if indexer else video_indexer
     """إدارة المزامنة بين المسار الصوتي والإطارات المرئية في الفيديو."""
     
     def _generate_embedding(self, text: str) -> List[float]:
@@ -74,7 +75,7 @@ class MultimodalSyncManager:
             return {"ok": False, "error": error}
             
         # 2. تحميل الفهرس البصري للفيديو
-        index = video_indexer.load_index(video_id)
+        index = self.video_indexer.load_index(video_id)
         if not index:
             return {"ok": False, "error": "الفهرس البصري للفيديو غير موجود."}
             
@@ -133,16 +134,23 @@ class MultimodalSyncManager:
         }
 
     def query_context(self, video_id: str, query: str, semantic: bool = True) -> List[Dict[str, Any]]:
-        """البحث عن سياق سمعي بصري باستخدام كلمة مفتاحية أو بحث دلالي."""
-        index = video_indexer.load_index(video_id)
-        if not index or "multimodal_sync" not in index:
-            return []
+        """البحث عن سياق سمعي بصري مع دعم التخزين المجزأ والبحث ANN."""
+        # محاولة تحميل الفهرس الرئيسي
+        index = self.video_indexer.load_index(video_id)
+        if not index: return []
             
         results = []
         query_vec = self._generate_embedding(query) if semantic else None
         query_hash = self._generate_lsh_hash(query_vec) if semantic else None
         
-        for item in index["multimodal_sync"]:
+        # إذا كان الفهرس مجزأً، يمكننا البحث عبر الأجزاء (Lazy Search)
+        is_sharded = index.get("is_sharded", False)
+        
+        # البيانات المتاحة حالياً
+        sync_data = index.get("multimodal_sync", [])
+        
+        # البحث في البيانات المحملة
+        for item in sync_data:
             # 1. فلترة ANN سريعة باستخدام LSH (Hamming Distance)
             if semantic and "semantic_index" in item:
                 item_hash = item["semantic_index"].get("lsh_hash")
