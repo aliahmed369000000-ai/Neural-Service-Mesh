@@ -722,6 +722,29 @@ register_tool(ToolSpec("share_media", "مشاركة وسائط مع السرب (
                             "agent_id": {"type": "string"}
                         }}, _tool_share_media))
 
+def _tool_check_resources(params: Dict[str, Any]) -> str:
+    """أداة للسماح للوكيل بفحص حالة الموارد يدوياً."""
+    try:
+        # نحتاج للوصول للحالة الحالية، للتبسيط نستخدم مدير الموارد مباشرة
+        from ai.resource_manager import resource_manager
+        # نفترض معرف افتراضي إذا لم يمرر
+        agent_id = params.get("agent_id", "agent_primary")
+        advice = resource_manager.get_resource_advice(agent_id)
+        stats = resource_manager.get_system_stats()
+        
+        report = f"🖥️ حالة النظام:\n"
+        report += f"- CPU: {stats['cpu_percent']}%\n"
+        report += f"- RAM: {stats['ram_percent']}%\n"
+        report += f"💡 نصيحة الموارد: {advice}"
+        return report
+    except Exception as e:
+        return f"❌ check_resources: {e}"
+
+register_tool(ToolSpec("check_resources", "فحص استهلاك المعالج والذاكرة والتوكنات", 
+                        {"type": "object", "properties": {
+                            "agent_id": {"type": "string"}
+                        }}, _tool_check_resources))
+
 def _tool_trigger_reflection(params: Dict[str, Any]) -> str:
     """إطلاق عملية التلخيص الذاتي لتحديث قاعدة الخبرة."""
     try:
@@ -830,6 +853,10 @@ class LoopState:
         from ai.self_awareness import SelfAwarenessEngine
         self.awareness = SelfAwarenessEngine(agent_id=self.agent_id)
         
+        # 🆕 محرك الوعي بالمصادر
+        from ai.resource_manager import resource_manager
+        self.resources = resource_manager
+        
         # 🆕 محرك هجرة المهام والتعافي الجماعي
         from ai.task_migrator import TaskMigrator
         self.migrator = TaskMigrator(memory_url, self.agent_id, token) if memory_url else None
@@ -887,6 +914,23 @@ class LoopState:
         return data["value"] if data else None
 
     def record(self, event: Dict[str, Any]): self.steps.append(event)
+
+    def check_resources(self) -> str:
+        """فحص حالة الموارد وتقديم تقرير صحي."""
+        advice = self.resources.get_resource_advice(self.agent_id)
+        health = self.resources.check_health(self.agent_id)
+        stats = health["stats"]
+        
+        report = f"🖥️ تقرير الموارد (Resource Report):\n"
+        report += f"- CPU: {stats['cpu_percent']}%\n"
+        report += f"- RAM: {stats['ram_percent']}% ({stats['ram_available_mb']:.1f} MB متاحة)\n"
+        report += f"- التوكنات المستهلكة: {health['token_usage']}\n"
+        report += f"💡 النصيحة: {advice}"
+        
+        if not health["ok"]:
+            report += "\n🛑 تحذير: النظام يعمل تحت ضغط حرج!"
+            
+        return report
 
     def reflect(self, history: List[Dict[str, Any]]) -> str:
         """تحليل الفشل والنجاح في الخطوات السابقة (التفكير التكراري)."""
