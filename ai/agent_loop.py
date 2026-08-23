@@ -411,6 +411,62 @@ def _tool_code_review(params: Dict[str, Any]) -> str:
 
 register_tool(ToolSpec("code_review", "تقييم كفاءة وأمان الكود البرمجي", {"type": "object", "properties": {"code": {"type": "string"}, "context": {"type": "string"}}}, _tool_code_review))
 
+def _tool_ask_swarm(params: Dict[str, Any]) -> str:
+    """طرح سؤال توضيحي على بقية الوكلاء في السرب."""
+    agent_id = str(params.get("agent_id", "default"))
+    query = str(params.get("query", ""))
+    context = str(params.get("context", ""))
+    try:
+        from ai.shared_experience import shared_experience
+        q_id = shared_experience.ask_swarm(agent_id, query, context)
+        return f"✅ تم إرسال سؤالك للسرب. رقم السؤال: {q_id}"
+    except Exception as e: return f"❌ ask_swarm: {e}"
+
+register_tool(ToolSpec("ask_swarm", "طرح سؤال على السرب", {"type": "object", "properties": {"agent_id": {"type": "string"}, "query": {"type": "string"}, "context": {"type": "string"}}}, _tool_ask_swarm))
+
+def _tool_check_swarm_queries(params: Dict[str, Any]) -> str:
+    """التحقق من الأسئلة المعلقة في السرب أو الإجابات الواردة لسؤالك."""
+    agent_id = str(params.get("agent_id", "default"))
+    try:
+        from ai.shared_experience import shared_experience
+        pending = shared_experience.get_pending_queries()
+        my_answers = shared_experience.check_my_answers(agent_id)
+        
+        report = "📋 تقرير السرب:\n"
+        if pending:
+            report += "\n❓ أسئلة تحتاج إجابة:\n"
+            for q in pending:
+                report += f"- [{q['id']}] من {q['asker']}: {q['query']}\n"
+        
+        if my_answers:
+            report += "\n💡 إجابات واردة لأسئلتك:\n"
+            for q in my_answers:
+                report += f"- سؤالك: {q['query']}\n"
+                for a in q['answers']:
+                    report += f"  ← إجابة من {a['provider']}: {a['answer']}\n"
+        
+        if not pending and not my_answers:
+            report += "لا توجد أسئلة أو إجابات جديدة حالياً."
+            
+        return report
+    except Exception as e: return f"❌ check_swarm: {e}"
+
+register_tool(ToolSpec("check_swarm", "التحقق من أسئلة وإجابات السرب", {"type": "object", "properties": {"agent_id": {"type": "string"}}}, _tool_check_swarm_queries))
+
+def _tool_answer_swarm(params: Dict[str, Any]) -> str:
+    """تقديم إجابة لسؤال مطروح في السرب."""
+    agent_id = str(params.get("agent_id", "default"))
+    query_id = str(params.get("query_id", ""))
+    answer = str(params.get("answer", ""))
+    try:
+        from ai.shared_experience import shared_experience
+        if shared_experience.answer_query(agent_id, query_id, answer):
+            return f"✅ تم إرسال إجابتك للسؤال {query_id}."
+        return f"❌ السؤال {query_id} غير موجود."
+    except Exception as e: return f"❌ answer_swarm: {e}"
+
+register_tool(ToolSpec("answer_swarm", "تقديم إجابة لسؤال في السرب", {"type": "object", "properties": {"agent_id": {"type": "string"}, "query_id": {"type": "string"}, "answer": {"type": "string"}}}, _tool_answer_swarm))
+
 # ═════════════════════════ محرك الحلقة ═════════════════════════════
 _SYSTEM_PROMPT = """أنت الوكيل التنفيذي لـ NSM. رد JSON فقط:
 {"thinking": "...", "tools": [{"tool": "...", "params": {...}}], "finish": "...", "end": true/false}"""

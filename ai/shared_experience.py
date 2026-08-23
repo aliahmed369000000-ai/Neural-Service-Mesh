@@ -26,7 +26,7 @@ class SharedExperienceManager:
                     return json.load(f)
             except Exception as e:
                 logger.error(f"فشل تحميل المعرفة الجماعية: {e}")
-        return {"shared_facts": {}, "global_metrics": {}, "version": "1.0"}
+        return {"shared_facts": {}, "active_queries": {}, "global_metrics": {}, "version": "1.1"}
 
     def _save_knowledge(self):
         try:
@@ -89,5 +89,50 @@ class SharedExperienceManager:
         if new_facts_count > 0:
             logger.info(f"📥 تم مزامنة {new_facts_count} حقيقة جماعية للوكيل {agent_memory.agent_id}")
         return new_facts_count
+
+    def ask_swarm(self, agent_id: str, query: str, context: str = ""):
+        """طرح سؤال توضيحي على السرب."""
+        query_id = f"q_{hash(query + str(time.time())) % 10000}"
+        self.knowledge["active_queries"][query_id] = {
+            "query": query,
+            "context": context,
+            "asker": agent_id,
+            "timestamp": time.time(),
+            "status": "open",
+            "answers": []
+        }
+        self._save_knowledge()
+        logger.info(f"❓ سؤال جديد من {agent_id}: {query}")
+        return query_id
+
+    def answer_query(self, agent_id: str, query_id: str, answer: str):
+        """تقديم إجابة لسؤال موجود."""
+        if query_id in self.knowledge["active_queries"]:
+            self.knowledge["active_queries"][query_id]["answers"].append({
+                "answer": answer,
+                "provider": agent_id,
+                "timestamp": time.time()
+            })
+            self.knowledge["active_queries"][query_id]["status"] = "answered"
+            self._save_knowledge()
+            logger.info(f"💡 إجابة جديدة من {agent_id} للسؤال {query_id}")
+            return True
+        return False
+
+    def get_pending_queries(self) -> List[Dict[str, Any]]:
+        """جلب الأسئلة التي تحتاج إلى إجابات."""
+        return [
+            {"id": q_id, **data} 
+            for q_id, data in self.knowledge["active_queries"].items() 
+            if data["status"] == "open"
+        ]
+
+    def check_my_answers(self, agent_id: str) -> List[Dict[str, Any]]:
+        """التحقق من وجود إجابات لأسئلة وكيل معين."""
+        my_queries = []
+        for q_id, data in self.knowledge["active_queries"].items():
+            if data["asker"] == agent_id and data["answers"]:
+                my_queries.append({"id": q_id, **data})
+        return my_queries
 
 shared_experience = SharedExperienceManager()
