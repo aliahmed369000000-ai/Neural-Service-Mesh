@@ -353,6 +353,14 @@ def render_unified_swarm_dashboard() -> None:
             if "Resource Drain Prediction" in innovations:
                 st.warning("⚡ **تنبؤ استباقي:** نظام مراقبة استنزاف الموارد يعمل بكامل طاقته.")
         
+        # مؤشرات مرونة الطاقة (Kappa)
+        resilience_events = [exp for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "resource_fluctuation"]
+        if resilience_events:
+            st.markdown("### ⚡ مرونة الطاقة والشبكة (Energy Resilience)")
+            res_data = resilience_events[-1]["data"]
+            st.warning(f"🔋 **حالة المرونة:** {res_data.get('p2p_resilience_status')} | **الحدث:** {res_data.get('type')}")
+            st.caption(f"العقد الاحتياطية النشطة: {', '.join(res_data.get('backup_nodes_engaged', []))}")
+        
         if quantum_accel:
             st.markdown("### ⚛️ حالة التسارع الكمي (Quantum Acceleration)")
             accel_data = quantum_accel[-1]["data"]

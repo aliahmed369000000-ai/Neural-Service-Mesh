@@ -51,6 +51,8 @@ class LivingMeshNode:
             capabilities += ["data_synthesis", "knowledge_graph", "cross_modal_fusion"]
         elif "iota" in nid_lower:
             capabilities += ["human_interaction", "emotional_intelligence", "natural_dialogue"]
+        elif "kappa" in nid_lower:
+            capabilities += ["energy_management", "network_resilience", "p2p_optimization", "power_grid_sync"]
             
         state["nodes"][self.node_id] = {
             "status": "online",
