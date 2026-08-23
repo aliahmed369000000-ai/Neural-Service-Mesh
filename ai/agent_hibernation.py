@@ -42,18 +42,50 @@ class AgentState:
         self.metadata = metadata or {}
         self.timestamp = time.time()
 
+    def _extract_facts(self, messages: List[Dict[str, Any]]) -> List[str]:
+        """استخراج الحقائق والقرارات الهامة من مجموعة رسائل (محاكاة دقيقة)."""
+        facts = []
+        for m in messages:
+            content = m.get("content", "")
+            # البحث عن أنماط القرارات والنتائج
+            import re
+            # استخراج الأكواد البرمجية
+            codes = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
+            for c in codes: facts.append(f"كود برمجي: {c[:50]}...")
+            
+            # استخراج القرارات الصريحة
+            decisions = re.findall(r"(?:تم تنفيذ|تم رفع|القرار هو):\s*([^.\n]+)", content)
+            facts.extend([f"قرار: {d.strip()}" for d in decisions])
+            
+            # استخراج SHA ورموز الالتزام
+            shas = re.findall(r"SHA:\s*([a-f0-9]{7,40})", content)
+            for s in shas: facts.append(f"SHA التزام: {s}")
+            
+            # استخراج النتائج الرقمية
+            metrics = re.findall(r"(\d+(?:\.\d+)?%|\d+\s*ms|\d+\s*KB)", content)
+            if metrics: facts.append(f"مقاييس أداء: {', '.join(metrics)}")
+            
+        return list(set(facts))
+
     def _auto_summarize_episodic(self):
-        """تحويل الذاكرة العاملة القديمة إلى ذاكرة أحداثية ملخصة مع دعم ANN."""
+        """تحويل الذاكرة العاملة القديمة إلى ذاكرة أحداثية ملخصة مع دعم ANN والكيانات."""
         if len(self.context) <= 15: return
         
         # استخراج الرسائل القديمة (ما عدا النظام وآخر 5 رسائل)
         to_summarize = self.context[1:-5]
         if not to_summarize: return
         
-        # محاكاة التلخيص (في الإنتاج يتم استدعاء LLM)
-        summary_text = f"تم تنفيذ {len(to_summarize)} تفاعلات سابقة تشمل: "
-        actions = [m.get("role", "user") for m in to_summarize]
-        summary_text += f"تفاعلات من {set(actions)}"
+        # 1. استخراج الحقائق الدقيقة قبل التلخيص
+        extracted_facts = self._extract_facts(to_summarize)
+        for fact in extracted_facts:
+            # حفظ الحقائق في الذاكرة الدلالية (Semantic Memory)
+            fact_id = f"fact_{int(time.time())}_{hash(fact)%1000}"
+            self.semantic_memory[fact_id] = {"content": fact, "timestamp": time.time()}
+        
+        # 2. محاكاة التلخيص الهيكلي
+        summary_text = f"أرشفة {len(to_summarize)} رسالة. تم استخراج {len(extracted_facts)} حقيقة دقيقة."
+        if extracted_facts:
+            summary_text += f" أهمها: {extracted_facts[0]}"
         
         # توليد تضمين دلالي للتلخيص (ANN Support)
         from ai.multimodal_sync import MultimodalSyncManager
