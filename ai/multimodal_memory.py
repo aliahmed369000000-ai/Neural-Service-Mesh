@@ -16,6 +16,7 @@ from pathlib import Path
 import numpy as np
 from ai.quantization_engine import VectorQuantizer
 from ai.sharding_engine import ShardingEngine
+from ai.ann_engine import ANNEngine
 
 class MultimodalMemory:
     def __init__(self, storage_dir: Optional[str] = None):
@@ -34,6 +35,8 @@ class MultimodalMemory:
         self.quantizer = VectorQuantizer()
         self.quantizer.load_codebook()
         self.sharding_engine = ShardingEngine(self.storage_dir)
+        self.ann_engine = ANNEngine()
+        self._load_ann_index()
 
     def _init_index(self):
         """تهيئة ملف الفهرس إذا لم يكن موجوداً."""
@@ -74,14 +77,30 @@ class MultimodalMemory:
         self._update_index(entry)
         return asset_id
 
+    def _load_ann_index(self):
+        """تحميل فهرس ANN من البيانات الحالية."""
+        if self.index_path.exists():
+            with open(self.index_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                for asset in data["assets"]:
+                    if "compressed_idx" in asset.get("metadata", {}):
+                        # استعادة المتجه التقريبي للإضافة للفهرس
+                        approx_vector = self.quantizer.dequantize(asset["metadata"]["compressed_idx"])
+                        if approx_vector is not None:
+                            self.ann_engine.add_vector(approx_vector, {"id": asset["id"], "type": asset["type"]})
+                self.ann_engine.build_index()
+
     def _update_index(self, entry: Dict[str, Any]):
         """تحديث ملف الفهرس بالبيانات الجديدة."""
         with open(self.index_path, "r+", encoding="utf-8") as f:
             data = json.load(f)
             
-            # تطبيق التكميم إذا وجد متجه دلالي (Embedding)
+            # تطبيق التكميم وإضافة لـ ANN إذا وجد متجه دلالي (Embedding)
             if "embedding" in entry.get("metadata", {}):
                 vector = entry["metadata"]["embedding"]
+                # إضافة لـ ANN قبل الضغط (أو باستخدام المتجه الأصلي لدقة أعلى في الفهرس)
+                self.ann_engine.add_vector(np.array(vector), {"id": entry["id"], "type": entry["type"]})
+                
                 compressed_idx = self.quantizer.quantize(np.array(vector))
                 entry["metadata"]["compressed_idx"] = compressed_idx
                 # إزالة المتجه الأصلي لتوفير المساحة
@@ -102,6 +121,11 @@ class MultimodalMemory:
             
             # إضافة إلى التخزين المجزأ أيضاً
             self.sharding_engine.add_to_shard(entry)
+
+    def search_semantic(self, query_vector: List[float], top_k: int = 5) -> List[Dict[str, Any]]:
+        """البحث الدلالي السريع باستخدام ANN."""
+        results = self.ann_engine.search(np.array(query_vector), top_k=top_k)
+        return [res[0] for res in results]
 
     def search_assets(self, query: str, media_type: Optional[str] = None, use_shards: bool = True) -> List[Dict[str, Any]]:
         """البحث عن أصول في الذاكرة بناءً على الوسوم أو النوع، مع دعم التجزئة."""
