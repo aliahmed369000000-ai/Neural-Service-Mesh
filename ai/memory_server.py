@@ -7,6 +7,9 @@ import time
 import uvicorn
 import asyncio
 import threading
+import gc
+import os
+import psutil
 from pathlib import Path
 
 app = FastAPI(title="NSM Shared Memory Server")
@@ -29,6 +32,8 @@ class MemoryState:
         self.data = self._load()
         self._lock = threading.Lock()
         self._save_pending = False
+        self.max_facts = 50000  # حد أقصى للحقائق في الذاكرة
+        self.ttl_seconds = 86400 * 7  # 7 أيام للحقائق منخفضة الأهمية
     
     def _load(self):
         if STORAGE_PATH.exists():
@@ -46,10 +51,33 @@ class MemoryState:
 
     def _save_worker(self):
         time.sleep(1) # تجميع الطلبات (Debounce)
+        self.prune() # تنظيف الذاكرة قبل الحفظ
         with self._lock:
             with open(STORAGE_PATH, "w") as f:
                 json.dump(self.data, f, indent=2)
         self._save_pending = False
+
+    def prune(self):
+        """تنظيف الحقائق القديمة أو منخفضة الأهمية عند تجاوز السعة."""
+        with self._lock:
+            facts = self.data["shared_facts"]
+            if len(facts) <= self.max_facts:
+                return
+
+            print(f"🧹 بدء تنظيف الذاكرة... الحجم الحالي: {len(facts)}")
+            # ترتيب حسب الأهمية (الأقل أولاً) ثم الوقت (الأقدم أولاً)
+            sorted_keys = sorted(
+                facts.keys(),
+                key=lambda k: (facts[k].get("importance", 0.5), facts[k].get("shared_at", 0))
+            )
+            
+            # حذف أقدم/أقل 20% من البيانات
+            to_remove = sorted_keys[:int(len(facts) * 0.2)]
+            for k in to_remove:
+                del facts[k]
+            
+            print(f"✅ تم حذف {len(to_remove)} حقيقة قديمة.")
+            gc.collect() # تحفيز جمع النفايات
 
 memory = MemoryState()
 
@@ -145,16 +173,36 @@ def answer_query(a: Answer, api_key: str = Depends(get_api_key)):
 @app.get("/metrics")
 def get_metrics(api_key: str = Depends(get_api_key)):
     uptime = time.time() - metrics.start_time
+    process = psutil.Process(os.getpid())
+    ram_usage_mb = process.memory_info().rss / (1024 * 1024)
+    
     return {
         "uptime_seconds": uptime,
         "total_requests": sum(metrics.request_counts.values()),
         "request_breakdown": metrics.request_counts,
         "active_agents_count": len(metrics.agent_stats),
         "agent_details": metrics.agent_stats,
+        "system_resources": {
+            "ram_usage_mb": round(ram_usage_mb, 2),
+            "cpu_percent": process.cpu_percent(interval=0.1),
+            "gc_objects": len(gc.get_objects())
+        },
         "memory_usage": {
             "facts_count": len(memory.data["shared_facts"]),
-            "queries_count": len(memory.data["active_queries"])
+            "queries_count": len(memory.data["active_queries"]),
+            "max_capacity": memory.max_facts
         }
+    }
+
+@app.post("/system/gc")
+def trigger_gc(api_key: str = Depends(get_api_key)):
+    initial_obj = len(gc.get_objects())
+    gc.collect()
+    final_obj = len(gc.get_objects())
+    return {
+        "status": "GC Triggered",
+        "objects_collected": initial_obj - final_obj,
+        "current_objects": final_obj
     }
 
 if __name__ == "__main__":
