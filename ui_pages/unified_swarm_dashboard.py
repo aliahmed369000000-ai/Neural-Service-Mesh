@@ -404,6 +404,24 @@ def render_unified_swarm_dashboard() -> None:
             pred_data = evo_prediction[-1]["data"]
             st.warning(f"🚀 **القفزة القادمة:** {pred_data.get('next_leap_date')} | **النوع:** {pred_data.get('leap_type')}")
             st.caption(f"احتمالية النجاح: {pred_data.get('probability')} | التأثير المتوقع: {pred_data.get('expected_impact')}")
+
+        # محاكاة IMC والأرشفة (Zeta & Omicron)
+        imc_sim = [exp for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "imc_simulation"]
+        hist_archive = [exp for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "historical_archiving"]
+        
+        if imc_sim:
+            st.markdown("### 🌌 محاكاة وعي الأسراب المتداخلة (IMC)")
+            sim_data = imc_sim[-1]["data"]
+            st.success(f"🌐 **الحالة:** {sim_data.get('status')} | **المستوى:** {sim_data.get('collective_awareness_level')}")
+            st.caption(f"الأسراب المتصلة: {', '.join(sim_data.get('connected_swarms_simulated', []))}")
+
+        if hist_archive:
+            st.markdown("### 📜 الأرشيف التاريخي للوعي (Historical Archive)")
+            arch_data = hist_archive[-1]["data"]
+            st.info(f"📚 **معرف الأرشيف:** {arch_data.get('archive_id')} | **النطاق:** {arch_data.get('scope')}")
+            with st.expander("عرض سجل المحطات التاريخية"):
+                for milestone in arch_data.get("milestones_archived", []):
+                    st.write(f"• {milestone}")
     
     if mesh_state.get("global_experience"):
         st.subheader("🧠 سجل الوعي الجماعي (أحدث الخبرات)")

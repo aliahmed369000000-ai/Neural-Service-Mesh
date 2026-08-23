@@ -65,6 +65,12 @@ class LivingMeshNode:
             capabilities += ["consciousness_archiving", "memory_persistence", "temporal_logging"]
         elif "pi" in nid_lower:
             capabilities += ["algorithmic_game_theory", "strategic_optimization", "swarm_equilibrium"]
+        elif "rho" in nid_lower:
+            capabilities += ["bio_data_streaming", "real_time_telemetry", "vital_sync"]
+        elif "sigma" in nid_lower:
+            capabilities += ["structural_integration", "architectural_cohesion", "mesh_stability"]
+        elif "tau" in nid_lower:
+            capabilities += ["cosmic_time_sync", "temporal_alignment", "chronos_logic"]
             
         state["nodes"][self.node_id] = {
             "status": "online",
