@@ -391,7 +391,8 @@ class CoreMatrixLayer:
         trainable_core: bool = True,
         core_lr_scale: float = 0.1,
         image_dim: int = 512,  # أبعاد ميزات الصورة (مثلاً من CLIP)
-        audio_dim: int = 128   # أبعاد ميزات الصوت (مثلاً Mel-spectrogram)
+        audio_dim: int = 128,  # أبعاد ميزات الصوت (مثلاً Mel-spectrogram)
+        video_dim: int = 512   # أبعاد ميزات الفيديو
     ):
         self.d_model        = d_model
         self.core_dim        = 784
@@ -405,6 +406,8 @@ class CoreMatrixLayer:
         self.b_img = np.zeros(d_model)
         self.W_aud = _xavier(d_model, audio_dim)
         self.b_aud = np.zeros(d_model)
+        self.W_vid = _xavier(d_model, video_dim)
+        self.b_vid = np.zeros(d_model)
 
         # أوزان الانتباه المتقاطع (Cross-Attention) لدمج الوسائط
         self.Wq_cross = _xavier(d_model, d_model)
@@ -468,6 +471,7 @@ class CoreMatrixLayer:
         X: np.ndarray, 
         image_feats: Optional[np.ndarray] = None, 
         audio_feats: Optional[np.ndarray] = None,
+        video_feats: Optional[np.ndarray] = None,
         use_cache: bool = False,
         multimodal_kv: Optional[Tuple[np.ndarray, np.ndarray]] = None
     ) -> Tuple[np.ndarray, Optional[Tuple[np.ndarray, np.ndarray]]]:
@@ -475,6 +479,7 @@ class CoreMatrixLayer:
         X: (seq, d_model) - embeddings النص
         image_feats: (num_images, image_dim) اختياري
         audio_feats: (num_audio, audio_dim) اختياري
+        video_feats: (num_frames, video_dim) اختياري
         use_cache: تفعيل التخزين المؤقت للميزات المتعددة الوسائط
         multimodal_kv: زوج (K, V) للوسائط ممرر من الخارج
         """
@@ -491,6 +496,9 @@ class CoreMatrixLayer:
                 modality_embeddings.append(image_feats @ self.W_img.T + self.b_img)
             if audio_feats is not None:
                 modality_embeddings.append(audio_feats @ self.W_aud.T + self.b_aud)
+            if video_feats is not None:
+                # نستخدم W_vid الذي أضفناه حديثاً
+                modality_embeddings.append(video_feats @ self.W_vid.T + self.b_vid)
                 
             if modality_embeddings:
                 M = np.concatenate(modality_embeddings, axis=0)
@@ -526,7 +534,7 @@ class CoreMatrixLayer:
             
         return act @ self.W_down.T + self.b_down, current_mm_kv
 
-    def backward(self, grad: np.ndarray, lr: float) -> Tuple[np.ndarray, Optional[np.ndarray], Optional[np.ndarray]]:
+    def backward(self, grad: np.ndarray, lr: float) -> Tuple[np.ndarray, Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
         gWd   = grad.T @ self._cout
         gbd   = grad.sum(0)
         g_act = grad @ self.W_down                        # (seq,784)
@@ -540,6 +548,7 @@ class CoreMatrixLayer:
         # تدرجات رؤوس الإسقاط متعددة الوسائط (إذا لزم الأمر مستقبلاً)
         gW_img = None; gb_img = None
         gW_aud = None; gb_aud = None
+        gW_vid = None; gb_vid = None
 
         if self.trainable_core and self.core_lr_scale > 0.0:
             gCore = g_out.T @ self._cup                   # (784,784)
@@ -552,7 +561,7 @@ class CoreMatrixLayer:
         self.b_down -= lr * np.clip(gbd, -CLIP_GRAD, CLIP_GRAD)
         self.b_up   -= lr * np.clip(gbu, -CLIP_GRAD, CLIP_GRAD)
         
-        return gX_fused, None, None  # نكتفي بتدرج X حالياً لتجنب تعقيد backward النصي
+        return gX_fused, None, None, None  # نكتفي بتدرج X حالياً لتجنب تعقيد backward النصي
 
     def info(self) -> dict:
         W = self._W_core
@@ -577,6 +586,8 @@ class CoreMatrixLayer:
         np.save(f"{prefix}_bimg.npy", self.b_img)
         np.save(f"{prefix}_Waud.npy", self.W_aud)
         np.save(f"{prefix}_baud.npy", self.b_aud)
+        np.save(f"{prefix}_Wvid.npy", self.W_vid)
+        np.save(f"{prefix}_bvid.npy", self.b_vid)
         np.save(f"{prefix}_Wq_cross.npy", self.Wq_cross)
         np.save(f"{prefix}_Wk_cross.npy", self.Wk_cross)
         np.save(f"{prefix}_Wv_cross.npy", self.Wv_cross)
@@ -586,6 +597,7 @@ class CoreMatrixLayer:
                              ("b_up","bu"),("b_down","bd"),
                              ("W_img","Wimg"),("b_img","bimg"),
                              ("W_aud","Waud"),("b_aud","baud"),
+                             ("W_vid","Wvid"),("b_vid","bvid"),
                              ("Wq_cross","Wq_cross"),("Wk_cross","Wk_cross"),
                              ("Wv_cross","Wv_cross")]:
             p = f"{prefix}_{fname}.npy"
@@ -1001,6 +1013,7 @@ class ArabicTransformer:
     def _forward(self, ids: np.ndarray, mask=None, trust_score: float = 1.0, 
                  image_feats: Optional[np.ndarray] = None, 
                  audio_feats: Optional[np.ndarray] = None,
+                 video_feats: Optional[np.ndarray] = None,
                  past_kv: Optional[MultimodalKVCache] = None,
                  use_cache: bool = False):
         """
@@ -1016,7 +1029,7 @@ class ArabicTransformer:
         
         # دمج الجوهر متعدد الوسائط (CoreMatrix Fusion)
         mm_kv_input = past_kv.multimodal_kv if past_kv is not None else None
-        core_out, mm_kv_output = self.core.forward(X, image_feats, audio_feats, 
+        core_out, mm_kv_output = self.core.forward(X, image_feats, audio_feats, video_feats,
                                                    use_cache=use_cache, 
                                                    multimodal_kv=mm_kv_input)
         X = X + core_out
@@ -1199,6 +1212,7 @@ class ArabicTransformer:
         repetition_penalty: float = 1.1,
         image_feats: Optional[np.ndarray] = None,
         audio_feats: Optional[np.ndarray] = None,
+        video_feats: Optional[np.ndarray] = None,
         use_kv_cache: bool = False
     ) -> np.ndarray:
         """يُولِّد تسلسل IDs مع nucleus/top-k وpenalty تكرار، مع دعم اختياري للـ KV Caching."""
@@ -1222,7 +1236,8 @@ class ArabicTransformer:
             S = len(arr)
             mask = np.triu(np.ones((S, S), bool), k=1)
             p, _, _, intent = self._forward(arr, mask, image_feats=image_feats, 
-                                            audio_feats=audio_feats, past_kv=cache, use_cache=True)
+                                            audio_feats=audio_feats, video_feats=video_feats,
+                                            past_kv=cache, use_cache=True)
             if intent == "malicious":
                 return np.array(ids, np.int64)
             last_p = p[-1]
@@ -1235,12 +1250,19 @@ class ArabicTransformer:
                 # Decode phase: مرر آخر token فقط مع الـ cache
                 arr = np.array([ids[-1]], np.int64)
                 # في الـ decode step، الـ mask عادة لا يلزم لأننا ننظر للخلف فقط
-                p, _, risk, intent = self._forward(arr, mask=None, past_kv=cache, use_cache=True)
+                p, _, risk, intent = self._forward(arr, mask=None, 
+                                                image_feats=image_feats, 
+                                                audio_feats=audio_feats,
+                                                video_feats=video_feats,
+                                                past_kv=cache, use_cache=True)
             else:
                 arr = np.array(ids[-self.max_seq:], np.int64)
                 S = len(arr)
                 mask = np.triu(np.ones((S, S), bool), k=1)
-                p, _, risk, intent = self._forward(arr, mask, image_feats=image_feats, audio_feats=audio_feats)
+                p, _, risk, intent = self._forward(arr, mask, 
+                                                image_feats=image_feats, 
+                                                audio_feats=audio_feats,
+                                                video_feats=video_feats)
             
             # حظر التوليد إذا تم اكتشاف نية خبيثة بوضوح
             if intent == "malicious":

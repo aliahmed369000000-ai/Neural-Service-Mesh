@@ -51,31 +51,53 @@ def test_kv_cache_equivalence():
 
     # 2. قياس السرعة (توليد 20 رمز)
     print("\n⚡ قياس السرعة (توليد 20 رمز)...")
+    # نستخدم temp=0 لجعل التوليد حتمياً (greedy) للمقارنة الدقيقة
     np.random.seed(42)
     start_time = time.time()
-    model.generate_ids(prompt, max_new=20, use_kv_cache=False)
+    gen_normal_ids = model.generate_ids(prompt, max_new=20, use_kv_cache=False, temp=0)
     normal_duration = time.time() - start_time
     print(f"✅ التوليد العادي: {normal_duration:.4f} ثانية")
     
     np.random.seed(42)
     start_time = time.time()
-    model.generate_ids(prompt, max_new=20, use_kv_cache=True)
+    gen_cached_ids = model.generate_ids(prompt, max_new=20, use_kv_cache=True, temp=0)
     cached_duration = time.time() - start_time
     print(f"✅ التوليد مع Cache: {cached_duration:.4f} ثانية")
     print(f"🚀 نسبة التحسن: {(normal_duration / cached_duration - 1) * 100:.1f}%")
     
-    # 3. اختبار التوافق مع الوسائط المتعددة
-    print("\n📸 اختبار KV Cache مع الوسائط المتعددة...")
-    image_feats = np.random.randn(1, 512)
+    match_ids = np.array_equal(gen_normal_ids, gen_cached_ids)
+    print(f"📊 مطابقة الرموز المولدة (Greedy): {'✅ متطابقة' if match_ids else '❌ غير متطابقة'}")
+
+    # 3. اختبار التوافق مع الوسائط المتعددة (صورة + صوت + فيديو)
+    print("\n📸 🎥 🔊 اختبار KV Cache مع الوسائط المتعددة الكاملة...")
+    image_feats = np.random.randn(1, 512) * 0.1
+    audio_feats = np.random.randn(1, 128) * 0.1
+    video_feats = np.random.randn(5, 512) * 10.0 # تكبير التأثير للتحقق من الرصد إحصائياً
     
     np.random.seed(42)
-    gen_mm_normal = model.generate_ids(prompt, max_new=5, image_feats=image_feats, use_kv_cache=False)
+    gen_mm_normal = model.generate_ids(prompt, max_new=5, 
+                                       image_feats=image_feats, 
+                                       audio_feats=audio_feats,
+                                       video_feats=video_feats,
+                                       use_kv_cache=False,
+                                       temp=0)
     
     np.random.seed(42)
-    gen_mm_cached = model.generate_ids(prompt, max_new=5, image_feats=image_feats, use_kv_cache=True)
+    gen_mm_cached = model.generate_ids(prompt, max_new=5, 
+                                       image_feats=image_feats, 
+                                       audio_feats=audio_feats,
+                                       video_feats=video_feats,
+                                       use_kv_cache=True,
+                                       temp=0)
     
     mm_match = np.array_equal(gen_mm_normal, gen_mm_cached)
-    print(f"📊 مطابقة نتائج الوسائط: {'✅ متطابقة' if mm_match else '❌ غير متطابقة'}")
+    print(f"📊 مطابقة نتائج الوسائط المتعددة: {'✅ متطابقة' if mm_match else '❌ غير متطابقة'}")
+    
+    # التحقق من أن الفيديو يؤثر فعلياً على المخرجات
+    np.random.seed(42)
+    gen_no_video = model.generate_ids(prompt, max_new=5, image_feats=image_feats, use_kv_cache=False, temp=0)
+    video_effect = not np.array_equal(gen_mm_normal, gen_no_video)
+    print(f"🎬 تأثير الفيديو على التوليد: {'✅ تم رصده' if video_effect else '❌ لم يُرصد'}")
     
     print("\n✨ انتهى الاختبار.")
 
