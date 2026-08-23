@@ -152,9 +152,15 @@ class SharedExperienceManager:
             content = fact.get("content") if isinstance(fact, dict) else str(fact)
             if not content: continue
             
+            # حماية السلامة: إذا كان التشفير مفعلاً، ارفض البيانات غير المشفرة القادمة من الخارج
+            is_enc = isinstance(fact, dict) and fact.get("is_encrypted", False)
+            if self.encryption_enabled and not is_enc:
+                continue
+
             # فك التشفير إذا لزم الأمر
-            if isinstance(fact, dict) and fact.get("is_encrypted"):
+            if is_enc:
                 content = self._decrypt(content)
+                if not content: continue # فشل فك التشفير
 
             exists = any(f.get("content") == content for f in agent_memory.ltm_semantic.values())
             if not exists:
