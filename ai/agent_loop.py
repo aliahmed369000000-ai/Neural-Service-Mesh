@@ -343,6 +343,7 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                 history = recovered.context
                 state.visual_memory = getattr(recovered, "visual_context", {})
                 state.audio_memory = getattr(recovered, "audio_context", {})
+                state.multimodal_memory = getattr(recovered, "multimodal_memory", {})
                 warmup_msg = "🌅 استيقظت. لخص أين توقفت."
                 if recovered.pending_tasks:
                     warmup_msg += f"\nالمهام المعلقة التي تم رصدها قبل النوم:\n- " + "\n- ".join(recovered.pending_tasks)
@@ -356,6 +357,11 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                     warmup_msg += f"\n🎙️ السياق الصوتي المستعاد (Audio Context):\n"
                     for audio_name, audio_data in state.audio_memory.items():
                         warmup_msg += f"- {audio_name}: {audio_data.get('duration', 'N/A')}s | {audio_data.get('type', 'Unknown')}\n"
+                
+                if state.multimodal_memory:
+                    warmup_msg += f"\n⚖️ السياق السمعي البصري المزامَن (Multimodal Memory):\n"
+                    for vid_id, sync_data in state.multimodal_memory.items():
+                        warmup_msg += f"- {vid_id}: تم مزامنة {len(sync_data.get('multimodal_sync', []))} نقطة زمنية.\n"
                 
                 history.append({"role": "user", "content": warmup_msg})
                 _emit({"type": "info", "text": "🌅 تم استعادة الحالة (Mental Warm-up المتعدد الوسائط)..."})
@@ -482,7 +488,9 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                             wake_after = int(t.get("params", {}).get("wake_up_after", 0))
                     
                     pending = extract_pending_tasks(history, {"steps": state.steps})
-                    if hibernate_agent(target_agent_id, history, {"steps": state.steps}, pending_tasks=pending, visual_context=state.visual_memory, audio_context=state.audio_memory):
+                    if hibernate_agent(target_agent_id, history, {"steps": state.steps}, pending_tasks=pending, 
+                                       visual_context=state.visual_memory, audio_context=state.audio_memory,
+                                       multimodal_memory=state.multimodal_memory):
                         if wake_after > 0:
                             from ai.agent_hibernation import schedule_wake_up
                             schedule_wake_up(target_agent_id, wake_after)

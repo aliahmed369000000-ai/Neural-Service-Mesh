@@ -24,7 +24,8 @@ class AgentState:
     def __init__(self, agent_id: str, context: List[Dict[str, Any]], plan: Dict[str, Any], 
                  metadata: Dict[str, Any] = None, memory_snapshot: Dict[str, Any] = None,
                  pending_tasks: List[str] = None, memory_shards: Dict[str, str] = None,
-                 visual_context: Dict[str, Any] = None, audio_context: Dict[str, Any] = None):
+                 visual_context: Dict[str, Any] = None, audio_context: Dict[str, Any] = None,
+                 multimodal_memory: Dict[str, Any] = None):
         self.agent_id = agent_id
         self.context = context
         self.plan = plan
@@ -33,6 +34,7 @@ class AgentState:
         self.memory_shards = memory_shards or {}
         self.visual_context = visual_context or {} # وصف الصور، نتائج OCR، وميتاداتا بصرية
         self.audio_context = audio_context or {}   # النصوص المستخرجة من الصوت وميتا-داتا الملفات الصوتية
+        self.multimodal_memory = multimodal_memory or {} # الذاكرة المزامنة (Audio-Visual Alignment)
         self.metadata = metadata or {}
         self.timestamp = time.time()
 
@@ -46,6 +48,7 @@ class AgentState:
             "memory_shards": self.memory_shards,
             "visual_context": self.visual_context,
             "audio_context": self.audio_context,
+            "multimodal_memory": self.multimodal_memory,
             "metadata": self.metadata,
             "timestamp": self.timestamp
         }
@@ -61,7 +64,8 @@ class AgentState:
             data.get("pending_tasks", []),
             data.get("memory_shards", {}),
             data.get("visual_context", {}),
-            data.get("audio_context", {})
+            data.get("audio_context", {}),
+            data.get("multimodal_memory", {})
         )
         state.timestamp = data.get("timestamp", time.time())
         return state
@@ -69,10 +73,11 @@ class AgentState:
 def hibernate_agent(agent_id: str, context: List[Dict[str, Any]], plan: Dict[str, Any], 
                     metadata: Dict[str, Any] = None, memory_snapshot: Dict[str, Any] = None,
                     pending_tasks: List[str] = None, memory_shards: Dict[str, str] = None,
-                    visual_context: Dict[str, Any] = None, audio_context: Dict[str, Any] = None) -> bool:
+                    visual_context: Dict[str, Any] = None, audio_context: Dict[str, Any] = None,
+                    multimodal_memory: Dict[str, Any] = None) -> bool:
     """حفظ حالة الوكيل في ملف محلي لدخول وضع النوم."""
     try:
-        state = AgentState(agent_id, context, plan, metadata, memory_snapshot, pending_tasks, memory_shards, visual_context, audio_context)
+        state = AgentState(agent_id, context, plan, metadata, memory_snapshot, pending_tasks, memory_shards, visual_context, audio_context, multimodal_memory)
         file_path = SLEEP_DIR / f"{agent_id}_sleep.json"
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(state.to_dict(), f, ensure_ascii=False, indent=2)
