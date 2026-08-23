@@ -28,6 +28,12 @@ class LivingMeshNode:
         self.collective_memory = {}
         self.local_evolution_score = 0.0
         self.last_sync = None
+        self.behavioral_weights = {
+            "processing_efficiency": 1.0,
+            "collaboration_index": 1.0,
+            "innovation_rate": 1.0,
+            "security_vigilance": 1.0
+        }
         
     def join_network(self):
         """الانضمام للشبكة اللامركزية."""
@@ -38,6 +44,7 @@ class LivingMeshNode:
             "status": "online",
             "last_seen": datetime.now(timezone.utc).isoformat(),
             "evolution_score": self.local_evolution_score,
+            "behavioral_weights": self.behavioral_weights,
             "capabilities": ["text", "image", "audio", "video", "tf_engine"],
             "assigned_tasks": []
         }
@@ -90,20 +97,51 @@ class LivingMeshNode:
         return dead_nodes
         
     def sync_experience(self, kind: str, experience_data: Dict[str, Any]):
-        """مشاركة خبرة جديدة مع الشبكة."""
+        """مشاركة خبرة جديدة مع الشبكة عبر بروتوكول P2P محاكي."""
         msg = {
             "id": f"exp_{uuid.uuid4().hex[:10]}",
             "from": self.node_id,
             "kind": kind,
             "data": experience_data,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "p2p_hops": 0
         }
+        
+        # التعلم اللحظي: تعديل الأوزان بناءً على نوع الخبرة
+        self.update_behavioral_weights(kind, experience_data)
+        
         state = self._load_state()
         state["global_experience"].append(msg)
-        # الاحتفاظ بآخر 1000 خبرة عالمية فقط لضمان السرعة
+        
+        # محاكاة انتشار P2P: تحديث العقد الأخرى مباشرة في الحالة
+        for nid, info in state["nodes"].items():
+            if nid != self.node_id and info["status"] == "online":
+                # في P2P حقيقي، هنا يتم إرسال المقبس (Socket)
+                logger.info(f"📡 P2P: Node {self.node_id} synced {kind} to {nid}")
+        
         if len(state["global_experience"]) > 1000:
             state["global_experience"] = state["global_experience"][-1000:]
         self._save_state(state)
+
+    def update_behavioral_weights(self, kind: str, data: Dict[str, Any]):
+        """التعلم التطوري اللحظي: تعديل الأوزان بناءً على التجربة."""
+        adjustment = 0.05
+        if kind == "task_completion":
+            self.behavioral_weights["processing_efficiency"] += adjustment
+            self.local_evolution_score += 0.01
+        elif kind == "collaboration":
+            self.behavioral_weights["collaboration_index"] += adjustment
+        elif kind == "innovation":
+            self.behavioral_weights["innovation_rate"] += adjustment * 2
+            self.local_evolution_score += 0.05
+        elif kind == "security_alert":
+            self.behavioral_weights["security_vigilance"] += adjustment * 3
+            
+        # ضمان بقاء الأوزان في نطاق منطقي
+        for key in self.behavioral_weights:
+            self.behavioral_weights[key] = round(max(0.1, min(5.0, self.behavioral_weights[key])), 3)
+        
+        logger.info(f"🧬 Real-time Evolution: Node {self.node_id} updated weights: {self.behavioral_weights}")
         
     def get_evolutionary_updates(self) -> List[Dict[str, Any]]:
         """الحصول على تحديثات التطور من العقد الأخرى."""

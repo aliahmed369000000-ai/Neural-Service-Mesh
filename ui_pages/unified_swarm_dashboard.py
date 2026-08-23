@@ -321,17 +321,28 @@ def render_unified_swarm_dashboard() -> None:
     col3.metric("تزامن التطور", f"{max([n.get('evolution_score', 0) for n in mesh_state['nodes'].values()] + [0]):.2f}")
 
     if mesh_state["nodes"]:
-        st.subheader("🖥️ حالة العقد الموزعة")
-        node_data = []
+        st.subheader("🖥️ حالة العقد الموزعة والتعلم اللحظي")
         for nid, info in mesh_state["nodes"].items():
-            node_data.append({
-                "العقدة": nid,
-                "الحالة": "🟢 متصل" if info["status"] == "online" else "🔴 غير متصل",
-                "آخر ظهور": info["last_seen"].split("T")[1].split(".")[0],
-                "السيادة": f"{info.get('evolution_score', 0):.2f}",
-                "القدرات": ", ".join(info.get("capabilities", []))
-            })
-        st.table(node_data)
+            with st.expander(f"{'🟢' if info['status'] == 'online' else '🔴'} العقدة: {nid}", expanded=True):
+                c1, c2, c3 = st.columns([1, 2, 1])
+                c1.write(f"**السيادة:** {info.get('evolution_score', 0):.2f}")
+                c1.write(f"**آخر ظهور:** {info['last_seen'].split('T')[1].split('.')[0]}")
+                
+                # عرض الأوزان التطورية
+                weights = info.get("behavioral_weights", {})
+                if weights:
+                    c2.write("**🧬 الأوزان التطورية اللحظية:**")
+                    cols = c2.columns(len(weights))
+                    for idx, (w_name, w_val) in enumerate(weights.items()):
+                        cols[idx].metric(w_name.replace("_", " ").title(), f"{w_val:.2f}")
+                
+                c3.write("**🛠️ القدرات:**")
+                for cap in info.get("capabilities", []):
+                    c3.caption(f"- {cap}")
+        
+        # ميزة ابتكار السرب: التنبؤ باستنزاف الموارد
+        if any("Resource Drain Prediction" in str(exp.get("data")) for exp in mesh_state.get("global_experience", [])):
+            st.info("💡 **ميزة مبتكرة من السرب:** نظام التنبؤ باستنزاف الموارد نشط الآن ويراقب العقد.")
     
     if mesh_state.get("global_experience"):
         st.subheader("🧠 سجل الوعي الجماعي (أحدث الخبرات)")
