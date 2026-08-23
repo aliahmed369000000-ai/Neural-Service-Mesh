@@ -217,7 +217,7 @@ class MemoryManager:
             # أو الاعتماد على LSH مع عتبة أكثر مرونة
             score = 1.0 - (dist / len(query_hash))
             
-            if dist <= 8: # رفع العتبة لزيادة التسامح في البحث الدلالي المحاكي (50% من طول الهاش)
+            if dist <= 10: # رفع العتبة لزيادة التسامح في البحث الدلالي المحاكي (62.5% من طول الهاش)
                 # تحديث القوة عند الاسترجاع
                 fact["strength"] = min(1.0, self._calculate_current_strength(fact) + self.boost_factor)
                 fact["last_access"] = now
