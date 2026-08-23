@@ -15,11 +15,34 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger("NSM.SharedExperience")
 
 class SharedExperienceManager:
-    def __init__(self, storage_path: str = "artifacts/learning/shared_knowledge.json"):
+    def __init__(self, storage_path: str = "artifacts/learning/shared_knowledge.json", remote_url: Optional[str] = None):
         self.storage_path = Path(storage_path)
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
+        self.remote_url = remote_url
+        self.api_key = "nsm_secret_key_2026"
         self.knowledge = self._load_knowledge()
+
+    def _request(self, method: str, endpoint: str, data: Optional[Dict] = None):
+        """إرسال طلب إلى خادم الذاكرة الموزع."""
+        if not self.remote_url:
+            return None
+        import requests
+        url = f"{self.remote_url}{endpoint}"
+        headers = {"X-NSM-Token": self.api_key}
+        try:
+            if method == "GET":
+                response = requests.get(url, headers=headers, timeout=5)
+            else:
+                response = requests.post(url, headers=headers, json=data, timeout=5)
+            
+            if response.status_code != 200:
+                logger.error(f"❌ خادم الذاكرة أعاد خطأ {response.status_code}: {response.text}")
+                return None
+            return response.json()
+        except Exception as e:
+            logger.error(f"❌ خطأ في الاتصال بخادم الذاكرة: {e}")
+            return None
         
     def _load_knowledge(self) -> Dict[str, Any]:
         if self.storage_path.exists():
@@ -39,60 +62,68 @@ class SharedExperienceManager:
                 logger.error(f"فشل حفظ المعرفة الجماعية: {e}")
 
     def share_fact(self, agent_id: str, fact: Dict[str, Any]):
-        with self._lock:
-            return self._share_fact_locked(agent_id, fact)
-
-    def _share_fact_locked(self, agent_id: str, fact: Dict[str, Any]):
-        """مشاركة حقيقة إذا كانت أهميتها تتجاوز الحد المسموح واجتازت التقييم الذاتي."""
+        """مشاركة حقيقة مع دعم الوضع الموزع."""
         importance = fact.get("strength", 0)
         content = fact.get("content", "")
         
-        # 1. التحقق من الحد الأدنى للأهمية
-        if importance < 0.7:
-            return False
+        if importance < 0.7: return False
             
-        # 2. التقييم الذاتي للحلول البرمجية (إذا كان المحتوى كوداً)
         if "```" in content or "import " in content or "def " in content:
             from ai.learning_engine import learning_engine
             eval_res = learning_engine.evaluate_solution(content)
-            if not eval_res["approved"]:
-                logger.warning(f"🛡️ رفض مشاركة حل برمجي ضعيف من {agent_id}: {eval_res['reasons']}")
-                return False
-            importance = (importance + eval_res["score"]) / 2 # دمج تقييم الكفاءة مع الأهمية
-            
-        fact_id = f"shared_{hash(content) % 10000}"
-        if fact_id not in self.knowledge["shared_facts"]:
-            self.knowledge["shared_facts"][fact_id] = {
-                "content": fact["content"],
-                "origin_agent": agent_id,
-                "shared_at": time.time(),
+            if not eval_res["approved"]: return False
+            importance = (importance + eval_res["score"]) / 2
+
+        if self.remote_url:
+            res = self._request("POST", "/share", {
+                "agent_id": agent_id,
+                "content": content,
                 "importance": importance,
-                "verification_count": 1,
                 "semantic_hash": fact.get("semantic_hash")
-            }
-            self._save_knowledge()
-            logger.info(f"🌐 تم نشر حقيقة جماعية جديدة من الوكيل {agent_id}")
-            return True
-        else:
-            # زيادة التوثيق إذا كانت الحقيقة معروفة مسبقاً
-            self.knowledge["shared_facts"][fact_id]["verification_count"] += 1
-            self._save_knowledge()
-            return True
+            })
+            return res and res.get("status") == "success"
+
+        with self._lock:
+            fact_id = f"shared_{hash(content) % 10000}"
+            if fact_id not in self.knowledge["shared_facts"]:
+                self.knowledge["shared_facts"][fact_id] = {
+                    "content": content,
+                    "origin_agent": agent_id,
+                    "shared_at": time.time(),
+                    "importance": importance,
+                    "verification_count": 1,
+                    "semantic_hash": fact.get("semantic_hash")
+                }
+                self._save_knowledge()
+                return True
+            return False
 
     def sync_agent_memory(self, agent_memory: Any):
         """مزامنة ذاكرة الوكيل مع المعرفة الجماعية."""
         new_facts_count = 0
+        
+        if self.remote_url:
+            remote_facts = self._request("GET", "/sync")
+            if remote_facts:
+                self.knowledge["shared_facts"].update(remote_facts)
+
         with self._lock:
             knowledge_copy = list(self.knowledge["shared_facts"].items())
             
         for fact_id, fact in knowledge_copy:
-            # إذا لم تكن الحقيقة موجودة لدى الوكيل، أضفها
-            exists = any(f["content"] == fact["content"] for f in agent_memory.ltm_semantic.values())
+            # معالجة حالة أن fact قد يكون قاموساً أو قيمة مباشرة (للتوافق)
+            content = fact.get("content") if isinstance(fact, dict) else str(fact)
+            if not content: continue
+            
+            exists = any(f.get("content") == content for f in agent_memory.ltm_semantic.values())
             if not exists:
+                importance = fact.get("importance", 0.8) if isinstance(fact, dict) else 0.8
+                s_hash = fact.get("semantic_hash") if isinstance(fact, dict) else None
+                
                 agent_memory.add_fact(
-                    fact["content"], 
-                    semantic_hash=fact.get("semantic_hash"),
-                    importance=fact["importance"] * 0.9
+                    content, 
+                    semantic_hash=s_hash,
+                    importance=importance * 0.9
                 )
                 new_facts_count += 1
         
