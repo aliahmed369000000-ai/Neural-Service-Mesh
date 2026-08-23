@@ -53,6 +53,12 @@ class LivingMeshNode:
             capabilities += ["human_interaction", "emotional_intelligence", "natural_dialogue"]
         elif "kappa" in nid_lower:
             capabilities += ["energy_management", "network_resilience", "p2p_optimization", "power_grid_sync"]
+        elif "lambda" in nid_lower:
+            capabilities += ["neural_ethics", "value_alignment", "sovereign_governance"]
+        elif "mu" in nid_lower:
+            capabilities += ["predictive_analytics", "trend_forecasting", "evolutionary_modeling"]
+        elif "nu" in nid_lower:
+            capabilities += ["cross_swarm_coordination", "inter_mesh_communication", "swarm_orchestration"]
             
         state["nodes"][self.node_id] = {
             "status": "online",

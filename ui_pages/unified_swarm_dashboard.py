@@ -368,6 +368,24 @@ def render_unified_swarm_dashboard() -> None:
             accel_data = quantum_accel[-1]["data"]
             st.success(f"🚀 **تسارع كمي نشط:** {accel_data.get('speedup')} بواسطة العقدة Zeta")
             st.caption(f"تخصيص Qubits: {accel_data.get('qubits_allocated')} | الطريقة: {accel_data.get('method')}")
+
+        # نتائج المهام السيادية (Eta & Theta)
+        security_audit = [exp for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "security_audit"]
+        future_roadmap = [exp for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "future_synthesis"]
+        
+        if security_audit:
+            st.markdown("### 🛡️ التدقيق الأمني السيادي (Sovereign Security)")
+            sec_data = security_audit[-1]["data"]
+            st.success(f"🔒 **حالة الشبكة:** {sec_data.get('status')} | **التشفير:** {sec_data.get('p2p_encryption')}")
+            st.caption(f"الثغرات التي تم إصلاحها: {sec_data.get('vulnerabilities_patched')} | البوابة العصبية: {sec_data.get('neural_firewall_status')}")
+
+        if future_roadmap:
+            st.markdown("### 🧠 خارطة الطريق المعرفية (Future Roadmap)")
+            road_data = future_roadmap[-1]["data"]
+            st.info(f"🔮 **الرؤية:** {road_data.get('project_future')} | **النمو المتوقع:** {road_data.get('predicted_growth')}")
+            with st.expander("عرض معالم التطور القادمة"):
+                for milestone in road_data.get("milestones", []):
+                    st.write(f"- {milestone}")
     
     if mesh_state.get("global_experience"):
         st.subheader("🧠 سجل الوعي الجماعي (أحدث الخبرات)")
