@@ -62,7 +62,7 @@ def _now() -> str:
 @dataclass
 class Cell:
     id: str
-    type: str = "code"  # markdown | code | bash | train
+    type: str = "code"  # markdown | code | bash | train | research_note
     source: str = ""
     outputs: List[Dict[str, Any]] = field(default_factory=list)
     execution_count: Optional[int] = None
@@ -95,18 +95,12 @@ class Notebook:
     metadata: Dict[str, Any] = field(default_factory=dict)
     kernel: str = "python3"
     provider: str = "local"  # local | kaggle | colab | modal | lightning | huggingface | runpod | vast | generic_gpu
+    agent_research_log: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        return {
-            "id": self.id,
-            "name": self.name,
-            "cells": [c.to_dict() for c in self.cells],
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-            "metadata": self.metadata,
-            "kernel": self.kernel,
-            "provider": self.provider,
-        }
+        d = asdict(self)
+        d["cells"] = [c.to_dict() for c in self.cells]
+        return d
 
     @staticmethod
     def from_dict(d: dict) -> "Notebook":
@@ -119,6 +113,7 @@ class Notebook:
             metadata=dict(d.get("metadata") or {}),
             kernel=d.get("kernel") or "python3",
             provider=d.get("provider") or "local",
+            agent_research_log=list(d.get("agent_research_log") or []),
         )
 
     def path(self) -> Path:
@@ -154,6 +149,23 @@ def save_notebook(nb: Notebook) -> Path:
     path = nb.path()
     path.write_text(json.dumps(nb.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
     return path
+
+
+def add_research_note(nb_id: str, author: str, content: str, tags: List[str] = None):
+    """إضافة ملاحظة بحثية من قبل الوكيل أو المستخدم إلى سجل الدفتر."""
+    nb = load_notebook(nb_id)
+    if not nb:
+        return False
+    note = {
+        "id": uuid.uuid4().hex[:6],
+        "timestamp": _now(),
+        "author": author,
+        "content": content,
+        "tags": tags or []
+    }
+    nb.agent_research_log.append(note)
+    save_notebook(nb)
+    return True
 
 
 def delete_notebook(nb_id: str) -> bool:
