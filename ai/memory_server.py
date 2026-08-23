@@ -66,7 +66,12 @@ class MemoryState:
                 with open(STORAGE_PATH, "r") as f:
                     return json.load(f)
             except: pass
-        return {"shared_facts": {}, "active_queries": {}, "trust_scores": {}}
+        return {
+            "shared_facts": {}, 
+            "active_queries": {}, 
+            "trust_scores": {},
+            "shared_tools": {} # 🆕 سجل الأدوات المشترك
+        }
     
     def save(self):
         """حفظ البيانات بشكل غير متزامن لتجنب حظر الطلبات."""
@@ -127,6 +132,14 @@ class Fact(BaseModel):
     importance: float
     semantic_hash: Optional[str] = None
     is_encrypted: bool = False
+
+class ToolDefinition(BaseModel):
+    name: str
+    description: str
+    code: str
+    params_schema: Dict[str, Any]
+    agent_id: str
+    version: str = "1.0.0"
 
 class Query(BaseModel):
     agent_id: str
@@ -201,6 +214,43 @@ def answer_query(a: Answer, agent: dict = Depends(get_current_agent)):
         memory.save()
         return {"status": "success"}
     raise HTTPException(status_code=404, detail="Query not found")
+
+# 🆕 نقاط نهاية سجل الأدوات (Tool Registry Endpoints)
+
+@app.post("/tools/publish")
+def publish_tool(tool: ToolDefinition, agent: dict = Depends(get_current_agent)):
+    """نشر أداة جديدة للسجل المركزي."""
+    check_permission(agent, "write")
+    if "shared_tools" not in memory.data:
+        memory.data["shared_tools"] = {}
+        
+    tool_id = tool.name
+    memory.data["shared_tools"][tool_id] = {
+        "name": tool.name,
+        "description": tool.description,
+        "code": tool.code,
+        "params_schema": tool.params_schema,
+        "author": tool.agent_id,
+        "version": tool.version,
+        "published_at": time.time()
+    }
+    memory.save()
+    return {"status": "success", "tool_id": tool_id}
+
+@app.get("/tools/list")
+def list_tools(agent: dict = Depends(get_current_agent)):
+    """قائمة بجميع الأدوات المتاحة في السجل."""
+    check_permission(agent, "read")
+    return memory.data.get("shared_tools", {})
+
+@app.get("/tools/get/{tool_id}")
+def get_tool(tool_id: str, agent: dict = Depends(get_current_agent)):
+    """جلب تفاصيل أداة محددة."""
+    check_permission(agent, "read")
+    tools = memory.data.get("shared_tools", {})
+    if tool_id in tools:
+        return tools[tool_id]
+    raise HTTPException(status_code=404, detail="Tool not found")
 
 @app.get("/metrics")
 def get_metrics(agent: dict = Depends(get_current_agent)):

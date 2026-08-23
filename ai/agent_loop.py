@@ -29,6 +29,7 @@ from ai.agent_auto_heal import AutoHeal
 from ai.memory_manager import MemoryManager
 from ai.tool_genesis import tool_genesis, ToolGenesis
 from ai.evolution_engine import evolution_engine
+from ai.tool_discovery import tool_discovery
 
 logger = logging.getLogger("NeuralServiceMesh.AgentLoop")
 healer = AutoHeal(max_rounds=3)
@@ -196,6 +197,20 @@ register_tool(ToolSpec(
         }
     }, 
     evolution_engine
+))
+
+# 🆕 تسجيل أداة اكتشاف الأدوات
+register_tool(ToolSpec(
+    "tool_discovery", 
+    "اكتشاف وتحميل الأدوات من السجل الجماعي للسرب", 
+    {
+        "type": "object", 
+        "properties": {
+            "action": {"type": "string", "enum": ["list", "install"]},
+            "tool_id": {"type": "string"}
+        }
+    }, 
+    tool_discovery
 ))
 
 def _tool_write(params: Dict[str, Any]) -> str:

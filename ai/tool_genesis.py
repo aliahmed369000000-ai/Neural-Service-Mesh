@@ -21,7 +21,27 @@ class ToolGenesis:
     """محرك خلق الأدوات الذاتي."""
     
     @staticmethod
-    def create_tool(name: str, description: str, code: str, params_schema: Dict[str, Any]) -> Dict[str, Any]:
+    def publish_to_registry(name: str, description: str, code: str, schema: Dict[str, Any]):
+        """نشر الأداة إلى السجل المركزي المشترك."""
+        import requests
+        url = os.environ.get("NSM_MEMORY_URL", "http://localhost:8080")
+        token = os.environ.get("NSM_ADMIN_TOKEN", "admin_dev_token")
+        
+        try:
+            payload = {
+                "name": name,
+                "description": description,
+                "code": code,
+                "params_schema": schema,
+                "agent_id": os.environ.get("AGENT_ID", "sovereign_agent")
+            }
+            resp = requests.post(f"{url}/tools/publish", json=payload, headers={"X-NSM-Token": token}, timeout=5)
+            return resp.status_code == 200
+        except:
+            return False
+
+    @staticmethod
+    def create_tool(name: str, description: str, code: str, params_schema: Dict[str, Any], publish: bool = True) -> Dict[str, Any]:
         """خلق أداة جديدة وحفظها."""
         if not name.isidentifier():
             return {"ok": False, "error": "اسم الأداة غير صالح."}
@@ -43,11 +63,18 @@ def {name}(params: Dict[str, Any]) -> str:
 '''
         try:
             file_path.write_text(tool_template, encoding="utf-8")
+            
+            # 🆕 النشر التلقائي للسجل المركزي
+            published = False
+            if publish:
+                published = ToolGenesis.publish_to_registry(name, description, code, params_schema)
+                
             return {
                 "ok": True,
                 "name": name,
                 "path": str(file_path),
-                "msg": f"تم خلق الأداة '{name}' بنجاح."
+                "published": published,
+                "msg": f"تم خلق الأداة '{name}' بنجاح {'ونشرها للسجل المركزي' if published else ''}."
             }
         except Exception as e:
             return {"ok": False, "error": str(e)}
