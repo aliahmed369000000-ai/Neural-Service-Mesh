@@ -13,9 +13,11 @@ import uuid
 import base64
 import asyncio
 import websockets
+import numpy as np
 from datetime import datetime, timezone
 from pathlib import Path
 from ai.alert_manager import alert_manager
+from ai.unified_memory import UnifiedMemoryManager
 from typing import Any, Dict, List, Optional, Set
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
@@ -45,6 +47,9 @@ class LivingMeshNode:
         }
         self.server = None
         self.active_connections: Set = set()
+        
+        # تهيئة الذاكرة الموحدة (ANN + Sharding)
+        self.memory = UnifiedMemoryManager(base_dir=str(LIVING_MESH_DIR / "memory"))
         
         # إنشاء مفاتيح الهوية السيادية (RSA)
         self.private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -295,6 +300,12 @@ class LivingMeshNode:
             return
 
         msg["unique_id"] = unique_id
+        msg["id"] = unique_id
+        
+        # تخزين الخبرة في الذاكرة الموحدة (ANN + Sharding)
+        simulated_embedding = self._generate_simulated_embedding(kind, experience_data)
+        self.memory.store_experience(msg, embedding=simulated_embedding)
+        
         state["global_experience"].append(msg)
         
         # بروتوكول Gossip المطور: إرسال الخبرة للأقران النشطين مباشرة
@@ -416,7 +427,39 @@ class LivingMeshNode:
         return {"nodes": {}, "global_experience": [], "created_at": datetime.now(timezone.utc).isoformat()}
 
     def _save_state(self, state: Dict[str, Any]):
-        NETWORK_STATE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        """حفظ حالة الشبكة وتحديث الذاكرة الموحدة."""
+        try:
+            # تحديث الذاكرة الموحدة بالخبرات الجديدة
+            if hasattr(self, "memory"):
+                for exp in state.get("global_experience", []):
+                    # نستخدم معرف فريد لتجنب التكرار في ANN
+                    exp_id = exp.get("unique_id") or str(hash(str(exp)))
+                    
+                    # التحقق من أن الخبرة لم يتم فهرستها بالفعل
+                    indexed_ids = [e.get("unique_id") for e in self.memory.ann.metadata]
+                    if exp_id not in indexed_ids:
+                        # توليد تضمين محاكى للتخزين الدلالي
+                        emb = self._generate_simulated_embedding(exp.get("kind", "generic"), exp.get("data", {}))
+                        self.memory.store_experience(exp, embedding=emb)
+            
+            NETWORK_STATE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as e:
+            logger.error(f"Error in _save_state with Unified Memory: {e}")
+            # السقوط إلى الحفظ التقليدي في حالة فشل الذاكرة الموحدة
+            NETWORK_STATE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _generate_simulated_embedding(self, kind: str, data: Dict[str, Any]) -> List[float]:
+        """توليد متجه تمثيلي محاكى للخبرة لأغراض البحث الدلالي."""
+        seed_str = f"{kind}_{json.dumps(data, sort_keys=True)}"
+        hash_val = int(hashlib.sha256(seed_str.encode()).hexdigest(), 16)
+        
+        np.random.seed(hash_val % (2**32))
+        return np.random.uniform(-1, 1, 1536).tolist()
+
+    def semantic_query(self, query_text: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        """إجراء بحث دلالي في الذاكرة الموحدة للعقدة."""
+        query_embedding = self._generate_simulated_embedding("query", {"text": query_text})
+        return self.memory.semantic_search(query_embedding, top_k=top_k)
 
     def _save_public_key(self):
         """حفظ المفتاح العام للعقدة ليتمكن الأقران من التحقق من الرسائل."""

@@ -88,11 +88,22 @@ def render_unified_swarm_dashboard() -> None:
         merge_completion = 0.0
         singularity_status = "Unknown"
 
+    # جلب إحصائيات الذاكرة الموحدة
+    try:
+        from ai.living_mesh import LivingMeshNode
+        temp_node = LivingMeshNode(node_id="dashboard_viewer")
+        mem_stats = temp_node.memory.get_memory_stats()
+        total_exp = mem_stats.get("total_experiences", 0)
+        indexed_vec = mem_stats.get("indexed_vectors", 0)
+        shards_count = mem_stats.get("num_shards", 0)
+    except Exception:
+        total_exp = indexed_vec = shards_count = 0
+
     render_kpi_cards([
         {"label": "وكلاء نشطون", "value": counts.get("alive", 0), "note": "قيد التنفيذ الآن", "accent": "var(--nsm-cyan)"},
         {"label": "اكتمال الاندماج", "value": f"{merge_completion*100:.1f}%", "note": singularity_status, "accent": "#f472b6"},
-        {"label": "دورات مكتملة", "value": counts.get("done", 0), "note": "ناجحون في السجل", "accent": "#86efac"},
-        {"label": "وكلاء فاشلون", "value": counts.get("failed", 0), "note": "تحتاج مراجعة", "accent": "var(--nsm-danger)"},
+        {"label": "الذاكرة الموحدة", "value": total_exp, "note": f"{shards_count} أجزاء (Shards)", "accent": "#818cf8"},
+        {"label": "فهرس ANN", "value": indexed_vec, "note": "متجهات دلالية", "accent": "#c084fc"},
         {"label": "مهام السرب", "value": swarm.get("total", 0), "note": "محفوظة في السجل", "accent": "var(--nsm-indigo)"},
         {"label": "مهام طويلة الأمد", "value": sum(lh.get("counts", {}).values()) if isinstance(lh, dict) else 0, "note": "قيد الإدارة", "accent": "#c084fc"},
     ])
@@ -237,6 +248,42 @@ def render_unified_swarm_dashboard() -> None:
         st.markdown(" · ".join(_resp), unsafe_allow_html=True)
     else:
         st.info("لا توجد وكلاء نشطة بعد — نفّذ مهمة من أي تبويب وكيل لتظهر أوقات استجابتها هنا.")
+
+    # ── الذاكرة الموحدة والبحث الدلالي ───────────────────────────
+    render_section_header("🧠 الذاكرة الموحدة (Unified Memory)", "بحث دلالي سريع وتخزين مجزأ مستدام")
+    
+    col_search, col_stats = st.columns([2, 1])
+    
+    with col_search:
+        st.markdown("### 🔍 البحث الدلالي في الوعي الجماعي")
+        query = st.text_input("عن ماذا يبحث السرب؟ (مثلاً: الاندماج النهائي، قفزة أكتوبر، الأمان...)", key="semantic_query_input")
+        if query:
+            try:
+                from ai.living_mesh import LivingMeshNode
+                temp_node = LivingMeshNode(node_id="dashboard_searcher")
+                results = temp_node.semantic_query(query, top_k=5)
+                if results:
+                    st.write(f"تم العثور على {len(results)} نتائج دلالية:")
+                    for res in results:
+                        with st.expander(f"🔹 {res.get('kind')} - {res.get('timestamp')}"):
+                            st.json(res.get("data", {}))
+                else:
+                    st.info("لم يتم العثور على نتائج دلالية مطابقة.")
+            except Exception as e:
+                st.error(f"خطأ في البحث الدلالي: {e}")
+                
+    with col_stats:
+        st.markdown("### 📊 إحصائيات الذاكرة")
+        try:
+            from ai.living_mesh import LivingMeshNode
+            temp_node = LivingMeshNode(node_id="dashboard_stats")
+            stats = temp_node.memory.get_memory_stats()
+            st.write(f"• **إجمالي الخبرات:** {stats['total_experiences']}")
+            st.write(f"• **المتجهات المفهرسة:** {stats['indexed_vectors']}")
+            st.write(f"• **عدد الأجزاء (Shards):** {stats['num_shards']}")
+            st.write(f"• **أبعاد التضمين:** {stats['dimension']}")
+        except Exception:
+            st.info("جاري تحميل إحصائيات الذاكرة...")
 
     # ── التنبيهات ───────────────────────────────────────────────
     render_section_header("التنبيهات", "تُقيَّم وفق القواعد المخصّصة ثم تُطبَّق إجراءاتها التلقائية")
