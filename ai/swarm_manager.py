@@ -25,6 +25,8 @@ class SwarmProposal:
         self.status = "pending"  # pending, approved, rejected
         self.created_at = time.time()
 
+from ai.living_mesh import LivingMeshNode
+
 class SwarmManager:
     def __init__(self, storage_dir: Optional[str] = None):
         self.root = Path(__file__).resolve().parent.parent
@@ -33,6 +35,10 @@ class SwarmManager:
         self.proposals: Dict[str, SwarmProposal] = {}
         self.workers: Dict[str, Dict[str, Any]] = {}
         self.results: List[Dict[str, Any]] = []
+        
+        # 🆕 Living Neural Mesh: عقدة الشبكة اللامركزية
+        self.mesh_node = LivingMeshNode()
+        self.mesh_node.join_network()
         
         # 🆕 سوق المهام والمنافسة
         self.marketplace_tasks: Dict[str, Dict[str, Any]] = {}

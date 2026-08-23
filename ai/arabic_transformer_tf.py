@@ -340,3 +340,16 @@ class ArabicTransformerTF(tf.keras.Model):
             
         logger.info("✅ Weights migration complete.")
 
+    def evolve_live(self, node_id: str):
+        """تفعيل التطور الحي عبر سحب آخر التحديثات من الشبكة اللامركزية."""
+        from ai.living_mesh import LivingMeshNode
+        node = LivingMeshNode(node_id)
+        updates = node.get_evolutionary_updates()
+        
+        if updates:
+            last_update = updates[-1]
+            logger.info(f"🧬 Node {node_id} detected evolution: {last_update['data']['change_log']}")
+            # هنا يمكن إضافة منطق تعديل الأوزان ديناميكياً بناءً على دلتا الشبكة
+            return True
+        return False
+
