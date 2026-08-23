@@ -24,6 +24,7 @@ from ai.cache_manager import agent_cache
 from ai.learning_engine import learning_engine
 from ai.video_sampler import video_sampler
 from ai.video_indexer import video_indexer
+from ai.multimodal_sync import multimodal_sync
 
 logger = logging.getLogger("NeuralServiceMesh.AgentLoop")
 
@@ -226,6 +227,23 @@ def _tool_video_sample(params: Dict[str, Any]) -> str:
     except Exception as e: return f"❌ video_sample: {e}"
 
 register_tool(ToolSpec("video_sample", "أخذ عينات ذكية من الفيديو", {"type": "object", "properties": {"video_path": {"type": "string"}, "video_id": {"type": "string"}}}, _tool_video_sample))
+
+def _tool_video_sync(params: Dict[str, Any]) -> str:
+    """مزامنة الصوت والصورة للفيديو وتصحيح الانحراف."""
+    video_id = str(params.get("video_id", ""))
+    audio_path = str(params.get("audio_path", ""))
+    if not video_id or not audio_path:
+        return "❌ video_sync: يجب توفير video_id و audio_path."
+    
+    try:
+        result = multimodal_sync.sync_video_audio(video_id, audio_path)
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return f"❌ video_sync: {e}"
+
+register_tool(ToolSpec("video_sync", "مزامنة الصوت والصورة وتصحيح الانحراف", 
+                        {"type": "object", "properties": {"video_id": {"type": "string"}, "audio_path": {"type": "string"}}}, 
+                        _tool_video_sync))
 
 # ═════════════════════════ محرك الحلقة ═════════════════════════════
 _SYSTEM_PROMPT = """أنت الوكيل التنفيذي لـ NSM. رد JSON فقط:

@@ -20,7 +20,7 @@ import json
 import os
 import urllib.error
 import urllib.request
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict, Any
 
 from ai.offline_mode import is_offline, offline_message
 
@@ -52,15 +52,9 @@ def transcribe_audio(
     with_timestamps: bool = False,
 ) -> Tuple[str | List[Dict[str, Any]], Optional[str]]:
     """
-    يحوّل صوتاً إلى نص عربي. يعيد (النص أو قائمة المقاطع, رسالة_خطأ).
-    with_timestamps: إذا كان True، يعيد قائمة بـ {"start": float, "end": float, "text": str}
-    """
-    """
-    يحوّل صوتاً إلى نص عربي. يعيد (النص, رسالة_خطأ).
-    dialect_mode: "msa" | "yemeni" | "auto"
-      - yemeni: يحافظ على ألفاظ اللهجة في التفريغ
-      - msa: يفضّل صياغة فصيحة
-    لا يرفع استثناءً أبداً.
+    يحوّل صوتاً إلى نص عربي. يعيد (النص أو قائمة المقاطع، رسالة_خطأ).
+    with_timestamps: إذا كان True، يعيد قائمة بـ {"start": float, "end": float, "text": str}.
+    dialect_mode: "msa" | "yemeni" | "auto".
     """
     if not audio_bytes:
         return "", "لم يصل أي صوت للتفريغ."
