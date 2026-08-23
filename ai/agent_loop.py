@@ -644,10 +644,11 @@ register_tool(ToolSpec("tool_genesis", "توليد أداة جديدة ذاتي�
                         }}, _tool_genesis, dangerous=True))
 
 def _tool_spawn_agent(params: Dict[str, Any]) -> str:
-    """استنساخ وكيل فرعي وتفويض مهمة فعلية له."""
+    """استنساخ وكيل فرعي وتفويض مهمة فعلية له مع تعيين الأدوار والثقة."""
     agent_name = str(params.get("name", f"sub_agent_{uuid.uuid4().hex[:4]}"))
     task = str(params.get("task", ""))
     role = str(params.get("role", "worker"))
+    trust = float(params.get("trust", 0.5))
     
     if not task:
         return "❌ spawn_agent: يجب تحديد المهمة."
@@ -655,8 +656,8 @@ def _tool_spawn_agent(params: Dict[str, Any]) -> str:
     try:
         from ai.swarm_manager import swarm_manager
         
-        # تسجيل الوكيل الفرعي في السرب
-        swarm_manager.register_worker(agent_name, role)
+        # تسجيل الوكيل الفرعي في السرب مع الثقة
+        swarm_manager.register_worker(agent_name, role, trust_score=trust)
         
         # 🆕 التنفيذ الفعلي: استدعاء حلقة الوكيل للوكيل الفرعي
         def run_sub_agent():
@@ -684,36 +685,41 @@ def _tool_spawn_agent(params: Dict[str, Any]) -> str:
     except Exception as e:
         return f"❌ spawn_agent: {e}"
 
-register_tool(ToolSpec("spawn_agent", "استنساخ وكيل فرعي وتفويض مهمة", 
+register_tool(ToolSpec("spawn_agent", "استنساخ وكيل فرعي وتفويض مهمة مع دور وثقة", 
                         {"type": "object", "properties": {
                             "name": {"type": "string"},
                             "task": {"type": "string"},
-                            "role": {"type": "string"}
+                            "role": {"type": "string", "enum": ["orchestrator", "worker", "auditor", "observer"]},
+                            "trust": {"type": "number"}
                         }}, _tool_spawn_agent))
 
 def _tool_share_media(params: Dict[str, Any]) -> str:
-    """مشاركة أصل وسائط (صورة، صوت) مع السرب."""
+    """مشاركة أصل وسائط (صورة، صوت) مع السرب مع التحقق من الصلاحيات."""
     file_path = params.get("file_path")
     media_type = params.get("type", "image")
     desc = params.get("description", "")
     tags = params.get("tags", [])
+    agent_id = params.get("agent_id", "agent_primary")
     
     if not file_path:
         return "❌ share_media: يجب تحديد مسار الملف."
         
     try:
         from ai.swarm_manager import swarm_manager
-        asset_id = swarm_manager.share_media("agent_primary", file_path, media_type, desc, tags)
+        asset_id = swarm_manager.share_media(agent_id, file_path, media_type, desc, tags)
         return f"✅ تم مشاركة الوسائط بنجاح. معرف الأصل: {asset_id}"
+    except PermissionError as pe:
+        return f"🚫 عطل في الصلاحيات: {pe}"
     except Exception as e:
         return f"❌ share_media: {e}"
 
-register_tool(ToolSpec("share_media", "مشاركة صورة أو صوت مع الذاكرة الجماعية للسرب", 
+register_tool(ToolSpec("share_media", "مشاركة وسائط مع السرب (تتطلب صلاحية)", 
                         {"type": "object", "properties": {
                             "file_path": {"type": "string"},
                             "type": {"type": "string", "enum": ["image", "audio", "video"]},
                             "description": {"type": "string"},
-                            "tags": {"type": "array", "items": {"type": "string"}}
+                            "tags": {"type": "array", "items": {"type": "string"}},
+                            "agent_id": {"type": "string"}
                         }}, _tool_share_media))
 
 def _tool_trigger_reflection(params: Dict[str, Any]) -> str:

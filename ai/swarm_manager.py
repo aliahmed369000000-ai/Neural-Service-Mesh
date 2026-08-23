@@ -37,26 +37,64 @@ class SwarmManager:
         self.proposal_timeout = 60  # مهلة المقترح بالثواني
         self.heartbeat_timeout = 20  # مهلة نبض القلب بالثواني
         
+        # تعريف الأدوار والصلاحيات (RBAC)
+        self.roles_config = {
+            "orchestrator": {"permissions": ["read", "write", "delete", "spawn", "reflect"], "trust_min": 0.8},
+            "worker": {"permissions": ["read", "write", "spawn"], "trust_min": 0.5},
+            "auditor": {"permissions": ["read", "reflect"], "trust_min": 0.7},
+            "observer": {"permissions": ["read"], "trust_min": 0.0}
+        }
+        
         # ربط الذاكرة متعددة الوسائط
         from ai.multimodal_memory import mm_memory
         self.memory = mm_memory
 
+    def check_permission(self, agent_id: str, action: str) -> bool:
+        """التحقق من صلاحيات الوكيل بناءً على الدور ومستوى الثقة."""
+        if agent_id not in self.workers:
+            # الوكلاء غير المسجلين لديهم صلاحيات Observer فقط افتراضياً
+            role = "observer"
+            trust_score = 0.5
+        else:
+            worker = self.workers[agent_id]
+            role = worker.get("role", "observer")
+            # جلب مستوى الثقة من قاعدة البيانات (افتراضياً 0.5 إذا لم يوجد)
+            trust_score = worker.get("trust_score", 0.5)
+
+        role_info = self.roles_config.get(role, self.roles_config["observer"])
+        
+        # 1. التحقق من وجود الصلاحية في الدور
+        if action not in role_info["permissions"]:
+            logger.warning(f"🚫 Permission Denied: Agent {agent_id} ({role}) tried to {action}")
+            return False
+            
+        # 2. التحقق من قيود الثقة الديناميكية
+        if trust_score < role_info["trust_min"]:
+            logger.warning(f"⚠️ Trust Constraint: Agent {agent_id} trust {trust_score} below required {role_info['trust_min']} for {role}")
+            return False
+            
+        return True
+
     def share_media(self, agent_id: str, file_path: str, media_type: str, description: str, tags: List[str]) -> str:
-        """مشاركة أصل وسائط مع السرب."""
+        """مشاركة أصل وسائط مع السرب مع التحقق من الصلاحيات."""
+        if not self.check_permission(agent_id, "write"):
+            raise PermissionError(f"الوكيل {agent_id} لا يملك صلاحية الكتابة في الذاكرة الجماعية.")
+            
         metadata = {"description": description, "tags": tags}
         asset_id = self.memory.store_asset(agent_id, file_path, media_type, metadata)
         logger.info(f"📸 Media Shared by {agent_id}: {asset_id} ({media_type})")
         return asset_id
 
-    def register_worker(self, agent_id: str, role: str):
-        """تسجيل وكيل جديد في السرب مع تهيئة نبض القلب."""
+    def register_worker(self, agent_id: str, role: str, trust_score: float = 0.5):
+        """تسجيل وكيل جديد في السرب مع تهيئة نبض القلب والأذونات."""
         self.workers[agent_id] = {
             "role": role,
             "status": "active",
+            "trust_score": trust_score,
             "last_seen": time.time(),
             "joined_at": time.time()
         }
-        logger.info(f"👷 Worker Registered: {agent_id} as {role}")
+        logger.info(f"👷 Worker Registered: {agent_id} as {role} (Trust: {trust_score})")
 
     def heartbeat(self, agent_id: str):
         """تحديث نبض القلب للوكيل لضمان أنه لا يزال نشطاً."""
