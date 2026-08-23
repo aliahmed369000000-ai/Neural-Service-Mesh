@@ -215,8 +215,12 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
             recovered = wake_up_agent(user_input)
             if recovered:
                 history = recovered.context
-                history.append({"role": "user", "content": "🌅 استيقظت. لخص أين توقفت."})
-                _emit({"type": "info", "text": "🌅 تم استعادة الحالة (Mental Warm-up)..."})
+                warmup_msg = "🌅 استيقظت. لخص أين توقفت."
+                if recovered.pending_tasks:
+                    warmup_msg += f"\nالمهام المعلقة التي تم رصدها قبل النوم:\n- " + "\n- ".join(recovered.pending_tasks)
+                
+                history.append({"role": "user", "content": warmup_msg})
+                _emit({"type": "info", "text": "🌅 تم استعادة الحالة (Mental Warm-up مع المهام المعلقة)..."})
             else:
                 history = [{"role": "user", "content": user_input}]
 
@@ -270,7 +274,7 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                     if sleep_requested: break
 
                 if sleep_requested:
-                    from ai.agent_hibernation import hibernate_agent
+                    from ai.agent_hibernation import hibernate_agent, extract_pending_tasks
                     sleep_reason = "Manual"
                     wake_after = 0
                     for t in tools:
@@ -278,7 +282,8 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                             sleep_reason = t.get("params", {}).get("reason", sleep_reason)
                             wake_after = int(t.get("params", {}).get("wake_up_after", 0))
                     
-                    if hibernate_agent(target_agent_id, history, {"steps": state.steps}):
+                    pending = extract_pending_tasks(history, {"steps": state.steps})
+                    if hibernate_agent(target_agent_id, history, {"steps": state.steps}, pending_tasks=pending):
                         if wake_after > 0:
                             from ai.agent_hibernation import schedule_wake_up
                             schedule_wake_up(target_agent_id, wake_after)

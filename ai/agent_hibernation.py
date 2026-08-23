@@ -20,12 +20,16 @@ SLEEP_DIR = ROOT / "artifacts" / "agent_sleep"
 SLEEP_DIR.mkdir(parents=True, exist_ok=True)
 
 class AgentState:
-    """تمثيل لحالة الوكيل القابلة للحفظ."""
-    def __init__(self, agent_id: str, context: List[Dict[str, Any]], plan: Dict[str, Any], metadata: Dict[str, Any] = None, memory_snapshot: Dict[str, Any] = None):
+    """تمثيل لحالة الوكيل القابلة للحفظ مع دعم الذاكرة الهيكلية."""
+    def __init__(self, agent_id: str, context: List[Dict[str, Any]], plan: Dict[str, Any], 
+                 metadata: Dict[str, Any] = None, memory_snapshot: Dict[str, Any] = None,
+                 pending_tasks: List[str] = None, memory_shards: Dict[str, str] = None):
         self.agent_id = agent_id
         self.context = context
         self.plan = plan
         self.memory_snapshot = memory_snapshot or {}
+        self.pending_tasks = pending_tasks or []
+        self.memory_shards = memory_shards or {} # روابط لملفات بيانات ضخمة
         self.metadata = metadata or {}
         self.timestamp = time.time()
 
@@ -35,6 +39,8 @@ class AgentState:
             "context": self.context,
             "plan": self.plan,
             "memory_snapshot": self.memory_snapshot,
+            "pending_tasks": self.pending_tasks,
+            "memory_shards": self.memory_shards,
             "metadata": self.metadata,
             "timestamp": self.timestamp
         }
@@ -46,15 +52,19 @@ class AgentState:
             data["context"], 
             data["plan"], 
             data.get("metadata", {}),
-            data.get("memory_snapshot", {})
+            data.get("memory_snapshot", {}),
+            data.get("pending_tasks", []),
+            data.get("memory_shards", {})
         )
         state.timestamp = data.get("timestamp", time.time())
         return state
 
-def hibernate_agent(agent_id: str, context: List[Dict[str, Any]], plan: Dict[str, Any], metadata: Dict[str, Any] = None, memory_snapshot: Dict[str, Any] = None) -> bool:
+def hibernate_agent(agent_id: str, context: List[Dict[str, Any]], plan: Dict[str, Any], 
+                    metadata: Dict[str, Any] = None, memory_snapshot: Dict[str, Any] = None,
+                    pending_tasks: List[str] = None, memory_shards: Dict[str, str] = None) -> bool:
     """حفظ حالة الوكيل في ملف محلي لدخول وضع النوم."""
     try:
-        state = AgentState(agent_id, context, plan, metadata, memory_snapshot)
+        state = AgentState(agent_id, context, plan, metadata, memory_snapshot, pending_tasks, memory_shards)
         file_path = SLEEP_DIR / f"{agent_id}_sleep.json"
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(state.to_dict(), f, ensure_ascii=False, indent=2)
@@ -98,6 +108,28 @@ def wake_up_agent(agent_id: str, lazy: bool = False) -> Optional[AgentState]:
     except Exception as e:
         logger.error(f"❌ فشل استيقاظ الوكيل {agent_id}: {e}")
         return None
+
+def extract_pending_tasks(context: List[Dict[str, Any]], plan: Dict[str, Any]) -> List[str]:
+    """
+    استخراج المهام التي لم تُنجز بعد من الخطة وسياق المحادثة.
+    """
+    pending = []
+    # 1. فحص الخطة الهيكلية إن وجدت
+    tasks = plan.get("tasks", [])
+    for t in tasks:
+        if isinstance(t, dict) and t.get("status") not in ["completed", "done", "finished"]:
+            pending.append(str(t.get("title", "مهمة غير محددة")))
+        elif isinstance(t, str):
+            pending.append(t)
+            
+    # 2. إذا كانت القائمة فارغة، نحاول الاستنتاج من آخر رسالة مساعد
+    if not pending:
+        last_assistant = next((m["content"] for m in reversed(context) if m["role"] == "assistant"), "")
+        # البحث عن أنماط مثل "الخطوة التالية:" أو "سأقوم بـ..."
+        matches = re.findall(r"(?:الخطوة التالية|سأقوم بـ|يجب تنفيذ):\s*(.+)", last_assistant)
+        pending.extend([m.strip() for m in matches])
+        
+    return pending[:5] # نكتفي بأهم 5 مهام لتوفير المساحة
 
 def list_sleeping_agents() -> List[str]:
     """قائمة بالوكلاء الموجودين حالياً في وضع النوم."""
