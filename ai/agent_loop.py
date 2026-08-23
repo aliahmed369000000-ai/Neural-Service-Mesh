@@ -1060,15 +1060,28 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                                 _emit({"type": "result", "tool": tname, "output": obs})
                                 continue
 
+                            # دعم التنسيق المتسلسل: حل المتغيرات الديناميكية {{last_output_TOOLNAME}}
+                            resolved_params = {}
+                            for k, v in params.items():
+                                if isinstance(v, str) and v.startswith("{{") and v.endswith("}}"):
+                                    key = v[2:-2].strip()
+                                    # البحث في ذاكرة المخرجات الأخيرة
+                                    resolved_params[k] = state.memory.short_term.get(key, v)
+                                else:
+                                    resolved_params[k] = v
+
                             # محاولة جلب النتيجة من الكاش
-                            cached_res = agent_cache.get(tname, params)
+                            cached_res = agent_cache.get(tname, resolved_params)
                             if cached_res:
                                 raw_res = cached_res
                                 obs = _truncate_obs(raw_res) + " (⚡ cached)"
                             else:
-                                raw_res = spec.executor(params)
+                                raw_res = spec.executor(resolved_params)
                                 obs = _truncate_obs(raw_res)
-                                agent_cache.set(tname, params, raw_res)
+                                agent_cache.set(tname, resolved_params, raw_res)
+                            
+                            # تخزين النتيجة في الذاكرة قصيرة المدى لاستخدامها من قبل أدوات أخرى
+                            state.memory.short_term[f"last_output_{tname}"] = raw_res
                             
                             # معالجة الإشارات الخاصة
                             if str(raw_res).startswith("SIGNAL_SLEEP:"):

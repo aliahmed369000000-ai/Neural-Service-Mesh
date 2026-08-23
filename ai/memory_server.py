@@ -151,6 +151,13 @@ class Answer(BaseModel):
     query_id: str
     answer: str
 
+class ToolVote(BaseModel):
+    tool_id: str
+    agent_id: str
+    vote: str # "up" or "down"
+    comment: Optional[str] = None
+    trust_score: float = 1.0
+
 @app.get("/health")
 def health():
     return {"status": "online", "version": "1.0.0"}
@@ -219,7 +226,7 @@ def answer_query(a: Answer, agent: dict = Depends(get_current_agent)):
 
 @app.post("/tools/publish")
 def publish_tool(tool: ToolDefinition, agent: dict = Depends(get_current_agent)):
-    """نشر أداة جديدة للسجل المركزي."""
+    """نشر أداة جديدة للسجل المركزي بحالة معلقة (Pending)."""
     check_permission(agent, "write")
     if "shared_tools" not in memory.data:
         memory.data["shared_tools"] = {}
@@ -232,10 +239,45 @@ def publish_tool(tool: ToolDefinition, agent: dict = Depends(get_current_agent))
         "params_schema": tool.params_schema,
         "author": tool.agent_id,
         "version": tool.version,
-        "published_at": time.time()
+        "published_at": time.time(),
+        "status": "pending", # 🆕 الحالة الافتراضية: معلق
+        "votes": {"up": 0, "down": 0},
+        "reviews": []
     }
     memory.save()
     return {"status": "success", "tool_id": tool_id}
+
+@app.post("/tools/vote")
+def vote_tool(v: ToolVote, agent: dict = Depends(get_current_agent)):
+    """التصويت على أداة ومراجعتها من قبل الأقران."""
+    check_permission(agent, "write")
+    tools = memory.data.get("shared_tools", {})
+    if v.tool_id not in tools:
+        raise HTTPException(status_code=404, detail="Tool not found")
+    
+    tool = tools[v.tool_id]
+    
+    # تحديث التصويت
+    if v.vote == "up":
+        tool["votes"]["up"] += 1
+    else:
+        tool["votes"]["down"] += 1
+        
+    # إضافة مراجعة
+    tool["reviews"].append({
+        "reviewer": v.agent_id,
+        "vote": v.vote,
+        "comment": v.comment,
+        "timestamp": time.time(),
+        "trust_score": v.trust_score
+    })
+    
+    # 🆕 معيار الاعتماد التلقائي: 3 أصوات إيجابية
+    if tool["votes"]["up"] >= 3 and tool["status"] == "pending":
+        tool["status"] = "approved"
+        
+    memory.save()
+    return {"status": "success", "current_status": tool["status"]}
 
 @app.get("/tools/list")
 def list_tools(agent: dict = Depends(get_current_agent)):

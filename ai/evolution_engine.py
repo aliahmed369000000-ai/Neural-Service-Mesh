@@ -344,40 +344,189 @@ class EvolutionEngine:
         }
 
     def _log_evolution(self, entry: dict):
-        log_file = ROOT / "memory" / "evolution_log.jsonl"
+        import json
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+        log_file = root / "memory" / "evolution_log.jsonl"
         log_file.parent.mkdir(parents=True, exist_ok=True)
         with log_file.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     def propose_innovation(self, agent_id: str, innovation_type: str, description: str, proposed_code_changes: Dict[str, str]) -> Dict[str, Any]:
-        """اقتراح ابتكار أو تعديل في الكود المصدري."""
+        """اقتراح ابتكار أو تعديل في الكود المصدري مع التحقق من السلامة."""
         import time
         innovation_id = f"inn_{int(time.time())}"
+        
+        # 1. التحقق الأولي من التغييرات المقترحة
+        verification_results = self._verify_proposed_changes(proposed_code_changes)
+        
         proposal = {
             "id": innovation_id,
             "agent_id": agent_id,
             "type": innovation_type,
             "desc": description,
             "changes": proposed_code_changes,
-            "status": "pending_review",
+            "verification": verification_results,
+            "status": "pending_review" if verification_results["safe"] else "rejected_by_safety",
             "ts": datetime.now(timezone.utc).isoformat()
         }
         self._log_evolution(proposal)
         return proposal
 
+    def _verify_proposed_changes(self, changes: Dict[str, str]) -> Dict[str, Any]:
+        """فحص أمني وتقني للتعديلات المقترحة قبل قبولها كمسودة."""
+        import ast
+        import time
+        from pathlib import Path
+        results = {"safe": True, "errors": []}
+        
+        for file_path, code in changes.items():
+            # فحص السنتكس
+            try:
+                ast.parse(code)
+            except SyntaxError as e:
+                results["safe"] = False
+                results["errors"].append(f"خطأ سنتكس في {file_path}: {e}")
+            
+            # فحص الأنماط المحظورة (استخدام Sandbox Lab logic)
+            from ai.sandbox_lab import SandboxTestingLab
+            lab = SandboxTestingLab()
+            
+            class MockMod:
+                def __init__(self, name, c):
+                    self.module_id = f"mod_{int(time.time())}"
+                    self.name = name
+                    self.code = c
+                    self.class_name = "InnovationNode"
+                    self.status = "pending"
+                    self.test_result = None
+            
+            # ضمان وجود كلاس متوافق مع الساندبوكس للاختبار
+            test_code = code
+            if "class " not in code:
+                test_code = f"class InnovationNode:\n    def process(self, data): return True\n\n" + code
+
+            mock = MockMod(Path(file_path).stem, test_code)
+            res = lab.test_module(mock)
+            if not res.safety_passed:
+                results["safe"] = False
+                results["errors"].extend(res.safety_violations)
+                
+        return results
+
+    def apply_innovation(self, innovation_id: str) -> Dict[str, Any]:
+        """تطبيق ابتكار معتمد فعلياً على الكود المصدري مع آلية تراجع (Rollback)."""
+        import json
+        import shutil
+        import os
+        from pathlib import Path
+        
+        root = Path(__file__).resolve().parent.parent
+        log_file = root / "memory" / "evolution_log.jsonl"
+        if not log_file.exists():
+            return {"ok": False, "error": f"سجل الابتكارات غير موجود في {log_file}."}
+            
+        proposal = None
+        with log_file.open("r", encoding="utf-8") as f:
+            for line in f:
+                data = json.loads(line)
+                if data["id"] == innovation_id:
+                    proposal = data
+                    break
+        
+        if not proposal:
+            return {"ok": False, "error": "الابتكار غير موجود في السجل."}
+            
+        if proposal["status"] == "rejected_by_safety":
+            return {"ok": False, "error": "لا يمكن تطبيق ابتكار مرفوض أمنياً."}
+
+        applied_files = []
+        try:
+            for file_path, new_code in proposal["changes"].items():
+                p = Path(file_path)
+                if not p.is_absolute():
+                    p = root / file_path
+                
+                # 1. إنشاء نسخة احتياطية
+                if p.exists():
+                    shutil.copy2(p, str(p) + ".bak")
+                
+                # 2. تطبيق التعديل
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text(new_code, encoding="utf-8")
+                applied_files.append(file_path)
+            
+            return {"ok": True, "applied_files": applied_files, "msg": f"تم تطبيق الابتكار {innovation_id} بنجاح."}
+        except Exception as e:
+            # محاولة التراجع التلقائي في حال الفشل
+            for f in applied_files:
+                bak = Path(f + ".bak")
+                if bak.exists():
+                    shutil.move(bak, f)
+            return {"ok": False, "error": f"فشل التطبيق: {e}"}
+
+    def rollback_innovation(self, innovation_id: str) -> Dict[str, Any]:
+        """التراجع عن ابتكار مطبق واستعادة النسخ الاحتياطية."""
+        import json
+        import os
+        from pathlib import Path
+        import shutil
+        
+        root = Path(__file__).resolve().parent.parent
+        log_file = root / "memory" / "evolution_log.jsonl"
+        proposal = None
+        if not log_file.exists():
+             return {"ok": False, "error": "سجل الابتكارات غير موجود."}
+
+        with log_file.open("r", encoding="utf-8") as f:
+            for line in f:
+                data = json.loads(line)
+                if data["id"] == innovation_id:
+                    proposal = data
+                    break
+        
+        if not proposal:
+            return {"ok": False, "error": "الابتكار غير موجود."}
+
+        restored = []
+        for file_path_str in proposal["changes"].keys():
+            p = Path(file_path_str)
+            if not p.is_absolute():
+                p = root / file_path_str
+            
+            bak = Path(str(p) + ".bak")
+            if bak.exists():
+                if p.exists(): os.remove(p)
+                shutil.move(bak, p)
+                restored.append(file_path_str)
+        
+        return {"ok": True, "restored_files": restored}
+
 def evolution_engine(params: Dict[str, Any]) -> str:
-    """أداة الوكيل لإدارة تطوره الذاتي (السيادة التطورية)."""
+    """أداة الوكيل لإدارة تطوره الذاتي (السيادة التطورية V2)."""
     import json
     action = params.get("action", "status")
     engine = EvolutionEngine()
     
     if action == "propose":
         res = engine.propose_innovation(
-            params.get("agent_id", "sovereign_agent"),
+            params.get("agent_id", os.environ.get("AGENT_ID", "sovereign_agent")),
             params.get("type", "feature"),
             params.get("description", ""),
             params.get("changes", {})
         )
         return json.dumps({"ok": True, "proposal": res}, ensure_ascii=False)
     
-    return json.dumps({"ok": True, "status": "Evolution Engine Active (Phase 5)"}, ensure_ascii=False)
+    if action == "apply":
+        innovation_id = params.get("innovation_id")
+        if not innovation_id: return "❌ evolution_engine: يجب توفير innovation_id."
+        res = engine.apply_innovation(innovation_id)
+        return json.dumps(res, ensure_ascii=False)
+        
+    if action == "rollback":
+        innovation_id = params.get("innovation_id")
+        if not innovation_id: return "❌ evolution_engine: يجب توفير innovation_id."
+        res = engine.rollback_innovation(innovation_id)
+        return json.dumps(res, ensure_ascii=False)
+    
+    return json.dumps({"ok": True, "status": "Evolution Engine Active (Phase 5 - V2)"}, ensure_ascii=False)

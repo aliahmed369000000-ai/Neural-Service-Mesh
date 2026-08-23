@@ -73,8 +73,28 @@ class ToolDiscovery:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def vote_and_review(self, tool_id: str, vote: str, comment: str) -> Dict[str, Any]:
+        """إرسال تقييم ومراجعة لأداة في السجل المركزي."""
+        try:
+            payload = {
+                "tool_id": tool_id,
+                "agent_id": os.environ.get("AGENT_ID", "Unknown_Agent"),
+                "vote": vote,
+                "comment": comment,
+                "trust_score": 1.0 # يمكن حسابه ديناميكياً بناءً على سمعة الوكيل
+            }
+            resp = requests.post(
+                f"{self.url}/tools/vote", 
+                headers={"X-NSM-Token": self.token}, 
+                json=payload,
+                timeout=5
+            )
+            return resp.json() if resp.status_code == 200 else {"ok": False, "error": resp.text}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
 def tool_discovery(params: Dict[str, Any]) -> str:
-    """أداة الوكيل لاكتشاف وتحميل أدوات من السجل الجماعي."""
+    """أداة الوكيل لاكتشاف، تحميل، وتقييم أدوات من السجل الجماعي."""
     action = params.get("action", "list")
     discovery = ToolDiscovery()
     
@@ -86,6 +106,14 @@ def tool_discovery(params: Dict[str, Any]) -> str:
         tool_id = params.get("tool_id")
         if not tool_id: return "❌ tool_discovery: يجب توفير tool_id."
         res = discovery.download_and_install(tool_id)
+        return json.dumps(res, ensure_ascii=False)
+        
+    if action == "vote":
+        tool_id = params.get("tool_id")
+        vote = params.get("vote") # "up" or "down"
+        comment = params.get("comment", "")
+        if not tool_id or not vote: return "❌ tool_discovery: يجب توفير tool_id و vote."
+        res = discovery.vote_and_review(tool_id, vote, comment)
         return json.dumps(res, ensure_ascii=False)
     
     return "❌ tool_discovery: إجراء غير معروف."
