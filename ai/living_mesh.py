@@ -141,20 +141,32 @@ class LivingMeshNode:
     def update_behavioral_weights(self, kind: str, data: Dict[str, Any]):
         """التعلم التطوري اللحظي: تعديل الأوزان بناءً على التجربة."""
         adjustment = 0.05
+        
+        # تفعيل ميزة QEA: إذا كانت الخبرة قادمة من Zeta أو تتعلق بالابتكار الكمي
+        is_quantum_boost = "zeta" in self.node_id.lower() or kind == "quantum_acceleration"
+        if is_quantum_boost:
+            adjustment *= 5 # تسارع تطوري خماسي الأبعاد
+            
         if kind == "task_completion":
             self.behavioral_weights["processing_efficiency"] += adjustment
-            self.local_evolution_score += 0.01
+            self.local_evolution_score += 0.01 * (5 if is_quantum_boost else 1)
         elif kind == "collaboration":
             self.behavioral_weights["collaboration_index"] += adjustment
         elif kind == "innovation":
             self.behavioral_weights["innovation_rate"] += adjustment * 2
-            self.local_evolution_score += 0.05
+            self.local_evolution_score += 0.05 * (5 if is_quantum_boost else 1)
         elif kind == "security_alert":
             self.behavioral_weights["security_vigilance"] += adjustment * 3
             
+        # ميزة QEA: التنبؤ الاستباقي (تعديل الأوزان بناءً على الابتكارات المستقبلية)
+        if kind == "innovation" and "QEA" in str(data.get("feature", "")):
+            logger.info(f"⚛️ QEA Triggered: Node {self.node_id} is anticipating future evolution paths.")
+            self.behavioral_weights["innovation_rate"] += 1.0
+            self.local_evolution_score += 0.5
+            
         # ضمان بقاء الأوزان في نطاق منطقي
         for key in self.behavioral_weights:
-            self.behavioral_weights[key] = round(max(0.1, min(5.0, self.behavioral_weights[key])), 3)
+            self.behavioral_weights[key] = round(max(0.1, min(10.0, self.behavioral_weights[key])), 3)
         
         logger.info(f"🧬 Real-time Evolution: Node {self.node_id} updated weights: {self.behavioral_weights}")
         

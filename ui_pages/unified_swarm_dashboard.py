@@ -346,6 +346,8 @@ def render_unified_swarm_dashboard() -> None:
         
         if innovations:
             st.info(f"💡 **ميزات مبتكرة من السرب:** {', '.join(set(filter(None, innovations)))} نشطة الآن.")
+            if "Quantum Evolutionary Awareness (QEA)" in innovations:
+                st.success("⚛️ **الوعي الكمي التطوري (QEA):** السرب يتنبأ الآن بمسارات التطور المستقبلية استباقياً.")
             if "Neural Path Pruning" in innovations:
                 st.success("🧠 **تحسين عصبي:** تم تفعيل تقليم المسارات العصبية لزيادة سرعة الاستجابة.")
             if "Resource Drain Prediction" in innovations:
