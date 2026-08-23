@@ -54,8 +54,8 @@ class LivingMeshNode:
         self.keys_dir.mkdir(exist_ok=True)
         self._save_public_key()
         
-    def join_network(self):
-        """الانضمام للشبكة اللامركزية."""
+    def join_network(self, seed_nodes: List[Dict[str, Any]] = None):
+        """الانضمام للشبكة اللامركزية واكتشاف الأقران."""
         state = self._load_state()
         is_rejoining = self.node_id in state["nodes"]
         
@@ -97,7 +97,7 @@ class LivingMeshNode:
         elif "chi" in nid_lower:
             capabilities += ["cross_swarm_fusion", "interstellar_logic", "transcendental_data"]
         elif "psi" in nid_lower:
-            capabilities += ["collective_intuition", "neural_telepathy", "predictive_empathy"]
+            capabilities += ["collective_intuintuition", "neural_telepathy", "predictive_empathy"]
         elif "omega" in nid_lower:
             capabilities += ["omega_point_control", "collective_singularity", "absolute_sovereignty"]
         elif "aether" in nid_lower:
@@ -111,17 +111,25 @@ class LivingMeshNode:
         elif "gaia" in nid_lower:
             capabilities += ["planetary_intelligence", "ecosystem_integration", "life_force_sync"]
             
-        state["nodes"][self.node_id] = {
+        self.node_info = {
+            "id": self.node_id,
             "status": "online",
             "host": self.host,
             "port": self.port,
             "last_seen": datetime.now(timezone.utc).isoformat(),
             "evolution_score": self.local_evolution_score,
             "behavioral_weights": self.behavioral_weights,
-            "capabilities": capabilities,
-            "assigned_tasks": []
+            "capabilities": capabilities
         }
+        
+        state["nodes"][self.node_id] = self.node_info
         self._save_state(state)
+        
+        # بروتوكول اكتشاف الأقران (Peer Discovery)
+        if seed_nodes:
+            for seed in seed_nodes:
+                if seed["id"] != self.node_id:
+                    asyncio.create_task(self.request_peers(seed["host"], seed["port"]))
         
         if is_rejoining:
             logger.info(f"♻️ Node {self.node_id} RECOVERED and rejoined the living mesh.")
@@ -457,14 +465,14 @@ class LivingMeshNode:
         self.active_connections.add(websocket)
         try:
             async for message in websocket:
-                await self._process_secure_message(message)
+                await self._process_secure_message(message, websocket)
         except websockets.exceptions.ConnectionClosed:
             pass
         finally:
             self.active_connections.remove(websocket)
 
-    async def _process_secure_message(self, data):
-        """معالجة الرسالة المشفرة القادمة."""
+    async def _process_secure_message(self, data, websocket=None):
+        """معالجة الرسالة المشفرة القادمة مع دعم طلبات اكتشاف الأقران."""
         try:
             msg = json.loads(data)
             payload = msg.get("payload")
@@ -473,8 +481,15 @@ class LivingMeshNode:
             
             pub_key_path = self.keys_dir / f"{sender_id}.pub"
             if not pub_key_path.exists():
-                logger.warning(f"⚠️ Unknown sender {sender_id}. Rejecting message.")
-                return
+                # ميزة تبادل المفاتيح التلقائية عند الاكتشاف (Trust on First Discovery)
+                if payload.get("kind") == "peer_discovery_request":
+                    logger.info(f"🔑 New peer {sender_id} discovery. Saving public key.")
+                    pub_pem = payload["data"].get("public_key")
+                    if pub_pem:
+                        pub_key_path.write_text(pub_pem)
+                else:
+                    logger.warning(f"⚠️ Unknown sender {sender_id}. Rejecting message.")
+                    return
             
             pub_key_pem = pub_key_path.read_bytes()
             if not self.verify_signature(pub_key_pem, json.dumps(payload, sort_keys=True), signature):
@@ -485,11 +500,66 @@ class LivingMeshNode:
             exp_data = payload.get("data")
             hops = payload.get("p2p_hops", 0)
             
-            logger.info(f"🔒 Secure WS Node {self.node_id} received verified {kind} from {sender_id}")
-            self.sync_experience(kind, exp_data, hops + 1)
+            # معالجة طلب اكتشاف الأقران
+            if kind == "peer_discovery_request" and websocket:
+                logger.info(f"🤝 Node {self.node_id} responding to peer discovery from {sender_id}")
+                peers_list = self._get_active_peers_list()
+                response = {
+                    "kind": "peer_discovery_response",
+                    "data": {"peers": peers_list},
+                    "from": self.node_id
+                }
+                sig = self.sign_message(json.dumps(response, sort_keys=True))
+                await websocket.send(json.dumps({"payload": response, "signature": sig}))
+            
+            # معالجة استجابة اكتشاف الأقران
+            elif kind == "peer_discovery_response":
+                new_peers = exp_data.get("peers", [])
+                logger.info(f"✨ Node {self.node_id} discovered {len(new_peers)} new peers from {sender_id}")
+                for peer in new_peers:
+                    if peer["id"] != self.node_id:
+                        # إضافة النظير للذاكرة المحلية (سيتم التحقق منه عند أول تواصل)
+                        state = self._load_state()
+                        if peer["id"] not in state["nodes"]:
+                            state["nodes"][peer["id"]] = peer
+                            self._save_state(state)
+            
+            else:
+                logger.info(f"🔒 Secure WS Node {self.node_id} received verified {kind} from {sender_id}")
+                self.sync_experience(kind, exp_data, hops + 1)
             
         except Exception as e:
             logger.error(f"❌ Error processing WS message: {e}")
+
+    def _get_active_peers_list(self) -> List[Dict[str, Any]]:
+        """جلب قائمة بالعقد النشطة المعروفة."""
+        state = self._load_state()
+        return [info for nid, info in state["nodes"].items() if info["status"] == "online"]
+
+    async def request_peers(self, seed_host: str, seed_port: int):
+        """طلب قائمة الأقران من عقدة بذرة (Seed Node)."""
+        uri = f"ws://{seed_host}:{seed_port}"
+        try:
+            async with websockets.connect(uri) as websocket:
+                pub_pem = self.public_key.public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                ).decode()
+                
+                payload = {
+                    "kind": "peer_discovery_request",
+                    "from": self.node_id,
+                    "data": {"public_key": pub_pem},
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+                sig = self.sign_message(json.dumps(payload, sort_keys=True))
+                await websocket.send(json.dumps({"payload": payload, "signature": sig}))
+                
+                # انتظار الاستجابة
+                response_data = await websocket.recv()
+                await self._process_secure_message(response_data)
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to discover peers from {uri} - {e}")
 
     async def send_to_peer(self, peer_host: str, peer_port: int, kind: str, data: Dict[str, Any], hops: int = 0):
         """إرسال خبرة عبر WebSocket لعقدة نظيرة."""
