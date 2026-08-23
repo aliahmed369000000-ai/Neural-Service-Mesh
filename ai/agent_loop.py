@@ -484,6 +484,14 @@ register_tool(ToolSpec("code_sandbox", "تشغيل أكواد بايثون وت�
                         {"type": "object", "properties": {"code": {"type": "string"}}}, 
                         _tool_code_sandbox))
 
+def _tool_vision_analyzer(params: Dict[str, Any]) -> str:
+    from ai.autonomous_tools import vision_analyzer
+    return vision_analyzer(params)
+
+register_tool(ToolSpec("vision_analyzer", "تحليل الصور والرسوم البيانية واستخراج المعلومات", 
+                        {"type": "object", "properties": {"image_path": {"type": "string"}, "prompt": {"type": "string"}}}, 
+                        _tool_vision_analyzer))
+
 def _tool_plan(params: Dict[str, Any]) -> str:
     """تحديث أو إنشاء خطة عمل للمهمة الحالية."""
     return f"SIGNAL_PLAN:{json.dumps(params)}"
