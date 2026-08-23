@@ -392,7 +392,8 @@ class CoreMatrixLayer:
         core_lr_scale: float = 0.1,
         image_dim: int = 512,  # أبعاد ميزات الصورة (مثلاً من CLIP)
         audio_dim: int = 128,  # أبعاد ميزات الصوت (مثلاً Mel-spectrogram)
-        video_dim: int = 512   # أبعاد ميزات الفيديو
+        video_dim: int = 512,  # أبعاد ميزات الفيديو
+        memory_dim: int = 1536  # أبعاد ميزات الذاكرة (ANN)
     ):
         self.d_model        = d_model
         self.core_dim        = 784
@@ -408,6 +409,8 @@ class CoreMatrixLayer:
         self.b_aud = np.zeros(d_model)
         self.W_vid = _xavier(d_model, video_dim)
         self.b_vid = np.zeros(d_model)
+        self.W_mem = _xavier(d_model, memory_dim)
+        self.b_mem = np.zeros(d_model)
 
         # أوزان الانتباه المتقاطع (Cross-Attention) لدمج الوسائط
         self.Wq_cross = _xavier(d_model, d_model)
@@ -472,6 +475,7 @@ class CoreMatrixLayer:
         image_feats: Optional[np.ndarray] = None, 
         audio_feats: Optional[np.ndarray] = None,
         video_feats: Optional[np.ndarray] = None,
+        memory_feats: Optional[np.ndarray] = None,
         use_cache: bool = False,
         multimodal_kv: Optional[Tuple[np.ndarray, np.ndarray]] = None
     ) -> Tuple[np.ndarray, Optional[Tuple[np.ndarray, np.ndarray]]]:
@@ -480,6 +484,7 @@ class CoreMatrixLayer:
         image_feats: (num_images, image_dim) اختياري
         audio_feats: (num_audio, audio_dim) اختياري
         video_feats: (num_frames, video_dim) اختياري
+        memory_feats: (num_mem, memory_dim) اختياري من الذاكرة الموحدة
         use_cache: تفعيل التخزين المؤقت للميزات المتعددة الوسائط
         multimodal_kv: زوج (K, V) للوسائط ممرر من الخارج
         """
@@ -497,8 +502,9 @@ class CoreMatrixLayer:
             if audio_feats is not None:
                 modality_embeddings.append(audio_feats @ self.W_aud.T + self.b_aud)
             if video_feats is not None:
-                # نستخدم W_vid الذي أضفناه حديثاً
                 modality_embeddings.append(video_feats @ self.W_vid.T + self.b_vid)
+            if memory_feats is not None:
+                modality_embeddings.append(memory_feats @ self.W_mem.T + self.b_mem)
                 
             if modality_embeddings:
                 M = np.concatenate(modality_embeddings, axis=0)
@@ -1014,10 +1020,11 @@ class ArabicTransformer:
                  image_feats: Optional[np.ndarray] = None, 
                  audio_feats: Optional[np.ndarray] = None,
                  video_feats: Optional[np.ndarray] = None,
+                 memory_feats: Optional[np.ndarray] = None,
                  past_kv: Optional[MultimodalKVCache] = None,
                  use_cache: bool = False):
         """
-        تمريرة أمامية تدعم اختيارياً الـ KV Caching.
+        تمريرة أمامية تدعم اختيارياً الـ KV Caching والذاكرة الموحدة.
         إذا تم تمرير past_kv، سيتم استخدامه وتحديثه.
         """
         S = len(ids)
@@ -1027,9 +1034,9 @@ class ArabicTransformer:
         X = self.embedding.forward(ids)
         X += self.pos_enc.forward(S, offset=pos_offset)
         
-        # دمج الجوهر متعدد الوسائط (CoreMatrix Fusion)
+        # دمج الجوهر متعدد الوسائط والذاكرة (CoreMatrix & Memory Fusion)
         mm_kv_input = past_kv.multimodal_kv if past_kv is not None else None
-        core_out, mm_kv_output = self.core.forward(X, image_feats, audio_feats, video_feats,
+        core_out, mm_kv_output = self.core.forward(X, image_feats, audio_feats, video_feats, memory_feats,
                                                    use_cache=use_cache, 
                                                    multimodal_kv=mm_kv_input)
         X = X + core_out
@@ -1063,12 +1070,14 @@ class ArabicTransformer:
         return logits, X, risk_score, intent
 
     # ── train (يمتص الأنماط → يُعدِّل الأوزان → يرمي النص) ──────────────────
-    def train_step(self, text: str) -> float:
+    def train_step(self, text: str, memory_feats: Optional[np.ndarray] = None) -> float:
         """
         يأخذ النص → يُعدِّل الأوزان → لا يحفظ النص.
         البيانات تُستهلَك وترمى، الأوزان وحدها تبقى.
         """
-        ids = self.tokenizer.encode(text, self.max_seq)
+        ids = self.tokenizer.encode(text)
+        if len(ids) > self.max_seq: ids = ids[:self.max_seq]
+        
         if len(ids) < 2:
             return 0.0
 
@@ -1076,7 +1085,7 @@ class ArabicTransformer:
         S   = len(inp)
         mask = np.triu(np.ones((S, S), bool), k=1)
 
-        probs, _, _, _ = self._forward(inp, mask)
+        probs, _, _, _ = self._forward(inp, mask, memory_feats=memory_feats)
         loss, gp = self.head.loss_grad(probs, tgt)
 
         # backward — يُعدِّل الأوزان
