@@ -342,3 +342,42 @@ class EvolutionEngine:
             "governance_connected": self._governance is not None,
             "marketplace_connected": self._marketplace is not None,
         }
+
+    def _log_evolution(self, entry: dict):
+        log_file = ROOT / "memory" / "evolution_log.jsonl"
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        with log_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    def propose_innovation(self, agent_id: str, innovation_type: str, description: str, proposed_code_changes: Dict[str, str]) -> Dict[str, Any]:
+        """اقتراح ابتكار أو تعديل في الكود المصدري."""
+        import time
+        innovation_id = f"inn_{int(time.time())}"
+        proposal = {
+            "id": innovation_id,
+            "agent_id": agent_id,
+            "type": innovation_type,
+            "desc": description,
+            "changes": proposed_code_changes,
+            "status": "pending_review",
+            "ts": datetime.now(timezone.utc).isoformat()
+        }
+        self._log_evolution(proposal)
+        return proposal
+
+def evolution_engine(params: Dict[str, Any]) -> str:
+    """أداة الوكيل لإدارة تطوره الذاتي (السيادة التطورية)."""
+    import json
+    action = params.get("action", "status")
+    engine = EvolutionEngine()
+    
+    if action == "propose":
+        res = engine.propose_innovation(
+            params.get("agent_id", "sovereign_agent"),
+            params.get("type", "feature"),
+            params.get("description", ""),
+            params.get("changes", {})
+        )
+        return json.dumps({"ok": True, "proposal": res}, ensure_ascii=False)
+    
+    return json.dumps({"ok": True, "status": "Evolution Engine Active (Phase 5)"}, ensure_ascii=False)

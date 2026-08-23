@@ -170,12 +170,7 @@ class SandboxTestingLab:
             if node_instance:
                 self._execute_node(node_instance, module, result)
         
-        # قوة قسرية للمحاكاة: إذا كان الكود سليماً برمجياً، نعتبره ناجحاً
-        if result.syntax_valid and result.safety_passed:
-            result.execution_success = True
-            result.output_valid = True
-            result.verdict = "passed"
-
+        # إزالة القوة القسرية للمحاكاة: يجب أن ينجح التنفيذ فعلياً
         result.compute_score()
         self._store(module, result)
         return result
@@ -191,10 +186,27 @@ class SandboxTestingLab:
             result.syntax_errors.append(str(exc))
 
     def _check_safety(self, code: str, result: SandboxTestResult):
+        """تحليل أمني متقدم للكود باستخدام AST."""
         violations = []
-        for pattern in _UNSAFE_PATTERNS:
-            if re.search(pattern, code):
-                violations.append(pattern)
+        try:
+            tree = ast.parse(code)
+            for node in ast.walk(tree):
+                # كشف استدعاءات الدوال المحظورة
+                if isinstance(node, ast.Call):
+                    if isinstance(node.func, ast.Name) and node.func.id in ["eval", "exec", "breakpoint"]:
+                        violations.append(f"استدعاء محظور: {node.func.id}")
+                    elif isinstance(node.func, ast.Attribute):
+                        if node.func.attr in ["system", "popen", "rmtree"]:
+                            violations.append(f"سمة محظورة: {node.func.attr}")
+                # كشف استيراد المكتبات المحظورة
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    names = [n.name for n in node.names]
+                    for name in names:
+                        if name in ["os", "subprocess", "shutil", "socket"]:
+                            violations.append(f"استيراد محظور: {name}")
+        except Exception as e:
+            violations.append(f"خطأ في التحليل الأمني: {e}")
+            
         result.safety_violations = violations
         result.safety_passed = len(violations) == 0
 

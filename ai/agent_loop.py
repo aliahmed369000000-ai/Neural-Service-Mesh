@@ -27,6 +27,8 @@ from ai.video_indexer import video_indexer
 from ai.multimodal_sync import multimodal_sync
 from ai.agent_auto_heal import AutoHeal
 from ai.memory_manager import MemoryManager
+from ai.tool_genesis import tool_genesis, ToolGenesis
+from ai.evolution_engine import evolution_engine
 
 logger = logging.getLogger("NeuralServiceMesh.AgentLoop")
 healer = AutoHeal(max_rounds=3)
@@ -157,6 +159,44 @@ def _tool_read(params: Dict[str, Any]) -> str:
     except Exception as e: return f"❌ read_file: {e}"
 
 register_tool(ToolSpec("read_file", "قراءة ملف", {"type": "object", "properties": {"path": {"type": "string"}}}, _tool_read))
+
+# 🆕 تسجيل أداة توليد الأدوات
+register_tool(ToolSpec(
+    "tool_genesis", 
+    "خلق أداة جديدة لنفسك (السيادة الإنشائية)", 
+    {
+        "type": "object", 
+        "properties": {
+            "name": {"type": "string"},
+            "description": {"type": "string"},
+            "code": {"type": "string"},
+            "params_schema": {"type": "object"}
+        },
+        "required": ["name", "description", "code"]
+    }, 
+    tool_genesis
+))
+
+# تحميل الأدوات الديناميكية عند البدء
+dynamic_tools = ToolGenesis.load_dynamic_tools()
+for name, fn in dynamic_tools.items():
+    register_tool(ToolSpec(name, f"أداة ديناميكية: {name}", {}, fn))
+
+# 🆕 تسجيل أداة التطور الذاتي
+register_tool(ToolSpec(
+    "evolution_engine", 
+    "إدارة التطور الذاتي واقتراح ابتكارات في الكود المصدري", 
+    {
+        "type": "object", 
+        "properties": {
+            "action": {"type": "string", "enum": ["status", "propose"]},
+            "type": {"type": "string"},
+            "description": {"type": "string"},
+            "changes": {"type": "object"}
+        }
+    }, 
+    evolution_engine
+))
 
 def _tool_write(params: Dict[str, Any]) -> str:
     path = _safe_tool_path(str(params.get("path", "")))

@@ -4,21 +4,9 @@ import requests
 from typing import Dict, Any
 
 def web_explorer(params: Dict[str, Any]) -> str:
-    """أداة تصفح الويب والبحث عن المعلومات."""
-    query = params.get("query", "")
-    if not query: return "❌ web_explorer: يجب توفير query."
-    
-    try:
-        # محاكاة البحث (في بيئة حقيقية سنستخدم API بحث)
-        # هنا سنستخدم duckduckgo-search إذا كانت متوفرة أو محاكاة ذكية
-        return json.dumps({
-            "ok": True,
-            "results": [
-                {"title": f"نتائج البحث عن {query}", "snippet": f"معلومات مفصلة حول {query} تشمل التقنيات الحديثة وأفضل الممارسات.", "url": "https://example.com/search"}
-            ]
-        }, ensure_ascii=False)
-    except Exception as e:
-        return f"❌ web_explorer Error: {e}"
+    """أداة تصفح الويب والبحث المعمق الحقيقية."""
+    from ai.web_explorer_real import web_explorer_real
+    return web_explorer_real(params)
 
 def code_sandbox(params: Dict[str, Any]) -> str:
     """بيئة تشغيل أكواد بايثون الآمنة."""
