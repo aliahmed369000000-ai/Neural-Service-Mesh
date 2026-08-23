@@ -13,6 +13,8 @@ import uuid
 import shutil
 from typing import Any, Dict, List, Optional
 from pathlib import Path
+import numpy as np
+from ai.quantization_engine import VectorQuantizer
 
 class MultimodalMemory:
     def __init__(self, storage_dir: Optional[str] = None):
@@ -28,6 +30,8 @@ class MultimodalMemory:
         # إنشاء المجلدات اللازمة
         self.assets_dir.mkdir(parents=True, exist_ok=True)
         self._init_index()
+        self.quantizer = VectorQuantizer()
+        self.quantizer.load_codebook()
 
     def _init_index(self):
         """تهيئة ملف الفهرس إذا لم يكن موجوداً."""
@@ -72,6 +76,16 @@ class MultimodalMemory:
         """تحديث ملف الفهرس بالبيانات الجديدة."""
         with open(self.index_path, "r+", encoding="utf-8") as f:
             data = json.load(f)
+            
+            # تطبيق التكميم إذا وجد متجه دلالي (Embedding)
+            if "embedding" in entry.get("metadata", {}):
+                vector = entry["metadata"]["embedding"]
+                compressed_idx = self.quantizer.quantize(np.array(vector))
+                entry["metadata"]["compressed_idx"] = compressed_idx
+                # إزالة المتجه الأصلي لتوفير المساحة
+                del entry["metadata"]["embedding"]
+                entry["quantized"] = True
+
             data["assets"].append(entry)
             
             # تحديث الوسوم (Tags) للبحث السريع
