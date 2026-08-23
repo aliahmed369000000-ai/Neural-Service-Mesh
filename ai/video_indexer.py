@@ -56,7 +56,7 @@ class VideoTemporalIndexer:
         return [kf for kf in index["keyframes"] if tag.lower() in [t.lower() for t in kf["tags"]]]
 
     def load_index(self, video_id: str) -> Optional[Dict]:
-        """تحميل فهرس من القرص."""
+        """تحميل فهرس من القرص مع دعم التحميل التجميعي للأجزاء."""
         if video_id in self.active_indices:
             return self.active_indices[video_id]
             
@@ -64,15 +64,57 @@ class VideoTemporalIndexer:
         if os.path.exists(path):
             with open(path, "r") as f:
                 index = json.load(f)
+                
+                # إذا كان الفهرس مجزأً، نقوم بتحميل الأجزاء ودمجها
+                if index.get("is_sharded"):
+                    index["keyframes"] = []
+                    for i in range(index["shard_count"]):
+                        index["keyframes"].extend(self.load_shard(video_id, i))
+                
                 self.active_indices[video_id] = index
                 return index
         return None
 
     def _save_index(self, video_id: str):
-        """حفظ الفهرس على القرص."""
-        if video_id in self.active_indices:
-            path = os.path.join(self.storage_dir, f"{video_id}_index.json")
-            with open(path, "w") as f:
-                json.dump(self.active_indices[video_id], f, indent=2)
+        """حفظ الفهرس على القرص مع دعم التجزئة (Sharding) للملفات الضخمة."""
+        if video_id not in self.active_indices: return
+        
+        index = self.active_indices[video_id]
+        base_path = os.path.join(self.storage_dir, f"{video_id}_index.json")
+        
+        # إذا تجاوز عدد الإطارات 100، نقوم بالتجزئة
+        shard_size = 100
+        keyframes = index.get("keyframes", [])
+        
+        if len(keyframes) > shard_size:
+            index["is_sharded"] = True
+            index["shard_count"] = (len(keyframes) + shard_size - 1) // shard_size
+            
+            # حفظ الملف الرئيسي بدون الإطارات
+            main_index = {k: v for k, v in index.items() if k != "keyframes"}
+            with open(base_path, "w") as f:
+                json.dump(main_index, f, indent=2)
+            
+            # حفظ الأجزاء (Shards)
+            shard_dir = os.path.join(self.storage_dir, f"{video_id}_shards")
+            os.makedirs(shard_dir, exist_ok=True)
+            
+            for i in range(index["shard_count"]):
+                shard_data = keyframes[i*shard_size : (i+1)*shard_size]
+                shard_path = os.path.join(shard_dir, f"shard_{i}.json")
+                with open(shard_path, "w") as f:
+                    json.dump(shard_data, f, indent=2)
+        else:
+            index["is_sharded"] = False
+            with open(base_path, "w") as f:
+                json.dump(index, f, indent=2)
+
+    def load_shard(self, video_id: str, shard_index: int) -> List[Dict]:
+        """تحميل جزء محدد من الفهرس المجزأ."""
+        shard_path = os.path.join(self.storage_dir, f"{video_id}_shards", f"shard_{shard_index}.json")
+        if os.path.exists(shard_path):
+            with open(shard_path, "r") as f:
+                return json.load(f)
+        return []
 
 video_indexer = VideoTemporalIndexer()
