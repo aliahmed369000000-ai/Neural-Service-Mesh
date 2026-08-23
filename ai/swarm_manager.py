@@ -54,6 +54,28 @@ class SwarmManager:
         # ربط الذاكرة متعددة الوسائط
         from ai.multimodal_memory import mm_memory
         self.memory = mm_memory
+        
+        # 🆕 إدارة حالة النوم
+        self.sleeping_agents: Dict[str, Dict[str, Any]] = {}
+
+    def set_agent_sleep(self, agent_id: str, snapshot_path: str):
+        """تحديث حالة الوكيل إلى 'نائم' وتخزين مسار لقطة الوعي."""
+        if agent_id in self.workers:
+            self.workers[agent_id]["status"] = "sleeping"
+            self.sleeping_agents[agent_id] = {
+                "snapshot_path": snapshot_path,
+                "sleep_time": time.time()
+            }
+            logger.info(f"😴 Agent {agent_id} is now in deep sleep.")
+
+    def set_agent_awake(self, agent_id: str):
+        """تحديث حالة الوكيل إلى 'نشط' عند الاستيقاظ."""
+        if agent_id in self.workers:
+            self.workers[agent_id]["status"] = "active"
+            self.workers[agent_id]["last_seen"] = time.time()
+            if agent_id in self.sleeping_agents:
+                del self.sleeping_agents[agent_id]
+            logger.info(f"🌅 Agent {agent_id} has awakened.")
 
     def check_permission(self, agent_id: str, action: str) -> bool:
         """التحقق من صلاحيات الوكيل بناءً على الدور ومستوى الثقة."""

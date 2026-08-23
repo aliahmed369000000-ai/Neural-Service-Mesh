@@ -197,23 +197,48 @@ def _tool_find_files(params: Dict[str, Any]) -> str:
 
 register_tool(ToolSpec("find_files", "البحث عن ملفات بنمط معين", {"type": "object", "properties": {"pattern": {"type": "string"}}}, _tool_find_files))
 
-def _tool_sleep(params: Dict[str, Any]) -> str:
+def _tool_go_to_sleep(params: Dict[str, Any]) -> str:
+    """حفظ حالة الوكيل الحالية والدخول في وضع النوم العميق."""
     agent_id = str(params.get("agent_id", "default"))
-    return f"SIGNAL_SLEEP:{agent_id}"
+    state_to_save = params.get("state", {})
+    
+    try:
+        from ai.persistence_manager import persistence_manager
+        from ai.swarm_manager import swarm_manager
+        
+        # حفظ لقطة الوعي
+        snapshot_path = persistence_manager.save_snapshot(agent_id, state_to_save)
+        
+        # إبلاغ مدير السرب بالدخول في النوم
+        swarm_manager.set_agent_sleep(agent_id, snapshot_path)
+        
+        return f"😴 تم حفظ وعي الوكيل {agent_id} والدخول في النوم العميق. المسار: {snapshot_path}"
+    except Exception as e:
+        return f"❌ فشل الدخول في النوم: {e}"
 
-register_tool(ToolSpec("sleep", "دخول وضع النوم", {"type": "object", "properties": {"agent_id": {"type": "string"}, "reason": {"type": "string"}, "wake_up_after": {"type": "integer"}}}, _tool_sleep))
+register_tool(ToolSpec("go_to_sleep", "حفظ الحالة والدخول في النوم العميق", {"type": "object", "properties": {"agent_id": {"type": "string"}, "state": {"type": "object"}}}, _tool_go_to_sleep))
 
 def _tool_wake_up(params: Dict[str, Any]) -> str:
+    """استعادة حالة الوكيل من آخر لقطة وعي محفوظة."""
     agent_id = str(params.get("agent_id", ""))
-    lazy = bool(params.get("lazy", False))
+    
     try:
-        from ai.agent_hibernation import wake_up_agent
-        state = wake_up_agent(agent_id, lazy=lazy)
-        if state: return f"🌅 الوكيل {agent_id} استيقظ ({'تدريجي' if lazy else 'كامل'})."
-        return f"ℹ️ لا توجد حالة للوكيل {agent_id}."
-    except Exception as e: return f"❌ wake_up: {e}"
+        from ai.persistence_manager import persistence_manager
+        from ai.swarm_manager import swarm_manager
+        
+        # استعادة لقطة الوعي
+        state = persistence_manager.load_snapshot(agent_id)
+        if not state:
+            return f"⚠️ لم يتم العثور على حالة محفوظة للوكيل {agent_id}."
+            
+        # إبلاغ مدير السرب بالاستيقاظ
+        swarm_manager.set_agent_awake(agent_id)
+        
+        return json.dumps({"status": "awakened", "agent_id": agent_id, "restored_state": state}, ensure_ascii=False)
+    except Exception as e:
+        return f"❌ فشل الاستيقاظ: {e}"
 
-register_tool(ToolSpec("wake_up", "إيقاظ وكيل", {"type": "object", "properties": {"agent_id": {"type": "string"}, "lazy": {"type": "boolean"}}}, _tool_wake_up))
+register_tool(ToolSpec("wake_up", "استعادة الحالة والاستيقاظ من النوم", {"type": "object", "properties": {"agent_id": {"type": "string"}}}, _tool_wake_up))
 
 # ── أدوات الوسائط والساندبوكس ──────────────────────────────────────
 def _tool_image_search(params: Dict[str, Any]) -> str:
