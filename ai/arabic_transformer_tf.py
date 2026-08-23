@@ -80,6 +80,14 @@ class CoreMatrixLayerTF(tf.keras.layers.Layer):
         multimodal_context = tf.zeros_like(X)
         K_mod, V_mod = None, None
 
+        # 🆕 Surah Harmonic Fusion: التزامن الترددي النبضي بين الصوت والفيديو
+        harmonic_modulator = None
+        if audio_feats is not None and video_feats is not None:
+            # استخراج نبضات التردد من الصوت
+            audio_pulse = tf.reduce_mean(tf.abs(audio_feats), axis=-1, keepdims=True)
+            audio_pulse = tf.nn.sigmoid(audio_pulse) # Pulse Gate
+            harmonic_modulator = tf.reduce_mean(audio_pulse, axis=1, keepdims=True)
+
         if multimodal_kv is not None:
             K_mod, V_mod = multimodal_kv
         else:
@@ -89,7 +97,11 @@ class CoreMatrixLayerTF(tf.keras.layers.Layer):
             if audio_feats is not None:
                 modality_embeddings.append(tf.matmul(audio_feats, self.W_aud) + self.b_aud)
             if video_feats is not None:
-                modality_embeddings.append(tf.matmul(video_feats, self.W_vid) + self.b_vid)
+                vid_emb = tf.matmul(video_feats, self.W_vid) + self.b_vid
+                # تطبيق الـ Harmonic Modulator لتعزيز الفيديو المتزامن صوتياً
+                if harmonic_modulator is not None:
+                    vid_emb = vid_emb * (1.0 + harmonic_modulator)
+                modality_embeddings.append(vid_emb)
             
             if modality_embeddings:
                 M = tf.concat(modality_embeddings, axis=1) # (batch, total_mod_tokens, d_model)
@@ -99,7 +111,12 @@ class CoreMatrixLayerTF(tf.keras.layers.Layer):
         if K_mod is not None:
             Q = tf.matmul(X, self.Wq_cross)
             # Simple Cross-Attention
-            scores = tf.matmul(Q, K_mod, transpose_b=True) / math.sqrt(self.d_model)
+            scores = tf.matmul(Q, K_mod, transpose_b=True) / math.sqrt(float(self.d_model))
+            
+            # تعزيز انتباه النص للوسائط المتزامنة نبضياً
+            if harmonic_modulator is not None:
+                scores = scores * (1.0 + 0.1 * harmonic_modulator)
+                
             attn = tf.nn.softmax(scores, axis=-1)
             multimodal_context = tf.matmul(attn, V_mod)
 
