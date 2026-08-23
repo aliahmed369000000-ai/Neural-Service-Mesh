@@ -21,6 +21,7 @@ import concurrent.futures
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 from ai.cache_manager import agent_cache
+from ai.learning_engine import learning_engine
 
 logger = logging.getLogger("NeuralServiceMesh.AgentLoop")
 
@@ -289,7 +290,11 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                 _emit({"type": "info", "text": "🌅 تم استعادة الحالة (Mental Warm-up المتعدد الوسائط)..."})
             else:
                 history = [{"role": "user", "content": user_input}]
-
+                # حقن الدروس المستفادة في السياق الأول
+                lessons = learning_engine.get_relevant_lessons(user_input)
+                if lessons:
+                    history.append({"role": "system", "content": lessons})
+            
             from ai.workload_monitor import WorkloadMonitor
             monitor = WorkloadMonitor()
             
@@ -422,7 +427,15 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                     history.append({"role": "user", "content": "\n".join(obs_round)})
                 
                 if parsed.get("end"):
-                    _emit({"type": "answer", "text": parsed.get("finish", "تم")})
+                    # استخلاص وتسجيل الخبرة عند انتهاء المهمة
+                    finish_text = parsed.get("finish", "تم")
+                    learning_engine.record_experience(
+                        task=user_input[:100],
+                        outcome=finish_text[:200],
+                        lesson="المهمة اكتملت بنجاح.",
+                        success=True
+                    )
+                    _emit({"type": "answer", "text": finish_text})
                     done = True
             
             yield from _flush()
