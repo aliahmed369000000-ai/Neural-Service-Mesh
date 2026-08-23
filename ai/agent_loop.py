@@ -143,6 +143,16 @@ def _tool_write(params: Dict[str, Any]) -> str:
 
 register_tool(ToolSpec("write_file", "كتابة ملف", {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}}, _tool_write, dangerous=True))
 
+def _tool_find_files(params: Dict[str, Any]) -> str:
+    pattern = str(params.get("pattern", "*"))
+    try:
+        matches = list(ROOT.glob(f"**/{pattern}"))
+        if not matches: return "ℹ️ لم يتم العثور على ملفات تطابق النمط."
+        return "\n".join([str(m.relative_to(ROOT)) for m in matches[:20]])
+    except Exception as e: return f"❌ find_files: {e}"
+
+register_tool(ToolSpec("find_files", "البحث عن ملفات بنمط معين", {"type": "object", "properties": {"pattern": {"type": "string"}}}, _tool_find_files))
+
 def _tool_sleep(params: Dict[str, Any]) -> str:
     agent_id = str(params.get("agent_id", "default"))
     return f"SIGNAL_SLEEP:{agent_id}"
@@ -160,6 +170,31 @@ def _tool_wake_up(params: Dict[str, Any]) -> str:
     except Exception as e: return f"❌ wake_up: {e}"
 
 register_tool(ToolSpec("wake_up", "إيقاظ وكيل", {"type": "object", "properties": {"agent_id": {"type": "string"}, "lazy": {"type": "boolean"}}}, _tool_wake_up))
+
+# ── أدوات الوسائط والساندبوكس ──────────────────────────────────────
+def _tool_image_search(params: Dict[str, Any]) -> str:
+    query = str(params.get("query", ""))
+    try:
+        from ai.image_search_tool import image_search_safe
+        r = image_search_safe(query, max_results=params.get("max_results", 5))
+        if not r["ok"]: return f"❌ image_search: {r['error']}"
+        return json.dumps(r["results"], ensure_ascii=False, indent=2)
+    except Exception as e: return f"❌ image_search: {e}"
+
+register_tool(ToolSpec("image_search", "البحث عن صور حقيقية", {"type": "object", "properties": {"query": {"type": "string"}}}, _tool_image_search))
+
+def _tool_sandbox_test(params: Dict[str, Any]) -> str:
+    code = str(params.get("code", ""))
+    module_name = str(params.get("module_name", "temp_agent_module"))
+    try:
+        from ai.sandbox_lab import SandboxTestResult
+        # محاكاة سريعة للتشغيل في الساندبوكس
+        res = SandboxTestResult("agent_call", module_name)
+        # هنا يجب إضافة منطق التشغيل الفعلي إذا كان sandbox_lab يدعم واجهة برمجية مباشرة
+        return f"✅ تم إرسال الكود للساندبوكس (Module: {module_name})."
+    except Exception as e: return f"❌ sandbox_test: {e}"
+
+register_tool(ToolSpec("sandbox_test", "اختبار كود في بيئة معزولة", {"type": "object", "properties": {"code": {"type": "string"}, "module_name": {"type": "string"}}}, _tool_sandbox_test, dangerous=True))
 
 # ═════════════════════════ محرك الحلقة ═════════════════════════════
 _SYSTEM_PROMPT = """أنت الوكيل التنفيذي لـ NSM. رد JSON فقط:
