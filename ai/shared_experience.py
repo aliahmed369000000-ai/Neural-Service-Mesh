@@ -9,19 +9,57 @@ import json
 import logging
 import time
 import threading
+import base64
+import os
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 logger = logging.getLogger("NSM.SharedExperience")
 
 class SharedExperienceManager:
-    def __init__(self, storage_path: str = "artifacts/learning/shared_knowledge.json", remote_url: Optional[str] = None):
+    def __init__(self, storage_path: str = "artifacts/learning/shared_knowledge.json", remote_url: Optional[str] = None, encryption_key: Optional[str] = None):
         self.storage_path = Path(storage_path)
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self.remote_url = remote_url
         self.api_key = "nsm_secret_key_2026"
         self.knowledge = self._load_knowledge()
+        
+        # إعداد التشفير
+        self.encryption_enabled = encryption_key is not None
+        if self.encryption_enabled:
+            self.cipher = self._init_cipher(encryption_key)
+        else:
+            self.cipher = None
+
+    def _init_cipher(self, key_str: str) -> Fernet:
+        """إنشاء محرك التشفير من سلسلة نصية."""
+        salt = b'nsm_salt_2026'
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100000,
+        )
+        key = base64.urlsafe_b64encode(kdf.derive(key_str.encode()))
+        return Fernet(key)
+
+    def _encrypt(self, text: str) -> str:
+        if not self.encryption_enabled or not self.cipher:
+            return text
+        return self.cipher.encrypt(text.encode()).decode()
+
+    def _decrypt(self, encrypted_text: str) -> str:
+        if not self.encryption_enabled or not self.cipher:
+            return encrypted_text
+        try:
+            return self.cipher.decrypt(encrypted_text.encode()).decode()
+        except:
+            return "[DECRYPTION_FAILED]"
 
     def _request(self, method: str, endpoint: str, data: Optional[Dict] = None):
         """إرسال طلب إلى خادم الذاكرة الموزع."""
@@ -54,12 +92,12 @@ class SharedExperienceManager:
         return {"shared_facts": {}, "active_queries": {}, "global_metrics": {}, "version": "1.1"}
 
     def _save_knowledge(self):
-        with self._lock:
-            try:
-                with open(self.storage_path, "w", encoding="utf-8") as f:
-                    json.dump(self.knowledge, f, ensure_ascii=False, indent=2)
-            except Exception as e:
-                logger.error(f"فشل حفظ المعرفة الجماعية: {e}")
+        # إزالة القفل من هنا لتجنب Deadlock إذا تم استدعاؤه من داخل قفل آخر
+        try:
+            with open(self.storage_path, "w", encoding="utf-8") as f:
+                json.dump(self.knowledge, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"فشل حفظ المعرفة الجماعية: {e}")
 
     def share_fact(self, agent_id: str, fact: Dict[str, Any]):
         """مشاركة حقيقة مع دعم الوضع الموزع."""
@@ -68,31 +106,30 @@ class SharedExperienceManager:
         
         if importance < 0.7: return False
             
-        if "```" in content or "import " in content or "def " in content:
-            from ai.learning_engine import learning_engine
-            eval_res = learning_engine.evaluate_solution(content)
-            if not eval_res["approved"]: return False
-            importance = (importance + eval_res["score"]) / 2
+        # تشفير المحتوى قبل المشاركة
+        final_content = self._encrypt(content)
 
         if self.remote_url:
             res = self._request("POST", "/share", {
                 "agent_id": agent_id,
-                "content": content,
+                "content": final_content,
                 "importance": importance,
-                "semantic_hash": fact.get("semantic_hash")
+                "semantic_hash": fact.get("semantic_hash"),
+                "is_encrypted": self.encryption_enabled
             })
             return res and res.get("status") == "success"
 
         with self._lock:
-            fact_id = f"shared_{hash(content) % 10000}"
+            fact_id = f"shared_{uuid.uuid4().hex[:6]}"
             if fact_id not in self.knowledge["shared_facts"]:
                 self.knowledge["shared_facts"][fact_id] = {
-                    "content": content,
+                    "content": final_content,
                     "origin_agent": agent_id,
                     "shared_at": time.time(),
                     "importance": importance,
                     "verification_count": 1,
-                    "semantic_hash": fact.get("semantic_hash")
+                    "semantic_hash": fact.get("semantic_hash"),
+                    "is_encrypted": self.encryption_enabled
                 }
                 self._save_knowledge()
                 return True
@@ -115,6 +152,10 @@ class SharedExperienceManager:
             content = fact.get("content") if isinstance(fact, dict) else str(fact)
             if not content: continue
             
+            # فك التشفير إذا لزم الأمر
+            if isinstance(fact, dict) and fact.get("is_encrypted"):
+                content = self._decrypt(content)
+
             exists = any(f.get("content") == content for f in agent_memory.ltm_semantic.values())
             if not exists:
                 importance = fact.get("importance", 0.8) if isinstance(fact, dict) else 0.8
