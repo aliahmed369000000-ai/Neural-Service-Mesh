@@ -821,6 +821,12 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                     reflection = state.reflect(history)
                     if reflection:
                         history.append({"role": "system", "content": reflection})
+                    
+                    # تحليل المشاعر التقنية وحقن الحالة العاطفية للسرب
+                    from ai.technical_sentiment import sentiment_engine
+                    sentiment_data = sentiment_engine.analyze_steps(state.steps)
+                    if sentiment_data["alert"]:
+                        history.append({"role": "system", "content": f"⚠️ تنبيه عاطفي: الوكيل يشعر بـ '{sentiment_data['sentiment']}' (الثقة: {sentiment_data['confidence']}). يرجى تبسيط المهام أو طلب المساعدة."})
                         
                     raw = _invoke_llm(fn, system, history)
                 except Exception as e:
