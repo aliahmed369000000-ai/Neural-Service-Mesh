@@ -26,6 +26,7 @@ from ai.video_sampler import video_sampler
 from ai.video_indexer import video_indexer
 from ai.multimodal_sync import multimodal_sync
 from ai.agent_auto_heal import AutoHeal
+from ai.memory_manager import MemoryManager
 
 logger = logging.getLogger("NeuralServiceMesh.AgentLoop")
 healer = AutoHeal(max_rounds=3)
@@ -346,14 +347,14 @@ def _tool_memory_search(params: Dict[str, Any]) -> str:
         if not agent_state:
             return "❌ فشل الوصول إلى ذاكرة الوكيل."
             
-        semantic_results = agent_state.search_semantic(query)
-        episodic_results = agent_state.search_episodic(query)
+        # استخدام MemoryManager المدمج في الحالة
+        results = agent_state.memory_manager.search(query)
         
         return json.dumps({
             "ok": True,
             "query": query,
-            "semantic_facts": [r["content"] for r in semantic_results[:3]],
-            "episodic_events": [r["summary"] for r in episodic_results[:2]]
+            "semantic_facts": [r["content"] for r in results["semantic"][:3]],
+            "episodic_events": [r["summary"] for r in results["episodic"][:2]]
         }, ensure_ascii=False, indent=2)
     except Exception as e:
         return f"❌ memory_search Error: {e}"
@@ -384,6 +385,7 @@ def _build_tools_prompt() -> str:
 class LoopState:
     def __init__(self, loop_id: str, user_input: str):
         self.loop_id, self.user_input = loop_id, user_input
+        self.memory = MemoryManager(f"agent_{loop_id}")
         self.round = 0
         self.steps = []
         self.status = "pending"
@@ -436,15 +438,38 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
             fn = llm_fn or (lambda s, h: "JSON logic here") # Placeholder
             system = _SYSTEM_PROMPT + "\n" + _build_tools_prompt()
             
-            # استعادة الحالة (الاستيقاظ التدريجي)
+            # استعادة الحالة (الاستيقاظ التدريجي مع STM/LTM)
             from ai.agent_hibernation import wake_up_agent
             recovered = wake_up_agent(user_input)
             if recovered:
-                history = recovered.context
+                # دمج MemoryManager المستعاد
+                state.memory = recovered.memory_manager
+                history = state.memory.stm
                 state.visual_memory = getattr(recovered, "visual_context", {})
                 state.audio_memory = getattr(recovered, "audio_context", {})
                 state.multimodal_memory = getattr(recovered, "multimodal_memory", {})
-                warmup_msg = "🌅 استيقظت. لخص أين توقفت."
+                
+                # تفعيل الاسترجاع النشط (Active Retrieval) للخبرات ذات الصلة بالمدخل الجديد
+                related = state.memory.search(user_input)
+                warmup_msg = "🌅 استيقظت. استعدت سياق المهمة."
+                
+                # دمج الخبرات المستعادة في السياق المباشر (Active Retrieval)
+                if related["semantic"] or related["episodic"]:
+                    context_snippet = "\n---\n💡 سياق مسترجع من الذاكرة طويلة الأمد:\n"
+                    for fact in related["semantic"][:2]:
+                        context_snippet += f"- حقيقة: {fact['content']}\n"
+                    for event in related["episodic"][:1]:
+                        context_snippet += f"- تجربة سابقة: {event['summary']}\n"
+                    
+                    # حقن السياق في التاريخ المستعاد
+                    history.insert(0, {"role": "system", "content": context_snippet})
+                    
+                    warmup_msg += "\n\n💡 خبرات مستعادة ذات صلة بالمهمة الحالية:\n"
+                    for f in related["semantic"][:2]:
+                        warmup_msg += f"- حقيقة: {f['content']}\n"
+                    for e in related["episodic"][:1]:
+                        warmup_msg += f"- حدث سابق: {e['summary']}\n"
+
                 if recovered.pending_tasks:
                     warmup_msg += f"\nالمهام المعلقة التي تم رصدها قبل النوم:\n- " + "\n- ".join(recovered.pending_tasks)
                 
@@ -466,7 +491,19 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                 history.append({"role": "user", "content": warmup_msg})
                 _emit({"type": "info", "text": "🌅 تم استعادة الحالة (Mental Warm-up المتعدد الوسائط)..."})
             else:
-                history = [{"role": "user", "content": user_input}]
+                history = state.memory.stm
+                
+                # الاسترجاع النشط للخبرات في الجلسة الجديدة
+                related = state.memory.search(user_input)
+                if related["semantic"] or related["episodic"]:
+                    context_snippet = "\n---\n💡 سياق مسترجع من الذاكرة طويلة الأمد:\n"
+                    for fact in related["semantic"][:2]:
+                        context_snippet += f"- حقيقة: {fact['content']}\n"
+                    for event in related["episodic"][:1]:
+                        context_snippet += f"- تجربة سابقة: {event['summary']}\n"
+                    history.append({"role": "system", "content": context_snippet})
+                
+                history.append({"role": "user", "content": user_input})
                 # حقن الدروس المستفادة في السياق الأول
                 lessons = learning_engine.get_relevant_lessons(user_input)
                 if lessons:
@@ -484,7 +521,8 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                 if state.round % 5 == 0:
                     from ai.agent_hibernation import hibernate_agent
                     # تفعيل الضغط في الحفظ التلقائي لتوفير المساحة
-                    hibernate_agent(f"{loop_id}_autosave", history, {"steps": state.steps}, compress=True)
+                    hibernate_agent(f"agent_{loop_id}", history, {"steps": state.steps}, 
+                                    memory_manager_data=state.memory.to_dict(), compress=True)
                     _emit({"type": "info", "text": "💾 حفظ تلقائي (مع الضغط الديناميكي)."})
                 
                 target_agent_id = f"agent_{loop_id}"
@@ -591,7 +629,8 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                     pending = extract_pending_tasks(history, {"steps": state.steps})
                     if hibernate_agent(target_agent_id, history, {"steps": state.steps}, pending_tasks=pending, 
                                        visual_context=state.visual_memory, audio_context=state.audio_memory,
-                                       multimodal_memory=state.multimodal_memory, compress=True):
+                                       multimodal_memory=state.multimodal_memory, 
+                                       memory_manager_data=state.memory.to_dict(), compress=True):
                         if wake_after > 0:
                             from ai.agent_hibernation import schedule_wake_up
                             schedule_wake_up(target_agent_id, wake_after)
