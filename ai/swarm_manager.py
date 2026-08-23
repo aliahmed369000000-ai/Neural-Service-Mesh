@@ -33,6 +33,12 @@ class SwarmManager:
         self.proposals: Dict[str, SwarmProposal] = {}
         self.workers: Dict[str, Dict[str, Any]] = {}
         self.results: List[Dict[str, Any]] = []
+        
+        # 🆕 سوق المهام والمنافسة
+        self.marketplace_tasks: Dict[str, Dict[str, Any]] = {}
+        self.bids: Dict[str, List[Dict[str, Any]]] = {}
+        self.competitions: Dict[str, Dict[str, Any]] = {}
+        
         self.threshold = 0.66  # عتبة التوافق (66%)
         self.proposal_timeout = 60  # مهلة المقترح بالثواني
         self.heartbeat_timeout = 20  # مهلة نبض القلب بالثواني
@@ -258,5 +264,110 @@ class SwarmManager:
         }
         with open(p_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+
+    # 🆕 منطق سوق المهام والمزايدة
+    def post_marketplace_task(self, task_id: str, description: str, requirements: Dict[str, Any]):
+        """طرح مهمة في سوق السرب للمزايدة عليها."""
+        self.marketplace_tasks[task_id] = {
+            "description": description,
+            "requirements": requirements,
+            "status": "open",
+            "created_at": time.time()
+        }
+        self.bids[task_id] = []
+        logger.info(f"🛒 Task Posted in Marketplace: {task_id}")
+
+    def submit_bid(self, task_id: str, agent_id: str, cost_estimate: int, time_estimate: float, trust_claim: float):
+        """تقديم عرض (Bid) من وكيل لمهمة معينة."""
+        if task_id not in self.marketplace_tasks or self.marketplace_tasks[task_id]["status"] != "open":
+            return False
+        
+        bid = {
+            "agent_id": agent_id,
+            "cost": cost_estimate,
+            "time": time_estimate,
+            "trust": trust_claim,
+            "ts": time.time()
+        }
+        self.bids[task_id].append(bid)
+        logger.info(f"💰 Bid Submitted for {task_id} by {agent_id}")
+        return True
+
+    def award_task(self, task_id: str) -> Optional[str]:
+        """اختيار العرض الأفضل وإرساء المهمة على الوكيل الأنسب."""
+        if task_id not in self.bids or not self.bids[task_id]:
+            return None
+        
+        # خوارزمية الاختيار: توازن بين التكلفة، الوقت، وثقة الوكيل الفعلية
+        best_bid = None
+        best_score = -1.0
+        
+        for bid in self.bids[task_id]:
+            agent_id = bid["agent_id"]
+            actual_trust = self.workers.get(agent_id, {}).get("trust_score", 0.5)
+            
+            # معادلة التقييم (Score): Trust / (Cost * Time)
+            score = actual_trust / (max(1, bid["cost"]) * max(0.1, bid["time"]))
+            
+            if score > best_score:
+                best_score = score
+                best_bid = bid
+        
+        if best_bid:
+            winner = best_bid["agent_id"]
+            self.marketplace_tasks[task_id]["status"] = "awarded"
+            self.marketplace_tasks[task_id]["winner"] = winner
+            logger.info(f"🏆 Task {task_id} awarded to {winner} (Score: {best_score:.2f})")
+            return winner
+        return None
+
+    # 🆕 منطق ساحة المنافسة (Competition Arena)
+    def start_competition(self, comp_id: str, task_desc: str, competitors: List[str]):
+        """بدء منافسة بين عدة وكلاء لحل نفس المهمة بالتوازي."""
+        self.competitions[comp_id] = {
+            "task": task_desc,
+            "competitors": competitors,
+            "solutions": {},
+            "status": "active",
+            "created_at": time.time()
+        }
+        logger.info(f"⚔️ Competition Started: {comp_id} between {competitors}")
+
+    def submit_solution(self, comp_id: str, agent_id: str, solution_data: Any):
+        """تقديم حل لمنافسة جارية."""
+        if comp_id not in self.competitions or agent_id not in self.competitions[comp_id]["competitors"]:
+            return False
+        
+        self.competitions[comp_id]["solutions"][agent_id] = {
+            "data": solution_data,
+            "ts": time.time()
+        }
+        logger.info(f"📝 Solution submitted for {comp_id} by {agent_id}")
+        return True
+
+    def judge_competition(self, comp_id: str, judge_id: str) -> Optional[str]:
+        """تقييم الحلول وإعلان الفائز في المنافسة."""
+        comp = self.competitions.get(comp_id)
+        if not comp or not comp["solutions"]:
+            return None
+        
+        # في النسخة الحالية، القاضي (Auditor) هو من يقرر، أو نستخدم خوارزمية مقارنة
+        # سنختار الحل الأسرع كمعيار بسيط حالياً
+        winner = None
+        earliest_ts = float('inf')
+        
+        for aid, sol in comp["solutions"].items():
+            if sol["ts"] < earliest_ts:
+                earliest_ts = sol["ts"]
+                winner = aid
+        
+        if winner:
+            comp["status"] = "finished"
+            comp["winner"] = winner
+            # مكافأة ضخمة للفائز
+            self._update_trust(winner, 0.15)
+            logger.info(f"🎖️ Agent {winner} won the competition {comp_id}!")
+            return winner
+        return None
 
 swarm_manager = SwarmManager()

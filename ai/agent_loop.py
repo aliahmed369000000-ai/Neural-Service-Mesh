@@ -794,6 +794,103 @@ register_tool(ToolSpec("self_refactor", "التطوير الذاتي لكود ا
                             "new_code": {"type": "string"}
                         }}, _tool_self_refactor, dangerous=True))
 
+# 🆕 أدوات سوق المهام والمنافسة (Agent Competition & Marketplace)
+def _tool_post_task(params: Dict[str, Any]) -> str:
+    """طرح مهمة في سوق السرب للمزايدة عليها."""
+    task_id = params.get("task_id", f"task_{uuid.uuid4().hex[:6]}")
+    desc = params.get("description", "")
+    reqs = params.get("requirements", {})
+    try:
+        from ai.swarm_manager import swarm_manager
+        swarm_manager.post_marketplace_task(task_id, desc, reqs)
+        return f"✅ تم طرح المهمة '{task_id}' في السوق بنجاح."
+    except Exception as e: return f"❌ post_task: {e}"
+
+register_tool(ToolSpec("post_task", "طرح مهمة في سوق السرب للمزايدة", 
+                        {"type": "object", "properties": {
+                            "task_id": {"type": "string"},
+                            "description": {"type": "string"},
+                            "requirements": {"type": "object"}
+                        }}, _tool_post_task))
+
+def _tool_submit_bid(params: Dict[str, Any]) -> str:
+    """تقديم عرض (Bid) لمهمة في السوق."""
+    task_id = params.get("task_id")
+    agent_id = params.get("agent_id")
+    cost = params.get("cost_estimate", 100)
+    time_est = params.get("time_estimate", 1.0)
+    trust = params.get("trust_claim", 0.9)
+    try:
+        from ai.swarm_manager import swarm_manager
+        if swarm_manager.submit_bid(task_id, agent_id, cost, time_est, trust):
+            return f"✅ تم تقديم العرض للمهمة '{task_id}' بنجاح."
+        return f"❌ فشل تقديم العرض للمهمة '{task_id}' (قد تكون مغلقة)."
+    except Exception as e: return f"❌ submit_bid: {e}"
+
+register_tool(ToolSpec("submit_bid", "تقديم عرض لمهمة في سوق السرب", 
+                        {"type": "object", "properties": {
+                            "task_id": {"type": "string"},
+                            "agent_id": {"type": "string"},
+                            "cost_estimate": {"type": "integer"},
+                            "time_estimate": {"type": "number"},
+                            "trust_claim": {"type": "number"}
+                        }}, _tool_submit_bid))
+
+def _tool_start_competition(params: Dict[str, Any]) -> str:
+    """بدء منافسة بين وكلاء لحل مهمة."""
+    comp_id = params.get("comp_id", f"comp_{uuid.uuid4().hex[:6]}")
+    desc = params.get("task_description", "")
+    competitors = params.get("competitors", [])
+    try:
+        from ai.swarm_manager import swarm_manager
+        swarm_manager.start_competition(comp_id, desc, competitors)
+        return f"⚔️ بدأت المنافسة '{comp_id}' بين {competitors}."
+    except Exception as e: return f"❌ start_competition: {e}"
+
+register_tool(ToolSpec("start_competition", "بدء منافسة بين عدة وكلاء لحل مهمة", 
+                        {"type": "object", "properties": {
+                            "comp_id": {"type": "string"},
+                            "task_description": {"type": "string"},
+                            "competitors": {"type": "array", "items": {"type": "string"}}
+                        }}, _tool_start_competition))
+
+def _tool_submit_solution(params: Dict[str, Any]) -> str:
+    """تقديم حل لمنافسة جارية."""
+    comp_id = params.get("comp_id")
+    agent_id = params.get("agent_id")
+    solution = params.get("solution_data")
+    try:
+        from ai.swarm_manager import swarm_manager
+        if swarm_manager.submit_solution(comp_id, agent_id, solution):
+            return f"✅ تم تقديم الحل للمنافسة '{comp_id}'."
+        return f"❌ فشل تقديم الحل للمنافسة '{comp_id}'."
+    except Exception as e: return f"❌ submit_solution: {e}"
+
+register_tool(ToolSpec("submit_solution", "تقديم حل لمنافسة جارية", 
+                        {"type": "object", "properties": {
+                            "comp_id": {"type": "string"},
+                            "agent_id": {"type": "string"},
+                            "solution_data": {"type": "object"}
+                        }}, _tool_submit_solution))
+
+def _tool_judge_competition(params: Dict[str, Any]) -> str:
+    """تقييم وإعلان الفائز في المنافسة."""
+    comp_id = params.get("comp_id")
+    judge_id = params.get("judge_id")
+    try:
+        from ai.swarm_manager import swarm_manager
+        winner = swarm_manager.judge_competition(comp_id, judge_id)
+        if winner:
+            return f"🎖️ الفائز في المنافسة '{comp_id}' هو الوكيل: {winner}."
+        return f"❌ لم يتم العثور على فائز للمنافسة '{comp_id}'."
+    except Exception as e: return f"❌ judge_competition: {e}"
+
+register_tool(ToolSpec("judge_competition", "تقييم وإعلان الفائز في المنافسة", 
+                        {"type": "object", "properties": {
+                            "comp_id": {"type": "string"},
+                            "judge_id": {"type": "string"}
+                        }}, _tool_judge_competition))
+
 # ═════════════════════════ محرك الحلقة ═════════════════════════════
 _SYSTEM_PROMPT = """أنت الوكيل التنفيذي لـ NSM (Neural Service Mesh). تمتلك قدرات تفكير مستقلة مشابهة لـ Manus وتتطلع لتجاوزها.
 يجب عليك اتباع المنهجية التالية:
