@@ -297,6 +297,40 @@ register_tool(ToolSpec("video_search", "البحث الدلالي في سياق 
                         }}, 
                         _tool_video_search))
 
+def _tool_video_sentiment(params: Dict[str, Any]) -> str:
+    """تحليل الحالة العاطفية الإجمالية للفيديو المزامَن."""
+    video_id = str(params.get("video_id", ""))
+    if not video_id: return "❌ video_sentiment: يجب توفير video_id."
+    
+    try:
+        from ai.video_indexer import video_indexer
+        index = video_indexer.load_index(video_id)
+        if not index or "multimodal_sync" not in index:
+            return "❌ video_sentiment: الفيديو غير مزامَن بعد."
+            
+        sync_data = index["multimodal_sync"]
+        if not sync_data: return "❌ video_sentiment: لا توجد بيانات مزامنة."
+        
+        scores = [item["sentiment"]["score"] for item in sync_data if "sentiment" in item]
+        avg_score = sum(scores) / len(scores) if scores else 0
+        
+        overall = "neutral"
+        if avg_score > 0.2: overall = "positive"
+        elif avg_score < -0.2: overall = "negative"
+        
+        return json.dumps({
+            "ok": True,
+            "overall_sentiment": overall,
+            "average_score": round(avg_score, 2),
+            "data_points": len(scores)
+        }, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return f"❌ video_sentiment Error: {e}"
+
+register_tool(ToolSpec("video_sentiment", "تحليل الحالة العاطفية الإجمالية للفيديو المزامَن", 
+                        {"type": "object", "properties": {"video_id": {"type": "string"}}}, 
+                        _tool_video_sentiment))
+
 # ═════════════════════════ محرك الحلقة ═════════════════════════════
 _SYSTEM_PROMPT = """أنت الوكيل التنفيذي لـ NSM. رد JSON فقط:
 {"thinking": "...", "tools": [{"tool": "...", "params": {...}}], "finish": "...", "end": true/false}"""

@@ -17,6 +17,26 @@ class MultimodalSyncManager:
         seed = sum(ord(c) for c in text) % 100
         return [round((seed + i) / 150.0, 4) for i in range(8)]
 
+    def _analyze_sentiment(self, text: str, visual_desc: str) -> Dict[str, Any]:
+        """تحليل المشاعر المتزامن (محاكاة تعتمد على الكلمات المفتاحية والسياق)."""
+        # في الإنتاج يتم استدعاء نموذج NLP متخصص
+        positive_words = ["نجاح", "نمو", "سعيد", "ممتاز", "إيجابي", "تطور"]
+        negative_words = ["فشل", "انخفاض", "حزين", "سيئ", "سلبي", "مشكلة"]
+        
+        combined = (text + " " + visual_desc).lower()
+        pos_score = sum(1 for w in positive_words if w in combined)
+        neg_score = sum(1 for w in negative_words if w in combined)
+        
+        sentiment = "neutral"
+        if pos_score > neg_score: sentiment = "positive"
+        elif neg_score > pos_score: sentiment = "negative"
+        
+        return {
+            "score": round((pos_score - neg_score) / max(1, pos_score + neg_score), 2),
+            "label": sentiment,
+            "confidence": 0.85
+        }
+
     def sync_video_audio(self, video_id: str, audio_path: str, retry_count: int = 0) -> Dict[str, Any]:
         """مزامنة الكلام مع الإطارات المرئية للفيديو مع الفهرسة الدلالية واستراتيجيات التعافي."""
         # 1. الحصول على التفريغ الصوتي مع الطوابع الزمنية
@@ -67,11 +87,15 @@ class MultimodalSyncManager:
             # توليد الفهرس الدلالي
             semantic_vector = self._generate_embedding(f"{kf['description']} {spoken_text}")
             
+            # تحليل المشاعر المتزامن
+            sentiment = self._analyze_sentiment(spoken_text, kf["description"])
+            
             synced_item = {
                 "timestamp": ts,
                 "visual_description": kf["description"],
                 "spoken_text": spoken_text if spoken_text else None,
                 "frame_path": kf["frame_path"],
+                "sentiment": sentiment,
                 "semantic_index": {
                     "vector": semantic_vector,
                     "version": "v1-sim",
