@@ -38,7 +38,7 @@ class MemoryManager:
             self.consolidate()
 
     def consolidate(self, force: bool = False):
-        """ترحيل المعلومات من STM إلى LTM (عملية التوحيد) مع التقييم الذاتي."""
+        """ترحيل المعلومات من STM إلى LTM (عملية التوحيد) مع التقييم الذاتي والمشاركة الجماعية."""
         if not force and len(self.stm) <= 10:
             return
 
@@ -53,10 +53,17 @@ class MemoryManager:
 
         logger.info(f"🧠 بدء توحيد الذاكرة للوكيل {self.agent_id} (ترحيل {len(to_migrate)} رسالة)...")
         
-        # 1. استخراج الحقائق الدقيقة (Semantic LTM) مع التقييم
+        # 1. استخراج الحقائق الدقيقة (Semantic LTM) مع التقييم والمشاركة
+        from ai.shared_experience import shared_experience
         facts_data = self._extract_facts(to_migrate)
         for f in facts_data:
-            self.add_fact(f["content"], importance=f["importance"])
+            fact_id = self.add_fact(f["content"], importance=f["importance"])
+            # مشاركة الحقائق المهمة مع السرب
+            if f["importance"] >= 0.7:
+                shared_experience.share_fact(self.agent_id, self.ltm_semantic[fact_id])
+        
+        # مزامنة المعرفة الجماعية الواردة
+        shared_experience.sync_agent_memory(self)
         
         # 2. إنشاء تلخيص أحداثي (Episodic LTM)
         fact_contents = [f["content"] for f in facts_data]
@@ -126,7 +133,7 @@ class MemoryManager:
             
         # ضمان أن fact_content سلسلة نصية لـ hash()
         content_str = str(fact_content)
-        fact_id = f"fact_{int(time.time())}_{hash(content_str)%1000}"
+        fact_id = f"fact_{int(time.time())}_{hash(content_str)%1000}_{len(self.ltm_semantic)}"
         self.ltm_semantic[fact_id] = {
             "content": fact_content,
             "timestamp": time.time(),

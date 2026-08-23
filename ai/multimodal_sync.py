@@ -1,4 +1,5 @@
 import os
+import re
 from typing import List, Dict, Any, Optional
 from ai.video_indexer import video_indexer
 from ai.stt_engine import transcribe_audio
@@ -11,12 +12,22 @@ class MultimodalSyncManager:
     """إدارة المزامنة بين المسار الصوتي والإطارات المرئية في الفيديو."""
     
     def _generate_embedding(self, text: str) -> List[float]:
-        """توليد تضمين دلالي (Semantic Embedding) للنص (محاكاة متجهة)."""
-        # في الإنتاج يتم استخدام OpenAI Embeddings أو نموذج محلي مثل BERT
-        # هنا نستخدم محاكاة متجهة بناءً على القيم الرقمية للأحرف لضمان الاتساق
-        if not text or not isinstance(text, str): return [0.0] * 8
-        seed = sum(ord(c) for c in text) % 100
-        return [round((seed + i) / 150.0, 4) for i in range(8)]
+        """توليد تضمين دلالي (Semantic Embedding) للنص (محاكاة متجهة محسنة)."""
+        if not text or not isinstance(text, str): return [0.0] * 16
+        
+        # استخراج الكلمات المفتاحية الدلالية (محاكاة دلالية)
+        keywords = re.findall(r"\w{4,}", text.lower())
+        vector = [0.0] * 16
+        for i, word in enumerate(keywords[:16]):
+            # استخدام hash ثابت للكلمة لضمان أن الكلمات المتشابهة تعطي نفس النتيجة
+            h = hash(word) % 1000
+            vector[i % 16] = round(h / 1000.0, 4)
+            
+        # إضافة وزن للأهمية التقنية
+        if re.search(r"```|sha|error|fix|done", text.lower()):
+            vector[0] = 1.0 
+            
+        return vector
 
     def _quantize_vector(self, vector: List[float]) -> List[int]:
         """تكميم المتجه من Float32 إلى Int8 لتقليل الحجم بنسبة 75%."""

@@ -49,8 +49,44 @@ class AgentState:
         self.metadata = metadata or {}
         self.timestamp = time.time()
 
+    def dream(self):
+        """
+        مرحلة الحلم (Dream Phase): معالجة الذاكرة أثناء النوم.
+        دمج الحقائق المتشابهة، تنظيف التناقضات، وتحديث المعرفة الجماعية.
+        """
+        logger.info(f"🌙 الوكيل {self.agent_id} في مرحلة الحلم (Dream Phase)...")
+        
+        # 1. تنظيف الذكريات الضعيفة (Forgetting Curve)
+        self.memory_manager.prune()
+        
+        # 2. دمج الحقائق الدلالية المتشابهة (De-duplication)
+        unique_facts = {}
+        for f_id, fact in list(self.memory_manager.ltm_semantic.items()):
+            content = str(fact.get("content", "")).lower().strip()
+            key = content[:5]
+            if not key: continue
+            if key not in unique_facts:
+                unique_facts[key] = fact
+            else:
+                unique_facts[key]["strength"] = min(1.0, unique_facts[key]["strength"] + 0.1)
+                unique_facts[key]["access_count"] = unique_facts[key].get("access_count", 0) + 1
+        
+        # تحديث القاموس الأصلي مباشرة
+        self.memory_manager.ltm_semantic.clear()
+        for i, f in enumerate(unique_facts.values()):
+            self.memory_manager.ltm_semantic[f"fact_dream_{i}"] = f
+        
+        # 3. مزامنة المعرفة الجماعية النهائية قبل النوم العميق
+        from ai.shared_experience import shared_experience
+        shared_experience.sync_agent_memory(self.memory_manager)
+        
+        logger.info(f"✨ انتهى الحلم: تم تصفية الذاكرة إلى {len(self.memory_manager.ltm_semantic)} حقيقة فريدة.")
+
     def compress(self, target_size_kb: int = 100, force_summarize: bool = False):
         """ضغط الذاكرة لتقليل حجم الحالة المحفوظة عبر MemoryManager."""
+        # تنفيذ مرحلة الحلم قبل الضغط
+        self.dream()
+        
         # محاولة التلخيص التلقائي والتوحيد
         self.memory_manager.consolidate(force=force_summarize)
         self.context = self.memory_manager.stm
