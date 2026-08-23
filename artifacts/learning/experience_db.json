@@ -67,5 +67,425 @@
     "trust_at_record": 0.30000000000000004,
     "timestamp": 1787452979.8206046,
     "status": "pending"
+  },
+  {
+    "agent_id": "agent_loop_7f027604",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492584.7593803,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_51ad9677",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492608.31395,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_d1c3836a",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492625.6152608,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_c8e9890d",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492679.231874,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_69e1316d",
+    "task_type": "راقب الشبكة وقم بإنقاذ أي عقدة فاشلة.",
+    "outcome": "المهمة مستمرة.",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492686.3903847,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_283f1201",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492701.3353841,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_66ee9ab6",
+    "task_type": "راقب الشبكة وقم بإنقاذ أي عقدة فاشلة.",
+    "outcome": "المهمة مستمرة.",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492708.4913676,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_636fca1f",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492722.7333937,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_d052dbe9",
+    "task_type": "راقب الشبكة وقم بإنقاذ أي عقدة فاشلة.",
+    "outcome": "المهمة مستمرة.",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492729.884082,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_247d0d7b",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492740.4177978,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_4bc8be78",
+    "task_type": "راقب الشبكة وقم بإنقاذ أي عقدة فاشلة.",
+    "outcome": "المهمة مستمرة.",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492747.5743725,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_b92345bf",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492758.491289,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_ad31bf94",
+    "task_type": "راقب الشبكة وقم بإنقاذ أي عقدة فاشلة.",
+    "outcome": "المهمة مستمرة.",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492765.6488554,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_fd705bed",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492780.1627548,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_80445155",
+    "task_type": "راقب الشبكة وقم بإنقاذ أي عقدة فاشلة.",
+    "outcome": "المهمة مستمرة.",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492787.3196929,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_f43feda7",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492803.3073635,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_97bd0785",
+    "task_type": "راقب الشبكة وقم بإنقاذ أي عقدة فاشلة.",
+    "outcome": "المهمة مستمرة.",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492810.4637914,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_ca0c38ce",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492903.8454185,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_1cfb6152",
+    "task_type": "راقب الشبكة وقم بإنقاذ أي عقدة فاشلة.",
+    "outcome": "المهمة مستمرة.",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492911.004027,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_f2396401",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492921.498486,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_803a2d20",
+    "task_type": "راقب الشبكة وقم بإنقاذ أي عقدة فاشلة.",
+    "outcome": "المهمة مستمرة.",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492928.653592,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_6fad822f",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492984.1642818,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_7e035f58",
+    "task_type": "راقب الشبكة وقم بإنقاذ أي عقدة فاشلة.",
+    "outcome": "المهمة مستمرة.",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787492991.3181827,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_7217e1a4",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787493002.080419,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_91521f20",
+    "task_type": "راقب الشبكة وقم بإنقاذ أي عقدة فاشلة.",
+    "outcome": "المهمة مستمرة.",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787493009.2387152,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_loop_7e3b6a22",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787493064.0967631,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_loop_c6e91421",
+    "task_type": "راقب الشبكة وقم بإنقاذ أي عقدة فاشلة.",
+    "outcome": "المهمة مستمرة.",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787493071.244927,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_loop_96092c00",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787493088.1248214,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_loop_cf64cbab",
+    "task_type": "راقب الشبكة وقم بإنقاذ أي عقدة فاشلة.",
+    "outcome": "المهمة مستمرة.",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787493095.2808611,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_loop_e4348699",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787493109.7189202,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_loop_604070cc",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787493127.029818,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_loop_c7e25548",
+    "task_type": "راقب الشبكة وقم بإنقاذ أي عقدة فاشلة.",
+    "outcome": "المهمة مستمرة.",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787493136.18283,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_loop_800e1835",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787493182.5848582,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_loop_30bdf85b",
+    "task_type": "راقب الشبكة وقم بإنقاذ أي عقدة فاشلة.",
+    "outcome": "المهمة مستمرة.",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787493191.7251885,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_loop_bcae9050",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787493202.374416,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_loop_9d17a606",
+    "task_type": "راقب الشبكة وقم بإنقاذ أي عقدة فاشلة.",
+    "outcome": "المهمة مستمرة.",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787493211.530348,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_loop_7a734de9",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787493222.3290093,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_loop_a96625a0",
+    "task_type": "راقب الشبكة وقم بإنقاذ أي عقدة فاشلة.",
+    "outcome": "المهمة مستمرة.",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787493231.4829273,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_loop_68dc8b0f",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787493353.3396854,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_loop_58124885",
+    "task_type": "راقب الشبكة وقم بإنقاذ أي عقدة فاشلة.",
+    "outcome": "المهمة مستمرة.",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787493362.5063028,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_loop_c5ac74e3",
+    "task_type": "قم بتحليل بيانات ضخمة واستخرج الأنماط...",
+    "outcome": "تم",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787493414.465776,
+    "status": "verified"
+  },
+  {
+    "agent_id": "agent_loop_loop_684275b6",
+    "task_type": "راقب الشبكة وقم بإنقاذ أي عقدة فاشلة.",
+    "outcome": "المهمة مستمرة.",
+    "lesson": "المهمة اكتملت بنجاح.",
+    "success": true,
+    "trust_at_record": 0.55,
+    "timestamp": 1787493423.623174,
+    "status": "verified"
   }
 ]

@@ -18,6 +18,7 @@ import threading
 import time
 import uuid
 import concurrent.futures
+import requests
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 from ai.cache_manager import agent_cache
@@ -30,6 +31,9 @@ from ai.memory_manager import MemoryManager
 from ai.tool_genesis import tool_genesis, ToolGenesis
 from ai.evolution_engine import evolution_engine
 from ai.tool_discovery import tool_discovery
+from ai.task_migrator import TaskMigrator
+from ai.self_awareness import SelfAwarenessEngine
+from ai.rescue_protocol import rescue_agent
 
 logger = logging.getLogger("NeuralServiceMesh.AgentLoop")
 healer = AutoHeal(max_rounds=3)
@@ -757,9 +761,14 @@ class TaskPlan:
         return {"goal": self.goal, "phases": self.phases, "current_phase_id": self.current_phase_id}
 
 class LoopState:
-    def __init__(self, loop_id: str, user_input: str):
-        self.loop_id, self.user_input = loop_id, user_input
-        self.memory = MemoryManager(f"agent_{loop_id}")
+    def __init__(self, loop_id: str, user_input: str, memory_url: Optional[str] = None, token: Optional[str] = None):
+        # توحيد معرف الوكيل ليكون agent_loop_ID لضمان التوافق مع نظام الإنقاذ
+        self.loop_id = loop_id
+        self.agent_id = f"agent_loop_{loop_id}" if not loop_id.startswith("agent_loop_") else loop_id
+        self.user_input = user_input
+        self.memory_url = memory_url
+        self.token = token
+        self.memory = MemoryManager(self.agent_id, memory_url, token)
         self.round = 0
         self.steps = []
         self.status = "pending"
@@ -769,7 +778,13 @@ class LoopState:
         self.visual_memory = {} # تخزين نتائج معالجة الصور اللحظية
         self.audio_memory = {}  # تخزين نتائج معالجة الصوت اللحظية
         from ai.self_awareness import SelfAwarenessEngine
-        self.awareness = SelfAwarenessEngine(agent_id=f"agent_{loop_id}")
+        self.awareness = SelfAwarenessEngine(agent_id=self.agent_id)
+        
+        # 🆕 محرك هجرة المهام والتعافي الجماعي
+        from ai.task_migrator import TaskMigrator
+        self.migrator = TaskMigrator(memory_url, self.agent_id, token) if memory_url else None
+        self._stop_heartbeat = threading.Event()
+        
         self.agent_roles = {
             "vision": "متخصص في تحليل الإطارات والميزات البصرية",
             "audio": "متخصص في تفريغ ومعالجة المسارات الصوتية",
@@ -777,6 +792,36 @@ class LoopState:
             "reasoning": "متخصص في اتخاذ القرارات النهائية بناءً على السياق الموحد"
         }
         self.pipeline_context = {} # مخزن لتبادل البيانات بين الأدوار المتخصصة
+        
+        # بدء نبض القلب في خيط منفصل إذا كان الخادم متاحاً
+        if memory_url:
+            threading.Thread(target=self._heartbeat_worker, daemon=True).start()
+
+    def _heartbeat_worker(self):
+        """خيط يرسل نبض القلب بشكل دوري للسيرفر."""
+        while not self._stop_heartbeat.is_set():
+            try:
+                import psutil
+                node_info = {
+                    "cpu": psutil.cpu_percent(),
+                    "ram": psutil.virtual_memory().percent,
+                    "os": "ubuntu-24.04",
+                    "pid": os.getpid()
+                }
+                current_task = self.user_input if self.user_input else "idle"
+                payload = {
+                    "agent_id": self.agent_id,
+                    "node_info": node_info,
+                    "current_task": current_task[:100]
+                }
+                # محاولة رفع نقطة تفتيش دورية
+                if self.round >= 0:
+                    self.migrator.save_local_checkpoint(f"task_{self.agent_id}", {"round": self.round, "steps_count": len(self.steps)})
+                
+                requests.post(f"{self.migrator.memory_url}/heartbeat", json=payload, headers=self.migrator.headers, timeout=5)
+            except Exception as e:
+                logger.warning(f"💓 Heartbeat failed for {self.agent_id}: {e}")
+            time.sleep(5) # إرسال نبض كل 5 ثوانٍ
 
     def set_pipeline_data(self, key: str, value: Any, role: str):
         """تخزين بيانات في الأنبوب مع تحديد الدور المسؤول."""
@@ -807,9 +852,9 @@ class LoopState:
         reflection += "💡 اقتراح تصحيحي: يجب تغيير الاستراتيجية أو التحقق من المعاملات المدخلة."
         return reflection
 
-def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_rounds: int = 10) -> Generator[Dict[str, Any], None, None]:
+def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_rounds: int = 10, memory_url: Optional[str] = None, token: Optional[str] = None) -> Generator[Dict[str, Any], None, None]:
     loop_id = f"loop_{uuid.uuid4().hex[:8]}"
-    state = LoopState(loop_id, user_input)
+    state = LoopState(loop_id, user_input, memory_url, token)
     
     def _emit(event: Dict[str, Any]):
         state.record(event)
@@ -901,6 +946,18 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                 lessons = learning_engine.get_relevant_lessons(user_input)
                 if lessons:
                     history.append({"role": "system", "content": lessons})
+                
+                # تسجيل أداة الإنقاذ ديناميكياً مع سياق الشبكة
+                def _rescue_wrapper(p):
+                    p["_memory_url"] = state.memory_url
+                    p["_agent_id"] = state.agent_id
+                    p["_token"] = state.token
+                    return rescue_agent(p)
+                
+                register_tool(ToolSpec("rescue_agent", "البحث عن الوكلاء المتعثرين وإنقاذ مهامهم", 
+                                       {"type": "object", "properties": {
+                                           "target_agent_id": {"type": "string"}
+                                       }}, _rescue_wrapper))
             
             from ai.workload_monitor import WorkloadMonitor
             monitor = WorkloadMonitor()
@@ -914,11 +971,11 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                 if state.round % 5 == 0:
                     from ai.agent_hibernation import hibernate_agent
                     # تفعيل الضغط في الحفظ التلقائي لتوفير المساحة
-                    hibernate_agent(f"agent_{loop_id}", history, {"steps": state.steps}, 
+                    hibernate_agent(state.agent_id, history, {"steps": state.steps}, 
                                     memory_manager_data=state.memory.to_dict(), compress=True)
                     _emit({"type": "info", "text": "💾 حفظ تلقائي (مع الضغط الديناميكي)."})
                 
-                target_agent_id = f"agent_{loop_id}"
+                target_agent_id = state.agent_id
                 try:
                     monitor.record_activity()
                     
@@ -1087,6 +1144,8 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                                 agent_cache.set(tname, resolved_params, raw_res)
                             
                             # تخزين النتيجة في الذاكرة قصيرة المدى لاستخدامها من قبل أدوات أخرى
+                            if not hasattr(state.memory, 'short_term'):
+                                state.memory.short_term = {}
                             state.memory.short_term[f"last_output_{tname}"] = raw_res
                             
                             # معالجة الإشارات الخاصة
@@ -1172,7 +1231,7 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                             outcome=finish_text,
                             lesson="المهمة اكتملت بنجاح.",
                             success=True,
-                            agent_id=f"agent_{loop_id}"
+                            agent_id=state.agent_id
                         )
                     except Exception as e:
                         logger.error(f"❌ خطأ تسجيل الخبرة: {e}")

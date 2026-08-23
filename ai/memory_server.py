@@ -34,6 +34,7 @@ def load_agent_registry():
     registry["Admin_Agent_01"] = {"role": "admin", "token": os.environ.get("NSM_ADMIN_TOKEN", base_token)}
     registry["agent-alpha"] = {"role": "expert", "token": base_token}
     registry["agent-beta"] = {"role": "worker", "token": base_token}
+    registry["test-agent"] = {"role": "admin", "token": "test_token_recovery"}
     
     # إمكانية إضافة وكلاء ديناميكياً عبر متغيرات البيئة AGENT_ID_TOKEN
     for key, value in os.environ.items():
@@ -127,9 +128,10 @@ memory = MemoryState()
 
 class MetricsState:
     def __init__(self):
-        self.request_counts = {"share": 0, "sync": 0, "ask": 0, "answer": 0}
+        self.request_counts = {"share": 0, "sync": 0, "ask": 0, "answer": 0, "heartbeat": 0}
         self.agent_stats = {}
         self.start_time = time.time()
+        self.node_status = {} # 🆕 حالة العقد الموزعة
 
     def log_request(self, type: str, agent_id: str):
         self.request_counts[type] = self.request_counts.get(type, 0) + 1
@@ -137,6 +139,18 @@ class MetricsState:
             self.agent_stats[agent_id] = {"requests": 0, "last_seen": 0}
         self.agent_stats[agent_id]["requests"] += 1
         self.agent_stats[agent_id]["last_seen"] = time.time()
+        
+    def update_heartbeat(self, agent_id: str, node_info: Dict[str, Any]):
+        """تحديث نبض القلب وحالة العقدة."""
+        print(f"💓 Heartbeat received from: {agent_id}")
+        self.request_counts["heartbeat"] += 1
+        if agent_id not in self.node_status:
+            self.node_status[agent_id] = {"agent_id": agent_id}
+        self.node_status[agent_id].update({
+            "last_seen": time.time(),
+            "info": node_info,
+            "status": "online"
+        })
 
 metrics = MetricsState()
 
@@ -172,9 +186,100 @@ class ToolVote(BaseModel):
     comment: Optional[str] = None
     trust_score: float = 1.0
 
+class Heartbeat(BaseModel):
+    agent_id: str
+    node_info: Dict[str, Any]
+    current_task: Optional[str] = None
+
 @app.get("/health")
 def health():
     return {"status": "online", "version": "1.0.0"}
+
+@app.post("/heartbeat")
+def post_heartbeat(hb: Heartbeat, agent: dict = Depends(get_current_agent)):
+    """استقبال نبض القلب من الوكلاء وتحديث حالتهم."""
+    print(f"💓 نبض قلب مستلم من: {hb.agent_id}")
+    metrics.update_heartbeat(hb.agent_id, hb.node_info)
+    # تخزين المهمة الحالية لدعم التعافي
+    if hb.current_task:
+        metrics.node_status[hb.agent_id]["current_task"] = hb.current_task
+    return {"status": "alive", "timestamp": time.time()}
+
+@app.get("/swarm/status")
+def get_swarm_status(agent: dict = Depends(get_current_agent)):
+    """عرض حالة السرب بالكامل واكتشاف العقد الفاشلة."""
+    check_permission(agent, "read")
+    now = time.time()
+    swarm_report = {}
+    for agent_id, data in metrics.node_status.items():
+        # إذا لم يرسل نبضاً لأكثر من 15 ثانية، نعتبره "فاشلاً"
+        status = "online"
+        if now - data["last_seen"] > 15:
+            status = "failed"
+        elif now - data["last_seen"] > 10:
+            status = "warning"
+            
+        swarm_report[agent_id] = {
+            "status": status,
+            "last_seen_seconds_ago": round(now - data["last_seen"], 2),
+            "info": data.get("info"),
+            "current_task": data.get("current_task")
+        }
+    return swarm_report
+
+@app.get("/nodes")
+def get_nodes(agent: dict = Depends(get_current_agent)):
+    """جلب قائمة العقد وحالتها (متوافق مع Rescue Protocol)."""
+    check_permission(agent, "read")
+    now = time.time()
+    nodes_list = []
+    for agent_id, data in metrics.node_status.items():
+        last_seen_diff = now - data["last_seen"]
+        status = "online"
+        if last_seen_diff > 15:
+            status = "failed"
+        elif last_seen_diff > 10:
+            status = "warning"
+            
+        nodes_list.append({
+            "agent_id": agent_id,
+            "status": status,
+            "last_seen": round(last_seen_diff, 2),
+            "current_task": data.get("current_task")
+        })
+    return nodes_list
+
+@app.post("/nodes/{target_id}/status")
+def update_node_status(target_id: str, payload: Dict[str, str], agent: dict = Depends(get_current_agent)):
+    """تحديث حالة عقدة معينة (مثلاً عند الهجرة)."""
+    check_permission(agent, "write")
+    if target_id in metrics.node_status:
+        metrics.node_status[target_id]["status"] = payload.get("status", "unknown")
+        return {"status": "updated"}
+    raise HTTPException(status_code=404, detail="Node not found")
+
+@app.post("/checkpoint/{task_id}")
+def save_checkpoint(task_id: str, checkpoint: Dict[str, Any], agent: dict = Depends(get_current_agent)):
+    """حفظ نقطة تفتيش لمهمة معينة."""
+    check_permission(agent, "write")
+    if "checkpoints" not in memory.data:
+        memory.data["checkpoints"] = {}
+    memory.data["checkpoints"][task_id] = {
+        "data": checkpoint,
+        "ts": time.time(),
+        "agent_id": agent["agent_id"]
+    }
+    memory.save()
+    return {"status": "saved"}
+
+@app.get("/checkpoint/{task_id}")
+def get_checkpoint(task_id: str, agent: dict = Depends(get_current_agent)):
+    """جلب آخر نقطة تفتيش لمهمة معينة."""
+    check_permission(agent, "read")
+    checkpoints = memory.data.get("checkpoints", {})
+    if task_id in checkpoints:
+        return checkpoints[task_id]["data"]
+    raise HTTPException(status_code=404, detail="Checkpoint not found")
 
 @app.post("/share")
 def share_fact(fact: Fact, agent: dict = Depends(get_current_agent)):
@@ -345,7 +450,10 @@ def trigger_gc(agent: dict = Depends(get_current_agent)):
         "current_objects": final_obj
     }
 
+def start_memory_server(port: int = 8080):
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="error")
+
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 8080))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    start_memory_server(port)

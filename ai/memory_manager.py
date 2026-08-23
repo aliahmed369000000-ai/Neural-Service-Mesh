@@ -18,9 +18,16 @@ logger = logging.getLogger("NSM.MemoryManager")
 class MemoryManager:
     """مدير الذاكرة الهرمي (Short-term & Long-term Memory)."""
     
-    def __init__(self, agent_id: str):
+    def __init__(self, agent_id: str, memory_url: Optional[str] = None, token: Optional[str] = None):
         self.agent_id = agent_id
         self.stm = []  # الذاكرة قصيرة الأجل (Short-term Memory / Working Context)
+        
+        # إعداد الاتصال الموزع للخبرة الجماعية
+        from ai.shared_experience import shared_experience
+        if memory_url:
+            shared_experience.remote_url = memory_url
+        if token:
+            shared_experience.api_key = token
         self.ltm_episodic = []  # الذاكرة الأحداثية طويلة الأجل (Episodic LTM)
         self.ltm_semantic = {}  # الذاكرة الدلالية طويلة الأجل (Semantic LTM - Facts)
         self.stm_limit = 15  # حد الرسائل في الذاكرة العاملة قبل الترحيل
