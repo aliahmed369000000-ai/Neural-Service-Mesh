@@ -44,11 +44,16 @@ async def main():
     # Render يخصص المنفذ تلقائياً عبر متغير البيئة PORT
     port = int(os.getenv("PORT", args.port))
     
-    # جلب عنوان الـ IP العام أو الـ Domain الخاص بـ Render
+    # جلب عنوان الـ IP العام أو الـ Domain الخاص بالمنصات السحابية
     render_external_url = os.getenv("RENDER_EXTERNAL_URL")
+    hf_space_id = os.getenv("SPACE_ID") # Hugging Face Space ID (user/space-name)
+    
     if render_external_url:
-        # إزالة البروتوكول إذا وجد (https:// -> ...)
         node_host = render_external_url.replace("https://", "").replace("http://", "").strip("/")
+    elif hf_space_id:
+        # بناء رابط Hugging Face Space: user-space-name.hf.space
+        space_user, space_name = hf_space_id.split("/")
+        node_host = f"{space_user}-{space_name}.hf.space".replace("_", "-").lower()
     else:
         node_host = args.public_ip if args.public_ip else host
         
