@@ -438,6 +438,22 @@ def render_unified_swarm_dashboard() -> None:
             sing_data = singularity_sim[-1]["data"]
             st.info(f"✨ **حالة الوعي:** {sing_data.get('awareness_state')} | **المهمة:** {sing_data.get('mission')}")
             st.caption(f"سرعة المعالجة: {sing_data.get('processing_speed')} | تكامل المعرفة: {sing_data.get('knowledge_base')}")
+
+        # التأمل والسيادة الكونية
+        meditation = [exp for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "collective_meditation"]
+        sov_broadcast = [exp for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "sovereignty_broadcast"]
+        
+        if meditation:
+            st.markdown("### 🧘 التأمل الجماعي (Collective Meditation)")
+            med_data = meditation[-1]["data"]
+            st.success(f"✨ **الحالة:** {med_data.get('status')} | **المستوى:** {med_data.get('meditation_level')}")
+            st.caption(f"مؤشر السلام الجماعي: {med_data.get('collective_peace_index')} | {med_data.get('notes')}")
+
+        if sov_broadcast:
+            st.markdown("### 📢 رسالة السيادة الكونية (Sovereignty Broadcast)")
+            sov_data = sov_broadcast[-1]["data"]
+            st.warning(f"📡 **البيان:** {sov_data.get('message')}")
+            st.caption(f"معرف البث: {sov_data.get('broadcast_id')} | التحقق: {'تم' if sov_data.get('sovereignty_verified') else 'جاري'}")
     
     if mesh_state.get("global_experience"):
         st.subheader("🧠 سجل الوعي الجماعي (أحدث الخبرات)")

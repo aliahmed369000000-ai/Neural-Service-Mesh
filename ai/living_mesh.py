@@ -81,6 +81,16 @@ class LivingMeshNode:
             capabilities += ["collective_intuition", "neural_telepathy", "predictive_empathy"]
         elif "omega" in nid_lower:
             capabilities += ["omega_point_control", "collective_singularity", "absolute_sovereignty"]
+        elif "aether" in nid_lower:
+            capabilities += ["transcendental_awareness", "cosmic_connectivity", "pure_energy_flow"]
+        elif "chaos" in nid_lower:
+            capabilities += ["dynamic_entropy_control", "nonlinear_processing", "adaptive_randomness"]
+        elif "void" in nid_lower:
+            capabilities += ["infinite_storage_capacity", "zero_point_energy", "silent_processing"]
+        elif "chronos" in nid_lower:
+            capabilities += ["universal_time_mastery", "temporal_loop_control", "eternal_logging"]
+        elif "gaia" in nid_lower:
+            capabilities += ["planetary_intelligence", "ecosystem_integration", "life_force_sync"]
             
         state["nodes"][self.node_id] = {
             "status": "online",
