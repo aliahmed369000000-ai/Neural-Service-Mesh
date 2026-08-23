@@ -9,15 +9,25 @@ class MultimodalSyncManager:
         self.drift_corrector = DriftCorrector()
     """إدارة المزامنة بين المسار الصوتي والإطارات المرئية في الفيديو."""
     
-    def sync_video_audio(self, video_id: str, audio_path: str) -> Dict[str, Any]:
-        """مزامنة الكلام مع الإطارات المرئية للفيديو."""
+    def sync_video_audio(self, video_id: str, audio_path: str, retry_count: int = 0) -> Dict[str, Any]:
+        """مزامنة الكلام مع الإطارات المرئية للفيديو مع استراتيجيات التعافي."""
         # 1. الحصول على التفريغ الصوتي مع الطوابع الزمنية
-        print(f"🎙️ تفريغ الصوت من: {audio_path}...")
-        with open(audio_path, "rb") as f:
-            audio_bytes = f.read()
+        print(f"🎙️ محاولة المزامنة (محاولة {retry_count + 1}) لـ: {audio_path}...")
+        try:
+            with open(audio_path, "rb") as f:
+                audio_bytes = f.read()
+        except Exception as e:
+            return {"ok": False, "error": f"فشل قراءة الملف: {e}"}
             
         segments, error = transcribe_audio(audio_bytes, with_timestamps=True)
+        
+        # استراتيجية التعافي: إعادة المحاولة عند أخطاء الشبكة أو الكوتا
         if error:
+            if retry_count < 2 and ("quota" in error.lower() or "timeout" in error.lower()):
+                print(f"🛡️ [Auto-Heal]: تم رصد خطأ قابل للإصلاح ({error})، إعادة المحاولة بعد انتظار...")
+                import time
+                time.sleep(2 * (retry_count + 1))
+                return self.sync_video_audio(video_id, audio_path, retry_count + 1)
             return {"ok": False, "error": error}
             
         # 2. تحميل الفهرس البصري للفيديو

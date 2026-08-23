@@ -25,8 +25,10 @@ from ai.learning_engine import learning_engine
 from ai.video_sampler import video_sampler
 from ai.video_indexer import video_indexer
 from ai.multimodal_sync import multimodal_sync
+from ai.agent_auto_heal import AutoHeal
 
 logger = logging.getLogger("NeuralServiceMesh.AgentLoop")
+healer = AutoHeal(max_rounds=3)
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -229,37 +231,39 @@ def _tool_video_sample(params: Dict[str, Any]) -> str:
 register_tool(ToolSpec("video_sample", "أخذ عينات ذكية من الفيديو", {"type": "object", "properties": {"video_path": {"type": "string"}, "video_id": {"type": "string"}}}, _tool_video_sample))
 
 def _tool_video_sync(params: Dict[str, Any]) -> str:
-    """مزامنة الصوت والصورة للفيديو وتصحيح الانحراف بنظام الأنابيب الموزع."""
+    """مزامنة الصوت والصورة للفيديو وتصحيح الانحراف بنظام الأنابيب الموزع مع التعافي التلقائي."""
     video_id = str(params.get("video_id", ""))
     audio_path = str(params.get("audio_path", ""))
-    role = str(params.get("role", "sync")) # الافتراضي هو وكيل المزامنة
     
     if not video_id or not audio_path:
         return "❌ video_sync: يجب توفير video_id و audio_path."
     
-    try:
+    def _sync_execution(vid, path):
         # 1. محاكاة توزيع المهام (Pipeline Simulation)
-        pipeline_log = []
-        pipeline_log.append(f"🔄 بدء الأنبوب الموزع للمصدر: {video_id}")
-        
-        # وكيل الصوت (Audio Agent) يبدأ أولاً
+        pipeline_log = [f"🔄 بدء الأنبوب الموزع للمصدر: {vid}"]
         pipeline_log.append(f"🎙️ [Audio Agent]: تفريغ المسار الصوتي...")
-        
-        # وكيل الرؤية (Vision Agent) يعمل بالتوازي
         pipeline_log.append(f"👁️ [Vision Agent]: تحليل الإطارات البصرية...")
-        
-        # وكيل المزامنة (Sync Agent) يجمع النتائج ويصحح الانحراف
         pipeline_log.append(f"⚖️ [Sync Agent]: دمج البيانات وتطبيق مرشح كالمان...")
         
-        result = multimodal_sync.sync_video_audio(video_id, audio_path)
-        
-        if result.get("ok"):
+        res = multimodal_sync.sync_video_audio(vid, path)
+        if res.get("ok"):
             pipeline_log.append(f"✅ [Reasoning Agent]: تم بناء السياق الموحد بنجاح.")
-            result["pipeline_log"] = pipeline_log
-            
-        return json.dumps(result, ensure_ascii=False, indent=2)
+            res["pipeline_log"] = pipeline_log
+        return res
+
+    try:
+        # استخدام AutoHeal لتنفيذ المزامنة مع قدرة على الإصلاح التلقائي
+        heal_result = healer.execute_with_healing(
+            tool_fn=_sync_execution,
+            tool_args={"vid": video_id, "path": audio_path}
+        )
+        
+        if heal_result["ok"]:
+            return json.dumps(heal_result["result"], ensure_ascii=False, indent=2)
+        else:
+            return f"❌ video_sync (Auto-Heal Failed): {heal_result['error']}"
     except Exception as e:
-        return f"❌ video_sync (Pipeline Error): {e}"
+        return f"❌ video_sync (System Error): {e}"
 
 register_tool(ToolSpec("video_sync", "مزامنة الصوت والصورة وتصحيح الانحراف", 
                         {"type": "object", "properties": {"video_id": {"type": "string"}, "audio_path": {"type": "string"}}}, 
