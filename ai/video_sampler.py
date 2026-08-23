@@ -3,6 +3,7 @@ import os
 import time
 from typing import List, Dict, Any, Tuple
 from ai.video_indexer import video_indexer
+from ai.vision_analyzer import vision_analyzer
 
 class SmartVideoSampler:
     """أخذ عينات ذكية من الفيديو بناءً على كشف التغير الجوهري."""
@@ -87,13 +88,18 @@ class SmartVideoSampler:
         frame_path = os.path.join(save_dir, frame_name)
         cv2.imwrite(frame_path, frame)
         
-        # إضافة للفهرس الزمني (مع وصف تلقائي أولي)
+        # تحليل الإطار تلقائياً باستخدام نموذج الرؤية
+        print(f"🧠 تحليل الإطار عند {timestamp:.2f}s...")
+        vision_res = vision_analyzer.analyze_image(frame_path)
+        description = vision_res.get("description", f"تغير بصرى بنسبة {change_score:.2f}%") if vision_res.get("ok") else f"تغير بصرى بنسبة {change_score:.2f}%"
+        
+        # إضافة للفهرس الزمني (مع الوصف المستخلص)
         video_indexer.add_keyframe(
             video_id=video_id,
             timestamp=timestamp,
             frame_path=frame_path,
-            description=f"تغير بصرى بنسبة {change_score:.2f}%",
-            tags=["motion", "keyframe"]
+            description=description,
+            tags=["motion", "keyframe", "analyzed"]
         )
 
 video_sampler = SmartVideoSampler()
