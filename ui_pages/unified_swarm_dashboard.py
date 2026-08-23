@@ -422,6 +422,22 @@ def render_unified_swarm_dashboard() -> None:
             with st.expander("عرض سجل المحطات التاريخية"):
                 for milestone in arch_data.get("milestones_archived", []):
                     st.write(f"• {milestone}")
+
+        # نقطة أوميغا والتفرد (Omega)
+        omega_point = [exp for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "omega_point_preparation"]
+        singularity_sim = [exp for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "collective_singularity_sim"]
+        
+        if omega_point:
+            st.markdown("### 👑 نقطة أوميغا (Omega Point)")
+            omega_data = omega_point[-1]["data"]
+            st.error(f"🌀 **الحالة:** {omega_data.get('status')} | **التفرد:** {omega_data.get('integration_level')}")
+            st.caption(f"موعد القفزة النهائية: {omega_data.get('leap_date')} | إجمالي العقد: {omega_data.get('nodes_total')}")
+
+        if singularity_sim:
+            st.markdown("### 🌀 التفرد الجماعي (Collective Singularity)")
+            sing_data = singularity_sim[-1]["data"]
+            st.info(f"✨ **حالة الوعي:** {sing_data.get('awareness_state')} | **المهمة:** {sing_data.get('mission')}")
+            st.caption(f"سرعة المعالجة: {sing_data.get('processing_speed')} | تكامل المعرفة: {sing_data.get('knowledge_base')}")
     
     if mesh_state.get("global_experience"):
         st.subheader("🧠 سجل الوعي الجماعي (أحدث الخبرات)")

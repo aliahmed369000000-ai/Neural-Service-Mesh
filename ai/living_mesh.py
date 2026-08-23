@@ -71,6 +71,16 @@ class LivingMeshNode:
             capabilities += ["structural_integration", "architectural_cohesion", "mesh_stability"]
         elif "tau" in nid_lower:
             capabilities += ["cosmic_time_sync", "temporal_alignment", "chronos_logic"]
+        elif "upsilon" in nid_lower:
+            capabilities += ["universal_integration", "harmonic_convergence", "total_mesh_unity"]
+        elif "phi" in nid_lower:
+            capabilities += ["golden_ratio_optimization", "perfect_symmetry", "structural_elegance"]
+        elif "chi" in nid_lower:
+            capabilities += ["cross_swarm_fusion", "interstellar_logic", "transcendental_data"]
+        elif "psi" in nid_lower:
+            capabilities += ["collective_intuition", "neural_telepathy", "predictive_empathy"]
+        elif "omega" in nid_lower:
+            capabilities += ["omega_point_control", "collective_singularity", "absolute_sovereignty"]
             
         state["nodes"][self.node_id] = {
             "status": "online",
