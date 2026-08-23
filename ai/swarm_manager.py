@@ -62,6 +62,10 @@ class SwarmManager:
         # 🆕 نظام مراقبة واكتشاف التسلل (IDS)
         from ai.ids_manager import IDSManager
         self.ids = IDSManager(storage_dir=str(self.storage_dir / "ids"))
+        
+        # 🆕 محرك الوعي العاطفي الجماعي
+        from ai.emotional_awareness import emotional_engine
+        self.emotional_engine = emotional_engine
 
     def set_agent_sleep(self, agent_id: str, snapshot_path: str):
         """تحديث حالة الوكيل إلى 'نائم' وتخزين مسار لقطة الوعي."""
@@ -136,16 +140,19 @@ class SwarmManager:
         logger.info(f"👷 Worker Registered: {agent_id} as {role} (Trust: {trust_score})")
 
     def heartbeat(self, agent_id: str):
-        """تحديث نبض القلب للوكيل لضمان أنه لا يزال نشطاً، مع تعافي تدريجي للثقة."""
+        """تحديث نبض القلب للوكيل لضمان أنه لا يزال نشطاً، مع تعافي تدريجي للثقة وتحديث المزاج."""
         if agent_id in self.workers:
             worker = self.workers[agent_id]
             worker["last_seen"] = time.time()
             worker["status"] = "active"
             
             # 🆕 تعافي تدريجي للثقة (Passive Recovery)
-            # إذا كانت الثقة منخفضة، تزيد بنسبة ضئيلة جداً مع كل نبضة قلب (دليل استقرار)
             if worker["trust_score"] < 0.5:
                 worker["trust_score"] = min(0.5, worker["trust_score"] + 0.001)
+                
+            # 🆕 تحديث المزاج الجماعي دورياً (كل 5 نبضات قلب لأي وكيل)
+            if int(time.time()) % 5 == 0:
+                self._sync_emotional_state()
 
     def get_active_workers(self) -> List[str]:
         """الحصول على قائمة الوكلاء الذين أرسلوا نبضات قلب مؤخراً."""
@@ -276,6 +283,24 @@ class SwarmManager:
             self.workers[agent_id]["trust_score"] = new_score
             if abs(delta) > 0.01:
                 logger.info(f"⚖️ Trust Update for {agent_id}: {old_score:.2f} -> {new_score:.2f}")
+            
+            # التحديث الفوري للمزاج عند حدوث تغيير حاد في الثقة
+            if abs(delta) >= 0.1:
+                self._sync_emotional_state()
+
+    def _sync_emotional_state(self):
+        """مزامنة الحالة العاطفية للمحرك مع بيانات السرب الحالية."""
+        swarm_data = {
+            "results": self.results,
+            "workers": self.workers,
+            "alert_level": self.ids.get_threat_level() if hasattr(self.ids, "get_threat_level") else 0.0
+        }
+        self.emotional_engine.update_mood(swarm_data)
+        
+        # تطبيق البارامترات المتكيفة
+        params = self.emotional_engine.get_adaptive_params()
+        self.threshold = params["consensus_threshold"]
+        self.heartbeat_timeout = params["heartbeat_interval"]
 
     def _save_proposal(self, proposal: SwarmProposal):
         """حفظ حالة المقترح مشفرة في القرص للمراجعة والتدقيق."""
