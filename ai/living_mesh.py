@@ -22,8 +22,10 @@ LIVING_MESH_DIR.mkdir(parents=True, exist_ok=True)
 NETWORK_STATE = LIVING_MESH_DIR / "network_state.json"
 
 class LivingMeshNode:
-    def __init__(self, node_id: str = None):
+    def __init__(self, node_id: str = None, host: str = "127.0.0.1", port: int = None):
         self.node_id = node_id or f"mesh_{uuid.uuid4().hex[:8]}"
+        self.host = host
+        self.port = port
         self.peers = []
         self.collective_memory = {}
         self.local_evolution_score = 0.0
@@ -34,6 +36,7 @@ class LivingMeshNode:
             "innovation_rate": 1.0,
             "security_vigilance": 1.0
         }
+        self.server = None
         
     def join_network(self):
         """الانضمام للشبكة اللامركزية."""
@@ -94,6 +97,8 @@ class LivingMeshNode:
             
         state["nodes"][self.node_id] = {
             "status": "online",
+            "host": self.host,
+            "port": self.port,
             "last_seen": datetime.now(timezone.utc).isoformat(),
             "evolution_score": self.local_evolution_score,
             "behavioral_weights": self.behavioral_weights,
@@ -249,20 +254,37 @@ class LivingMeshNode:
         self.update_behavioral_weights(kind, experience_data)
         
         state = self._load_state()
-        # التحقق من عدم تكرار الخبرة
-        if any(e.get("id") == msg_id for e in state.get("global_experience", [])):
+        # التحقق من عدم تكرار الخبرة (عبر المحتوى لمنع الحلقات اللانهائية في P2P)
+        exp_hash = hashlib.sha256(json.dumps(experience_data, sort_keys=True).encode()).hexdigest()
+        
+        # استخدام معرف فريد للخبرة بناءً على المحتوى والنوع
+        unique_id = f"{kind}_{exp_hash[:12]}"
+        
+        if any(e.get("unique_id") == unique_id for e in state.get("global_experience", [])):
             return
 
+        msg["unique_id"] = unique_id
         state["global_experience"].append(msg)
         
-        # محاكاة بروتوكول Gossip: إرسال الخبرة لـ 2 من الأقران عشوائياً
+        # بروتوكول Gossip: إرسال الخبرة لـ 2 من الأقران عشوائياً
         import random
-        online_peers = [nid for nid, info in state["nodes"].items() if nid != self.node_id and info["status"] == "online"]
+        import asyncio
+        online_peers = [(nid, info.get("host"), info.get("port")) for nid, info in state["nodes"].items() 
+                        if nid != self.node_id and info["status"] == "online"]
+        
         if online_peers:
             targets = random.sample(online_peers, min(len(online_peers), 2))
-            for target in targets:
-                logger.info(f"📢 Gossip: Node {self.node_id} propagating {kind} to {target} (Hop {hops})")
-                # في بيئة حقيقية، هذا استدعاء RPC/Socket لعقدة أخرى
+            for target_id, t_host, t_port in targets:
+                if t_host and t_port:
+                    logger.info(f"📢 Real Gossip: Node {self.node_id} propagating {kind} to {target_id} at {t_host}:{t_port}")
+                    # محاولة الإرسال الحقيقي (بشكل غير متزامن)
+                    try:
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            loop.create_task(self.send_to_peer(t_host, t_port, kind, experience_data, hops + 1))
+                    except: pass
+                else:
+                    logger.info(f"📢 Simulated Gossip: Node {self.node_id} propagating {kind} to {target_id} (No active port)")
         
         if len(state["global_experience"]) > 1000:
             state["global_experience"] = state["global_experience"][-1000:]
@@ -362,6 +384,70 @@ class LivingMeshNode:
 
     def _save_state(self, state: Dict[str, Any]):
         NETWORK_STATE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # ───────────────────────────────────────────────────────────────────────────
+    # بروتوكول التواصل الحقيقي (Real P2P Logic)
+    # ───────────────────────────────────────────────────────────────────────────
+    async def start_node_server(self):
+        """بدء خادم الاستماع للعقدة."""
+        import asyncio
+        server = await asyncio.start_server(self._handle_p2p_message, self.host, self.port or 0)
+        self.port = server.sockets[0].getsockname()[1]
+        self.server = server
+        
+        # تحديث المنفذ في حالة الشبكة
+        self.join_network()
+        
+        logger.info(f"🚀 Node {self.node_id} listening on {self.host}:{self.port}")
+        async with server:
+            await server.serve_forever()
+
+    async def _handle_p2p_message(self, reader, writer):
+        """معالجة الرسائل القادمة من الأقران."""
+        data = await reader.read(8192)
+        if not data: return
+        
+        try:
+            msg = json.loads(data.decode())
+            kind = msg.get("kind")
+            exp_data = msg.get("data")
+            hops = msg.get("p2p_hops", 0)
+            
+            logger.info(f"📥 Node {self.node_id} received {kind} from {msg.get('from')}")
+            
+            # معالجة الخبرة محلياً (تحديث الأوزان وحفظ الحالة)
+            self.sync_experience(kind, exp_data, hops + 1)
+            
+        except Exception as e:
+            logger.error(f"❌ Error handling P2P message: {e}")
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    async def send_to_peer(self, peer_host: str, peer_port: int, kind: str, data: Dict[str, Any], hops: int = 0):
+        """إرسال خبرة مباشرة لعقدة نظيرة."""
+        import asyncio
+        if not peer_port: return
+        
+        try:
+            reader, writer = await asyncio.open_connection(peer_host, peer_port)
+            
+            msg = {
+                "id": f"p2p_{uuid.uuid4().hex[:8]}",
+                "from": self.node_id,
+                "kind": kind,
+                "data": data,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "p2p_hops": hops
+            }
+            
+            writer.write(json.dumps(msg).encode())
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+            logger.info(f"📤 Node {self.node_id} sent {kind} to {peer_host}:{peer_port}")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to connect to peer {peer_host}:{peer_port} - {e}")
 
 def get_network_snapshot() -> Dict[str, Any]:
     """الحصول على لقطة كاملة لحالة الشبكة للعرض في الواجهة."""
