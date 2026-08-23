@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 from pathlib import Path
 import numpy as np
 from ai.quantization_engine import VectorQuantizer
+from ai.sharding_engine import ShardingEngine
 
 class MultimodalMemory:
     def __init__(self, storage_dir: Optional[str] = None):
@@ -32,6 +33,7 @@ class MultimodalMemory:
         self._init_index()
         self.quantizer = VectorQuantizer()
         self.quantizer.load_codebook()
+        self.sharding_engine = ShardingEngine(self.storage_dir)
 
     def _init_index(self):
         """تهيئة ملف الفهرس إذا لم يكن موجوداً."""
@@ -97,9 +99,15 @@ class MultimodalMemory:
             f.seek(0)
             json.dump(data, f, ensure_ascii=False, indent=2)
             f.truncate()
+            
+            # إضافة إلى التخزين المجزأ أيضاً
+            self.sharding_engine.add_to_shard(entry)
 
-    def search_assets(self, query: str, media_type: Optional[str] = None) -> List[Dict[str, Any]]:
-        """البحث عن أصول في الذاكرة بناءً على الوسوم أو النوع."""
+    def search_assets(self, query: str, media_type: Optional[str] = None, use_shards: bool = True) -> List[Dict[str, Any]]:
+        """البحث عن أصول في الذاكرة بناءً على الوسوم أو النوع، مع دعم التجزئة."""
+        if use_shards:
+            return self.sharding_engine.search_in_shards(query, media_type)
+            
         with open(self.index_path, "r", encoding="utf-8") as f:
             data = json.load(f)
             
