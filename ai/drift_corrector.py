@@ -1,18 +1,29 @@
 import numpy as np
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
+from ai.learning_engine import learning_engine
 
 class DriftCorrector:
     """
     نظام تصحيح الانحراف الزمني الهجين (Kalman + DTW).
     يقوم بالتنبؤ بالانحراف الزمني وتصحيحه باستخدام المطابقة غير الخطية.
     """
-    def __init__(self, process_variance=1e-4, measurement_variance=1e-2):
+    def __init__(self, process_variance=1e-4, measurement_variance=1e-2, source_id: Optional[str] = None):
         # معاملات مرشح كالمان (نموذج الدرجة الثانية: الإزاحة والسرعة)
         self.q = process_variance
         self.r = measurement_variance
         self.state = np.array([0.0, 0.0])  # [offset, drift_rate]
         self.covariance = np.eye(2) * 1.0
         self.last_ts = None
+        self.source_id = source_id
+        
+        # محاولة تحميل نمط انحراف مسبق من الخبرة الجماعية
+        if source_id:
+            profile = learning_engine.get_drift_profile(source_id)
+            if profile:
+                self.state[1] = profile.get("drift_rate", 0.0)
+                # تقليل خطأ التقدير الابتدائي لأننا نملك خبرة سابقة
+                self.covariance[1, 1] = 0.1 
+                print(f"🧠 استعادة نمط الانحراف للمصدر {source_id}: {self.state[1]:.4f}")
         
     def kalman_update(self, measurement: float, current_ts: float) -> float:
         """تحديث الحالة باستخدام مرشح كالمان (إزاحة + معدل انحراف)"""
@@ -85,14 +96,21 @@ class DriftCorrector:
         corrected_timestamp = current_timestamp - stable_offset
         
         # حساب الثقة بناءً على مصفوفة التغاير (Covariance)
-        confidence = 1.0 / (1.0 + np.trace(self.covariance))
+        confidence = float(1.0 / (1.0 + np.trace(self.covariance)))
+        
+        # حفظ النمط المكتشف في محرك التعلم إذا كانت الثقة عالية
+        if self.source_id and confidence > 0.95:
+            learning_engine.save_drift_profile(self.source_id, {
+                "drift_rate": float(self.state[1]),
+                "last_offset": float(stable_offset)
+            })
         
         return {
             "original_timestamp": current_timestamp,
             "corrected_timestamp": corrected_timestamp,
             "estimated_drift": stable_offset,
             "drift_rate": self.state[1],
-            "confidence": float(confidence)
+            "confidence": confidence
         }
 
 if __name__ == "__main__":

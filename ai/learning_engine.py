@@ -113,6 +113,31 @@ class LearningEngine:
             summary += f"- {status}{origin}: {exp.get('lesson')}\n"
         return summary
 
+    def get_drift_profile(self, video_source: str) -> Optional[Dict[str, Any]]:
+        """جلب ملف تعريف الانحراف الزمني لمصدر معين."""
+        for exp in reversed(self.experience_db):
+            if exp.get("task_type") == "drift_profile" and exp.get("source") == video_source:
+                if exp.get("status") == "verified":
+                    return exp.get("profile")
+        return None
+
+    def save_drift_profile(self, video_source: str, profile: Dict[str, Any], agent_id: str = "global"):
+        """حفظ نمط الانحراف المكتشف كمهمة تعلم."""
+        lesson = f"تم رصد انحراف بمعدل {profile.get('drift_rate', 0):.4f} في المصدر {video_source}"
+        experience = {
+            "agent_id": agent_id,
+            "task_type": "drift_profile",
+            "source": video_source,
+            "profile": profile,
+            "lesson": lesson,
+            "success": True,
+            "timestamp": time.time(),
+            "status": "verified" # أنماط الانحراف التقنية تعتبر موثقة تلقائياً إذا جاءت من DriftCorrector
+        }
+        self.experience_db.append(experience)
+        if len(self.experience_db) > 100: self.experience_db.pop(0)
+        self._save_db()
+
     def import_expert_seeds(self, seeds_file: str):
         """استيراد بذور خبرة خارجية من ملف JSON."""
         try:
