@@ -45,23 +45,16 @@ class DynamicSparseAttentionNumPy:
         if mask is not None:
             scores = np.where(mask[None], -1e9, scores)
             
-        # --- Dynamic Sparsity ---
-        # اختيار أفضل k عناصر لكل صف في كل رأس
+        # --- Dynamic Sparsity (Vectorized) ---
         k_elements = max(1, int(seq_len * self.sparsity_k))
         
-        # مصفوفة لحجب القيم الضعيفة
-        sparse_mask = np.ones_like(scores, dtype=bool)
-        
-        for h in range(self.n_heads):
-            for i in range(seq_len):
-                row = scores[h, i]
-                # إيجاد عتبة الـ Top-K
-                if k_elements < seq_len:
-                    threshold = np.partition(row, -k_elements)[-k_elements]
-                    sparse_mask[h, i] = row >= threshold
-        
-        # حجب القيم التي ليست ضمن الـ Top-K
-        sparse_scores = np.where(sparse_mask, scores, -1e9)
+        if k_elements < seq_len:
+            # استخدام np.partition بشكل متجه عبر المحور الأخير
+            # نأخذ العتبة لكل صف في كل رأس
+            thresholds = np.partition(scores, -k_elements, axis=-1)[..., -k_elements, None]
+            sparse_scores = np.where(scores >= thresholds, scores, -1e9)
+        else:
+            sparse_scores = scores
         
         attn = _softmax(sparse_scores)
         self._attn = attn

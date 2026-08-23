@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
+from ai.layers.dynamic_sparse_attention_numpy import DynamicSparseAttentionNumPy
 
 logger = logging.getLogger(__name__)
 
@@ -659,9 +660,12 @@ class LayerNorm:
 # 8. Transformer Block
 # ══════════════════════════════════════════════════════════════════════════════
 class TransformerBlock:
-    def __init__(self, d_model=D_MODEL, n_heads=N_HEADS, d_ff=D_FF, bid=0):
+    def __init__(self, d_model=D_MODEL, n_heads=N_HEADS, d_ff=D_FF, bid=0, use_sparse_attn=True):
         self.bid  = bid
-        self.mha  = MultiHeadAttention(d_model, n_heads)
+        if use_sparse_attn:
+            self.mha = DynamicSparseAttentionNumPy(d_model, n_heads, sparsity_k=0.25)
+        else:
+            self.mha = MultiHeadAttention(d_model, n_heads)
         self.ffn  = FFN(d_model, d_ff)
         self.ln1  = LayerNorm(d_model)
         self.ln2  = LayerNorm(d_model)
@@ -764,7 +768,8 @@ class ArabicTransformer:
                  weights_dir=WEIGHTS_DIR, core_csv=None,
                  tokenizer: Optional[object] = None,
                  use_hash_tokenizer: bool = False,
-                 tokenizer_type: str = "word"):
+                 tokenizer_type: str = "word",
+                 use_sparse_attn: bool = True):
         """
         tokenizer_type: "word"|"bpe"|"wordpiece"|"sentencepiece"|"unigram"|"char"|"byte_bpe"|"modern_bbpe"|"hash"
         يُتجاهل إذا مُرِّر كائن tokenizer مباشرة.
@@ -848,7 +853,7 @@ class ArabicTransformer:
         self.embedding   = TokenEmbedding(vocab_size, d_model)
         self.pos_enc     = PositionalEncoding(d_model, max_seq)
         self.core        = CoreMatrixLayer(core_csv, d_model)
-        self.blocks      = [TransformerBlock(d_model, n_heads, d_ff, i)
+        self.blocks      = [TransformerBlock(d_model, n_heads, d_ff, i, use_sparse_attn=use_sparse_attn)
                             for i in range(n_layers)]
         self.head        = OutputHead(d_model, vocab_size)
 
