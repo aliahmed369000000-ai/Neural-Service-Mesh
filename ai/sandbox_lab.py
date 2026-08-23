@@ -151,6 +151,10 @@ class SandboxTestingLab:
 
         # 2. Safety check (static analysis)
         self._check_safety(module.code, result)
+        if not result.safety_passed:
+            result.compute_score()
+            self._store(module, result)
+            return result
 
         # 3. Write to sandbox temp file
         sandbox_path = self._write_to_sandbox(module)

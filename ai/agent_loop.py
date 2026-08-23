@@ -186,12 +186,20 @@ register_tool(ToolSpec("image_search", "البحث عن صور حقيقية", {"
 def _tool_sandbox_test(params: Dict[str, Any]) -> str:
     code = str(params.get("code", ""))
     module_name = str(params.get("module_name", "temp_agent_module"))
+    class_name = str(params.get("class_name", "GeneratedNode"))
     try:
-        from ai.sandbox_lab import SandboxTestResult
-        # محاكاة سريعة للتشغيل في الساندبوكس
-        res = SandboxTestResult("agent_call", module_name)
-        # هنا يجب إضافة منطق التشغيل الفعلي إذا كان sandbox_lab يدعم واجهة برمجية مباشرة
-        return f"✅ تم إرسال الكود للساندبوكس (Module: {module_name})."
+        from ai.sandbox_lab import SandboxTestingLab
+        # إنشاء كائن وحدة وهمي للتوافق مع sandbox_lab
+        class MockModule:
+            def __init__(self, mid, name, code, cname):
+                self.module_id, self.name, self.code, self.class_name = mid, name, code, cname
+                self.status = "new"
+                self.test_result = None
+
+        lab = SandboxTestingLab(sandbox_dir=str(ROOT / "artifacts" / "sandbox"))
+        mock = MockModule("agent_test", module_name, code, class_name)
+        res = lab.test_module(mock)
+        return json.dumps(res.to_dict(), ensure_ascii=False, indent=2)
     except Exception as e: return f"❌ sandbox_test: {e}"
 
 register_tool(ToolSpec("sandbox_test", "اختبار كود في بيئة معزولة", {"type": "object", "properties": {"code": {"type": "string"}, "module_name": {"type": "string"}}}, _tool_sandbox_test, dangerous=True))
