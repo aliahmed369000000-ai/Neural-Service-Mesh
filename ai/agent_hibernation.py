@@ -20,36 +20,77 @@ SLEEP_DIR = ROOT / "artifacts" / "agent_sleep"
 SLEEP_DIR.mkdir(parents=True, exist_ok=True)
 
 class AgentState:
-    """تمثيل لحالة الوكيل القابلة للحفظ مع دعم الذاكرة الهيكلية والبصرية."""
+    """تمثيل لحالة الوكيل القابلة للحفظ مع دعم الذاكرة الهرمية (Hierarchical Memory)."""
     def __init__(self, agent_id: str, context: List[Dict[str, Any]], plan: Dict[str, Any], 
                  metadata: Dict[str, Any] = None, memory_snapshot: Dict[str, Any] = None,
                  pending_tasks: List[str] = None, memory_shards: Dict[str, str] = None,
                  visual_context: Dict[str, Any] = None, audio_context: Dict[str, Any] = None,
-                 multimodal_memory: Dict[str, Any] = None):
+                 multimodal_memory: Dict[str, Any] = None,
+                 episodic_memory: List[Dict[str, Any]] = None,
+                 semantic_memory: Dict[str, Any] = None):
         self.agent_id = agent_id
-        self.context = context
+        self.context = context  # الذاكرة العاملة (Working Memory)
         self.plan = plan
         self.memory_snapshot = memory_snapshot or {}
         self.pending_tasks = pending_tasks or []
         self.memory_shards = memory_shards or {}
-        self.visual_context = visual_context or {} # وصف الصور، نتائج OCR، وميتاداتا بصرية
-        self.audio_context = audio_context or {}   # النصوص المستخرجة من الصوت وميتا-داتا الملفات الصوتية
-        self.multimodal_memory = multimodal_memory or {} # الذاكرة المزامنة (Audio-Visual Alignment)
+        self.visual_context = visual_context or {}
+        self.audio_context = audio_context or {}
+        self.multimodal_memory = multimodal_memory or {}
+        self.episodic_memory = episodic_memory or []  # ذاكرة التجارب والأحداث (Episodic Memory)
+        self.semantic_memory = semantic_memory or {}  # ذاكرة الحقائق والمفاهيم (Semantic Memory)
         self.metadata = metadata or {}
         self.timestamp = time.time()
 
+    def _auto_summarize_episodic(self):
+        """تحويل الذاكرة العاملة القديمة إلى ذاكرة أحداثية ملخصة مع دعم ANN."""
+        if len(self.context) <= 15: return
+        
+        # استخراج الرسائل القديمة (ما عدا النظام وآخر 5 رسائل)
+        to_summarize = self.context[1:-5]
+        if not to_summarize: return
+        
+        # محاكاة التلخيص (في الإنتاج يتم استدعاء LLM)
+        summary_text = f"تم تنفيذ {len(to_summarize)} تفاعلات سابقة تشمل: "
+        actions = [m.get("role", "user") for m in to_summarize]
+        summary_text += f"تفاعلات من {set(actions)}"
+        
+        # توليد تضمين دلالي للتلخيص (ANN Support)
+        from ai.multimodal_sync import MultimodalSyncManager
+        sync_manager = MultimodalSyncManager()
+        embedding = sync_manager._generate_embedding(summary_text)
+        lsh_hash = sync_manager._generate_lsh_hash(embedding)
+        
+        episode = {
+            "timestamp": time.time(),
+            "summary": summary_text,
+            "raw_count": len(to_summarize),
+            "importance": 0.7,
+            "semantic_hash": lsh_hash
+        }
+        self.episodic_memory.append(episode)
+        
+        # تحديث السياق (الاحتفاظ بالنظام وآخر 5 رسائل)
+        system_msg = self.context[0]
+        recent = self.context[-5:]
+        self.context = [system_msg] + recent
+        logger.info(f"🧠 تم أرشفة {len(to_summarize)} رسالة في الذاكرة الأحداثية.")
+
     def compress(self, target_size_kb: int = 100):
         """ضغط الذاكرة لتقليل حجم الحالة المحفوظة."""
+        # محاولة التلخيص التلقائي أولاً قبل الضغط الفيزيائي
+        self._auto_summarize_episodic()
+        
         initial_size = len(json.dumps(self.to_dict())) / 1024
         if initial_size <= target_size_kb: return
         
         logger.info(f"🗜️ بدء ضغط الذاكرة (الحجم الحالي: {initial_size:.1f}KB)...")
         
-        # 1. ضغط السياق (الاحتفاظ برسالة النظام وأهم الرسائل الأخيرة)
-        if len(self.context) > 10:
-            system_msg = [m for m in self.context if m.get("role") == "system"]
-            recent = self.context[-8:]
-            self.context = system_msg + recent
+        # 1. ضغط السياق الإضافي إذا لزم الأمر
+        if len(self.context) > 6:
+            system_msg = self.context[0]
+            recent = self.context[-3:]
+            self.context = [system_msg] + recent
             
         # 2. ضغط الذاكرة متعددة الوسائط (الاحتفاظ بنقاط المزامنة ذات الثقة العالية فقط)
         for vid_id in list(self.multimodal_memory.keys()):
@@ -67,6 +108,25 @@ class AgentState:
         final_size = len(json.dumps(self.to_dict())) / 1024
         logger.info(f"✅ تم الضغط: {initial_size:.1f}KB -> {final_size:.1f}KB")
 
+    def search_episodic(self, query: str) -> List[Dict[str, Any]]:
+        """البحث الدلالي في الذاكرة الأحداثية باستخدام ANN."""
+        from ai.multimodal_sync import MultimodalSyncManager
+        sync_manager = MultimodalSyncManager()
+        query_vec = sync_manager._generate_embedding(query)
+        query_hash = sync_manager._generate_lsh_hash(query_vec)
+        
+        results = []
+        for episode in self.episodic_memory:
+            e_hash = episode.get("semantic_hash")
+            if not e_hash: continue
+            
+            # حساب مسافة هاملينج (ANN Filter)
+            distance = sum(c1 != c2 for c1, c2 in zip(query_hash, e_hash))
+            if distance <= 2: # عتبة التشابه
+                results.append(episode)
+        
+        return sorted(results, key=lambda x: x["timestamp"], reverse=True)
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "agent_id": self.agent_id,
@@ -78,6 +138,8 @@ class AgentState:
             "visual_context": self.visual_context,
             "audio_context": self.audio_context,
             "multimodal_memory": self.multimodal_memory,
+            "episodic_memory": self.episodic_memory,
+            "semantic_memory": self.semantic_memory,
             "metadata": self.metadata,
             "timestamp": self.timestamp
         }
@@ -94,7 +156,9 @@ class AgentState:
             data.get("memory_shards", {}),
             data.get("visual_context", {}),
             data.get("audio_context", {}),
-            data.get("multimodal_memory", {})
+            data.get("multimodal_memory", {}),
+            data.get("episodic_memory", []),
+            data.get("semantic_memory", {})
         )
         state.timestamp = data.get("timestamp", time.time())
         return state
