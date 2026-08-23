@@ -267,14 +267,16 @@ class SwarmManager:
                 logger.info(f"⚖️ Trust Update for {agent_id}: {old_score:.2f} -> {new_score:.2f}")
 
     def _save_proposal(self, proposal: SwarmProposal):
-        """حفظ حالة المقترح في القرص للمراجعة والتدقيق، وتحديث الثقة عند الإغلاق."""
+        """حفظ حالة المقترح مشفرة في القرص للمراجعة والتدقيق."""
+        from ai.security_manager import security_manager
+        
         # تحديث الثقة عند الموافقة أو الرفض
         if proposal.status == "approved":
-            self._update_trust(proposal.proposer, 0.1) # مكافأة للمقترح الناجح
+            self._update_trust(proposal.proposer, 0.1)
         elif proposal.status == "rejected":
-            self._update_trust(proposal.proposer, -0.05) # جزاء بسيط للمقترح المرفوض
+            self._update_trust(proposal.proposer, -0.05)
 
-        p_path = self.storage_dir / f"{proposal.proposal_id}.json"
+        p_path = self.storage_dir / f"{proposal.proposal_id}.enc"
         data = {
             "id": proposal.proposal_id,
             "proposer": proposal.proposer,
@@ -284,8 +286,11 @@ class SwarmManager:
             "status": proposal.status,
             "created_at": proposal.created_at
         }
-        with open(p_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        
+        # تشفير بيانات المقترح قبل الحفظ
+        encrypted_data = security_manager.encrypt(data)
+        with open(p_path, "wb") as f:
+            f.write(encrypted_data)
 
     # 🆕 منطق سوق المهام والمزايدة
     def post_marketplace_task(self, task_id: str, description: str, requirements: Dict[str, Any]):

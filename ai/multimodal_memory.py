@@ -17,7 +17,11 @@ from pathlib import Path
 class MultimodalMemory:
     def __init__(self, storage_dir: Optional[str] = None):
         self.root = Path(__file__).resolve().parent.parent
-        self.storage_dir = Path(storage_dir) if storage_dir else self.root / "artifacts" / "memory" / "multimodal"
+        if storage_dir:
+            self.storage_dir = Path(storage_dir).resolve()
+        else:
+            self.storage_dir = (self.root / "artifacts" / "memory" / "multimodal").resolve()
+            
         self.assets_dir = self.storage_dir / "assets"
         self.index_path = self.storage_dir / "index.json"
         
@@ -32,7 +36,8 @@ class MultimodalMemory:
                 json.dump({"assets": [], "tags": {}}, f, ensure_ascii=False, indent=2)
 
     def store_asset(self, agent_id: str, file_path: str, media_type: str, metadata: Dict[str, Any]) -> str:
-        """تخزين أصل جديد في الذاكرة الجماعية."""
+        """تخزين أصل جديد في الذاكرة الجماعية مع التشفير."""
+        from ai.security_manager import security_manager
         asset_id = f"asset_{uuid.uuid4().hex[:8]}"
         src_path = Path(file_path)
         if not src_path.exists():
@@ -42,17 +47,22 @@ class MultimodalMemory:
         ext = src_path.suffix
         dest_path = self.assets_dir / f"{asset_id}{ext}"
         
-        # نسخ الملف إلى المستودع المركزي
-        shutil.copy2(src_path, dest_path)
+        # تشفير الملف أثناء النسخ
+        with open(src_path, 'rb') as f_src:
+            encrypted_data = security_manager.encrypt(f_src.read())
         
-        # تحديث الفهرس
+        with open(dest_path, 'wb') as f_dest:
+            f_dest.write(encrypted_data)
+        
+        # تحديث الفهرس (تشفير البيانات الوصفية الحساسة)
         entry = {
             "id": asset_id,
             "owner": agent_id,
             "type": media_type,
             "path": str(dest_path.relative_to(self.root)),
             "metadata": metadata,
-            "ts": time.time()
+            "ts": time.time(),
+            "encrypted": True
         }
         
         self._update_index(entry)

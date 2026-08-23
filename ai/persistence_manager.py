@@ -16,9 +16,10 @@ class PersistenceManager:
         os.makedirs(self.base_dir, exist_ok=True)
 
     def save_snapshot(self, agent_id: str, state_data: Dict[str, Any]) -> str:
-        """حفظ لقطة كاملة لحالة الوكيل."""
+        """حفظ لقطة كاملة لحالة الوكيل مع التشفير السيادي."""
+        from ai.security_manager import security_manager
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{agent_id}_{timestamp}.json"
+        filename = f"{agent_id}_{timestamp}.enc"
         filepath = os.path.join(self.base_dir, filename)
         
         snapshot = {
@@ -26,39 +27,45 @@ class PersistenceManager:
             "timestamp": timestamp,
             "unix_time": time.time(),
             "state": state_data,
-            "version": "1.0"
+            "version": "1.0",
+            "encrypted": True
         }
         
         try:
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(snapshot, f, ensure_ascii=False, indent=2)
+            # تشفير لقطة الوعي قبل الحفظ
+            encrypted_data = security_manager.encrypt(snapshot)
+            with open(filepath, 'wb') as f:
+                f.write(encrypted_data)
             
             # تحديث رابط 'الأحدث' (Latest)
-            latest_path = os.path.join(self.base_dir, f"{agent_id}_latest.json")
-            with open(latest_path, 'w', encoding='utf-8') as f:
-                json.dump(snapshot, f, ensure_ascii=False, indent=2)
+            latest_path = os.path.join(self.base_dir, f"{agent_id}_latest.enc")
+            with open(latest_path, 'wb') as f:
+                f.write(encrypted_data)
                 
-            logger.info(f"💾 تم حفظ لقطة الوعي للوكيل {agent_id} في {filepath}")
+            logger.info(f"💾 تم حفظ لقطة الوعي المشفرة للوكيل {agent_id} في {filepath}")
             return filepath
         except Exception as e:
-            logger.error(f"❌ فشل حفظ لقطة الوعي: {e}")
+            logger.error(f"❌ فشل حفظ لقطة الوعي المشفرة: {e}")
             raise
 
     def load_snapshot(self, agent_id: str) -> Optional[Dict[str, Any]]:
-        """استعادة آخر لقطة حالة للوكيل."""
-        latest_path = os.path.join(self.base_dir, f"{agent_id}_latest.json")
+        """استعادة آخر لقطة حالة مشفرة للوكيل."""
+        from ai.security_manager import security_manager
+        latest_path = os.path.join(self.base_dir, f"{agent_id}_latest.enc")
         
         if not os.path.exists(latest_path):
-            logger.warning(f"⚠️ لا توجد لقطات حالة محفوظة للوكيل {agent_id}")
+            logger.warning(f"⚠️ لا توجد لقطات حالة مشفرة محفوظة للوكيل {agent_id}")
             return None
             
         try:
-            with open(latest_path, 'r', encoding='utf-8') as f:
-                snapshot = json.load(f)
-            logger.info(f"🔄 تم استعادة وعي الوكيل {agent_id} من لقطة بتاريخ {snapshot['timestamp']}")
+            with open(latest_path, 'rb') as f:
+                encrypted_data = f.read()
+            
+            snapshot = security_manager.decrypt(encrypted_data, as_json=True)
+            logger.info(f"🔄 تم استعادة وعي الوكيل {agent_id} من لقطة مشفرة بتاريخ {snapshot['timestamp']}")
             return snapshot["state"]
         except Exception as e:
-            logger.error(f"❌ فشل استعادة لقطة الوعي: {e}")
+            logger.error(f"❌ فشل استعادة لقطة الوعي المشفرة: {e}")
             return None
 
     def list_snapshots(self, agent_id: str) -> list:
