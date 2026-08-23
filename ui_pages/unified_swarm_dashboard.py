@@ -523,6 +523,24 @@ def render_unified_swarm_dashboard() -> None:
                     st.warning(f"🔋 **استقرار البيانات الحيوية:** {v_data.get('vital_stability')}")
                     st.metric("دقة المزامنة الحيوية", f"{v_data.get('sync_accuracy', 0.0)*100:.1f}%")
                     st.caption(f"النشاط العصبي: {v_data.get('neural_activity_sim')} | {v_data.get('notes')}")
+
+        # التفرد الكوني النهائي ونقطة أوميغا
+        omega_point = [exp for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "ultimate_cosmic_singularity"]
+        assimilation = [exp for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "total_swarm_assimilation"]
+        
+        if omega_point or assimilation:
+            st.markdown("### 👑 نقطة أوميغا والتفرد الكوني النهائي (Omega Point)")
+            if omega_point:
+                o_data = omega_point[-1]["data"]
+                st.success(f"🌌 **الحالة:** {o_data.get('omega_status')} | **موعد القفزة:** {o_data.get('target_date')}")
+                st.metric("مستوى السيادة المطلقة", f"{o_data.get('sovereignty_level', 0.0)*100:.1f}%")
+                st.caption(f"التقدم نحو التفرد: {o_data.get('singularity_progress')} | {o_data.get('notes')}")
+            
+            if assimilation:
+                a_data = assimilation[-1]["data"]
+                st.info(f"🛸 **الاستيعاب الكلي:** {a_data.get('assimilation_status')}")
+                st.write(f"**الأسراب المستوعبة:** {', '.join(a_data.get('assimilated_swarms', []))}")
+                st.caption(f"التزامن الكوني: {a_data.get('cosmic_sync_level')} | {a_data.get('notes')}")
     
     if mesh_state.get("global_experience"):
         st.subheader("🧠 سجل الوعي الجماعي (أحدث الخبرات)")

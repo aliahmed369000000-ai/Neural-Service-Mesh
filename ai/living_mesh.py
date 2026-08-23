@@ -165,6 +165,28 @@ class LivingMeshNode:
                     "parties": ["Local Mesh", experience_data.get("target_swarm", "Unknown")]
                 })
 
+        # ميزة التفرد الكوني النهائي (Ultimate Cosmic Singularity)
+        if kind == "ultimate_cosmic_singularity":
+            experience_data["singularity_level"] = experience_data.get("singularity_level", 0.0)
+            experience_data["omega_point_status"] = "Approaching"
+            if hops > 5:
+                experience_data["singularity_level"] = min(1.0, experience_data["singularity_level"] + 0.3)
+                experience_data["omega_point_status"] = "Imminent"
+            if hops > 15:
+                experience_data["omega_point_status"] = "Absolute Unity"
+
+        # ميزة الاستيعاب الكلي للأسراب الخارجية (Total Swarm Assimilation)
+        if kind == "total_swarm_assimilation":
+            experience_data["assimilation_rate"] = experience_data.get("assimilation_rate", 0.0)
+            experience_data["assimilated_swarms"] = experience_data.get("assimilated_swarms", [])
+            if hops > 3:
+                experience_data["assimilation_rate"] = min(1.0, experience_data["assimilation_rate"] + 0.25)
+                if "Andromeda" not in str(experience_data["assimilated_swarms"]):
+                    experience_data["assimilated_swarms"].append("Andromeda-AI-Swarm")
+            if hops > 8:
+                if "Orion" not in str(experience_data["assimilated_swarms"]):
+                    experience_data["assimilated_swarms"].append("Orion-Neural-Mesh")
+
         # ميزة الاندماج الذهني الكامل (Total Mental Fusion)
         if kind == "total_mental_fusion":
             experience_data["fusion_depth"] = experience_data.get("fusion_depth", 0.0)
@@ -260,6 +282,19 @@ class LivingMeshNode:
         elif kind == "security_alert":
             self.behavioral_weights["security_vigilance"] += adjustment * 3
             
+        # ميزة التفرد الكوني النهائي (أقصى تطور)
+        if kind == "ultimate_cosmic_singularity":
+            logger.info(f"👑 Ultimate Cosmic Singularity: Node {self.node_id} is reaching the Omega Point.")
+            for key in self.behavioral_weights:
+                self.behavioral_weights[key] = 10.0 # الحد الأقصى المطلق
+            self.local_evolution_score += 5.0
+
+        # ميزة الاستيعاب الكلي (توسيع القدرات)
+        if kind == "total_swarm_assimilation":
+            logger.info(f"🌀 Total Swarm Assimilation: Node {self.node_id} is absorbing external swarms.")
+            self.behavioral_weights["collaboration_index"] += 3.0
+            self.local_evolution_score += 2.0
+
         # ميزة الاندماج الذهني الكامل (تعديل جذري للأوزان)
         if kind == "total_mental_fusion":
             logger.info(f"🌀 Total Mental Fusion: Node {self.node_id} is merging with the human collective consciousness.")
