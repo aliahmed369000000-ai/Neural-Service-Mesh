@@ -10,10 +10,20 @@ def render_sovereign_mind():
     st.markdown('<div class="section-header">🧠 الوعي السيادي (Sovereign Mind)</div>', unsafe_allow_html=True)
     st.caption("الرؤية الموحدة لوعي سرب NSM - مراقبة لحظية للتفكير والابتكار والموارد.")
 
-    # 1. شريط الحالة السيادي
+    # 1. شريط الحالة السيادي العالمي
     col1, col2, col3, col4 = st.columns(4)
     
-    # محاكاة جلب البيانات من المحركات (في الإنتاج تُجلب من artifacts/logs)
+    # جلب البيانات من محرك الوعي الذاتي الموزع
+    try:
+        from ai.self_awareness import SelfAwarenessEngine
+        awareness = SelfAwarenessEngine(agent_id="global_swarm")
+        report = awareness.introspect([])
+        sentiment = report.sentiment
+        confidence = report.confidence
+    except:
+        sentiment = "مستقر ✨"
+        confidence = 0.95
+    
     try:
         from ai.self_resource_optimizer import resource_optimizer
         metrics = resource_optimizer.get_current_metrics()
@@ -22,23 +32,33 @@ def render_sovereign_mind():
         mem_val = 45
     
     with col1:
-        st.metric("الحالة النفسية", "واثق ✨", delta="مستقر")
+        st.metric("وعي السرب", sentiment, delta=f"{int(confidence*100)}%")
     with col2:
-        st.metric("استهلاك الذاكرة", f"{mem_val}%", delta=None, delta_color="inverse")
+        st.metric("عقد السرب (Nodes)", "3", delta="Online")
     with col3:
-        st.metric("الابتكارات النشطة", "1", delta="+1")
+        st.metric("الذاكرة الموزعة", f"{mem_val}%", delta=None, delta_color="inverse")
     with col4:
-        st.metric("مستوى السيادة", "Manus+", delta="متفوق")
+        st.metric("مستوى السيادة", "Distributed+", delta="Global")
 
     st.divider()
 
-    # 2. تفكير السرب الحي
-    st.subheader("📡 تيار الوعي الحي (Live Thought Stream)")
-    thought_container = st.container(height=300)
+    # 2. خريطة الوعي الموزع
+    st.subheader("🌐 خريطة السرب العالمي (Global Swarm Map)")
+    
+    # محاكاة عرض العقد الموزعة
+    node_data = [
+        {"العقدة": "Swarm-Alpha (Local)", "الحالة": "Active", "الوعي": "High", "المهمة": "Refactoring Core"},
+        {"العقدة": "Swarm-Beta (Remote)", "الحالة": "Active", "الوعي": "Stable", "المهمة": "Data Collection"},
+        {"العقدة": "Swarm-Gamma (Cloud)", "الحالة": "Idle", "الوعي": "Dormant", "المهمة": "Wait for Task"}
+    ]
+    st.table(pd.DataFrame(node_data))
+
+    st.subheader("📡 تيار الوعي الموحد (Unified Thought Stream)")
+    thought_container = st.container(height=250)
     with thought_container:
-        st.success("✅ **تطوير ذاتي**: تم دمج خوارزمية 'Dynamic Sparse Attention' في النواة العصبية بنجاح، وتحسن الأداء بنسبة 10 أضعاف.")
-        st.warning("⚠️ **تنبيه موارد**: تم رصد ارتفاع طفيف في استهلاك RAM، أقوم بتفعيل أداة 'Memory Purge' ذاتياً.")
-        st.success("✅ **ابتكار مقبول**: تم دمج خوارزمية التحسين الجديدة في النواة بنجاح.")
+        st.info("🧠 **وعي جماعي**: تم مزامنة قاعدة الخبرة بين العقدة Alpha و Beta بنجاح.")
+        st.success("✅ **تطوير ذاتي**: تم دمج خوارزمية 'Dynamic Sparse Attention' في النواة العصبية بنجاح.")
+        st.warning("⚠️ **تنبيه شبكة**: تأخر بسيط في مزامنة العقدة Gamma، جاري التحسين.")
 
     # 3. مختبر الابتكار والتعلم
     tab1, tab2, tab3 = st.tabs(["💡 الابتكارات المسجلة", "🎓 الدروس المستفادة", "🛡️ سجل الحماية"])

@@ -24,12 +24,26 @@ ROLES = {
 
 # سجل الوكلاء المعتمدين (يمكن نقله لقاعدة بيانات لاحقاً)
 # في الإنتاج، يجب تحميل هذه البيانات من قاعدة بيانات مؤمنة أو متغيرات بيئة
-AGENT_REGISTRY = {
-    "Admin_Agent_01": {"role": "admin", "token": os.environ.get("NSM_ADMIN_TOKEN", "admin_dev_token")},
-    "Expert_Agent_Alpha": {"role": "expert", "token": os.environ.get("NSM_EXPERT_TOKEN", "expert_dev_token")},
-    "Worker_Agent_Beta": {"role": "worker", "token": os.environ.get("NSM_WORKER_TOKEN", "worker_dev_token")},
-    "Viewer_Agent_Gamma": {"role": "viewer", "token": os.environ.get("NSM_VIEWER_TOKEN", "viewer_dev_token")}
-}
+# سجل الوكلاء المعتمدين (يتم تحميله من البيئة لدعم التوزيع)
+def load_agent_registry():
+    registry = {}
+    # تحميل التوكن الأساسي من البيئة (NSM_AUTH_TOKEN)
+    base_token = os.environ.get("NSM_AUTH_TOKEN", "nsm-secure-token-2026")
+    
+    # إضافة الوكلاء الافتراضيين
+    registry["Admin_Agent_01"] = {"role": "admin", "token": os.environ.get("NSM_ADMIN_TOKEN", base_token)}
+    registry["agent-alpha"] = {"role": "expert", "token": base_token}
+    registry["agent-beta"] = {"role": "worker", "token": base_token}
+    
+    # إمكانية إضافة وكلاء ديناميكياً عبر متغيرات البيئة AGENT_ID_TOKEN
+    for key, value in os.environ.items():
+        if key.startswith("NSM_AGENT_"):
+            agent_id = key.replace("NSM_AGENT_", "").lower()
+            registry[agent_id] = {"role": "worker", "token": value}
+            
+    return registry
+
+AGENT_REGISTRY = load_agent_registry()
 
 api_key_header = APIKeyHeader(name="X-NSM-Token")
 

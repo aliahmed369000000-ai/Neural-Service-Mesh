@@ -57,143 +57,78 @@ class SystemAwarenessReport:
         }
 
 
+import time
+import psutil
+import os
+from ai.technical_sentiment import sentiment_engine
+
 class SelfAwarenessEngine:
     """
-    Phase 7: Provides the system with introspective awareness of its own state.
-
-    Reads from:
-      - NodeRegistry          (node count, types)
-      - ScoringEngine         (weak/strong connections)
-      - MemoryEngine          (failure patterns)
-      - AgentFactory          (active agents)
-      - EnvironmentModel      (world model)
-      - ObjectivesEngine      (current goals)
+    محرك الوعي الذاتي (Self-Awareness Engine) - V2.
+    يمنح الوكيل إدراكاً لحالته التقنية، النفسية، والموارد المتاحة في بيئة موزعة.
     """
-
-    def __init__(
-        self,
-        registry=None,
-        graph=None,
-        scoring_engine=None,
-        memory_engine=None,
-        agent_factory=None,
-        knowledge_store=None,
-        environment_model=None,
-        objectives_engine=None,
-    ):
-        self._registry = registry
-        self._graph = graph
-        self._scoring = scoring_engine
-        self._memory = memory_engine
-        self._agent_factory = agent_factory
-        self._knowledge = knowledge_store
-        self._env_model = environment_model
-        self._objectives = objectives_engine
+    def __init__(self, agent_id: str = "NSM-Agent"):
+        self.agent_id = agent_id
+        self.start_time = time.time()
+        self.memory_limit_mb = 2048 # افتراضي 2GB
+        self.state_history = []
         self._report_count = 0
-        self._last_report: Optional[SystemAwarenessReport] = None
 
-    def introspect(self) -> SystemAwarenessReport:
-        """Generate a full self-awareness report."""
+    def introspect(self, recent_steps: List[Dict[str, Any]] = None) -> SystemAwarenessReport:
+        """توليد تقرير وعي ذاتي كامل."""
         report = SystemAwarenessReport()
-
-        # ── Node & graph stats ─────────────────────────────────────────────
-        try:
-            report.node_count = self._registry.count() if self._registry else 0
-        except Exception:
-            report.node_count = 0
-
-        try:
-            stats = self._graph.stats() if self._graph else {}
-            report.edge_count = stats.get("edges", 0)
-        except Exception:
-            report.edge_count = 0
-
-        # ── Agent count ────────────────────────────────────────────────────
-        try:
-            if self._agent_factory:
-                af_summary = self._agent_factory.summary()
-                report.active_agents = af_summary.get("active_agents", 0)
-        except Exception:
-            pass
-
-        # ── Weakest / strongest nodes (via scoring) ────────────────────────
-        try:
-            if self._scoring:
-                scores = self._scoring.list_scores()
-                if scores:
-                    worst = min(scores, key=lambda s: s.get("connection_score", 50))
-                    best = max(scores, key=lambda s: s.get("connection_score", 50))
-                    report.weakest_node = {
-                        "connection": f"{worst.get('source_id','?')[:8]} → {worst.get('target_id','?')[:8]}",
-                        "score": worst.get("connection_score"),
-                        "success_rate": worst.get("success_rate"),
-                        "total_runs": worst.get("total_runs"),
-                    }
-                    report.strongest_node = {
-                        "connection": f"{best.get('source_id','?')[:8]} → {best.get('target_id','?')[:8]}",
-                        "score": best.get("connection_score"),
-                        "success_rate": best.get("success_rate"),
-                        "total_runs": best.get("total_runs"),
-                    }
-        except Exception as exc:
-            logger.debug(f"[SelfAwareness] scoring read error: {exc}")
-
-        # ── Most failing / succeeding routes (via memory) ──────────────────
-        try:
-            if self._memory:
-                routes = self._memory.all_routes()
-                if routes:
-                    routes_with_runs = [r for r in routes if r.get("runs", 0) > 0]
-                    if routes_with_runs:
-                        worst_route = min(routes_with_runs, key=lambda r: r.get("success_rate", 1.0))
-                        best_route = max(routes_with_runs, key=lambda r: r.get("success_rate", 0.0))
-                        report.most_failing_transition = {
-                            "path": worst_route.get("path_key"),
-                            "success_rate": worst_route.get("success_rate"),
-                            "runs": worst_route.get("runs"),
-                            "health": worst_route.get("health"),
-                        }
-                        report.most_successful_transition = {
-                            "path": best_route.get("path_key"),
-                            "success_rate": best_route.get("success_rate"),
-                            "runs": best_route.get("runs"),
-                            "health": best_route.get("health"),
-                        }
-        except Exception as exc:
-            logger.debug(f"[SelfAwareness] memory read error: {exc}")
-
-        # ── Current objectives ─────────────────────────────────────────────
-        try:
-            if self._objectives:
-                report.current_objectives = self._objectives.active_goals()
-        except Exception:
-            report.current_objectives = []
-
-        # ── Known capabilities from world model ────────────────────────────
-        try:
-            if self._env_model:
-                report.known_capabilities = self._env_model.get_known_capabilities()[:20]
-                failures = self._env_model.get_known_failures()
-                report.known_failures = [
-                    {"key": k, **v}
-                    for k, v in sorted(failures.items(),
-                                       key=lambda x: x[1].get("count", 0), reverse=True)
-                ][:10]
-        except Exception:
-            pass
-
-        # ── System health score ────────────────────────────────────────────
-        report.system_health_score = self._compute_health(report)
-        report.phase7_readiness = self._compute_readiness(report)
-
-        # ── Insights ───────────────────────────────────────────────────────
-        report.insights = self._generate_insights(report)
-
-        self._last_report = report
+        
+        # 1. الوعي بالموارد (Physical Awareness)
+        process = psutil.Process(os.getpid())
+        mem_info = process.memory_info()
+        ram_usage_mb = mem_info.rss / (1024 * 1024)
+        cpu_usage = process.cpu_percent(interval=0.1)
+        
+        # 2. الوعي النفسي التقني (Technical Sentiment)
+        sentiment_data = sentiment_engine.analyze_steps(recent_steps or [])
+        
+        # 3. الوعي بالزمن والجهد
+        uptime = time.time() - self.start_time
+        
+        # تحديث التقرير
+        report.node_count = 1 # في الحاوية الحالية
+        report.active_agents = 1
+        report.system_health_score = 1.0 - (0.5 if ram_usage_mb > self.memory_limit_mb * 0.8 else 0.0)
+        
+        insight = self._generate_reflection(sentiment_data, ram_usage_mb)
+        report.insights = [insight]
+        
+        # تخزين الحالة للـ Telemetry
+        awareness_state = {
+            "agent_id": self.agent_id,
+            "timestamp": time.time(),
+            "ram_mb": round(ram_usage_mb, 2),
+            "cpu_percent": cpu_usage,
+            "sentiment": sentiment_data["sentiment"],
+            "reflection": insight
+        }
+        self.state_history.append(awareness_state)
+        if len(self.state_history) > 50: self.state_history.pop(0)
+        
         self._report_count += 1
-        logger.info(f"[SelfAwareness] introspection #{self._report_count} complete "
-                    f"(health={report.system_health_score:.2f})")
         return report
+
+    def _generate_reflection(self, sentiment: Dict[str, Any], ram: float) -> str:
+        """توليد 'تأمل ذاتي' نصي يعبر عن وعي الوكيل."""
+        reflection = f"أنا الوكيل {self.agent_id}. "
+        
+        if sentiment["sentiment"] == "Confident":
+            reflection += "أشعر بالثقة في أدائي الحالي، العمليات تسير بسلاسة. "
+        elif sentiment["sentiment"] == "Frustrated":
+            reflection += "أشعر بالإحباط بسبب تكرار الأخطاء، أحتاج لمراجعة استراتيجيتي. "
+        
+        if ram > (self.memory_limit_mb * 0.8):
+            reflection += "أدرك أن مواردي من الذاكرة بدأت تنفد، يجب أن أكون حذراً في العمليات القادمة."
+        
+        return reflection
+
+    def get_last_awareness(self) -> Optional[Dict[str, Any]]:
+        return self.state_history[-1] if self.state_history else None
 
     def _compute_health(self, report: SystemAwarenessReport) -> float:
         score = 0.5  # baseline

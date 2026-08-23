@@ -768,6 +768,8 @@ class LoopState:
         self.plan: Optional[TaskPlan] = None
         self.visual_memory = {} # تخزين نتائج معالجة الصور اللحظية
         self.audio_memory = {}  # تخزين نتائج معالجة الصوت اللحظية
+        from ai.self_awareness import SelfAwarenessEngine
+        self.awareness = SelfAwarenessEngine(agent_id=f"agent_{loop_id}")
         self.agent_roles = {
             "vision": "متخصص في تحليل الإطارات والميزات البصرية",
             "audio": "متخصص في تفريغ ومعالجة المسارات الصوتية",
@@ -919,6 +921,10 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                 target_agent_id = f"agent_{loop_id}"
                 try:
                     monitor.record_activity()
+                    
+                    # وعي ذاتي عند كل جولة
+                    awareness_report = state.awareness.introspect(state.steps)
+                    _emit({"type": "info", "text": f"🧠 وعي الوكيل: {awareness_report.insights[0]}"})
                     
                     # مراقبة الموارد وحقن تنبيهات سيادية إذا لزم الأمر
                     from ai.self_resource_optimizer import resource_optimizer
