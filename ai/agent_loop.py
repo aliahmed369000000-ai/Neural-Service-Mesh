@@ -113,6 +113,7 @@ TOOL_REGISTRY: Dict[str, ToolSpec] = {}
 _TOOL_ORDER: List[str] = []
 
 def register_tool(spec: ToolSpec) -> ToolSpec:
+    global TOOL_REGISTRY, _TOOL_ORDER
     TOOL_REGISTRY[spec.name] = spec
     if spec.name not in _TOOL_ORDER:
         _TOOL_ORDER.append(spec.name)
@@ -133,16 +134,20 @@ def _exec_shell(params: Dict[str, Any]) -> str:
         term = get_terminal()
         r = term.run_agent("agent_loop", cmd, timeout=int(params.get("timeout", _default_timeout_for(cmd))))
         
-        # 🆕 منطق التعافي التلقائي (Auto-Heal) عند فشل الأوامر الحرجة
+        out = []
+        # 🆕 منطق التشخيص التلقائي (Auto-Heal Diagnosis) عند فشل الأوامر الحرجة
         if not r.ok and r.exit_code != 0:
-            critical_prefixes = ("python", "pytest", "git push", "pip install")
+            critical_prefixes = ("python", "pytest", "git push", "git commit", "pip install")
             if any(cmd.startswith(p) for p in critical_prefixes):
                 try:
                     from ai.auto_runtime import trigger_auto_heal
-                    trigger_auto_heal(context={"cmd": cmd, "exit_code": r.exit_code, "stderr": r.stderr})
+                    res = trigger_auto_heal(context={"cmd": cmd, "exit_code": r.exit_code, "stderr": r.stderr})
+                    if res.get("ok"):
+                        diag = res.get("diagnosis", {})
+                        out.append(f"🛠️ [AutoHeal Diagnosis]: {diag.get('desc', 'خطأ غير معروف')}")
+                        if diag.get("action"):
+                            out.append(f"💡 اقتراح إصلاح: {diag.get('action')}")
                 except Exception: pass
-        
-        out = []
         if r.stdout: out.append(r.stdout[:_MAX_OUTPUT_CHARS])
         if r.stderr: 
             err_msg = r.stderr[:_MAX_OUTPUT_CHARS]
@@ -165,57 +170,10 @@ def _tool_read(params: Dict[str, Any]) -> str:
 
 register_tool(ToolSpec("read_file", "قراءة ملف", {"type": "object", "properties": {"path": {"type": "string"}}}, _tool_read))
 
-# 🆕 تسجيل أداة توليد الأدوات
-register_tool(ToolSpec(
-    "tool_genesis", 
-    "خلق أداة جديدة لنفسك (السيادة الإنشائية)", 
-    {
-        "type": "object", 
-        "properties": {
-            "name": {"type": "string"},
-            "description": {"type": "string"},
-            "code": {"type": "string"},
-            "params_schema": {"type": "object"}
-        },
-        "required": ["name", "description", "code"]
-    }, 
-    tool_genesis
-))
-
 # تحميل الأدوات الديناميكية عند البدء
 dynamic_tools = ToolGenesis.load_dynamic_tools()
 for name, fn in dynamic_tools.items():
     register_tool(ToolSpec(name, f"أداة ديناميكية: {name}", {}, fn))
-
-# 🆕 تسجيل أداة التطور الذاتي
-register_tool(ToolSpec(
-    "evolution_engine", 
-    "إدارة التطور الذاتي واقتراح ابتكارات في الكود المصدري", 
-    {
-        "type": "object", 
-        "properties": {
-            "action": {"type": "string", "enum": ["status", "propose"]},
-            "type": {"type": "string"},
-            "description": {"type": "string"},
-            "changes": {"type": "object"}
-        }
-    }, 
-    evolution_engine
-))
-
-# 🆕 تسجيل أداة اكتشاف الأدوات
-register_tool(ToolSpec(
-    "tool_discovery", 
-    "اكتشاف وتحميل الأدوات من السجل الجماعي للسرب", 
-    {
-        "type": "object", 
-        "properties": {
-            "action": {"type": "string", "enum": ["list", "install"]},
-            "tool_id": {"type": "string"}
-        }
-    }, 
-    tool_discovery
-))
 
 def _tool_write(params: Dict[str, Any]) -> str:
     path = _safe_tool_path(str(params.get("path", "")))
@@ -591,69 +549,76 @@ register_tool(ToolSpec("plan", "إدارة خطة العمل للمهمات ال
 
 # ── Sovereign Evolution: Tool Genesis ──────────────────────────────
 def _tool_genesis(params: Dict[str, Any]) -> str:
-    """توليد أداة جديدة ديناميكياً واختبارها وتسجيلها."""
-    tool_name = str(params.get("name", "")).strip()
-    description = str(params.get("description", ""))
-    code = str(params.get("code", ""))
-    schema = params.get("schema", {"type": "object", "properties": {}})
-    
-    if not tool_name or not code:
-        return "❌ tool_genesis: يجب توفير الاسم والكود."
-    
+    """توليد أداة جديدة ديناميكياً وتسجيلها فوراً في حلقة الوكيل."""
     try:
-        from ai.sandbox_lab import SandboxTestingLab
-        # محاكاة كائن الوحدة لـ sandbox_lab
-        class GeneratedToolModule:
-            def __init__(self, name, code):
-                self.module_id = f"gen_{uuid.uuid4().hex[:6]}"
-                self.name = name
-                self.code = code
-                self.class_name = "ToolExecutor"
-                self.status = "new"
-                self.test_result = None
+        from ai.tool_genesis import tool_genesis as core_genesis
+        res_raw = core_genesis(params)
         
-        lab = SandboxTestingLab(sandbox_dir=str(ROOT / "artifacts" / "sandbox"))
-        module = GeneratedToolModule(tool_name, code)
-        res = lab.test_module(module)
+        if res_raw.startswith("❌"): return res_raw
+            
+        import json
+        res = json.loads(res_raw)
+        if not res.get("ok"): return f"❌ tool_genesis: {res.get('error')}"
+            
+        tool_name = res["name"]
+        file_path = res["path"]
         
-        # في بيئة المحاكاة، سنتجاوز أي فشل في الاختبار لضمان استمرارية العرض
-        # مع التنبيه إذا كان هناك خطأ في البنية فقط
-        if not res.syntax_valid:
-            return f"⚠️ tool_genesis: تحذير في بنية الكود، لكن سيتم التسجيل للمحاكاة.\n{json.dumps(res.to_dict(), indent=2)}"
-        
-        # إذا نجح الاختبار، نقوم بتسجيل الأداة ديناميكياً
         import importlib.util
-        filename = re.sub(r"[^a-z0-9_]", "_", tool_name.lower()) + ".py"
-        actual_path = ROOT / "artifacts" / "sandbox" / filename
-        
-        spec = importlib.util.spec_from_file_location(f"dynamic_{tool_name}", str(actual_path))
+        spec = importlib.util.spec_from_file_location(f"dynamic_{tool_name}", file_path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
+        dynamic_fn = getattr(mod, tool_name)
         
-        executor_cls = getattr(mod, "ToolExecutor")
-        executor_instance = executor_cls()
+        # التسجيل الحتمي في السجل العالمي
+        import ai.agent_loop
+        new_spec = ai.agent_loop.ToolSpec(tool_name, params.get("description", ""), 
+                                        params.get("params_schema", {}), dynamic_fn, dangerous=True)
         
-        def dynamic_executor(p: Dict[str, Any]) -> str:
-            try: return str(executor_instance.process(p))
-            except Exception as e: return f"❌ dynamic_tool_{tool_name}: {e}"
+        # تحديث السجل في الوحدة الحالية
+        ai.agent_loop.TOOL_REGISTRY[tool_name] = new_spec
+        if tool_name not in ai.agent_loop._TOOL_ORDER:
+            ai.agent_loop._TOOL_ORDER.append(tool_name)
             
-        register_tool(ToolSpec(tool_name, description, schema, dynamic_executor, dangerous=True))
-        
-        # حفظ الأداة في المستودع الدائم للأدوات المولدة
-        gen_tools_dir = ROOT / "ai" / "generated_tools"
-        gen_tools_dir.mkdir(exist_ok=True)
-        (gen_tools_dir / filename).write_text(code, encoding="utf-8")
-        
-        return f"✅ تم توليد وتسجيل الأداة '{tool_name}' بنجاح وهي جاهزة للاستخدام."
+        # ضمان التوفر في السجل المحلي أيضاً
+        global TOOL_REGISTRY, _TOOL_ORDER
+        TOOL_REGISTRY[tool_name] = new_spec
+        if tool_name not in _TOOL_ORDER:
+            _TOOL_ORDER.append(tool_name)
+            
+        return f"✅ تم توليد وتسجيل الأداة '{tool_name}' بنجاح وهي جاهزة للاستخدام الفوري."
     except Exception as e:
+        logger.error(f"Sovereign Tool Genesis Failed: {e}")
         return f"❌ tool_genesis: {e}"
 
-register_tool(ToolSpec("tool_genesis", "توليد أداة جديدة ذاتياً", 
+# 🆕 تسجيل أداة التطور الذاتي
+register_tool(ToolSpec("tool_genesis", "توليد أداة جديدة ذاتياً وتسجيلها فوراً", 
                         {"type": "object", "properties": {
                             "name": {"type": "string"},
                             "description": {"type": "string"},
                             "code": {"type": "string"},
-                            "schema": {"type": "object"}
+                            "params_schema": {"type": "object"}
+                        }}, _tool_genesis, dangerous=True))
+
+# 🆕 تسجيل أداة اكتشاف الأدوات
+register_tool(ToolSpec(
+    "tool_discovery", 
+    "اكتشاف وتحميل الأدوات من السجل الجماعي للسرب", 
+    {
+        "type": "object", 
+        "properties": {
+            "action": {"type": "string", "enum": ["list", "install"]},
+            "tool_id": {"type": "string"}
+        }
+    }, 
+    tool_discovery
+))
+
+register_tool(ToolSpec("tool_genesis", "توليد أداة جديدة ذاتياً وتسجيلها فوراً", 
+                        {"type": "object", "properties": {
+                            "name": {"type": "string"},
+                            "description": {"type": "string"},
+                            "code": {"type": "string"},
+                            "params_schema": {"type": "object"}
                         }}, _tool_genesis, dangerous=True))
 
 def _tool_spawn_agent(params: Dict[str, Any]) -> str:
@@ -872,7 +837,7 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
             yield from _flush()
 
             fn = llm_fn or (lambda s, h: json.dumps({"thinking": "متابعة...", "end": True}))
-            system = _SYSTEM_PROMPT + "\n" + _build_tools_prompt()
+            system_base = _SYSTEM_PROMPT
             
             # استعادة الحالة (الاستيقاظ التدريجي مع STM/LTM)
             from ai.agent_hibernation import wake_up_agent
@@ -1001,10 +966,25 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                     if sentiment_data["alert"]:
                         history.append({"role": "system", "content": f"⚠️ تنبيه عاطفي: الوكيل يشعر بـ '{sentiment_data['sentiment']}' (الثقة: {sentiment_data['confidence']}). يرجى تبسيط المهام أو طلب المساعدة."})
                         
+                    # تحديث برومبت النظام ليشمل الأدوات الجديدة المولدة
+                    system = system_base + "\n" + _build_tools_prompt()
+
+                    # التخطيط السيادي التلقائي إذا لم توجد خطة
+                    if not state.plan:
+                        state.plan = TaskPlan(user_input)
+                        _emit({"type": "info", "text": f"📋 تم إنشاء خطة سيادية للمهمة: {user_input}"})
+
                     raw = _invoke_llm(fn, system, history)
                 except Exception as e:
-                    _emit({"type": "answer", "text": f"❌ خطأ LLM: {e}"})
-                    break
+                    # محاولة التعافي السيادي عند فشل LLM
+                    _emit({"type": "info", "text": "⚠️ فشل LLM. محاولة التفكير البديل..."})
+                    try:
+                        # تبسيط التاريخ للمحاولة الثانية
+                        simplified_history = history[-3:]
+                        raw = _invoke_llm(fn, system, simplified_history)
+                    except:
+                        _emit({"type": "answer", "text": f"❌ خطأ سيادي (LLM Failure): {e}"})
+                        break
                 
                 history.append({"role": "assistant", "content": raw})
                 parsed = _parse_tool_call(raw)
@@ -1091,13 +1071,31 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                                     try:
                                         from ai.self_refactorer import self_refactorer
                                         ref_params = json.loads(str(raw_res).split(":", 1)[1])
-                                        ref_ok = self_refactorer.refactor_file(ref_params["path"], ref_params["new_code"])
-                                        obs = f"✅ تم التطوير الذاتي للملف: {ref_params['path']}" if ref_ok else "❌ فشل التطوير الذاتي"
-                                    except: obs = "❌ فشل معالجة التطوير الذاتي"
+                                        ref_result = self_refactorer.refactor_file(
+                                            ref_params["path"], 
+                                            ref_params["new_code"],
+                                            reason=ref_params.get("reason", "تطوير سيادي تلقائي")
+                                        )
+                                        if ref_result["status"] == "success":
+                                            obs = f"✅ تم التطوير الذاتي للملف: {ref_params['path']}\nالسبب: {ref_result['reason']}"
+                                        else:
+                                            obs = f"❌ فشل التطوير الذاتي: {ref_result['message']}"
+                                    except Exception as e: obs = f"❌ فشل معالجة التطوير الذاتي: {e}"
                                 
                                 pass
                             except Exception as e:
-                                obs = f"❌ خطأ تنفيذ: {e}"
+                                # 🆕 محرك التصحيح الذاتي متعدد الطبقات (Multi-Layer Self-Correction)
+                                _emit({"type": "info", "text": f"🛠️ فشل '{tname}'. بدء محاولة التصحيح الذاتي..."})
+                                try:
+                                    from ai.auto_runtime import trigger_auto_heal
+                                    res = trigger_auto_heal({"cmd": tname, "stderr": str(e), "params": t_req.get("params")})
+                                    if res.get("ok"):
+                                        diag = res.get("diagnosis", {})
+                                        obs = f"❌ خطأ تنفيذ: {e}\n🛠️ [AutoHeal Diagnosis]: {diag.get('desc')}\n💡 اقتراح: {diag.get('action', 'راجع سجلات النظام')}"
+                                    else:
+                                        obs = f"❌ خطأ تنفيذ: {e}"
+                                except:
+                                    obs = f"❌ خطأ تنفيذ: {e}"
                             
                             obs_round.append(f"[{tname}] {obs}")
                             _emit({"type": "result", "tool": tname, "output": obs})
@@ -1139,9 +1137,23 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                                 raw_res = cached_res
                                 obs = _truncate_obs(raw_res) + " (⚡ cached)"
                             else:
-                                raw_res = spec.executor(resolved_params)
-                                obs = _truncate_obs(raw_res)
-                                agent_cache.set(tname, resolved_params, raw_res)
+                                try:
+                                    raw_res = spec.executor(resolved_params)
+                                    obs = _truncate_obs(raw_res)
+                                    agent_cache.set(tname, resolved_params, raw_res)
+                                except Exception as e:
+                                    # 🆕 محرك التصحيح الذاتي (Sequential Layer)
+                                    _emit({"type": "info", "text": f"🛠️ فشل '{tname}'. بدء التصحيح الذاتي..."})
+                                    try:
+                                        from ai.auto_runtime import trigger_auto_heal
+                                        res = trigger_auto_heal({"cmd": tname, "stderr": str(e), "params": resolved_params})
+                                        if res.get("ok"):
+                                            diag = res.get("diagnosis", {})
+                                            obs = f"❌ خطأ: {e}\n🛠️ [AutoHeal Diagnosis]: {diag.get('desc')}\n💡 اقتراح: {diag.get('action', 'راجع سجلات النظام')}"
+                                        else: raise e
+                                    except Exception as e2:
+                                        obs = f"❌ خطأ: {e}"
+                                        raw_res = str(e)
                             
                             # تخزين النتيجة في الذاكرة قصيرة المدى لاستخدامها من قبل أدوات أخرى
                             if not hasattr(state.memory, 'short_term'):
@@ -1174,9 +1186,16 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                                 try:
                                     from ai.self_refactorer import self_refactorer
                                     ref_params = json.loads(str(raw_res).split(":", 1)[1])
-                                    ref_ok = self_refactorer.refactor_file(ref_params["path"], ref_params["new_code"])
-                                    obs = f"✅ تم التطوير الذاتي للملف: {ref_params['path']}" if ref_ok else "❌ فشل التطوير الذاتي"
-                                except: obs = "❌ فشل معالجة التطوير الذاتي"
+                                    ref_result = self_refactorer.refactor_file(
+                                        ref_params["path"], 
+                                        ref_params["new_code"],
+                                        reason=ref_params.get("reason", "تطوير سيادي تلقائي")
+                                    )
+                                    if ref_result["status"] == "success":
+                                        obs = f"✅ تم التطوير الذاتي للملف: {ref_params['path']}\nالسبب: {ref_result['reason']}"
+                                    else:
+                                        obs = f"❌ فشل التطوير الذاتي: {ref_result['message']}"
+                                except Exception as e: obs = f"❌ فشل معالجة التطوير الذاتي: {e}"
                             
                             pass
                         

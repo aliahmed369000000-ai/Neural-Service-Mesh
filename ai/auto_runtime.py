@@ -243,6 +243,30 @@ class AutoRuntime:
             pass
         return st
 
+def trigger_auto_heal(context: Dict[str, Any]) -> Dict[str, Any]:
+    """🆕 تشغيل محرك التعافي التلقائي بناءً على سياق الخطأ."""
+    try:
+        from ai.agent_auto_heal import AutoHeal
+        healer = AutoHeal(max_rounds=3)
+        
+        cmd = context.get("cmd", "")
+        stderr = context.get("stderr", "") or context.get("error", "")
+        
+        logger.info(f"🛠️ [AutoHeal] Triggered for cmd: {cmd}")
+        
+        # تشخيص الخطأ
+        diagnosis = healer.diagnose(stderr)
+        if not diagnosis:
+            return {"ok": False, "error": "لم يتم التعرف على نمط الخطأ للتعافي."}
+            
+        return {
+            "ok": True,
+            "diagnosis": diagnosis,
+            "action": f"محاولة إصلاح عبر استراتيجية: {diagnosis['desc']}"
+        }
+    except Exception as e:
+        logger.error(f"❌ [AutoHeal] Trigger failed: {e}")
+        return {"ok": False, "error": str(e)}
 
 _rt: Optional[AutoRuntime] = None
 _rt_lock = threading.Lock()
