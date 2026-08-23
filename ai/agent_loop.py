@@ -492,6 +492,14 @@ register_tool(ToolSpec("vision_analyzer", "تحليل الصور والرسوم 
                         {"type": "object", "properties": {"image_path": {"type": "string"}, "prompt": {"type": "string"}}}, 
                         _tool_vision_analyzer))
 
+def _tool_security_scanner(params: Dict[str, Any]) -> str:
+    from ai.autonomous_tools import security_scanner
+    return security_scanner(params)
+
+register_tool(ToolSpec("security_scanner", "فحص الكود البرمجي لكشف الثغرات الأمنية والممارسات غير الآمنة", 
+                        {"type": "object", "properties": {"code": {"type": "string"}}}, 
+                        _tool_security_scanner))
+
 def _tool_plan(params: Dict[str, Any]) -> str:
     """تحديث أو إنشاء خطة عمل للمهمة الحالية."""
     return f"SIGNAL_PLAN:{json.dumps(params)}"

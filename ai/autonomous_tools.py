@@ -64,3 +64,43 @@ def vision_analyzer(params: Dict[str, Any]) -> str:
         }, ensure_ascii=False)
     except Exception as e:
         return f"❌ vision_analyzer Error: {e}"
+
+def security_scanner(params: Dict[str, Any]) -> str:
+    """فحص الكود البرمجي لكشف الثغرات الأمنية والممارسات غير الآمنة."""
+    code = params.get("code", "")
+    if not code: return "❌ security_scanner: لا يوجد كود لفحصه."
+    
+    vulnerabilities = []
+    
+    # 1. كشف استخدام eval/exec
+    if "eval(" in code or "exec(" in code:
+        vulnerabilities.append({
+            "type": "Code Injection",
+            "severity": "CRITICAL",
+            "description": "استخدام eval() أو exec() يسمح بحقن أكواد ضارة."
+        })
+        
+    # 2. كشف المفاتيح السرية المسربة (نمط بسيط)
+    import re
+    secret_patterns = [r"API_KEY\s*=\s*['\"].*['\"]", r"PASSWORD\s*=\s*['\"].*['\"]"]
+    for pattern in secret_patterns:
+        if re.search(pattern, code, re.IGNORECASE):
+            vulnerabilities.append({
+                "type": "Secret Leak",
+                "severity": "HIGH",
+                "description": "تم اكتشاف مفتاح سري أو كلمة مرور مكتوبة مباشرة في الكود."
+            })
+            
+    # 3. كشف استخدام مكتبات غير آمنة
+    if "import pickle" in code:
+        vulnerabilities.append({
+            "type": "Unsafe Deserialization",
+            "severity": "MEDIUM",
+            "description": "استخدام pickle قد يؤدي لتنفيذ أكواد غير مصرح بها عند فك التسلسل."
+        })
+
+    return json.dumps({
+        "safe": len(vulnerabilities) == 0,
+        "vulnerabilities": vulnerabilities,
+        "recommendation": "يرجى إصلاح الثغرات المكتشفة قبل التشغيل." if vulnerabilities else "الكود يبدو آمناً."
+    }, ensure_ascii=False)
