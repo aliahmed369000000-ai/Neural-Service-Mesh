@@ -38,7 +38,7 @@ class MemoryManager:
             self.consolidate()
 
     def consolidate(self, force: bool = False):
-        """ترحيل المعلومات من STM إلى LTM (عملية التوحيد)."""
+        """ترحيل المعلومات من STM إلى LTM (عملية التوحيد) مع التقييم الذاتي."""
         if not force and len(self.stm) <= 10:
             return
 
@@ -53,23 +53,47 @@ class MemoryManager:
 
         logger.info(f"🧠 بدء توحيد الذاكرة للوكيل {self.agent_id} (ترحيل {len(to_migrate)} رسالة)...")
         
-        # 1. استخراج الحقائق الدقيقة (Semantic LTM)
-        facts = self._extract_facts(to_migrate)
-        self._store_in_semantic(facts)
+        # 1. استخراج الحقائق الدقيقة (Semantic LTM) مع التقييم
+        facts_data = self._extract_facts(to_migrate)
+        for f in facts_data:
+            self.add_fact(f["content"], importance=f["importance"])
         
         # 2. إنشاء تلخيص أحداثي (Episodic LTM)
-        self._store_in_episodic(to_migrate, facts)
+        fact_contents = [f["content"] for f in facts_data]
+        avg_importance = sum(f["importance"] for f in facts_data) / len(facts_data) if facts_data else 0.3
+        self._store_in_episodic(to_migrate, fact_contents, importance=avg_importance)
         
         # 3. تنظيف STM (الاحتفاظ برسالة النظام وآخر الرسائل)
         system_msg = self.stm[0]
         recent = self.stm[-5:]
         self.stm = [system_msg] + recent
 
-    def _extract_facts(self, messages: List[Dict[str, Any]]) -> List[str]:
-        """استخراج الحقائق والقرارات التقنية من الرسائل."""
-        facts = []
+    def reflect(self, content: str) -> float:
+        """
+        محرك التقييم الذاتي (Self-Reflection): تقييم أهمية المعلومة (0.0 - 1.0).
+        المعلومات التقنية والقرارات تحصل على وزن أعلى.
+        """
+        importance = 0.3  # القيمة الافتراضية للمعلومات العادية
+        
+        # 1. البحث عن مؤشرات الأهمية التقنية
+        if re.search(r"```python|import |def |class ", content):
+            importance += 0.4  # كود برمجي
+        if re.search(r"SHA\s*[a-f0-9]{7,40}", content, re.I):
+            importance += 0.3  # التزام Git
+        if re.search(r"تم (?:تنفيذ|رفع|إنجاز|إصلاح)", content):
+            importance += 0.2  # إنجاز مهمة
+        if re.search(r"\d+(?:\.\d+)?%|\d+\s*ms|\d+\s*KB", content):
+            importance += 0.2  # مقاييس أداء
+            
+        return min(1.0, importance)
+
+    def _extract_facts(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """استخراج الحقائق والقرارات التقنية مع تقييم أهميتها."""
+        extracted = []
         for m in messages:
             content = m.get("content", "")
+            facts = []
+            
             # استخراج الأكواد
             codes = re.findall(r"```python\n(.*?)\n```", content, re.DOTALL)
             for c in codes: facts.append(f"كود برمجي: {c[:50]}...")
@@ -86,10 +110,14 @@ class MemoryManager:
             metrics = re.findall(r"(\d+(?:\.\d+)?%|\d+\s*ms|\d+\s*KB)", content)
             if metrics: facts.append(f"مقاييس أداء: {', '.join(metrics)}")
             
-        return list(set(facts))
+            for f in set(facts):
+                importance = self.reflect(f)
+                extracted.append({"content": f, "importance": importance})
+                
+        return extracted
 
-    def add_fact(self, fact_content: str, semantic_hash: Optional[str] = None):
-        """إضافة حقيقة مفردة إلى الذاكرة الدلالية."""
+    def add_fact(self, fact_content: str, semantic_hash: Optional[str] = None, importance: float = 1.0):
+        """إضافة حقيقة مفردة إلى الذاكرة الدلالية مع تحديد القوة بناءً على الأهمية."""
         if not semantic_hash:
             from ai.multimodal_sync import MultimodalSyncManager
             sync_manager = MultimodalSyncManager()
@@ -103,19 +131,20 @@ class MemoryManager:
             "content": fact_content,
             "timestamp": time.time(),
             "last_access": time.time(),
-            "strength": 1.0,
+            "strength": importance,
+            "last_access": time.time(),
             "access_count": 0,
             "semantic_hash": semantic_hash
         }
         return fact_id
 
     def _store_in_semantic(self, facts: List[str]):
-        """حفظ مجموعة حقائق في الذاكرة الدلالية."""
+        """حفظ مجموعة حقائق في الذاكرة الدلالية (للتوافق)."""
         for fact in facts:
             self.add_fact(fact)
 
-    def _store_in_episodic(self, messages: List[Dict[str, Any]], facts: List[str]):
-        """حفظ ملخص التجربة في الذاكرة الأحداثية."""
+    def _store_in_episodic(self, messages: List[Dict[str, Any]], facts: List[str], importance: float = 1.0):
+        """حفظ ملخص التجربة في الذاكرة الأحداثية مع تحديد القوة بناءً على الأهمية."""
         summary = f"أرشفة {len(messages)} رسالة. تم استخراج {len(facts)} حقيقة."
         if facts: summary += f" أهمها: {facts[0]}"
         
@@ -127,7 +156,7 @@ class MemoryManager:
         episode = {
             "timestamp": time.time(),
             "last_access": time.time(),
-            "strength": 1.0,
+            "strength": importance,
             "access_count": 0,
             "summary": summary,
             "raw_count": len(messages),

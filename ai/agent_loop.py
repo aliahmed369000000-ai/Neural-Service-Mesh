@@ -366,6 +366,37 @@ register_tool(ToolSpec("memory_search", "البحث الدلالي في ذاكر
                         }}, 
                         _tool_memory_search))
 
+def _tool_memory_reflection(params: Dict[str, Any]) -> str:
+    """استعراض تقييمات التفكير الذاتي للذاكرة الحالية."""
+    agent_id = str(params.get("agent_id", "default"))
+    try:
+        from ai.agent_hibernation import wake_up_agent
+        state = wake_up_agent(agent_id, lazy=True)
+        if not state or not hasattr(state, 'memory_manager') or not state.memory_manager:
+            return "ℹ️ لا توجد بيانات ذاكرة متاحة للتقييم حالياً."
+        
+        mem = state.memory_manager
+        reflection_report = {
+            "agent_id": agent_id,
+            "semantic_facts_count": len(mem.ltm_semantic),
+            "episodic_events_count": len(mem.ltm_episodic),
+            "top_important_facts": []
+        }
+        
+        # جلب أهم 5 حقائق بناءً على القوة (التي تعكس الأهمية والتقييم الذاتي)
+        sorted_facts = sorted(mem.ltm_semantic.values(), key=lambda x: x.get("strength", 0), reverse=True)
+        for f in sorted_facts[:5]:
+            reflection_report["top_important_facts"].append({
+                "content": f["content"][:100] + "...",
+                "importance_score": round(f.get("strength", 0), 2),
+                "last_access": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(f.get("last_access", 0)))
+            })
+            
+        return json.dumps(reflection_report, ensure_ascii=False, indent=2)
+    except Exception as e: return f"❌ memory_reflection: {e}"
+
+register_tool(ToolSpec("memory_reflection", "استعراض تقييمات التفكير الذاتي للذاكرة", {"type": "object", "properties": {"agent_id": {"type": "string"}}}, _tool_memory_reflection))
+
 # ═════════════════════════ محرك الحلقة ═════════════════════════════
 _SYSTEM_PROMPT = """أنت الوكيل التنفيذي لـ NSM. رد JSON فقط:
 {"thinking": "...", "tools": [{"tool": "...", "params": {...}}], "finish": "...", "end": true/false}"""
