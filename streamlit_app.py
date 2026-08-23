@@ -200,11 +200,13 @@ def render_training_ops_hub():
         '<div class="section-header">🎓 التدريب والعمليات</div>',
         unsafe_allow_html=True,
     )
-    st.caption("تدريب النماذج · خليط الخبراء ونمو الوكيل · AIaaS والاقتصاد · لوحة عمليات التدريب")
-    sub = st.tabs(["🎓 التدريب", "📓 Notebook", "🧩 MoE والوكيل", "☁️ AIaaS والاقتصاد", "📡 عمليات التدريب", "🌐 المجدول متعدد الحسابات", "📶 التدريب الحي"])
+    st.caption("تدريب النماذج · دماغ Surah السيادي · AIaaS والاقتصاد · لوحة عمليات التدريب")
+    sub = st.tabs(["🎓 التدريب", "📓 Notebook", "🧠 Surah السيادية", "☁️ AIaaS والاقتصاد", "📡 عمليات التدريب", "🌐 المجدول متعدد الحسابات", "📶 التدريب الحي"])
     with sub[0]: render_training()
     with sub[1]: render_training_notebook()
-    with sub[2]: render_moe_agent_studio()
+    with sub[2]:
+        st.info("🧠 **شبكة Surah 4096 السيادية:** يتم الآن توحيد كافة العمليات تحت محرك Surah الموحد لضمان أعلى مستويات الوعي والاستقرار.")
+        # render_moe_agent_studio() - Archived in favor of Surah unification
     with sub[3]: render_aiaas_economy_hub()
     with sub[4]: render_training_ops_dashboard()
     with sub[5]: render_scheduler_hub()
@@ -602,7 +604,7 @@ def main():
         </div>
         <div class="nsm-nav-card">
             <div class="nsm-nav-card-icon">🎓</div>
-            <div><div class="nsm-nav-card-title">التدريب والعمليات</div><div class="nsm-nav-card-copy">Notebook، MoE، AIaaS، المجدول، وأدوات التشغيل.</div></div>
+            <div><div class="nsm-nav-card-title">التدريب والعمليات</div><div class="nsm-nav-card-copy">Notebook، Surah، AIaaS، المجدول، وأدوات التشغيل.</div></div>
         </div>
     </div>
     """, unsafe_allow_html=True)

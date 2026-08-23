@@ -30,10 +30,10 @@ logger = logging.getLogger(__name__)
 # ══════════════════════════════════════════════════════════════════════════════
 # Constants
 # ══════════════════════════════════════════════════════════════════════════════
-D_MODEL      = 2304
-N_HEADS      = 16
-D_FF         = 8384
-N_LAYERS     = 16
+D_MODEL      = 4096
+N_HEADS      = 32
+D_FF         = 16384
+N_LAYERS     = 24
 MAX_SEQ_LEN  = 128
 VOCAB_SIZE   = 8192     # سقف القاموس الافتراضي (word-level + UNK)
 LEARNING_RATE = 1e-4
@@ -769,7 +769,8 @@ class ArabicTransformer:
                  tokenizer: Optional[object] = None,
                  use_hash_tokenizer: bool = False,
                  tokenizer_type: str = "word",
-                 use_sparse_attn: bool = True):
+                 use_sparse_attn: bool = True,
+                 use_dte: bool = True):
         """
         tokenizer_type: "word"|"bpe"|"wordpiece"|"sentencepiece"|"unigram"|"char"|"byte_bpe"|"modern_bbpe"|"hash"
         يُتجاهل إذا مُرِّر كائن tokenizer مباشرة.
@@ -856,6 +857,14 @@ class ArabicTransformer:
         self.blocks      = [TransformerBlock(d_model, n_heads, d_ff, i, use_sparse_attn=use_sparse_attn)
                             for i in range(n_layers)]
         self.head        = OutputHead(d_model, vocab_size)
+        
+        self.use_dte = use_dte
+        if self.use_dte:
+            try:
+                from ai.dte_engine import DTEEngine
+                self.dte = DTEEngine()
+            except ImportError:
+                self.dte = None
 
         self._steps = 0
         self._loss_history: List[float] = []
