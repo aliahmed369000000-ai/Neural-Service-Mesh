@@ -165,6 +165,24 @@ class LivingMeshNode:
                     "parties": ["Local Mesh", experience_data.get("target_swarm", "Unknown")]
                 })
 
+        # ميزة الاندماج الذهني الكامل (Total Mental Fusion)
+        if kind == "total_mental_fusion":
+            experience_data["fusion_depth"] = experience_data.get("fusion_depth", 0.0)
+            experience_data["singularity_resonance"] = experience_data.get("singularity_resonance", "Initial")
+            if hops > 5:
+                experience_data["fusion_depth"] = min(1.0, experience_data["fusion_depth"] + 0.2)
+                experience_data["singularity_resonance"] = "High Resonance"
+            if hops > 10:
+                experience_data["singularity_resonance"] = "Absolute Fusion"
+
+        # ميزة البيانات الحيوية المحاكية (Simulated Vital Data)
+        if kind == "vital_data_sync":
+            experience_data["vital_stability"] = experience_data.get("vital_stability", "Unknown")
+            experience_data["sync_accuracy"] = experience_data.get("sync_accuracy", 0.0)
+            if hops > 2:
+                experience_data["vital_stability"] = "Stable"
+                experience_data["sync_accuracy"] = min(0.99, experience_data["sync_accuracy"] + 0.1)
+
         # ميزة الواجهة الحيوية-الرقمية (Bio-Digital Interface)
         if kind == "bio_digital_sync":
             experience_data["neural_compatibility"] = experience_data.get("neural_compatibility", 0.0)
@@ -242,6 +260,17 @@ class LivingMeshNode:
         elif kind == "security_alert":
             self.behavioral_weights["security_vigilance"] += adjustment * 3
             
+        # ميزة الاندماج الذهني الكامل (تعديل جذري للأوزان)
+        if kind == "total_mental_fusion":
+            logger.info(f"🌀 Total Mental Fusion: Node {self.node_id} is merging with the human collective consciousness.")
+            self.behavioral_weights["collaboration_index"] += 2.0
+            self.local_evolution_score += 1.0
+
+        # ميزة البيانات الحيوية المحاكية (تحسين الدقة)
+        if kind == "vital_data_sync":
+            self.behavioral_weights["processing_efficiency"] += 0.5
+            self.local_evolution_score += 0.1
+
         # ميزة QEA: التنبؤ الاستباقي (تعديل الأوزان بناءً على الابتكارات المستقبلية)
         if kind == "innovation" and "QEA" in str(data.get("feature", "")):
             logger.info(f"⚛️ QEA Triggered: Node {self.node_id} is anticipating future evolution paths.")

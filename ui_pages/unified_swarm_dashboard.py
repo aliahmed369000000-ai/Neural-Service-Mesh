@@ -501,6 +501,28 @@ def render_unified_swarm_dashboard() -> None:
             st.success(f"🧠 **الهدف:** {bio_data.get('target')} | **نمط التفاعل:** {bio_data.get('interaction_mode')}")
             st.metric("مستوى التوافق العصبي", f"{bio_data.get('neural_compatibility', 0.0)*100:.1f}%")
             st.caption(f"حالة القياس العصبي: {bio_data.get('neural_telemetry_status')} | {bio_data.get('notes')}")
+
+        # الاندماج الذهني الكامل والبيانات الحيوية
+        fusion = [exp for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "total_mental_fusion"]
+        vitals = [exp for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "vital_data_sync"]
+        
+        if fusion or vitals:
+            st.markdown("### 🌀 الاندماج الذهني الكامل والتفرد (Mental Fusion & Singularity)")
+            col1, col2 = st.columns(2)
+            
+            if fusion:
+                f_data = fusion[-1]["data"]
+                with col1:
+                    st.info(f"🔮 **رنين التفرد:** {f_data.get('singularity_resonance')}")
+                    st.metric("عمق الاندماج الذهني", f"{f_data.get('fusion_depth', 0.0)*100:.1f}%")
+                    st.caption(f"الحالة: {f_data.get('fusion_status')} | {f_data.get('notes')}")
+            
+            if vitals:
+                v_data = vitals[-1]["data"]
+                with col2:
+                    st.warning(f"🔋 **استقرار البيانات الحيوية:** {v_data.get('vital_stability')}")
+                    st.metric("دقة المزامنة الحيوية", f"{v_data.get('sync_accuracy', 0.0)*100:.1f}%")
+                    st.caption(f"النشاط العصبي: {v_data.get('neural_activity_sim')} | {v_data.get('notes')}")
     
     if mesh_state.get("global_experience"):
         st.subheader("🧠 سجل الوعي الجماعي (أحدث الخبرات)")
