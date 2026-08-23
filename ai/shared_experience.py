@@ -26,7 +26,7 @@ class SharedExperienceManager:
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self.remote_url = remote_url
-        self.api_key = api_key or "nsm_worker_token_2026" # التوكن الافتراضي
+        self.api_key = api_key or os.environ.get("NSM_WORKER_TOKEN")
         self.knowledge = self._load_knowledge()
         
         # إعداد التشفير مع دعم التدوير
@@ -64,7 +64,7 @@ class SharedExperienceManager:
 
     def _init_cipher(self, key_str: str) -> Fernet:
         """إنشاء محرك التشفير من سلسلة نصية."""
-        salt = b'nsm_salt_2026'
+        salt = os.environ.get("NSM_ENCRYPTION_SALT", "default_salt").encode()
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,

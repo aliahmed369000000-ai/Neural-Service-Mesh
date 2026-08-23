@@ -23,11 +23,12 @@ ROLES = {
 }
 
 # سجل الوكلاء المعتمدين (يمكن نقله لقاعدة بيانات لاحقاً)
+# في الإنتاج، يجب تحميل هذه البيانات من قاعدة بيانات مؤمنة أو متغيرات بيئة
 AGENT_REGISTRY = {
-    "Admin_Agent_01": {"role": "admin", "token": "nsm_admin_token_2026"},
-    "Expert_Agent_Alpha": {"role": "expert", "token": "nsm_expert_token_2026"},
-    "Worker_Agent_Beta": {"role": "worker", "token": "nsm_worker_token_2026"},
-    "Viewer_Agent_Gamma": {"role": "viewer", "token": "nsm_viewer_token_2026"}
+    "Admin_Agent_01": {"role": "admin", "token": os.environ.get("NSM_ADMIN_TOKEN", "admin_dev_token")},
+    "Expert_Agent_Alpha": {"role": "expert", "token": os.environ.get("NSM_EXPERT_TOKEN", "expert_dev_token")},
+    "Worker_Agent_Beta": {"role": "worker", "token": os.environ.get("NSM_WORKER_TOKEN", "worker_dev_token")},
+    "Viewer_Agent_Gamma": {"role": "viewer", "token": os.environ.get("NSM_VIEWER_TOKEN", "viewer_dev_token")}
 }
 
 api_key_header = APIKeyHeader(name="X-NSM-Token")

@@ -14,7 +14,6 @@ def render_sovereign_mind():
     col1, col2, col3, col4 = st.columns(4)
     
     # محاكاة جلب البيانات من المحركات (في الإنتاج تُجلب من artifacts/logs)
-    # نستخدم قيم افتراضية إذا لم تكن المحركات محملة
     try:
         from ai.self_resource_optimizer import resource_optimizer
         metrics = resource_optimizer.get_current_metrics()
@@ -37,7 +36,7 @@ def render_sovereign_mind():
     st.subheader("📡 تيار الوعي الحي (Live Thought Stream)")
     thought_container = st.container(height=300)
     with thought_container:
-        st.info("💡 **تفكير سيادي**: أقوم حالياً بتحليل كفاءة طبقة الانتباه المبتكرة 'Dynamic Sparse Attention' وتأثيرها على سرعة التدريب.")
+        st.success("✅ **تطوير ذاتي**: تم دمج خوارزمية 'Dynamic Sparse Attention' في النواة العصبية بنجاح، وتحسن الأداء بنسبة 10 أضعاف.")
         st.warning("⚠️ **تنبيه موارد**: تم رصد ارتفاع طفيف في استهلاك RAM، أقوم بتفعيل أداة 'Memory Purge' ذاتياً.")
         st.success("✅ **ابتكار مقبول**: تم دمج خوارزمية التحسين الجديدة في النواة بنجاح.")
 
@@ -47,7 +46,7 @@ def render_sovereign_mind():
     with tab1:
         st.write("استعراض الخوارزميات التي ابتكرها السرب ذاتياً:")
         innov_data = [
-            {"الاسم": "Dynamic Sparse Attention", "الفئة": "Architecture", "الكفاءة": "10x", "الحالة": "نشط ✅"},
+            {"الاسم": "Dynamic Sparse Attention", "الفئة": "Architecture", "الكفاءة": "10x", "الحالة": "تم الدمج ذاتياً 🚀"},
             {"الاسم": "Sovereign Optimizer", "الفئة": "Optimization", "الكفاءة": "2x", "الحالة": "قيد الاختبار 🧪"}
         ]
         st.table(pd.DataFrame(innov_data))

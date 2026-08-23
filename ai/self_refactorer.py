@@ -45,4 +45,6 @@ class SelfRefactorer:
                 os.remove(temp_path)
             return {"status": "error", "message": f"Refactoring failed: {str(e)}"}
 
-self_refactorer = SelfRefactorer("/home/ubuntu/Neural-Service-Mesh")
+from pathlib import Path
+ROOT = Path(__file__).resolve().parent.parent
+self_refactorer = SelfRefactorer(str(ROOT))
