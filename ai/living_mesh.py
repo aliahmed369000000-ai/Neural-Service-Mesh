@@ -15,6 +15,7 @@ import asyncio
 import websockets
 from datetime import datetime, timezone
 from pathlib import Path
+from ai.alert_manager import alert_manager
 from typing import Any, Dict, List, Optional, Set
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
@@ -173,6 +174,8 @@ class LivingMeshNode:
                     info["status"] = "offline"
                     dead_nodes.append(nid)
                     logger.warning(f"Node {nid} is detected as DEAD (Self-Healing Triggered)")
+                    # إرسال تنبيه فوري بسقوط العقدة
+                    alert_manager.send_alert("CRITICAL", f"Node {nid} is DEAD", {"host": info.get("host"), "port": info.get("port")})
             except Exception:
                 info["status"] = "offline"
                 dead_nodes.append(nid)
@@ -498,7 +501,14 @@ class LivingMeshNode:
             
             pub_key_pem = pub_key_path.read_bytes()
             if not self.verify_signature(pub_key_pem, json.dumps(payload, sort_keys=True), signature):
-                logger.error(f"❌ Signature verification FAILED for message from {sender_id}!")
+                error_msg = f"❌ Signature verification FAILED for message from {sender_id}!"
+                logger.error(error_msg)
+                # إرسال تنبيه أمني فوراً
+                alert_manager.send_alert("SECURITY", "Intrusion Attempt Detected: Invalid Signature", {
+                    "sender_id": sender_id,
+                    "kind": payload.get("kind"),
+                    "timestamp": payload.get("timestamp")
+                })
                 return
             
             kind = payload.get("kind")

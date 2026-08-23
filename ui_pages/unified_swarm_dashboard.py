@@ -245,6 +245,45 @@ def render_unified_swarm_dashboard() -> None:
     else:
         st.success("لا توجد تنبيهات نشطة — السرب ضمن الحدود المسموحة.")
 
+    # ── إعدادات التنبيهات السيادية ───────────────────────────
+    with st.expander("🚨 إعدادات التنبيهات السيادية (Telegram & Email)"):
+        from ai.alert_manager import alert_manager
+        st.markdown("### 🛠️ تكوين قنوات الإشعار")
+        
+        # Telegram Config
+        st.markdown("#### 📱 Telegram Bot")
+        tg_enabled = st.checkbox("تفعيل Telegram", value=alert_manager.config["telegram"]["enabled"])
+        tg_token = st.text_input("Bot Token", value=alert_manager.config["telegram"]["token"], type="password")
+        tg_chat_id = st.text_input("Chat ID", value=alert_manager.config["telegram"]["chat_id"])
+        
+        # Email Config
+        st.markdown("#### 📧 Email (SMTP)")
+        em_enabled = st.checkbox("تفعيل البريد الإلكتروني", value=alert_manager.config["email"]["enabled"])
+        col_smtp, col_port = st.columns([3, 1])
+        with col_smtp:
+            em_server = st.text_input("SMTP Server", value=alert_manager.config["email"]["smtp_server"])
+        with col_port:
+            em_port = st.number_input("Port", value=alert_manager.config["email"]["port"])
+        em_user = st.text_input("Email User", value=alert_manager.config["email"]["user"])
+        em_pass = st.text_input("Email Password", value=alert_manager.config["email"]["password"], type="password")
+        em_recv = st.text_input("Receiver Email", value=alert_manager.config["email"]["receiver"])
+        
+        if st.button("💾 حفظ إعدادات التنبيهات"):
+            new_config = {
+                "telegram": {"enabled": tg_enabled, "token": tg_token, "chat_id": tg_chat_id},
+                "email": {
+                    "enabled": em_enabled, "smtp_server": em_server, "port": em_port,
+                    "user": em_user, "password": em_pass, "receiver": em_recv
+                },
+                "alert_levels": ["CRITICAL", "SECURITY"]
+            }
+            alert_manager.save_config(new_config)
+            st.success("تم حفظ إعدادات التنبيهات بنجاح!")
+            
+        if st.button("🧪 إرسال تنبيه تجريبي"):
+            alert_manager.send_alert("TEST", "هذا تنبيه تجريبي من نظام NSM السيادي.")
+            st.info("تم إرسال التنبيه التجريبي. تحقق من قنوات الإشعار الخاصة بك.")
+
     # ── المراقبة الحية وخريطة الثقة ───────────────────────────
     render_section_header("🛰️ المراقبة الحية وخريطة الثقة", "نبضات السرب · الهوية السيادية · أمن الشبكة")
     
