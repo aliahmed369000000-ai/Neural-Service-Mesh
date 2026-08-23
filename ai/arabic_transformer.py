@@ -24,6 +24,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from ai.layers.dynamic_sparse_attention_numpy import DynamicSparseAttentionNumPy
+from ai.neural_security_gate import neural_security_gate
 
 logger = logging.getLogger(__name__)
 
@@ -870,14 +871,21 @@ class ArabicTransformer:
         self._loss_history: List[float] = []
 
     # ── forward ───────────────────────────────────────────────────────────────
-    def _forward(self, ids: np.ndarray, mask=None):
+    def _forward(self, ids: np.ndarray, mask=None, trust_score: float = 1.0):
         X  = self.embedding.forward(ids)
         X += self.pos_enc.forward(len(ids))
         # قلب الشبكة: المصفوفة المدروسة
         X  = X + self.core.forward(X)          # Residual
         for blk in self.blocks:
             X = blk.forward(X, mask)
-        return self.head.forward(X), X
+        
+        logits = self.head.forward(X)
+        
+        # تحليل النوايا الأمنية (البوابة العصبية)
+        last_hidden = X[-1] if X.ndim > 1 else X
+        risk_score, intent = neural_security_gate.analyze_intent(last_hidden)
+        
+        return logits, X, risk_score, intent
 
     # ── train (يمتص الأنماط → يُعدِّل الأوزان → يرمي النص) ──────────────────
     def train_step(self, text: str) -> float:
@@ -893,7 +901,7 @@ class ArabicTransformer:
         S   = len(inp)
         mask = np.triu(np.ones((S, S), bool), k=1)
 
-        probs, _ = self._forward(inp, mask)
+        probs, _, _, _ = self._forward(inp, mask)
         loss, gp = self.head.loss_grad(probs, tgt)
 
         # backward — يُعدِّل الأوزان
@@ -990,7 +998,7 @@ class ArabicTransformer:
         ids = self.tokenizer.encode(text, self.max_seq)
         if len(ids) == 0:
             return np.zeros(self.embedding.W.shape[1])
-        _, hidden = self._forward(ids)
+        _, hidden, _, _ = self._forward(ids)
         return hidden[1:-1].mean(0) if len(hidden) > 2 else hidden.mean(0)
 
     def predict_next(self, text: str, top_k=5, temp=1.0) -> List[Tuple[int, float]]:
@@ -999,7 +1007,7 @@ class ArabicTransformer:
         if not len(ids): return []
         S    = len(ids)
         mask = np.triu(np.ones((S,S), bool), k=1)
-        p, _ = self._forward(ids, mask)
+        p, _, _, _ = self._forward(ids, mask)
         lp   = p[-1]
         if temp != 1.0:
             lp = _softmax((np.log(np.clip(lp,1e-10,1)) / temp).reshape(1,-1)).flatten()
@@ -1042,7 +1050,12 @@ class ArabicTransformer:
             arr = np.array(ids[-self.max_seq:], np.int64)
             S = len(arr)
             mask = np.triu(np.ones((S, S), bool), k=1)
-            p, _ = self._forward(arr, mask)
+            p, _, risk, intent = self._forward(arr, mask)
+            
+            # حظر التوليد إذا تم اكتشاف نية خبيثة بوضوح
+            if intent == "malicious":
+                logger.warning(f"🚫 Generation blocked by Neural Security Gate: Intent '{intent}'")
+                break
             lp = p[-1]
             if sample_token is not None:
                 nxt = sample_token(
