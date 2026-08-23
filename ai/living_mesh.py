@@ -40,12 +40,17 @@ class LivingMeshNode:
         state = self._load_state()
         is_rejoining = self.node_id in state["nodes"]
         
+        # تحديد القدرات بناءً على نوع العقدة
+        capabilities = ["text", "image", "audio", "video", "tf_engine"]
+        if "zeta" in self.node_id.lower():
+            capabilities += ["quantum_compute", "distributed_qubits", "entanglement_sync"]
+            
         state["nodes"][self.node_id] = {
             "status": "online",
             "last_seen": datetime.now(timezone.utc).isoformat(),
             "evolution_score": self.local_evolution_score,
             "behavioral_weights": self.behavioral_weights,
-            "capabilities": ["text", "image", "audio", "video", "tf_engine"],
+            "capabilities": capabilities,
             "assigned_tasks": []
         }
         self._save_state(state)

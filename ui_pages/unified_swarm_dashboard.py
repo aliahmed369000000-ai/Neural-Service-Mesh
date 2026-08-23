@@ -342,12 +342,20 @@ def render_unified_swarm_dashboard() -> None:
         
         # ميزات ابتكار السرب
         innovations = [exp.get("data", {}).get("feature") for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "innovation"]
+        quantum_accel = [exp for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "quantum_acceleration"]
+        
         if innovations:
             st.info(f"💡 **ميزات مبتكرة من السرب:** {', '.join(set(filter(None, innovations)))} نشطة الآن.")
             if "Neural Path Pruning" in innovations:
                 st.success("🧠 **تحسين عصبي:** تم تفعيل تقليم المسارات العصبية لزيادة سرعة الاستجابة.")
             if "Resource Drain Prediction" in innovations:
                 st.warning("⚡ **تنبؤ استباقي:** نظام مراقبة استنزاف الموارد يعمل بكامل طاقته.")
+        
+        if quantum_accel:
+            st.markdown("### ⚛️ حالة التسارع الكمي (Quantum Acceleration)")
+            accel_data = quantum_accel[-1]["data"]
+            st.success(f"🚀 **تسارع كمي نشط:** {accel_data.get('speedup')} بواسطة العقدة Zeta")
+            st.caption(f"تخصيص Qubits: {accel_data.get('qubits_allocated')} | الطريقة: {accel_data.get('method')}")
     
     if mesh_state.get("global_experience"):
         st.subheader("🧠 سجل الوعي الجماعي (أحدث الخبرات)")
