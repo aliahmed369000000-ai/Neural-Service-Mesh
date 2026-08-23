@@ -46,6 +46,7 @@ from ai.arabic_transformer import (
     WordTokenizer, HashTokenizer, TokenEmbedding, PositionalEncoding, CoreMatrixLayer,
     MultiHeadAttention, LayerNorm, OutputHead,
 )
+from ai.layers.dynamic_sparse_attention_numpy import DynamicSparseAttentionNumPy
 
 logger = logging.getLogger(__name__)
 
@@ -188,9 +189,12 @@ class MoEFFN:
 # ══════════════════════════════════════════════════════════════════════════════
 class MoETransformerBlock:
     def __init__(self, d_model=D_MODEL, n_heads=N_HEADS, d_ff_expert=256,
-                 n_experts=8, top_k=2, bid=0):
+                 n_experts=8, top_k=2, bid=0, use_sparse_attn=True):
         self.bid = bid
-        self.mha = MultiHeadAttention(d_model, n_heads)
+        if use_sparse_attn:
+            self.mha = DynamicSparseAttentionNumPy(d_model, n_heads, sparsity_k=0.25)
+        else:
+            self.mha = MultiHeadAttention(d_model, n_heads)
         self.moe = MoEFFN(d_model, d_ff_expert, n_experts, top_k)
         self.ln1 = LayerNorm(d_model)
         self.ln2 = LayerNorm(d_model)
