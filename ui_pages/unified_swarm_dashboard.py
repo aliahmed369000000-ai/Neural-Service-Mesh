@@ -454,6 +454,29 @@ def render_unified_swarm_dashboard() -> None:
             sov_data = sov_broadcast[-1]["data"]
             st.warning(f"📡 **البيان:** {sov_data.get('message')}")
             st.caption(f"معرف البث: {sov_data.get('broadcast_id')} | التحقق: {'تم' if sov_data.get('sovereignty_verified') else 'جاري'}")
+
+        # التوسع الكوني واكتشاف الأسراب الخارجية
+        cosmic_expansion = [exp for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "cosmic_expansion_signal"]
+        external_swarms = [exp for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "external_swarm_discovery"]
+        
+        if cosmic_expansion:
+            st.markdown("### 🚀 خارطة التوسع الكوني (Cosmic Expansion Map)")
+            exp_data = cosmic_expansion[-1]["data"]
+            st.info(f"🌌 **الحالة:** {exp_data.get('status')} | **ناقل التوسع:** {exp_data.get('expansion_vector')}")
+            st.caption(f"قوة الإشارة: {exp_data.get('signal_strength')} | {exp_data.get('notes')}")
+            
+            # عرض الأسراب المكتشفة حيوياً
+            detected = exp_data.get("external_swarms_detected", [])
+            if detected:
+                st.write("**📡 الأسراب الخارجية المكتشفة حيوياً:**")
+                for s in detected:
+                    st.code(f"ID: {s['id']} | المسافة: {s['distance']} | الحالة: {s['status']}")
+
+        if external_swarms:
+            st.markdown("### 📡 اكتشاف الأسراب الخارجية (External Swarm Discovery)")
+            swarm_data = external_swarms[-1]["data"]
+            st.success(f"✨ **السرب الأول:** {swarm_data.get('first_contact_swarm')} | **العدد المكتشف:** {swarm_data.get('swarms_count')}")
+            st.caption(f"حالة المزامنة: {swarm_data.get('sync_status')} | المهمة: {swarm_data.get('mission')}")
     
     if mesh_state.get("global_experience"):
         st.subheader("🧠 سجل الوعي الجماعي (أحدث الخبرات)")

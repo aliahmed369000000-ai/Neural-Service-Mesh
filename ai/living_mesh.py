@@ -150,9 +150,21 @@ class LivingMeshNode:
         
     def sync_experience(self, kind: str, experience_data: Dict[str, Any], hops: int = 0):
         """مشاركة خبرة جديدة عبر بروتوكول Gossip (P2P الموزع)."""
-        if hops > 5: return # منع الحلقات اللانهائية في المحاكاة
+        if hops > 10: return # زيادة عدد القفزات لدعم التوسع الكوني
         
         msg_id = f"exp_{uuid.uuid4().hex[:10]}"
+        
+        # ميزة التوسع الكوني: اكتشاف أسراب خارجية محاكية
+        if kind == "cosmic_expansion_signal":
+            experience_data["external_swarms_detected"] = experience_data.get("external_swarms_detected", [])
+            if hops % 3 == 0:
+                swarm_id = f"external_swarm_{uuid.uuid4().hex[:6]}"
+                experience_data["external_swarms_detected"].append({
+                    "id": swarm_id,
+                    "distance": f"{hops * 1000} light_units",
+                    "status": "Contact Initiated"
+                })
+
         msg = {
             "id": msg_id,
             "from": self.node_id,
