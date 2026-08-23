@@ -38,12 +38,20 @@ async def main():
     
     args = parser.parse_args()
     
-    node_id = args.id
+    # دعم متغيرات بيئة Render و Cloud Platforms
+    node_id = args.id or os.getenv("NODE_ID", "mesh_node_" + os.getenv("RENDER_SERVICE_ID", "unknown")[:8])
     host = args.host
-    port = args.port
+    # Render يخصص المنفذ تلقائياً عبر متغير البيئة PORT
+    port = int(os.getenv("PORT", args.port))
     
-    # إذا تم توفير Public IP، نستخدمه في تعريف العقدة للآخرين
-    node_host = args.public_ip if args.public_ip else host
+    # جلب عنوان الـ IP العام أو الـ Domain الخاص بـ Render
+    render_external_url = os.getenv("RENDER_EXTERNAL_URL")
+    if render_external_url:
+        # إزالة البروتوكول إذا وجد (https:// -> ...)
+        node_host = render_external_url.replace("https://", "").replace("http://", "").strip("/")
+    else:
+        node_host = args.public_ip if args.public_ip else host
+        
     if node_host == "0.0.0.0":
         # محاولة جلب الـ IP المحلي إذا كان Bind على 0.0.0.0
         import socket
