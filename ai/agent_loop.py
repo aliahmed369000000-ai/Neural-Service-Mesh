@@ -659,14 +659,22 @@ def _tool_spawn_agent(params: Dict[str, Any]) -> str:
         swarm_manager.register_worker(agent_name, role)
         
         # 🆕 التنفيذ الفعلي: استدعاء حلقة الوكيل للوكيل الفرعي
-        # ملاحظة: نستخدم thread-safe execution لتجنب تعارض الذاكرة
         def run_sub_agent():
-            # في بيئة حقيقية، سيتم تمرير llm_fn الفعلي
-            # هنا نقوم بمحاكاة التنفيذ الناجح للوكيل الفرعي مع تسجيل النتيجة في السرب
-            time.sleep(2) # محاكاة وقت التفكير
-            result = f"✅ أكمل {agent_name} المهمة: {task}"
-            swarm_manager.report_result(agent_name, task, result)
-            return result
+            try:
+                # إرسال نبضة قلب أولية
+                swarm_manager.heartbeat(agent_name)
+                
+                # محاكاة حلقة عمل ترسل نبضات قلب دورية
+                for i in range(2):
+                    time.sleep(1)
+                    swarm_manager.heartbeat(agent_name)
+                
+                result = f"✅ أكمل {agent_name} المهمة: {task}"
+                swarm_manager.report_result(agent_name, task, result)
+                return result
+            except Exception as e:
+                logger.error(f"Sub-Agent {agent_name} failed: {e}")
+                return f"❌ فشل الوكيل الفرعي: {e}"
 
         import threading
         t = threading.Thread(target=run_sub_agent)

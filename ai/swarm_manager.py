@@ -34,15 +34,37 @@ class SwarmManager:
         self.workers: Dict[str, Dict[str, Any]] = {}
         self.results: List[Dict[str, Any]] = []
         self.threshold = 0.66  # عتبة التوافق (66%)
+        self.proposal_timeout = 60  # مهلة المقترح بالثواني
+        self.heartbeat_timeout = 20  # مهلة نبض القلب بالثواني
 
     def register_worker(self, agent_id: str, role: str):
-        """تسجيل وكيل جديد في السرب."""
+        """تسجيل وكيل جديد في السرب مع تهيئة نبض القلب."""
         self.workers[agent_id] = {
             "role": role,
             "status": "active",
+            "last_seen": time.time(),
             "joined_at": time.time()
         }
         logger.info(f"👷 Worker Registered: {agent_id} as {role}")
+
+    def heartbeat(self, agent_id: str):
+        """تحديث نبض القلب للوكيل لضمان أنه لا يزال نشطاً."""
+        if agent_id in self.workers:
+            self.workers[agent_id]["last_seen"] = time.time()
+            self.workers[agent_id]["status"] = "active"
+
+    def get_active_workers(self) -> List[str]:
+        """الحصول على قائمة الوكلاء الذين أرسلوا نبضات قلب مؤخراً."""
+        now = time.time()
+        active = []
+        for aid, info in self.workers.items():
+            if now - info["last_seen"] <= self.heartbeat_timeout:
+                active.append(aid)
+            else:
+                if info["status"] == "active":
+                    info["status"] = "offline"
+                    logger.warning(f"⚠️ Worker {aid} went offline (Timeout)")
+        return active
 
     def report_result(self, agent_id: str, task: str, result: str):
         """تسجيل نتيجة مهمة من وكيل فرعي."""
@@ -99,22 +121,39 @@ class SwarmManager:
         return {"ok": True, "consensus": consensus}
 
     def check_consensus(self, proposal_id: str) -> Dict[str, Any]:
-        """تحليل الأصوات الحالية لمعرفة ما إذا تم الوصول للتوافق."""
+        """تحليل الأصوات الحالية مع مراعاة المهلة والوكلاء النشطين."""
         proposal = self.proposals.get(proposal_id)
         if not proposal: return {"status": "not_found"}
         
-        total_weight = sum(v["weight"] for v in proposal.votes.values())
+        if proposal.status != "pending":
+            return {"status": proposal.status, "score": 0}
+
+        now = time.time()
+        is_timeout = (now - proposal.created_at) > self.proposal_timeout
+        active_agents = self.get_active_workers()
+        
+        # تصفية الأصوات لتشمل الوكلاء النشطين فقط
+        valid_votes = {aid: v for aid, v in proposal.votes.items() if aid in active_agents}
+        
+        total_weight = sum(v["weight"] for v in valid_votes.values())
         if total_weight == 0:
+            if is_timeout:
+                proposal.status = "expired"
+                self._save_proposal(proposal)
+                return {"status": "expired", "score": 0}
             return {"status": "pending", "score": 0}
             
-        yes_weight = sum(v["weight"] for v in proposal.votes.values() if v["vote"])
+        yes_weight = sum(v["weight"] for v in valid_votes.values() if v["vote"])
         score = yes_weight / total_weight
         
-        if score >= self.threshold:
+        # التوافق المرن: خفض العتبة قليلاً عند حدوث Timeout لضمان الاستمرارية
+        current_threshold = self.threshold if not is_timeout else 0.51
+        
+        if score >= current_threshold:
             proposal.status = "approved"
             self._save_proposal(proposal)
-            return {"status": "approved", "score": score}
-        elif len(proposal.votes) >= 3 and score < 0.4: # رفض مبكر إذا كانت الأصوات سلبية جداً
+            return {"status": "approved", "score": score, "adaptive": is_timeout}
+        elif is_timeout or (len(valid_votes) >= 3 and score < 0.3):
             proposal.status = "rejected"
             self._save_proposal(proposal)
             return {"status": "rejected", "score": score}
