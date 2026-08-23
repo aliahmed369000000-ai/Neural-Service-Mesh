@@ -32,14 +32,62 @@ class LivingMeshNode:
     def join_network(self):
         """الانضمام للشبكة اللامركزية."""
         state = self._load_state()
+        is_rejoining = self.node_id in state["nodes"]
+        
         state["nodes"][self.node_id] = {
             "status": "online",
             "last_seen": datetime.now(timezone.utc).isoformat(),
             "evolution_score": self.local_evolution_score,
-            "capabilities": ["text", "image", "audio", "video", "tf_engine"]
+            "capabilities": ["text", "image", "audio", "video", "tf_engine"],
+            "assigned_tasks": []
         }
         self._save_state(state)
-        logger.info(f"Node {self.node_id} joined the living mesh.")
+        
+        if is_rejoining:
+            logger.info(f"♻️ Node {self.node_id} RECOVERED and rejoined the living mesh.")
+            self.recover_collective_state()
+        else:
+            logger.info(f"Node {self.node_id} joined the living mesh.")
+
+    def recover_collective_state(self):
+        """استعادة آخر حالة وعي للشبكة عند التعافي."""
+        state = self._load_state()
+        # استرجاع آخر تحديثات التطور والخبرات لمزامنة الحالة المحلية
+        recent_exps = state.get("global_experience", [])[-50:]
+        for exp in recent_exps:
+            if exp["kind"] == "evolution_sync":
+                self.local_evolution_score = max(self.local_evolution_score, exp["data"].get("score", 0.0))
+        logger.info(f"🧠 Node {self.node_id} synchronized state: Evolution Score = {self.local_evolution_score}")
+
+    def send_heartbeat(self):
+        """إرسال نبض قلب لتأكيد الوجود وتحديث الحالة."""
+        state = self._load_state()
+        if self.node_id in state["nodes"]:
+            state["nodes"][self.node_id]["last_seen"] = datetime.now(timezone.utc).isoformat()
+            state["nodes"][self.node_id]["status"] = "online"
+            self._save_state(state)
+            return True
+        return False
+
+    def check_network_health(self, timeout_seconds: int = 60) -> List[str]:
+        """فحص صحة الشبكة ورصد العقد المتعطلة."""
+        state = self._load_state()
+        dead_nodes = []
+        now = datetime.now(timezone.utc)
+        
+        for nid, info in state["nodes"].items():
+            if info["status"] == "offline":
+                continue
+                
+            last_seen = datetime.fromisoformat(info["last_seen"])
+            if (now - last_seen).total_seconds() > timeout_seconds:
+                info["status"] = "offline"
+                dead_nodes.append(nid)
+                logger.warning(f"Node {nid} is detected as DEAD (Self-Healing Triggered)")
+        
+        if dead_nodes:
+            self._save_state(state)
+        return dead_nodes
         
     def sync_experience(self, kind: str, experience_data: Dict[str, Any]):
         """مشاركة خبرة جديدة مع الشبكة."""

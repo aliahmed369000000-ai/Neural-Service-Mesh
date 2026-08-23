@@ -89,7 +89,33 @@ class SwarmManager:
         for aid, info in self.workers.items():
             if now - info["last_seen"] <= self.heartbeat_timeout:
                 active.append(aid)
+            elif info["status"] == "active":
+                # رصد فشل العقدة محلياً وتحديث الحالة
+                info["status"] = "offline"
+                logger.warning(f"⚠️ Node {aid} timed out and marked as offline.")
+                self.trigger_self_healing(aid)
         return active
+
+    def trigger_self_healing(self, dead_agent_id: str):
+        """بروتوكول التعافي الذاتي: سحب المهام وإعادة توزيعها."""
+        logger.info(f"🚑 Self-Healing Protocol triggered for Agent {dead_agent_id}")
+        
+        # 1. سحب المهام الموكلة للعقدة المتعطلة
+        tasks_to_reassign = []
+        for tid, task in self.marketplace_tasks.items():
+            if task.get("assigned_to") == dead_agent_id and task["status"] == "assigned":
+                tasks_to_reassign.append(tid)
+        
+        # 2. إعادة طرح المهام في السوق فوراً
+        for tid in tasks_to_reassign:
+            task = self.marketplace_tasks[tid]
+            task["status"] = "open"
+            task["assigned_to"] = None
+            task["bids"] = [] # تصفير المزايدات القديمة
+            logger.info(f"🔄 Task {tid} reassigned to marketplace due to node failure.")
+            
+        # 3. إخطار الشبكة اللامركزية (Living Mesh)
+        self.mesh_node.check_network_health(timeout_seconds=self.heartbeat_timeout)
 
     def _update_trust(self, agent_id: str, delta: float):
         if agent_id in self.workers:
