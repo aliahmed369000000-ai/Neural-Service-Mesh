@@ -157,8 +157,8 @@ class LivingMeshNode:
             return True
         return False
 
-    def check_network_health(self, timeout_seconds: int = 60) -> List[str]:
-        """فحص صحة الشبكة ورصد العقد المتعطلة."""
+    def check_network_health(self, timeout_seconds: int = 30) -> List[str]:
+        """فحص صحة الشبكة ورصد العقد المتعطلة مع تحديث قائمة الأقران النشطين."""
         state = self._load_state()
         dead_nodes = []
         now = datetime.now(timezone.utc)
@@ -166,12 +166,16 @@ class LivingMeshNode:
         for nid, info in state["nodes"].items():
             if info["status"] == "offline":
                 continue
-                
-            last_seen = datetime.fromisoformat(info["last_seen"])
-            if (now - last_seen).total_seconds() > timeout_seconds:
+            
+            try:
+                last_seen = datetime.fromisoformat(info["last_seen"])
+                if (now - last_seen).total_seconds() > timeout_seconds:
+                    info["status"] = "offline"
+                    dead_nodes.append(nid)
+                    logger.warning(f"Node {nid} is detected as DEAD (Self-Healing Triggered)")
+            except Exception:
                 info["status"] = "offline"
                 dead_nodes.append(nid)
-                logger.warning(f"Node {nid} is detected as DEAD (Self-Healing Triggered)")
         
         if dead_nodes:
             self._save_state(state)
@@ -290,14 +294,15 @@ class LivingMeshNode:
         msg["unique_id"] = unique_id
         state["global_experience"].append(msg)
         
-        # بروتوكول Gossip: إرسال الخبرة لـ 2 من الأقران عشوائياً
+        # بروتوكول Gossip المطور: إرسال الخبرة للأقران النشطين مباشرة
         import random
         import asyncio
         online_peers = [(nid, info.get("host"), info.get("port")) for nid, info in state["nodes"].items() 
                         if nid != self.node_id and info["status"] == "online"]
         
         if online_peers:
-            targets = random.sample(online_peers, min(len(online_peers), 2))
+            # زيادة عدد الأقران المستهدفين لضمان المرونة في حالة انقطاع العقد
+            targets = random.sample(online_peers, min(len(online_peers), 3))
             for target_id, t_host, t_port in targets:
                 if t_host and t_port:
                     logger.info(f"📢 Real Gossip: Node {self.node_id} propagating {kind} to {target_id} at {t_host}:{t_port}")
