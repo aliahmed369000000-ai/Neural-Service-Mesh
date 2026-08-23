@@ -36,6 +36,17 @@ class SwarmManager:
         self.threshold = 0.66  # عتبة التوافق (66%)
         self.proposal_timeout = 60  # مهلة المقترح بالثواني
         self.heartbeat_timeout = 20  # مهلة نبض القلب بالثواني
+        
+        # ربط الذاكرة متعددة الوسائط
+        from ai.multimodal_memory import mm_memory
+        self.memory = mm_memory
+
+    def share_media(self, agent_id: str, file_path: str, media_type: str, description: str, tags: List[str]) -> str:
+        """مشاركة أصل وسائط مع السرب."""
+        metadata = {"description": description, "tags": tags}
+        asset_id = self.memory.store_asset(agent_id, file_path, media_type, metadata)
+        logger.info(f"📸 Media Shared by {agent_id}: {asset_id} ({media_type})")
+        return asset_id
 
     def register_worker(self, agent_id: str, role: str):
         """تسجيل وكيل جديد في السرب مع تهيئة نبض القلب."""

@@ -691,6 +691,31 @@ register_tool(ToolSpec("spawn_agent", "استنساخ وكيل فرعي وتفو
                             "role": {"type": "string"}
                         }}, _tool_spawn_agent))
 
+def _tool_share_media(params: Dict[str, Any]) -> str:
+    """مشاركة أصل وسائط (صورة، صوت) مع السرب."""
+    file_path = params.get("file_path")
+    media_type = params.get("type", "image")
+    desc = params.get("description", "")
+    tags = params.get("tags", [])
+    
+    if not file_path:
+        return "❌ share_media: يجب تحديد مسار الملف."
+        
+    try:
+        from ai.swarm_manager import swarm_manager
+        asset_id = swarm_manager.share_media("agent_primary", file_path, media_type, desc, tags)
+        return f"✅ تم مشاركة الوسائط بنجاح. معرف الأصل: {asset_id}"
+    except Exception as e:
+        return f"❌ share_media: {e}"
+
+register_tool(ToolSpec("share_media", "مشاركة صورة أو صوت مع الذاكرة الجماعية للسرب", 
+                        {"type": "object", "properties": {
+                            "file_path": {"type": "string"},
+                            "type": {"type": "string", "enum": ["image", "audio", "video"]},
+                            "description": {"type": "string"},
+                            "tags": {"type": "array", "items": {"type": "string"}}
+                        }}, _tool_share_media))
+
 def _tool_propose_innovation(params: Dict[str, Any]) -> str:
     """اقتراح ابتكار خوارزمي جديد للشبكة العصبية."""
     import json

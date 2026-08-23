@@ -1,0 +1,93 @@
+"""
+ai/multimodal_memory.py
+=======================
+نظام الذاكرة الجماعية متعددة الوسائط للسرب السيادي.
+
+يدير هذا الملف تخزين، فهرسة، ومشاركة الأصول البصرية والسمعية بين الوكلاء،
+مما يسمح للسرب بامتلاك "ذاكرة حسية" مشتركة.
+"""
+import json
+import os
+import time
+import uuid
+import shutil
+from typing import Any, Dict, List, Optional
+from pathlib import Path
+
+class MultimodalMemory:
+    def __init__(self, storage_dir: Optional[str] = None):
+        self.root = Path(__file__).resolve().parent.parent
+        self.storage_dir = Path(storage_dir) if storage_dir else self.root / "artifacts" / "memory" / "multimodal"
+        self.assets_dir = self.storage_dir / "assets"
+        self.index_path = self.storage_dir / "index.json"
+        
+        # إنشاء المجلدات اللازمة
+        self.assets_dir.mkdir(parents=True, exist_ok=True)
+        self._init_index()
+
+    def _init_index(self):
+        """تهيئة ملف الفهرس إذا لم يكن موجوداً."""
+        if not self.index_path.exists():
+            with open(self.index_path, "w", encoding="utf-8") as f:
+                json.dump({"assets": [], "tags": {}}, f, ensure_ascii=False, indent=2)
+
+    def store_asset(self, agent_id: str, file_path: str, media_type: str, metadata: Dict[str, Any]) -> str:
+        """تخزين أصل جديد في الذاكرة الجماعية."""
+        asset_id = f"asset_{uuid.uuid4().hex[:8]}"
+        src_path = Path(file_path)
+        if not src_path.exists():
+            raise FileNotFoundError(f"الملف غير موجود: {file_path}")
+            
+        # تحديد المسار الجديد
+        ext = src_path.suffix
+        dest_path = self.assets_dir / f"{asset_id}{ext}"
+        
+        # نسخ الملف إلى المستودع المركزي
+        shutil.copy2(src_path, dest_path)
+        
+        # تحديث الفهرس
+        entry = {
+            "id": asset_id,
+            "owner": agent_id,
+            "type": media_type,
+            "path": str(dest_path.relative_to(self.root)),
+            "metadata": metadata,
+            "ts": time.time()
+        }
+        
+        self._update_index(entry)
+        return asset_id
+
+    def _update_index(self, entry: Dict[str, Any]):
+        """تحديث ملف الفهرس بالبيانات الجديدة."""
+        with open(self.index_path, "r+", encoding="utf-8") as f:
+            data = json.load(f)
+            data["assets"].append(entry)
+            
+            # تحديث الوسوم (Tags) للبحث السريع
+            for tag in entry.get("metadata", {}).get("tags", []):
+                if tag not in data["tags"]:
+                    data["tags"][tag] = []
+                data["tags"][tag].append(entry["id"])
+                
+            f.seek(0)
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.truncate()
+
+    def search_assets(self, query: str, media_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        """البحث عن أصول في الذاكرة بناءً على الوسوم أو النوع."""
+        with open(self.index_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            
+        results = []
+        # البحث في الوسوم أولاً
+        asset_ids = data["tags"].get(query, [])
+        
+        for asset in data["assets"]:
+            if asset["id"] in asset_ids or query.lower() in asset["metadata"].get("description", "").lower():
+                if not media_type or asset["type"] == media_type:
+                    results.append(asset)
+                    
+        return results
+
+mm_memory = MultimodalMemory()
