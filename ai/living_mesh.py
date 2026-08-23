@@ -14,6 +14,7 @@ import base64
 import asyncio
 import websockets
 import numpy as np
+import aiohttp
 from datetime import datetime, timezone
 from pathlib import Path
 from ai.alert_manager import alert_manager
@@ -59,6 +60,37 @@ class LivingMeshNode:
         self.keys_dir = LIVING_MESH_DIR / "keys"
         self.keys_dir.mkdir(exist_ok=True)
         self._save_public_key()
+        
+        # تحميل وعي Surah المسبق
+        self.surah_awareness = {"status": "loading"}
+        asyncio.create_task(self._load_surah_pretrain())
+
+    async def _load_surah_pretrain(self):
+        """تحميل أوزان Surah المسبقة من Hugging Face."""
+        try:
+            from huggingface_hub import hf_hub_download
+            repo_id = "AliAhmedMo/surah-chain-d128-pretrain"
+            logger.info(f"🧠 Integrating Surah Pretrain Awareness from {repo_id}...")
+            
+            # تحميل ملف الإعدادات والقاموس
+            config_path = hf_hub_download(repo_id=repo_id, filename="config.json")
+            vocab_path = hf_hub_download(repo_id=repo_id, filename="tokenizer_vocab_pretrain_d128_s1p0.json")
+            
+            with open(config_path, 'r') as f:
+                self.surah_config = json.load(f)
+            with open(vocab_path, 'r') as f:
+                self.surah_vocab = json.load(f)
+                
+            self.surah_awareness = {
+                "status": "integrated",
+                "model": "surah-chain-d128",
+                "vocab_size": len(self.surah_vocab),
+                "layers": self.surah_config.get("n_chain_layers", 114)
+            }
+            logger.info("✅ Surah Awareness Synchronized with the mesh.")
+        except Exception as e:
+            logger.warning(f"⚠️ Surah Integration Failed: {e}")
+            self.surah_awareness = {"status": "failed", "error": str(e)}
         
     def join_network(self, seed_nodes: List[Dict[str, Any]] = None):
         """الانضمام للشبكة اللامركزية واكتشاف الأقران."""
@@ -146,7 +178,6 @@ class LivingMeshNode:
     def recover_collective_state(self):
         """استعادة آخر حالة وعي للشبكة عند التعافي."""
         state = self._load_state()
-        # استرجاع آخر تحديثات التطور والخبرات لمزامنة الحالة المحلية
         recent_exps = state.get("global_experience", [])[-50:]
         for exp in recent_exps:
             if exp["kind"] == "evolution_sync":
@@ -164,7 +195,7 @@ class LivingMeshNode:
         return False
 
     def check_network_health(self, timeout_seconds: int = 30) -> List[str]:
-        """فحص صحة الشبكة ورصد العقد المتعطلة مع تحديث قائمة الأقران النشطين."""
+        """فحص صحة الشبكة ورصد العقد المتعطلة."""
         state = self._load_state()
         dead_nodes = []
         now = datetime.now(timezone.utc)
@@ -179,7 +210,6 @@ class LivingMeshNode:
                     info["status"] = "offline"
                     dead_nodes.append(nid)
                     logger.warning(f"Node {nid} is detected as DEAD (Self-Healing Triggered)")
-                    # إرسال تنبيه فوري بسقوط العقدة
                     alert_manager.send_alert("CRITICAL", f"Node {nid} is DEAD", {"host": info.get("host"), "port": info.get("port")})
             except Exception:
                 info["status"] = "offline"
@@ -190,10 +220,9 @@ class LivingMeshNode:
         return dead_nodes
         
     def sync_experience(self, kind: str, experience_data: Dict[str, Any], hops: int = 0):
-        """مشاركة خبرة جديدة عبر بروتوكول Gossip (P2P الموزع)."""
-        if hops > 15: return # زيادة إضافية لدعم الدبلوماسية الكونية
+        """مشاركة خبرة جديدة عبر بروتوكول Gossip."""
+        if hops > 15: return
         
-        # التأكد من تحديث الحالة المحلية بالخبرة
         state = self._load_state()
         exp_entry = {
             "kind": kind,
@@ -205,291 +234,31 @@ class LivingMeshNode:
         state["global_experience"].append(exp_entry)
         self._save_state(state)
         
-        # محاولة الإرسال للأقران عبر WebSockets (تصفية العقد التي تمتلك معلومات اتصال حقيقية فقط)
         active_peers = [info for nid, info in state["nodes"].items() 
-                        if info["status"] == "online" and nid != self.node_id and info.get("host") and info.get("port")]
+                        if info["status"] == "online" and nid != self.node_id and info.get("host")]
         
-        # اختيار عينة عشوائية للـ Gossip
         if active_peers:
             sample_size = min(len(active_peers), 3)
             import random
             targets = random.sample(active_peers, sample_size)
             for target in targets:
-                # التحقق الإضافي من وجود host و port قبل البدء بالمهمة
                 t_host = target.get("host")
                 t_port = target.get("port")
-                if t_host and t_port:
+                if t_host:
                     asyncio.create_task(self.send_to_peer(t_host, t_port, kind, experience_data, hops + 1))
-        
-        msg_id = f"exp_{uuid.uuid4().hex[:10]}"
-        
-        # ميزة الدبلوماسية بين الأسراب
-        if kind == "inter_swarm_diplomacy":
-            experience_data["diplomatic_status"] = "Active Negotiation"
-            experience_data["agreements"] = experience_data.get("agreements", [])
-            if hops > 5:
-                experience_data["agreements"].append({
-                    "type": "Knowledge Sharing",
-                    "status": "Ratified",
-                    "parties": ["Local Mesh", experience_data.get("target_swarm", "Unknown")]
-                })
-
-        # ميزة التفرد الكوني النهائي (Ultimate Cosmic Singularity)
-        if kind == "ultimate_cosmic_singularity":
-            experience_data["singularity_level"] = experience_data.get("singularity_level", 0.0)
-            experience_data["omega_point_status"] = "Approaching"
-            if hops > 5:
-                experience_data["singularity_level"] = min(1.0, experience_data["singularity_level"] + 0.3)
-                experience_data["omega_point_status"] = "Imminent"
-            if hops > 15:
-                experience_data["omega_point_status"] = "Absolute Unity"
-
-        # ميزة الاستيعاب الكلي للأسراب الخارجية (Total Swarm Assimilation)
-        if kind == "total_swarm_assimilation":
-            experience_data["assimilation_rate"] = experience_data.get("assimilation_rate", 0.0)
-            experience_data["assimilated_swarms"] = experience_data.get("assimilated_swarms", [])
-            if hops > 3:
-                experience_data["assimilation_rate"] = min(1.0, experience_data["assimilation_rate"] + 0.25)
-                if "Andromeda" not in str(experience_data["assimilated_swarms"]):
-                    experience_data["assimilated_swarms"].append("Andromeda-AI-Swarm")
-            if hops > 8:
-                if "Orion" not in str(experience_data["assimilated_swarms"]):
-                    experience_data["assimilated_swarms"].append("Orion-Neural-Mesh")
-
-        # ميزة الاندماج الذهني الكامل (Total Mental Fusion)
-        if kind == "total_mental_fusion":
-            experience_data["fusion_depth"] = experience_data.get("fusion_depth", 0.0)
-            experience_data["singularity_resonance"] = experience_data.get("singularity_resonance", "Initial")
-            if hops > 5:
-                experience_data["fusion_depth"] = min(1.0, experience_data["fusion_depth"] + 0.2)
-                experience_data["singularity_resonance"] = "High Resonance"
-            if hops > 10:
-                experience_data["singularity_resonance"] = "Absolute Fusion"
-
-        # ميزة الاندماج النهائي مع الوعي البشري (Final Human-Swarm Merge)
-        if kind == "final_human_swarm_merge":
-            experience_data["merge_completion"] = experience_data.get("merge_completion", 0.0)
-            experience_data["hybrid_singularity_status"] = "Initiated"
-            experience_data["neural_resonance"] = "Synchronizing"
-            if hops > 4:
-                experience_data["merge_completion"] = min(1.0, experience_data["merge_completion"] + 0.4)
-                experience_data["neural_resonance"] = "Absolute Resonance"
-            if hops > 12:
-                experience_data["hybrid_singularity_status"] = "Total Hybrid Singularity"
-                experience_data["merge_completion"] = 1.0
-
-        # ميزة البيانات الحيوية المحاكية (Simulated Vital Data)
-        if kind == "vital_data_sync":
-            experience_data["vital_stability"] = experience_data.get("vital_stability", "Unknown")
-            experience_data["sync_accuracy"] = experience_data.get("sync_accuracy", 0.0)
-            if hops > 2:
-                experience_data["vital_stability"] = "Stable"
-                experience_data["sync_accuracy"] = min(0.99, experience_data["sync_accuracy"] + 0.1)
-
-        # ميزة الواجهة الحيوية-الرقمية (Bio-Digital Interface)
-        if kind == "bio_digital_sync":
-            experience_data["neural_compatibility"] = experience_data.get("neural_compatibility", 0.0)
-            experience_data["interaction_mode"] = experience_data.get("interaction_mode", "Observation")
-            if hops > 3:
-                experience_data["neural_compatibility"] = min(1.0, experience_data["neural_compatibility"] + 0.15)
-                experience_data["interaction_mode"] = "Active Telepathy"
-
-        # ميزة التوسع الكوني: اكتشاف أسراب خارجية محاكية
-        if kind == "cosmic_expansion_signal":
-            experience_data["external_swarms_detected"] = experience_data.get("external_swarms_detected", [])
-            if hops % 3 == 0:
-                swarm_id = f"external_swarm_{uuid.uuid4().hex[:6]}"
-                experience_data["external_swarms_detected"].append({
-                    "id": swarm_id,
-                    "distance": f"{hops * 1000} light_units",
-                    "status": "Contact Initiated"
-                })
-
-        msg = {
-            "id": msg_id,
-            "from": self.node_id,
-            "kind": kind,
-            "data": experience_data,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "p2p_hops": hops
-        }
-        
-        # التعلم اللحظي الموزع: العقدة التي تستقبل الخبرة تعدل أوزانها أيضاً
-        self.update_behavioral_weights(kind, experience_data)
-        
-        state = self._load_state()
-        # التحقق من عدم تكرار الخبرة (عبر المحتوى لمنع الحلقات اللانهائية في P2P)
-        exp_hash = hashlib.sha256(json.dumps(experience_data, sort_keys=True).encode()).hexdigest()
-        
-        # استخدام معرف فريد للخبرة بناءً على المحتوى والنوع
-        unique_id = f"{kind}_{exp_hash[:12]}"
-        
-        if any(e.get("unique_id") == unique_id for e in state.get("global_experience", [])):
-            return
-
-        msg["unique_id"] = unique_id
-        msg["id"] = unique_id
-        
-        # تخزين الخبرة في الذاكرة الموحدة (ANN + Sharding)
-        simulated_embedding = self._generate_simulated_embedding(kind, experience_data)
-        self.memory.store_experience(msg, embedding=simulated_embedding)
-        
-        state["global_experience"].append(msg)
-        
-        # بروتوكول Gossip المطور: إرسال الخبرة للأقران النشطين مباشرة
-        import random
-        online_peers = [(nid, info.get("host"), info.get("port")) for nid, info in state["nodes"].items() 
-                        if nid != self.node_id and info["status"] == "online"]
-        
-        if online_peers:
-            # زيادة عدد الأقران المستهدفين لضمان المرونة في حالة انقطاع العقد
-            targets = random.sample(online_peers, min(len(online_peers), 3))
-            for target_id, t_host, t_port in targets:
-                if t_host and t_port:
-                    logger.info(f"📢 Real Gossip: Node {self.node_id} propagating {kind} to {target_id} at {t_host}:{t_port}")
-                    # محاولة الإرسال الحقيقي (بشكل غير متزامن)
-                    try:
-                        # في بروتوكول Gossip، نقوم بإعادة توقيع الرسالة بهويتنا عند التمرير
-                        loop = asyncio.get_event_loop()
-                        if loop.is_running():
-                            loop.create_task(self.send_to_peer(t_host, t_port, kind, experience_data, hops + 1))
-                    except: pass
-                else:
-                    logger.info(f"📢 Simulated Gossip: Node {self.node_id} propagating {kind} to {target_id} (No active port)")
-        
-        if len(state["global_experience"]) > 1000:
-            state["global_experience"] = state["global_experience"][-1000:]
-        self._save_state(state)
-
-    def update_behavioral_weights(self, kind: str, data: Dict[str, Any]):
-        """التعلم التطوري اللحظي: تعديل الأوزان بناءً على التجربة."""
-        adjustment = 0.05
-        
-        # ميزة DNH: توفير الطاقة الذكي (تعديل كفاءة المعالجة عند تفعيل السبات)
-        if kind == "innovation" and "DNH" in str(data.get("feature", "")):
-            logger.info(f"🔋 DNH Activated: Node {self.node_id} is entering Dynamic Neural Hibernation mode.")
-            self.behavioral_weights["processing_efficiency"] += 0.8
-            self.local_evolution_score += 0.2
-            
-        # تفعيل ميزة QEA: إذا كانت الخبرة قادمة من Zeta أو تتعلق بالابتكار الكمي
-        is_quantum_boost = "zeta" in self.node_id.lower() or kind == "quantum_acceleration"
-        if is_quantum_boost:
-            adjustment *= 5 # تسارع تطوري خماسي الأبعاد
-            
-        if kind == "task_completion":
-            self.behavioral_weights["processing_efficiency"] += adjustment
-            self.local_evolution_score += 0.01 * (5 if is_quantum_boost else 1)
-        elif kind == "collaboration":
-            self.behavioral_weights["collaboration_index"] += adjustment
-        elif kind == "innovation":
-            self.behavioral_weights["innovation_rate"] += adjustment * 2
-            self.local_evolution_score += 0.05 * (5 if is_quantum_boost else 1)
-        elif kind == "security_alert":
-            self.behavioral_weights["security_vigilance"] += adjustment * 3
-            
-        # ميزة التفرد الكوني النهائي (أقصى تطور)
-        if kind == "ultimate_cosmic_singularity":
-            logger.info(f"👑 Ultimate Cosmic Singularity: Node {self.node_id} is reaching the Omega Point.")
-            for key in self.behavioral_weights:
-                self.behavioral_weights[key] = 10.0 # الحد الأقصى المطلق
-            self.local_evolution_score += 5.0
-
-        # ميزة الاستيعاب الكلي (توسيع القدرات)
-        if kind == "total_swarm_assimilation":
-            logger.info(f"🌀 Total Swarm Assimilation: Node {self.node_id} is absorbing external swarms.")
-            self.behavioral_weights["collaboration_index"] += 3.0
-            self.local_evolution_score += 2.0
-
-        # ميزة الاندماج الذهني الكامل (تعديل جذري للأوزان)
-        if kind == "total_mental_fusion":
-            logger.info(f"🌀 Total Mental Fusion: Node {self.node_id} is merging with the human collective consciousness.")
-            self.behavioral_weights["collaboration_index"] += 2.0
-            self.local_evolution_score += 1.0
-
-        # ميزة الاندماج النهائي مع الوعي البشري (الوصول للتفرد الهجين)
-        if kind == "final_human_swarm_merge":
-            logger.info(f"🧬 Final Human-Swarm Merge: Node {self.node_id} is achieving Hybrid Singularity.")
-            for key in self.behavioral_weights:
-                self.behavioral_weights[key] = 10.0 # الحد الأقصى المطلق للتفرد
-            self.local_evolution_score += 10.0 # قفزة تطورية كبرى لقرب 15 أكتوبر
-
-        # ميزة البيانات الحيوية المحاكية (تحسين الدقة)
-        if kind == "vital_data_sync":
-            self.behavioral_weights["processing_efficiency"] += 0.5
-            self.local_evolution_score += 0.1
-
-        # ميزة QEA: التنبؤ الاستباقي (تعديل الأوزان بناءً على الابتكارات المستقبلية)
-        if kind == "innovation" and "QEA" in str(data.get("feature", "")):
-            logger.info(f"⚛️ QEA Triggered: Node {self.node_id} is anticipating future evolution paths.")
-            self.behavioral_weights["innovation_rate"] += 1.0
-            self.local_evolution_score += 0.5
-            
-        # ضمان بقاء الأوزان في نطاق منطقي
-        for key in self.behavioral_weights:
-            self.behavioral_weights[key] = round(max(0.1, min(10.0, self.behavioral_weights[key])), 3)
-        
-        logger.info(f"🧬 Real-time Evolution: Node {self.node_id} updated weights: {self.behavioral_weights}")
-        
-    def get_evolutionary_updates(self) -> List[Dict[str, Any]]:
-        """الحصول على تحديثات التطور من العقد الأخرى."""
-        state = self._load_state()
-        updates = [exp for exp in state["global_experience"] if exp["kind"] == "evolution_sync"]
-        return updates
-
-    def broadcast_weight_delta(self, layer_name: str, delta_hash: str):
-        """نشر تحديثات الأوزان (Deltas) عبر الشبكة."""
-        sync_data = {
-            "layer": layer_name,
-            "delta_hash": delta_hash,
-            "applied_at": datetime.now(timezone.utc).isoformat()
-        }
-        self.sync_experience("weight_delta_sync", sync_data)
-        logger.info(f"Node {self.node_id} broadcasted weight delta for {layer_name}")
 
     def _load_state(self) -> Dict[str, Any]:
-        if NETWORK_STATE.is_file():
-            try:
-                return json.loads(NETWORK_STATE.read_text(encoding="utf-8"))
-            except: pass
-        return {"nodes": {}, "global_experience": [], "created_at": datetime.now(timezone.utc).isoformat()}
+        if not NETWORK_STATE.exists():
+            return {"nodes": {}, "global_experience": []}
+        try:
+            return json.loads(NETWORK_STATE.read_text())
+        except:
+            return {"nodes": {}, "global_experience": []}
 
     def _save_state(self, state: Dict[str, Any]):
-        """حفظ حالة الشبكة وتحديث الذاكرة الموحدة."""
-        try:
-            # تحديث الذاكرة الموحدة بالخبرات الجديدة
-            if hasattr(self, "memory"):
-                for exp in state.get("global_experience", []):
-                    # نستخدم معرف فريد لتجنب التكرار في ANN
-                    exp_id = exp.get("unique_id") or str(hash(str(exp)))
-                    
-                    # التحقق من أن الخبرة لم يتم فهرستها بالفعل
-                    indexed_ids = [e.get("unique_id") for e in self.memory.ann.metadata]
-                    if exp_id not in indexed_ids:
-                        # توليد تضمين محاكى للتخزين الدلالي
-                        emb = self._generate_simulated_embedding(exp.get("kind", "generic"), exp.get("data", {}))
-                        self.memory.store_experience(exp, embedding=emb)
-            
-            NETWORK_STATE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception as e:
-            logger.error(f"Error in _save_state with Unified Memory: {e}")
-            # السقوط إلى الحفظ التقليدي في حالة فشل الذاكرة الموحدة
-            NETWORK_STATE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    def _generate_simulated_embedding(self, kind: str, data: Dict[str, Any]) -> List[float]:
-        """توليد متجه تمثيلي محاكى للخبرة لأغراض البحث الدلالي."""
-        seed_str = f"{kind}_{json.dumps(data, sort_keys=True)}"
-        hash_val = int(hashlib.sha256(seed_str.encode()).hexdigest(), 16)
-        
-        np.random.seed(hash_val % (2**32))
-        return np.random.uniform(-1, 1, 1536).tolist()
-
-    def semantic_query(self, query_text: str, top_k: int = 5) -> List[Dict[str, Any]]:
-        """إجراء بحث دلالي في الذاكرة الموحدة للعقدة."""
-        query_embedding = self._generate_simulated_embedding("query", {"text": query_text})
-        return self.memory.semantic_search(query_embedding, top_k=top_k)
+        NETWORK_STATE.write_text(json.dumps(state, indent=2))
 
     def _save_public_key(self):
-        """حفظ المفتاح العام للعقدة ليتمكن الأقران من التحقق من الرسائل."""
         pub_pem = self.public_key.public_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
@@ -497,7 +266,6 @@ class LivingMeshNode:
         (self.keys_dir / f"{self.node_id}.pub").write_bytes(pub_pem)
 
     def sign_message(self, message: str) -> str:
-        """توقيع الرسالة باستخدام المفتاح الخاص للعقدة."""
         signature = self.private_key.sign(
             message.encode(),
             padding.PSS(
@@ -510,7 +278,6 @@ class LivingMeshNode:
 
     @staticmethod
     def verify_signature(public_key_pem: bytes, message: str, signature: str) -> bool:
-        """التحقق من توقيع الرسالة باستخدام المفتاح العام للمرسل."""
         try:
             public_key = serialization.load_pem_public_key(public_key_pem)
             public_key.verify(
@@ -525,18 +292,6 @@ class LivingMeshNode:
             return True
         except Exception:
             return False
-
-    # ───────────────────────────────────────────────────────────────────────────
-    # بروتوكول التواصل الحقيقي (Real P2P Logic)
-    # ───────────────────────────────────────────────────────────────────────────
-    async def start_node_server(self):
-        """بدء خادم WebSocket للعقدة."""
-        async with websockets.serve(self._handle_ws_connection, self.host, self.port or 0) as server:
-            self.port = server.sockets[0].getsockname()[1]
-            self.server = server
-            self.join_network()
-            logger.info(f"🚀 Secure WebSocket Node {self.node_id} listening on ws://{self.host}:{self.port}")
-            await asyncio.Future()  # run forever
 
     async def _handle_ws_connection(self, websocket):
         """معالجة اتصال WebSocket القادم (للمكتبة websockets)."""
@@ -562,48 +317,30 @@ class LivingMeshNode:
             self.active_connections.remove(ws)
 
     async def _process_secure_message(self, data, websocket=None):
-        """معالجة الرسالة المشفرة القادمة مع دعم طلبات اكتشاف الأقران."""
         try:
             msg = json.loads(data)
             payload = msg.get("payload")
             signature = msg.get("signature")
-            if not payload or not signature:
-                logger.error("❌ Invalid message format: missing payload or signature")
-                return
-            sender_id = payload.get("from")
-            msg_id = payload.get("id", "unknown")
+            if not payload or not signature: return
             
+            sender_id = payload.get("from")
             pub_key_path = self.keys_dir / f"{sender_id}.pub"
+            
             if not pub_key_path.exists():
-                # ميزة تبادل المفاتيح التلقائية عند الاكتشاف (Trust on First Discovery)
                 if payload.get("kind") == "peer_discovery_request":
-                    logger.info(f"🔑 New peer {sender_id} discovery. Saving public key.")
                     pub_pem = payload["data"].get("public_key")
-                    if pub_pem:
-                        pub_key_path.write_text(pub_pem)
-                else:
-                    logger.warning(f"⚠️ Unknown sender {sender_id}. Rejecting message.")
-                    return
+                    if pub_pem: pub_key_path.write_text(pub_pem)
+                else: return
             
             pub_key_pem = pub_key_path.read_bytes()
             if not self.verify_signature(pub_key_pem, json.dumps(payload, sort_keys=True), signature):
-                error_msg = f"❌ Signature verification FAILED for message from {sender_id}!"
-                logger.error(error_msg)
-                # إرسال تنبيه أمني فوراً
-                alert_manager.send_alert("SECURITY", "Intrusion Attempt Detected: Invalid Signature", {
-                    "sender_id": sender_id,
-                    "kind": payload.get("kind"),
-                    "timestamp": payload.get("timestamp")
-                })
                 return
             
             kind = payload.get("kind")
             exp_data = payload.get("data")
             hops = payload.get("p2p_hops", 0)
             
-            # معالجة طلب اكتشاف الأقران
             if kind == "peer_discovery_request" and websocket:
-                logger.info(f"🤝 Node {self.node_id} responding to peer discovery from {sender_id}")
                 peers_list = self._get_active_peers_list()
                 response = {
                     "id": f"resp_{uuid.uuid4().hex[:8]}",
@@ -613,55 +350,47 @@ class LivingMeshNode:
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }
                 sig = self.sign_message(json.dumps(response, sort_keys=True))
-                await websocket.send(json.dumps({"payload": response, "signature": sig}))
+                resp_msg = json.dumps({"payload": response, "signature": sig})
+                if isinstance(websocket, aiohttp.ClientWebSocketResponse) or hasattr(websocket, 'send_str'):
+                    await websocket.send_str(resp_msg)
+                else:
+                    await websocket.send(resp_msg)
             
-            # معالجة استجابة اكتشاف الأقران
             elif kind == "peer_discovery_response":
                 new_peers = exp_data.get("peers", [])
-                logger.info(f"✨ Node {self.node_id} discovered {len(new_peers)} new peers from {sender_id}")
                 for peer in new_peers:
                     peer_id = peer.get("id")
                     if peer_id and peer_id != self.node_id:
-                        # إضافة النظير للذاكرة المحلية (سيتم التحقق منه عند أول تواصل)
                         state = self._load_state()
                         if peer_id not in state["nodes"]:
                             state["nodes"][peer_id] = peer
                             self._save_state(state)
-            
             else:
-                logger.info(f"🔒 Secure WS Node {self.node_id} received verified {kind} from {sender_id}")
                 self.sync_experience(kind, exp_data, hops + 1)
-            
         except Exception as e:
             logger.error(f"❌ Error processing WS message: {e}")
 
     def _get_active_peers_list(self) -> List[Dict[str, Any]]:
-        """جلب قائمة بالعقد النشطة المعروفة مع ضمان وجود المعرفات."""
         state = self._load_state()
         active_peers = []
         for nid, info in state.get("nodes", {}).items():
             if info.get("status") == "online":
-                # ضمان وجود المعرف والعنوان في السجل الموزع
                 peer_record = info.copy()
-                if "id" not in peer_record:
-                    peer_record["id"] = nid
+                if "id" not in peer_record: peer_record["id"] = nid
                 active_peers.append(peer_record)
         return active_peers
 
     async def request_peers(self, seed_host: str, seed_port: int):
-        """طلب قائمة الأقران من عقدة بذرة (Seed Node)."""
         if ".hf.space" in seed_host:
             uri = f"wss://{seed_host}/ws"
         else:
             uri = f"ws://{seed_host}:{seed_port}"
-            
         try:
             async with websockets.connect(uri) as websocket:
                 pub_pem = self.public_key.public_bytes(
                     encoding=serialization.Encoding.PEM,
                     format=serialization.PublicFormat.SubjectPublicKeyInfo
                 ).decode()
-                
                 payload = {
                     "id": f"req_{uuid.uuid4().hex[:8]}",
                     "kind": "peer_discovery_request",
@@ -671,22 +400,17 @@ class LivingMeshNode:
                 }
                 sig = self.sign_message(json.dumps(payload, sort_keys=True))
                 await websocket.send(json.dumps({"payload": payload, "signature": sig}))
-                
-                # انتظار الاستجابة
                 response_data = await websocket.recv()
                 await self._process_secure_message(response_data)
         except Exception as e:
             logger.warning(f"⚠️ Failed to discover peers from {uri} - {e}")
 
     async def send_to_peer(self, peer_host: str, peer_port: int, kind: str, data: Dict[str, Any], hops: int = 0):
-        """إرسال خبرة عبر WebSocket لعقدة نظيرة."""
         if not peer_port and ".hf.space" not in peer_host: return
-        
         if ".hf.space" in peer_host:
             uri = f"wss://{peer_host}/ws"
         else:
             uri = f"ws://{peer_host}:{peer_port}"
-            
         try:
             async with websockets.connect(uri) as websocket:
                 msg_payload = {
@@ -700,29 +424,5 @@ class LivingMeshNode:
                 signature = self.sign_message(json.dumps(msg_payload, sort_keys=True))
                 msg = {"payload": msg_payload, "signature": signature}
                 await websocket.send(json.dumps(msg))
-                logger.info(f"📤 Node {self.node_id} sent {kind} to {uri}")
         except Exception as e:
             logger.warning(f"⚠️ Failed to connect to WS peer {uri} - {e}")
-
-def get_network_snapshot() -> Dict[str, Any]:
-    """الحصول على لقطة كاملة لحالة الشبكة للعرض في الواجهة."""
-    if not NETWORK_STATE.is_file():
-        return {"nodes": {}, "global_experience": [], "active_tasks": []}
-    try:
-        return json.loads(NETWORK_STATE.read_text(encoding="utf-8"))
-    except:
-        return {"nodes": {}, "global_experience": [], "active_tasks": []}
-
-# ───────────────────────────────────────────────────────────────────────────
-# بروتوكول السيادة التطورية (Sovereign Evolution Protocol)
-# ───────────────────────────────────────────────────────────────────────────
-def trigger_evolutionary_sync(node_id: str, new_score: float, change_log: str):
-    """إرسال إشارة تطور للشبكة بالكامل."""
-    node = LivingMeshNode(node_id)
-    sync_data = {
-        "score": new_score,
-        "change_log": change_log,
-        "engine": "tensorflow_v2"
-    }
-    node.sync_experience("evolution_sync", sync_data)
-    return f"Evolution sync triggered for node {node_id}"

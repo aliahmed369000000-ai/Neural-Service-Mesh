@@ -88,7 +88,7 @@ def render_unified_swarm_dashboard() -> None:
         merge_completion = 0.0
         singularity_status = "Unknown"
 
-    # جلب إحصائيات الذاكرة الموحدة
+    # جلب إحصائيات الذاكرة الموحدة ووعي Surah
     try:
         from ai.living_mesh import LivingMeshNode
         temp_node = LivingMeshNode(node_id="dashboard_viewer")
@@ -96,16 +96,23 @@ def render_unified_swarm_dashboard() -> None:
         total_exp = mem_stats.get("total_experiences", 0)
         indexed_vec = mem_stats.get("indexed_vectors", 0)
         shards_count = mem_stats.get("num_shards", 0)
+        
+        # حالة وعي Surah
+        surah_awareness = getattr(temp_node, 'surah_awareness', {"status": "loading"})
+        surah_status = surah_awareness.get("status", "unknown")
+        surah_note = f"Surah-Chain-d128 ({surah_status})"
     except Exception:
         total_exp = indexed_vec = shards_count = 0
+        surah_status = "failed"
+        surah_note = "Surah Awareness: Offline"
 
     render_kpi_cards([
         {"label": "وكلاء نشطون", "value": counts.get("alive", 0), "note": "قيد التنفيذ الآن", "accent": "var(--nsm-cyan)"},
+        {"label": "وعي Surah", "value": surah_status.upper(), "note": surah_note, "accent": "#fbbf24"},
         {"label": "اكتمال الاندماج", "value": f"{merge_completion*100:.1f}%", "note": singularity_status, "accent": "#f472b6"},
         {"label": "الذاكرة الموحدة", "value": total_exp, "note": f"{shards_count} أجزاء (Shards)", "accent": "#818cf8"},
         {"label": "فهرس ANN", "value": indexed_vec, "note": "متجهات دلالية", "accent": "#c084fc"},
         {"label": "مهام السرب", "value": swarm.get("total", 0), "note": "محفوظة في السجل", "accent": "var(--nsm-indigo)"},
-        {"label": "مهام طويلة الأمد", "value": sum(lh.get("counts", {}).values()) if isinstance(lh, dict) else 0, "note": "قيد الإدارة", "accent": "#c084fc"},
     ])
 
     # ── مؤشرات الأداء: الذاكرة ووقت الاستجابة ──────────────────
