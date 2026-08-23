@@ -171,13 +171,26 @@ class MetricsState:
         self.agent_stats[agent_id]["last_seen"] = time.time()
         
     def update_heartbeat(self, agent_id: str, node_info: Dict[str, Any]):
-        """تحديث نبض القلب وحالة العقدة."""
+        """تحديث نبض القلب وحالة العقدة مع تطبيق التعافي التدريجي للثقة."""
+        now = time.time()
         print(f"💓 Heartbeat received from: {agent_id}")
         self.request_counts["heartbeat"] += 1
+        
         if agent_id not in self.node_status:
-            self.node_status[agent_id] = {"agent_id": agent_id}
+            self.node_status[agent_id] = {"agent_id": agent_id, "last_recovery": now}
+        
+        # آلية التعافي التدريجي: زيادة الثقة بمقدار 0.01 كل 60 ثانية من النشاط المستمر
+        last_recovery = self.node_status[agent_id].get("last_recovery", now)
+        if now - last_recovery >= 60: # التعافي التدريجي كل دقيقة من النشاط
+            current_score = memory.data["trust_scores"].get(agent_id, 1.0)
+            if current_score < 1.0: # التعافي يعمل فقط للعودة للمستوى الطبيعي
+                memory.data["trust_scores"][agent_id] = min(current_score + 0.01, 1.0)
+                print(f"📈 [Recovery]: زيادة ثقة الوكيل {agent_id} إلى {memory.data['trust_scores'][agent_id]}")
+                memory.save() # ضمان حفظ نقاط الثقة الجديدة
+            self.node_status[agent_id]["last_recovery"] = now
+
         self.node_status[agent_id].update({
-            "last_seen": time.time(),
+            "last_seen": now,
             "info": node_info,
             "status": "online"
         })
