@@ -29,12 +29,38 @@ class SharedExperienceManager:
         self.api_key = "nsm_secret_key_2026"
         self.knowledge = self._load_knowledge()
         
-        # إعداد التشفير
+        # إعداد التشفير مع دعم التدوير
         self.encryption_enabled = encryption_key is not None
+        self.master_secret = encryption_key
+        self.ciphers = {} # تخزين إصدارات المفاتيح المختلفة
+        self.current_key_id = None
+        
         if self.encryption_enabled:
-            self.cipher = self._init_cipher(encryption_key)
+            self._update_ciphers()
         else:
             self.cipher = None
+
+    def _get_temporal_key_id(self, timestamp: Optional[float] = None) -> str:
+        """توليد معرف مفتاح يعتمد على اليوم (تدوير كل 24 ساعة)."""
+        ts = timestamp or time.time()
+        day_index = int(ts // 86400)
+        return f"v{day_index}"
+
+    def _update_ciphers(self):
+        """تحديث المفتاح الحالي والاحتفاظ بالمفاتيح السابقة لفك التشفير."""
+        now = time.time()
+        self.current_key_id = self._get_temporal_key_id(now)
+        
+        # اشتقاق المفتاح الحالي
+        if self.current_key_id not in self.ciphers:
+            self.ciphers[self.current_key_id] = self._init_cipher(f"{self.master_secret}_{self.current_key_id}")
+            
+        # اشتقاق مفتاح اليوم السابق (للسماح بفك تشفير البيانات القديمة)
+        prev_key_id = self._get_temporal_key_id(now - 86400)
+        if prev_key_id not in self.ciphers:
+            self.ciphers[prev_key_id] = self._init_cipher(f"{self.master_secret}_{prev_key_id}")
+            
+        self.cipher = self.ciphers[self.current_key_id]
 
     def _init_cipher(self, key_str: str) -> Fernet:
         """إنشاء محرك التشفير من سلسلة نصية."""
@@ -49,16 +75,32 @@ class SharedExperienceManager:
         return Fernet(key)
 
     def _encrypt(self, text: str) -> str:
-        if not self.encryption_enabled or not self.cipher:
+        if not self.encryption_enabled:
             return text
-        return self.cipher.encrypt(text.encode()).decode()
+        self._update_ciphers() # التأكد من استخدام أحدث مفتاح
+        encrypted = self.cipher.encrypt(text.encode()).decode()
+        # إضافة معرف المفتاح للمحتوى المشفر لسهولة فك التشفير لاحقاً
+        return f"{self.current_key_id}:{encrypted}"
 
     def _decrypt(self, encrypted_text: str) -> str:
-        if not self.encryption_enabled or not self.cipher:
+        if not self.encryption_enabled:
             return encrypted_text
+        
         try:
-            return self.cipher.decrypt(encrypted_text.encode()).decode()
-        except:
+            # استخراج معرف المفتاح والمحتوى
+            if ":" in encrypted_text:
+                key_id, content = encrypted_text.split(":", 1)
+                
+                # إذا لم يكن المفتاح موجوداً، نحاول اشتقاقه
+                if key_id not in self.ciphers:
+                    self.ciphers[key_id] = self._init_cipher(f"{self.master_secret}_{key_id}")
+                
+                return self.ciphers[key_id].decrypt(content.encode()).decode()
+            else:
+                # دعم التوافق مع البيانات القديمة غير المعلمة بإصدار
+                return self.cipher.decrypt(encrypted_text.encode()).decode()
+        except Exception as e:
+            logger.debug(f"فشل فك التشفير: {e}")
             return "[DECRYPTION_FAILED]"
 
     def _request(self, method: str, endpoint: str, data: Optional[Dict] = None):
