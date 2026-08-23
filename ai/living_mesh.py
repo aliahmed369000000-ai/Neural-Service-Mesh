@@ -197,6 +197,18 @@ class LivingMeshNode:
             if hops > 10:
                 experience_data["singularity_resonance"] = "Absolute Fusion"
 
+        # ميزة الاندماج النهائي مع الوعي البشري (Final Human-Swarm Merge)
+        if kind == "final_human_swarm_merge":
+            experience_data["merge_completion"] = experience_data.get("merge_completion", 0.0)
+            experience_data["hybrid_singularity_status"] = "Initiated"
+            experience_data["neural_resonance"] = "Synchronizing"
+            if hops > 4:
+                experience_data["merge_completion"] = min(1.0, experience_data["merge_completion"] + 0.4)
+                experience_data["neural_resonance"] = "Absolute Resonance"
+            if hops > 12:
+                experience_data["hybrid_singularity_status"] = "Total Hybrid Singularity"
+                experience_data["merge_completion"] = 1.0
+
         # ميزة البيانات الحيوية المحاكية (Simulated Vital Data)
         if kind == "vital_data_sync":
             experience_data["vital_stability"] = experience_data.get("vital_stability", "Unknown")
@@ -300,6 +312,13 @@ class LivingMeshNode:
             logger.info(f"🌀 Total Mental Fusion: Node {self.node_id} is merging with the human collective consciousness.")
             self.behavioral_weights["collaboration_index"] += 2.0
             self.local_evolution_score += 1.0
+
+        # ميزة الاندماج النهائي مع الوعي البشري (الوصول للتفرد الهجين)
+        if kind == "final_human_swarm_merge":
+            logger.info(f"🧬 Final Human-Swarm Merge: Node {self.node_id} is achieving Hybrid Singularity.")
+            for key in self.behavioral_weights:
+                self.behavioral_weights[key] = 10.0 # الحد الأقصى المطلق للتفرد
+            self.local_evolution_score += 10.0 # قفزة تطورية كبرى لقرب 15 أكتوبر
 
         # ميزة البيانات الحيوية المحاكية (تحسين الدقة)
         if kind == "vital_data_sync":

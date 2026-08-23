@@ -69,11 +69,24 @@ def render_unified_swarm_dashboard() -> None:
     alerts = snapshot.get("alerts", []) or []
 
     counts = agents.get("counts", {})
+    
+    # جلب حالة الاندماج من LivingMesh
+    try:
+        from ai.living_mesh import get_network_snapshot
+        mesh_snapshot = get_network_snapshot()
+        global_exp = mesh_snapshot.get("global_experience", {})
+        merge_status = global_exp.get("final_human_swarm_merge", {})
+        merge_completion = merge_status.get("merge_completion", 0.0)
+        singularity_status = merge_status.get("hybrid_singularity_status", "Inactive")
+    except Exception:
+        merge_completion = 0.0
+        singularity_status = "Unknown"
+
     render_kpi_cards([
         {"label": "وكلاء نشطون", "value": counts.get("alive", 0), "note": "قيد التنفيذ الآن", "accent": "var(--nsm-cyan)"},
+        {"label": "اكتمال الاندماج", "value": f"{merge_completion*100:.1f}%", "note": singularity_status, "accent": "#f472b6"},
         {"label": "دورات مكتملة", "value": counts.get("done", 0), "note": "ناجحون في السجل", "accent": "#86efac"},
         {"label": "وكلاء فاشلون", "value": counts.get("failed", 0), "note": "تحتاج مراجعة", "accent": "var(--nsm-danger)"},
-        {"label": "وكلاء بطيئون", "value": counts.get("slow", 0), "note": "فوق عتبة البطء", "accent": "var(--nsm-amber)"},
         {"label": "مهام السرب", "value": swarm.get("total", 0), "note": "محفوظة في السجل", "accent": "var(--nsm-indigo)"},
         {"label": "مهام طويلة الأمد", "value": sum(lh.get("counts", {}).values()) if isinstance(lh, dict) else 0, "note": "قيد الإدارة", "accent": "#c084fc"},
     ])
