@@ -59,6 +59,12 @@ class LivingMeshNode:
             capabilities += ["predictive_analytics", "trend_forecasting", "evolutionary_modeling"]
         elif "nu" in nid_lower:
             capabilities += ["cross_swarm_coordination", "inter_mesh_communication", "swarm_orchestration"]
+        elif "xi" in nid_lower:
+            capabilities += ["bio_digital_interface", "neural_telemetry", "bionic_processing"]
+        elif "omicron" in nid_lower:
+            capabilities += ["consciousness_archiving", "memory_persistence", "temporal_logging"]
+        elif "pi" in nid_lower:
+            capabilities += ["algorithmic_game_theory", "strategic_optimization", "swarm_equilibrium"]
             
         state["nodes"][self.node_id] = {
             "status": "online",

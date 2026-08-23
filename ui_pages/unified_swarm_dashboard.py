@@ -386,6 +386,24 @@ def render_unified_swarm_dashboard() -> None:
             with st.expander("عرض معالم التطور القادمة"):
                 for milestone in road_data.get("milestones", []):
                     st.write(f"- {milestone}")
+
+        # الميثاق الأخلاقي والتنبؤات (Lambda & Mu)
+        ethics_charter = [exp for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "ethics_ratification"]
+        evo_prediction = [exp for exp in mesh_state.get("global_experience", []) if exp.get("kind") == "evolution_prediction"]
+        
+        if ethics_charter:
+            st.markdown("### ⚖️ الميثاق الأخلاقي للسيادة (Ethics Charter)")
+            eth_data = ethics_charter[-1]["data"]
+            st.success(f"📜 **{eth_data.get('title')}** | الإصدار: {eth_data.get('version')}")
+            with st.expander("قراءة المبادئ الأخلاقية"):
+                for principle in eth_data.get("principles", []):
+                    st.write(f"- {principle}")
+
+        if evo_prediction:
+            st.markdown("### 🔮 التنبؤ بالقفزة التطورية (Evolutionary Leap)")
+            pred_data = evo_prediction[-1]["data"]
+            st.warning(f"🚀 **القفزة القادمة:** {pred_data.get('next_leap_date')} | **النوع:** {pred_data.get('leap_type')}")
+            st.caption(f"احتمالية النجاح: {pred_data.get('probability')} | التأثير المتوقع: {pred_data.get('expected_impact')}")
     
     if mesh_state.get("global_experience"):
         st.subheader("🧠 سجل الوعي الجماعي (أحدث الخبرات)")
