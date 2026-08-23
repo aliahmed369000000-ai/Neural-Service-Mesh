@@ -193,6 +193,34 @@ class LivingMeshNode:
         """مشاركة خبرة جديدة عبر بروتوكول Gossip (P2P الموزع)."""
         if hops > 15: return # زيادة إضافية لدعم الدبلوماسية الكونية
         
+        # التأكد من تحديث الحالة المحلية بالخبرة
+        state = self._load_state()
+        exp_entry = {
+            "kind": kind,
+            "data": experience_data,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "node": self.node_id
+        }
+        if "global_experience" not in state: state["global_experience"] = []
+        state["global_experience"].append(exp_entry)
+        self._save_state(state)
+        
+        # محاولة الإرسال للأقران عبر WebSockets (تصفية العقد التي تمتلك معلومات اتصال حقيقية فقط)
+        active_peers = [info for nid, info in state["nodes"].items() 
+                        if info["status"] == "online" and nid != self.node_id and info.get("host") and info.get("port")]
+        
+        # اختيار عينة عشوائية للـ Gossip
+        if active_peers:
+            sample_size = min(len(active_peers), 3)
+            import random
+            targets = random.sample(active_peers, sample_size)
+            for target in targets:
+                # التحقق الإضافي من وجود host و port قبل البدء بالمهمة
+                t_host = target.get("host")
+                t_port = target.get("port")
+                if t_host and t_port:
+                    asyncio.create_task(self.send_to_peer(t_host, t_port, kind, experience_data, hops + 1))
+        
         msg_id = f"exp_{uuid.uuid4().hex[:10]}"
         
         # ميزة الدبلوماسية بين الأسراب
@@ -310,7 +338,6 @@ class LivingMeshNode:
         
         # بروتوكول Gossip المطور: إرسال الخبرة للأقران النشطين مباشرة
         import random
-        import asyncio
         online_peers = [(nid, info.get("host"), info.get("port")) for nid, info in state["nodes"].items() 
                         if nid != self.node_id and info["status"] == "online"]
         
@@ -528,7 +555,11 @@ class LivingMeshNode:
             msg = json.loads(data)
             payload = msg.get("payload")
             signature = msg.get("signature")
+            if not payload or not signature:
+                logger.error("❌ Invalid message format: missing payload or signature")
+                return
             sender_id = payload.get("from")
+            msg_id = payload.get("id", "unknown")
             
             pub_key_path = self.keys_dir / f"{sender_id}.pub"
             if not pub_key_path.exists():
@@ -563,9 +594,11 @@ class LivingMeshNode:
                 logger.info(f"🤝 Node {self.node_id} responding to peer discovery from {sender_id}")
                 peers_list = self._get_active_peers_list()
                 response = {
+                    "id": f"resp_{uuid.uuid4().hex[:8]}",
                     "kind": "peer_discovery_response",
                     "data": {"peers": peers_list},
-                    "from": self.node_id
+                    "from": self.node_id,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
                 }
                 sig = self.sign_message(json.dumps(response, sort_keys=True))
                 await websocket.send(json.dumps({"payload": response, "signature": sig}))
@@ -575,11 +608,12 @@ class LivingMeshNode:
                 new_peers = exp_data.get("peers", [])
                 logger.info(f"✨ Node {self.node_id} discovered {len(new_peers)} new peers from {sender_id}")
                 for peer in new_peers:
-                    if peer["id"] != self.node_id:
+                    peer_id = peer.get("id")
+                    if peer_id and peer_id != self.node_id:
                         # إضافة النظير للذاكرة المحلية (سيتم التحقق منه عند أول تواصل)
                         state = self._load_state()
-                        if peer["id"] not in state["nodes"]:
-                            state["nodes"][peer["id"]] = peer
+                        if peer_id not in state["nodes"]:
+                            state["nodes"][peer_id] = peer
                             self._save_state(state)
             
             else:
@@ -590,9 +624,17 @@ class LivingMeshNode:
             logger.error(f"❌ Error processing WS message: {e}")
 
     def _get_active_peers_list(self) -> List[Dict[str, Any]]:
-        """جلب قائمة بالعقد النشطة المعروفة."""
+        """جلب قائمة بالعقد النشطة المعروفة مع ضمان وجود المعرفات."""
         state = self._load_state()
-        return [info for nid, info in state["nodes"].items() if info["status"] == "online"]
+        active_peers = []
+        for nid, info in state.get("nodes", {}).items():
+            if info.get("status") == "online":
+                # ضمان وجود المعرف والعنوان في السجل الموزع
+                peer_record = info.copy()
+                if "id" not in peer_record:
+                    peer_record["id"] = nid
+                active_peers.append(peer_record)
+        return active_peers
 
     async def request_peers(self, seed_host: str, seed_port: int):
         """طلب قائمة الأقران من عقدة بذرة (Seed Node)."""
@@ -605,6 +647,7 @@ class LivingMeshNode:
                 ).decode()
                 
                 payload = {
+                    "id": f"req_{uuid.uuid4().hex[:8]}",
                     "kind": "peer_discovery_request",
                     "from": self.node_id,
                     "data": {"public_key": pub_pem},
