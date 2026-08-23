@@ -227,6 +227,18 @@
         "video",
         "tf_engine"
       ]
+    },
+    "mesh_c45b52c4": {
+      "status": "online",
+      "last_seen": "2026-08-23T21:08:02.893307+00:00",
+      "evolution_score": 0.0,
+      "capabilities": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "tf_engine"
+      ]
     }
   },
   "global_experience": [
