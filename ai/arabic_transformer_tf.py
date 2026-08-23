@@ -83,8 +83,15 @@ class CoreMatrixLayerTF(tf.keras.layers.Layer):
         # 🆕 Surah Harmonic Fusion: التزامن الترددي النبضي بين الصوت والفيديو
         harmonic_modulator = None
         if audio_feats is not None and video_feats is not None:
-            # استخراج نبضات التردد من الصوت
+            # 🆕 تطبيق توصية العقدة Gamma: تعزيز الترددات العالية (High-Frequency Boost)
+            # نفترض أن الترددات العالية موجودة في النصف الأخير من أبعاد ميزات الصوت
+            audio_dim = tf.shape(audio_feats)[-1]
+            hf_components = audio_feats[:, :, audio_dim//2:]
+            hf_energy = tf.reduce_mean(tf.abs(hf_components), axis=-1, keepdims=True)
+            
+            # استخراج نبضات التردد من الصوت مع تعزيز المكونات العالية
             audio_pulse = tf.reduce_mean(tf.abs(audio_feats), axis=-1, keepdims=True)
+            audio_pulse = (audio_pulse + 0.5 * hf_energy) # تعزيز الترددات العالية
             audio_pulse = tf.nn.sigmoid(audio_pulse) # Pulse Gate
             harmonic_modulator = tf.reduce_mean(audio_pulse, axis=1, keepdims=True)
 
@@ -113,9 +120,10 @@ class CoreMatrixLayerTF(tf.keras.layers.Layer):
             # Simple Cross-Attention
             scores = tf.matmul(Q, K_mod, transpose_b=True) / math.sqrt(float(self.d_model))
             
-            # تعزيز انتباه النص للوسائط المتزامنة نبضياً
+            # 🆕 تعزيز انتباه النص للوسائط المتزامنة نبضياً (توصية Gamma لتعزيز الحركة السريعة)
             if harmonic_modulator is not None:
-                scores = scores * (1.0 + 0.1 * harmonic_modulator)
+                # رفع المعامل من 0.1 إلى 0.25 لزيادة حساسية الحركة
+                scores = scores * (1.0 + 0.25 * harmonic_modulator)
                 
             attn = tf.nn.softmax(scores, axis=-1)
             multimodal_context = tf.matmul(attn, V_mod)
