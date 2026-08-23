@@ -17,6 +17,7 @@ import subprocess
 import threading
 import time
 import uuid
+import concurrent.futures
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
@@ -318,24 +319,60 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                 obs_round = []
                 sleep_requested = False
                 
-                for t_req in tools:
-                    tname = t_req.get("tool")
-                    params = t_req.get("params", {})
-                    spec = TOOL_REGISTRY.get(tname)
-                    total_tools += 1
-                    state.tools_used += 1
-                    _emit({"type": "tool", "tool": tname, "params": params})
-                    
-                    if not spec: obs = f"❌ أداة غير معروفة: {tname}"
-                    else:
-                        obs = _truncate_obs(spec.executor(params))
-                        if str(obs).startswith("SIGNAL_SLEEP:"):
-                            sleep_requested = True
-                            target_agent_id = str(obs).split(":")[1]
-                    
-                    obs_round.append(f"[{tname}] {obs}")
-                    _emit({"type": "result", "tool": tname, "output": obs})
-                    if sleep_requested: break
+                # تنفيذ الأدوات (دعم التوازي للتحسين)
+                if len(tools) > 1:
+                    _emit({"type": "info", "text": f"⚡ تشغيل {len(tools)} أدوات بشكل متوازٍ..."})
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future_to_tool = {}
+                        for t_req in tools:
+                            tname = t_req.get("tool")
+                            params = t_req.get("params", {})
+                            spec = TOOL_REGISTRY.get(tname)
+                            total_tools += 1
+                            state.tools_used += 1
+                            _emit({"type": "tool", "tool": tname, "params": params})
+                            
+                            if spec:
+                                future = executor.submit(spec.executor, params)
+                                future_to_tool[future] = t_req
+                            else:
+                                obs_round.append(f"[{tname}] ❌ أداة غير معروفة")
+                                _emit({"type": "result", "tool": tname, "output": "❌ أداة غير معروفة"})
+
+                        for future in concurrent.futures.as_completed(future_to_tool):
+                            t_req = future_to_tool[future]
+                            tname = t_req.get("tool")
+                            try:
+                                obs = _truncate_obs(future.result())
+                                if str(obs).startswith("SIGNAL_SLEEP:"):
+                                    sleep_requested = True
+                                    target_agent_id = str(obs).split(":")[1]
+                            except Exception as e:
+                                obs = f"❌ خطأ تنفيذ: {e}"
+                            
+                            obs_round.append(f"[{tname}] {obs}")
+                            _emit({"type": "result", "tool": tname, "output": obs})
+                            if sleep_requested: break
+                else:
+                    # تنفيذ تسلسلي لأداة واحدة
+                    for t_req in tools:
+                        tname = t_req.get("tool")
+                        params = t_req.get("params", {})
+                        spec = TOOL_REGISTRY.get(tname)
+                        total_tools += 1
+                        state.tools_used += 1
+                        _emit({"type": "tool", "tool": tname, "params": params})
+                        
+                        if not spec: obs = f"❌ أداة غير معروفة: {tname}"
+                        else:
+                            obs = _truncate_obs(spec.executor(params))
+                            if str(obs).startswith("SIGNAL_SLEEP:"):
+                                sleep_requested = True
+                                target_agent_id = str(obs).split(":")[1]
+                        
+                        obs_round.append(f"[{tname}] {obs}")
+                        _emit({"type": "result", "tool": tname, "output": obs})
+                        if sleep_requested: break
 
                 if sleep_requested:
                     from ai.agent_hibernation import hibernate_agent, extract_pending_tasks
