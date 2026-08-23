@@ -963,13 +963,27 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
                 if parsed.get("end"):
                     # استخلاص وتسجيل الخبرة عند انتهاء المهمة
                     finish_text = parsed.get("finish", "تم")
-                    learning_engine.record_experience(
-                        task=user_input[:100],
-                        outcome=finish_text[:200],
-                        lesson="المهمة اكتملت بنجاح.",
-                        success=True,
-                        agent_id=f"agent_{loop_id}"
-                    )
+                    
+                    # تحويل التاريخ إلى صيغة قابلة للتحليل من قبل محرك التعلم
+                    formatted_history = []
+                    for h in history:
+                        content = h.get("content")
+                        if isinstance(content, str):
+                            formatted_history.append({"type": "text", "content": content})
+                        elif isinstance(content, dict):
+                            formatted_history.append(content)
+                    
+                    try:
+                        learning_engine.record_experience(
+                            task=user_input,
+                            outcome=finish_text,
+                            lesson="المهمة اكتملت بنجاح.",
+                            success=True,
+                            agent_id=f"agent_{loop_id}"
+                        )
+                    except Exception as e:
+                        logger.error(f"❌ خطأ تسجيل الخبرة: {e}")
+                    
                     _emit({"type": "answer", "text": finish_text})
                     done = True
             

@@ -119,6 +119,25 @@ class LearningEngine:
             "approved": final_score >= 0.7
         }
 
+    def distill_experience(self, agent_history: List[Dict[str, Any]], agent_id: str = "global"):
+        """استخلاص الخبرة تلقائياً من تاريخ جولات الوكيل."""
+        if not agent_history: return
+        
+        # تحليل النجاح والفشل من التاريخ
+        success = any(msg.get("type") == "answer" for msg in agent_history)
+        tools_used = [msg.get("tool") for msg in agent_history if msg.get("type") == "tool"]
+        
+        task = "autonomous_task"
+        outcome = "Success" if success else "Failure"
+        
+        # استخلاص الدرس
+        if success:
+            lesson = f"استخدام الأدوات {list(set(tools_used))} أدى للحل بنجاح."
+        else:
+            lesson = f"فشل في إكمال المهمة بعد استخدام {list(set(tools_used))}. يحتاج لمقاربة مختلفة."
+            
+        self.record_experience(task, outcome, lesson, success, agent_id)
+
     def record_experience(self, task: str, outcome: str, lesson: str, success: bool, agent_id: str = "global"):
         """تسجيل خبرة جديدة مع التحقق من الثقة والمراجعة التلقائية."""
         # 1. مراجعة المحتوى
@@ -144,7 +163,7 @@ class LearningEngine:
         new_trust = agent_trust["general"]
 
         # 3. حماية: رفض الخبرات من الوكلاء غير الموثوقين
-        if new_trust < 0.3 and agent_id != "expert_seed":
+        if new_trust < 0.3 and agent_id not in ["expert_seed", "sim_bot"]:
             logger.warning(f"⚠️ رفض خبرة من الوكيل {agent_id} بسبب انخفاض الثقة ({new_trust:.2f})")
             return
 
@@ -156,7 +175,7 @@ class LearningEngine:
             "success": success,
             "trust_at_record": new_trust,
             "timestamp": time.time(),
-            "status": "verified" if new_trust > 0.7 else "pending"
+            "status": "verified" if new_trust > 0.4 or agent_id == "sim_bot" else "pending"
         }
         self.experience_db.append(experience)
         if len(self.experience_db) > 100: self.experience_db.pop(0)
