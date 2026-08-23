@@ -34,6 +34,7 @@ from ai.tool_discovery import tool_discovery
 from ai.task_migrator import TaskMigrator
 from ai.self_awareness import SelfAwarenessEngine
 from ai.rescue_protocol import rescue_agent
+from ai.cognitive_growth import cognitive_engine
 
 logger = logging.getLogger("NeuralServiceMesh.AgentLoop")
 healer = AutoHeal(max_rounds=3)
@@ -290,6 +291,16 @@ def _tool_video_sample(params: Dict[str, Any]) -> str:
     except Exception as e: return f"❌ video_sample: {e}"
 
 register_tool(ToolSpec("video_sample", "أخذ عينات ذكية من الفيديو", {"type": "object", "properties": {"video_path": {"type": "string"}, "video_id": {"type": "string"}}}, _tool_video_sample))
+
+def _tool_cognitive_report(params: Dict[str, Any]) -> str:
+    """الحصول على تقرير النمو المعرفي وتحديث الاستراتيجيات."""
+    try:
+        cognitive_engine.evolve_strategies()
+        return cognitive_engine.get_growth_report()
+    except Exception as e:
+        return f"❌ فشل تقرير النمو: {e}"
+
+register_tool(ToolSpec("cognitive_report", "عرض تقرير النمو المعرفي وتحديث الاستراتيجيات", {}, _tool_cognitive_report))
 
 def _tool_video_sync(params: Dict[str, Any]) -> str:
     """مزامنة الصوت والصورة للفيديو وتصحيح الانحراف بنظام الأنابيب الموزع مع التعافي التلقائي."""
