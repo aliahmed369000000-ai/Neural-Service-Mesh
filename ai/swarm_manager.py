@@ -45,6 +45,7 @@ class SwarmManager:
         
         # تعريف الأدوار والصلاحيات (RBAC)
         self.roles_config = {
+            "sovereign": {"permissions": ["read", "write", "delete", "spawn", "reflect", "admin"], "trust_min": 0.95},
             "orchestrator": {"permissions": ["read", "write", "delete", "spawn", "reflect"], "trust_min": 0.8},
             "worker": {"permissions": ["read", "write", "spawn"], "trust_min": 0.5},
             "auditor": {"permissions": ["read", "reflect"], "trust_min": 0.7},

@@ -22,8 +22,9 @@ class IDSManager:
             "max_actions_per_min": 20,    # أقصى عدد أفعال في الدقيقة
             "max_failed_auth_attempts": 3, # أقصى محاولات وصول غير مصرح بها
             "suspicious_patterns": [
-                "rm -rf /", "sudo", "chmod 777", "eval(", "exec("
-            ]
+                "rm -rf /", "sudo", "chmod 777", "eval(", "exec(", "sh ", "bash ", ".sh", "nc ", "curl -s", "wget "
+            ],
+            "entropy_threshold": 4.5       # عتبة العشوائية لاكتشاف الأوامر المشفرة
         }
         
         # سجل النشاط اللحظي للوكلاء
@@ -75,6 +76,11 @@ class IDSManager:
             risk_score += 0.8
             alerts.append("Token burst detected")
             
+        # 4. تحليل عشوائية الأوامر (Entropy Analysis) لاكتشاف الالتفاف
+        if isinstance(action, str) and self._calculate_entropy(action) > self.thresholds["entropy_threshold"]:
+            risk_score += 0.5
+            alerts.append("High entropy action detected (possible obfuscation)")
+
         # اتخاذ إجراء إذا كان الخطر مرتفعاً
         if risk_score >= 0.7:
             self._quarantine_agent(agent_id, alerts)
@@ -114,3 +120,10 @@ class IDSManager:
         if agent_id in self.quarantine_list:
             self.quarantine_list.remove(agent_id)
             logging.info(f"IDS: Agent {agent_id} released from quarantine")
+
+    def _calculate_entropy(self, text: str) -> float:
+        """حساب عشوائية النص لاكتشاف الأوامر المشفرة أو المشوهة."""
+        import math
+        if not text: return 0
+        probs = [text.count(c) / len(text) for c in set(text)]
+        return -sum(p * math.log2(p) for p in probs)
