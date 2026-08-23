@@ -1,0 +1,63 @@
+{
+  "video_id": "test_vid_001",
+  "created_at": 1787453287.0160549,
+  "metadata": {
+    "path": "tests/sample_video.mp4",
+    "fps": 30.0,
+    "total_frames": 150,
+    "duration": 5.0
+  },
+  "keyframes": [
+    {
+      "timestamp": 0.0,
+      "frame_path": "artifacts/sampled_frames/test_vid_001/frame_0.00s.jpg",
+      "description": "\u062a\u063a\u064a\u0631 \u0628\u0635\u0631\u0649 \u0628\u0646\u0633\u0628\u0629 100.00%",
+      "tags": [
+        "motion",
+        "keyframe"
+      ],
+      "hash": -1963582020683560306
+    },
+    {
+      "timestamp": 1.0,
+      "frame_path": "artifacts/sampled_frames/test_vid_001/frame_1.00s.jpg",
+      "description": "\u062a\u063a\u064a\u0631 \u0628\u0635\u0631\u0649 \u0628\u0646\u0633\u0628\u0629 100.00%",
+      "tags": [
+        "motion",
+        "keyframe"
+      ],
+      "hash": -6943826511016366502
+    },
+    {
+      "timestamp": 2.0,
+      "frame_path": "artifacts/sampled_frames/test_vid_001/frame_2.00s.jpg",
+      "description": "\u062a\u063a\u064a\u0631 \u0628\u0635\u0631\u0649 \u0628\u0646\u0633\u0628\u0629 100.00%",
+      "tags": [
+        "motion",
+        "keyframe"
+      ],
+      "hash": 2149258420011852932
+    },
+    {
+      "timestamp": 3.0,
+      "frame_path": "artifacts/sampled_frames/test_vid_001/frame_3.00s.jpg",
+      "description": "\u062a\u063a\u064a\u0631 \u0628\u0635\u0631\u0649 \u0628\u0646\u0633\u0628\u0629 100.00%",
+      "tags": [
+        "motion",
+        "keyframe"
+      ],
+      "hash": 3425990390771001129
+    },
+    {
+      "timestamp": 4.0,
+      "frame_path": "artifacts/sampled_frames/test_vid_001/frame_4.00s.jpg",
+      "description": "\u062a\u063a\u064a\u0631 \u0628\u0635\u0631\u0649 \u0628\u0646\u0633\u0628\u0629 100.00%",
+      "tags": [
+        "motion",
+        "keyframe"
+      ],
+      "hash": -5212320123850404343
+    }
+  ],
+  "events": []
+}

@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 from ai.cache_manager import agent_cache
 from ai.learning_engine import learning_engine
+from ai.video_sampler import video_sampler
+from ai.video_indexer import video_indexer
 
 logger = logging.getLogger("NeuralServiceMesh.AgentLoop")
 
@@ -213,6 +215,17 @@ def _tool_sandbox_test(params: Dict[str, Any]) -> str:
     except Exception as e: return f"❌ sandbox_test: {e}"
 
 register_tool(ToolSpec("sandbox_test", "اختبار كود في بيئة معزولة", {"type": "object", "properties": {"code": {"type": "string"}, "module_name": {"type": "string"}}}, _tool_sandbox_test, dangerous=True))
+
+def _tool_video_sample(params: Dict[str, Any]) -> str:
+    """يأخذ عينات ذكية من الفيديو ويحدث الفهرس الزمني."""
+    video_path = str(params.get("video_path", ""))
+    video_id = str(params.get("video_id", f"vid_{uuid.uuid4().hex[:6]}"))
+    try:
+        result = video_sampler.process_video(video_path, video_id)
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as e: return f"❌ video_sample: {e}"
+
+register_tool(ToolSpec("video_sample", "أخذ عينات ذكية من الفيديو", {"type": "object", "properties": {"video_path": {"type": "string"}, "video_id": {"type": "string"}}}, _tool_video_sample))
 
 # ═════════════════════════ محرك الحلقة ═════════════════════════════
 _SYSTEM_PROMPT = """أنت الوكيل التنفيذي لـ NSM. رد JSON فقط:

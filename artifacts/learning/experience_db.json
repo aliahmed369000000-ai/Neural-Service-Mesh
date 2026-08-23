@@ -1,0 +1,71 @@
+[
+  {
+    "task_type": "جمع بيانات Kaggle",
+    "outcome": "فشل بسبب نفاذ الذاكرة (OOM)",
+    "lesson": "يجب استخدام تقنية FSDP أو تقليل حجم الدفعة (Batch Size) عند التعامل مع d=8192.",
+    "success": false,
+    "timestamp": 1787452770.6280417,
+    "weight": 2.0
+  },
+  {
+    "task_type": "جمع بيانات Kaggle",
+    "outcome": "فشل بسبب نفاذ الذاكرة (OOM)",
+    "lesson": "يجب استخدام تقنية FSDP أو تقليل حجم الدفعة (Batch Size) عند التعامل مع d=8192.",
+    "success": false,
+    "timestamp": 1787452778.3142684,
+    "weight": 2.0
+  },
+  {
+    "agent_id": "expert_architect",
+    "task_type": "تدريب نموذج d=8192",
+    "outcome": "تجنب فشل الذاكرة في Kaggle TPU",
+    "lesson": "استخدم دائماً torch.distributed.fsdp مع auto_wrap_policy لضمان توزيع الأوزان على جميع النوى وتجنب HBM OOM على النواة 0.",
+    "success": true,
+    "timestamp": 1787452847.5340412
+  },
+  {
+    "agent_id": "expert_data_scientist",
+    "task_type": "تجميع بيانات متنوعة",
+    "outcome": "تحسين جودة بيانات Pre-training",
+    "lesson": "قم بتصفية البيانات المكررة باستخدام MinHash LSH قبل التدريب لتقليل وقت التقارب وتحسين دقة النموذج.",
+    "success": true,
+    "timestamp": 1787452847.5340433
+  },
+  {
+    "agent_id": "expert_sysadmin",
+    "task_type": "إدارة كيرنل Kaggle",
+    "outcome": "منع توقف التدريب المفاجئ",
+    "lesson": "اضبط وقت التدريب على 11 ساعة كحد أقصى لتجنب Timeout التلقائي من Kaggle (12 ساعة)، وقم بتفعيل الحفظ التلقائي كل ساعة.",
+    "success": true,
+    "timestamp": 1787452847.5340445
+  },
+  {
+    "agent_id": "agent_alpha",
+    "task_type": "إصلاح خطأ استيراد",
+    "outcome": "نجاح",
+    "lesson": "تأكد من إضافة المجلد الأب إلى sys.path عند تشغيل الاختبارات محلياً.",
+    "success": true,
+    "timestamp": 1787452847.5342531,
+    "weight": 1.0
+  },
+  {
+    "agent_id": "unreliable_agent",
+    "task_type": "مهمة فاشلة",
+    "outcome": "خطأ",
+    "lesson": "درس غير مفيد",
+    "success": false,
+    "trust_at_record": 0.4,
+    "timestamp": 1787452979.8203595,
+    "status": "pending"
+  },
+  {
+    "agent_id": "unreliable_agent",
+    "task_type": "مهمة فاشلة",
+    "outcome": "خطأ",
+    "lesson": "درس غير مفيد",
+    "success": false,
+    "trust_at_record": 0.30000000000000004,
+    "timestamp": 1787452979.8206046,
+    "status": "pending"
+  }
+]
