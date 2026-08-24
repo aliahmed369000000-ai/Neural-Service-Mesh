@@ -1,0 +1,14 @@
+{
+  "agent_id": "scheduler_bot",
+  "context": [
+    {
+      "role": "user",
+      "content": "تست"
+    }
+  ],
+  "plan": {
+    "step": 1
+  },
+  "metadata": {},
+  "timestamp": 1787451180.583796
+}

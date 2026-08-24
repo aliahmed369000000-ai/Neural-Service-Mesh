@@ -1,0 +1,1 @@
+def fast_add(a, b): return a + b # Optimized

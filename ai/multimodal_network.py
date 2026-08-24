@@ -226,6 +226,8 @@ class AudioEncoder:
 
 # ── الشبكة الموحّدة الذاتية النمو ─────────────────────────────────────────
 
+from ai.dte_engine import DTEEngine
+
 class MultimodalRoutingCore:
     """
     الطبقة الموحّدة المطلوبة: دمج [نص+صورة+صوت] (1040) → تمثيل موحّد (1×784)
@@ -238,7 +240,9 @@ class MultimodalRoutingCore:
         analysis_outputs: int = ANALYSIS_OUT_DEFAULT,
         learning_rate: float = 0.003,
         name: str = "multimodal_core_v1",
+        enable_dte: bool = True
     ):
+        self.dte_engine = DTEEngine() if enable_dte else None
         self.name = name
         self.learning_rate = learning_rate
         self._train_steps = 0
@@ -390,6 +394,10 @@ class MultimodalRoutingCore:
         grad_fused = self.hidden.backward(grad_hidden, self.learning_rate)
         self.fusion.backward(grad_fused, self.learning_rate)
 
+        # تطبيق تطور الطوبولوجيا الديناميكي (DTE) كل 100 خطوة
+        if self.dte_engine and self._train_steps % 100 == 0 and self._train_steps > 0:
+            self._evolve_topology()
+
         self._train_steps += 1
         self._steps_since_growth += 1
         self._last_loss = total_loss
@@ -398,6 +406,14 @@ class MultimodalRoutingCore:
             self._loss_history = self._loss_history[-1000:]
         self.evolve_if_plateau()
         return total_loss
+
+    def _evolve_topology(self):
+        """تطبيق DTE على طبقات الشبكة لتطوير هيكلها."""
+        for layer in [self.fusion, self.hidden]:
+            # استخدام الأوزان الحالية لمحاكاة أهمية الروابط في التطور
+            dummy_grad = np.random.randn(*layer.weights.shape) * 0.01
+            layer.weights, stats = self.dte_engine.evolve_layer(layer.weights, dummy_grad)
+            logger.info(f"[DTE] Evolved {layer.name}: Active Ratio {stats['active_ratio']:.2%}")
 
     # ── حفظ/تحميل ─────────────────────────────────────────────────────────
     def save(self, directory: str = WEIGHTS_DIR) -> str:

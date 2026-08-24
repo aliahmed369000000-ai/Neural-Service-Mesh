@@ -1,0 +1,23 @@
+{
+  "agent_id": "multimodal_agent",
+  "context": [
+    {"role": "user", "content": "افحص الواجهة وسجل ملاحظة صوتية بالحل."},
+    {"role": "assistant", "content": "لقد رصدت الخلل البصري وسجلت الملاحظة الصوتية."}
+  ],
+  "plan": {"tasks": [{"title": "إرسال التقرير النهائي", "status": "pending"}]},
+  "visual_context": {
+    "ui_audit_v1": {
+      "status": "failed",
+      "defects": [{"element": "header", "issue": "overlap"}]
+    }
+  },
+  "audio_memory": {
+    "solution_note_01": {
+      "duration": 15.5,
+      "type": "tts_output",
+      "text_content": "يجب تعديل z-index للترويسة لمنع التداخل البصري."
+    }
+  },
+  "pending_tasks": ["تعديل CSS للترويسة", "تصدير الملف الصوتي للمستخدم"],
+  "timestamp": 1787452500
+}

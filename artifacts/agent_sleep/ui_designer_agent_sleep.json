@@ -1,0 +1,20 @@
+{
+  "agent_id": "ui_designer_agent",
+  "context": [
+    {"role": "user", "content": "أنشئ واجهة تسجيل دخول بسيطة."},
+    {"role": "assistant", "content": "لقد أنشأت الواجهة، لكن الاختبار البصري أظهر وجود عيوب."}
+  ],
+  "plan": {"tasks": [{"title": "إصلاح عيوب الواجهة البصرية", "status": "pending"}]},
+  "visual_context": {
+    "ui_login_v1": {
+      "status": "failed",
+      "defects": [
+        {"element": "h2", "issue": "negative_margin", "desc": "العنوان خارج النطاق"},
+        {"element": "button", "issue": "low_contrast", "desc": "النص غير مرئي"}
+      ],
+      "last_action": "visual_audit"
+    }
+  },
+  "pending_tasks": ["تصحيح محاذاة العنوان H2", "تعديل تباين ألوان الزر"],
+  "timestamp": 1787452275
+}

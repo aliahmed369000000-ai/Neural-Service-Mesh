@@ -147,19 +147,26 @@ def suggest_command(
 
 
 def _local_fallback(history: List[str]) -> str:
-    """اقتراحات محلية بدون LLM (قواعد بسيطة حسب آخر أمر)."""
+    """اقتراحات محلية ذكية تعتمد على سياق NSM."""
     if not history:
-        return "git status"
+        return "git status --short"
     last = history[-1].strip().lower()
-    if last.startswith("git"):
-        return "git log --oneline -8" if "status" in last else "git status --short"
-    if last.startswith("streamlit"):
-        return "curl -s -o /dev/null -w '%{http_code}' http://localhost:8501"
-    if "pytest" in last or "compile" in last:
-        return "ls -la"
+    
+    # 🆕 اقتراحات مبنية على دورة حياة التطوير في NSM
+    if "compile" in last or ".py" in last:
+        return "python3 -m py_compile ai/agent_loop.py"
+    if last.startswith("git commit"):
+        return "git push origin main"
+    if last.startswith("git push"):
+        return "git log -1 --stat"
+    if "error" in last or "failed" in last:
+        return "tail -n 20 memory/terminal_sessions.jsonl"
     if last.startswith("cd "):
-        return "ls"
-    return "ls"
+        return "ls -F"
+    if "pip install" in last:
+        return "pip list | grep " + last.split()[-1]
+    
+    return "git status --short"
 
 
 # ══════════════════════ أوامر مدمجة في terminal ══════════════════════

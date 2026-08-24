@@ -99,6 +99,7 @@ render_agent_monitor = _lazy_page("ui_pages.agent_monitor", "render_agent_monito
 render_swarm_studio = _lazy_page("ui_pages.swarm_studio", "render_swarm_studio")
 render_unified_swarm_dashboard = _lazy_page("ui_pages.unified_swarm_dashboard", "render_unified_swarm_dashboard")
 render_backend_data_panel = _lazy_page("ui_pages.backend_data_panel", "render_backend_data_panel")
+render_sovereign_mind = _lazy_page("ui_pages.sovereign_mind", "render_sovereign_mind")
 
 
 
@@ -199,11 +200,13 @@ def render_training_ops_hub():
         '<div class="section-header">🎓 التدريب والعمليات</div>',
         unsafe_allow_html=True,
     )
-    st.caption("تدريب النماذج · خليط الخبراء ونمو الوكيل · AIaaS والاقتصاد · لوحة عمليات التدريب")
-    sub = st.tabs(["🎓 التدريب", "📓 Notebook", "🧩 MoE والوكيل", "☁️ AIaaS والاقتصاد", "📡 عمليات التدريب", "🌐 المجدول متعدد الحسابات", "📶 التدريب الحي"])
+    st.caption("تدريب النماذج · دماغ Surah السيادي · AIaaS والاقتصاد · لوحة عمليات التدريب")
+    sub = st.tabs(["🎓 التدريب", "📓 Notebook", "🧠 Surah السيادية", "☁️ AIaaS والاقتصاد", "📡 عمليات التدريب", "🌐 المجدول متعدد الحسابات", "📶 التدريب الحي"])
     with sub[0]: render_training()
     with sub[1]: render_training_notebook()
-    with sub[2]: render_moe_agent_studio()
+    with sub[2]:
+        st.info("🧠 **شبكة Surah 4096 السيادية:** يتم الآن توحيد كافة العمليات تحت محرك Surah الموحد لضمان أعلى مستويات الوعي والاستقرار.")
+        # render_moe_agent_studio() - Archived in favor of Surah unification
     with sub[3]: render_aiaas_economy_hub()
     with sub[4]: render_training_ops_dashboard()
     with sub[5]: render_scheduler_hub()
@@ -230,15 +233,16 @@ def render_system_group():
             st.session_state["_dev_console_unlocked"] = False
             st.rerun()
 
-    sub = st.tabs(["🧠 الذاكرة", "🏥 صحة النظام", "🔬 API متقدمة",
+    sub = st.tabs(["🧠 الذاكرة", "👁️ الوعي السيادي", "🏥 صحة النظام", "🔬 API متقدمة",
                    "⚙️ النظام الداخلي", "🖥️ لوحة المطوّر", "💻 Terminal", "⚡ Terminal Live"])
     with sub[0]: render_memory()
-    with sub[1]: render_health()
-    with sub[2]: render_advanced_api()
-    with sub[3]: render_system_core()
-    with sub[4]: render_dev_console()
-    with sub[5]: render_nsm_terminal()
-    with sub[6]: render_nsm_terminal_live()
+    with sub[1]: render_sovereign_mind()
+    with sub[2]: render_health()
+    with sub[3]: render_advanced_api()
+    with sub[4]: render_system_core()
+    with sub[5]: render_dev_console()
+    with sub[6]: render_nsm_terminal()
+    with sub[7]: render_nsm_terminal_live()
 
 
 
@@ -600,7 +604,7 @@ def main():
         </div>
         <div class="nsm-nav-card">
             <div class="nsm-nav-card-icon">🎓</div>
-            <div><div class="nsm-nav-card-title">التدريب والعمليات</div><div class="nsm-nav-card-copy">Notebook، MoE، AIaaS، المجدول، وأدوات التشغيل.</div></div>
+            <div><div class="nsm-nav-card-title">التدريب والعمليات</div><div class="nsm-nav-card-copy">Notebook، Surah، AIaaS، المجدول، وأدوات التشغيل.</div></div>
         </div>
     </div>
     """, unsafe_allow_html=True)

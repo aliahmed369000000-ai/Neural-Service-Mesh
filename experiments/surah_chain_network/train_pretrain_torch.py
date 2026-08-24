@@ -96,6 +96,9 @@ SCN_RESUME = os.environ.get("SCN_RESUME", "").strip().lower()
 CHECKPOINT_EVERY = int(os.environ.get("SCN_CHECKPOINT_EVERY", "2"))  # حفظ مرفوع كل كذا عصر
 # حد زمني للجلسة (ساعات) — أقل من حد Kaggle 12س حتى لا يُقطع العمل دون حفظ
 MAX_HOURS = float(os.environ.get("SCN_MAX_HOURS", "0") or 0)  # 0 = بلا حد
+# حفظ وطباعة أثناء العصر (حتى لا تضيع ساعات بلا checkpoint إذا أُلغي الكيرنل)
+SAVE_EVERY_STEPS = int(os.environ.get("SCN_SAVE_EVERY_STEPS", "0") or 0)  # 0 = فقط نهاية العصر
+LOG_EVERY_STEPS = int(os.environ.get("SCN_LOG_EVERY_STEPS", "0") or 0)
 # ── رفع سريع أول الجولة: epoch الأول والثاني يُرفعان فورًا —
 #     أقصى حماية من موت مبكر قبل أول رفع دوري ──
 FIRST_FAST = os.environ.get("SCN_FIRST_FAST", "1").strip().lower() in ("1", "true", "yes")
@@ -161,6 +164,31 @@ elif PRESET == "xlarge":
             f"torch.compile معطّل (XLA JIT) | BATCH={BATCH} × "
             f"accum={GRAD_ACCUM} → effective_batch={BATCH * GRAD_ACCUM}"
         )
+elif PRESET in ("xlarge-4096", "xlarge4096", "d4096"):
+    # d=4096: وسط بين large و6144 — أنسب لشريحة TPU ~16GB HBM
+    # 32 رأس × 128 | GQA 4 KV | FFN≈2×d افتراضياً قابل للضبط
+    D_MODEL, N_HEADS, N_PRE, N_POST = 4096, 32, 4, 4
+    N_KV_HEADS, D_HEAD = 4, 128
+    D_FF = int(os.environ.get("SCN_D_FF", "11008"))
+    CHAIN_SCALE = float(os.environ.get("SCN_CHAIN_SCALE", "0.5"))
+    N = max(N, int(os.environ.get("SCN_N", "50000")))
+    BATCH = int(os.environ.get("SCN_BATCH", "2"))
+    BASE_LR = float(os.environ.get("SCN_LR", "1.5e-4"))
+    MAX_LEN = int(os.environ.get("SCN_MAX_LEN", "64"))
+    COMPILE = os.environ.get("SCN_COMPILE", "0") == "1"
+    USE_8BIT_ADAM = os.environ.get("SCN_USE_8BIT_ADAM", "0") == "1"
+    GRAD_ACCUM = max(1, int(os.environ.get("SCN_GRAD_ACCUM", "8")))
+    MAX_EXPANDS = int(os.environ.get("SCN_MAX_EXPANDS", "5"))
+    SCN_TPU = os.environ.get("SCN_TPU", "0") == "1"
+    if SCN_TPU:
+        USE_8BIT_ADAM = False
+        COMPILE = False
+        BATCH = int(os.environ.get("SCN_BATCH", "2"))
+        GRAD_ACCUM = max(1, int(os.environ.get("SCN_GRAD_ACCUM", "8")))
+        print(
+            f"✅ وضع TPU d=4096 (SCN_TPU=1): bf16 | BATCH={BATCH} × "
+            f"accum={GRAD_ACCUM} → effective_batch={BATCH * GRAD_ACCUM}"
+        )
 elif PRESET in ("xlarge-6144", "xlarge6144"):
     # معمارية نماذج كبيرة مخفّفة: d=6144 (48 رأس × 128/رأس، 6 KV heads، FFN=21504)
     # ~4.2B params | bf16 أوزان ≈ 8.4GB | ~25GB إجمالي تدريب على TPU
@@ -189,7 +217,16 @@ elif PRESET in ("xlarge-6144", "xlarge6144"):
             f"accum={GRAD_ACCUM} → effective_batch={BATCH * GRAD_ACCUM}"
         )
 
+# تجاوز اختياري بعد الـpreset (لتقليل الذاكرة على TPU)
+if os.environ.get("SCN_N_PRE", "").strip():
+    N_PRE = int(os.environ["SCN_N_PRE"])
+if os.environ.get("SCN_N_POST", "").strip():
+    N_POST = int(os.environ["SCN_N_POST"])
+if os.environ.get("SCN_CHAIN_SCALE", "").strip() and PRESET:
+    CHAIN_SCALE = float(os.environ["SCN_CHAIN_SCALE"])
+
 if N_KV_HEADS is not None and N_HEADS % N_KV_HEADS != 0:
+
     raise ValueError(f"n_heads ({N_HEADS}) يجب أن يقبل القسمة على n_kv_heads ({N_KV_HEADS})")
 
 if UNTIL_END:
@@ -766,6 +803,34 @@ def main():
                 if loss == loss:  # not NaN
                     ep_losses.append(loss)
             global_step += 1
+            # طباعة دورية أثناء العصر
+            if LOG_EVERY_STEPS > 0 and global_step % LOG_EVERY_STEPS == 0 and ep_losses:
+                recent = ep_losses[-min(20, len(ep_losses)):]
+                print(
+                    f"  step {global_step} ep={ep} loss≈{sum(recent)/len(recent):.4f} "
+                    f"lr={m.lr:.6f}",
+                    flush=True,
+                )
+            # حفظ منتصف-العصر حتى لا يضيع الجهد عند إلغاء الجلسة
+            if SAVE_EVERY_STEPS > 0 and global_step % SAVE_EVERY_STEPS == 0:
+                mid_meta = {
+                    "epoch": ep,
+                    "best_loss": best,
+                    "history": history,
+                    "global_step": global_step,
+                    "n_expands": n_expands,
+                    "expand_log": expand_log,
+                    "n_sentences": len(texts),
+                    "d_model": D_MODEL,
+                    "mid_epoch": True,
+                    "total_seconds": total_seconds_prev + (time.time() - t0),
+                }
+                try:
+                    m.save(str(CKPT_LATEST), train_meta=mid_meta)
+                    print(f"  💾 mid-save step={global_step} → {CKPT_LATEST.name}", flush=True)
+                    _upload_checkpoint(ep)
+                except Exception as _se:
+                    print(f"  ⚠ mid-save failed: {_se}", flush=True)
         mean_l = sum(ep_losses) / max(1, len(ep_losses))
         history.append({"epoch": ep, "loss": mean_l, "lr": m.lr})
         mark = ""

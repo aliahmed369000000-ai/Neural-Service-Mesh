@@ -260,6 +260,8 @@ def render_training_notebook():
         [
             "🚀 إطلاق سريع",
             "📓 الدفتر",
+            "🧬 المختبر العصبي",
+            "🧿 مركز السيادة",
             "📋 المهام",
             "🖥️ البيئة",
             "✨ الميزات",
@@ -988,8 +990,83 @@ def render_training_notebook():
                     _render_cell_outputs(cell.outputs)
                 st.markdown("---")
 
-    # ═══════════ 3) المهام ═══════════
+    # ═══════════ 3) المختبر العصبي ═══════════
     with lab_tabs[2]:
+        st.markdown("### 🧬 المختبر العصبي (Neural Lab)")
+        st.caption("بيئة تجريبية سريعة لمقارنة أداء محركات NumPy و TensorFlow على شبكة Surah 4096.")
+        
+        nb = _ensure_nb()
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            engine_choice = st.radio("المحرك النشط", ["NumPy (الأصلي)", "TensorFlow (المسرع)"], horizontal=True, key="lab_engine_choice")
+        with c2:
+            st.metric("حالة الذاكرة", "مستقرة" if health.get("ready_to_launch_kaggle") else "محدودة")
+
+        st.markdown("#### 🛠️ أدوات المختبر")
+        tool_cols = st.columns(3)
+        with tool_cols[0]:
+            if st.button("📊 قياس سرعة التوليد", use_container_width=True):
+                code = "from ai.benchmark_tf import run_comparison\nrun_comparison()"
+                add_cell(nb.id, "code", code)
+                st.rerun()
+        with tool_cols[1]:
+            if st.button("📽️ اختبار ميزات الفيديو", use_container_width=True):
+                code = "import numpy as np\nfrom ai.arabic_transformer_tf import ArabicTransformerTF\nm = ArabicTransformerTF(d_model=64)\nv = np.random.rand(1, 16, 512).astype(np.float32)\nout = m._forward([1, 2, 3], video_feats=v)\nprint('Video fusion success:', out[0].shape)"
+                add_cell(nb.id, "code", code)
+                st.rerun()
+        with tool_cols[2]:
+            if st.button("🧪 فحص الـ KV Cache", use_container_width=True):
+                code = "from tests.test_surah_multimodal_kv_cache import test_kv_cache_parity\ntest_kv_cache_parity()"
+                add_cell(nb.id, "code", code)
+                st.rerun()
+
+    # ═══════════ 4) مركز السيادة ═══════════
+    with lab_tabs[3]:
+        st.markdown("### 🧿 مركز سيادة الوكيل (Agent Sovereignty)")
+        st.caption("سجل أبحاث وتطوير الوكلاء الذاتي — توثيق المسيرة المعرفية.")
+        
+        nb = _ensure_nb()
+        
+        # 📊 مراقبة الموارد الحية
+        st.markdown("#### 📉 مراقبة الموارد الحية")
+        res_col1, res_col2, res_col3 = st.columns(3)
+        try:
+            import psutil
+            cpu_usage = psutil.cpu_percent()
+            ram_usage = psutil.virtual_memory().percent
+            res_col1.metric("استهلاك المعالج", f"{cpu_usage}%")
+            res_col2.metric("استهلاك الذاكرة", f"{ram_usage}%")
+            res_col3.metric("الخلايا المنفذة", len([c for c in nb.cells if c.status == 'ok']))
+        except Exception:
+            st.caption("أدوات مراقبة النظام غير متوفرة في هذه البيئة.")
+
+        # عرض سجل الأبحاث
+        st.markdown("#### 📝 سجل أبحاث الوكيل")
+        if hasattr(nb, 'agent_research_log') and nb.agent_research_log:
+            for note in reversed(nb.agent_research_log):
+                with st.expander(f"📌 {note['author']} · {note['timestamp'][:16]}", expanded=False):
+                    st.markdown(note['content'])
+                    if note.get('tags'):
+                        st.caption("الوسوم: " + " · ".join(note['tags']))
+        else:
+            st.info("لا توجد ملاحظات بحثية بعد. الوكلاء سيقومون بتوثيق تجاربهم هنا.")
+
+        # إضافة ملاحظة يدوية
+        with st.expander("➕ إضافة ملاحظة بحثية جديدة"):
+            with st.form("new_research_note"):
+                author = st.text_input("الكاتب", value="NSM Bot")
+                content = st.text_area("المحتوى (يدعم Markdown)")
+                tags = st.text_input("الوسوم (مفصولة بفاصلة)")
+                if st.form_submit_button("حفظ الملاحظة"):
+                    from ai.notebook_engine import add_research_note
+                    tag_list = [t.strip() for t in tags.split(",")] if tags else []
+                    if add_research_note(nb.id, author, content, tag_list):
+                        st.success("تم حفظ الملاحظة البحثية بنجاح.")
+                        st.rerun()
+
+    # ═══════════ 5) المهام ═══════════
+    with lab_tabs[4]:
         st.markdown("### سجل مهام التدريب")
         jobs = list_jobs(40)
         if st.button("🔄 تحديث القائمة", key="jobs_refresh"):

@@ -1,0 +1,5 @@
+{
+  "tool": "rescue_agent",
+  "result": "❌ [Rescue]: فشل بروتوكول الإنقاذ: string indices must be integers, not 'str'",
+  "timestamp": 1787492729.6815574
+}

@@ -151,6 +151,10 @@ class SandboxTestingLab:
 
         # 2. Safety check (static analysis)
         self._check_safety(module.code, result)
+        if not result.safety_passed:
+            result.compute_score()
+            self._store(module, result)
+            return result
 
         # 3. Write to sandbox temp file
         sandbox_path = self._write_to_sandbox(module)
@@ -165,7 +169,8 @@ class SandboxTestingLab:
             # 6. Execute with test data
             if node_instance:
                 self._execute_node(node_instance, module, result)
-
+        
+        # إزالة القوة القسرية للمحاكاة: يجب أن ينجح التنفيذ فعلياً
         result.compute_score()
         self._store(module, result)
         return result
@@ -181,10 +186,27 @@ class SandboxTestingLab:
             result.syntax_errors.append(str(exc))
 
     def _check_safety(self, code: str, result: SandboxTestResult):
+        """تحليل أمني متقدم للكود باستخدام AST."""
         violations = []
-        for pattern in _UNSAFE_PATTERNS:
-            if re.search(pattern, code):
-                violations.append(pattern)
+        try:
+            tree = ast.parse(code)
+            for node in ast.walk(tree):
+                # كشف استدعاءات الدوال المحظورة
+                if isinstance(node, ast.Call):
+                    if isinstance(node.func, ast.Name) and node.func.id in ["eval", "exec", "breakpoint"]:
+                        violations.append(f"استدعاء محظور: {node.func.id}")
+                    elif isinstance(node.func, ast.Attribute):
+                        if node.func.attr in ["system", "popen", "rmtree"]:
+                            violations.append(f"سمة محظورة: {node.func.attr}")
+                # كشف استيراد المكتبات المحظورة
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    names = [n.name for n in node.names]
+                    for name in names:
+                        if name in ["os", "subprocess", "shutil", "socket"]:
+                            violations.append(f"استيراد محظور: {name}")
+        except Exception as e:
+            violations.append(f"خطأ في التحليل الأمني: {e}")
+            
         result.safety_violations = violations
         result.safety_passed = len(violations) == 0
 
@@ -238,9 +260,10 @@ class SandboxTestingLab:
         try:
             output = node.process(test_data)
             result.execution_latency_ms = (time.perf_counter() - t0) * 1000
-            result.execution_success = isinstance(output, dict)
+            # دعم المخرجات النصية أو القواميس
+            result.execution_success = isinstance(output, (dict, str))
             if result.execution_success:
-                result.output_valid = len(output) > 0
+                result.output_valid = len(str(output)) > 0
         except Exception as exc:
             result.execution_latency_ms = (time.perf_counter() - t0) * 1000
             result.execution_success = False

@@ -23,16 +23,18 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
+from ai.layers.dynamic_sparse_attention_numpy import DynamicSparseAttentionNumPy
+from ai.neural_security_gate import neural_security_gate
 
 logger = logging.getLogger(__name__)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Constants
 # ══════════════════════════════════════════════════════════════════════════════
-D_MODEL      = 2304
-N_HEADS      = 16
-D_FF         = 8384
-N_LAYERS     = 16
+D_MODEL      = 4096
+N_HEADS      = 32
+D_FF         = 16384
+N_LAYERS     = 24
 MAX_SEQ_LEN  = 128
 VOCAB_SIZE   = 8192     # سقف القاموس الافتراضي (word-level + UNK)
 LEARNING_RATE = 1e-4
@@ -351,8 +353,8 @@ class PositionalEncoding:
         pe[:, 1::2] = np.cos(pos / div)
         self._table = pe.astype(np.float64)
 
-    def forward(self, seq_len: int) -> np.ndarray:
-        return self._table[:seq_len]
+    def forward(self, seq_len: int, offset: int = 0) -> np.ndarray:
+        return self._table[offset : offset + seq_len]
 
     def forward_indices(self, pos_idx: np.ndarray) -> np.ndarray:
         """إضافة دعم الـ batching: يُرجع الترميز الموضعي لمصفوفة مؤشرات
@@ -388,6 +390,10 @@ class CoreMatrixLayer:
         d_model: int = D_MODEL,
         trainable_core: bool = True,
         core_lr_scale: float = 0.1,
+        image_dim: int = 512,  # أبعاد ميزات الصورة (مثلاً من CLIP)
+        audio_dim: int = 128,  # أبعاد ميزات الصوت (مثلاً Mel-spectrogram)
+        video_dim: int = 512,  # أبعاد ميزات الفيديو
+        memory_dim: int = 1536  # أبعاد ميزات الذاكرة (ANN)
     ):
         self.d_model        = d_model
         self.core_dim        = 784
@@ -396,19 +402,34 @@ class CoreMatrixLayer:
         self._W_core: Optional[np.ndarray] = None
         self._loaded  = False
 
+        # رؤوس الإسقاط متعددة الوسائط (Multimodal Projection Heads)
+        self.W_img = _xavier(d_model, image_dim)
+        self.b_img = np.zeros(d_model)
+        self.W_aud = _xavier(d_model, audio_dim)
+        self.b_aud = np.zeros(d_model)
+        self.W_vid = _xavier(d_model, video_dim)
+        self.b_vid = np.zeros(d_model)
+        self.W_mem = _xavier(d_model, memory_dim)
+        self.b_mem = np.zeros(d_model)
+
+        # أوزان الانتباه المتقاطع (Cross-Attention) لدمج الوسائط
+        self.Wq_cross = _xavier(d_model, d_model)
+        self.Wk_cross = _xavier(d_model, d_model)
+        self.Wv_cross = _xavier(d_model, d_model)
+
         self.W_up   = _xavier(self.core_dim, d_model)
         self.W_down = _xavier(d_model, self.core_dim)
         self.b_up   = np.zeros(self.core_dim)
         self.b_down = np.zeros(d_model)
 
-        self._cx = self._cup = self._cout = None  # cache
+        # التخزين المؤقت للميزات والتدفق
+        self._cx = self._cup = self._cout = None
+        self._mm_cache = None  # (K_mod, V_mod) cache
 
         if csv_path and os.path.exists(csv_path):
             self._load_csv(csv_path)
 
         if self._W_core is None:
-            # لا مصفوفة محمَّلة من CSV/NPY — نبدأ ببذرة Xavier قابلة للتدريب
-            # بدل مصفوفة الهوية الثابتة القديمة (كانت تمنع أي تعلّم فعلي).
             self._W_core = _xavier(self.core_dim, self.core_dim)
 
     def _load_csv(self, path: str) -> bool:
@@ -431,31 +452,111 @@ class CoreMatrixLayer:
     def _core(self) -> np.ndarray:
         return self._W_core
 
-    def forward(self, X: np.ndarray) -> np.ndarray:
-        self._cx  = X
-        up        = X @ self.W_up.T + self.b_up          # (seq,784)
-        self._cup = up
-        out       = up @ self._core().T                  # (seq,784)
+    def _sparse_cross_attention(self, Q_text: np.ndarray, K_mod: np.ndarray, V_mod: np.ndarray, k_ratio: float = 0.25) -> np.ndarray:
+        """
+        تطبيق انتباه متفرق (Sparse Cross-Attention) بين النص والوسائط.
+        """
+        d_k = Q_text.shape[-1]
+        scores = (Q_text @ K_mod.T) / np.sqrt(d_k)
+        
+        # تطبيق التفرقة (Top-K)
+        k = max(1, int(K_mod.shape[0] * k_ratio))
+        if k < K_mod.shape[0]:
+            # الحصول على قيمة العتبة (الـ k-th الأكبر) لكل صف
+            thresh = np.partition(scores, -k, axis=-1)[:, [-k]]
+            scores[scores < thresh] = -1e9
+            
+        attn = _softmax(scores)
+        return attn @ V_mod
+
+    def forward(
+        self, 
+        X: np.ndarray, 
+        image_feats: Optional[np.ndarray] = None, 
+        audio_feats: Optional[np.ndarray] = None,
+        video_feats: Optional[np.ndarray] = None,
+        memory_feats: Optional[np.ndarray] = None,
+        use_cache: bool = False,
+        multimodal_kv: Optional[Tuple[np.ndarray, np.ndarray]] = None
+    ) -> Tuple[np.ndarray, Optional[Tuple[np.ndarray, np.ndarray]]]:
+        """
+        X: (seq, d_model) - embeddings النص
+        image_feats: (num_images, image_dim) اختياري
+        audio_feats: (num_audio, audio_dim) اختياري
+        video_feats: (num_frames, video_dim) اختياري
+        memory_feats: (num_mem, memory_dim) اختياري من الذاكرة الموحدة
+        use_cache: تفعيل التخزين المؤقت للميزات المتعددة الوسائط
+        multimodal_kv: زوج (K, V) للوسائط ممرر من الخارج
+        """
+        multimodal_context = np.zeros_like(X)
+        
+        K_mod, V_mod = None, None
+        
+        # الأولوية للـ KV الممرر صراحة
+        if multimodal_kv is not None:
+            K_mod, V_mod = multimodal_kv
+        else:
+            modality_embeddings = []
+            if image_feats is not None:
+                modality_embeddings.append(image_feats @ self.W_img.T + self.b_img)
+            if audio_feats is not None:
+                modality_embeddings.append(audio_feats @ self.W_aud.T + self.b_aud)
+            if video_feats is not None:
+                modality_embeddings.append(video_feats @ self.W_vid.T + self.b_vid)
+            if memory_feats is not None:
+                modality_embeddings.append(memory_feats @ self.W_mem.T + self.b_mem)
+                
+            if modality_embeddings:
+                M = np.concatenate(modality_embeddings, axis=0)
+                K_mod = M @ self.Wk_cross.T
+                V_mod = M @ self.Wv_cross.T
+        
+        current_mm_kv = (K_mod, V_mod) if K_mod is not None else None
+
+        if K_mod is not None:
+            Q = X @ self.Wq_cross.T
+            multimodal_context = self._sparse_cross_attention(Q, K_mod, V_mod)
+            
+        # X المدمج (النص + سياق الوسائط المختار بالانتباه)
+        X_fused = X + multimodal_context
+        
+        # لا نحفظ الحالات الداخلية في _cx و _cup عند استخدام الـ cache لتجنب التداخل
+        if not use_cache and multimodal_kv is None:
+            self._cx  = X_fused
+            up        = X_fused @ self.W_up.T + self.b_up
+            self._cup = up
+        else:
+            up        = X_fused @ self.W_up.T + self.b_up
+            
+        out       = up @ self._core().T
+        
         # sign-flip activation (من NSM)
         act       = _relu(out)
-        mask      = np.abs(out) > 0.15
-        act[mask] *= -0.5
-        self._cout = act
-        return act @ self.W_down.T + self.b_down          # (seq,256)
+        mask_flip = np.abs(out) > 0.15
+        act[mask_flip] *= -0.5
+        
+        if not use_cache and multimodal_kv is None:
+            self._cout = act
+            
+        return act @ self.W_down.T + self.b_down, current_mm_kv
 
-    def backward(self, grad: np.ndarray, lr: float) -> np.ndarray:
+    def backward(self, grad: np.ndarray, lr: float) -> Tuple[np.ndarray, Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
         gWd   = grad.T @ self._cout
         gbd   = grad.sum(0)
         g_act = grad @ self.W_down                        # (seq,784)
-        # relu grad (تقريبي عبر sign-flip)
+        
         g_out = g_act * (self._cout > 0).astype(float)
         g_up  = g_out @ self._core()                      # (seq,784)
         gWu   = g_up.T @ self._cx
         gbu   = g_up.sum(0)
-        gX    = g_up @ self.W_up
+        gX_fused = g_up @ self.W_up
+        
+        # تدرجات رؤوس الإسقاط متعددة الوسائط (إذا لزم الأمر مستقبلاً)
+        gW_img = None; gb_img = None
+        gW_aud = None; gb_aud = None
+        gW_vid = None; gb_vid = None
 
         if self.trainable_core and self.core_lr_scale > 0.0:
-            # out = up @ core.T  ⇒  dL/dcore = g_out.T @ up
             gCore = g_out.T @ self._cup                   # (784,784)
             self._W_core -= (lr * self.core_lr_scale) * np.clip(gCore, -CLIP_GRAD, CLIP_GRAD)
             np.clip(self._W_core, -5.0, 5.0, out=self._W_core)
@@ -465,7 +566,8 @@ class CoreMatrixLayer:
             np.clip(W, -5.0, 5.0, out=W)
         self.b_down -= lr * np.clip(gbd, -CLIP_GRAD, CLIP_GRAD)
         self.b_up   -= lr * np.clip(gbu, -CLIP_GRAD, CLIP_GRAD)
-        return gX
+        
+        return gX_fused, None, None, None  # نكتفي بتدرج X حالياً لتجنب تعقيد backward النصي
 
     def info(self) -> dict:
         W = self._W_core
@@ -484,11 +586,26 @@ class CoreMatrixLayer:
         np.save(f"{prefix}_Wd.npy",   self.W_down)
         np.save(f"{prefix}_bu.npy",   self.b_up)
         np.save(f"{prefix}_bd.npy",   self.b_down)
-        np.save(f"{prefix}_core.npy", self._W_core)  # تُحفظ الآن لأنها تتغيّر بالتدريب
+        np.save(f"{prefix}_core.npy", self._W_core)
+        # حفظ رؤوس الوسائط وأوزان الانتباه
+        np.save(f"{prefix}_Wimg.npy", self.W_img)
+        np.save(f"{prefix}_bimg.npy", self.b_img)
+        np.save(f"{prefix}_Waud.npy", self.W_aud)
+        np.save(f"{prefix}_baud.npy", self.b_aud)
+        np.save(f"{prefix}_Wvid.npy", self.W_vid)
+        np.save(f"{prefix}_bvid.npy", self.b_vid)
+        np.save(f"{prefix}_Wq_cross.npy", self.Wq_cross)
+        np.save(f"{prefix}_Wk_cross.npy", self.Wk_cross)
+        np.save(f"{prefix}_Wv_cross.npy", self.Wv_cross)
 
     def load(self, prefix: str):
         for attr, fname in [("W_up","Wu"),("W_down","Wd"),
-                             ("b_up","bu"),("b_down","bd")]:
+                             ("b_up","bu"),("b_down","bd"),
+                             ("W_img","Wimg"),("b_img","bimg"),
+                             ("W_aud","Waud"),("b_aud","baud"),
+                             ("W_vid","Wvid"),("b_vid","bvid"),
+                             ("Wq_cross","Wq_cross"),("Wk_cross","Wk_cross"),
+                             ("Wv_cross","Wv_cross")]:
             p = f"{prefix}_{fname}.npy"
             if os.path.exists(p):
                 setattr(self, attr, np.load(p).astype(np.float64))
@@ -515,7 +632,7 @@ class MultiHeadAttention:
         self._X = self._Q = self._K = self._V = None
         self._attn = self._concat = None
 
-    def forward(self, X: np.ndarray, mask=None) -> np.ndarray:
+    def forward(self, X: np.ndarray, mask=None, past_kv: Optional[Tuple[np.ndarray, np.ndarray]] = None) -> Tuple[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
         self._X = X
         S = len(X)
         Q = X @ self.Wq.T                                # (S, dm)
@@ -528,14 +645,36 @@ class MultiHeadAttention:
         Kh = K.reshape(S, self.h, self.dk).transpose(1,0,2)
         Vh = V.reshape(S, self.h, self.dk).transpose(1,0,2)
 
-        sc = Qh @ Kh.transpose(0,2,1) / math.sqrt(self.dk)  # (h,S,S)
+        if past_kv is not None:
+            prev_k, prev_v = past_kv
+            Kh = np.concatenate([prev_k, Kh], axis=1)
+            Vh = np.concatenate([prev_v, Vh], axis=1)
+        
+        current_kv = (Kh, Vh)
+        S_total = Kh.shape[1]
+
+        sc = Qh @ Kh.transpose(0,2,1) / math.sqrt(self.dk)  # (h, S, S_total)
         if mask is not None:
-            sc = np.where(mask[None], -1e9, sc)
-        at = _softmax(sc)                                 # (h,S,S)
+            # مواءمة الـ mask مع الطول الكلي (S_total)
+            # في التوليد السببي، الرمز الجديد يجب أن يرى كل ما سبقه
+            if mask.ndim == 2:
+                if mask.shape[0] == S and mask.shape[1] == S_total:
+                    m = mask
+                elif mask.shape[0] == S and mask.shape[1] == S:
+                    # قناع causal للجزء الجديد، نجعله يرى الماضي بالكامل
+                    m = np.zeros((S, S_total), dtype=bool)
+                    m[:, S_total-S:] = mask
+                else:
+                    m = mask
+                sc = np.where(m[None], -1e9, sc)
+            else:
+                sc = np.where(mask[None], -1e9, sc)
+            
+        at = _softmax(sc)                                 # (h, S, S_total)
         self._attn = at
-        out = at @ Vh                                     # (h,S,dk)
+        out = at @ Vh                                     # (h, S, dk)
         self._concat = out.transpose(1,0,2).reshape(S, self.dm)
-        return self._concat @ self.Wo.T                  # (S, dm)
+        return self._concat @ self.Wo.T, current_kv      # (S, dm), (h, S_total, dk)
 
     def backward(self, grad: np.ndarray, lr: float) -> np.ndarray:
         S = self._X.shape[0]
@@ -659,20 +798,31 @@ class LayerNorm:
 # 8. Transformer Block
 # ══════════════════════════════════════════════════════════════════════════════
 class TransformerBlock:
-    def __init__(self, d_model=D_MODEL, n_heads=N_HEADS, d_ff=D_FF, bid=0):
+    def __init__(self, d_model=D_MODEL, n_heads=N_HEADS, d_ff=D_FF, bid=0, use_sparse_attn=True):
         self.bid  = bid
-        self.mha  = MultiHeadAttention(d_model, n_heads)
+        if use_sparse_attn:
+            self.mha = DynamicSparseAttentionNumPy(d_model, n_heads, sparsity_k=0.25)
+        else:
+            self.mha = MultiHeadAttention(d_model, n_heads)
         self.ffn  = FFN(d_model, d_ff)
         self.ln1  = LayerNorm(d_model)
         self.ln2  = LayerNorm(d_model)
         self._X   = self._ao = None
 
-    def forward(self, X, mask=None):
+    def forward(self, X, mask=None, past_kv=None):
         self._X  = X
-        ao       = self.mha.forward(self.ln1.forward(X), mask)
+        
+        current_kv = None
+        if isinstance(self.mha, MultiHeadAttention):
+            ao, current_kv = self.mha.forward(self.ln1.forward(X), mask, past_kv=past_kv)
+        else:
+            # DynamicSparseAttentionNumPy لا يدعم Cache حالياً
+            ao = self.mha.forward(self.ln1.forward(X), mask)
+            
         self._ao = ao
         X2       = X + ao
-        return X2 + self.ffn.forward(self.ln2.forward(X2))
+        out      = X2 + self.ffn.forward(self.ln2.forward(X2))
+        return out, current_kv
 
     def backward(self, grad, lr):
         X2     = self._X + self._ao
@@ -764,7 +914,9 @@ class ArabicTransformer:
                  weights_dir=WEIGHTS_DIR, core_csv=None,
                  tokenizer: Optional[object] = None,
                  use_hash_tokenizer: bool = False,
-                 tokenizer_type: str = "word"):
+                 tokenizer_type: str = "word",
+                 use_sparse_attn: bool = True,
+                 use_dte: bool = True):
         """
         tokenizer_type: "word"|"bpe"|"wordpiece"|"sentencepiece"|"unigram"|"char"|"byte_bpe"|"modern_bbpe"|"hash"
         يُتجاهل إذا مُرِّر كائن tokenizer مباشرة.
@@ -848,30 +1000,84 @@ class ArabicTransformer:
         self.embedding   = TokenEmbedding(vocab_size, d_model)
         self.pos_enc     = PositionalEncoding(d_model, max_seq)
         self.core        = CoreMatrixLayer(core_csv, d_model)
-        self.blocks      = [TransformerBlock(d_model, n_heads, d_ff, i)
+        self.blocks      = [TransformerBlock(d_model, n_heads, d_ff, i, use_sparse_attn=use_sparse_attn)
                             for i in range(n_layers)]
         self.head        = OutputHead(d_model, vocab_size)
+        
+        self.use_dte = use_dte
+        if self.use_dte:
+            try:
+                from ai.dte_engine import DTEEngine
+                self.dte = DTEEngine()
+            except ImportError:
+                self.dte = None
 
         self._steps = 0
         self._loss_history: List[float] = []
 
     # ── forward ───────────────────────────────────────────────────────────────
-    def _forward(self, ids: np.ndarray, mask=None):
-        X  = self.embedding.forward(ids)
-        X += self.pos_enc.forward(len(ids))
-        # قلب الشبكة: المصفوفة المدروسة
-        X  = X + self.core.forward(X)          # Residual
-        for blk in self.blocks:
-            X = blk.forward(X, mask)
-        return self.head.forward(X), X
+    def _forward(self, ids: np.ndarray, mask=None, trust_score: float = 1.0, 
+                 image_feats: Optional[np.ndarray] = None, 
+                 audio_feats: Optional[np.ndarray] = None,
+                 video_feats: Optional[np.ndarray] = None,
+                 memory_feats: Optional[np.ndarray] = None,
+                 past_kv: Optional[MultimodalKVCache] = None,
+                 use_cache: bool = False):
+        """
+        تمريرة أمامية تدعم اختيارياً الـ KV Caching والذاكرة الموحدة.
+        إذا تم تمرير past_kv، سيتم استخدامه وتحديثه.
+        """
+        S = len(ids)
+        # إذا كان هناك cache، نحتاج لمعرفة الموضع الحالي (offset)
+        pos_offset = past_kv.get_seq_len() if past_kv is not None else 0
+        
+        X = self.embedding.forward(ids)
+        X += self.pos_enc.forward(S, offset=pos_offset)
+        
+        # دمج الجوهر متعدد الوسائط والذاكرة (CoreMatrix & Memory Fusion)
+        mm_kv_input = past_kv.multimodal_kv if past_kv is not None else None
+        core_out, mm_kv_output = self.core.forward(X, image_feats, audio_feats, video_feats, memory_feats,
+                                                   use_cache=use_cache, 
+                                                   multimodal_kv=mm_kv_input)
+        X = X + core_out
+        
+        if past_kv is not None and mm_kv_output is not None:
+            past_kv.multimodal_kv = mm_kv_output
+        
+        new_layer_kv = []
+        for i, blk in enumerate(self.blocks):
+            layer_past = past_kv.layer_past_kv[i] if (past_kv is not None and i < len(past_kv.layer_past_kv)) else None
+            X, current_kv = blk.forward(X, mask, past_kv=layer_past)
+            new_layer_kv.append(current_kv)
+            
+        if past_kv is not None:
+            # تحديث الـ cache للطبقات
+            if not past_kv.layer_past_kv:
+                past_kv.layer_past_kv = new_layer_kv
+            else:
+                for i in range(len(new_layer_kv)):
+                    if i < len(past_kv.layer_past_kv):
+                        past_kv.layer_past_kv[i] = new_layer_kv[i]
+                    else:
+                        past_kv.layer_past_kv.append(new_layer_kv[i])
+        
+        logits = self.head.forward(X)
+        
+        # تحليل النوايا الأمنية (البوابة العصبية)
+        last_hidden = X[-1] if X.ndim > 1 else X
+        risk_score, intent = neural_security_gate.analyze_intent(last_hidden)
+        
+        return logits, X, risk_score, intent
 
     # ── train (يمتص الأنماط → يُعدِّل الأوزان → يرمي النص) ──────────────────
-    def train_step(self, text: str) -> float:
+    def train_step(self, text: str, memory_feats: Optional[np.ndarray] = None) -> float:
         """
         يأخذ النص → يُعدِّل الأوزان → لا يحفظ النص.
         البيانات تُستهلَك وترمى، الأوزان وحدها تبقى.
         """
-        ids = self.tokenizer.encode(text, self.max_seq)
+        ids = self.tokenizer.encode(text)
+        if len(ids) > self.max_seq: ids = ids[:self.max_seq]
+        
         if len(ids) < 2:
             return 0.0
 
@@ -879,7 +1085,7 @@ class ArabicTransformer:
         S   = len(inp)
         mask = np.triu(np.ones((S, S), bool), k=1)
 
-        probs, _ = self._forward(inp, mask)
+        probs, _, _, _ = self._forward(inp, mask, memory_feats=memory_feats)
         loss, gp = self.head.loss_grad(probs, tgt)
 
         # backward — يُعدِّل الأوزان
@@ -950,9 +1156,10 @@ class ArabicTransformer:
         # ── forward (نفس الطبقات الموجودة، بدون أي تعديل عليها) ──
         X = self.embedding.forward(inp)
         X = X + self.pos_enc.forward_indices(pos_inp)
-        X = X + self.core.forward(X)
+        core_out, _ = self.core.forward(X) # تدريب batch لا يدعم الوسائط حالياً للتبسيط
+        X = X + core_out
         for blk in self.blocks:
-            X = blk.forward(X, mask)
+            X, _ = blk.forward(X, mask)
         probs = self.head.forward(X)
 
         loss, gp = self.head.loss_grad_masked(probs, tgt, valid_mask)
@@ -976,7 +1183,7 @@ class ArabicTransformer:
         ids = self.tokenizer.encode(text, self.max_seq)
         if len(ids) == 0:
             return np.zeros(self.embedding.W.shape[1])
-        _, hidden = self._forward(ids)
+        _, hidden, _, _ = self._forward(ids)
         return hidden[1:-1].mean(0) if len(hidden) > 2 else hidden.mean(0)
 
     def predict_next(self, text: str, top_k=5, temp=1.0) -> List[Tuple[int, float]]:
@@ -985,7 +1192,7 @@ class ArabicTransformer:
         if not len(ids): return []
         S    = len(ids)
         mask = np.triu(np.ones((S,S), bool), k=1)
-        p, _ = self._forward(ids, mask)
+        p, _, _, _ = self._forward(ids, mask)
         lp   = p[-1]
         if temp != 1.0:
             lp = _softmax((np.log(np.clip(lp,1e-10,1)) / temp).reshape(1,-1)).flatten()
@@ -1012,23 +1219,65 @@ class ArabicTransformer:
         top_k: int = 50,
         top_p: float = 0.92,
         repetition_penalty: float = 1.1,
+        image_feats: Optional[np.ndarray] = None,
+        audio_feats: Optional[np.ndarray] = None,
+        video_feats: Optional[np.ndarray] = None,
+        use_kv_cache: bool = False
     ) -> np.ndarray:
-        """يُولِّد تسلسل IDs مع nucleus/top-k وpenalty تكرار."""
+        """يُولِّد تسلسل IDs مع nucleus/top-k وpenalty تكرار، مع دعم اختياري للـ KV Caching."""
+        from ai.multimodal_kv_cache import MultimodalKVCache
+        
         eos = getattr(self.tokenizer, "EOS", 3)
         ids = list(self.tokenizer.encode(text, self.max_seq - max_new))
         if ids and ids[-1] == eos:
             ids = ids[:-1]
+            
         try:
             from ai.sampling_utils import sample_token
         except ImportError:
             sample_token = None  # type: ignore
+            
+        cache = MultimodalKVCache() if use_kv_cache else None
+        
+        # Prefill phase
+        if use_kv_cache and ids:
+            arr = np.array(ids, np.int64)
+            S = len(arr)
+            mask = np.triu(np.ones((S, S), bool), k=1)
+            p, _, _, intent = self._forward(arr, mask, image_feats=image_feats, 
+                                            audio_feats=audio_feats, video_feats=video_feats,
+                                            past_kv=cache, use_cache=True)
+            if intent == "malicious":
+                return np.array(ids, np.int64)
+            last_p = p[-1]
+        
         for _ in range(max_new):
             if len(ids) >= self.max_seq:
                 break
-            arr = np.array(ids[-self.max_seq:], np.int64)
-            S = len(arr)
-            mask = np.triu(np.ones((S, S), bool), k=1)
-            p, _ = self._forward(arr, mask)
+            
+            if use_kv_cache:
+                # Decode phase: مرر آخر token فقط مع الـ cache
+                arr = np.array([ids[-1]], np.int64)
+                # في الـ decode step، الـ mask عادة لا يلزم لأننا ننظر للخلف فقط
+                p, _, risk, intent = self._forward(arr, mask=None, 
+                                                image_feats=image_feats, 
+                                                audio_feats=audio_feats,
+                                                video_feats=video_feats,
+                                                past_kv=cache, use_cache=True)
+            else:
+                arr = np.array(ids[-self.max_seq:], np.int64)
+                S = len(arr)
+                mask = np.triu(np.ones((S, S), bool), k=1)
+                p, _, risk, intent = self._forward(arr, mask, 
+                                                image_feats=image_feats, 
+                                                audio_feats=audio_feats,
+                                                video_feats=video_feats)
+            
+            # حظر التوليد إذا تم اكتشاف نية خبيثة بوضوح
+            if intent == "malicious":
+                logger.warning(f"🚫 Generation blocked by Neural Security Gate: Intent '{intent}'")
+                break
+                
             lp = p[-1]
             if sample_token is not None:
                 nxt = sample_token(
@@ -1048,9 +1297,11 @@ class ArabicTransformer:
                     break
                 lp = lp / s
                 nxt = int(np.random.choice(len(lp), p=lp))
+                
             if nxt == eos:
                 break
             ids.append(nxt)
+            
         return np.array(ids, np.int64)
 
     def generate(

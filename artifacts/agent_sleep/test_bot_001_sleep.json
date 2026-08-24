@@ -1,0 +1,22 @@
+{
+  "agent_id": "test_bot_001",
+  "context": [
+    {
+      "role": "user",
+      "content": "مرحباً"
+    },
+    {
+      "role": "assistant",
+      "content": "أهلاً بك، كيف أساعدك؟"
+    }
+  ],
+  "plan": {
+    "steps": [
+      "step1",
+      "step2"
+    ],
+    "current": 0
+  },
+  "metadata": {},
+  "timestamp": 1787450934.0379937
+}

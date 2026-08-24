@@ -375,6 +375,10 @@ class CausalSelfAttention(nn.Module):
         if self.use_qk_norm:
             q = self.q_norm(q)
             k = self.k_norm(k)
+        # TPU/bf16: RMSNorm قد يُرجع float32 بينما v يبقى bfloat16 — SDPA يرفض ذلك
+        if q.dtype != v.dtype or k.dtype != v.dtype:
+            q = q.to(dtype=v.dtype)
+            k = k.to(dtype=v.dtype)
 
         k_r, v_r = self._repeat_kv(k), self._repeat_kv(v)
 
@@ -419,6 +423,9 @@ class CausalSelfAttention(nn.Module):
         if self.use_qk_norm:
             q = self.q_norm(q)
             k = self.k_norm(k)
+        if q.dtype != v.dtype or k.dtype != v.dtype:
+            q = q.to(dtype=v.dtype)
+            k = k.to(dtype=v.dtype)
 
         if past_kv is not None:
             past_k, past_v = past_kv

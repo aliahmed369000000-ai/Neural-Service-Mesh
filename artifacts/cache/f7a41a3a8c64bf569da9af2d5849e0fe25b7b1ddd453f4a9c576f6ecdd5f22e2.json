@@ -1,0 +1,5 @@
+{
+  "tool": "rescue_agent",
+  "result": "🚨 [Rescue]: بدء عملية الإنقاذ للوكيل agent_loop_loop_68dc8b0f...\n📦 [Data]: تم استعادة نقطة التفتيش (الجولة: 1)\n🔄 [Migration]: نقل المهمة إلى الوكيل الحالي (agent_loop_loop_58124885)\n✅ [Status]: تم استئناف العمل بنجاح. العقدة الفاشلة تم وسمها كـ 'migrated'.",
+  "timestamp": 1787493362.3034918
+}

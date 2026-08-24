@@ -20,7 +20,7 @@ import json
 import os
 import urllib.error
 import urllib.request
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Dict, Any
 
 from ai.offline_mode import is_offline, offline_message
 
@@ -49,13 +49,12 @@ def transcribe_audio(
     audio_bytes: bytes,
     mime_type: str = "audio/wav",
     dialect_mode: str = "msa",
-) -> Tuple[str, Optional[str]]:
+    with_timestamps: bool = False,
+) -> Tuple[str | List[Dict[str, Any]], Optional[str]]:
     """
-    يحوّل صوتاً إلى نص عربي. يعيد (النص, رسالة_خطأ).
-    dialect_mode: "msa" | "yemeni" | "auto"
-      - yemeni: يحافظ على ألفاظ اللهجة في التفريغ
-      - msa: يفضّل صياغة فصيحة
-    لا يرفع استثناءً أبداً.
+    يحوّل صوتاً إلى نص عربي. يعيد (النص أو قائمة المقاطع، رسالة_خطأ).
+    with_timestamps: إذا كان True، يعيد قائمة بـ {"start": float, "end": float, "text": str}.
+    dialect_mode: "msa" | "yemeni" | "auto".
     """
     if not audio_bytes:
         return "", "لم يصل أي صوت للتفريغ."
@@ -79,6 +78,13 @@ def transcribe_audio(
     else:
         prompt = _TRANSCRIBE_PROMPT_MSA
 
+    if with_timestamps:
+        prompt += (
+            "\n\nأعد النتيجة حصراً بصيغة JSON كقائمة من الكائنات، "
+            "كل كائن يحتوي على الحقول التالية: 'start' (بداية المقطع بالثواني)، "
+            "'end' (نهاية المقطع بالثواني)، 'text' (النص المنطوق في هذا المقطع)."
+        )
+
     body = {
         "contents": [{
             "role": "user",
@@ -101,6 +107,16 @@ def transcribe_audio(
         with urllib.request.urlopen(req, timeout=30) as r:
             data = json.loads(r.read())
         text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        
+        if with_timestamps:
+            try:
+                # محاولة تنظيف النص من علامات Markdown إذا وجدت
+                clean_text = text.replace("```json", "").replace("```", "").strip()
+                segments = json.loads(clean_text)
+                return segments, None
+            except json.JSONDecodeError:
+                return text, "فشل في تحويل النتيجة إلى تنسيق زمني (JSON)."
+                
         return text, None
     except urllib.error.HTTPError as e:
         return "", f"تعذّر تفريغ الصوت (خطأ خادم {e.code})."

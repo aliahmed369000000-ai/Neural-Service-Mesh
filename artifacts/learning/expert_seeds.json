@@ -1,0 +1,24 @@
+
+[
+  {
+    "agent_id": "expert_architect",
+    "task_type": "تدريب نموذج d=8192",
+    "outcome": "تجنب فشل الذاكرة في Kaggle TPU",
+    "lesson": "استخدم دائماً torch.distributed.fsdp مع auto_wrap_policy لضمان توزيع الأوزان على جميع النوى وتجنب HBM OOM على النواة 0.",
+    "success": true
+  },
+  {
+    "agent_id": "expert_data_scientist",
+    "task_type": "تجميع بيانات متنوعة",
+    "outcome": "تحسين جودة بيانات Pre-training",
+    "lesson": "قم بتصفية البيانات المكررة باستخدام MinHash LSH قبل التدريب لتقليل وقت التقارب وتحسين دقة النموذج.",
+    "success": true
+  },
+  {
+    "agent_id": "expert_sysadmin",
+    "task_type": "إدارة كيرنل Kaggle",
+    "outcome": "منع توقف التدريب المفاجئ",
+    "lesson": "اضبط وقت التدريب على 11 ساعة كحد أقصى لتجنب Timeout التلقائي من Kaggle (12 ساعة)، وقم بتفعيل الحفظ التلقائي كل ساعة.",
+    "success": true
+  }
+]

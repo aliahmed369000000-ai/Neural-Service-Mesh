@@ -53,8 +53,8 @@ def audit_log_path() -> Path:
     return _AUDIT_LOG
 
 
-def _append_audit(entry: dict) -> None:
-    """يكتب دخولًا في سجل التدقيق مع تدوير بطيء جدًا يمنع نموه بلا حد."""
+def _append_audit(entry: dict, encrypt: bool = False) -> None:
+    """يكتب دخولًا في سجل التدقيق مع دعم التشفير وتدوير بطيء جدًا."""
     with _audit_lock:
         try:
             _AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -65,8 +65,18 @@ def _append_audit(entry: dict) -> None:
                     _AUDIT_LOG.write_text("\n".join(keep) + "\n", encoding="utf-8")
                 except Exception:
                     pass
+            
+            data = json.dumps(entry, ensure_ascii=False)
+            if encrypt:
+                try:
+                    from ai.shared_experience import SharedExperience
+                    exp = SharedExperience()
+                    data = f"ENCRYPTED:{exp.encrypt(data)}"
+                except Exception:
+                    pass # Fallback to plain if encryption fails
+            
             with _AUDIT_LOG.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                f.write(data + "\n")
         except Exception:
             pass
 
@@ -108,6 +118,7 @@ class RolePermissions:
     can_run_background: bool = False
     can_override_mode: bool = False           # هل يستطيع ترقية نفسه إلى admin
     can_manage_session: bool = True           # cd/export/unset/snapshot/alias
+    encrypt_logs: bool = False                # 🆕 هل يجب تشفير سجلات هذا الدور
     allow_regex: Optional[re.Pattern] = None  # أوامر إضافية مسموحة (نمط regex)
 
     def to_dict(self) -> dict:
@@ -215,11 +226,14 @@ class TerminalRoleManager:
             self._agent_scopes.pop(agent_id, None)
 
     # ───────── الفحص ─────────
-    def role_of(self, agent_id: str) -> RolePermissions:
+    def role_of(self, agent_id: str) -> Dict[str, Any]:
         with self._lock:
-            ov = self._agent_overrides.get(agent_id, {})
-            role = ov.get("role", "agent")
-        return dict(self._roles.get(role, DEFAULT_ROLES["agent"]).__dict__)  # snapshot
+            ov = dict(self._agent_overrides.get(agent_id, {}))
+            role_name = ov.get("role", "agent")
+            perms = dict(self._roles.get(role_name, DEFAULT_ROLES["agent"]).__dict__)
+            # دمج التجاوزات الخاصة بالوكيل (مثل encrypt_logs أو allow_regex)
+            perms.update(ov)
+            return perms
 
     def scoped_cwd(self, agent_id: str, requested: Path) -> Tuple[Path, str]:
         """يقيّد cwd بالوكيل: إن كان له scope وcwd المطلوب خارجه يُعاد إلى	scope.
@@ -313,11 +327,16 @@ class TerminalRoleManager:
         # ── مشغلات shell ──
         if perms.allow_shell_operators:
             return True, ""
-        masked = c
-        if "$(" in masked or "`" in masked or ">" in masked or "<" in masked:
-            return False, "إعادة توجيه/استبدال أوامر غير مسموح لدورك — اطلب من المالك"
+        
+        from ai.nsm_terminal import _mask_quotes
+        masked = _mask_quotes(c)
+        
+        if "$(" in masked or "`" in masked:
+            return False, "استبدال أوامر ($() أو `) غير مسموح لدورك"
+        if ">" in masked or "<" in masked:
+            return False, "إعادة توجيه التدفق (> أو <) غير مسموحة لدورك"
         if "&" in masked.replace("&&", ""):
-            return False, "التشغيل بالخلفية & غير مسموح لدورك"
+            return False, "التشغيل بالخلفية (&) غير مسموح لدورك"
         if re.search(r"&&|\|\||\||;", masked):
             return False, "تسلسل الأوامر (&&/;/|) غير مسموح لدورك"
 
@@ -328,6 +347,8 @@ class TerminalRoleManager:
         self, agent_id: str, cmd: str, allowed: bool, reason: str,
         role: str = "", extra: Optional[Dict[str, Any]] = None,
     ) -> None:
+        perms = self.role_of(agent_id)
+        encrypt = perms.get("encrypt_logs", False)
         entry = {
             "ts": _now(),
             "agent": agent_id,
@@ -338,7 +359,7 @@ class TerminalRoleManager:
         }
         if extra:
             entry.update(extra)
-        _append_audit(entry)
+        _append_audit(entry, encrypt=encrypt)
 
     def roles_snapshot(self) -> Dict[str, dict]:
         return {k: v.to_dict() for k, v in self._roles.items()}

@@ -190,7 +190,7 @@ class ReasoningPipeline:
         transformer_weights_path: Optional[str] = "models/transformer_ckg_v3",
         use_deep_routing: bool = True,
         deep_routing_blend: float = 0.45,
-        use_moe: bool = True,
+        use_moe: bool = False,
         moe_blend: float = 0.25,
         moe_train_on_query: bool = False,
     ):
@@ -704,100 +704,11 @@ class ReasoningPipeline:
         ranked = self._decide(weights, matched, related, memory_hits, question=question)
 
         # 4b: Hierarchical MoE — تعزيز ترتيب المفاهيم حسب مسار الخبراء
-        moe_info: Dict[str, Any] = {"moe_applied": False}
-        if getattr(self, "use_moe", False) and getattr(self, "_moe_bridge", None) is not None:
-            try:
-                from ai.moe_ckg_bridge import (
-                    moe_boost_pipeline_ranked,
-                    map_cluster_to_category,
-                )
-                if ranked:
-                    ranked, moe_info = moe_boost_pipeline_ranked(
-                        ranked,
-                        context_vector,
-                        question=question,
-                        blend=self.moe_blend,
-                    )
-                else:
-                    # لا مفاهيم بعد — نسجّل أوزان الفئات فقط للشفافية
-                    cw = self._moe_bridge.category_weights(context_vector, question)
-                    moe_info = {
-                        "moe_applied": bool(self._moe_bridge.available),
-                        "category_weights": cw,
-                        "note": "no_ranked_concepts",
-                    }
-                weights["_moe_routing"] = 1.0 if moe_info.get("moe_applied") else 0.0
-                if moe_info.get("category_weights"):
-                    top_cats = sorted(
-                        moe_info["category_weights"].items(),
-                        key=lambda kv: -kv[1],
-                    )[:3]
-                    for cat, w in top_cats:
-                        weights[f"_moe_cat_{cat}"] = round(float(w), 4)
-                # تدريب خفيف اختياري لراوتر المجموعات من clusters المطابقة
-                if self.moe_train_on_query and matched:
-                    prefs = []
-                    for m in matched:
-                        cat = map_cluster_to_category(m.cluster or "")
-                        if cat not in prefs:
-                            prefs.append(cat)
-                    if prefs:
-                        try:
-                            tr = self._moe_bridge.train_on_context(
-                                context_vector, prefs, steps=2
-                            )
-                            moe_info["moe_train"] = tr
-                        except Exception as _mt_err:
-                            logger.debug("moe train_on_query: %s", _mt_err)
-            except Exception as _moe_err:
-                logger.warning("MoE rerank skipped: %s", _moe_err)
-                weights["_moe_routing"] = 0.0
-        else:
-            weights["_moe_routing"] = 0.0
-
-        # تلخيص توجيه MoE للواجهة
-        moe_summary: Optional[Dict[str, Any]] = None
-        if moe_info.get("moe_applied") and moe_info.get("category_weights"):
-            ranked_cats = sorted(
-                moe_info["category_weights"].items(), key=lambda kv: -kv[1]
-            )
-            top_cat, top_w = ranked_cats[0]
-            second_w = ranked_cats[1][1] if len(ranked_cats) > 1 else 0.0
-            conf = float(min(1.0, top_w + 0.5 * (top_w - second_w)))
-            experts: List[str] = []
-            try:
-                if self._moe_bridge and self._moe_bridge.moe is not None:
-                    g = self._moe_bridge.moe.groups.get(top_cat)
-                    if g is not None:
-                        experts = list(g._id_order)[:4]
-            except Exception:
-                experts = []
-            moe_summary = {
-                "top": top_cat,
-                "confidence": round(conf, 4),
-                "weight": round(float(top_w), 4),
-                "alternatives": [
-                    {"category": c, "weight": round(float(w), 4)}
-                    for c, w in ranked_cats[1:3]
-                ],
-                "experts": experts,
-            }
-            moe_info["summary"] = moe_summary
-
+        # MoE disabled in Surah-centric mode
+        weights["_moe_routing"] = 0.0
+        
         # 5: Answer
         answer_text = self._build_answer_text(question, ranked, weights)
-        if moe_summary:
-            alts = ", ".join(
-                f"{a['category']} ({a['weight']})" for a in moe_summary.get("alternatives") or []
-            )
-            exp = ", ".join(moe_summary.get("experts") or []) or "—"
-            banner = (
-                f"🧩 **توجيه MoE:** `{moe_summary['top']}` "
-                f"(ثقة {moe_summary['confidence']:.0%}) · خبراء: {exp}"
-            )
-            if alts:
-                banner += f" · بدائل: {alts}"
-            answer_text = banner + chr(10)*2 + answer_text
 
         # ── Experience Learning: بناء وتخزين Episode (Requirements #1,#2,#4,#5) ──
         episode_id: Optional[str] = None

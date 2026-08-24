@@ -1,0 +1,10 @@
+{"ts": "2026-08-23T13:57:03", "type": "status", "loop_id": "loop_684275b6", "status": "running"}
+{"ts": "2026-08-23T13:57:03", "type": "status", "round": 1}
+{"ts": "2026-08-23T13:57:03", "type": "info", "text": "🧠 وعي الوكيل: أنا الوكيل agent_loop_loop_684275b6. "}
+{"ts": "2026-08-23T13:57:03", "type": "thinking", "content": "لقد رصدت فشلاً في الشبكة. سأستخدم أداة الإنقاذ لاستعادة المهام."}
+{"ts": "2026-08-23T13:57:03", "type": "tool", "tool": "rescue_agent", "params": {"target_agent_id": "agent_loop_loop_c5ac74e3"}}
+{"ts": "2026-08-23T13:57:03", "type": "result", "tool": "rescue_agent", "output": "🚨 [Rescue]: بدء عملية الإنقاذ للوكيل agent_loop_loop_c5ac74e3...\n📦 [Data]: تم استعادة نقطة التفتيش (الجولة: 1)\n🔄 [Migration]: نقل المهمة إلى الوكيل الحالي (agent_loop_loop_684275b6)\n✅ [Status]: تم استئناف العمل بنجاح. العقدة الفاشلة تم وسمها كـ 'migrated'."}
+{"ts": "2026-08-23T13:57:03", "type": "status", "round": 2}
+{"ts": "2026-08-23T13:57:03", "type": "info", "text": "🧠 وعي الوكيل: أنا الوكيل agent_loop_loop_684275b6. "}
+{"ts": "2026-08-23T13:57:03", "type": "thinking", "content": "تم الإنقاذ بنجاح."}
+{"ts": "2026-08-23T13:57:03", "type": "answer", "text": "المهمة مستمرة."}

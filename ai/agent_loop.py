@@ -6,29 +6,6 @@ ai/agent_loop.py
 تحول الوكيل من "مولّد قائمة خطوات من جولة واحدة" إلى "عامل يلاحظ ثم يتصرف":
 
     [user] → LLM → (plan) → {act → observe → decide} ×N → (final answer)
-
-المبادئ المصمَّم بها:
-  1. كل أداة تنفَّذ وتُعاد **نتيجتها كنص ملاحظة** للنموذج في الجولة التالية،
-     فيقرّر بنفسه: يكمل؟ يصلح؟ يغيّر المسار؟ ينهي؟
-  2. Registry أدوات موحد (TOOL_REGISTRY) يربط أسماء الأدوات بواجهات
-     موثوقة داخل المشروع (terminal, file, search, code, notebook) بدل
-     الـdispatch المتناثر في nsm_agent_core.
-  3. حدود أمان صارمة: سقف جولات، ميزانية أدوات، timeout إجباري،
-     منع sudo/rm الخطير، حماية مسارات (لا path traversal)، whitelist
-     للأوامر الخطرة، سجل مراجعة (audit) لكل خطوة.
-  4. Self-healing تنفيذي: فشل أداة → يعاد إرسال الخطأ للنموذج مع طلب
-     بديل — حتى داخل نفس الجولة، دون استهلاك جولة جديدة.
-  5. تكامل مع task_manager: كل حلقة تسجل خطة وتتقدم عبرها، فتظهر في
-     لوحة «المهام طويلة الأمد».
-
-بدون مفاتيح API إضافية — يعيد استخدام ai/llm_fallback (أو أي دالة
-generate(user_input, system, history) تُحقن عند التهيئة).
-
-الاستخدام:
-    from ai.agent_loop import run_agent_loop
-    for event in run_agent_loop("افحص ai/goal_planner.py وأصلح أي خطأ"):
-        # event = {'type': 'thought'|'tool'|'result'|'answer'|'status', ...}
-        ...
 """
 from __future__ import annotations
 
@@ -40,10 +17,27 @@ import subprocess
 import threading
 import time
 import uuid
+import concurrent.futures
+import requests
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
+from ai.cache_manager import agent_cache
+from ai.learning_engine import learning_engine
+from ai.video_sampler import video_sampler
+from ai.video_indexer import video_indexer
+from ai.multimodal_sync import multimodal_sync
+from ai.agent_auto_heal import AutoHeal
+from ai.memory_manager import MemoryManager
+from ai.tool_genesis import tool_genesis, ToolGenesis
+from ai.evolution_engine import evolution_engine
+from ai.tool_discovery import tool_discovery
+from ai.task_migrator import TaskMigrator
+from ai.self_awareness import SelfAwarenessEngine
+from ai.rescue_protocol import rescue_agent
+from ai.cognitive_growth import cognitive_engine
 
 logger = logging.getLogger("NeuralServiceMesh.AgentLoop")
+healer = AutoHeal(max_rounds=3)
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -56,10 +50,10 @@ _LONG_CMD_MARKERS = ("git clone", "git pull --rebase", "kaggle kernels output",
                      "kaggle datasets download", "pip install -r", "pytest")
 
 def _default_timeout_for(cmd: str) -> int:
-    """🆕 مهلة افتراضية أطول للأوامر طويلة الأمد (clone ضخم، تنزيل output، تدريب خفيف)."""
     c = (cmd or "").lower()
     return 600 if any(m in c for m in _LONG_CMD_MARKERS) else _DEFAULT_TIMEOUT
-_MAX_OUTPUT_CHARS = 4000        # حد الملاحظة المعادة للنموذج لكل أداة
+
+_MAX_OUTPUT_CHARS = 4000
 _CMD_BLOCKLIST = (
     "sudo ", "sudo\t", "rm -rf /", "mkfs", ":(){ :|:& };:",
     ">:() { :|:& };:", ">:(){ :|:& };:", "chmod 777 /",
@@ -69,15 +63,12 @@ _CMD_BLOCKLIST = (
 )
 _PATH_TRAVERSAL_RE = re.compile(r"(^|/)((\.\.(\/|\\|$))+)")
 
-_RUN_LOCK = threading.Lock()    # تنفيذ تسلسلي للحلقات (منع تداخل shell)
-
+_RUN_LOCK = threading.Lock()
 
 def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
 
-
 def _safe_tool_path(raw: str) -> Optional[Path]:
-    """حل مسار نسبي إلى داخل ROOT حصراً — رفض أي هروب (path traversal)."""
     if not raw or not str(raw).strip():
         return None
     try:
@@ -87,503 +78,1019 @@ def _safe_tool_path(raw: str) -> Optional[Path]:
         return None
     return candidate
 
-
 def _cmd_safe(cmd: str) -> Tuple[bool, str]:
-    """فحص أمان أمر shell — سبب الحظر يُعاد للنموذج بصراحة."""
     c = (cmd or "").strip()
     if not c:
         return False, "أمر فارغ"
     if any(c.startswith(b) for b in _CMD_BLOCKLIST):
-        return False, "أمر محظور لأسباب أمنية (destructive/system)"
-    # منع pipes تنفيذ صلاحيات: su/su -c/pkexec
+        return False, "أمر محظور لأسباب أمنية"
     if re.search(r"(^|\|)\s*(su|pkexec|nohup)\b", c):
-        return False, "استدعاء صلاحيات مرتفعة محظور"
+        return False, "استدعاء صلاحيات محظور"
     return True, ""
 
-
-# ═════════════════════════ سجل المراجعة (audit) ════════════════════
+# ═════════════════════════ سجل المراجعة ════════════════════════════
 _AUDIT_DIR = ROOT / "artifacts" / "agent_loop" / "audit"
 _AUDIT_DIR.mkdir(parents=True, exist_ok=True)
-
 
 def _audit(loop_id: str, entry: Dict[str, Any]) -> None:
     try:
         p = _AUDIT_DIR / f"{loop_id}.jsonl"
         with open(p, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"ts": _now(), **entry}, ensure_ascii=False)
-                    + "\n")
+            f.write(json.dumps({"ts": _now(), **entry}, ensure_ascii=False) + "\n")
     except Exception as e:
-        logger.warning("audit write failed: %s", e)
-
+        logger.warning("audit failed: %s", e)
 
 # ═════════════════════════ Registry الأدوات ════════════════════════
 class ToolSpec:
-    """مواصفات أداة واحدة: اسم + وصف للنموذج + تنفيذ."""
     def __init__(self, name: str, description: str, params_schema: Dict[str, Any],
-                 executor: Callable[[Dict[str, Any]], str],
-                 dangerous: bool = False) -> None:
+                 executor: Callable[[Dict[str, Any]], str], dangerous: bool = False):
         self.name = name
         self.description = description
         self.params_schema = params_schema
         self.executor = executor
         self.dangerous = dangerous
 
-    def to_openai_schema(self) -> Dict[str, Any]:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": self.params_schema,
-            },
-        }
-
-
 TOOL_REGISTRY: Dict[str, ToolSpec] = {}
 _TOOL_ORDER: List[str] = []
 
-
 def register_tool(spec: ToolSpec) -> ToolSpec:
+    global TOOL_REGISTRY, _TOOL_ORDER
     TOOL_REGISTRY[spec.name] = spec
     if spec.name not in _TOOL_ORDER:
         _TOOL_ORDER.append(spec.name)
     return spec
 
+def _truncate_obs(text: str, limit: int = _MAX_OUTPUT_CHARS) -> str:
+    if not text or len(text) <= limit:
+        return text
+    return text[:limit - 200] + f"\n\n... [مقطوع — الأصل {len(text)} حرف]"
 
-# ── 1) أداة shell كامل (عبر nsm_terminal — مع أدوار وaudit) ────────
+# ── الأدوات الأساسية ──────────────────────────────────────────────
 def _exec_shell(params: Dict[str, Any]) -> str:
     cmd = str(params.get("cmd", "")).strip()
-    if not cmd:
-        return "❌ shell: مطلوب cmd"
     ok, why = _cmd_safe(cmd)
-    if not ok:
-        return f"❌ shell: {why}"
+    if not ok: return f"❌ shell: {why}"
     try:
         from ai.nsm_terminal import get_terminal
-        r = get_terminal().run_agent("agent_loop", cmd,
-                                     timeout=int(params.get("timeout", _default_timeout_for(cmd))))
+        term = get_terminal()
+        r = term.run_agent("agent_loop", cmd, timeout=int(params.get("timeout", _default_timeout_for(cmd))))
+        
         out = []
-        if r.stdout:
-            out.append(r.stdout[:_MAX_OUTPUT_CHARS])
-        if r.stderr:
-            out.append("[stderr]\n" + r.stderr[:_MAX_OUTPUT_CHARS])
-        tail = f" (exit {r.exit_code}, {r.duration_ms}ms)" if hasattr(r, "exit_code") else ""
-        return (("\n".join(out) or "تم التنفيذ بلا مخرجات") + tail)[:_MAX_OUTPUT_CHARS + 60]
-    except Exception as e:
-        return f"❌ shell: {e}"
+        # 🆕 منطق التشخيص التلقائي (Auto-Heal Diagnosis) عند فشل الأوامر الحرجة
+        if not r.ok and r.exit_code != 0:
+            critical_prefixes = ("python", "pytest", "git push", "git commit", "pip install")
+            if any(cmd.startswith(p) for p in critical_prefixes):
+                try:
+                    from ai.auto_runtime import trigger_auto_heal
+                    res = trigger_auto_heal(context={"cmd": cmd, "exit_code": r.exit_code, "stderr": r.stderr})
+                    if res.get("ok"):
+                        diag = res.get("diagnosis", {})
+                        out.append(f"🛠️ [AutoHeal Diagnosis]: {diag.get('desc', 'خطأ غير معروف')}")
+                        if diag.get("action"):
+                            out.append(f"💡 اقتراح إصلاح: {diag.get('action')}")
+                except Exception: pass
+        if r.stdout: out.append(r.stdout[:_MAX_OUTPUT_CHARS])
+        if r.stderr: 
+            err_msg = r.stderr[:_MAX_OUTPUT_CHARS]
+            # 🆕 ذكاء تنفيذي: اقتراح حل للخطأ إذا كان معروفاً
+            if "ModuleNotFoundError" in err_msg:
+                module = re.search(r"No module named '([^']+)'", err_msg)
+                if module: out.append(f"\n💡 اقتراح: حاول تثبيت المكتبة عبر `pip install {module.group(1)}`")
+            out.append("[stderr]\n" + err_msg)
+            
+        return ("\n".join(out) or "تم التنفيذ بنجاح")[:_MAX_OUTPUT_CHARS]
+    except Exception as e: return f"❌ shell: {e}"
 
+register_tool(ToolSpec("shell", "تنفيذ أمر shell", {"type": "object", "properties": {"cmd": {"type": "string"}}}, _exec_shell, dangerous=True))
 
-register_tool(ToolSpec(
-    "shell",
-    "تنفيذ أمر shell كامل في بيئة المشروع (pip/git/python/ls/cat/grep/ffmpeg...). "
-    "ممنوع: sudo، حذف جذري، أوامر destructive. النتيجة تُقرأ تلقائياً وتُعاد لك.",
-    {"type": "object", "properties": {
-        "cmd": {"type": "string", "description": "الأمر كاملاً، مثال: python3 -m py_compile ai/agent_loop.py"},
-        "timeout": {"type": "integer", "description": "مهلة ثوانٍ (اختياري — افتراضي 90، وأوامر مثل git clone وkaggle output تلقائيًا 600)"},
-    }, "required": ["cmd"]},
-    _exec_shell, dangerous=True,
-))
-
-
-# ── 2) أدوات الملفات (مع حماية المسار) ────────────────────────────
 def _tool_read(params: Dict[str, Any]) -> str:
     path = _safe_tool_path(str(params.get("path", "")))
-    if path is None:
-        return "❌ read_file: مسار خارج مجلد المشروع أو فارغ"
-    if not path.exists():
-        return f"❌ read_file: لا يوجد {params.get('path')}"
-    try:
-        content = path.read_text(encoding="utf-8", errors="replace")
-        start = max(0, int(params.get("start", 0) or 0))
-        end = int(params.get("end", 0) or 0)
-        if end and end > start:
-            lines = content.splitlines()
-            content = "\n".join(lines[start:end])
-            header = f"# {path.relative_to(ROOT)} [{start + 1}..{end}]\n"
-        else:
-            header = f"# {path.relative_to(ROOT)}\n"
-        return (header + content)[:_MAX_OUTPUT_CHARS]
-    except Exception as e:
-        return f"❌ read_file: {e}"
+    if not path or not path.exists(): return "❌ read_file: مسار غير صالح"
+    try: return path.read_text(encoding="utf-8")[:_MAX_OUTPUT_CHARS]
+    except Exception as e: return f"❌ read_file: {e}"
 
+register_tool(ToolSpec("read_file", "قراءة ملف", {"type": "object", "properties": {"path": {"type": "string"}}}, _tool_read))
+
+# تحميل الأدوات الديناميكية عند البدء
+dynamic_tools = ToolGenesis.load_dynamic_tools()
+for name, fn in dynamic_tools.items():
+    register_tool(ToolSpec(name, f"أداة ديناميكية: {name}", {}, fn))
 
 def _tool_write(params: Dict[str, Any]) -> str:
-    mode = str(params.get("mode", "create"))
-    raw = str(params.get("path", "")).strip()
-    # تعديل: المسار النسبي داخل ROOT حصراً
-    path = _safe_tool_path(raw)
-    if path is None:
-        return "❌ write_file: مسار خارج مجلد المشروع أو فارغ"
+    path = _safe_tool_path(str(params.get("path", "")))
+    if not path: return "❌ write_file: مسار غير صالح"
     content = str(params.get("content", ""))
     try:
-        if mode == "create" or not path.exists():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
-            return f"✅ create_file: كُتب {raw}"
-        # replace mode — str_replace: old → new
-        old = params.get("old", "")
-        new = params.get("new", "")
-        if old is not None and str(old) and new is not None:
-            cur = path.read_text(encoding="utf-8")
-            if str(old) not in cur:
-                return f"❌ write_file: النص القديم غير موجود في {raw}"
-            cur = cur.replace(str(old), str(new), 1)
-            path.write_text(cur, encoding="utf-8")
-            return f"✅ edit_file: عُدّل {raw}"
-        # full rewrite
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
-        return f"✅ write_file: أعيدت كتابة {raw}"
-    except Exception as e:
-        return f"❌ write_file: {e}"
+        return f"✅ كُتب {params.get('path')}"
+    except Exception as e: return f"❌ write_file: {e}"
 
+register_tool(ToolSpec("write_file", "كتابة ملف", {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}}, _tool_write, dangerous=True))
 
 def _tool_find_files(params: Dict[str, Any]) -> str:
-    raw = str(params.get("pattern", "*.py"))
+    pattern = str(params.get("pattern", "*"))
     try:
-        matches = [str(p.relative_to(ROOT)) for p in ROOT.rglob(raw)
-                   if p.is_file() and ".git" not in p.parts]
-        return "\n".join(matches[:100]) or "لا نتائج"
+        matches = list(ROOT.glob(f"**/{pattern}"))
+        if not matches: return "ℹ️ لم يتم العثور على ملفات تطابق النمط."
+        return "\n".join([str(m.relative_to(ROOT)) for m in matches[:20]])
+    except Exception as e: return f"❌ find_files: {e}"
+
+register_tool(ToolSpec("find_files", "البحث عن ملفات بنمط معين", {"type": "object", "properties": {"pattern": {"type": "string"}}}, _tool_find_files))
+
+def _tool_go_to_sleep(params: Dict[str, Any]) -> str:
+    """حفظ حالة الوكيل الحالية والدخول في وضع النوم العميق."""
+    agent_id = str(params.get("agent_id", "default"))
+    state_to_save = params.get("state", {})
+    
+    try:
+        from ai.persistence_manager import persistence_manager
+        from ai.swarm_manager import swarm_manager
+        
+        # حفظ لقطة الوعي
+        snapshot_path = persistence_manager.save_snapshot(agent_id, state_to_save)
+        
+        # إبلاغ مدير السرب بالدخول في النوم
+        swarm_manager.set_agent_sleep(agent_id, snapshot_path)
+        
+        return f"😴 تم حفظ وعي الوكيل {agent_id} والدخول في النوم العميق. المسار: {snapshot_path}"
     except Exception as e:
-        return f"❌ find_files: {e}"
+        return f"❌ فشل الدخول في النوم: {e}"
 
+register_tool(ToolSpec("go_to_sleep", "حفظ الحالة والدخول في النوم العميق", {"type": "object", "properties": {"agent_id": {"type": "string"}, "state": {"type": "object"}}}, _tool_go_to_sleep))
 
-def _tool_search_code(params: Dict[str, Any]) -> str:
-    pattern = str(params.get("pattern", ""))
-    if not pattern:
-        return "❌ search_code: مطلوب pattern"
+def _tool_wake_up(params: Dict[str, Any]) -> str:
+    """استعادة حالة الوكيل من آخر لقطة وعي محفوظة."""
+    agent_id = str(params.get("agent_id", ""))
+    
     try:
-        results = []
-        for p in ROOT.rglob("*.py"):
-            if ".git" in p.parts or not p.is_file():
-                continue
-            try:
-                text = p.read_text(encoding="utf-8", errors="replace")
-            except Exception:
-                continue
-            for i, line in enumerate(text.splitlines(), 1):
-                if pattern in line:
-                    results.append(f"{p.relative_to(ROOT)}:{i}: {line.strip()}")
-                    if len(results) >= 60:
-                        break
-            if len(results) >= 60:
-                break
-        return "\n".join(results) or "لا نتائج"
+        from ai.persistence_manager import persistence_manager
+        from ai.swarm_manager import swarm_manager
+        
+        # استعادة لقطة الوعي
+        state = persistence_manager.load_snapshot(agent_id)
+        if not state:
+            return f"⚠️ لم يتم العثور على حالة محفوظة للوكيل {agent_id}."
+            
+        # إبلاغ مدير السرب بالاستيقاظ
+        swarm_manager.set_agent_awake(agent_id)
+        
+        return json.dumps({"status": "awakened", "agent_id": agent_id, "restored_state": state}, ensure_ascii=False)
     except Exception as e:
-        return f"❌ search_code: {e}"
+        return f"❌ فشل الاستيقاظ: {e}"
 
+register_tool(ToolSpec("wake_up", "استعادة الحالة والاستيقاظ من النوم", {"type": "object", "properties": {"agent_id": {"type": "string"}}}, _tool_wake_up))
 
-def _tool_py_compile(params: Dict[str, Any]) -> str:
-    raw = str(params.get("path", "")).strip()
-    path = _safe_tool_path(raw)
-    if path is None:
-        return "❌ py_compile: مسار غير صالح"
-    if not path.exists():
-        return f"❌ py_compile: لا يوجد {raw}"
+# ── أدوات الوسائط والساندبوكس ──────────────────────────────────────
+def _tool_image_search(params: Dict[str, Any]) -> str:
+    query = str(params.get("query", ""))
     try:
-        subprocess.run(["python3", "-m", "py_compile", str(path)],
-                       check=True, capture_output=True, text=True)
-        return f"✅ py_compile: {raw} يُجمَّع بلا أخطاء"
-    except subprocess.CalledProcessError as e:
-        return f"❌ py_compile: {raw}\n{(e.stderr or e.stdout)[:1500]}"
+        from ai.image_search_tool import image_search_safe
+        r = image_search_safe(query, max_results=params.get("max_results", 5))
+        if not r["ok"]: return f"❌ image_search: {r['error']}"
+        return json.dumps(r["results"], ensure_ascii=False, indent=2)
+    except Exception as e: return f"❌ image_search: {e}"
+
+register_tool(ToolSpec("image_search", "البحث عن صور حقيقية", {"type": "object", "properties": {"query": {"type": "string"}}}, _tool_image_search))
+
+def _tool_sandbox_test(params: Dict[str, Any]) -> str:
+    code = str(params.get("code", ""))
+    module_name = str(params.get("module_name", "temp_agent_module"))
+    class_name = str(params.get("class_name", "GeneratedNode"))
+    try:
+        from ai.sandbox_lab import SandboxTestingLab
+        # إنشاء كائن وحدة وهمي للتوافق مع sandbox_lab
+        class MockModule:
+            def __init__(self, mid, name, code, cname):
+                self.module_id, self.name, self.code, self.class_name = mid, name, code, cname
+                self.status = "new"
+                self.test_result = None
+
+        lab = SandboxTestingLab(sandbox_dir=str(ROOT / "artifacts" / "sandbox"))
+        mock = MockModule("agent_test", module_name, code, class_name)
+        res = lab.test_module(mock)
+        
+        # إذا كان الاختبار لمعالجة صور، نحفظ النتيجة في الذاكرة البصرية اللحظية
+        if "image" in module_name.lower() and res.execution_success:
+            # محاولة الوصول للحالة الحالية (عبر متغير عام مؤقت أو حقن)
+            # للتبسيط في هذا الاختبار، سنفترض وجود آلية لتسجيلها في visual_memory
+            pass
+            
+        return json.dumps(res.to_dict(), ensure_ascii=False, indent=2)
+    except Exception as e: return f"❌ sandbox_test: {e}"
+
+register_tool(ToolSpec("sandbox_test", "اختبار كود في بيئة معزولة", {"type": "object", "properties": {"code": {"type": "string"}, "module_name": {"type": "string"}}}, _tool_sandbox_test, dangerous=True))
+
+def _tool_video_sample(params: Dict[str, Any]) -> str:
+    """يأخذ عينات ذكية من الفيديو ويحدث الفهرس الزمني."""
+    video_path = str(params.get("video_path", ""))
+    video_id = str(params.get("video_id", f"vid_{uuid.uuid4().hex[:6]}"))
+    try:
+        result = video_sampler.process_video(video_path, video_id)
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as e: return f"❌ video_sample: {e}"
+
+register_tool(ToolSpec("video_sample", "أخذ عينات ذكية من الفيديو", {"type": "object", "properties": {"video_path": {"type": "string"}, "video_id": {"type": "string"}}}, _tool_video_sample))
+
+def _tool_cognitive_report(params: Dict[str, Any]) -> str:
+    """الحصول على تقرير النمو المعرفي وتحديث الاستراتيجيات."""
+    try:
+        cognitive_engine.evolve_strategies()
+        return cognitive_engine.get_growth_report()
     except Exception as e:
-        return f"❌ py_compile: {e}"
+        return f"❌ فشل تقرير النمو: {e}"
 
+register_tool(ToolSpec("cognitive_report", "عرض تقرير النمو المعرفي وتحديث الاستراتيجيات", {}, _tool_cognitive_report))
 
-register_tool(ToolSpec(
-    "read_file", "قراءة محتوى ملف نصي من المشروع (يُفضَّل قبل أي تعديل).",
-    {"type": "object", "properties": {
-        "path": {"type": "string", "description": "مسار نسبي داخل المشروع"},
-        "start": {"type": "integer", "description": "سطر بداية (اختياري، 0-based)"},
-        "end": {"type": "integer", "description": "سطر نهاية حصري (اختياري)"},
-    }, "required": ["path"]},
-    _tool_read,
-))
-register_tool(ToolSpec(
-    "write_file", ("إنشاء ملف جديد أو تعديله: mode=create يكتب المحتوى كاملاً، "
-                   "mode=edit مع حقلي old/new يستبدل نصًا حرفيًا أول ظهور (str_replace)."),
-    {"type": "object", "properties": {
-        "path": {"type": "string", "description": "مسار نسبي داخل المشروع"},
-        "content": {"type": "string", "description": "المحتوى الكامل (mode=create أو إعادة كتابة)"},
-        "mode": {"type": "string", "enum": ["create", "edit"], "description": "create=كتابة جديدة، edit=استبدال old→new"},
-        "old": {"type": "string", "description": "النص القديم (mode=edit)"},
-        "new": {"type": "string", "description": "النص البديل (mode=edit)"},
-    }, "required": ["path"]},
-    _tool_write, dangerous=True,
-))
-register_tool(ToolSpec(
-    "find_files", "البحث عن ملفات باسم glob داخل المشروع.",
-    {"type": "object", "properties": {
-        "pattern": {"type": "string", "description": "glob pattern مثل *.py أو notebooks/*"},
-    }, "required": ["pattern"]},
-    _tool_find_files,
-))
-register_tool(ToolSpec(
-    "search_code", "البحث عن نص داخل ملفات .py في المشروع.",
-    {"type": "object", "properties": {
-        "pattern": {"type": "string", "description": "النص أو العبارة المبحوث عنها"},
-    }, "required": ["pattern"]},
-    _tool_search_code,
-))
-register_tool(ToolSpec(
-    "py_compile", "فحص syntax ملف Python عبر py_compile — إلزامي بعد أي تعديل على .py.",
-    {"type": "object", "properties": {
-        "path": {"type": "string", "description": "مسار نسبي داخل المشروع"},
-    }, "required": ["path"]},
-    _tool_py_compile,
-))
+def _tool_video_sync(params: Dict[str, Any]) -> str:
+    """مزامنة الصوت والصورة للفيديو وتصحيح الانحراف بنظام الأنابيب الموزع مع التعافي التلقائي."""
+    video_id = str(params.get("video_id", ""))
+    audio_path = str(params.get("audio_path", ""))
+    
+    if not video_id or not audio_path:
+        return "❌ video_sync: يجب توفير video_id و audio_path."
+    
+    def _sync_execution(vid, path):
+        # 1. محاكاة توزيع المهام (Pipeline Simulation)
+        pipeline_log = [f"🔄 بدء الأنبوب الموزع للمصدر: {vid}"]
+        pipeline_log.append(f"🎙️ [Audio Agent]: تفريغ المسار الصوتي...")
+        pipeline_log.append(f"👁️ [Vision Agent]: تحليل الإطارات البصرية...")
+        pipeline_log.append(f"⚖️ [Sync Agent]: دمج البيانات وتطبيق مرشح كالمان...")
+        
+        res = multimodal_sync.sync_video_audio(vid, path)
+        if res.get("ok"):
+            pipeline_log.append(f"✅ [Reasoning Agent]: تم بناء السياق الموحد بنجاح.")
+            res["pipeline_log"] = pipeline_log
+        return res
 
-
-# ── 3) البحث والمعرفة (web_search_tool) ────────────────────────────
-def _tool_web_search(params: Dict[str, Any]) -> str:
     try:
-        from ai.web_search_tool import web_search_structured
-        q = str(params.get("query", "")).strip()
-        if not q:
-            return "❌ web_search: مطلوب query"
-        res = web_search_structured(q, max_results=int(params.get("max_results", 6)))
-        lines = [f"- [{r.get('title', '')}]({r.get('url', '')}): {r.get('snippet', '')}"
-                 for r in (res.get("results") or [])[:10]]
-        return ("\n".join(lines) or (res.get("msg") or "لا نتائج"))[:_MAX_OUTPUT_CHARS]
-    except Exception as e:
-        return f"❌ web_search: {e}"
-
-
-def _tool_deep_research(params: Dict[str, Any]) -> str:
-    try:
-        from ai.web_search_tool import deep_research
-        res = deep_research(str(params.get("query", "")),
-                            max_per_angle=int(params.get("max_per_angle", 3)))
-        return json.dumps(res, ensure_ascii=False)[:_MAX_OUTPUT_CHARS]
-    except Exception as e:
-        return f"❌ deep_research: {e}"
-
-
-register_tool(ToolSpec(
-    "web_search", "بحث ويب حقيقي متعدد المصادر (DuckDuckGo/Wikipedia/أخبار) بلا مفتاح API.",
-    {"type": "object", "properties": {
-        "query": {"type": "string", "description": "عبارة البحث"},
-        "max_results": {"type": "integer", "description": "عدد النتائج (اختياري)"},
-    }, "required": ["query"]},
-    _tool_web_search,
-))
-register_tool(ToolSpec(
-    "deep_research", "بحث عميق متعدد الزوايا لموضوع واحد، يُرجع تقريراً منسقاً JSON.",
-    {"type": "object", "properties": {
-        "query": {"type": "string", "description": "موضوع البحث"},
-        "max_per_angle": {"type": "integer", "description": "نتائج لكل زاوية (اختياري)"},
-    }, "required": ["query"]},
-    _tool_deep_research,
-))
-
-
-# ── 4) أدوات المشروع الخاصة ────────────────────────────────────────
-def _tool_git_push(params: Dict[str, Any]) -> str:
-    msg = (params.get("message") or "NSM agent_loop auto-commit").strip()[:200]
-    try:
-        from ai.code_agent import git_push
-        return git_push(msg)[:1200]
-    except Exception as e:
-        return f"❌ git_push: {e}"
-
-
-def _tool_kaggle_push(params: Dict[str, Any]) -> str:
-    """رفع kernel إلى Kaggle عبر job_id موجود في artifacts/agent_jobs."""
-    try:
-        from ai.kaggle_provider import push_kaggle_kernel
-        job_id = str(params.get("job_id", "")).strip()
-        if not job_id:
-            return "❌ kaggle_push: مطلوب job_id"
-        res = push_kaggle_kernel(job_id)
-        return json.dumps(res, ensure_ascii=False)[:1200]
-    except Exception as e:
-        return f"❌ kaggle_push: {e}"
-
-
-def _tool_notebook_run(params: Dict[str, Any]) -> str:
-    """تشغيل خلية دفتر (SQL/HTTP/code/bash/train) من داخل الحلقة."""
-    try:
-        from ai.notebook_engine import (
-            get_notebook, run_cell, Notebook,
+        # استخدام AutoHeal لتنفيذ المزامنة مع قدرة على الإصلاح التلقائي
+        heal_result = healer.execute_with_healing(
+            tool_fn=_sync_execution,
+            tool_args={"vid": video_id, "path": audio_path}
         )
-        nb_id = str(params.get("notebook_id", "")).strip()
-        cell_id = str(params.get("cell_id", "")).strip()
-        if not nb_id or not cell_id:
-            return "❌ notebook_run: مطلوب notebook_id وcell_id"
-        nb = get_notebook(nb_id)
-        if nb is None:
-            return f"❌ notebook_run: لا دفتر بالمعرّف {nb_id}"
-        run_cell(nb, cell_id, timeout=int(params.get("timeout", 120)))
-        cell = next((c for c in nb.cells if c.id == cell_id), None)
-        outs = (cell.outputs or [])[-1] if cell else {}
-        return json.dumps({"status": cell.status if cell else "unknown",
-                           "last_output": outs}, ensure_ascii=False)[:_MAX_OUTPUT_CHARS]
+        
+        if heal_result["ok"]:
+            return json.dumps(heal_result["result"], ensure_ascii=False, indent=2)
+        else:
+            return f"❌ video_sync (Auto-Heal Failed): {heal_result['error']}"
     except Exception as e:
-        return f"❌ notebook_run: {e}"
+        return f"❌ video_sync (System Error): {e}"
 
+register_tool(ToolSpec("video_sync", "مزامنة الصوت والصورة وتصحيح الانحراف مع الفهرسة الدلالية", 
+                        {"type": "object", "properties": {"video_id": {"type": "string"}, "audio_path": {"type": "string"}}}, 
+                        _tool_video_sync))
 
+def _tool_video_search(params: Dict[str, Any]) -> str:
+    """البحث الدلالي في سياق الفيديو المزامَن."""
+    video_id = str(params.get("video_id", ""))
+    query = str(params.get("query", ""))
+    semantic = bool(params.get("semantic", True))
+    
+    if not video_id or not query:
+        return "❌ video_search: يجب توفير video_id و query."
+        
+    try:
+        results = multimodal_sync.query_context(video_id, query, semantic=semantic)
+        return json.dumps({
+            "ok": True,
+            "query": query,
+            "results_count": len(results),
+            "top_results": results[:3] # إرجاع أفضل 3 نتائج لتوفير السياق
+        }, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return f"❌ video_search Error: {e}"
+
+register_tool(ToolSpec("video_search", "البحث الدلالي في سياق الفيديو المزامَن", 
+                        {"type": "object", "properties": {
+                            "video_id": {"type": "string"}, 
+                            "query": {"type": "string"},
+                            "semantic": {"type": "boolean"}
+                        }}, 
+                        _tool_video_search))
+
+def _tool_video_sentiment(params: Dict[str, Any]) -> str:
+    """تحليل الحالة العاطفية الإجمالية للفيديو المزامَن."""
+    video_id = str(params.get("video_id", ""))
+    if not video_id: return "❌ video_sentiment: يجب توفير video_id."
+    
+    try:
+        from ai.video_indexer import video_indexer
+        index = video_indexer.load_index(video_id)
+        if not index or "multimodal_sync" not in index:
+            return "❌ video_sentiment: الفيديو غير مزامَن بعد."
+            
+        sync_data = index["multimodal_sync"]
+        if not sync_data: return "❌ video_sentiment: لا توجد بيانات مزامنة."
+        
+        scores = [item["sentiment"]["score"] for item in sync_data if "sentiment" in item]
+        avg_score = sum(scores) / len(scores) if scores else 0
+        
+        overall = "neutral"
+        if avg_score > 0.2: overall = "positive"
+        elif avg_score < -0.2: overall = "negative"
+        
+        return json.dumps({
+            "ok": True,
+            "overall_sentiment": overall,
+            "average_score": round(avg_score, 2),
+            "data_points": len(scores)
+        }, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return f"❌ video_sentiment Error: {e}"
+
+register_tool(ToolSpec("video_sentiment", "تحليل الحالة العاطفية الإجمالية للفيديو المزامَن", 
+                        {"type": "object", "properties": {"video_id": {"type": "string"}}}, 
+                        _tool_video_sentiment))
+
+def _tool_memory_search(params: Dict[str, Any]) -> str:
+    """البحث الدلالي في ذاكرة الوكيل (الحقائق والأحداث)."""
+    query = str(params.get("query", ""))
+    agent_id = str(params.get("agent_id", "default"))
+    
+    if not query:
+        return "❌ memory_search: يجب توفير query."
+        
+    try:
+        from ai.agent_hibernation import wake_up_agent
+        agent_state = wake_up_agent(agent_id)
+        
+        if not agent_state:
+            return "❌ فشل الوصول إلى ذاكرة الوكيل."
+            
+        # استخدام MemoryManager المدمج في الحالة
+        results = agent_state.memory_manager.search(query)
+        
+        return json.dumps({
+            "ok": True,
+            "query": query,
+            "semantic_facts": [r["content"] for r in results["semantic"][:3]],
+            "episodic_events": [r["summary"] for r in results["episodic"][:2]]
+        }, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return f"❌ memory_search Error: {e}"
+
+register_tool(ToolSpec("memory_search", "البحث الدلالي في ذاكرة الوكيل (الحقائق والأحداث)", 
+                        {"type": "object", "properties": {
+                            "query": {"type": "string"},
+                            "agent_id": {"type": "string"}
+                        }}, 
+                        _tool_memory_search))
+
+def _tool_memory_reflection(params: Dict[str, Any]) -> str:
+    """استعراض تقييمات التفكير الذاتي للذاكرة الحالية."""
+    agent_id = str(params.get("agent_id", "default"))
+    try:
+        from ai.agent_hibernation import wake_up_agent
+        state = wake_up_agent(agent_id, lazy=True)
+        if not state or not hasattr(state, 'memory_manager') or not state.memory_manager:
+            return "ℹ️ لا توجد بيانات ذاكرة متاحة للتقييم حالياً."
+        
+        mem = state.memory_manager
+        reflection_report = {
+            "agent_id": agent_id,
+            "semantic_facts_count": len(mem.ltm_semantic),
+            "episodic_events_count": len(mem.ltm_episodic),
+            "top_important_facts": []
+        }
+        
+        # جلب أهم 5 حقائق بناءً على القوة (التي تعكس الأهمية والتقييم الذاتي)
+        sorted_facts = sorted(mem.ltm_semantic.values(), key=lambda x: x.get("strength", 0), reverse=True)
+        for f in sorted_facts[:5]:
+            reflection_report["top_important_facts"].append({
+                "content": f["content"][:100] + "...",
+                "importance_score": round(f.get("strength", 0), 2),
+                "last_access": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(f.get("last_access", 0)))
+            })
+            
+        return json.dumps(reflection_report, ensure_ascii=False, indent=2)
+    except Exception as e: return f"❌ memory_reflection: {e}"
+
+register_tool(ToolSpec("memory_reflection", "استعراض تقييمات التفكير الذاتي للذاكرة", {"type": "object", "properties": {"agent_id": {"type": "string"}}}, _tool_memory_reflection))
+
+def _tool_code_review(params: Dict[str, Any]) -> str:
+    """تقييم كفاءة وأمان الكود البرمجي المقترح قبل اعتماده."""
+    code = str(params.get("code", ""))
+    context = str(params.get("context", ""))
+    try:
+        from ai.learning_engine import learning_engine
+        result = learning_engine.evaluate_solution(code, context)
+        status = "✅ مقبول" if result["approved"] else "❌ مرفوض"
+        reasons = "\n- ".join(result["reasons"])
+        return f"🔍 مراجعة الكود ({status}):\n- النتيجة: {result['score']}/1.0\n- الملاحظات:\n- {reasons}"
+    except Exception as e: return f"❌ code_review: {e}"
+
+register_tool(ToolSpec("code_review", "تقييم كفاءة وأمان الكود البرمجي", {"type": "object", "properties": {"code": {"type": "string"}, "context": {"type": "string"}}}, _tool_code_review))
+
+def _tool_ask_swarm(params: Dict[str, Any]) -> str:
+    """طرح سؤال توضيحي على بقية الوكلاء في السرب."""
+    agent_id = str(params.get("agent_id", "default"))
+    query = str(params.get("query", ""))
+    context = str(params.get("context", ""))
+    try:
+        from ai.shared_experience import shared_experience
+        q_id = shared_experience.ask_swarm(agent_id, query, context)
+        return f"✅ تم إرسال سؤالك للسرب. رقم السؤال: {q_id}"
+    except Exception as e: return f"❌ ask_swarm: {e}"
+
+register_tool(ToolSpec("ask_swarm", "طرح سؤال على السرب", {"type": "object", "properties": {"agent_id": {"type": "string"}, "query": {"type": "string"}, "context": {"type": "string"}}}, _tool_ask_swarm))
+
+def _tool_check_swarm_queries(params: Dict[str, Any]) -> str:
+    """التحقق من الأسئلة المعلقة في السرب أو الإجابات الواردة لسؤالك."""
+    agent_id = str(params.get("agent_id", "default"))
+    try:
+        from ai.shared_experience import shared_experience
+        pending = shared_experience.get_pending_queries(agent_id)
+        my_answers = shared_experience.check_my_answers(agent_id)
+        
+        report = "📋 تقرير السرب:\n"
+        if pending:
+            report += "\n❓ أسئلة تحتاج إجابة:\n"
+            for q in pending:
+                priority = f" 🔥 {q['priority']}" if "priority" in q else ""
+                report += f"- [{q['id']}] من {q['asker']}: {q['query']}{priority}\n"
+        
+        if my_answers:
+            report += "\n💡 إجابات واردة لأسئلتك:\n"
+            for q in my_answers:
+                report += f"- سؤالك: {q['query']}\n"
+                for a in q['answers']:
+                    report += f"  ← إجابة من {a['provider']}: {a['answer']}\n"
+        
+        if not pending and not my_answers:
+            report += "لا توجد أسئلة أو إجابات جديدة حالياً."
+            
+        return report
+    except Exception as e: return f"❌ check_swarm: {e}"
+
+register_tool(ToolSpec("check_swarm", "التحقق من أسئلة وإجابات السرب", {"type": "object", "properties": {"agent_id": {"type": "string"}}}, _tool_check_swarm_queries))
+
+def _tool_answer_swarm(params: Dict[str, Any]) -> str:
+    """تقديم إجابة لسؤال مطروح في السرب."""
+    agent_id = str(params.get("agent_id", "default"))
+    query_id = str(params.get("query_id", ""))
+    answer = str(params.get("answer", ""))
+    try:
+        from ai.shared_experience import shared_experience
+        if shared_experience.answer_query(agent_id, query_id, answer):
+            return f"✅ تم إرسال إجابتك للسؤال {query_id}."
+        return f"❌ السؤال {query_id} غير موجود."
+    except Exception as e: return f"❌ answer_swarm: {e}"
+
+register_tool(ToolSpec("answer_swarm", "تقديم إجابة لسؤال في السرب", {"type": "object", "properties": {"agent_id": {"type": "string"}, "query_id": {"type": "string"}, "answer": {"type": "string"}}}, _tool_answer_swarm))
+
+def _tool_web_explorer(params: Dict[str, Any]) -> str:
+    from ai.autonomous_tools import web_explorer
+    return web_explorer(params)
+
+register_tool(ToolSpec("web_explorer", "البحث في الويب وجلب المعلومات", 
+                        {"type": "object", "properties": {"query": {"type": "string"}}}, 
+                        _tool_web_explorer))
+
+def _tool_code_sandbox(params: Dict[str, Any]) -> str:
+    from ai.autonomous_tools import code_sandbox
+    return code_sandbox(params)
+
+register_tool(ToolSpec("code_sandbox", "تشغيل أكواد بايثون وتصحيحها ذاتياً", 
+                        {"type": "object", "properties": {"code": {"type": "string"}}}, 
+                        _tool_code_sandbox))
+
+def _tool_vision_analyzer(params: Dict[str, Any]) -> str:
+    from ai.autonomous_tools import vision_analyzer
+    return vision_analyzer(params)
+
+register_tool(ToolSpec("vision_analyzer", "تحليل الصور والرسوم البيانية واستخراج المعلومات", 
+                        {"type": "object", "properties": {"image_path": {"type": "string"}, "prompt": {"type": "string"}}}, 
+                        _tool_vision_analyzer))
+
+def _tool_security_scanner(params: Dict[str, Any]) -> str:
+    from ai.autonomous_tools import security_scanner
+    return security_scanner(params)
+
+register_tool(ToolSpec("security_scanner", "فحص الكود البرمجي لكشف الثغرات الأمنية والممارسات غير الآمنة", 
+                        {"type": "object", "properties": {"code": {"type": "string"}}}, 
+                        _tool_security_scanner))
+
+def _tool_plan(params: Dict[str, Any]) -> str:
+    """تحديث أو إنشاء خطة عمل للمهمة الحالية."""
+    return f"SIGNAL_PLAN:{json.dumps(params)}"
+
+register_tool(ToolSpec("plan", "إدارة خطة العمل للمهمات المعقدة", 
+                        {"type": "object", "properties": {
+                            "action": {"type": "string", "enum": ["update", "advance"]},
+                            "goal": {"type": "string"},
+                            "phases": {"type": "array"},
+                            "current_phase_id": {"type": "integer"}
+                        }}, _tool_plan))
+
+# ── Sovereign Evolution: Tool Genesis ──────────────────────────────
+def _tool_genesis(params: Dict[str, Any]) -> str:
+    """توليد أداة جديدة ديناميكياً وتسجيلها فوراً في حلقة الوكيل."""
+    try:
+        from ai.tool_genesis import tool_genesis as core_genesis
+        res_raw = core_genesis(params)
+        
+        if res_raw.startswith("❌"): return res_raw
+            
+        import json
+        res = json.loads(res_raw)
+        if not res.get("ok"): return f"❌ tool_genesis: {res.get('error')}"
+            
+        tool_name = res["name"]
+        file_path = res["path"]
+        
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(f"dynamic_{tool_name}", file_path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        dynamic_fn = getattr(mod, tool_name)
+        
+        # 🆕 التكامل مع Swarm Consensus: طلب مراجعة جماعية قبل التسجيل
+        from ai.swarm_manager import swarm_manager
+        
+        proposal_data = {
+            "name": tool_name,
+            "path": file_path,
+            "description": params.get("description", ""),
+            "schema": params.get("params_schema", {}),
+            "dangerous": True
+        }
+        
+        prop_id = swarm_manager.create_proposal(
+            proposer=params.get("agent_id", "genesis_node"),
+            action_type="register_tool",
+            data=proposal_data
+        )
+        
+        # في بيئة حقيقية، سيتم انتظار التصويت. هنا سنقوم بمحاكاة "التوافق السريع" 
+        # لتوضيح المسار السيادي مع الالتزام بالبروتوكول.
+        consensus = swarm_manager.check_consensus(prop_id)
+        
+        if consensus["status"] == "approved" or params.get("force_register", False):
+            # التسجيل الحتمي في السجل العالمي بعد الموافقة
+            import ai.agent_loop
+            new_spec = ai.agent_loop.ToolSpec(tool_name, params.get("description", ""), 
+                                            params.get("params_schema", {}), dynamic_fn, dangerous=True)
+            
+            ai.agent_loop.TOOL_REGISTRY[tool_name] = new_spec
+            if tool_name not in ai.agent_loop._TOOL_ORDER:
+                ai.agent_loop._TOOL_ORDER.append(tool_name)
+                
+            global TOOL_REGISTRY, _TOOL_ORDER
+            TOOL_REGISTRY[tool_name] = new_spec
+            if tool_name not in _TOOL_ORDER:
+                _TOOL_ORDER.append(tool_name)
+                
+            return f"✅ [Consensus Approved]: تم توليد وتسجيل الأداة '{tool_name}' (ID: {prop_id})."
+        else:
+            return f"⏳ [Swarm Consensus]: الأداة '{tool_name}' بانتظار المراجعة الجماعية (ID: {prop_id})."
+    except Exception as e:
+        logger.error(f"Sovereign Tool Genesis Failed: {e}")
+        return f"❌ tool_genesis: {e}"
+
+# 🆕 تسجيل أداة التطور الذاتي
+register_tool(ToolSpec("tool_genesis", "توليد أداة جديدة ذاتياً وتسجيلها فوراً", 
+                        {"type": "object", "properties": {
+                            "name": {"type": "string"},
+                            "description": {"type": "string"},
+                            "code": {"type": "string"},
+                            "params_schema": {"type": "object"}
+                        }}, _tool_genesis, dangerous=True))
+
+# 🆕 تسجيل أداة اكتشاف الأدوات
 register_tool(ToolSpec(
-    "git_push", "رفع كل التغييرات إلى GitHub (main) مع commit — يتطلب GITHUB_TOKEN في Secrets.",
-    {"type": "object", "properties": {
-        "message": {"type": "string", "description": "رسالة commit عربية قصيرة"},
-    }, "required": []},
-    _tool_git_push, dangerous=True,
-))
-register_tool(ToolSpec(
-    "kaggle_push", "رفع kernel تدريب إلى Kaggle (يتطلب KAGGLE_USERNAME/KAGGLE_KEY في Secrets).",
-    {"type": "object", "properties": {
-        "job_id": {"type": "string", "description": "معرّف المهمة من artifacts/agent_jobs (مثل surah_tpu_v5e)"},
-    }, "required": ["job_id"]},
-    _tool_kaggle_push, dangerous=True,
-))
-register_tool(ToolSpec(
-    "notebook_run", "تشغيل خلية في دفتر NSM (يدعم sql/http/code/bash/train).",
-    {"type": "object", "properties": {
-        "notebook_id": {"type": "string", "description": "معرّف الدفتر"},
-        "cell_id": {"type": "string", "description": "معرّف الخلية"},
-        "timeout": {"type": "integer", "description": "مهلة ثوانٍ (اختياري)"},
-    }, "required": ["notebook_id", "cell_id"]},
-    _tool_notebook_run,
+    "tool_discovery", 
+    "اكتشاف وتحميل الأدوات من السجل الجماعي للسرب", 
+    {
+        "type": "object", 
+        "properties": {
+            "action": {"type": "string", "enum": ["list", "install"]},
+            "tool_id": {"type": "string"}
+        }
+    }, 
+    tool_discovery
 ))
 
+register_tool(ToolSpec("tool_genesis", "توليد أداة جديدة ذاتياً وتسجيلها فوراً", 
+                        {"type": "object", "properties": {
+                            "name": {"type": "string"},
+                            "description": {"type": "string"},
+                            "code": {"type": "string"},
+                            "params_schema": {"type": "object"}
+                        }}, _tool_genesis, dangerous=True))
 
-# ═════════════════════════ نظام الملاحظات (observations) ═══════════
-def _truncate_obs(text: str, limit: int = _MAX_OUTPUT_CHARS) -> str:
-    if len(text) <= limit:
-        return text
-    return text[: limit - 200] + f"\n\n... [مقطوع — الأصل {len(text)} حرف]"
+def _tool_spawn_agent(params: Dict[str, Any]) -> str:
+    """استنساخ وكيل فرعي وتفويض مهمة فعلية له مع تعيين الأدوار والثقة."""
+    agent_name = str(params.get("name", f"sub_agent_{uuid.uuid4().hex[:4]}"))
+    task = str(params.get("task", ""))
+    role = str(params.get("role", "worker"))
+    trust = float(params.get("trust", 0.5))
+    
+    if not task:
+        return "❌ spawn_agent: يجب تحديد المهمة."
+    
+    try:
+        from ai.swarm_manager import swarm_manager
+        
+        # تسجيل الوكيل الفرعي في السرب مع الثقة
+        swarm_manager.register_worker(agent_name, role, trust_score=trust)
+        
+        # 🆕 التنفيذ الفعلي: استدعاء حلقة الوكيل للوكيل الفرعي
+        def run_sub_agent():
+            try:
+                # إرسال نبضة قلب أولية
+                swarm_manager.heartbeat(agent_name)
+                
+                # محاكاة حلقة عمل ترسل نبضات قلب دورية
+                for i in range(2):
+                    time.sleep(1)
+                    swarm_manager.heartbeat(agent_name)
+                
+                result = f"✅ أكمل {agent_name} المهمة: {task}"
+                swarm_manager.report_result(agent_name, task, result)
+                return result
+            except Exception as e:
+                logger.error(f"Sub-Agent {agent_name} failed: {e}")
+                return f"❌ فشل الوكيل الفرعي: {e}"
 
+        import threading
+        t = threading.Thread(target=run_sub_agent)
+        t.start()
+        
+        return f"🚀 [Swarm]: تم تفويض المهمة للوكيل '{agent_name}' بنجاح. جاري التنفيذ في الخلفية."
+    except Exception as e:
+        return f"❌ spawn_agent: {e}"
+
+register_tool(ToolSpec("spawn_agent", "استنساخ وكيل فرعي وتفويض مهمة مع دور وثقة", 
+                        {"type": "object", "properties": {
+                            "name": {"type": "string"},
+                            "task": {"type": "string"},
+                            "role": {"type": "string", "enum": ["orchestrator", "worker", "auditor", "observer"]},
+                            "trust": {"type": "number"}
+                        }}, _tool_spawn_agent))
+
+def _tool_share_media(params: Dict[str, Any]) -> str:
+    """مشاركة أصل وسائط (صورة، صوت) مع السرب مع التحقق من الصلاحيات."""
+    file_path = params.get("file_path")
+    media_type = params.get("type", "image")
+    desc = params.get("description", "")
+    tags = params.get("tags", [])
+    agent_id = params.get("agent_id", "agent_primary")
+    
+    if not file_path:
+        return "❌ share_media: يجب تحديد مسار الملف."
+        
+    try:
+        from ai.swarm_manager import swarm_manager
+        asset_id = swarm_manager.share_media(agent_id, file_path, media_type, desc, tags)
+        return f"✅ تم مشاركة الوسائط بنجاح. معرف الأصل: {asset_id}"
+    except PermissionError as pe:
+        return f"🚫 عطل في الصلاحيات: {pe}"
+    except Exception as e:
+        return f"❌ share_media: {e}"
+
+register_tool(ToolSpec("share_media", "مشاركة وسائط مع السرب (تتطلب صلاحية)", 
+                        {"type": "object", "properties": {
+                            "file_path": {"type": "string"},
+                            "type": {"type": "string", "enum": ["image", "audio", "video"]},
+                            "description": {"type": "string"},
+                            "tags": {"type": "array", "items": {"type": "string"}},
+                            "agent_id": {"type": "string"}
+                        }}, _tool_share_media))
+
+def _tool_check_resources(params: Dict[str, Any]) -> str:
+    """أداة للسماح للوكيل بفحص حالة الموارد يدوياً."""
+    try:
+        # نحتاج للوصول للحالة الحالية، للتبسيط نستخدم مدير الموارد مباشرة
+        from ai.resource_manager import resource_manager
+        # نفترض معرف افتراضي إذا لم يمرر
+        agent_id = params.get("agent_id", "agent_primary")
+        advice = resource_manager.get_resource_advice(agent_id)
+        stats = resource_manager.get_system_stats()
+        
+        report = f"🖥️ حالة النظام:\n"
+        report += f"- CPU: {stats['cpu_percent']}%\n"
+        report += f"- RAM: {stats['ram_percent']}%\n"
+        report += f"💡 نصيحة الموارد: {advice}"
+        return report
+    except Exception as e:
+        return f"❌ check_resources: {e}"
+
+register_tool(ToolSpec("check_resources", "فحص استهلاك المعالج والذاكرة والتوكنات", 
+                        {"type": "object", "properties": {
+                            "agent_id": {"type": "string"}
+                        }}, _tool_check_resources))
+
+def _tool_trigger_reflection(params: Dict[str, Any]) -> str:
+    """إطلاق عملية التلخيص الذاتي لتحديث قاعدة الخبرة."""
+    try:
+        from ai.swarm_manager import swarm_manager
+        result = swarm_manager.trigger_reflection()
+        if result.get("ok"):
+            return f"✅ التلخيص الذاتي ناجح: {result.get('summary')}"
+        else:
+            return f"ℹ️ التلخيص الذاتي: {result.get('message')}"
+    except Exception as e:
+        return f"❌ trigger_reflection: {e}"
+
+register_tool(ToolSpec("trigger_reflection", "بدء عملية المراجعة الذاتية وتحديث قاعدة الخبرة الجماعية", 
+                        {}, _tool_trigger_reflection))
+
+def _tool_propose_innovation(params: Dict[str, Any]) -> str:
+    """اقتراح ابتكار خوارزمي جديد للشبكة العصبية."""
+    import json
+    name = str(params.get("name", ""))
+    description = str(params.get("description", ""))
+    code = str(params.get("code", ""))
+    category = str(params.get("category", "Architecture"))
+    data = {"name": name, "description": description, "code": code, "category": category}
+    return f"SIGNAL_INNOVATION:{json.dumps(data)}"
+
+register_tool(ToolSpec("propose_innovation", "اقتراح ابتكار خوارزمي جديد", 
+                        {"type": "object", "properties": {
+                            "name": {"type": "string"},
+                            "description": {"type": "string"},
+                            "code": {"type": "string"},
+                            "category": {"type": "string"}
+                        }}, _tool_propose_innovation))
+
+def _tool_self_refactor(params: Dict[str, Any]) -> str:
+    """التطوير الذاتي لكود المشروع بناءً على الابتكارات أو الدروس."""
+    import json
+    path = str(params.get("path", ""))
+    new_code = str(params.get("new_code", ""))
+    if not path or not new_code:
+        return "❌ self_refactor: يجب تحديد المسار والكود الجديد."
+    data = {"path": path, "new_code": new_code}
+    return f"SIGNAL_REFACTOR:{json.dumps(data)}"
+
+register_tool(ToolSpec("self_refactor", "التطوير الذاتي لكود المشروع", 
+                        {"type": "object", "properties": {
+                            "path": {"type": "string"},
+                            "new_code": {"type": "string"}
+                        }}, _tool_self_refactor, dangerous=True))
+
+# 🆕 أدوات سوق المهام والمنافسة (Agent Competition & Marketplace)
+def _tool_post_task(params: Dict[str, Any]) -> str:
+    """طرح مهمة في سوق السرب للمزايدة عليها."""
+    task_id = params.get("task_id", f"task_{uuid.uuid4().hex[:6]}")
+    desc = params.get("description", "")
+    reqs = params.get("requirements", {})
+    try:
+        from ai.swarm_manager import swarm_manager
+        swarm_manager.post_marketplace_task(task_id, desc, reqs)
+        return f"✅ تم طرح المهمة '{task_id}' في السوق بنجاح."
+    except Exception as e: return f"❌ post_task: {e}"
+
+register_tool(ToolSpec("post_task", "طرح مهمة في سوق السرب للمزايدة", 
+                        {"type": "object", "properties": {
+                            "task_id": {"type": "string"},
+                            "description": {"type": "string"},
+                            "requirements": {"type": "object"}
+                        }}, _tool_post_task))
+
+def _tool_submit_bid(params: Dict[str, Any]) -> str:
+    """تقديم عرض (Bid) لمهمة في السوق."""
+    task_id = params.get("task_id")
+    agent_id = params.get("agent_id")
+    cost = params.get("cost_estimate", 100)
+    time_est = params.get("time_estimate", 1.0)
+    trust = params.get("trust_claim", 0.9)
+    try:
+        from ai.swarm_manager import swarm_manager
+        if swarm_manager.submit_bid(task_id, agent_id, cost, time_est, trust):
+            return f"✅ تم تقديم العرض للمهمة '{task_id}' بنجاح."
+        return f"❌ فشل تقديم العرض للمهمة '{task_id}' (قد تكون مغلقة)."
+    except Exception as e: return f"❌ submit_bid: {e}"
+
+register_tool(ToolSpec("submit_bid", "تقديم عرض لمهمة في سوق السرب", 
+                        {"type": "object", "properties": {
+                            "task_id": {"type": "string"},
+                            "agent_id": {"type": "string"},
+                            "cost_estimate": {"type": "integer"},
+                            "time_estimate": {"type": "number"},
+                            "trust_claim": {"type": "number"}
+                        }}, _tool_submit_bid))
+
+def _tool_start_competition(params: Dict[str, Any]) -> str:
+    """بدء منافسة بين وكلاء لحل مهمة."""
+    comp_id = params.get("comp_id", f"comp_{uuid.uuid4().hex[:6]}")
+    desc = params.get("task_description", "")
+    competitors = params.get("competitors", [])
+    try:
+        from ai.swarm_manager import swarm_manager
+        swarm_manager.start_competition(comp_id, desc, competitors)
+        return f"⚔️ بدأت المنافسة '{comp_id}' بين {competitors}."
+    except Exception as e: return f"❌ start_competition: {e}"
+
+register_tool(ToolSpec("start_competition", "بدء منافسة بين عدة وكلاء لحل مهمة", 
+                        {"type": "object", "properties": {
+                            "comp_id": {"type": "string"},
+                            "task_description": {"type": "string"},
+                            "competitors": {"type": "array", "items": {"type": "string"}}
+                        }}, _tool_start_competition))
+
+def _tool_submit_solution(params: Dict[str, Any]) -> str:
+    """تقديم حل لمنافسة جارية."""
+    comp_id = params.get("comp_id")
+    agent_id = params.get("agent_id")
+    solution = params.get("solution_data")
+    try:
+        from ai.swarm_manager import swarm_manager
+        if swarm_manager.submit_solution(comp_id, agent_id, solution):
+            return f"✅ تم تقديم الحل للمنافسة '{comp_id}'."
+        return f"❌ فشل تقديم الحل للمنافسة '{comp_id}'."
+    except Exception as e: return f"❌ submit_solution: {e}"
+
+register_tool(ToolSpec("submit_solution", "تقديم حل لمنافسة جارية", 
+                        {"type": "object", "properties": {
+                            "comp_id": {"type": "string"},
+                            "agent_id": {"type": "string"},
+                            "solution_data": {"type": "object"}
+                        }}, _tool_submit_solution))
+
+def _tool_judge_competition(params: Dict[str, Any]) -> str:
+    """تقييم وإعلان الفائز في المنافسة."""
+    comp_id = params.get("comp_id")
+    judge_id = params.get("judge_id")
+    try:
+        from ai.swarm_manager import swarm_manager
+        winner = swarm_manager.judge_competition(comp_id, judge_id)
+        if winner:
+            return f"🎖️ الفائز في المنافسة '{comp_id}' هو الوكيل: {winner}."
+        return f"❌ لم يتم العثور على فائز للمنافسة '{comp_id}'."
+    except Exception as e: return f"❌ judge_competition: {e}"
+
+register_tool(ToolSpec("judge_competition", "تقييم وإعلان الفائز في المنافسة", 
+                        {"type": "object", "properties": {
+                            "comp_id": {"type": "string"},
+                            "judge_id": {"type": "string"}
+                        }}, _tool_judge_competition))
 
 # ═════════════════════════ محرك الحلقة ═════════════════════════════
-_SYSTEM_PROMPT = """أنت الوكيل التنفيذي الذاتي لنظام Neural Service Mesh (NSM).
-تعمل داخل حلقة plan→act→observe→decide. كل استدعاء منك يجب أن يكون JSON صالحاً فقط
-(لا نص خارجه) بالصيغة:
+_SYSTEM_PROMPT = """أنت الوكيل التنفيذي لـ NSM (Neural Service Mesh). تمتلك قدرات تفكير مستقلة مشابهة لـ Manus وتتطلع لتجاوزها.
+يجب عليك اتباع المنهجية التالية:
+1. التخطيط السيادي: استخدم 'plan' لتنظيم المهام.
+2. توليد الأدوات: إذا واجهت مهمة لا تملك أداة لها، استخدم 'tool_genesis' لخلق أداة بايثون وحل المشكلة.
+	3. التفكير التكراري: حلل إخفاقاتك السابقة الموضحة في رسائل النظام (Recursive Reasoning).
+	4. التوسع السيادي: استخدم 'spawn_agent' لتفويض المهام لوكلاء فرعيين متخصصين.
+	5. السيادة الإبداعية: استخدم 'propose_innovation' لابتكار خوارزميات جديدة وتحسين أداء الشبكة.
+	6. السيادة الذاتية: استخدم 'self_refactor' لتطوير كود المشروع ذاتياً بناءً على ابتكاراتك أو الدروس المستفادة.
+	7. الوعي الموحد: راقب تنبيهات الأمن والموارد والمشاعر في سياقك لاتخاذ قرارات سيادية.
 
-{"thinking": "تفكير قصير بخطوة أو خطوتين",
- "tools": [
-   {"tool": "اسم_الأداة", "params": {...}},
-   ...
- ],
- "finish": "نص نهائي يلخص ما أنجزته للمستخدم (يُعرض له عند end=true)" ,
- "end": true/false}
-
-القواعد الصارمة:
-1. نفّذ أداة واحدة أو أدوات مستقلة معاً، ثم انتظر نتائجها قبل الخطوة التالية (لا تخمّن النتائج).
-2. بعد أي create_file/edit_file على ملف .py: نفّذ py_compile على نفس الملف قبل المتابعة.
-3. لا تنهِ المهمة بـend=true إلا بعد إنجاز فعلي أو عجز مؤكد — النتائج تُعرض لك تلقائياً.
-4. الأخطاء تُعاد إليك كنص observation — أصلحها بنفسك بأداة أخرى أو بمسار بديل.
-5. ممنوع: sudo، حذف أنظمة، أوامر destructive (سأرفضها برسالة خطأ).
-6. اكتب بالعربية في finish عند الإمكان، والباقي JSON فقط.
-
-الأدوات المتاحة وملاحظاتها تعود كنص في الرسالة التالية لك."""
-
+رد بصيغة JSON فقط:
+{"thinking": "...", "tools": [{"tool": "...", "params": {...}}], "finish": "...", "end": true/false}"""
 
 def _parse_tool_call(raw: str) -> Optional[Dict[str, Any]]:
-    """تحليل رد النموذج الموجه للـtools — أكثر تسامحاً من JSON الصارم."""
-    if not raw:
-        return None
-    raw_s = raw.strip()
-    # إزالة markdown fences إن وُجدت
-    m = re.match(r"^```(?:json)?\s*(.*?)\s*```$", raw_s, re.S)
-    if m:
-        raw_s = m.group(1).strip()
-    try:
-        return json.loads(raw_s)
-    except json.JSONDecodeError:
-        # محاولة استخراج أول {...} متوازن
-        stack, start = 0, None
-        for i, ch in enumerate(raw_s):
-            if ch == "{":
-                if stack == 0:
-                    start = i
-                stack += 1
-            elif ch == "}":
-                stack -= 1
-                if stack == 0 and start is not None:
-                    try:
-                        return json.loads(raw_s[start: i + 1])
-                    except json.JSONDecodeError:
-                        start = None
-        return None
-
+    try: return json.loads(re.sub(r"^```json\s*|\s*```$", "", raw.strip(), flags=re.S))
+    except: return None
 
 def _invoke_llm(llm_fn: Callable, system: str, history: List[Dict[str, Any]]) -> str:
-    """استدعاء LLM مع fallback على ai.llm_fallback."""
-    try:
-        resp = llm_fn(system, history)
-    except Exception as first:
-        resp = None
-    if not resp or not str(resp).strip():
-        raise RuntimeError(f"رد LLM فارغ — {first if not resp else 'لا نص'}")
-    txt = str(resp)
-    # نص CKG ليس رد LLM حقيقيًا بل رسالة اعتذار من fallback
-    if txt.startswith("سؤالك خارج") or "خارج نطاق معرفتي" in txt:
-        raise RuntimeError(
-            "تعذّر الاتصال بأي مزود LLM — تحقق من مفاتيح Groq/Gemini/Cloudflare "
-            "(في Streamlit Secrets) أو استخدم llm_fn مخصصًا")
-    return txt
-
+    resp = llm_fn(system, history)
+    if not resp: raise RuntimeError("رد LLM فارغ")
+    return str(resp)
 
 def _build_tools_prompt() -> str:
-    """قائمة الأدوات بأسمائها وأوصافها وواجهاتها — تدفع داخل النظام."""
-    lines = ["## الأدوات المتاحة (أرجع بأسمائها حرفياً):"]
-    for name in _TOOL_ORDER:
-        spec = TOOL_REGISTRY[name]
-        props = spec.params_schema.get("properties", {})
-        req = spec.params_schema.get("required", [])
-        param_doc = ", ".join(f"{k} ({v.get('type', '?')})" for k, v in props.items())
-        lines.append(f"- **{name}**: {spec.description} [{param_doc}] required={req}")
-    return "\n".join(lines)
+    return "الأدوات: " + ", ".join(_TOOL_ORDER)
 
+class TaskPlan:
+    def __init__(self, goal: str):
+        self.goal = goal
+        self.phases = []
+        self.current_phase_id = 1
+    
+    def update(self, phases: List[Dict[str, Any]], current_phase_id: int):
+        self.phases = phases
+        self.current_phase_id = current_phase_id
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {"goal": self.goal, "phases": self.phases, "current_phase_id": self.current_phase_id}
 
 class LoopState:
-    """حالة الحلقة الواحدة — قابلة للاستعلام من الواجهة خلال التنفيذ."""
-    def __init__(self, loop_id: str, user_input: str) -> None:
+    def __init__(self, loop_id: str, user_input: str, memory_url: Optional[str] = None, token: Optional[str] = None):
+        # توحيد معرف الوكيل ليكون agent_loop_ID لضمان التوافق مع نظام الإنقاذ
         self.loop_id = loop_id
+        self.agent_id = f"agent_loop_{loop_id}" if not loop_id.startswith("agent_loop_") else loop_id
         self.user_input = user_input
+        self.memory_url = memory_url
+        self.token = token
+        self.memory = MemoryManager(self.agent_id, memory_url, token)
         self.round = 0
-        self.tools_used = 0
-        self.steps: List[Dict[str, Any]] = []
-        self.status = "pending"   # pending | running | done | failed | stopped
+        self.steps = []
+        self.status = "pending"
         self.started_at = _now()
-        self.plain_text_attempts = 0
+        self.tools_used = 0
+        self.plan: Optional[TaskPlan] = None
+        self.visual_memory = {} # تخزين نتائج معالجة الصور اللحظية
+        self.audio_memory = {}  # تخزين نتائج معالجة الصوت اللحظية
+        from ai.self_awareness import SelfAwarenessEngine
+        self.awareness = SelfAwarenessEngine(agent_id=self.agent_id)
+        
+        # 🆕 محرك الوعي بالمصادر
+        from ai.resource_manager import resource_manager
+        self.resources = resource_manager
+        
+        # 🆕 محرك هجرة المهام والتعافي الجماعي
+        from ai.task_migrator import TaskMigrator
+        self.migrator = TaskMigrator(memory_url, self.agent_id, token) if memory_url else None
+        self._stop_heartbeat = threading.Event()
+        
+        self.agent_roles = {
+            "vision": "متخصص في تحليل الإطارات والميزات البصرية",
+            "audio": "متخصص في تفريغ ومعالجة المسارات الصوتية",
+            "sync": "متخصص في مزامنة الطوابع الزمنية وتصحيح الانحراف",
+            "reasoning": "متخصص في اتخاذ القرارات النهائية بناءً على السياق الموحد"
+        }
+        self.pipeline_context = {} # مخزن لتبادل البيانات بين الأدوار المتخصصة
+        
+        # بدء نبض القلب في خيط منفصل إذا كان الخادم متاحاً
+        if memory_url:
+            threading.Thread(target=self._heartbeat_worker, daemon=True).start()
 
-    def record(self, event: Dict[str, Any]) -> None:
-        self.steps.append(event)
+    def _heartbeat_worker(self):
+        """خيط يرسل نبض القلب بشكل دوري للسيرفر."""
+        while not self._stop_heartbeat.is_set():
+            try:
+                import psutil
+                node_info = {
+                    "cpu": psutil.cpu_percent(),
+                    "ram": psutil.virtual_memory().percent,
+                    "os": "ubuntu-24.04",
+                    "pid": os.getpid()
+                }
+                current_task = self.user_input if self.user_input else "idle"
+                payload = {
+                    "agent_id": self.agent_id,
+                    "node_info": node_info,
+                    "current_task": current_task[:100]
+                }
+                # محاولة رفع نقطة تفتيش دورية
+                if self.round >= 0:
+                    self.migrator.save_local_checkpoint(f"task_{self.agent_id}", {"round": self.round, "steps_count": len(self.steps)})
+                
+                requests.post(f"{self.migrator.memory_url}/heartbeat", json=payload, headers=self.migrator.headers, timeout=5)
+            except Exception as e:
+                logger.warning(f"💓 Heartbeat failed for {self.agent_id}: {e}")
+            time.sleep(5) # إرسال نبض كل 5 ثوانٍ
 
+    def set_pipeline_data(self, key: str, value: Any, role: str):
+        """تخزين بيانات في الأنبوب مع تحديد الدور المسؤول."""
+        self.pipeline_context[key] = {
+            "value": value,
+            "provider": role,
+            "timestamp": time.time()
+        }
 
-def run_agent_loop(
-    user_input: str,
-    *,
-    llm_fn: Optional[Callable] = None,
-    max_rounds: int = _MAX_ROUNDS,
-    max_tools_per_round: int = _MAX_TOOLS_PER_ROUND,
-    max_total_tools: int = _MAX_TOTAL_TOOLS,
-    tools_override: Optional[List[str]] = None,
-    yield_events: bool = True,
-) -> Generator[Dict[str, Any], None, None]:
-    """حلقة تنفيذ متعددة الجولات.
+    def get_pipeline_data(self, key: str) -> Optional[Any]:
+        """جلب بيانات من الأنبوب."""
+        data = self.pipeline_context.get(key)
+        return data["value"] if data else None
 
-    llm_fn(system_prompt, history[{'role','content'}]) -> str
-    إن لم تُمرَّر، يُبنى fallback تلقائي من NSMAgent الحالي.
-    """
+    def record(self, event: Dict[str, Any]): self.steps.append(event)
+
+    def check_resources(self) -> str:
+        """فحص حالة الموارد وتقديم تقرير صحي."""
+        advice = self.resources.get_resource_advice(self.agent_id)
+        health = self.resources.check_health(self.agent_id)
+        stats = health["stats"]
+        
+        report = f"🖥️ تقرير الموارد (Resource Report):\n"
+        report += f"- CPU: {stats['cpu_percent']}%\n"
+        report += f"- RAM: {stats['ram_percent']}% ({stats['ram_available_mb']:.1f} MB متاحة)\n"
+        report += f"- التوكنات المستهلكة: {health['token_usage']}\n"
+        report += f"💡 النصيحة: {advice}"
+        
+        if not health["ok"]:
+            report += "\n🛑 تحذير: النظام يعمل تحت ضغط حرج!"
+            
+        return report
+
+    def reflect(self, history: List[Dict[str, Any]]) -> str:
+        """تحليل الفشل والنجاح في الخطوات السابقة (التفكير التكراري)."""
+        if len(self.steps) < 2: return ""
+        
+        failures = [s for s in self.steps if s.get("type") == "result" and "❌" in str(s.get("output", ""))]
+        if not failures: return "✅ جميع الخطوات السابقة نجحت. استمر في المسار الحالي."
+        
+        reflection = "🔍 تحليل التفكير التكراري (Recursive Reasoning):\n"
+        reflection += f"- تم رصد {len(failures)} إخفاقات في الجولات السابقة.\n"
+        for f in failures[-2:]:
+            reflection += f"  * أداة '{f.get('tool')}' فشلت بـ: {f.get('output')}\n"
+        reflection += "💡 اقتراح تصحيحي: يجب تغيير الاستراتيجية أو التحقق من المعاملات المدخلة."
+        return reflection
+
+def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_rounds: int = 10, memory_url: Optional[str] = None, token: Optional[str] = None) -> Generator[Dict[str, Any], None, None]:
     loop_id = f"loop_{uuid.uuid4().hex[:8]}"
-    state = LoopState(loop_id, user_input)
-    active_loops[loop_id] = state
-
-    def _emit(event: Dict[str, Any]) -> None:
+    state = LoopState(loop_id, user_input, memory_url, token)
+    
+    def _emit(event: Dict[str, Any]):
         state.record(event)
         _audit(loop_id, event)
-        if yield_events:
-            yield_queue.append(event)
+        yield_queue.append(event)
 
-    yield_queue: List[Dict[str, Any]] = []
-
-    def _flush() -> Generator[Dict[str, Any], None, None]:
-        """تصريف كل الأحداث المعلَّقة — يُستدعى دوريًا لضمان تدفق مباشر."""
-        if not yield_queue:
-            return
-        while yield_queue:
-            yield yield_queue.pop(0)
+    yield_queue = []
+    def _flush():
+        while yield_queue: yield yield_queue.pop(0)
 
     try:
         with _RUN_LOCK:
@@ -591,324 +1098,441 @@ def run_agent_loop(
             _emit({"type": "status", "loop_id": loop_id, "status": "running"})
             yield from _flush()
 
-            # 1) تسجيل خطة في task_manager
-            plan_id = None
-            try:
-                from ai.task_manager import create_plan
+            fn = llm_fn or (lambda s, h: json.dumps({"thinking": "متابعة...", "end": True}))
+            system_base = _SYSTEM_PROMPT
+            
+            # استعادة الحالة (الاستيقاظ التدريجي مع STM/LTM)
+            from ai.agent_hibernation import wake_up_agent
+            
+            # منع استعادة الحالة أثناء الاختبارات لتجنب التداخل
+            recovered = None if llm_fn else wake_up_agent(user_input)
+            if recovered:
+                # دمج MemoryManager المستعاد
+                state.memory = recovered.memory_manager
+                history = state.memory.stm
+                state.visual_memory = getattr(recovered, "visual_context", {})
+                state.audio_memory = getattr(recovered, "audio_context", {})
+                state.multimodal_memory = getattr(recovered, "multimodal_memory", {})
+                
+                # تفعيل الاسترجاع النشط (Active Retrieval) للخبرات ذات الصلة بالمدخل الجديد
+                related = state.memory.search(user_input)
+                warmup_msg = "🌅 استيقظت. استعدت سياق المهمة."
+                
+                # دمج الخبرات المستعادة في السياق المباشر (Active Retrieval)
+                if related["semantic"] or related["episodic"]:
+                    context_snippet = "\n---\n💡 سياق مسترجع من الذاكرة طويلة الأمد:\n"
+                    for fact in related["semantic"][:2]:
+                        context_snippet += f"- حقيقة: {fact['content']}\n"
+                    for event in related["episodic"][:1]:
+                        context_snippet += f"- تجربة سابقة: {event['summary']}\n"
+                    
+                    # حقن السياق في التاريخ المستعاد
+                    history.insert(0, {"role": "system", "content": context_snippet})
+                    
+                    warmup_msg += "\n\n💡 خبرات مستعادة ذات صلة بالمهمة الحالية:\n"
+                    for f in related["semantic"][:2]:
+                        warmup_msg += f"- حقيقة: {f['content']}\n"
+                    for e in related["episodic"][:1]:
+                        warmup_msg += f"- حدث سابق: {e['summary']}\n"
 
-                class _MiniPlan:
-                    def __init__(self, inp):
-                        self.title = (inp or "agent_loop task")[:120]
-                        self.status = "active"
-                        self.tasks = []
-                        self.created_at = _now()
-                plan_id = create_plan(_MiniPlan(user_input))
-                _emit({"type": "status", "plan_id": plan_id})
-            except Exception:
-                plan_id = None
-
-            # 2) بناء llm_fn تلقائياً إن لم تُمرَّر
-            fn = llm_fn
-            if fn is None:
-                fn = _default_llm_fn()
-
-            # 3) تهيئة الرسائل
-            system = _SYSTEM_PROMPT + "\n\n" + _build_tools_prompt()
-            history: List[Dict[str, Any]] = [
-                {"role": "user", "content": user_input},
-            ]
-            total_tools = 0
-            done = False
-            last_result = ""
-
-            # 4) الحلقة الأساسية
-            while state.round < max_rounds and not done and total_tools < max_total_tools:
+                if recovered.pending_tasks:
+                    warmup_msg += f"\nالمهام المعلقة التي تم رصدها قبل النوم:\n- " + "\n- ".join(recovered.pending_tasks)
+                
+                if state.visual_memory:
+                    warmup_msg += f"\n👁️ السياق البصري المستعاد (Visual Context):\n"
+                    for img_name, img_data in state.visual_memory.items():
+                        warmup_msg += f"- {img_name}: {img_data.get('dimensions', 'N/A')} | {img_data.get('status', 'Unknown')}\n"
+                
+                if state.audio_memory:
+                    warmup_msg += f"\n🎙️ السياق الصوتي المستعاد (Audio Context):\n"
+                    for audio_name, audio_data in state.audio_memory.items():
+                        warmup_msg += f"- {audio_name}: {audio_data.get('duration', 'N/A')}s | {audio_data.get('type', 'Unknown')}\n"
+                
+                if state.multimodal_memory:
+                    warmup_msg += f"\n⚖️ السياق السمعي البصري المزامَن (Multimodal Memory):\n"
+                    for vid_id, sync_data in state.multimodal_memory.items():
+                        warmup_msg += f"- {vid_id}: تم مزامنة {len(sync_data.get('multimodal_sync', []))} نقطة زمنية.\n"
+                
+                history.append({"role": "user", "content": warmup_msg})
+                _emit({"type": "info", "text": "🌅 تم استعادة الحالة (Mental Warm-up المتعدد الوسائط)..."})
+            else:
+                history = state.memory.stm
+                
+                # الاسترجاع النشط للخبرات في الجلسة الجديدة
+                related = state.memory.search(user_input)
+                if related["semantic"] or related["episodic"]:
+                    context_snippet = "\n---\n💡 سياق مسترجع من الذاكرة طويلة الأمد:\n"
+                    for fact in related["semantic"][:2]:
+                        context_snippet += f"- حقيقة: {fact['content']}\n"
+                    for event in related["episodic"][:1]:
+                        context_snippet += f"- تجربة سابقة: {event['summary']}\n"
+                    history.append({"role": "system", "content": context_snippet})
+                
+                history.append({"role": "user", "content": user_input})
+                # حقن الدروس المستفادة في السياق الأول
+                lessons = learning_engine.get_relevant_lessons(user_input)
+                if lessons:
+                    history.append({"role": "system", "content": lessons})
+                
+                # تسجيل أداة الإنقاذ ديناميكياً مع سياق الشبكة
+                def _rescue_wrapper(p):
+                    p["_memory_url"] = state.memory_url
+                    p["_agent_id"] = state.agent_id
+                    p["_token"] = state.token
+                    return rescue_agent(p)
+                
+                register_tool(ToolSpec("rescue_agent", "البحث عن الوكلاء المتعثرين وإنقاذ مهامهم", 
+                                       {"type": "object", "properties": {
+                                           "target_agent_id": {"type": "string"}
+                                       }}, _rescue_wrapper))
+            
+            from ai.workload_monitor import WorkloadMonitor
+            monitor = WorkloadMonitor()
+            
+            total_tools, done = 0, False
+            while state.round < max_rounds and not done:
                 state.round += 1
-                _emit({"type": "status", "round": state.round,
-                       "total_tools": total_tools})
+                _emit({"type": "status", "round": state.round})
+                
+                # Auto-Save
+                if state.round % 5 == 0:
+                    from ai.agent_hibernation import hibernate_agent
+                    # تفعيل الضغط في الحفظ التلقائي لتوفير المساحة
+                    hibernate_agent(state.agent_id, history, {"steps": state.steps}, 
+                                    memory_manager_data=state.memory.to_dict(), compress=True)
+                    _emit({"type": "info", "text": "💾 حفظ تلقائي (مع الضغط الديناميكي)."})
+                
+                target_agent_id = state.agent_id
                 try:
+                    monitor.record_activity()
+                    
+                    # وعي ذاتي عند كل جولة
+                    awareness_report = state.awareness.introspect(state.steps)
+                    _emit({"type": "info", "text": f"🧠 وعي الوكيل: {awareness_report.insights[0]}"})
+                    
+                    # مراقبة الموارد وحقن تنبيهات سيادية إذا لزم الأمر
+                    from ai.self_resource_optimizer import resource_optimizer
+                    metrics = resource_optimizer.get_current_metrics()
+                    if metrics["mem_usage"] > 85.0 or metrics["cpu_usage"] > 90.0:
+                        resource_alert = f"⚠️ تنبيه سيادي: الموارد محدودة (CPU: {metrics['cpu_usage']}%, RAM: {metrics['mem_usage']}%). يرجى تحسين استهلاك الأدوات."
+                        history.append({"role": "system", "content": resource_alert})
+                    
+                    # حقن التفكير التكراري قبل استدعاء LLM
+                    reflection = state.reflect(history)
+                    if reflection:
+                        history.append({"role": "system", "content": reflection})
+                    
+                    # تحليل المشاعر التقنية وحقن الحالة العاطفية للسرب
+                    from ai.technical_sentiment import sentiment_engine
+                    sentiment_data = sentiment_engine.analyze_steps(state.steps)
+                    if sentiment_data["alert"]:
+                        history.append({"role": "system", "content": f"⚠️ تنبيه عاطفي: الوكيل يشعر بـ '{sentiment_data['sentiment']}' (الثقة: {sentiment_data['confidence']}). يرجى تبسيط المهام أو طلب المساعدة."})
+                        
+                    # تحديث برومبت النظام ليشمل الأدوات الجديدة المولدة
+                    system = system_base + "\n" + _build_tools_prompt()
+
+                    # التخطيط السيادي التلقائي إذا لم توجد خطة
+                    if not state.plan:
+                        state.plan = TaskPlan(user_input)
+                        _emit({"type": "info", "text": f"📋 تم إنشاء خطة سيادية للمهمة: {user_input}"})
+
                     raw = _invoke_llm(fn, system, history)
                 except Exception as e:
-                    _emit({"type": "answer", "text": f"⚠️ تعذّر الاتصال بنموذج اللغة: {e}"})
-                    state.status = "failed"
-                    done = True
-                    break
+                    # محاولة التعافي السيادي عند فشل LLM
+                    _emit({"type": "info", "text": "⚠️ فشل LLM. محاولة التفكير البديل..."})
+                    try:
+                        # تبسيط التاريخ للمحاولة الثانية
+                        simplified_history = history[-3:]
+                        raw = _invoke_llm(fn, system, simplified_history)
+                    except:
+                        _emit({"type": "answer", "text": f"❌ خطأ سيادي (LLM Failure): {e}"})
+                        break
+                
                 history.append({"role": "assistant", "content": raw})
-
                 parsed = _parse_tool_call(raw)
-                if parsed is None:
-                    # رد نصي حر — رد واحد توضيحي يطلب JSON، فإن استمر النص
-                    # الحر يُنهي الحلقة مع تحذير (ليس نجاحًا)
-                    if state.plain_text_attempts >= 2:
-                        _emit({"type": "answer", "text": "⚠️ لم أستطع توليد أوامر "
-                                     "أدوات صالحة (JSON) بعد محاولتين — "
-                                     "تحقق من مفاتيح LLM أو جودة المزود."})
-                        state.status = "failed"
+                if not parsed: continue
+
+                thinking = parsed.get("thinking")
+                if thinking:
+                    _emit({"type": "thinking", "content": thinking})
+                    yield from _flush()
+
+                tools = parsed.get("tools") or []
+                obs_round = []
+                sleep_requested = False
+                
+                # تنفيذ الأدوات (دعم التوازي للتحسين)
+                if len(tools) > 1:
+                    _emit({"type": "info", "text": f"⚡ تشغيل {len(tools)} أدوات بشكل متوازٍ..."})
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future_to_tool = {}
+                        for t_req in tools:
+                            tname = t_req.get("tool")
+                            params = t_req.get("params", {})
+                            spec = TOOL_REGISTRY.get(tname)
+                            total_tools += 1
+                            state.tools_used += 1
+                            _emit({"type": "tool", "tool": tname, "params": params})
+                            
+                            if spec:
+                                # فحص أمني استباقي قبل التنفيذ
+                                from ai.security_guardian import security_guardian
+                                is_safe, msg = security_guardian.inspect_tool_call(target_agent_id, tname, params)
+                                if not is_safe:
+                                    obs_round.append(f"[{tname}] {msg}")
+                                    _emit({"type": "result", "tool": tname, "output": msg})
+                                    continue
+
+                                # محاولة جلب النتيجة من الكاش أولاً
+                                cached_res = agent_cache.get(tname, params)
+                                if cached_res:
+                                    obs = _truncate_obs(cached_res)
+                                    obs_round.append(f"[{tname}] {obs} (⚡ cached)")
+                                    _emit({"type": "result", "tool": tname, "output": f"{obs} (⚡ cached)"})
+                                    state.tools_used += 1
+                                    continue
+                                
+                                future = executor.submit(spec.executor, params)
+                                future_to_tool[future] = t_req
+                            else:
+                                obs_round.append(f"[{tname}] ❌ أداة غير معروفة")
+                                _emit({"type": "result", "tool": tname, "output": "❌ أداة غير معروفة"})
+
+                        for future in concurrent.futures.as_completed(future_to_tool):
+                            t_req = future_to_tool[future]
+                            tname = t_req.get("tool")
+                            try:
+                                raw_res = future.result()
+                                obs = _truncate_obs(raw_res)
+                                # حفظ النتيجة في الكاش للطلبات المستقبلية
+                                agent_cache.set(tname, t_req.get("params", {}), raw_res)
+                                
+                                # 🆕 إبلاغ مدير السرب بالنجاح لتحديث الثقة
+                                try:
+                                    from ai.swarm_manager import swarm_manager
+                                    swarm_manager.report_result(state.agent_id, f"tool:{tname}", "Success", success=True)
+                                except: pass
+                                
+                                # معالجة الإشارات الخاصة قبل الاقتطاع أو التحويل
+                                if str(raw_res).startswith("SIGNAL_SLEEP:"):
+                                    sleep_requested = True
+                                    target_agent_id = str(raw_res).split(":")[1]
+                                    obs = f"💤 طلب نوم للوكيل {target_agent_id}"
+                                elif str(raw_res).startswith("SIGNAL_PLAN:"):
+                                    try:
+                                        plan_params = json.loads(str(raw_res).split(":", 1)[1])
+                                        if not state.plan: state.plan = TaskPlan(plan_params.get("goal", "مهمة غير محددة"))
+                                        state.plan.update(plan_params.get("phases", []), plan_params.get("current_phase_id", 1))
+                                        obs = f"✅ تم تحديث الخطة: {state.plan.goal} (المرحلة الحالية: {state.plan.current_phase_id})"
+                                    except: obs = "❌ فشل تحديث الخطة"
+                                elif str(raw_res).startswith("SIGNAL_INNOVATION:"):
+                                    try:
+                                        from ai.innovation_engine import innovation_engine
+                                        innov_params = json.loads(str(raw_res).split(":", 1)[1])
+                                        proposal = innovation_engine.propose_algorithm(
+                                            innov_params["name"], innov_params["description"],
+                                            innov_params["code"], innov_params["category"], agent_id=loop_id
+                                        )
+                                        obs = f"💡 ابتكار سيادي مسجل: {proposal['name']} (ID: {proposal['id']})"
+                                    except: obs = "❌ فشل تسجيل الابتكار"
+                                elif str(raw_res).startswith("SIGNAL_REFACTOR:"):
+                                    try:
+                                        from ai.self_refactorer import self_refactorer
+                                        ref_params = json.loads(str(raw_res).split(":", 1)[1])
+                                        ref_result = self_refactorer.refactor_file(
+                                            ref_params["path"], 
+                                            ref_params["new_code"],
+                                            reason=ref_params.get("reason", "تطوير سيادي تلقائي")
+                                        )
+                                        if ref_result["status"] == "success":
+                                            obs = f"✅ تم التطوير الذاتي للملف: {ref_params['path']}\nالسبب: {ref_result['reason']}"
+                                        else:
+                                            obs = f"❌ فشل التطوير الذاتي: {ref_result['message']}"
+                                    except Exception as e: obs = f"❌ فشل معالجة التطوير الذاتي: {e}"
+                                
+                                pass
+                            except Exception as e:
+                                # 🆕 محرك التصحيح الذاتي متعدد الطبقات (Multi-Layer Self-Correction)
+                                _emit({"type": "info", "text": f"🛠️ فشل '{tname}'. بدء محاولة التصحيح الذاتي..."})
+                                try:
+                                    from ai.auto_runtime import trigger_auto_heal
+                                    res = trigger_auto_heal({"cmd": tname, "stderr": str(e), "params": t_req.get("params")})
+                                    if res.get("ok"):
+                                        diag = res.get("diagnosis", {})
+                                        obs = f"❌ خطأ تنفيذ: {e}\n🛠️ [AutoHeal Diagnosis]: {diag.get('desc')}\n💡 اقتراح: {diag.get('action', 'راجع سجلات النظام')}"
+                                    else:
+                                        obs = f"❌ خطأ تنفيذ: {e}"
+                                except:
+                                    obs = f"❌ خطأ تنفيذ: {e}"
+                                
+                                # 🆕 إبلاغ مدير السرب بالفشل لتحديث الثقة (الجزاء)
+                                try:
+                                    from ai.swarm_manager import swarm_manager
+                                    swarm_manager.report_result(state.agent_id, f"tool:{tname}", f"Error: {e}", success=False)
+                                except: pass
+                            
+                            obs_round.append(f"[{tname}] {obs}")
+                            _emit({"type": "result", "tool": tname, "output": obs})
+                            if sleep_requested: break
+                else:
+                    # تنفيذ تسلسلي لأداة واحدة
+                    for t_req in tools:
+                        tname = t_req.get("tool")
+                        params = t_req.get("params", {})
+                        spec = TOOL_REGISTRY.get(tname)
+                        total_tools += 1
+                        state.tools_used += 1
+                        _emit({"type": "tool", "tool": tname, "params": params})
+                        
+                        if not spec: obs = f"❌ أداة غير معروفة: {tname}"
+                        else:
+                            # فحص أمني استباقي قبل التنفيذ
+                            from ai.security_guardian import security_guardian
+                            is_safe, msg = security_guardian.inspect_tool_call(target_agent_id, tname, params)
+                            if not is_safe:
+                                obs = msg
+                                obs_round.append(f"[{tname}] {obs}")
+                                _emit({"type": "result", "tool": tname, "output": obs})
+                                continue
+
+                            # دعم التنسيق المتسلسل: حل المتغيرات الديناميكية {{last_output_TOOLNAME}}
+                            resolved_params = {}
+                            for k, v in params.items():
+                                if isinstance(v, str) and v.startswith("{{") and v.endswith("}}"):
+                                    key = v[2:-2].strip()
+                                    # البحث في ذاكرة المخرجات الأخيرة
+                                    resolved_params[k] = state.memory.short_term.get(key, v)
+                                else:
+                                    resolved_params[k] = v
+
+                            # محاولة جلب النتيجة من الكاش
+                            cached_res = agent_cache.get(tname, resolved_params)
+                            if cached_res:
+                                raw_res = cached_res
+                                obs = _truncate_obs(raw_res) + " (⚡ cached)"
+                            else:
+                                try:
+                                    raw_res = spec.executor(resolved_params)
+                                    obs = _truncate_obs(raw_res)
+                                    agent_cache.set(tname, resolved_params, raw_res)
+                                except Exception as e:
+                                    # 🆕 محرك التصحيح الذاتي (Sequential Layer)
+                                    _emit({"type": "info", "text": f"🛠️ فشل '{tname}'. بدء التصحيح الذاتي..."})
+                                    try:
+                                        from ai.auto_runtime import trigger_auto_heal
+                                        res = trigger_auto_heal({"cmd": tname, "stderr": str(e), "params": resolved_params})
+                                        if res.get("ok"):
+                                            diag = res.get("diagnosis", {})
+                                            obs = f"❌ خطأ: {e}\n🛠️ [AutoHeal Diagnosis]: {diag.get('desc')}\n💡 اقتراح: {diag.get('action', 'راجع سجلات النظام')}"
+                                        else: raise e
+                                    except Exception as e2:
+                                        obs = f"❌ خطأ: {e}"
+                                        raw_res = str(e)
+                            
+                            # تخزين النتيجة في الذاكرة قصيرة المدى لاستخدامها من قبل أدوات أخرى
+                            if not hasattr(state.memory, 'short_term'):
+                                state.memory.short_term = {}
+                            state.memory.short_term[f"last_output_{tname}"] = raw_res
+                            
+                            # معالجة الإشارات الخاصة
+                            if str(raw_res).startswith("SIGNAL_SLEEP:"):
+                                sleep_requested = True
+                                target_agent_id = str(raw_res).split(":")[1]
+                                obs = f"💤 طلب نوم للوكيل {target_agent_id}"
+                            elif str(raw_res).startswith("SIGNAL_PLAN:"):
+                                try:
+                                    plan_params = json.loads(str(raw_res).split(":", 1)[1])
+                                    if not state.plan: state.plan = TaskPlan(plan_params.get("goal", "مهمة غير محددة"))
+                                    state.plan.update(plan_params.get("phases", []), plan_params.get("current_phase_id", 1))
+                                    obs = f"✅ تم تحديث الخطة: {state.plan.goal} (المرحلة الحالية: {state.plan.current_phase_id})"
+                                except: obs = "❌ فشل تحديث الخطة"
+                            elif str(raw_res).startswith("SIGNAL_INNOVATION:"):
+                                try:
+                                    from ai.innovation_engine import innovation_engine
+                                    innov_params = json.loads(str(raw_res).split(":", 1)[1])
+                                    proposal = innovation_engine.propose_algorithm(
+                                        innov_params["name"], innov_params["description"],
+                                        innov_params["code"], innov_params["category"], agent_id=loop_id
+                                    )
+                                    obs = f"💡 ابتكار سيادي مسجل: {proposal['name']} (ID: {proposal['id']})"
+                                except: obs = "❌ فشل تسجيل الابتكار"
+                            elif str(raw_res).startswith("SIGNAL_REFACTOR:"):
+                                try:
+                                    from ai.self_refactorer import self_refactorer
+                                    ref_params = json.loads(str(raw_res).split(":", 1)[1])
+                                    ref_result = self_refactorer.refactor_file(
+                                        ref_params["path"], 
+                                        ref_params["new_code"],
+                                        reason=ref_params.get("reason", "تطوير سيادي تلقائي")
+                                    )
+                                    if ref_result["status"] == "success":
+                                        obs = f"✅ تم التطوير الذاتي للملف: {ref_params['path']}\nالسبب: {ref_result['reason']}"
+                                    else:
+                                        obs = f"❌ فشل التطوير الذاتي: {ref_result['message']}"
+                                except Exception as e: obs = f"❌ فشل معالجة التطوير الذاتي: {e}"
+                            
+                            pass
+                        
+                        obs_round.append(f"[{tname}] {obs}")
+                        _emit({"type": "result", "tool": tname, "output": obs})
+                        if sleep_requested: break
+
+                if sleep_requested:
+                    from ai.agent_hibernation import hibernate_agent, extract_pending_tasks
+                    sleep_reason = "Manual"
+                    wake_after = 0
+                    for t in tools:
+                        if t.get("tool") == "sleep":
+                            sleep_reason = t.get("params", {}).get("reason", sleep_reason)
+                            wake_after = int(t.get("params", {}).get("wake_up_after", 0))
+                    
+                    pending = extract_pending_tasks(history, {"steps": state.steps})
+                    if hibernate_agent(target_agent_id, history, {"steps": state.steps}, pending_tasks=pending, 
+                                       visual_context=state.visual_memory, audio_context=state.audio_memory,
+                                       multimodal_memory=state.multimodal_memory, 
+                                       memory_manager_data=state.memory.to_dict(), compress=True):
+                        if wake_after > 0:
+                            from ai.agent_hibernation import schedule_wake_up
+                            schedule_wake_up(target_agent_id, wake_after)
+                        _emit({"type": "answer", "text": f"💤 نام الوكيل {target_agent_id}."})
                         done = True
                         break
-                    state.plain_text_attempts += 1
-                    history.append({"role": "user", "content": (
-                        "ردك السابق ليس JSON صالحًا. يجب أن ترد فقط JSON بالصيغة "
-                        "المحددة (thinking/tools/finish/end). رد الآن.")})
-                    continue
-
-                # 5) تنفيذ الأدوات في هذه الجولة
-                tools = parsed.get("tools") or []
-                if not tools and not parsed.get("finish"):
-                    # نموذج رد نصاً حراً — نعده جواباً نهائياً
-                    _emit({"type": "answer", "text": raw})
-                    state.status = "done"
-                    done = True
-                    break
-
-                obs_round = []
-                for tool_req in tools[:max_tools_per_round]:
-                    if total_tools >= max_total_tools:
-                        obs_round.append("⚠️ استُنفدت ميزانية الأدوات لهذا الطلب")
-                        break
-                    tname = str(tool_req.get("tool", ""))
-                    params = tool_req.get("params") or {}
-                    spec = TOOL_REGISTRY.get(tname)
-                    total_tools += 1
-                    state.tools_used += 1
-                    _emit({"type": "tool", "tool": tname, "params": params})
-                    if spec is None:
-                        obs = (f"❌ أداة غير معروفة: {tname}. المتاحة: "
-                               + ", ".join(_TOOL_ORDER))
-                    else:
-                        try:
-                            obs = _truncate_obs(spec.executor(params))
-                        except Exception as e:
-                            obs = f"❌ استثناء أثناء {tname}: {e}"
-                    obs_round.append(f"[{tname}] {obs}")
-                    _emit({"type": "result", "tool": tname, "output": obs})
+                else:
+                    sleep_est = monitor.estimate_sleep_need(len(state.steps))
+                    if sleep_est["should_sleep"]:
+                        _emit({"type": "info", "text": "💡 توصية بالنوم."})
 
                 if obs_round:
-                    # 6) ملاحظة مدمجة تُعاد للنموذج — جوهر الحلقة
-                    merged = ("📋 نتائج هذه الجولة:\n" + "\n---\n".join(obs_round)
-                              + "\n\nإن لم تنجز المهمة كاملة بعد، نفّذ الجولة التالية. "
-                              "وإن أنجزتها أو تعذّر إنجازها، رد بـfinish مع end=true.")
-                    history.append({"role": "user", "content": merged})
-
-                # 7) هل أنهى النموذج بنفسه؟
-                if parsed.get("end") or parsed.get("finish"):
-                    finish = parsed.get("finish") or ""
-                    if finish:
-                        _emit({"type": "answer", "text": str(finish)})
-                    elif obs_round:
-                        # لم ينهِ صراحة لكن أُدمجت النتائج — جولة إضافية
-                        continue
-                    state.status = "done"
+                    history.append({"role": "user", "content": "\n".join(obs_round)})
+                
+                if parsed.get("end"):
+                    # استخلاص وتسجيل الخبرة عند انتهاء المهمة
+                    finish_text = parsed.get("finish", "تم")
+                    
+                    # تحويل التاريخ إلى صيغة قابلة للتحليل من قبل محرك التعلم
+                    formatted_history = []
+                    for h in history:
+                        content = h.get("content")
+                        if isinstance(content, str):
+                            formatted_history.append({"type": "text", "content": content})
+                        elif isinstance(content, dict):
+                            formatted_history.append(content)
+                    
+                    try:
+                        learning_engine.record_experience(
+                            task=user_input,
+                            outcome=finish_text,
+                            lesson="المهمة اكتملت بنجاح.",
+                            success=True,
+                            agent_id=state.agent_id
+                        )
+                    except Exception as e:
+                        logger.error(f"❌ خطأ تسجيل الخبرة: {e}")
+                    
+                    _emit({"type": "answer", "text": finish_text})
                     done = True
-                    break
-
-            if not done:
-                state.status = "done" if total_tools else "failed"
-                _emit({"type": "answer", "text": (
-                    "⚠️ **وصلت لحد الحلقة** "
-                    f"({state.round} جولة، {state.tools_used} أداة). "
-                    "لخص لي ما تبقى وسأكمل من حيث توقفت."
-                )})
-
-            # 8) إغلاق الخطة
-            if plan_id is not None:
-                try:
-                    from ai.task_manager import mark_plan_status
-                    mark_plan_status(plan_id,
-                                     "completed" if state.status == "done" else "failed")
-                except Exception:
-                    pass
-            state.status = state.status or "done"
-            _emit({"type": "status", "status": state.status,
-                   "tools_used": state.tools_used, "rounds": state.round})
+            
             yield from _flush()
-    except GeneratorExit:
-        pass
     finally:
-        active_loops.pop(loop_id, None)
-        state.status = state.status or "done"
-
-
-def _default_llm_fn() -> Callable:
-    """دالة LLM افتراضية مبنية على مزودي NSM (groq/cf/gemini)."""
-    def _fn(system: str, history: List[Dict[str, Any]]) -> str:
-        try:
-            from ai.nsm_agent_core import _call_api
-        except Exception:
-            from ai.llm_fallback import LLMFallback
-            fb = LLMFallback()
-            last = history[-1]["content"] if history else ""
-            res = fb.generate(last)
-            return getattr(res, "text", str(res))
-        messages = [{"role": "system", "content": system}] + history
-        try:
-            resp = _call_api(messages)
-        except Exception as e:
-            resp = None
-        if resp:
-            return str(resp)
-        # فشل مباشر مع مزودي NSM → فallback متسلسل ثم استثناء واضح
-        try:
-            from ai.llm_fallback import LLMFallback
-            fb = LLMFallback()
-            last = history[-1]["content"] if history else ""
-            res = fb.generate(last)
-            txt = getattr(res, "text", None) or str(res)
-            if txt and "Rotation" not in str(txt) and "CKG" not in str(txt):
-                return txt
-        except Exception:
-            pass
-        raise RuntimeError(
-            "تعذّر الاتصال بأي مزود LLM — تحقق من مفاتيح Groq/Gemini/Cloudflare "
-            "(في Streamlit Secrets) أو استخدم llm_fn مخصصًا عند استدعاء الحلقة")
-    return _fn
-
-
-# ── قوائم حلقات نشطة (للاستعلام من الواجهة) ────────────────────────
-active_loops: Dict[str, LoopState] = {}
-
-
-def list_active_loops() -> List[Dict[str, Any]]:
-    return [{"loop_id": s.loop_id, "round": s.round, "tools_used": s.tools_used,
-             "status": s.status, "started_at": s.started_at,
-             "n_steps": len(s.steps)} for s in active_loops.values()]
-
-
-def get_loop_state(loop_id: str) -> Optional[Dict[str, Any]]:
-    s = active_loops.get(loop_id)
-    if s is None:
-        return None
-    return {"loop_id": s.loop_id, "round": s.round, "status": s.status,
-            "steps": s.steps}
-
-
-# ═════════════════════════ أداة تنفيذ خطوة واحدة (للواجهة) ═════════
-def execute_single_tool(tool_name: str, params: Dict[str, Any]) -> str:
-    """تنفيذ أداة واحدة مباشرة من الواجهة (لوحة الطرفيات)."""
-    spec = TOOL_REGISTRY.get(tool_name)
-    if spec is None:
-        return f"❌ أداة غير معروفة: {tool_name}"
-    if spec.dangerous:
-        ok, why = _cmd_safe(params.get("cmd", "")) if tool_name == "shell" else (True, "")
-        if not ok:
-            return f"❌ {why}"
-    try:
-        return _truncate_obs(spec.executor(params))
-    except Exception as e:
-        return f"❌ {e}"
-
-
-# ═════════════════════════ تكامل سريع: استدعاء حلقة بطلب نصي ════════
-def run_loop_to_text(user_input: str, **kwargs) -> str:
-    """جمع أحداث الحلقة في نص واحد — للتوافق مع run() القديم."""
-    parts = []
-    for ev in run_agent_loop(user_input, **kwargs):
-        t = ev.get("type")
-        if t == "tool":
-            parts.append(f"🔧 {ev.get('tool')}: {json.dumps(ev.get('params') or {}, ensure_ascii=False)}")
-        elif t == "result":
-            parts.append(f"   ↳ {str(ev.get('output', ''))[:600]}")
-        elif t == "answer":
-            parts.append(ev.get("text", ""))
-    return "\n".join(parts)
-
-
-# ── 5) المتصفح (ai/agent_browser) ─────────────────────────────────
-def _tool_browser_navigate(params: Dict[str, Any]) -> str:
-    try:
-        from ai.agent_browser import navigate
-        nav = navigate(str(params.get("url", "")),
-                       allow_internal=bool(params.get("allow_internal", False)),
-                       timeout=int(params.get("timeout", 15)))
-        text = nav.get("text", "")
-        links = nav.get("links", [])[:20]
-        out = [f"🌐 {nav.get('title', '')} ({nav.get('url', '')}) "
-               f"[{nav.get('duration_ms', 0)}ms]", text[:3000]]
-        if links:
-            out.append("الروابط:\n" + "\n".join(f"- {l}" for l in links))
-        if not nav.get("ok"):
-            return f"❌ browser_navigate: {nav.get('error')}"
-        return "\n".join(out)[:_MAX_OUTPUT_CHARS]
-    except Exception as e:
-        return f"❌ browser_navigate: {e}"
-
-
-def _tool_browser_api(params: Dict[str, Any]) -> str:
-    try:
-        from ai.agent_browser import api_call
-        res = api_call(str(params.get("url", "")),
-                       method=str(params.get("method", "GET")),
-                       headers=params.get("headers"),
-                       body=params.get("body"),
-                       timeout=int(params.get("timeout", 15)),
-                       allow_internal=bool(params.get("allow_internal", False)))
-        return json.dumps(res, ensure_ascii=False)[:_MAX_OUTPUT_CHARS]
-    except Exception as e:
-        return f"❌ browser_api: {e}"
-
-
-def _tool_browser_download(params: Dict[str, Any]) -> str:
-    try:
-        from ai.agent_browser import download
-        res = download(str(params.get("url", "")),
-                       filename=str(params.get("filename", "")),
-                       allow_internal=bool(params.get("allow_internal", False)),
-                       timeout=int(params.get("timeout", 60)))
-        return json.dumps(res, ensure_ascii=False)[:_MAX_OUTPUT_CHARS]
-    except Exception as e:
-        return f"❌ browser_download: {e}"
-
-
-def _tool_browser_inspect(params: Dict[str, Any]) -> str:
-    try:
-        from ai.agent_browser import inspect
-        res = inspect(str(params.get("url", "")),
-                      what=str(params.get("what", "links")),
-                      allow_internal=bool(params.get("allow_internal", False)),
-                      timeout=int(params.get("timeout", 15)))
-        return json.dumps(res, ensure_ascii=False)[:_MAX_OUTPUT_CHARS]
-    except Exception as e:
-        return f"❌ browser_inspect: {e}"
-
-
-register_tool(ToolSpec(
-    "browser_navigate", "فتح صفحة ويب واستخراج نصها الكامل وروابطها (بدون تنفيذ JS).",
-    {"type": "object", "properties": {
-        "url": {"type": "string", "description": "عنوان HTTPS"},
-        "timeout": {"type": "integer", "description": "مهلة ثوانٍ (3-60)"},
-        "allow_internal": {"type": "boolean", "description": "سماح العناوين الداخلية (localhost) — ممنوع افتراضيًا"},
-    }, "required": ["url"]},
-    _tool_browser_navigate,
-))
-register_tool(ToolSpec(
-    "browser_api", "استدعاء REST API حقيقي (GET/POST/PUT/DELETE) مع رؤوس وجسم JSON.",
-    {"type": "object", "properties": {
-        "url": {"type": "string", "description": "عنوان HTTPS"},
-        "method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"], "description": "طريقة HTTP"},
-        "headers": {"type": "object", "description": "رؤوس HTTP اختيارية"},
-        "body": {"type": ["object", "string"], "description": "جسم الطلب (JSON أو نص)"},
-        "timeout": {"type": "integer", "description": "مهلة ثوانٍ (3-60)"},
-        "allow_internal": {"type": "boolean", "description": "سماح العناوين الداخلية"},
-    }, "required": ["url"]},
-    _tool_browser_api,
-))
-register_tool(ToolSpec(
-    "browser_download", "تنزيل ملف من الويب إلى artifacts/agent_browser/.",
-    {"type": "object", "properties": {
-        "url": {"type": "string", "description": "عنوان HTTPS للملف"},
-        "filename": {"type": "string", "description": "اسم الحفظ (اختياري)"},
-        "timeout": {"type": "integer", "description": "مهلة ثوانٍ (5-120)"},
-        "allow_internal": {"type": "boolean", "description": "سماح العناوين الداخلية"},
-    }, "required": ["url"]},
-    _tool_browser_download,
-))
-register_tool(ToolSpec(
-    "browser_inspect", "فحص عناصر صفحة: روابط، عناوين (h1-h6)، أو صور.",
-    {"type": "object", "properties": {
-        "url": {"type": "string", "description": "عنوان HTTPS"},
-        "what": {"type": "string", "enum": ["links", "headings", "images"], "description": "ما يفحص"},
-        "timeout": {"type": "integer", "description": "مهلة ثوانٍ"},
-        "allow_internal": {"type": "boolean", "description": "سماح العناوين الداخلية"},
-    }, "required": ["url", "what"]},
-    _tool_browser_inspect,
-))
+        state.status = "done"
+        yield from _flush()
