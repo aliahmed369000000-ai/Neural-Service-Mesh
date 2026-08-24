@@ -382,9 +382,10 @@ class LivingMeshNode:
 
     async def request_peers(self, seed_host: str, seed_port: int):
         if ".hf.space" in seed_host:
+            # Hugging Face يستخدم WSS دائماً ولا يحتاج لمنفذ في الـ URI
             uri = f"wss://{seed_host}/ws"
         else:
-            uri = f"ws://{seed_host}:{seed_port}"
+            uri = f"ws://{seed_host}:{seed_port}/ws"
         try:
             async with websockets.connect(uri) as websocket:
                 pub_pem = self.public_key.public_bytes(
@@ -410,7 +411,7 @@ class LivingMeshNode:
         if ".hf.space" in peer_host:
             uri = f"wss://{peer_host}/ws"
         else:
-            uri = f"ws://{peer_host}:{peer_port}"
+            uri = f"ws://{peer_host}:{peer_port}/ws"
         try:
             async with websockets.connect(uri) as websocket:
                 msg_payload = {

@@ -76,7 +76,17 @@ async def main():
     node = LivingMeshNode(node_id=node_id, host=node_host, port=port)
     
     seed_nodes = []
-    if args.seed_host:
+    # دعم اكتشاف عقدة البذور عبر متغيرات البيئة (مفيد للتوسع السريع)
+    env_seed_url = os.getenv("SEED_NODE_URL")
+    if env_seed_url:
+        seed_host = env_seed_url.replace("https://", "").replace("http://", "").replace("wss://", "").replace("ws://", "").strip("/")
+        seed_nodes.append({
+            "id": "seed_node",
+            "host": seed_host,
+            "port": 443 if ".hf.space" in seed_host else 80
+        })
+        logger.info(f"🌐 Found seed node via environment: {seed_host}")
+    elif args.seed_host:
         seed_nodes.append({
             "id": "seed_node",
             "host": args.seed_host,
