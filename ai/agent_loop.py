@@ -950,6 +950,47 @@ def _invoke_llm(llm_fn: Callable, system: str, history: List[Dict[str, Any]]) ->
     if not resp: raise RuntimeError("رد LLM فارغ")
     return str(resp)
 
+# ═══════ ربط مؤقت بـ LLM حقيقي عبر ai/llm_fallback.py (بديل الـ stub الفارغ) ═══════
+# قبل هذا التعديل: عند عدم تمرير llm_fn صراحة (وهذا ما كان يحدث فعلياً في
+# نقطة التشغيل الوحيدة بالإنتاج، ai/agent_background_tasks.py)، كانت الحلقة
+# تسقط على دالة وهمية تُرجع {"thinking": "متابعة...", "end": True} فوراً —
+# أي بلا أي استدعاء LLM حقيقي إطلاقاً. الآن تتصل فعلياً بسلسلة LLMFallback
+# الحقيقية الموجودة مسبقاً (نفس المستخدَمة في ui_pages/agent_orchestrator.py).
+#
+# هذا ربط "مؤقت" بتصريح المستخدم — يمكن تعطيله فوراً وبدون تعديل كود إضافي
+# عبر متغيّر بيئة NSM_AGENT_LOOP_LIVE_LLM=0 (مثلاً أثناء تدريب Kaggle إن رغب
+# بعدم استهلاك حصص مزوّدي LLM المجانية بالتوازي)، فيعود لسلوك الـstub القديم.
+def _stub_llm_fn(system: str, history: List[Dict[str, Any]]) -> str:
+    return json.dumps({"thinking": "متابعة...", "end": True})
+
+def _get_default_llm_fn() -> Callable:
+    """يُستدعى فقط حين لا يُمرَّر llm_fn صراحة (أي: الاستخدام الحقيقي بالإنتاج،
+    وليس المحاكاات في simulations/ أو الاختبارات التي تمرّر mock صراحة)."""
+    if os.environ.get("NSM_AGENT_LOOP_LIVE_LLM", "1").strip().lower() in ("0", "false", "no"):
+        return _stub_llm_fn
+    try:
+        from ai.llm_fallback import LLMFallback
+        _llm = LLMFallback()
+
+        def _real_llm_fn(system: str, history: List[Dict[str, Any]]) -> str:
+            # history هنا سجل جولات ReAct بصيغة {"role","content"} (وليس
+            # أزواج (user, assistant) بسيطة كما يتوقع LLMFallback.generate)،
+            # لذا نحوّله لنص متسلسل واحد يُمرَّر كـ query مع system_prompt.
+            lines = []
+            for msg in (history or [])[-12:]:  # حد سياق معقول لكل استدعاء
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                prefix = {"user": "User", "assistant": "Assistant", "system": "System"}.get(role, role)
+                lines.append(f"{prefix}: {content}")
+            query = "\n".join(lines) if lines else "ابدأ التنفيذ."
+            result = _llm.generate(query=query, system_prompt=system)
+            return result.text
+
+        return _real_llm_fn
+    except Exception as e:
+        logger.warning(f"⚠️ تعذّر تفعيل LLM حقيقي لحلقة الوكيل، رجوع لسلوك stub: {e}")
+        return _stub_llm_fn
+
 def _build_tools_prompt() -> str:
     return "الأدوات: " + ", ".join(_TOOL_ORDER)
 
@@ -1098,7 +1139,7 @@ def run_agent_loop(user_input: str, *, llm_fn: Optional[Callable] = None, max_ro
             _emit({"type": "status", "loop_id": loop_id, "status": "running"})
             yield from _flush()
 
-            fn = llm_fn or (lambda s, h: json.dumps({"thinking": "متابعة...", "end": True}))
+            fn = llm_fn or _get_default_llm_fn()
             system_base = _SYSTEM_PROMPT
             
             # استعادة الحالة (الاستيقاظ التدريجي مع STM/LTM)
