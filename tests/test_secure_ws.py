@@ -3,6 +3,7 @@ import json
 import logging
 import sys
 import os
+import websockets
 from pathlib import Path
 
 # إضافة مسار المشروع للاستيراد
@@ -31,11 +32,13 @@ async def run_test():
     # 2. إنشاء العقدة الثانية (Zeta)
     node_zeta = LivingMeshNode("node_zeta", port=7772)
     
-    # 3. تشغيل الخوادم في الخلفية
-    server_alpha = asyncio.create_task(node_alpha.start_node_server())
-    server_zeta = asyncio.create_task(node_zeta.start_node_server())
-    
-    await asyncio.sleep(2)  # انتظار بدء الخوادم
+    # 3. تشغيل الخوادم فعلياً عبر websockets.serve()
+    server_alpha = await websockets.serve(node_alpha._handle_ws_connection, "127.0.0.1", node_alpha.port)
+    server_zeta = await websockets.serve(node_zeta._handle_ws_connection, "127.0.0.1", node_zeta.port)
+    node_alpha.server = server_alpha
+    node_zeta.server = server_zeta
+
+    await asyncio.sleep(1)
     
     print("\n🌐 Sending message via Secure WebSocket from Alpha to Zeta...")
     # 4. إرسال خبرة من Alpha إلى Zeta عبر WS
@@ -54,10 +57,10 @@ async def run_test():
         print("❌ Failure: WebSocket message was not received or verified.")
     
     # إغلاق الخوادم
-    node_alpha.server.close()
-    node_zeta.server.close()
+    server_alpha.close()
+    server_zeta.close()
+    await asyncio.gather(server_alpha.wait_closed(), server_zeta.wait_closed(), return_exceptions=True)
     print("\n🏁 Secure WebSocket Test Completed.")
-    # ملاحظة: asyncio loop سيتوقف عند انتهاء المهام
 
 if __name__ == "__main__":
     try:

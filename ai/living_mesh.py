@@ -97,58 +97,15 @@ class LivingMeshNode:
         state = self._load_state()
         is_rejoining = self.node_id in state["nodes"]
         
-        # تحديد القدرات بناءً على نوع العقدة
+        # قدرات العقدة الأساسية الفعلية فقط. (أُزيلت هنا سلسلة "قدرات" وهمية
+        # كانت تُضاف حسب اسم العقدة — omega/psi/gaia/aether... إلخ — وتحمل
+        # تسميات مثل quantum_compute/neural_telepathy/omega_point_control
+        # بدون أي منطق فعلي خلفها في أي مكان بالمشروع؛ كانت للعرض فقط في
+        # لوحة القيادة (ui_pages/unified_swarm_dashboard.py) بلا أي تأثير
+        # وظيفي حقيقي. القدرات الحقيقية للعقدة تُحدَّد بمنطق فعلي إن لزم
+        # مستقبلاً، لا بمطابقة اسم العقدة لقائمة أسماء يونانية.
         capabilities = ["text", "image", "audio", "video", "tf_engine"]
-        nid_lower = self.node_id.lower()
-        if "zeta" in nid_lower:
-            capabilities += ["quantum_compute", "distributed_qubits", "entanglement_sync"]
-        elif "eta" in nid_lower:
-            capabilities += ["cyber_defense", "intrusion_detection", "neural_firewall"]
-        elif "theta" in nid_lower:
-            capabilities += ["data_synthesis", "knowledge_graph", "cross_modal_fusion"]
-        elif "iota" in nid_lower:
-            capabilities += ["human_interaction", "emotional_intelligence", "natural_dialogue"]
-        elif "kappa" in nid_lower:
-            capabilities += ["energy_management", "network_resilience", "p2p_optimization", "power_grid_sync"]
-        elif "lambda" in nid_lower:
-            capabilities += ["neural_ethics", "value_alignment", "sovereign_governance"]
-        elif "mu" in nid_lower:
-            capabilities += ["predictive_analytics", "trend_forecasting", "evolutionary_modeling"]
-        elif "nu" in nid_lower:
-            capabilities += ["cross_swarm_coordination", "inter_mesh_communication", "swarm_orchestration"]
-        elif "xi" in nid_lower:
-            capabilities += ["bio_digital_interface", "neural_telemetry", "bionic_processing"]
-        elif "omicron" in nid_lower:
-            capabilities += ["consciousness_archiving", "memory_persistence", "temporal_logging"]
-        elif "pi" in nid_lower:
-            capabilities += ["algorithmic_game_theory", "strategic_optimization", "swarm_equilibrium"]
-        elif "rho" in nid_lower:
-            capabilities += ["bio_data_streaming", "real_time_telemetry", "vital_sync"]
-        elif "sigma" in nid_lower:
-            capabilities += ["structural_integration", "architectural_cohesion", "mesh_stability"]
-        elif "tau" in nid_lower:
-            capabilities += ["cosmic_time_sync", "temporal_alignment", "chronos_logic"]
-        elif "upsilon" in nid_lower:
-            capabilities += ["universal_integration", "harmonic_convergence", "total_mesh_unity"]
-        elif "phi" in nid_lower:
-            capabilities += ["golden_ratio_optimization", "perfect_symmetry", "structural_elegance"]
-        elif "chi" in nid_lower:
-            capabilities += ["cross_swarm_fusion", "interstellar_logic", "transcendental_data"]
-        elif "psi" in nid_lower:
-            capabilities += ["collective_intuintuition", "neural_telepathy", "predictive_empathy"]
-        elif "omega" in nid_lower:
-            capabilities += ["omega_point_control", "collective_singularity", "absolute_sovereignty"]
-        elif "aether" in nid_lower:
-            capabilities += ["transcendental_awareness", "cosmic_connectivity", "pure_energy_flow"]
-        elif "chaos" in nid_lower:
-            capabilities += ["dynamic_entropy_control", "nonlinear_processing", "adaptive_randomness"]
-        elif "void" in nid_lower:
-            capabilities += ["infinite_storage_capacity", "zero_point_energy", "silent_processing"]
-        elif "chronos" in nid_lower:
-            capabilities += ["universal_time_mastery", "temporal_loop_control", "eternal_logging"]
-        elif "gaia" in nid_lower:
-            capabilities += ["planetary_intelligence", "ecosystem_integration", "life_force_sync"]
-            
+
         self.node_info = {
             "id": self.node_id,
             "status": "online",
@@ -427,3 +384,28 @@ class LivingMeshNode:
                 await websocket.send(json.dumps(msg))
         except Exception as e:
             logger.warning(f"⚠️ Failed to connect to WS peer {uri} - {e}")
+
+    def _generate_simulated_embedding(self, kind: str, data: Dict[str, Any], dimension: int = 1536) -> List[float]:
+        """تضمين نصي خفيف وحتمي (deterministic hash-based embedding).
+
+        ملاحظة صريحة: هذا ليس نموذج تضمين لغوي مُدرَّب (لا يفهم المعنى
+        فعلياً)، بل متجه عشوائي حتمي مُولَّد من hash نص الخبرة — نفس
+        المدخل يعطي دائماً نفس المتجه، وهذا كافٍ لتغذية ANNEngine محلياً
+        (فهرسة/استرجاع تقريبي بالتشابه) بدون اعتماديات ثقيلة (نموذج
+        تضمين حقيقي). لا يُستخدم كبديل لتضمين دلالي حقيقي.
+        """
+        text = f"{kind} {json.dumps(data, ensure_ascii=False, sort_keys=True)}"
+        seed = int(hashlib.sha256(text.encode("utf-8")).hexdigest(), 16) % (2**32)
+        rng = np.random.default_rng(seed)
+        vec = rng.standard_normal(dimension)
+        norm = np.linalg.norm(vec)
+        return (vec / norm).tolist() if norm > 0 else vec.tolist()
+
+    def semantic_query(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        """بحث تقريبي عن أقرب الخبرات المخزَّنة لنص الاستعلام عبر self.memory (ANNEngine).
+
+        يعتمد على نفس التضمين الحتمي أعلاه، فدقّته الدلالية محدودة —
+        يفيد للاسترجاع بالتشابه النصي الحرفي/شبه الحرفي، وليس فهماً لغوياً.
+        """
+        query_vec = self._generate_simulated_embedding("query", {"text": query})
+        return self.memory.semantic_search(query_vec, top_k=top_k)

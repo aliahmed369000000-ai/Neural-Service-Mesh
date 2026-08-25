@@ -3,6 +3,7 @@ import json
 import logging
 import sys
 import os
+import websockets
 from pathlib import Path
 
 # إضافة مسار المشروع للاستيراد
@@ -27,27 +28,35 @@ async def run_test():
     
     # 1. إنشاء العقدة الأولى (Alpha) - ستكون العقدة البذرة (Seed)
     node_alpha = LivingMeshNode("node_alpha", port=8881)
-    server_alpha = asyncio.create_task(node_alpha.start_node_server())
-    
-    await asyncio.sleep(2)
+    server_alpha = await websockets.serve(node_alpha._handle_ws_connection, "127.0.0.1", node_alpha.port)
+    node_alpha.server = server_alpha
+    # ملاحظة إصلاح: الاختبار الأصلي كان لا يستدعي join_network() لـ Alpha
+    # إطلاقاً، فلم تكن تُسجَّل بالشبكة أصلاً (سبب حقيقي لفشل الاكتشاف،
+    # منفصل عن مشكلة start_node_server المفقودة التي كانت تمنع وصول
+    # التنفيذ لهذه النقطة أساساً).
+    node_alpha.join_network()
+
+    await asyncio.sleep(1)
     
     # 2. إنشاء العقدة الثانية (Zeta) - تنضم عبر Alpha
     node_zeta = LivingMeshNode("node_zeta", port=8882)
-    server_zeta = asyncio.create_task(node_zeta.start_node_server())
+    server_zeta = await websockets.serve(node_zeta._handle_ws_connection, "127.0.0.1", node_zeta.port)
+    node_zeta.server = server_zeta
     
     # انضمام Zeta للشبكة باستخدام Alpha كبذرة
     node_zeta.join_network(seed_nodes=[{"id": "node_alpha", "host": "127.0.0.1", "port": 8881}])
     
-    await asyncio.sleep(3)
+    await asyncio.sleep(2)
     
     # 3. إنشاء العقدة الثالثة (Rho) - تنضم عبر Zeta
     # هذا يختبر انتشار الأقران (Zeta ستخبر Rho عن Alpha)
     node_rho = LivingMeshNode("node_rho", port=8883)
-    server_rho = asyncio.create_task(node_rho.start_node_server())
+    server_rho = await websockets.serve(node_rho._handle_ws_connection, "127.0.0.1", node_rho.port)
+    node_rho.server = server_rho
     
     node_rho.join_network(seed_nodes=[{"id": "node_zeta", "host": "127.0.0.1", "port": 8882}])
     
-    await asyncio.sleep(3)
+    await asyncio.sleep(2)
     
     # 4. التحقق من النتائج
     state_rho = node_rho._load_state()
@@ -61,9 +70,13 @@ async def run_test():
         print("❌ Failure: Peer discovery propagation failed.")
         
     # إغلاق الخوادم
-    node_alpha.server.close()
-    node_zeta.server.close()
-    node_rho.server.close()
+    server_alpha.close()
+    server_zeta.close()
+    server_rho.close()
+    await asyncio.gather(
+        server_alpha.wait_closed(), server_zeta.wait_closed(), server_rho.wait_closed(),
+        return_exceptions=True,
+    )
     print("\n🏁 Peer Discovery Test Completed.")
 
 if __name__ == "__main__":

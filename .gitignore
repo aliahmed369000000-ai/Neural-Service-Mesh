@@ -111,3 +111,5 @@ artifacts/learning/distributed_knowledge.json
 tests/test_consensus.py
 tests/test_reputation.py
 tests/test_temporal_recovery.py
+artifacts/living_mesh/keys/
+artifacts/living_mesh/memory/

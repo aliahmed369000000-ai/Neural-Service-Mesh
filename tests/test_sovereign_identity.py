@@ -3,6 +3,7 @@ import json
 import logging
 import sys
 import os
+import websockets
 from pathlib import Path
 
 # إضافة مسار المشروع للاستيراد
@@ -33,11 +34,13 @@ async def run_test():
     node_zeta = LivingMeshNode("node_zeta", port=9992)
     node_zeta.join_network()
     
-    # 3. تشغيل الخوادم في الخلفية
-    server_alpha = asyncio.create_task(node_alpha.start_node_server())
-    server_zeta = asyncio.create_task(node_zeta.start_node_server())
-    
-    await asyncio.sleep(2)  # انتظار بدء الخوادم وتبادل المفاتيح العامة (عبر الدليل المشترك حالياً)
+    # 3. تشغيل الخوادم فعلياً عبر websockets.serve()
+    server_alpha = await websockets.serve(node_alpha._handle_ws_connection, "127.0.0.1", node_alpha.port)
+    server_zeta = await websockets.serve(node_zeta._handle_ws_connection, "127.0.0.1", node_zeta.port)
+    node_alpha.server = server_alpha
+    node_zeta.server = server_zeta
+
+    await asyncio.sleep(1)  # انتظار ثبات الخوادم وتبادل المفاتيح العامة (عبر الدليل المشترك حالياً)
     
     print("\n🔒 Sending Secure message from Alpha to Zeta...")
     # 4. إرسال خبرة من Alpha إلى Zeta
@@ -78,9 +81,9 @@ async def run_test():
         print("❌ Defense Failure: Zeta accepted an unverified message!")
     
     # إغلاق الخوادم
-    node_alpha.server.close()
-    node_zeta.server.close()
-    await asyncio.gather(server_alpha, server_zeta, return_exceptions=True)
+    server_alpha.close()
+    server_zeta.close()
+    await asyncio.gather(server_alpha.wait_closed(), server_zeta.wait_closed(), return_exceptions=True)
     print("\n🏁 Sovereign Test Completed.")
 
 if __name__ == "__main__":

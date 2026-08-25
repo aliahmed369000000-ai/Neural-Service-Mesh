@@ -3,6 +3,7 @@ import json
 import logging
 import sys
 import os
+import websockets
 from pathlib import Path
 
 # إضافة مسار المشروع للاستيراد
@@ -28,11 +29,16 @@ async def run_test():
     node_zeta = LivingMeshNode("node_zeta", port=8889)
     node_zeta.join_network()
     
-    # 3. تشغيل الخوادم في الخلفية
-    server_alpha = asyncio.create_task(node_alpha.start_node_server())
-    server_zeta = asyncio.create_task(node_zeta.start_node_server())
-    
-    await asyncio.sleep(2)  # انتظار بدء الخوادم
+    # 3. تشغيل الخوادم فعلياً عبر websockets.serve()
+    # (start_node_server() لم تعد موجودة على LivingMeshNode بعد إعادة الهيكلة
+    #  لصالح node_launcher.py القائم على aiohttp؛ الطريقة الصحيحة الحالية
+    #  للاستماع المباشر عبر بروتوكول websockets الخام هي _handle_ws_connection)
+    server_alpha = await websockets.serve(node_alpha._handle_ws_connection, "127.0.0.1", node_alpha.port)
+    server_zeta = await websockets.serve(node_zeta._handle_ws_connection, "127.0.0.1", node_zeta.port)
+    node_alpha.server = server_alpha
+    node_zeta.server = server_zeta
+
+    await asyncio.sleep(1)  # هامش أمان لثبات الاتصال
     
     print("\n📡 Sending experience from Alpha to Zeta via Real P2P...")
     # 4. إرسال خبرة من Alpha إلى Zeta
@@ -51,9 +57,9 @@ async def run_test():
         print("❌ Failure: Zeta did not receive the experience.")
     
     # إغلاق الخوادم
-    node_alpha.server.close()
-    node_zeta.server.close()
-    await asyncio.gather(server_alpha, server_zeta, return_exceptions=True)
+    server_alpha.close()
+    server_zeta.close()
+    await asyncio.gather(server_alpha.wait_closed(), server_zeta.wait_closed(), return_exceptions=True)
     print("\n🏁 Test Completed.")
 
 if __name__ == "__main__":
