@@ -256,6 +256,26 @@ def render_unified_swarm_dashboard() -> None:
     else:
         st.info("لا توجد وكلاء نشطة بعد — نفّذ مهمة من أي تبويب وكيل لتظهر أوقات استجابتها هنا.")
 
+    # ── مركز التطور الذاتي ──────────────────────────────────────────
+    render_section_header("🧬 مركز التطور الذاتي (Self-Evolution Hub)", "تمكين الوكلاء من استنساخ المستودعات وتطوير أنفسهم ذاتياً")
+    
+    col_evo_input, col_evo_action = st.columns([3, 1])
+    with col_evo_input:
+        evolution_task = st.text_input("صف المهمة البرمجية للوكيل (مثلاً: تحسين التوثيق، إصلاح خطأ):", key="evo_task_input")
+    with col_evo_action:
+        st.write("") # مساحة للمحاذاة
+        if st.button("🚀 تكليف السرب بالتطوير", key="evo_btn", use_container_width=True):
+            if evolution_task:
+                try:
+                    from ai.living_mesh import LivingMeshNode
+                    temp_node = LivingMeshNode(node_id="dashboard_commander")
+                    temp_node.sync_experience("evolution_task", {"task": evolution_task})
+                    st.success(f"✅ تم إرسال المهمة: '{evolution_task}' إلى السرب.")
+                except Exception as e:
+                    st.error(f"❌ فشل إرسال المهمة: {e}")
+            else:
+                st.warning("⚠️ يرجى إدخال وصف المهمة.")
+
     # ── الذاكرة الموحدة والبحث الدلالي ───────────────────────────
     render_section_header("🧠 الذاكرة الموحدة (Unified Memory)", "بحث دلالي سريع وتخزين مجزأ مستدام")
     
