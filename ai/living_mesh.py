@@ -20,6 +20,7 @@ from pathlib import Path
 from ai.alert_manager import alert_manager
 from ai.unified_memory import UnifiedMemoryManager
 from ai.git_manager import GitManager
+from ai.toolbox import nsm_toolbox
 from typing import Any, Dict, List, Optional, Set
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
@@ -68,6 +69,9 @@ class LivingMeshNode:
         
         # تهيئة مدير Git للتطور الذاتي
         self.git_manager = GitManager()
+        
+        # ربط صندوق الأدوات
+        self.toolbox = nsm_toolbox
 
     async def _load_surah_pretrain(self):
         """تحميل أوزان Surah المسبقة من Hugging Face."""
@@ -298,10 +302,31 @@ class LivingMeshNode:
             elif kind == "evolution_task":
                 logger.info(f"🧬 Node {self.node_id} received Evolution Task: {exp_data.get('task')}")
                 asyncio.create_task(self._execute_evolution(exp_data))
+            elif kind == "tool_request":
+                # طلب تنفيذ أداة محددة من السرب
+                logger.info(f"🛠️ Node {self.node_id} received Tool Request: {exp_data.get('tool_name')}")
+                asyncio.create_task(self._handle_tool_request(exp_data))
             else:
                 self.sync_experience(kind, exp_data, hops + 1)
         except Exception as e:
             logger.error(f"❌ Error processing WS message: {e}")
+
+    async def _handle_tool_request(self, request_data: Dict[str, Any]):
+        """معالجة طلب تنفيذ أداة ومشاركة النتيجة."""
+        try:
+            tool_name = request_data.get("tool_name")
+            args = request_data.get("args", {})
+            
+            result = self.toolbox.execute_tool(tool_name, **args)
+            
+            # مشاركة نتيجة تنفيذ الأداة مع الشبكة
+            self.sync_experience("tool_result", {
+                "tool_name": tool_name,
+                "result": result,
+                "node": self.node_id
+            })
+        except Exception as e:
+            logger.error(f"❌ Tool Execution Request Failed: {e}")
 
     async def _execute_evolution(self, task_data: Dict[str, Any]):
         """تنفيذ مهمة التطوير الذاتي برمجياً."""
