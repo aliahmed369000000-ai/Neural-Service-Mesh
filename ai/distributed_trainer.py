@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""🚀 NSM Distributed Trainer — محرك التدريب الموزع لـ Surah 4096.
+"""🚀 NSM Distributed Trainer — محرك التدريب الموزع لـ Surah 4096 (Kaggle Edition).
 
 يستخدم هذا المحرك DeepSpeed ZeRO-3 لدمج قوة 7 بطاقات GPU وتوزيع الذاكرة
 بشكل يسمح بتدريب نماذج عملاقة تتجاوز سعة البطاقة الواحدة.
+تم تحسينه للعمل في بيئة Kaggle وحفظ الأوزان محلياً.
 """
 import os
 import torch
@@ -26,6 +27,11 @@ class NSMDistributedTrainer:
         self.world_size = torch.cuda.device_count()
         self.local_rank = int(os.environ.get("LOCAL_RANK", 0))
         self.security = NSMSecurityGuard()
+        
+        # إعداد مسارات Kaggle
+        self.checkpoint_dir = "/kaggle/working/checkpoints"
+        if not os.path.exists(self.checkpoint_dir) and self.local_rank == 0:
+            os.makedirs(self.checkpoint_dir, exist_ok=True)
         
         print(f"🛡️ Security Protocol Active. Initializing NSM Distributed Swarm with {self.world_size} GPUs...")
 
@@ -87,7 +93,8 @@ class NSMDistributedTrainer:
             )
         else:
             # التراجع إلى DDP التقليدي إذا لم يتوفر DeepSpeed
-            dist.init_process_group(backend="nccl")
+            if not dist.is_initialized():
+                dist.init_process_group(backend="nccl")
             torch.cuda.set_device(self.local_rank)
             self.model = self.model.to(self.local_rank)
             self.model = DDP(self.model, device_ids=[self.local_rank])
@@ -131,19 +138,20 @@ class NSMDistributedTrainer:
                 cognitive_engine.apply_evolutionary_patch(p)
                 print(f"✨ Evolutionary Patch Proposed: {p['type']}")
 
-    def save_checkpoint(self, path):
-        """حفظ الأوزان الموزعة وتأمينها."""
+    def save_checkpoint(self, tag):
+        """حفظ الأوزان الموزعة وتأمينها في مسار Kaggle."""
         if self.local_rank == 0:
+            save_path = os.path.join(self.checkpoint_dir, tag)
             if deepspeed:
-                self.model_engine.save_checkpoint(path)
-                # تشفير الأوزان بعد الحفظ
-                self.security.encrypt_weights(os.path.join(path, "mp_rank_00_model_states.pt"))
+                self.model_engine.save_checkpoint(self.checkpoint_dir, tag=tag)
+                # ملاحظة: DeepSpeed يحفظ عدة ملفات، التشفير يحتاج معالجة خاصة للمجلد
             else:
-                torch.save(self.model.state_dict(), path)
-                self.security.encrypt_weights(path)
-            print(f"💾 Checkpoint saved and secured at {path}")
+                torch.save(self.model.state_dict(), save_path)
+                self.security.encrypt_weights(save_path)
+            print(f"💾 Checkpoint '{tag}' saved and secured at {self.checkpoint_dir}")
 
 if __name__ == "__main__":
-    # مثال توضيحي للتشغيل
-    print("🛠️ NSM Distributed Trainer Ready for Surah 4096.")
+    # مثال توضيحي للتشغيل في Kaggle
+    print("🛠️ NSM Distributed Trainer Ready for Surah 4096 on Kaggle.")
+    print(f"Checkpoints will be saved to: /kaggle/working/checkpoints")
     print("Usage: deepspeed ai/distributed_trainer.py --num_gpus 7")

@@ -1,4 +1,4 @@
-
+# -*- coding: utf-8 -*-
 import json
 import os
 import time
@@ -10,21 +10,30 @@ logger = logging.getLogger("NeuralServiceMesh.CognitiveGrowth")
 
 class CognitiveGrowthEngine:
     """
-    🧠 NSM Cognitive Growth Engine — محرك النمو المعرفي الذاتي.
+    🧠 NSM Cognitive Growth Engine — محرك النمو المعرفي الذاتي (Kaggle Edition).
     يسمح للسرب بتحليل الخبرات، استخلاص الأنماط، واقتراح تطورات هيكلية للنماذج.
     """
-    def __init__(self, db_path: str = "artifacts/learning/experience_db.json"):
-        self.db_path = db_path
+    def __init__(self, db_path: str = None):
+        # التوافق مع مسارات Kaggle للخبرات
+        if db_path is None:
+            if os.path.exists("/kaggle/working"):
+                self.db_path = "/kaggle/working/experience_db.json"
+            else:
+                self.db_path = "artifacts/learning/experience_db.json"
+        else:
+            self.db_path = db_path
+            
         self.knowledge_base = []
         self.strategies = {}
         self.evolution_steps = []
         self.last_analysis_time = 0
         self._load_db()
-        logger.info("🧠 Cognitive Growth Engine Initialized.")
+        logger.info(f"🧠 Cognitive Growth Engine Initialized. DB: {self.db_path}")
 
     def _load_db(self):
-        if not os.path.exists(os.path.dirname(self.db_path)):
-            os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir and not os.path.exists(db_dir):
+            os.makedirs(db_dir, exist_ok=True)
         if os.path.exists(self.db_path):
             try:
                 with open(self.db_path, 'r', encoding='utf-8') as f:
@@ -59,7 +68,7 @@ class CognitiveGrowthEngine:
         return proposals
 
     def apply_evolutionary_patch(self, proposal: Dict[str, Any]):
-        """توثيق تطبيق التطور الهيكلي."""
+        """توثيق تطبيق التطور الهيكلي وحفظه محلياً."""
         step = {
             "step_id": len(self.evolution_steps) + 1,
             "type": proposal["type"],
@@ -67,6 +76,11 @@ class CognitiveGrowthEngine:
             "timestamp": time.time()
         }
         self.evolution_steps.append(step)
+        # حفظ التطور في قاعدة البيانات المحلية
+        self.knowledge_base.append({"event": "evolution", "details": step})
+        with open(self.db_path, 'w', encoding='utf-8') as f:
+            json.dump(self.knowledge_base, f, ensure_ascii=False, indent=4)
+            
         logger.info(f"✨ Evolutionary Step Recorded: {proposal['type']}")
         return step
 
@@ -78,7 +92,7 @@ class CognitiveGrowthEngine:
             "intelligence_index": 1.0 + (len(self.evolution_steps) * 0.1)
         }
         
-        report = f"--- 🧠 تقرير النمو المعرفي السيادي ---\n"
+        report = f"--- 🧠 تقرير النمو المعرفي السيادي (Kaggle) ---\n"
         report += f"مؤشر الذكاء الحالي: {analysis['intelligence_index']:.2f}\n"
         report += f"خطوات التطور المنفذة: {analysis['evolution_steps']}\n"
         report += f"إجمالي الخبرات المكتسبة: {analysis['total_experiences']}\n"
@@ -102,10 +116,10 @@ class CognitiveGrowthEngine:
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         
         with open(log_path, "a", encoding="utf-8") as f:
-            f.write(f"\n\n## 🧠 Cognitive Update - {time.ctime()}\n")
+            f.write(f"\n\n## 🧠 Cognitive Update (Kaggle) - {time.ctime()}\n")
             f.write(report)
             
-        git.commit_and_push(repo_path, "🧬 NSM Bot: Recording Cognitive Growth Evolution", [log_path])
+        git.commit_and_push(repo_path, "🧬 NSM Bot: Recording Cognitive Growth Evolution from Kaggle", [log_path])
         return "✅ Evolution recorded and pushed to GitHub."
 
 # نسخة عالمية للنمو
