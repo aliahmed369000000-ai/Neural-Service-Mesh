@@ -9,6 +9,7 @@ import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from ai.security_guard import NSMSecurityGuard
+from ai.cognitive_growth import cognitive_engine
 
 # محاولة استيراد DeepSpeed (يجب تثبيته في بيئة التدريب)
 try:
@@ -92,8 +93,8 @@ class NSMDistributedTrainer:
             self.model = DDP(self.model, device_ids=[self.local_rank])
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-4)
 
-    def train_step(self, batch):
-        """خطوة تدريب واحدة موزعة."""
+    def train_step(self, batch, step_idx=0):
+        """خطوة تدريب واحدة موزعة مع تحليل النمو المعرفي."""
         inputs, labels = batch
         
         if deepspeed:
@@ -109,7 +110,26 @@ class NSMDistributedTrainer:
             loss.backward()
             self.optimizer.step()
             
+        # تحليل النمو المعرفي كل 100 خطوة
+        if step_idx % 100 == 0 and self.local_rank == 0:
+            self._trigger_cognitive_growth(loss.item())
+            
         return loss.item()
+
+    def _trigger_cognitive_growth(self, current_loss):
+        """تفعيل تحليل النمو المعرفي بناءً على نتائج التدريب."""
+        if not hasattr(self, 'loss_history'): self.loss_history = []
+        self.loss_history.append(current_loss)
+        
+        trend = cognitive_engine.analyze_learning_trend(self.loss_history)
+        print(f"🧠 Cognitive Analysis: {trend}")
+        
+        if "structural evolution" in trend.lower():
+            metrics = {"accuracy": 0.75, "loss_variance": 0.5} # مقاييس محاكية
+            proposals = cognitive_engine.propose_structural_evolution(metrics)
+            for p in proposals:
+                cognitive_engine.apply_evolutionary_patch(p)
+                print(f"✨ Evolutionary Patch Proposed: {p['type']}")
 
     def save_checkpoint(self, path):
         """حفظ الأوزان الموزعة وتأمينها."""

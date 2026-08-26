@@ -224,3 +224,15 @@ nsm_toolbox.register_tool(
     "رصد محاولات التسلل وحالة تشفير البيانات الحية", 
     "security"
 )
+
+def cognitive_evolution_tracker() -> str:
+    """أداة لرصد معدل نمو الذكاء والتحسينات المطبقة في السرب العالمي."""
+    from ai.cognitive_growth import cognitive_engine
+    return cognitive_engine.get_growth_report()
+
+nsm_toolbox.register_tool(
+    "cognitive_tracker", 
+    cognitive_evolution_tracker, 
+    "رصد معدل نمو الذكاء والتحسينات الهيكلية المطبقة", 
+    "autonomous"
+)

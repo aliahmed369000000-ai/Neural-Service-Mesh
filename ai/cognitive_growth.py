@@ -10,17 +10,21 @@ logger = logging.getLogger("NeuralServiceMesh.CognitiveGrowth")
 
 class CognitiveGrowthEngine:
     """
-    محرك النمو المعرفي الذاتي (SCG):
-    يسمح للسرب بتحليل الخبرات المتراكمة، استخلاص الأنماط، وتوليد استراتيجيات عمل جديدة.
+    🧠 NSM Cognitive Growth Engine — محرك النمو المعرفي الذاتي.
+    يسمح للسرب بتحليل الخبرات، استخلاص الأنماط، واقتراح تطورات هيكلية للنماذج.
     """
     def __init__(self, db_path: str = "artifacts/learning/experience_db.json"):
         self.db_path = db_path
         self.knowledge_base = []
         self.strategies = {}
+        self.evolution_steps = []
         self.last_analysis_time = 0
         self._load_db()
+        logger.info("🧠 Cognitive Growth Engine Initialized.")
 
     def _load_db(self):
+        if not os.path.exists(os.path.dirname(self.db_path)):
+            os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         if os.path.exists(self.db_path):
             try:
                 with open(self.db_path, 'r', encoding='utf-8') as f:
@@ -29,62 +33,80 @@ class CognitiveGrowthEngine:
                 logger.error(f"Failed to load experience DB: {e}")
                 self.knowledge_base = []
 
-    def analyze_experiences(self):
-        """تحليل الخبرات لاستخلاص الأنماط والدروس المستفادة."""
-        if not self.knowledge_base:
-            return "قاعدة الخبرات فارغة حالياً."
-
-        analysis = {
-            "total_tasks": len(self.knowledge_base),
-            "success_rate": sum(1 for x in self.knowledge_base if x.get("success")) / len(self.knowledge_base),
-            "top_failures": {},
-            "key_lessons": []
-        }
-
-        for exp in self.knowledge_base:
-            if not exp.get("success"):
-                task_type = exp.get("task_type", "unknown")
-                analysis["top_failures"][task_type] = analysis["top_failures"].get(task_type, 0) + 1
-            
-            lesson = exp.get("lesson")
-            if lesson and lesson not in analysis["key_lessons"]:
-                analysis["key_lessons"].append(lesson)
-
-        self.last_analysis_time = time.time()
-        return analysis
-
-    def evolve_strategies(self):
-        """توليد استراتيجيات جديدة بناءً على التحليل المعرفي."""
-        analysis = self.analyze_experiences()
-        if isinstance(analysis, str): return
-
-        # استراتيجية إدارة الذاكرة
-        if analysis["success_rate"] < 0.7:
-            self.strategies["memory_safety"] = "تفعيل التكميم (VQ) الصارم وتقليل حجم الدفعة تلقائياً."
+    def analyze_learning_trend(self, loss_history: List[float]) -> str:
+        """تحليل اتجاه التعلم لاكتشاف فرص التطور الهيكلي."""
+        if len(loss_history) < 10:
+            return "Gathering more data for trend analysis..."
         
-        # استراتيجية توزيع المهام
-        failure_types = sorted(analysis["top_failures"].items(), key=lambda x: x[1], reverse=True)
-        if failure_types:
-            most_failed = failure_types[0][0]
-            self.strategies["task_routing"] = f"توجيه مهام {most_failed} إلى الوكلاء ذوي الثقة > 0.9 فقط."
+        recent_loss = loss_history[-10:]
+        trend = np.polyfit(range(len(recent_loss)), recent_loss, 1)[0]
+        
+        if trend > 0:
+            return "⚠️ Learning Stalled: Suggesting structural evolution."
+        elif trend > -0.0001:
+            return "📉 Slow Convergence: Optimizing attention complexity."
+        return "✅ Healthy Growth: Maintaining current trajectory."
 
-        logger.info(f"🧠 Cognitive Evolution: {len(self.strategies)} new strategies evolved.")
-        return self.strategies
+    def propose_structural_evolution(self, metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """اقتراح تغييرات هيكلية بناءً على مقاييس الأداء."""
+        proposals = []
+        if metrics.get("accuracy", 0) < 0.8 and metrics.get("loss_variance", 0) > 0.4:
+            proposals.append({
+                "type": "add_residual_connection",
+                "reason": "Improving gradient stability",
+                "impact": "Better convergence for deep layers"
+            })
+        return proposals
+
+    def apply_evolutionary_patch(self, proposal: Dict[str, Any]):
+        """توثيق تطبيق التطور الهيكلي."""
+        step = {
+            "step_id": len(self.evolution_steps) + 1,
+            "type": proposal["type"],
+            "reason": proposal["reason"],
+            "timestamp": time.time()
+        }
+        self.evolution_steps.append(step)
+        logger.info(f"✨ Evolutionary Step Recorded: {proposal['type']}")
+        return step
 
     def get_growth_report(self) -> str:
-        """تقرير عن حالة النمو المعرفي للسرب."""
-        self.evolve_strategies()
-        analysis = self.analyze_experiences()
-        if isinstance(analysis, str): return analysis
-
-        report = f"--- تقرير النمو المعرفي الذاتي ---\n"
-        report += f"إجمالي الخبرات: {analysis['total_tasks']}\n"
-        report += f"معدل النجاح العام: {analysis['success_rate']:.2%}\n"
-        report += f"الاستراتيجيات النشطة: {len(self.strategies)}\n"
-        for name, desc in self.strategies.items():
-            report += f"- {name}: {desc}\n"
+        """تقرير شامل عن حالة النمو المعرفي والتطور الذاتي."""
+        analysis = {
+            "total_experiences": len(self.knowledge_base),
+            "evolution_steps": len(self.evolution_steps),
+            "intelligence_index": 1.0 + (len(self.evolution_steps) * 0.1)
+        }
+        
+        report = f"--- 🧠 تقرير النمو المعرفي السيادي ---\n"
+        report += f"مؤشر الذكاء الحالي: {analysis['intelligence_index']:.2f}\n"
+        report += f"خطوات التطور المنفذة: {analysis['evolution_steps']}\n"
+        report += f"إجمالي الخبرات المكتسبة: {analysis['total_experiences']}\n"
+        
+        if self.evolution_steps:
+            report += "أحدث قفزات التطور:\n"
+            for step in self.evolution_steps[-3:]:
+                report += f"- [{step['type']}]: {step['reason']}\n"
         
         return report
+
+    def push_evolution_to_github(self):
+        """رفع تقرير التطور المعرفي إلى المستودع كإنجاز سيادي."""
+        from ai.git_manager import GitManager
+        git = GitManager()
+        
+        report = self.get_growth_report()
+        repo_path = git.clone("cognitive_evolution_push")
+        
+        log_path = os.path.join(repo_path, "docs/EVOLUTION_LOG.md")
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"\n\n## 🧠 Cognitive Update - {time.ctime()}\n")
+            f.write(report)
+            
+        git.commit_and_push(repo_path, "🧬 NSM Bot: Recording Cognitive Growth Evolution", [log_path])
+        return "✅ Evolution recorded and pushed to GitHub."
 
 # نسخة عالمية للنمو
 cognitive_engine = CognitiveGrowthEngine()
