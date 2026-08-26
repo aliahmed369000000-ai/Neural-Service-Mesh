@@ -1,3 +1,14 @@
+---
+title: NSM Alpha Node
+emoji: 🧠
+colorFrom: green
+colorTo: blue
+sdk: streamlit
+sdk_version: 1.30.0
+app_file: streamlit_app.py
+pinned: false
+---
+
 # Neural Service Mesh (NSM)
 
 منصة ذكاء اصطناعي عربية متخصصة بالمعرفة الإسلامية، مبنية بـ Python/Streamlit،

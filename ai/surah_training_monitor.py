@@ -191,7 +191,14 @@ def render_live_training_dashboard() -> None:
     with kpi_cols[2]:
         st.metric("الخسارة الأخيرة", f"{prog.get('loss', '—') if prog.get('loss') is not None else '—'}")
     with kpi_cols[3]:
-        st.metric("أفضل خسارة", f"{prog.get('best_loss', '—') if prog.get('best_loss') is not None else '—'}")
+        # حساب معدل التوكنات (تقديري بناءً على global_step و elapsed و batch)
+        # N = global_step * batch * max_len
+        batch = int(prog.get("batch") or 24)
+        max_len = int(prog.get("max_len") or 96)
+        step = int(prog.get("global_step") or 0)
+        elapsed = float(prog.get("elapsed") or 0)
+        tps = (step * batch * max_len) / elapsed if elapsed > 0 else 0
+        st.metric("سرعة المعالجة", f"{tps:.0f} T/s", help="معدل التوكنات في الثانية (تقديري)")
 
     if prog:
         elapsed = float(prog.get("elapsed") or 0)
