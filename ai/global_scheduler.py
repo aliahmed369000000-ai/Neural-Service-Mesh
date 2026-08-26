@@ -52,14 +52,27 @@ class KaggleGlobalScheduler:
         print(f"🚀 بدء إطلاق السرب العالمي عبر {len(self.accounts)} حسابات...")
         results = []
         
-        # التأكد من وجود ملف التشغيل وكافة التبعيات في المجلد الحالي
-        # ملاحظة: Kaggle يرفع فقط الملفات في المجلد الحالي، لذا يجب نسخ ai/ إلى مجلد مؤقت للرفع
+        # إنشاء ملف تشغيل واحد يحتوي على كافة التبعيات لتجنب مشاكل الاستيراد
         upload_dir = "kaggle_upload"
         os.makedirs(upload_dir, exist_ok=True)
-        subprocess.run(["cp", "kaggle_run.py", upload_dir], check=True)
-        subprocess.run(["cp", "-r", "ai", upload_dir], check=True)
-        # إنشاء ملف __init__.py لضمان عمل الحزم
-        with open(os.path.join(upload_dir, "ai", "__init__.py"), "w") as f: pass
+        
+        with open(os.path.join(upload_dir, "kaggle_run.py"), "w") as out:
+            # إضافة التبعيات الأساسية
+            for dep in ["ai/distributed_trainer.py", "ai/gradient_mesh.py", "ai/living_mesh.py"]:
+                if os.path.exists(dep):
+                    with open(dep, "r") as f:
+                        content = f.read()
+                        # إزالة الاستيرادات المحلية التي ستسبب مشاكل
+                        content = content.replace("from ai.", "from ")
+                        out.write(f"\n# --- FROM {dep} ---\n")
+                        out.write(content)
+            
+            # إضافة كود التشغيل الأساسي
+            with open("kaggle_run.py", "r") as f:
+                content = f.read()
+                content = content.replace("from ai.", "from ")
+                out.write("\n# --- MAIN RUNNER ---\n")
+                out.write(content)
         
         for i, acc in enumerate(self.accounts):
             username = acc['username']
