@@ -8,6 +8,7 @@ import os
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+from ai.security_guard import NSMSecurityGuard
 
 # محاولة استيراد DeepSpeed (يجب تثبيته في بيئة التدريب)
 try:
@@ -23,8 +24,9 @@ class NSMDistributedTrainer:
         self.config = config or self._default_config()
         self.world_size = torch.cuda.device_count()
         self.local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        self.security = NSMSecurityGuard()
         
-        print(f"📡 Initializing NSM Distributed Swarm with {self.world_size} GPUs...")
+        print(f"🛡️ Security Protocol Active. Initializing NSM Distributed Swarm with {self.world_size} GPUs...")
 
     def _default_config(self):
         """إعدادات DeepSpeed ZeRO-3 للتحسين الهجومي (Aggressive Optimization) لـ 7 بطاقات GPU."""
@@ -110,13 +112,16 @@ class NSMDistributedTrainer:
         return loss.item()
 
     def save_checkpoint(self, path):
-        """حفظ الأوزان الموزعة."""
+        """حفظ الأوزان الموزعة وتأمينها."""
         if self.local_rank == 0:
             if deepspeed:
                 self.model_engine.save_checkpoint(path)
+                # تشفير الأوزان بعد الحفظ
+                self.security.encrypt_weights(os.path.join(path, "mp_rank_00_model_states.pt"))
             else:
                 torch.save(self.model.state_dict(), path)
-            print(f"💾 Checkpoint saved at {path}")
+                self.security.encrypt_weights(path)
+            print(f"💾 Checkpoint saved and secured at {path}")
 
 if __name__ == "__main__":
     # مثال توضيحي للتشغيل

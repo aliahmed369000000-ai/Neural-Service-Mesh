@@ -201,3 +201,26 @@ nsm_toolbox.register_tool(
     "قياس سرعة التدريب ورصد التحسن في الأداء الحسابي", 
     "compute"
 )
+
+def security_monitor_tool() -> str:
+    """أداة لرصد محاولات التسلل وحالة تشفير البيانات الحية في السرب."""
+    from ai.security_guard import NSMSecurityGuard
+    guard = NSMSecurityGuard()
+    status = guard.get_security_status()
+    
+    report = "🛡️ NSM Security Monitor Report:\n"
+    report += f" - Status: {status['status']}\n"
+    report += f" - Encryption: {status['encryption']}\n"
+    report += f" - Integrity Checks: {status['integrity_checks']}\n"
+    report += " - Latest Alerts:\n"
+    for alert in status['alerts']:
+        report += f"   ⚠️ {alert}\n"
+        
+    return report
+
+nsm_toolbox.register_tool(
+    "security_monitor", 
+    security_monitor_tool, 
+    "رصد محاولات التسلل وحالة تشفير البيانات الحية", 
+    "security"
+)
