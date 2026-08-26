@@ -11,6 +11,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from ai.security_guard import NSMSecurityGuard
 from ai.cognitive_growth import cognitive_engine
+from ai.gradient_mesh import GradientExchangeProtocol
 
 # محاولة استيراد DeepSpeed (يجب تثبيته في بيئة التدريب)
 try:
@@ -35,6 +36,10 @@ class NSMDistributedTrainer:
                 os.makedirs(self.checkpoint_dir, exist_ok=True)
             except Exception as e:
                 print(f"⚠️ Warning: Could not create checkpoint directory {self.checkpoint_dir}: {e}")
+        
+        # تهيئة بروتوكول تبادل التدرجات العالمي
+        alpha_url = os.environ.get("ALPHA_NODE_WS_URL", "wss://aliahmedmo-nsm-alpha-node.hf.space/ws")
+        self.gradient_mesh = GradientExchangeProtocol(node_id=f"kaggle_{os.environ.get('KAGGLE_USERNAME', 'unknown')}", alpha_url=alpha_url)
         
         print(f"🛡️ Security Protocol Active. Initializing NSM Distributed Swarm with {self.world_size} GPUs...")
 
@@ -109,13 +114,18 @@ class NSMDistributedTrainer:
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-4)
 
     def train_step(self, batch, step_idx=0):
-        """خطوة تدريب واحدة موزعة مع تحليل النمو المعرفي."""
+        """خطوة تدريب واحدة موزعة مع تحليل النمو المعرفي وتبادل التدرجات."""
         inputs, labels = batch
         
         if deepspeed:
             outputs = self.model_engine(inputs)
             loss = torch.nn.functional.cross_entropy(outputs, labels)
             self.model_engine.backward(loss)
+            
+            # تبادل التدرجات عبر الشبكة العالمية قبل تحديث الأوزان
+            if step_idx % 5 == 0: # مزامنة كل 5 خطوات لتقليل ضغط الشبكة
+                asyncio.run(self.gradient_mesh.broadcast_gradients(self.model))
+                
             self.model_engine.step()
         else:
             device = self.local_rank if torch.cuda.is_available() else "cpu"
@@ -124,6 +134,11 @@ class NSMDistributedTrainer:
             outputs = self.model(inputs)
             loss = torch.nn.functional.cross_entropy(outputs, labels)
             loss.backward()
+            
+            # تبادل التدرجات عبر الشبكة العالمية
+            if step_idx % 5 == 0:
+                asyncio.run(self.gradient_mesh.broadcast_gradients(self.model))
+                
             self.optimizer.step()
             
         # تحليل النمو المعرفي كل 100 خطوة

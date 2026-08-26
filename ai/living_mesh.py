@@ -250,10 +250,18 @@ class LivingMeshNode:
         except Exception:
             return False
 
+    async def _handle_aiohttp_ws_msg(self, ws, data):
+        """معالج رسائل WebSocket لـ aiohttp."""
+        # تحويل البيانات إلى الصيغة المتوقعة من قبل _process_secure_message
+        if isinstance(data, dict):
+            await self._process_secure_message(json.dumps(data), websocket=ws)
+        else:
+            await self._process_secure_message(data, websocket=ws)
+
     async def _process_secure_message(self, data, websocket=None):
         try:
             msg = json.loads(data)
-            payload = msg.get("payload")
+            payload = msg.get("payload") or msg # دعم كلا الصيغتين
             signature = msg.get("signature")
             if not payload or not signature: return
             

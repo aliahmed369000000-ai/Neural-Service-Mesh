@@ -47,7 +47,29 @@ async def handle_ws(request):
     ws = web.WebSocketResponse()
     await ws.prepare(request)
     node = request.app['node']
-    await node._handle_aiohttp_ws(ws)
+    
+    # تخزين التدرجات المجمعة في ذاكرة العقدة
+    if not hasattr(node, 'gradient_buffer'):
+        node.gradient_buffer = {}
+    
+    async for msg in ws:
+        if msg.type == web.WSMsgType.TEXT:
+            data = json.loads(msg.data)
+            if data.get("type") == "gradient_push":
+                node.gradient_buffer[data["node_id"]] = data["data"]
+                # All-Reduce: إرسال التدرجات المجمعة لبقية السرب
+                if len(node.gradient_buffer) >= 2: # تفعيل عند وجود عقدتين على الأقل
+                    aggregated_data = list(node.gradient_buffer.values())[0] # تبسيط: إرسال أول تدرج متاح
+                    for conn in node.active_connections:
+                        await conn.send_str(json.dumps({
+                            "type": "gradient_pull",
+                            "data": aggregated_data
+                        }))
+            else:
+                await node._handle_aiohttp_ws_msg(ws, data)
+        elif msg.type == web.WSMsgType.ERROR:
+            logger.error(f"WS connection closed with exception {ws.exception()}")
+            
     return ws
 
 async def main():
