@@ -27,9 +27,11 @@ class KaggleGlobalScheduler:
 
     def create_kernel_metadata(self, username: str, node_id: str):
         """إنشاء ملف تعريف الكيرنل لكل عقدة."""
+        # استخدام طابع زمني لضمان فرادة المعرف وتجنب تعارض الـ 409
+        ts = int(time.time())
         metadata = {
-            "id": f"{username}/nsm-node-{node_id}",
-            "title": f"NSM Global Node - {node_id}",
+            "id": f"{username}/nsm-node-{node_id}-{ts}",
+            "title": f"NSM Global Node - {node_id} ({ts})",
             "code_file": "kaggle_run.py",
             "language": "python",
             "kernel_type": "script",
