@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Neural Service Mesh (NSM)</title>
+  <meta name="description" content="منصة ذكاء اصطناعي عربية — Neural Service Mesh" />
+  <style>
+    :root {
+      --bg: #0b1220;
+      --card: #121a2b;
+      --text: #e8eefc;
+      --muted: #9aa8c7;
+      --accent: #3ddc97;
+      --accent2: #5b8cff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, "Noto Naskh Arabic", Arial, sans-serif;
+      background: radial-gradient(1200px 600px at 80% -10%, #1a2744 0%, var(--bg) 55%);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      width: min(640px, 100%);
+      background: linear-gradient(180deg, #152038 0%, var(--card) 100%);
+      border: 1px solid #243251;
+      border-radius: 20px;
+      padding: 32px 28px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.35);
+    }
+    .badge {
+      display: inline-block;
+      font-size: 12px;
+      color: var(--accent);
+      background: rgba(61,220,151,.12);
+      border: 1px solid rgba(61,220,151,.35);
+      padding: 4px 10px;
+      border-radius: 999px;
+      margin-bottom: 14px;
+    }
+    h1 { margin: 0 0 10px; font-size: 1.7rem; line-height: 1.35; }
+    p { color: var(--muted); line-height: 1.7; margin: 0 0 14px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+    a.btn {
+      text-decoration: none;
+      color: #061018;
+      background: var(--accent);
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-weight: 700;
+      display: inline-block;
+    }
+    a.btn.secondary {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid #334769;
+    }
+    .note {
+      margin-top: 22px;
+      font-size: 0.9rem;
+      color: var(--muted);
+      border-top: 1px solid #243251;
+      padding-top: 16px;
+    }
+    code { color: #c7d7ff; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="badge">Neural Service Mesh</div>
+    <h1>منصة NSM تعمل — هذه صفحة Netlify الثابتة</h1>
+    <p>
+      تطبيق NSM مبني بـ <strong>Python / Streamlit</strong>.
+      استضافة Netlify مخصّصة للمواقع الثابتة وFunctions،
+      وليست بديلاً كاملاً عن تشغيل Streamlit كخادم دائم.
+    </p>
+    <p>
+      إذا كنت تبحث عن الواجهة التفاعلية الكاملة، استخدم نشر
+      <strong>Streamlit Community Cloud</strong> (أو Hugging Face Spaces)
+      من نفس المستودع وملف <code>streamlit_app.py</code>.
+    </p>
+    <div class="actions">
+      <a class="btn" href="https://github.com/aliahmed369000000-ai/Neural-Service-Mesh" target="_blank" rel="noopener">المستودع على GitHub</a>
+      <a class="btn secondary" href="https://share.streamlit.io/" target="_blank" rel="noopener">Streamlit Cloud</a>
+    </div>
+    <p class="note">
+      الموقع <code>fancy-hamster-654327.netlify.app</code> يعرض هذه الصفحة بعد إصلاح مجلد النشر.
+      خطأ 404 السابق كان بسبب عدم وجود <code>index.html</code> في مجلد النشر.
+    </p>
+  </main>
+</body>
+</html>

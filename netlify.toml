@@ -1,0 +1,12 @@
+# نشر ثابت لـ NSM على Netlify (صفحة هبوط)
+# تطبيق Streamlit الكامل يُنشر على Streamlit Cloud / HF Spaces
+
+[build]
+  publish = "public"
+  command = "echo 'NSM static landing — no build required'"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
