@@ -20,7 +20,7 @@ except ImportError:
     deepspeed = None
 
 class NSMDistributedTrainer:
-    def __init__(self, model, train_dataset, config=None):
+    def __init__(self, model, train_dataset, config=None, checkpoint_dir=None):
         self.model = model
         self.train_dataset = train_dataset
         self.config = config or self._default_config()
@@ -28,10 +28,13 @@ class NSMDistributedTrainer:
         self.local_rank = int(os.environ.get("LOCAL_RANK", 0))
         self.security = NSMSecurityGuard()
         
-        # إعداد مسارات Kaggle
-        self.checkpoint_dir = "/kaggle/working/checkpoints"
-        if not os.path.exists(self.checkpoint_dir) and self.local_rank == 0:
-            os.makedirs(self.checkpoint_dir, exist_ok=True)
+        # إعداد مسارات التخزين (الافتراضي Kaggle)
+        self.checkpoint_dir = checkpoint_dir or "/kaggle/working/checkpoints"
+        if self.local_rank == 0:
+            try:
+                os.makedirs(self.checkpoint_dir, exist_ok=True)
+            except Exception as e:
+                print(f"⚠️ Warning: Could not create checkpoint directory {self.checkpoint_dir}: {e}")
         
         print(f"🛡️ Security Protocol Active. Initializing NSM Distributed Swarm with {self.world_size} GPUs...")
 
@@ -92,12 +95,17 @@ class NSMDistributedTrainer:
                 model_parameters=self.model.parameters()
             )
         else:
-            # التراجع إلى DDP التقليدي إذا لم يتوفر DeepSpeed
-            if not dist.is_initialized():
-                dist.init_process_group(backend="nccl")
-            torch.cuda.set_device(self.local_rank)
-            self.model = self.model.to(self.local_rank)
-            self.model = DDP(self.model, device_ids=[self.local_rank])
+            # التراجع إلى DDP التقليدي أو التدريب المحلي
+            if torch.cuda.is_available():
+                if not dist.is_initialized():
+                    dist.init_process_group(backend="nccl")
+                torch.cuda.set_device(self.local_rank)
+                self.model = self.model.to(self.local_rank)
+                self.model = DDP(self.model, device_ids=[self.local_rank])
+            else:
+                print("⚠️ Running in Local CPU mode (No CUDA detected).")
+                self.model = self.model.to("cpu")
+            
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-4)
 
     def train_step(self, batch, step_idx=0):
@@ -110,7 +118,8 @@ class NSMDistributedTrainer:
             self.model_engine.backward(loss)
             self.model_engine.step()
         else:
-            inputs, labels = inputs.to(self.local_rank), labels.to(self.local_rank)
+            device = self.local_rank if torch.cuda.is_available() else "cpu"
+            inputs, labels = inputs.to(device), labels.to(device)
             self.optimizer.zero_grad()
             outputs = self.model(inputs)
             loss = torch.nn.functional.cross_entropy(outputs, labels)
