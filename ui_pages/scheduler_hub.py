@@ -249,7 +249,7 @@ def _tab_command_center():
         "(والحساب الحالي تلقائيًا). تنبيه أحمر عند أي kernel فاشل."
     )
 
-    auto = st.toggle("⚡ تحديث تلقائي كل 60 ثانية", value=True)
+    auto = st.toggle("⚡ تحديث تلقائي كل 60 ثانية", value=True, key="sched_hub_auto_refresh_cmd_center")
 
     c_btn = st.columns(3)
     with c_btn[0]:
@@ -416,7 +416,7 @@ def _tab_live_logs():
         "بعد اكتمال التدريب). يُحدّث تلقائيًا كل 60 ثانية."
     )
 
-    auto = st.toggle("⚡ تحديث تلقائي كل 60 ثانية", value=True)
+    auto = st.toggle("⚡ تحديث تلقائي كل 60 ثانية", value=True, key="sched_hub_auto_refresh_live_logs")
     if auto:
         import time as _time
         st.markdown(f"_آخر تحديث: {_time.strftime('%H:%M:%S')}_")
