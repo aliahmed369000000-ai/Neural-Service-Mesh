@@ -67,25 +67,38 @@ class GradientExchangeProtocol:
                         param.grad = (param.grad + remote_grad) / 2.0
 
     async def broadcast_gradients(self, model: torch.nn.Module):
-        """بث التدرجات المحلية للسرب."""
+        """بث التدرجات المحلية للسرب مع قياس زمن التأخير."""
         if not self.is_connected: return
         
+        import time
+        start_time = time.time()
+        
         grad_data = self.serialize_gradients(model)
+        serialization_time = time.time() - start_time
+        
         await self.ws.send_str(json.dumps({
             "type": "gradient_push",
             "node_id": self.node_id,
-            "data": grad_data
+            "data": grad_data,
+            "timestamp": start_time,
+            "serialization_ms": serialization_time * 1000
         }))
+        logger.info(f"📤 Gradients pushed. Serialization: {serialization_time*1000:.2f}ms")
 
     async def listen_for_updates(self, model: torch.nn.Module):
-        """الاستماع لتحديثات الأوزان/التدرجات من السرب."""
+        """الاستماع لتحديثات الأوزان/التدرجات من السرب مع قياس زمن المزامنة الكلي."""
         if not self.is_connected: return
         
+        import time
         async for msg in self.ws:
             if msg.type == aiohttp.WSMsgType.TEXT:
                 data = json.loads(msg.data)
                 if data.get("type") == "gradient_pull":
+                    recv_time = time.time()
+                    push_time = data.get("timestamp", recv_time)
+                    latency = (recv_time - push_time) * 1000
+                    
                     self.deserialize_and_apply(model, data["data"])
-                    logger.info("🔄 Global Gradients Integrated.")
+                    logger.info(f"🔄 Global Gradients Integrated. E2E Latency: {latency:.2f}ms")
 
 gradient_protocol = None

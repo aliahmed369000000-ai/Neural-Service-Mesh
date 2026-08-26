@@ -56,14 +56,30 @@ async def handle_ws(request):
         if msg.type == web.WSMsgType.TEXT:
             data = json.loads(msg.data)
             if data.get("type") == "gradient_push":
-                node.gradient_buffer[data["node_id"]] = data["data"]
+                import time
+                recv_time = time.time()
+                push_time = data.get("timestamp", recv_time)
+                network_latency = (recv_time - push_time) * 1000
+                
+                node.gradient_buffer[data["node_id"]] = {
+                    "data": data["data"],
+                    "timestamp": data.get("timestamp"),
+                    "latency_ms": network_latency
+                }
+                
+                logger.info(f"📥 Received gradients from {data['node_id']}. Latency: {network_latency:.2f}ms")
+                
                 # All-Reduce: إرسال التدرجات المجمعة لبقية السرب
-                if len(node.gradient_buffer) >= 2: # تفعيل عند وجود عقدتين على الأقل
-                    aggregated_data = list(node.gradient_buffer.values())[0] # تبسيط: إرسال أول تدرج متاح
+                if len(node.gradient_buffer) >= 2:
+                    # نستخدم أحدث تدرج مجمع
+                    latest_node = max(node.gradient_buffer.items(), key=lambda x: x[1]['timestamp'])[0]
+                    aggregated_data = node.gradient_buffer[latest_node]["data"]
+                    
                     for conn in node.active_connections:
                         await conn.send_str(json.dumps({
                             "type": "gradient_pull",
-                            "data": aggregated_data
+                            "data": aggregated_data,
+                            "timestamp": node.gradient_buffer[latest_node]["timestamp"]
                         }))
             else:
                 await node._handle_aiohttp_ws_msg(ws, data)
