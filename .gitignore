@@ -113,3 +113,13 @@ tests/test_reputation.py
 tests/test_temporal_recovery.py
 artifacts/living_mesh/keys/
 artifacts/living_mesh/memory/
+
+# أوزان — لا تُرفع للمستودع (تُحفظ على Kaggle Datasets)
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+artifacts/hierarchical_moe/*.pt
+artifacts/hierarchical_moe/*.npy
+ai/models/initial_weights.npy
+experiments/**/checkpoints/
