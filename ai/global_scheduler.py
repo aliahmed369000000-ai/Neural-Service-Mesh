@@ -25,7 +25,7 @@ class KaggleGlobalScheduler:
             json.dump(creds, f)
         os.chmod(os.path.join(self.base_dir, "kaggle.json"), 0o600)
 
-    def create_kernel_metadata(self, username: str, node_id: str):
+    def create_kernel_metadata(self, username: str, node_id: str, target_dir: str = "."):
         """إنشاء ملف تعريف الكيرنل لكل عقدة."""
         # استخدام طابع زمني لضمان فرادة المعرف وتجنب تعارض الـ 409
         ts = int(time.time())
@@ -44,7 +44,7 @@ class KaggleGlobalScheduler:
             "kernel_sources": [],
             "model_sources": []
         }
-        with open("kernel-metadata.json", "w") as f:
+        with open(os.path.join(target_dir, "kernel-metadata.json"), "w") as f:
             json.dump(metadata, f)
 
     def launch_all(self):
@@ -52,9 +52,14 @@ class KaggleGlobalScheduler:
         print(f"🚀 بدء إطلاق السرب العالمي عبر {len(self.accounts)} حسابات...")
         results = []
         
-        # التأكد من وجود ملف التشغيل في المجلد الحالي
-        if not os.path.exists("kaggle_run.py"):
-            subprocess.run(["cp", "ai/distributed_trainer.py", "kaggle_run.py"], check=True)
+        # التأكد من وجود ملف التشغيل وكافة التبعيات في المجلد الحالي
+        # ملاحظة: Kaggle يرفع فقط الملفات في المجلد الحالي، لذا يجب نسخ ai/ إلى مجلد مؤقت للرفع
+        upload_dir = "kaggle_upload"
+        os.makedirs(upload_dir, exist_ok=True)
+        subprocess.run(["cp", "kaggle_run.py", upload_dir], check=True)
+        subprocess.run(["cp", "-r", "ai", upload_dir], check=True)
+        # إنشاء ملف __init__.py لضمان عمل الحزم
+        with open(os.path.join(upload_dir, "ai", "__init__.py"), "w") as f: pass
         
         for i, acc in enumerate(self.accounts):
             username = acc['username']
@@ -63,12 +68,12 @@ class KaggleGlobalScheduler:
             
             print(f"📦 تجهيز العقدة {node_id} للحساب {username}...")
             self._setup_credentials(username, key)
-            self.create_kernel_metadata(username, node_id)
+            self.create_kernel_metadata(username, node_id, target_dir=upload_dir)
             
             try:
                 # الإطلاق الفعلي عبر Kaggle CLI
                 process = subprocess.run(
-                    ["kaggle", "kernels", "push", "-p", "."],
+                    ["kaggle", "kernels", "push", "-p", upload_dir],
                     capture_output=True,
                     text=True,
                     check=True
