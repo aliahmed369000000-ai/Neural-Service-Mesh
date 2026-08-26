@@ -27,30 +27,50 @@ class NSMDistributedTrainer:
         print(f"📡 Initializing NSM Distributed Swarm with {self.world_size} GPUs...")
 
     def _default_config(self):
-        """إعدادات DeepSpeed ZeRO-3 المثالية لـ 7 بطاقات GPU."""
+        """إعدادات DeepSpeed ZeRO-3 للتحسين الهجومي (Aggressive Optimization) لـ 7 بطاقات GPU."""
         return {
-            "train_batch_size": 32,
-            "steps_per_print": 10,
+            "train_batch_size": 128,
+            "train_micro_batch_size_per_gpu": 16,
+            "gradient_accumulation_steps": 1,
+            "steps_per_print": 1,
             "optimizer": {
                 "type": "Adam",
                 "params": {
                     "lr": 1e-4,
-                    "betas": [0.9, 0.999],
+                    "betas": [0.9, 0.95],
                     "eps": 1e-8,
-                    "weight_decay": 3e-7
+                    "weight_decay": 1e-6
                 }
             },
             "zero_optimization": {
-                "stage": 3,  # ZeRO-3 لتقسيم الأوزان والذاكرة بالكامل
-                "offload_optimizer": {"device": "cpu"},
-                "offload_param": {"device": "cpu"},
+                "stage": 3,
+                "offload_optimizer": {
+                    "device": "cpu",
+                    "pin_memory": True
+                },
+                "offload_param": {
+                    "device": "none"
+                },
                 "overlap_comm": True,
                 "contiguous_gradients": True,
-                "reduce_bucket_size": 5e8,
-                "stage3_prefetch_bucket_size": 5e8,
-                "stage3_param_persistence_threshold": 1e6
+                "sub_group_size": 1e9,
+                "reduce_bucket_size": "auto",
+                "stage3_prefetch_bucket_size": "auto",
+                "stage3_param_persistence_threshold": "auto",
+                "stage3_max_live_parameters": 1e9,
+                "stage3_max_reuse_distance": 1e9,
+                "gather_16bit_weights_on_model_save": True
             },
-            "fp16": {"enabled": True}
+            "gradient_clipping": 1.0,
+            "fp16": {
+                "enabled": True,
+                "loss_scale": 0,
+                "initial_scale_power": 16,
+                "loss_scale_window": 1000,
+                "hysteresis": 2,
+                "min_loss_scale": 1
+            },
+            "wall_clock_breakdown": False
         }
 
     def setup(self):

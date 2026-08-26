@@ -179,3 +179,25 @@ nsm_toolbox.register_tool(
     "مراقبة وإدارة التدريب الموزع على عدة GPUs", 
     "compute"
 )
+
+def training_speed_benchmark(tflops: float = 0.0, samples_per_sec: float = 0.0) -> str:
+    """أداة لقياس سرعة التدريب ورصد التحسن في الأداء."""
+    status = "📊 NSM Training Speed Benchmark:\n"
+    status += f" - Throughput: {samples_per_sec:.2f} samples/sec\n"
+    status += f" - Compute Power: {tflops:.2f} TFLOPS\n"
+    
+    if tflops > 100:
+        status += "🚀 Performance Status: EXTREME (ZeRO-3 Aggressive Active)\n"
+    elif tflops > 50:
+        status += "⚡ Performance Status: HIGH\n"
+    else:
+        status += "🐢 Performance Status: NORMAL\n"
+        
+    return status
+
+nsm_toolbox.register_tool(
+    "speed_benchmark", 
+    training_speed_benchmark, 
+    "قياس سرعة التدريب ورصد التحسن في الأداء الحسابي", 
+    "compute"
+)
