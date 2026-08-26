@@ -154,3 +154,28 @@ nsm_toolbox.register_tool(
     "ترجمة النصوص بين اللغات المختلفة", 
     "language"
 )
+
+def distributed_training_monitor(**kwargs) -> str:
+    """أداة لمراقبة حالة التدريب الموزع على عدة GPUs."""
+    import torch
+    try:
+        gpu_count = torch.cuda.device_count()
+        if gpu_count == 0:
+            return "❌ No GPUs detected for distributed training."
+        
+        status = f"📡 NSM Distributed Swarm: {gpu_count} GPUs Active.\n"
+        for i in range(gpu_count):
+            props = torch.cuda.get_device_properties(i)
+            mem_total = props.total_memory / 1e9
+            status += f" - GPU {i} ({props.name}): {mem_total:.2f} GB VRAM.\n"
+        
+        return status + "✅ Ready for Surah 4096 Multi-GPU Training."
+    except Exception as e:
+        return f"❌ Error monitoring GPUs: {e}"
+
+nsm_toolbox.register_tool(
+    "distributed_trainer", 
+    distributed_training_monitor, 
+    "مراقبة وإدارة التدريب الموزع على عدة GPUs", 
+    "compute"
+)
