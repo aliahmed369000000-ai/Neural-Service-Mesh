@@ -101,16 +101,25 @@ class NSMDistributedTrainer:
                 model_parameters=self.model.parameters()
             )
         else:
-            # التراجع إلى DDP التقليدي أو التدريب المحلي
-            if torch.cuda.is_available():
-                if not dist.is_initialized():
-                    dist.init_process_group(backend="nccl")
-                torch.cuda.set_device(self.local_rank)
-                self.model = self.model.to(self.local_rank)
-                self.model = DDP(self.model, device_ids=[self.local_rank])
+        # التراجع إلى DDP التقليدي أو التدريب المحلي
+        if torch.cuda.is_available():
+            if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
+                try:
+                    if not dist.is_initialized():
+                        dist.init_process_group(backend="nccl")
+                    torch.cuda.set_device(self.local_rank)
+                    self.model = self.model.to(self.local_rank)
+                    self.model = DDP(self.model, device_ids=[self.local_rank])
+                    print("✅ DDP Initialized successfully.")
+                except Exception as e:
+                    print(f"⚠️ DDP Init failed: {e}. Falling back to single-node mode.")
+                    self.model = self.model.cuda()
             else:
-                print("⚠️ Running in Local CPU mode (No CUDA detected).")
-                self.model = self.model.to("cpu")
+                print("ℹ️ Standalone mode: RANK/WORLD_SIZE not set. Using local GPU.")
+                self.model = self.model.cuda()
+        else:
+            print("⚠️ Running in Local CPU mode (No CUDA detected).")
+            self.model = self.model.to("cpu")
             
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-4)
 
