@@ -2636,276 +2636,303 @@ def render_css(theme_key: str) -> str:
     return css
 
 # ── حقن CSS السمة الحالية (مع تخزين دائم للتفضيل عبر core.artifacts_store) ──
-if "ui_theme" not in st.session_state:
-    try:
-        from core.artifacts_store import get_setting as _get_persisted_setting
-        st.session_state.ui_theme = _get_persisted_setting("ui_theme", "dark")
-    except Exception:
-        st.session_state.ui_theme = "dark"
-st.markdown(render_css(st.session_state.ui_theme), unsafe_allow_html=True)
-
-# ── فرض قسري للون نص التبويبات عبر JS (طبقة حماية أخيرة) ──────────────────
-# السبب: .streamlit/config.toml يثبّت ثيم Streamlit الأصلي على "dark"
-# دائماً (لأسباب أخرى غير متعلقة بتبديلنا الداخلي للثيم)، وبعض مكوّنات
-# BaseWeb الداخلية (مثل st.tabs) قد تُطبّق ألوان مشتقة من ذلك الثيم
-# الأصلي بطريقة تُفلت أحياناً من تجاوزات CSS العادية.
+# 🛠️ إصلاح جوهري: هذا الحقن (CSS + JS اللوحة/التبويبات) كان قبل هذا الإصلاح
+# كوداً على مستوى الوحدة (module-level) داخل app_core.py. بما أن بايثون
+# يستورد كل وحدة مرة واحدة فقط لكل عملية خادم (sys.modules cache)، فإن
+# `from app_core import *` في streamlit_app.py لا يُعيد تنفيذ جسد هذه
+# الوحدة في أي rerun لاحق — أي أن هذا الكود كان يُنفَّذ فعلياً مرة واحدة
+# فقط طوال عمر عملية الخادم (أول استيراد بعد إعادة التشغيل)، وليس عند كل
+# rerun كما توحي التعليقات الأصلية بداخله. النتيجة المُلاحَظة: بعد إعادة
+# التشغيل يظهر التصميم صحيحاً (الشريط الجانبي يميناً) لأن هذا هو التشغيل
+# الوحيد الذي نفّذ الحقن فعلياً؛ ثم أي تفاعل لاحق (زر، تبديل، بحث...) يسبب
+# rerun عادياً لا يُعيد حقن وسم <style> هذا إطلاقاً، فتختفي قواعد RTL/order
+# الخاصة بالشريط الجانبي من الـDOM ويظهر التطبيق بترتيبه الافتراضي (يساراً)
+# — وهذا نفس السبب الذي يُفسّر عودة التبويب النشط إلى «الرئيسية»: اختفاء
+# هذا العنصر من تيار العناصر (delta stream) يُغيّر مواضع العناصر التالية
+# له في الشجرة (بما فيها st.tabs الرئيسية)، فيفقد Streamlit تتبّع التبويب
+# المختار سابقاً ويعود للتبويب الافتراضي (الأول).
 #
-# ملاحظة مهمة: حقن <script> عبر st.markdown (كما كان سابقاً) لا يُنفَّذه
-# المتصفح — عنصر <script> المُدرَج عبر innerHTML/markdown لا يعمل أبداً،
-# هذا سلوك موثّق بمتصفحات الويب وليس مجرد "أحياناً". الحل الصحيح
-# المضمون هو st.components.v1.html الذي يُنشئ iframe حقيقياً يُنفَّذ فيه
-# JS فعلياً، ومن داخله نصل لمستند الصفحة الأم عبر window.parent.document.
-_tab_text_color = THEMES.get(st.session_state.ui_theme, THEMES["dark"])["gold"]
-_tab_selected_bg_color = THEMES.get(st.session_state.ui_theme, THEMES["dark"])["bg"]
+# الحل: تحويل هذا الحقن إلى دالة حقيقية تُستدعى صراحة من main() في
+# streamlit_app.py — أي دالة تُستدعى فعلياً في كل rerun (السكربت الرئيسي
+# يُعاد تنفيذه بالكامل من Streamlit في كل مرة، بخلاف الوحدات المستورَدة)،
+# فيضمن إعادة حقن CSS/JS في كل مرة كما كان يُفترض دائماً.
+def apply_runtime_css_and_chrome() -> None:
+    """يحقن CSS الثيم الحالي + JS اللوحة/تلوين التبويبات.
+    يجب استدعاؤها من main() في كل تشغيل للسكربت (وليس تركها على مستوى
+    الوحدة) حتى تُطبَّق فعلياً بعد أي rerun، لا فقط أول استيراد للوحدة.
+    """
+    if "ui_theme" not in st.session_state:
+        try:
+            from core.artifacts_store import get_setting as _get_persisted_setting
+            st.session_state.ui_theme = _get_persisted_setting("ui_theme", "dark")
+        except Exception:
+            st.session_state.ui_theme = "dark"
+    st.markdown(render_css(st.session_state.ui_theme), unsafe_allow_html=True)
 
-# أداء: هذا الحقن (iframe جديد + ~165 سطر JS + مسح فوري لكامل DOM 5 مرات
-# عبر setTimeout) كان يُنفَّذ بالكامل من جديد عند *كل* rerun — أي عند كل
-# نقرة/تفاعل في أي مكان بالتطبيق (9700+ سطر، عشرات التبويبات)، رغم أن
-# MutationObserver المُنشأ بداخله (مضمون doc.__nsmTabObserver) يبقى حياً
-# ويعيد تطبيق لون التبويبات وscroll-reveal تفاعلياً بنفسه عند أي تغيّر
-# DOM لاحق (بما فيها الضغط على تبويب آخر). لذلك: نعيد الحقن الكامل فقط
-# عند أول تحميل للجلسة، أو عند تغيّر الثيم فعلياً (لأن الألوان مُضمَّنة
-# كقيم ثابتة داخل الـJS وقت الحقن، لازم تتحدّث لو الثيم تغيّر). أي rerun
-# عادي (تنقّل بين التبويبات، إرسال رسالة دردشة، إلخ) يتخطّى هذا الحقن
-# بالكامل الآن ويعتمد على الـMutationObserver الحي أصلاً.
-_nsm_chrome_key = f"_nsm_chrome_theme::{st.session_state.ui_theme}"
-if not st.session_state.get(_nsm_chrome_key):
-    st.session_state[_nsm_chrome_key] = True
-    st.components.v1.html(f"""
-<script>
-(function() {{
-    function nsmForceTabColor() {{
-        try {{
-            const doc = window.parent.document;
-            const tabs = doc.querySelectorAll('.stTabs [data-baseweb="tab"]');
-            tabs.forEach(function(tab) {{
-                const selected = tab.getAttribute('aria-selected') === 'true';
-                const color = selected ? '{_tab_selected_bg_color}' : '{_tab_text_color}';
-                tab.style.setProperty('color', color, 'important');
-                tab.querySelectorAll('*').forEach(function(child) {{
-                    child.style.setProperty('color', color, 'important');
-                }});
-            }});
-        }} catch (e) {{ /* تجاهل صامت — بيئة قد لا تسمح بالوصول للمستند الأب */ }}
-    }}
+    # ── فرض قسري للون نص التبويبات عبر JS (طبقة حماية أخيرة) ──────────────────
+    # السبب: .streamlit/config.toml يثبّت ثيم Streamlit الأصلي على "dark"
+    # دائماً (لأسباب أخرى غير متعلقة بتبديلنا الداخلي للثيم)، وبعض مكوّنات
+    # BaseWeb الداخلية (مثل st.tabs) قد تُطبّق ألوان مشتقة من ذلك الثيم
+    # الأصلي بطريقة تُفلت أحياناً من تجاوزات CSS العادية.
+    #
+    # ملاحظة مهمة: حقن <script> عبر st.markdown (كما كان سابقاً) لا يُنفَّذه
+    # المتصفح — عنصر <script> المُدرَج عبر innerHTML/markdown لا يعمل أبداً،
+    # هذا سلوك موثّق بمتصفحات الويب وليس مجرد "أحياناً". الحل الصحيح
+    # المضمون هو st.components.v1.html الذي يُنشئ iframe حقيقياً يُنفَّذ فيه
+    # JS فعلياً، ومن داخله نصل لمستند الصفحة الأم عبر window.parent.document.
+    _tab_text_color = THEMES.get(st.session_state.ui_theme, THEMES["dark"])["gold"]
+    _tab_selected_bg_color = THEMES.get(st.session_state.ui_theme, THEMES["dark"])["bg"]
 
-    // ── كشف تدريجي عند التمرير (scroll-reveal) ─────────────────────────
-    function nsmInitScrollReveal() {{
-        try {{
-            const doc = window.parent.document;
-            const targets = doc.querySelectorAll(
-                '.section-header, .glass-card, .concept-card, [data-testid="stExpander"]'
-            );
-            targets.forEach(function(el) {{
-                if (!el.classList.contains('nsm-reveal')) el.classList.add('nsm-reveal');
-            }});
-            if (!doc.__nsmRevealIO) {{
-                doc.__nsmRevealIO = new IntersectionObserver(function(entries) {{
-                    entries.forEach(function(e) {{
-                        if (e.isIntersecting) {{
-                            e.target.classList.add('is-visible');
-                            doc.__nsmRevealIO.unobserve(e.target);
-                        }}
+    # أداء: هذا الحقن (iframe جديد + ~165 سطر JS + مسح فوري لكامل DOM 5 مرات
+    # عبر setTimeout) كان يُنفَّذ بالكامل من جديد عند *كل* rerun — أي عند كل
+    # نقرة/تفاعل في أي مكان بالتطبيق (9700+ سطر، عشرات التبويبات)، رغم أن
+    # MutationObserver المُنشأ بداخله (مضمون doc.__nsmTabObserver) يبقى حياً
+    # ويعيد تطبيق لون التبويبات وscroll-reveal تفاعلياً بنفسه عند أي تغيّر
+    # DOM لاحق (بما فيها الضغط على تبويب آخر). لذلك: نعيد الحقن الكامل فقط
+    # عند أول تحميل للجلسة، أو عند تغيّر الثيم فعلياً (لأن الألوان مُضمَّنة
+    # كقيم ثابتة داخل الـJS وقت الحقن، لازم تتحدّث لو الثيم تغيّر). أي rerun
+    # عادي (تنقّل بين التبويبات، إرسال رسالة دردشة، إلخ) يتخطّى هذا الحقن
+    # بالكامل الآن ويعتمد على الـMutationObserver الحي أصلاً.
+    _nsm_chrome_key = f"_nsm_chrome_theme::{st.session_state.ui_theme}"
+    if not st.session_state.get(_nsm_chrome_key):
+        st.session_state[_nsm_chrome_key] = True
+        st.components.v1.html(f"""
+    <script>
+    (function() {{
+        function nsmForceTabColor() {{
+            try {{
+                const doc = window.parent.document;
+                const tabs = doc.querySelectorAll('.stTabs [data-baseweb="tab"]');
+                tabs.forEach(function(tab) {{
+                    const selected = tab.getAttribute('aria-selected') === 'true';
+                    const color = selected ? '{_tab_selected_bg_color}' : '{_tab_text_color}';
+                    tab.style.setProperty('color', color, 'important');
+                    tab.querySelectorAll('*').forEach(function(child) {{
+                        child.style.setProperty('color', color, 'important');
                     }});
-                }}, {{ threshold: 0.12 }});
-            }}
-            doc.querySelectorAll('.nsm-reveal:not(.is-visible)').forEach(function(el) {{
-                doc.__nsmRevealIO.observe(el);
-            }});
-        }} catch (e) {{ /* تجاهل صامت */ }}
-    }}
+                }});
+            }} catch (e) {{ /* تجاهل صامت — بيئة قد لا تسمح بالوصول للمستند الأب */ }}
+        }}
 
-    // ── لوحة أوامر سريعة (Ctrl+K / ⌘K) للتنقّل الفوري بين الأقسام ──────
-    function nsmBuildPalette() {{
-        try {{
-            const doc = window.parent.document;
-            if (doc.__nsmPaletteBuilt) return;
-            doc.__nsmPaletteBuilt = true;
-
-            const overlay = doc.createElement('div');
-            overlay.id = 'nsm-cmdk-overlay';
-            overlay.className = 'nsm-cmdk-overlay';
-            overlay.innerHTML =
-                '<div class="nsm-cmdk-box">' +
-                    '<input id="nsm-cmdk-input" class="nsm-cmdk-input" placeholder="ابحث عن قسم أو قسم فرعي... (Esc للإغلاق)" />' +
-                    '<div id="nsm-cmdk-list" class="nsm-cmdk-list"></div>' +
-                    '<div class="nsm-cmdk-hint">↑↓ للتنقّل · Enter للفتح · Esc للإغلاق</div>' +
-                '</div>';
-            doc.body.appendChild(overlay);
-
-            const fab = doc.createElement('button');
-            fab.id = 'nsm-cmdk-fab';
-            fab.className = 'nsm-cmdk-fab';
-            fab.type = 'button';
-            fab.title = 'بحث سريع (Ctrl+K)';
-            fab.textContent = '⌘K';
-            doc.body.appendChild(fab);
-
-            // ── فهرسة كل الأقسام: التبويبات الرئيسية + التبويبات الفرعية
-            // المتداخلة داخلها (مثل «المعرفة ‹ القرآن الكريم»)، حتى يقدر
-            // المستخدم يقفز مباشرة لأي قسم فرعي بدل الاقتصار على الرئيسية.
-            // الربط بين كل تبويب فرعي وأصله الرئيسي يتم عبر aria-labelledby
-            // (نمط ARIA القياسي لِـ tabpanel ← id تبويبه الأصل)، وهو أثبت
-            // من محاولة حساب الفهرس يدوياً لأن كل التبويبات (حتى غير
-            // النشطة) موجودة بالـDOM دوماً وقد تتشابه تسمياتها.
-            function buildIndex() {{
-                const groups = Array.from(doc.querySelectorAll('.stTabs'));
-                if (!groups.length) return [];
-                const rootGroup = groups[0];
-                const items = [];
-
-                function ownTabs(group) {{
-                    return Array.from(group.querySelectorAll('[data-baseweb="tab-list"] [role="tab"]'))
-                        .filter(function(t) {{ return t.closest('.stTabs') === group; }});
+        // ── كشف تدريجي عند التمرير (scroll-reveal) ─────────────────────────
+        function nsmInitScrollReveal() {{
+            try {{
+                const doc = window.parent.document;
+                const targets = doc.querySelectorAll(
+                    '.section-header, .glass-card, .concept-card, [data-testid="stExpander"]'
+                );
+                targets.forEach(function(el) {{
+                    if (!el.classList.contains('nsm-reveal')) el.classList.add('nsm-reveal');
+                }});
+                if (!doc.__nsmRevealIO) {{
+                    doc.__nsmRevealIO = new IntersectionObserver(function(entries) {{
+                        entries.forEach(function(e) {{
+                            if (e.isIntersecting) {{
+                                e.target.classList.add('is-visible');
+                                doc.__nsmRevealIO.unobserve(e.target);
+                            }}
+                        }});
+                    }}, {{ threshold: 0.12 }});
                 }}
-
-                ownTabs(rootGroup).forEach(function(t) {{
-                    items.push({{
-                        label: (t.textContent || '').trim(),
-                        parent: null,
-                        run: function() {{ t.click(); }},
-                    }});
+                doc.querySelectorAll('.nsm-reveal:not(.is-visible)').forEach(function(el) {{
+                    doc.__nsmRevealIO.observe(el);
                 }});
+            }} catch (e) {{ /* تجاهل صامت */ }}
+        }}
 
-                for (let i = 1; i < groups.length; i++) {{
-                    const g = groups[i];
-                    // نبحث عن حاوية اللوحة الأصل بأكثر من محدد احتياطاً لاختلاف
-                    // إصدار BaseWeb — data-baseweb هو الأساسي، role=tabpanel احتياط ARIA قياسي.
-                    const parentPanel = g.closest('[data-baseweb="tab-panel"], [role="tabpanel"]');
-                    if (!parentPanel) continue;
-                    const parentId = parentPanel.getAttribute('aria-labelledby');
-                    const parentTab = parentId ? doc.getElementById(parentId) : null;
-                    if (!parentTab) continue;
-                    const parentLabel = (parentTab.textContent || '').trim();
-                    ownTabs(g).forEach(function(st) {{
+        // ── لوحة أوامر سريعة (Ctrl+K / ⌘K) للتنقّل الفوري بين الأقسام ──────
+        function nsmBuildPalette() {{
+            try {{
+                const doc = window.parent.document;
+                if (doc.__nsmPaletteBuilt) return;
+                doc.__nsmPaletteBuilt = true;
+
+                const overlay = doc.createElement('div');
+                overlay.id = 'nsm-cmdk-overlay';
+                overlay.className = 'nsm-cmdk-overlay';
+                overlay.innerHTML =
+                    '<div class="nsm-cmdk-box">' +
+                        '<input id="nsm-cmdk-input" class="nsm-cmdk-input" placeholder="ابحث عن قسم أو قسم فرعي... (Esc للإغلاق)" />' +
+                        '<div id="nsm-cmdk-list" class="nsm-cmdk-list"></div>' +
+                        '<div class="nsm-cmdk-hint">↑↓ للتنقّل · Enter للفتح · Esc للإغلاق</div>' +
+                    '</div>';
+                doc.body.appendChild(overlay);
+
+                const fab = doc.createElement('button');
+                fab.id = 'nsm-cmdk-fab';
+                fab.className = 'nsm-cmdk-fab';
+                fab.type = 'button';
+                fab.title = 'بحث سريع (Ctrl+K)';
+                fab.textContent = '⌘K';
+                doc.body.appendChild(fab);
+
+                // ── فهرسة كل الأقسام: التبويبات الرئيسية + التبويبات الفرعية
+                // المتداخلة داخلها (مثل «المعرفة ‹ القرآن الكريم»)، حتى يقدر
+                // المستخدم يقفز مباشرة لأي قسم فرعي بدل الاقتصار على الرئيسية.
+                // الربط بين كل تبويب فرعي وأصله الرئيسي يتم عبر aria-labelledby
+                // (نمط ARIA القياسي لِـ tabpanel ← id تبويبه الأصل)، وهو أثبت
+                // من محاولة حساب الفهرس يدوياً لأن كل التبويبات (حتى غير
+                // النشطة) موجودة بالـDOM دوماً وقد تتشابه تسمياتها.
+                function buildIndex() {{
+                    const groups = Array.from(doc.querySelectorAll('.stTabs'));
+                    if (!groups.length) return [];
+                    const rootGroup = groups[0];
+                    const items = [];
+
+                    function ownTabs(group) {{
+                        return Array.from(group.querySelectorAll('[data-baseweb="tab-list"] [role="tab"]'))
+                            .filter(function(t) {{ return t.closest('.stTabs') === group; }});
+                    }}
+
+                    ownTabs(rootGroup).forEach(function(t) {{
                         items.push({{
-                            label: (st.textContent || '').trim(),
-                            parent: parentLabel,
-                            run: function() {{
-                                parentTab.click();
-                                setTimeout(function() {{ st.click(); }}, 60);
-                            }},
+                            label: (t.textContent || '').trim(),
+                            parent: null,
+                            run: function() {{ t.click(); }},
                         }});
                     }});
-                }}
-                return items;
-            }}
 
-            function renderList(filterText) {{
-                const list = doc.getElementById('nsm-cmdk-list');
-                list.innerHTML = '';
-                const f = (filterText || '').trim();
-                const all = buildIndex();
-                const matches = all.filter(function(it) {{
-                    if (!f) return true;
-                    const hay = (it.parent ? it.parent + ' ' : '') + it.label;
-                    return hay.indexOf(f) !== -1;
-                }});
-                if (!matches.length) {{
-                    const empty = doc.createElement('div');
-                    empty.className = 'nsm-cmdk-empty';
-                    empty.textContent = 'لا توجد أقسام مطابقة';
-                    list.appendChild(empty);
-                    return;
-                }}
-                matches.forEach(function(it, i) {{
-                    const item = doc.createElement('div');
-                    item.className = 'nsm-cmdk-item' + (i === 0 ? ' active' : '');
-                    if (it.parent) {{
-                        const parentSpan = doc.createElement('span');
-                        parentSpan.className = 'nsm-cmdk-item-parent';
-                        parentSpan.textContent = it.parent;
-                        const sepSpan = doc.createElement('span');
-                        sepSpan.className = 'nsm-cmdk-item-sep';
-                        sepSpan.textContent = '‹';
-                        item.appendChild(parentSpan);
-                        item.appendChild(sepSpan);
+                    for (let i = 1; i < groups.length; i++) {{
+                        const g = groups[i];
+                        // نبحث عن حاوية اللوحة الأصل بأكثر من محدد احتياطاً لاختلاف
+                        // إصدار BaseWeb — data-baseweb هو الأساسي، role=tabpanel احتياط ARIA قياسي.
+                        const parentPanel = g.closest('[data-baseweb="tab-panel"], [role="tabpanel"]');
+                        if (!parentPanel) continue;
+                        const parentId = parentPanel.getAttribute('aria-labelledby');
+                        const parentTab = parentId ? doc.getElementById(parentId) : null;
+                        if (!parentTab) continue;
+                        const parentLabel = (parentTab.textContent || '').trim();
+                        ownTabs(g).forEach(function(st) {{
+                            items.push({{
+                                label: (st.textContent || '').trim(),
+                                parent: parentLabel,
+                                run: function() {{
+                                    parentTab.click();
+                                    setTimeout(function() {{ st.click(); }}, 60);
+                                }},
+                            }});
+                        }});
                     }}
-                    const labelSpan = doc.createElement('span');
-                    labelSpan.textContent = it.label;
-                    item.appendChild(labelSpan);
-                    item.addEventListener('click', function() {{
-                        it.run();
-                        closePalette();
+                    return items;
+                }}
+
+                function renderList(filterText) {{
+                    const list = doc.getElementById('nsm-cmdk-list');
+                    list.innerHTML = '';
+                    const f = (filterText || '').trim();
+                    const all = buildIndex();
+                    const matches = all.filter(function(it) {{
+                        if (!f) return true;
+                        const hay = (it.parent ? it.parent + ' ' : '') + it.label;
+                        return hay.indexOf(f) !== -1;
                     }});
-                    list.appendChild(item);
+                    if (!matches.length) {{
+                        const empty = doc.createElement('div');
+                        empty.className = 'nsm-cmdk-empty';
+                        empty.textContent = 'لا توجد أقسام مطابقة';
+                        list.appendChild(empty);
+                        return;
+                    }}
+                    matches.forEach(function(it, i) {{
+                        const item = doc.createElement('div');
+                        item.className = 'nsm-cmdk-item' + (i === 0 ? ' active' : '');
+                        if (it.parent) {{
+                            const parentSpan = doc.createElement('span');
+                            parentSpan.className = 'nsm-cmdk-item-parent';
+                            parentSpan.textContent = it.parent;
+                            const sepSpan = doc.createElement('span');
+                            sepSpan.className = 'nsm-cmdk-item-sep';
+                            sepSpan.textContent = '‹';
+                            item.appendChild(parentSpan);
+                            item.appendChild(sepSpan);
+                        }}
+                        const labelSpan = doc.createElement('span');
+                        labelSpan.textContent = it.label;
+                        item.appendChild(labelSpan);
+                        item.addEventListener('click', function() {{
+                            it.run();
+                            closePalette();
+                        }});
+                        list.appendChild(item);
+                    }});
+                }}
+                function openPalette() {{
+                    overlay.classList.add('is-open');
+                    const inp = doc.getElementById('nsm-cmdk-input');
+                    inp.value = '';
+                    renderList('');
+                    setTimeout(function() {{ inp.focus(); }}, 30);
+                }}
+                function closePalette() {{
+                    overlay.classList.remove('is-open');
+                }}
+                overlay.addEventListener('click', function(e) {{
+                    if (e.target === overlay) closePalette();
                 }});
-            }}
-            function openPalette() {{
-                overlay.classList.add('is-open');
-                const inp = doc.getElementById('nsm-cmdk-input');
-                inp.value = '';
-                renderList('');
-                setTimeout(function() {{ inp.focus(); }}, 30);
-            }}
-            function closePalette() {{
-                overlay.classList.remove('is-open');
-            }}
-            overlay.addEventListener('click', function(e) {{
-                if (e.target === overlay) closePalette();
-            }});
-            fab.addEventListener('click', function() {{
-                if (overlay.classList.contains('is-open')) closePalette(); else openPalette();
-            }});
-            doc.getElementById('nsm-cmdk-input').addEventListener('input', function(e) {{
-                renderList(e.target.value);
-            }});
-            doc.addEventListener('keydown', function(e) {{
-                const isOpen = overlay.classList.contains('is-open');
-                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {{
-                    e.preventDefault();
-                    if (isOpen) closePalette(); else openPalette();
-                    return;
-                }}
-                if (!isOpen) return;
-                if (e.key === 'Escape') {{ closePalette(); return; }}
-                const items = Array.from(doc.querySelectorAll('.nsm-cmdk-item'));
-                if (!items.length) return;
-                let idx = items.findIndex(function(i) {{ return i.classList.contains('active'); }});
-                if (e.key === 'ArrowDown') {{
-                    e.preventDefault();
-                    if (idx < items.length - 1) {{
-                        items[idx].classList.remove('active');
-                        items[idx + 1].classList.add('active');
-                        items[idx + 1].scrollIntoView({{ block: 'nearest' }});
+                fab.addEventListener('click', function() {{
+                    if (overlay.classList.contains('is-open')) closePalette(); else openPalette();
+                }});
+                doc.getElementById('nsm-cmdk-input').addEventListener('input', function(e) {{
+                    renderList(e.target.value);
+                }});
+                doc.addEventListener('keydown', function(e) {{
+                    const isOpen = overlay.classList.contains('is-open');
+                    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {{
+                        e.preventDefault();
+                        if (isOpen) closePalette(); else openPalette();
+                        return;
                     }}
-                }} else if (e.key === 'ArrowUp') {{
-                    e.preventDefault();
-                    if (idx > 0) {{
-                        items[idx].classList.remove('active');
-                        items[idx - 1].classList.add('active');
-                        items[idx - 1].scrollIntoView({{ block: 'nearest' }});
+                    if (!isOpen) return;
+                    if (e.key === 'Escape') {{ closePalette(); return; }}
+                    const items = Array.from(doc.querySelectorAll('.nsm-cmdk-item'));
+                    if (!items.length) return;
+                    let idx = items.findIndex(function(i) {{ return i.classList.contains('active'); }});
+                    if (e.key === 'ArrowDown') {{
+                        e.preventDefault();
+                        if (idx < items.length - 1) {{
+                            items[idx].classList.remove('active');
+                            items[idx + 1].classList.add('active');
+                            items[idx + 1].scrollIntoView({{ block: 'nearest' }});
+                        }}
+                    }} else if (e.key === 'ArrowUp') {{
+                        e.preventDefault();
+                        if (idx > 0) {{
+                            items[idx].classList.remove('active');
+                            items[idx - 1].classList.add('active');
+                            items[idx - 1].scrollIntoView({{ block: 'nearest' }});
+                        }}
+                    }} else if (e.key === 'Enter') {{
+                        e.preventDefault();
+                        if (items[idx]) items[idx].click();
                     }}
-                }} else if (e.key === 'Enter') {{
-                    e.preventDefault();
-                    if (items[idx]) items[idx].click();
-                }}
-            }});
-        }} catch (e) {{ /* تجاهل صامت */ }}
-    }}
-
-    nsmForceTabColor();
-    nsmInitScrollReveal();
-    nsmBuildPalette();
-    setTimeout(nsmForceTabColor, 150);
-    setTimeout(nsmForceTabColor, 500);
-    setTimeout(nsmForceTabColor, 1200);
-    setTimeout(nsmInitScrollReveal, 200);
-    setTimeout(nsmInitScrollReveal, 700);
-    try {{
-        const doc2 = window.parent.document;
-        if (!doc2.__nsmTabObserver) {{
-            const obs = new MutationObserver(function() {{
-                nsmForceTabColor();
-                nsmInitScrollReveal();
-            }});
-            obs.observe(doc2.body, {{ childList: true, subtree: true, attributes: true, attributeFilter: ['aria-selected', 'class'] }});
-            doc2.__nsmTabObserver = obs;
+                }});
+            }} catch (e) {{ /* تجاهل صامت */ }}
         }}
-    }} catch (e) {{}}
-}})();
-</script>
-""", height=0, width=0)
+
+        nsmForceTabColor();
+        nsmInitScrollReveal();
+        nsmBuildPalette();
+        setTimeout(nsmForceTabColor, 150);
+        setTimeout(nsmForceTabColor, 500);
+        setTimeout(nsmForceTabColor, 1200);
+        setTimeout(nsmInitScrollReveal, 200);
+        setTimeout(nsmInitScrollReveal, 700);
+        try {{
+            const doc2 = window.parent.document;
+            if (!doc2.__nsmTabObserver) {{
+                const obs = new MutationObserver(function() {{
+                    nsmForceTabColor();
+                    nsmInitScrollReveal();
+                }});
+                obs.observe(doc2.body, {{ childList: true, subtree: true, attributes: true, attributeFilter: ['aria-selected', 'class'] }});
+                doc2.__nsmTabObserver = obs;
+            }}
+        }} catch (e) {{}}
+    }})();
+    </script>
+    """, height=0, width=0)
+
+
 
 
 
