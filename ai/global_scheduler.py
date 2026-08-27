@@ -38,6 +38,7 @@ class KaggleGlobalScheduler:
             "kernel_type": "script",
             "is_private": "true",
             "enable_gpu": "true",
+            "accelerator": "gpu",
             "enable_tpu": "false",
             "enable_internet": "true",
             "dataset_sources": [],

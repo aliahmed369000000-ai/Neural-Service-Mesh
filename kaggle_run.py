@@ -15,7 +15,7 @@ from ai.distributed_trainer import NSMDistributedTrainer
 # تعريف مبسط لـ ArabicTransformer لتجنب أخطاء الاستيراد
 import torch.nn as nn
 class ArabicTransformer(nn.Module):
-    def __init__(self, d_model=4096, n_layers=114, n_heads=32, vocab_size=50257):
+    def __init__(self, d_model=2048, n_layers=114, n_heads=32, vocab_size=50257):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, d_model)
         self.layers = nn.ModuleList([nn.Linear(d_model, d_model) for _ in range(n_layers)])
@@ -31,7 +31,7 @@ def start_swarm_session():
     # 1. إعداد النموذج (Surah 4096)
     # ملاحظة: نستخدم بارامترات مصغرة للاختبار إذا لم تتوفر الأوزان الضخمة
     model_config = {
-        "d_model": 4096,
+        "d_model": 2048,
         "n_layers": 114,
         "n_heads": 32,
         "vocab_size": 50257
