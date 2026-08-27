@@ -554,7 +554,7 @@ def main():
                 <div class="hero-badge"><span class="dot"></span> مبني على القرآن الكريم</div>
             </div>
             <div class="main-title">🧠 النظام المعرفي العربي</div>
-            <div class="subtitle">Neural Service Mesh · ذكاء اصطناعي عربي متخصص بالمعرفة الإسلامية</div>
+            <div class="subtitle">Neural Service Mesh · ذكاء اصطناعي عربي</div>
             <div class="welcome-line">
                 اسأل عن أي مفهوم إسلامي أو عربي، وسيربطه النظام بشبكة معرفية حيّة
                 مبنية على القرآن الكريم وعلوم اللغة — بحث، محادثة، ومحتوى إبداعي، كل ذلك بالعربية.
