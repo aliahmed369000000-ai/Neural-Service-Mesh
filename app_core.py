@@ -1098,11 +1098,23 @@ html, body { overflow-x: hidden; }
 /* ── نقل الشريط الجانبي (تسجيل الدخول والإعدادات) إلى يمين الشاشة ──
    Streamlit يضع الشريط الجانبي دائماً في بداية حاوية flex الرئيسية
    بصرياً على اليسار، بصرف النظر عن اتجاه RTL للنصوص. نعكس ترتيبهما
-   البصري فقط بخاصية order دون المساس بترتيبهما الفعلي في DOM. */
-[data-testid="stAppViewContainer"] { display: flex; flex-direction: row; }
-[data-testid="stSidebar"] { order: 2; }
+   البصري فقط بخاصية order دون المساس بترتيبهما الفعلي في DOM.
+
+   🛠️ إصلاح: خاصية order في CSS تُفسَّر حسب اتجاه (direction) الحاوية
+   نفسها لا حسب اتجاه الصفحة العامة فقط. الحاوية هنا كانت ترث
+   direction:rtl من القاعدة العامة (html, body, [class*="css"])، فيصبح
+   "البداية" البصرية لمحور flex هو اليمين، فينعكس معنى order بالكامل:
+   العنصر order:1 (المحتوى الرئيسي) ينتهي به المطاف على اليمين،
+   وorder:2 (الشريط الجانبي) على اليسار — أي عكس ما تشرحه التعليقات
+   وعكس ما يُفترض أن يحدث فعلياً (وهذا ما كان يظهر في الواجهة المنشورة:
+   الشريط الجانبي على اليسار). الحل: نفرض direction:ltr صراحة على حاوية
+   الـflex نفسها فقط (حتى تُفسَّر قيم order فيزيائياً من اليسار لليمين
+   كما كانت مصمَّمة)، ثم نعيد direction:rtl صراحة على كل من الشريط
+   الجانبي والمحتوى الرئيسي حتى يبقى نص كل منهما من اليمين لليسار كالمعتاد. */
+[data-testid="stAppViewContainer"] { display: flex; flex-direction: row; direction: ltr; }
+[data-testid="stSidebar"] { order: 2; direction: rtl; }
 [data-testid="stAppViewContainer"] > .main,
-[data-testid="stAppViewContainer"] [data-testid="stMain"] { order: 1; flex: 1 1 auto; min-width: 0; }
+[data-testid="stAppViewContainer"] [data-testid="stMain"] { order: 1; flex: 1 1 auto; min-width: 0; direction: rtl; }
 @media (max-width: 768px) {
     /* على الجوال يعرض Streamlit الشريط الجانبي كطبقة منزلقة فوق المحتوى
        لا كعمود flex — عكس order هنا قد يقلب اتجاه الانزلاق، فنُلغي
