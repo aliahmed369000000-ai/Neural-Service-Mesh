@@ -6,6 +6,7 @@
 تم تحسينه للعمل في بيئة Kaggle وحفظ الأوزان محلياً.
 """
 import os
+import asyncio
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
