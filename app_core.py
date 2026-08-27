@@ -2767,16 +2767,28 @@ def apply_runtime_css_and_chrome() -> None:
                 doc.body.appendChild(fab);
 
                 // ── فهرسة كل الأقسام: التبويبات الرئيسية + التبويبات الفرعية
-                // المتداخلة داخلها (مثل «المعرفة ‹ القرآن الكريم»)، حتى يقدر
-                // المستخدم يقفز مباشرة لأي قسم فرعي بدل الاقتصار على الرئيسية.
-                // الربط بين كل تبويب فرعي وأصله الرئيسي يتم عبر aria-labelledby
-                // (نمط ARIA القياسي لِـ tabpanel ← id تبويبه الأصل)، وهو أثبت
-                // من محاولة حساب الفهرس يدوياً لأن كل التبويبات (حتى غير
-                // النشطة) موجودة بالـDOM دوماً وقد تتشابه تسمياتها.
+                // المتداخلة داخلها (مثل «المعرفة ‹ القرآن الكريم»، أو ثلاث
+                // مستويات كما في «🤖 الوكلاء ‹ 🤖 وكلاء AI ‹ 🔍 وكيل البحث»)،
+                // حتى يقدر المستخدم يقفز مباشرة لأي قسم فرعي بدل الاقتصار
+                // على الرئيسية.
+                //
+                // 🛠️ إصلاح: النسخة السابقة كانت تفترض أن أول عنصر .stTabs
+                // بترتيب DOM هو دائماً «الجذر» (rootGroup = groups[0])، ثم
+                // لكل مجموعة أخرى كانت تصعد أباً واحداً فقط قبل النقر عليه.
+                // هذا الافتراض خاطئ لسببين:
+                //   1) تبويبات أخرى غير متداخلة (مثل تبويبَي «دخول/حساب
+                //      جديد» بالشريط الجانبي) هي أيضاً بلا أب، فقد تظهر أولاً
+                //      بترتيب DOM وتُخطئ في تحديد الجذر الفعلي.
+                //   2) عناصر متداخلة على 3 مستويات فأكثر (كل فئات وكلاء AI
+                //      الفردية) تحتاج للنقر على *كل* الأجداد بالترتيب من
+                //      الخارج للداخل، لا أب واحد فقط — وإلا يبقى التبويب
+                //      الفرعي المستهدف داخل لوحة غير ظاهرة أصلاً فيفشل
+                //      النقر عليها بصمت، ويظل المستخدم على «🏠 الرئيسية».
+                // الحل: تسلّق كامل سلسلة الأجداد لكل مجموعة عبر aria-labelledby
+                // بدل افتراض عمق ثابت، والنقر عليها بالترتيب الصحيح تباعاً.
                 function buildIndex() {{
                     const groups = Array.from(doc.querySelectorAll('.stTabs'));
                     if (!groups.length) return [];
-                    const rootGroup = groups[0];
                     const items = [];
 
                     function ownTabs(group) {{
@@ -2784,35 +2796,53 @@ def apply_runtime_css_and_chrome() -> None:
                             .filter(function(t) {{ return t.closest('.stTabs') === group; }});
                     }}
 
-                    ownTabs(rootGroup).forEach(function(t) {{
-                        items.push({{
-                            label: (t.textContent || '').trim(),
-                            parent: null,
-                            run: function() {{ t.click(); }},
-                        }});
-                    }});
+                    // يبني سلسلة كل تبويبات الأجداد اللازم النقر عليها أولاً
+                    // (من الخارج للداخل) قبل أن تصبح مجموعة `group` نفسها
+                    // ظاهرة/قابلة للنقر. مصفوفة فارغة تعني أن المجموعة جذرية
+                    // (لا أب لها) — بغض النظر عن ترتيبها في DOM.
+                    function getAncestorChain(group) {{
+                        const chain = [];
+                        let current = group;
+                        const seen = new Set();
+                        while (true) {{
+                            const panel = current.closest('[data-baseweb="tab-panel"], [role="tabpanel"]');
+                            if (!panel) break;
+                            const parentId = panel.getAttribute('aria-labelledby');
+                            const parentTab = parentId ? doc.getElementById(parentId) : null;
+                            if (!parentTab || seen.has(parentTab)) break;
+                            seen.add(parentTab);
+                            chain.unshift(parentTab);
+                            const parentGroup = parentTab.closest('.stTabs');
+                            if (!parentGroup || parentGroup === current) break;
+                            current = parentGroup;
+                        }}
+                        return chain;
+                    }}
 
-                    for (let i = 1; i < groups.length; i++) {{
-                        const g = groups[i];
-                        // نبحث عن حاوية اللوحة الأصل بأكثر من محدد احتياطاً لاختلاف
-                        // إصدار BaseWeb — data-baseweb هو الأساسي، role=tabpanel احتياط ARIA قياسي.
-                        const parentPanel = g.closest('[data-baseweb="tab-panel"], [role="tabpanel"]');
-                        if (!parentPanel) continue;
-                        const parentId = parentPanel.getAttribute('aria-labelledby');
-                        const parentTab = parentId ? doc.getElementById(parentId) : null;
-                        if (!parentTab) continue;
-                        const parentLabel = (parentTab.textContent || '').trim();
-                        ownTabs(g).forEach(function(st) {{
+                    groups.forEach(function(g) {{
+                        const chain = getAncestorChain(g);
+                        const parentLabel = chain.length
+                            ? (chain[chain.length - 1].textContent || '').trim()
+                            : null;
+                        ownTabs(g).forEach(function(t) {{
                             items.push({{
-                                label: (st.textContent || '').trim(),
+                                label: (t.textContent || '').trim(),
                                 parent: parentLabel,
                                 run: function() {{
-                                    parentTab.click();
-                                    setTimeout(function() {{ st.click(); }}, 60);
+                                    // ننقر كل الأجداد بالترتيب من الخارج للداخل أولاً
+                                    // (بفاصل زمني كافٍ ليُحدَّث الـDOM ويظهر كل
+                                    // مستوى قبل محاولة النقر على التالي)، ثم
+                                    // التبويب المستهدف نفسه أخيراً.
+                                    let delay = 0;
+                                    chain.forEach(function(ancestorTab) {{
+                                        setTimeout(function() {{ ancestorTab.click(); }}, delay);
+                                        delay += 80;
+                                    }});
+                                    setTimeout(function() {{ t.click(); }}, delay);
                                 }},
                             }});
                         }});
-                    }}
+                    }});
                     return items;
                 }}
 
