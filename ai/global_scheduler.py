@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import subprocess
 import time
 from typing import List, Dict
@@ -47,32 +48,96 @@ class KaggleGlobalScheduler:
         with open(os.path.join(target_dir, "kernel-metadata.json"), "w") as f:
             json.dump(metadata, f)
 
+    def build_bundle(self, output_path: str = None) -> str:
+        """يبني kaggle_run.py موحّداً بدمج شجرة الاعتماديات الحقيقية فقط
+        (فُحصت فعلياً سطراً بسطر، وليست قائمة تخمينية):
+
+            security_guard.py، cognitive_growth.py، gradient_mesh.py
+            → distributed_trainer.py → kaggle_run.py (نقطة الدخول)
+
+        ملاحظة إصلاح جوهرية: الإصدار السابق كان يدمج 3 ملفات فقط
+        (distributed_trainer, gradient_mesh, living_mesh) بينما
+        distributed_trainer.py يستورد أيضاً من security_guard و
+        cognitive_growth — وهما لم يكونا مُدمَجين إطلاقاً. هذا بالضبط
+        سبب ModuleNotFoundError: No module named 'security_guard' في
+        سرب nsm-global-node-*.
+
+        living_mesh.py استُبعد عمداً هنا: تحققت أنه غير مُستورد فعلياً
+        من distributed_trainer.py أو kaggle_run.py في مسار التدريب
+        الحالي، وإدراجه كان سيجرّ اعتماديات إضافية غير ضرورية لهذا
+        المسار (alert_manager، unified_memory، git_manager، toolbox،
+        ann_engine، sharding_engine) وترفع احتمال فشل جديد بلا فائدة.
+
+        كذلك: الإصدار السابق كان يستبدل "from ai." بـ"from " نصياً بلا
+        تمييز — فتتحول "from ai.security_guard import X" إلى
+        "from security_guard import X"، وهذا يفشل أيضاً حتى لو أُضيف
+        الملف للدمج، لأن الرمز أصبح متاحاً مباشرة بنفس نطاق الأسماء بعد
+        الدمج ولا حاجة لاستيراده من ملف منفصل غير موجود على Kaggle.
+        الإصلاح هنا يحذف هذه الأسطر كلياً (تعليق فقط) بدل إعادة تسميتها.
+        """
+        dep_order = [
+            "ai/security_guard.py",
+            "ai/cognitive_growth.py",
+            "ai/gradient_mesh.py",
+            "ai/distributed_trainer.py",
+        ]
+        bundled_module_names = {os.path.splitext(os.path.basename(p))[0] for p in dep_order}
+
+        def _strip_internal_imports(content: str) -> str:
+            out_lines = []
+            for line in content.splitlines():
+                m = re.match(r"^\s*from ai\.(\w+) import", line)
+                if m and m.group(1) in bundled_module_names:
+                    out_lines.append(f"# [bundled, تم دمجه أعلاه] {line.strip()}")
+                    continue
+                out_lines.append(line)
+            return "\n".join(out_lines)
+
+        def _disable_main_block(content: str) -> str:
+            """يعطّل كتلة if __name__ == '__main__': الخاصة بملفات التبعية
+            (وليس نقطة الدخول النهائية kaggle_run.py) — بدون هذا، كل ملف
+            مُدمَج ينفّذ كتلة __main__ الخاصة به بالتتابع عند تشغيل الحزمة
+            الموحّدة (لأنها كلها تُنفَّذ فعلياً تحت __name__ == '__main__'
+            الواحد الخاص بالحزمة الكاملة). تحقّقت من هذا فعلياً بتشغيل
+            الحزمة في بيئة معزولة قبل هذا الإصلاح: نفَّذت security_guard.py
+            كتلته التجريبية الخاصة به بدل الانتقال مباشرة لتنفيذ التدريب."""
+            return re.sub(
+                r'^if __name__ == "__main__":',
+                'if __name__ == "__disabled_main__":  # [bundled] كتلة تشغيل تجريبية معطَّلة عمداً',
+                content,
+                flags=re.M,
+            )
+
+        parts = []
+        for dep in dep_order:
+            if not os.path.exists(dep):
+                raise FileNotFoundError(f"ملف اعتماد أساسي مفقود لبناء الحزمة: {dep}")
+            with open(dep, "r", encoding="utf-8") as f:
+                content = f.read()
+            content = _strip_internal_imports(content)
+            content = _disable_main_block(content)
+            parts.append(f"\n# ═══ FROM {dep} ═══\n" + content)
+
+        with open("kaggle_run.py", "r", encoding="utf-8") as f:
+            main_content = f.read()
+        # لا نعطّل كتلة __main__ هنا عمداً — هذه نقطة الدخول الوحيدة المقصودة للحزمة
+        parts.append("\n# ═══ MAIN RUNNER (kaggle_run.py) ═══\n" + _strip_internal_imports(main_content))
+
+        bundle = "\n".join(parts)
+        if output_path:
+            with open(output_path, "w", encoding="utf-8") as out:
+                out.write(bundle)
+        return bundle
+
     def launch_all(self):
         """إطلاق جميع العقد عبر الحسابات السبعة."""
         print(f"🚀 بدء إطلاق السرب العالمي عبر {len(self.accounts)} حسابات...")
         results = []
         
-        # إنشاء ملف تشغيل واحد يحتوي على كافة التبعيات لتجنب مشاكل الاستيراد
+        # إنشاء ملف تشغيل واحد يحتوي على كافة التبعيات الحقيقية (انظر build_bundle)
         upload_dir = "kaggle_upload"
         os.makedirs(upload_dir, exist_ok=True)
-        
-        with open(os.path.join(upload_dir, "kaggle_run.py"), "w") as out:
-            # إضافة التبعيات الأساسية
-            for dep in ["ai/distributed_trainer.py", "ai/gradient_mesh.py", "ai/living_mesh.py"]:
-                if os.path.exists(dep):
-                    with open(dep, "r") as f:
-                        content = f.read()
-                        # إزالة الاستيرادات المحلية التي ستسبب مشاكل
-                        content = content.replace("from ai.", "from ")
-                        out.write(f"\n# --- FROM {dep} ---\n")
-                        out.write(content)
-            
-            # إضافة كود التشغيل الأساسي
-            with open("kaggle_run.py", "r") as f:
-                content = f.read()
-                content = content.replace("from ai.", "from ")
-                out.write("\n# --- MAIN RUNNER ---\n")
-                out.write(content)
+        self.build_bundle(output_path=os.path.join(upload_dir, "kaggle_run.py"))
         
         for i, acc in enumerate(self.accounts):
             username = acc['username']
