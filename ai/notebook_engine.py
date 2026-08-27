@@ -94,7 +94,7 @@ class Notebook:
     updated_at: str = field(default_factory=_now)
     metadata: Dict[str, Any] = field(default_factory=dict)
     kernel: str = "python3"
-    provider: str = "local"  # local | kaggle | colab | modal | lightning | huggingface | runpod | vast | generic_gpu
+    provider: str = "local"  # local | kaggle | colab | modal | lightning | huggingface | vast | generic_gpu
     agent_research_log: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -505,7 +505,7 @@ def create_notebook(name: str = "NSM Training Lab", template: str = "training") 
                     "| **lightning** | رصيد شهري + API |\n"
                     "| **huggingface** | HF_TOKEN |\n"
                     "| colab | سريع وقد ينقطع |\n"
-                    "| runpod / vast | مستقر (مدفوع غالباً) |\n\n"
+                    "| vast | مستقر (مدفوع غالباً) |\n\n"
                     "كتالوج كامل: `ai/free_gpu_providers.py` — مفاتيح في Streamlit Secrets."
                 ),
             ),
@@ -809,7 +809,7 @@ def plan_remote_run(nb: Notebook, provider: str) -> Dict[str, Any]:
         plan["steps"] = [
             "افتح notebooks/*Colab*.ipynb في Google Colab",
             "scripts/colab_bootstrap.py لربط المستودع",
-            "Colab قد ينقطع — للديمومة استخدم Kaggle أو RunPod/Vast",
+            "Colab قد ينقطع — للديمومة استخدم Kaggle أو Vast",
         ]
     elif provider in ("modal", "lightning", "huggingface", "hf"):
         try:
@@ -823,7 +823,7 @@ def plan_remote_run(nb: Notebook, provider: str) -> Dict[str, Any]:
         except Exception as e:
             plan["ok"] = False
             plan["error"] = str(e)
-    elif provider in ("runpod", "vast", "generic_gpu", "remote"):
+    elif provider in ("vast", "generic_gpu", "remote"):
         plan["steps"] = [
             "اضبط مفاتيح المزوّد في Secrets",
             "ai/remote_gpu_provider.py لإرسال مهمة",
@@ -838,7 +838,7 @@ def plan_remote_run(nb: Notebook, provider: str) -> Dict[str, Any]:
             plan["error"] = str(e)
         try:
             from ai.free_gpu_providers import plan_for_provider
-            plan["catalog"] = plan_for_provider(provider if provider in ("runpod", "vast") else "runpod", notebook_id=nb.id)
+            plan["catalog"] = plan_for_provider(provider if provider == "vast" else "vast", notebook_id=nb.id)
         except Exception:
             pass
     else:

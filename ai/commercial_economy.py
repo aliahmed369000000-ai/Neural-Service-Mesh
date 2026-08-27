@@ -27,7 +27,6 @@ LEDGER_PATH = LEDGER / "revenue_ledger.jsonl"
 
 SPOT_TABLE = {
     "vast_rtx3090": {"spot": 0.15, "ondemand": 0.35},
-    "runpod_rtx4090": {"spot": 0.29, "ondemand": 0.44},
     "aws_g4dn": {"spot": 0.16, "ondemand": 0.53},
     "kaggle_t4": {"spot": 0.0, "ondemand": 0.0},
 }
@@ -127,7 +126,7 @@ def sell_license(item_id: str, buyer: str = "demo_buyer") -> Dict[str, Any]:
     return {"ok": False, "error": "item_not_found"}
 
 
-def compute_arbitrage_quote(provider: str = "runpod_rtx4090", hours: float = 10.0, sell_rate_usd_h: Optional[float] = None) -> Dict[str, Any]:
+def compute_arbitrage_quote(provider: str = "vast_rtx3090", hours: float = 10.0, sell_rate_usd_h: Optional[float] = None) -> Dict[str, Any]:
     row = SPOT_TABLE.get(provider) or {"spot": 0.3, "ondemand": 0.5}
     buy = float(row["spot"])
     market = float(sell_rate_usd_h if sell_rate_usd_h is not None else row["ondemand"])
@@ -229,7 +228,7 @@ def handle_economic_command(user_input: str) -> Optional[str]:
         item = publish_model("NSM-Demo-Classifier", "tabular", 29.0, notes="تجريبي")
         return f"## 📦 نُشر في السوق\n```json\n{json.dumps(item, ensure_ascii=False, indent=2)}\n```"
     if re.search(r"(arbitrage|مضارب[ةه]\s*حوسب|هامش\s*spot)", text, re.I):
-        q = compute_arbitrage_quote("runpod_rtx4090", 10)
+        q = compute_arbitrage_quote("vast_rtx3090", 10)
         return f"## 📉 عرض Arbitrage\n```json\n{json.dumps(q, ensure_ascii=False, indent=2)}\n```"
     if re.search(r"(بيع\s*بيانات|synthetic\s*sell)", text, re.I):
         r = sell_synthetic_demo(500, "curated", "general")

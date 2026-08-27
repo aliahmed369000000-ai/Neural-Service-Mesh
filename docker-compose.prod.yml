@@ -4,7 +4,7 @@
 #
 # الخدمات:
 #   nsm-ui   — Streamlit :8501
-#   nsm-api  — FastAPI   :5000  (ضع GPU على هذه الخدمة في RunPod/AWS)
+#   nsm-api  — FastAPI   :5000  (ضع GPU على هذه الخدمة في مزوّد السحابة المفضّل لديك)
 #   nsm-mcp  — MCP stdio غير معرّض كمنفذ؛ يُشغَّل عبر وكيل/SSH أو بوابة منفصلة
 
 services:

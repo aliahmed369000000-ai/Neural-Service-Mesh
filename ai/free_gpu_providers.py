@@ -137,21 +137,6 @@ FREE_GPU_CATALOG: List[Dict[str, Any]] = [
         "priority": 10,
     },
     {
-        "id": "runpod",
-        "name": "RunPod",
-        "tier": "paid_with_credits",
-        "gpu": "متنوع (A40/A100/H100…)",
-        "quota_ar": "مدفوع؛ أحياناً أرصدة ترحيبية",
-        "session_limit_ar": "Pods حسب الدفع — مناسب لعدم الانقطاع",
-        "api_key_env": ["RUNPOD_API_KEY"],
-        "signup_url": "https://www.runpod.io/",
-        "api_docs": "https://docs.runpod.io/",
-        "best_for": "تدريب طويل مستقر (مدفوع)",
-        "nsm_module": "ai.remote_gpu_provider",
-        "supports_api_submit": True,
-        "priority": 6,
-    },
-    {
         "id": "vast",
         "name": "Vast.ai",
         "tier": "marketplace",
@@ -219,7 +204,7 @@ def recommended_stack_ar() -> str:
         "### استدلال مجاني (ليس تدريب أوزان كامل)\n"
         "- Groq · OpenRouter :free · NVIDIA NIM\n\n"
         "### مستقر وطويل (مدفوع غالباً)\n"
-        "- RunPod · Vast.ai\n\n"
+        "- Vast.ai\n\n"
         "**نصيحة NSM:** للتدريب دون انقطاع Colab → **Kaggle API** أولاً، ثم Modal/Lightning."
     )
 

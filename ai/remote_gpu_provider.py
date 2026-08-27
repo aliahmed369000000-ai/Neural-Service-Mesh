@@ -3,7 +3,6 @@ Remote GPU Provider — واجهة موحّدة لتشغيل التدريب عل
 ==============================================================
   • LocalGPUProvider: الجهاز الحالي (Colab / سيرفرك) عبر gpu_runtime
   • ColabBridgeProvider: جلسة Colab تدفع النتائج عبر webhook/API
-  • RunPodProvider: هيكل جاهز (يحتاج API key — اختياري)
   • Kaggle: عبر ai.kaggle_provider (API Kernels + Dual T4 داخل الدفتر)
 
 لا يتضمن أتمتة متصفح Google Colab (Playwright).
@@ -166,64 +165,10 @@ class ColabBridgeProvider(RemoteGPUProvider):
         return local
 
 
-class RunPodProvider(RemoteGPUProvider):
-    """هيكل RunPod — يتطلّب RUNPOD_API_KEY؛ بدون مفتاح يعيد تعليمات فقط."""
-
-    name = "runpod"
-
-    def status(self) -> Dict[str, Any]:
-        key = os.environ.get("RUNPOD_API_KEY") or ""
-        return {
-            "provider": self.name,
-            "api_key_set": bool(key),
-            "ok": bool(key),
-            "note": "ضع RUNPOD_API_KEY ثم نفّذ submit — التنفيذ الكامل يُضاف حسب قالب الـpod",
-        }
-
-    def submit_train_csv(
-        self,
-        csv_path: str,
-        epochs: int = 15,
-        prefer: str = "auto",
-        job_meta: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        key = os.environ.get("RUNPOD_API_KEY") or ""
-        if not key:
-            return {
-                "ok": False,
-                "provider": self.name,
-                "status": "not_configured",
-                "error": "RUNPOD_API_KEY غير مضبوط",
-                "hint": "https://docs.runpod.io/ — أو استخدم local/colab_bridge",
-            }
-        # Placeholder: لا نستدعي API حقيقي بدون قالب مستخدم
-        job_id = f"runpod_pending_{uuid.uuid4().hex[:8]}"
-        job = {
-            "ok": False,
-            "job_id": job_id,
-            "provider": self.name,
-            "status": "stub",
-            "error": "RunPod submit يحتاج قالب pod مخصص لمشروعك — الواجهة جاهزة للربط",
-            "request": {
-                "csv_path": csv_path,
-                "epochs": epochs,
-                "prefer": prefer,
-                "meta": job_meta or {},
-            },
-            "finished_at": _now(),
-        }
-        (REMOTE_DIR / f"{job_id}.json").write_text(
-            json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        return job
-
-
 def get_provider(name: Optional[str] = None) -> RemoteGPUProvider:
     n = (name or os.environ.get("NSM_REMOTE_GPU_PROVIDER") or "local").strip().lower()
     if n in ("colab", "colab_bridge", "bridge"):
         return ColabBridgeProvider()
-    if n in ("runpod", "pod"):
-        return RunPodProvider()
     # kaggle يُدار عبر ai.kaggle_provider (أوامر مستقلة + Dual T4)
     if n in ("kaggle", "kag"):
         # لا نعيد كائن RemoteGPUProvider هنا — استخدم handle_kaggle_command
@@ -332,7 +277,6 @@ def remote_status_report() -> str:
     providers = {
         "local": LocalGPUProvider().status(),
         "colab_bridge": ColabBridgeProvider().status(),
-        "runpod": RunPodProvider().status(),
     }
     inbox = REMOTE_DIR / "inbox"
     n_inbox = len(list(inbox.glob("*.json"))) if inbox.is_dir() else 0

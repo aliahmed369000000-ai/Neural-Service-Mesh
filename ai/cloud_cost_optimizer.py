@@ -32,8 +32,6 @@ def _now() -> str:
 REFERENCE_GPU_PRICES: Dict[str, Dict[str, float]] = {
     "kaggle_t4": {"on_demand": 0.0, "spot": 0.0, "note": "حصة مجانية أسبوعية محدودة"},
     "colab_t4": {"on_demand": 0.0, "spot": 0.0, "note": "مجاني متقطع / Colab Pro منفصل"},
-    "runpod_rtx4090": {"on_demand": 0.44, "spot": 0.29, "note": "تقريبي"},
-    "runpod_a100_80g": {"on_demand": 1.39, "spot": 0.99, "note": "تقريبي"},
     "vast_rtx3090": {"on_demand": 0.25, "spot": 0.15, "note": "تقريبي سوقي"},
     "aws_g4dn_xlarge": {"on_demand": 0.526, "spot": 0.16, "note": "T4 تقريبي"},
 }
@@ -71,7 +69,7 @@ class CostDecision:
 
 
 def estimate_training_cost(
-    gpu_key: str = "runpod_rtx4090",
+    gpu_key: str = "vast_rtx3090",
     hours: float = 2.0,
     use_spot: bool = True,
 ) -> Dict[str, float]:
