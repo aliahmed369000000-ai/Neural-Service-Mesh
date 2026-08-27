@@ -1576,13 +1576,22 @@ hr { border-color: var(--border) !important; }
 
 }
 
-/* ── بينتو-جريد للإحصاءات — بطاقة مميزة كبيرة + بقية البطاقات بأحجام متفاوتة ── */
+/* ── بينتو-جريد للإحصاءات — بطاقة مميزة كبيرة + بقية البطاقات بأحجام متفاوتة ──
+   🛠️ إصلاح RTL: نفس سبب مشكلة الشريط الجانبي (راجع [data-testid="stAppViewContainer"]
+   أعلاه) — الحاوية هنا لم تكن تفرض direction:rtl على نفسها صراحةً، فكانت
+   تعتمد فقط على التوارث من القاعدة العامة. أي عنصر أب لاحق (مثل حاوية
+   Streamlit الداخلية لعمود التبويب) قد يكسر هذا التوارث فيصبح ترتيب
+   شبكة CSS Grid (grid-auto-flow) من اليسار لليمين بدل اليمين لليسار،
+   وتفقد البطاقات محاذاتها المقصودة — وهو ما ظهر في لقطة شاشة المستخدم
+   (قسم "تفاصيل الشبكة المعرفية" يظهر كنص مكدَّس بلا شبكة منظمة). */
 .bento-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     grid-auto-flow: dense;
     gap: 0.8rem;
     margin-bottom: 0.6rem;
+    direction: rtl;
+    text-align: right;
 }
 .bento-grid .metric-card { margin-bottom: 0; }
 .bento-featured {
