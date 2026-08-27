@@ -67,7 +67,7 @@ def render_agents_hub():
 
 
 def _render_agent_page(category):
-    """يعرض صفحة وكيل واحد: محادثة معزولة + أسئلة سريعة خاصة بفئته."""
+    """يعرض صفحة وكيل واحد: محادثة معزولة خاصة بفئته."""
     import html as _html
 
     bot_key  = f"agent_bot_{category.key}"

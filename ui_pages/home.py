@@ -32,7 +32,7 @@ def render_home():
             <div class="concept-card" style="border-right:3px solid var(--gold);margin-bottom:0.6rem;">
                 <div style="font-weight:700;font-size:1.02rem;margin-bottom:0.35rem;">👋 مرحباً بك في Neural Service Mesh</div>
                 <div style="color:var(--text-muted);font-size:0.9rem;line-height:1.75;">
-                    ابدأ من <b>الأسئلة المقترحة</b> أو <b>مفهوم اليوم</b> بالأسفل، أو انتقل مباشرةً إلى
+                    ابدأ من <b>مفهوم اليوم</b> بالأسفل، أو انتقل مباشرةً إلى
                     <b>المحادثة</b> و<b>المعرفة</b>. النظام يعمل حتى بدون أي مفتاح API.
                 </div>
             </div>
