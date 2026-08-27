@@ -120,7 +120,7 @@ class NSMDistributedTrainer:
         
         if deepspeed:
             outputs = self.model_engine(inputs)
-            loss = torch.nn.functional.cross_entropy(outputs, labels)
+            loss = torch.nn.functional.cross_entropy(outputs.view(-1, outputs.size(-1)), labels.view(-1))
             self.model_engine.backward(loss)
             
             # تبادل التدرجات عبر الشبكة العالمية قبل تحديث الأوزان
@@ -133,7 +133,7 @@ class NSMDistributedTrainer:
             inputs, labels = inputs.to(device), labels.to(device)
             self.optimizer.zero_grad()
             outputs = self.model(inputs)
-            loss = torch.nn.functional.cross_entropy(outputs, labels)
+            loss = torch.nn.functional.cross_entropy(outputs.view(-1, outputs.size(-1)), labels.view(-1))
             loss.backward()
             
             # تبادل التدرجات عبر الشبكة العالمية
