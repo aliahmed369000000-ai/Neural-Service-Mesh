@@ -47,17 +47,17 @@ class NSMDistributedTrainer:
     def _default_config(self):
         """إعدادات DeepSpeed ZeRO-3 للتحسين الهجومي (Aggressive Optimization) لـ 7 بطاقات GPU."""
         return {
-            "train_batch_size": 128,
-            "train_micro_batch_size_per_gpu": 16,
+            "train_batch_size": 256,
+            "train_micro_batch_size_per_gpu": 32,
             "gradient_accumulation_steps": 1,
             "steps_per_print": 1,
             "optimizer": {
                 "type": "Adam",
                 "params": {
-                    "lr": 1e-4,
-                    "betas": [0.9, 0.95],
+                    "lr": 2e-4,
+                    "betas": [0.9, 0.98],
                     "eps": 1e-8,
-                    "weight_decay": 1e-6
+                    "weight_decay": 1e-5
                 }
             },
             "zero_optimization": {
