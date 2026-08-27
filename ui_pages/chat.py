@@ -1009,63 +1009,6 @@ def render_chat():
             disabled=not _TTS_OK,
         )
 
-    # أسئلة سريعة — كاملة عند بداية المحادثة فقط، ثم مطوية لتقليل الازدحام البصري
-    # مرتبة لتغطي معرفة إسلامية + مفاهيم عامة مفيدة للمستخدم العربي
-    quick_qs = [
-        "ما هي أركان الإسلام؟",
-        "معنى التقوى في القرآن",
-        "ما هي سورة الفاتحة؟",
-        "ما هو الصبر؟",
-        "من هم الخلفاء الراشدون؟",
-        "ما الفرق بين العلم والمعرفة؟",
-        "ما هي سورة الكهف؟",
-        "اشرح مفهوم الرحمة",
-    ]
-    if not st.session_state.nsm_messages:
-        st.markdown("**⚡ ابدأ بسؤال سريع:**")
-        st.caption("اضغط أي سؤال لإرساله فوراً — يمكنك تعديل الصياغة لاحقاً")
-        quick_cols = st.columns(4)
-        for i, q in enumerate(quick_qs):
-            with quick_cols[i % 4]:
-                if st.button(q, key=f"chat_q_{i}", use_container_width=True):
-                    st.session_state._chat_pending = q
-    else:
-        with st.expander("⚡ أسئلة سريعة"):
-            quick_cols = st.columns(4)
-            for i, q in enumerate(quick_qs):
-                with quick_cols[i % 4]:
-                    if st.button(q, key=f"chat_q_{i}", use_container_width=True):
-                        st.session_state._chat_pending = q
-
-    # ══════════════════════════════════════════════════════════════════════
-    # 💡 اقتراحات متابعة ذكية (بناءً على آخر رد)
-    # ══════════════════════════════════════════════════════════════════════
-    if st.session_state.nsm_messages and st.session_state.nsm_messages[-1][0] == "nsm":
-        _last_response = st.session_state.nsm_messages[-1][1]
-        # توليد اقتراحات بسيطة بناءً على الكلمات المفتاحية في الرد
-        _suggestions = []
-        _response_lower = _last_response.lower()
-        
-        # اقتراحات عامة مفيدة — تُعرض فقط إن لم يكن الرد يذكرها أصلاً
-        if "مثال" not in _response_lower and "أمثلة" not in _response_lower:
-            _suggestions.append("أعطني مثالاً عملياً")
-        if "آية" not in _response_lower and "سورة" not in _response_lower:
-            _suggestions.append("ما الآيات المرتبطة؟")
-        if "لماذا" not in _response_lower:
-            _suggestions.append("لماذا هذا مهم؟")
-        if "كيف" not in _response_lower and len(_suggestions) < 3:
-            _suggestions.append("كيف أطبّق هذا؟")
-        if "ببساطة" not in _response_lower and "باختصار" not in _response_lower and len(_suggestions) < 3:
-            _suggestions.append("اشرح لي باختصار")
-        
-        if _suggestions:
-            st.markdown("**💡 اقتراحات للمتابعة:**")
-            _sug_cols = st.columns(len(_suggestions[:3]))
-            for i, sug in enumerate(_suggestions[:3]):  # حد أقصى 3 اقتراحات
-                with _sug_cols[i]:
-                    if st.button(sug, key=f"chat_suggestion_{i}", use_container_width=True):
-                        st.session_state._chat_pending = sug
-    
     # أدوات المحادثة: مسح / إعادة توليد آخر رد / تصدير — بجانب بعضها
     # (لا بعد أدوات المالك)
     st.caption("🛠️ أدوات المحادثة")

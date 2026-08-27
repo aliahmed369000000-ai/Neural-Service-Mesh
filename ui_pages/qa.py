@@ -21,22 +21,6 @@ def render_qa():
         unsafe_allow_html=True,
     )
 
-    # ── أمثلة جاهزة ──
-    st.markdown("**أمثلة:**")
-    examples = [
-        "من هو محمد ﷺ؟",
-        "ما علاقة الصبر بالإيمان؟",
-        "ماذا يقول القرآن عن العدل؟",
-        "ما قصة يوسف؟",
-    ]
-    ex_cols = st.columns(len(examples))
-    for i, ex in enumerate(examples):
-        with ex_cols[i]:
-            if st.button(ex, key=f"qa_example_{i}", use_container_width=True):
-                st.session_state["qa_question"] = ex
-                st.session_state["_qa_auto_ask"] = True
-                st.rerun()
-
     st.session_state.setdefault("qa_conversation_history", [])
     default_q = st.session_state.get("qa_question", "")
     question = st.text_input(

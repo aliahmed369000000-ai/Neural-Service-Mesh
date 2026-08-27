@@ -310,15 +310,6 @@ def _render_agent_page(category):
                     st.rerun()
             st.markdown("---")
 
-    if category.quick_prompts:
-
-        st.markdown("**⚡ أسئلة سريعة:**")
-        qcols = st.columns(len(category.quick_prompts))
-        for i, q in enumerate(category.quick_prompts):
-            with qcols[i]:
-                if st.button(q, key=f"agent_q_{category.key}_{i}", use_container_width=True):
-                    st.session_state[f"_agent_pending_{category.key}"] = q
-
     _has_msgs = bool(st.session_state[msg_key])
     _last_is_bot = _has_msgs and st.session_state[msg_key][-1][0] == "bot"
     col_clear, col_regen, col_export = st.columns(3)

@@ -492,23 +492,9 @@ def render_system_core():
         if not _GOAL_PLANNER_OK:
             st.error("⚠️ تعذّر تحميل GoalPlanner.")
         else:
-            _gp_examples = [
-                "تلخيص مفاهيم سورة البقرة",
-                "إيجاد العلاقة بين الصبر والإيمان",
-                "تحليل مفهوم العدل في القرآن",
-                "استخراج قصص الأنبياء من الآيات",
-            ]
-            st.markdown("**أمثلة:**")
-            _gp_ex_cols = st.columns(len(_gp_examples))
-            _gp_chosen = None
-            for _i, _ex in enumerate(_gp_examples):
-                with _gp_ex_cols[_i]:
-                    if st.button(_ex, key=f"gp_ex_{_i}", use_container_width=True):
-                        _gp_chosen = _ex
-
             _gp_goal = st.text_input(
                 "اكتب هدفك:",
-                value=_gp_chosen or st.session_state.get("gp_goal", ""),
+                value=st.session_state.get("gp_goal", ""),
                 placeholder="مثال: تلخيص مفاهيم سورة البقرة",
                 key="gp_goal_input",
             )

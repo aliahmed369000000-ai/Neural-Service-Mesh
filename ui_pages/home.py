@@ -391,33 +391,6 @@ def render_home():
                     st.toast("جارٍ فتح المحادثة…", icon="💬")
                     st.rerun()
 
-    # ── 💡 أسئلة مقترحة — تسهّل البداية للمستخدم الجديد دون الحاجة لابتكار سؤال
-    # من الصفر. الضغط على أي سؤال يملأ حقل البحث السريع أعلاه ويعرض النتيجة
-    # فوراً (نفس مسار البحث المعرفي الموجود). إضافة فقط — لا تغيّر منطقاً قائماً.
-    st.markdown("---")
-    st.markdown('<div class="section-header">💡 أسئلة مقترحة للبدء</div>', unsafe_allow_html=True)
-    st.caption("اضغط على أي سؤال لاستكشافه مباشرة عبر الشبكة المعرفية")
-
-    _suggested_qs = [
-        "ما هو الصبر في القرآن؟",
-        "معنى التقوى",
-        "الجذر اللغوي للرحمة",
-        "ما الفرق بين العلم والمعرفة؟",
-        "مفهوم العدل في الإسلام",
-        "التوبة وشروطها",
-        "الإيمان بالغيب",
-        "ماذا تعني البركة؟",
-    ]
-    _sq_cols = st.columns(4)
-    for _i, _sq in enumerate(_suggested_qs):
-        with _sq_cols[_i % 4]:
-            if st.button(_sq, key=f"home_suggested_q_{_i}", use_container_width=True):
-                with st.spinner("🔍 جارٍ البحث..."):
-                    _sq_result = search_knowledge(_sq)
-                st.session_state["_nsm_home_last_quick_search"] = (_sq, _sq_result)
-                st.session_state["home_quick_search_input"] = _sq
-                st.rerun()
-
     # ── 🌟 مفهوم اليوم — مفهوم عشوائي ثابت لنفس اليوم (لا يتغير بكل rerun)
     # يعتمد على تاريخ اليوم فقط، فلا يحتاج تخزين دائم ولا يغيّر أي حالة قائمة.
     st.markdown("---")

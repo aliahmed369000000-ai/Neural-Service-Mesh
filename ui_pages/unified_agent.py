@@ -114,21 +114,6 @@ def render_unified_agent():
                 """
             )
 
-    # ── اقتراحات سريعة ──
-    st.caption("اقتراحات")
-    _suggestions = [
-        "تقرير النظام",
-        "مساعدة",
-        "صنّف: ما حكم الصلاة؟",
-        "افحص المشروع",
-        "حالة نمو الوكيل",
-    ]
-    scols = st.columns(len(_suggestions))
-    for i, q in enumerate(_suggestions):
-        with scols[i]:
-            if st.button(q, key=f"ua_sug_{i}", use_container_width=True):
-                st.session_state["_ua_pending"] = q
-
     # ── صندوق المحادثة ──
     box_id = "unified-agent-chat-box"
     html_out = f'<div class="ua-box" id="{box_id}">'

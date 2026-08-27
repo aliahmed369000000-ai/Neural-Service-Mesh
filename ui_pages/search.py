@@ -51,17 +51,6 @@ def render_search():
             f"لم يُعثر على معلومات كافية عن «{query}» حتى الآن. "
             "يتعلم النظام بشكل مستمر — جرّب مفهوماً أقرب أو أحد الأمثلة أعلاه."
         )
-        # إن وُجدت جذور/تطابقات جزئية اعرضها كاقتراحات سريعة
-        _hints = result.get("root_matches") or []
-        if _hints:
-            st.caption("اقتراحات قريبة:")
-            _hcols = st.columns(min(6, len(_hints)))
-            for _i, _h in enumerate(_hints[:6]):
-                _name = _h[0] if isinstance(_h, (list, tuple)) else str(_h)
-                with _hcols[_i]:
-                    if st.button(_name, key=f"nf_hint_{_i}", use_container_width=True):
-                        st.session_state["search_query"] = _name
-                        st.rerun()
         return
 
     # ── عرض النتائج ──────────────────────────────────────────────────────

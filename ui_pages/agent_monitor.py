@@ -679,19 +679,6 @@ def render_swarm_runner_panel() -> None:
         )
         return
 
-    # ── الاقتراحات السريعة ──────────────────────────────────────────────
-    _run_suggestions = [
-        "ما هي أعلى قمم الجبال في العالم؟",
-        "اشرح لي مفهوم الشبكات العصبية ببساطة",
-        "ما أهم فوائد الذكاء الاصطناعي؟",
-        "لخّص لي قصة كفاح طويلة",
-    ]
-    sug_cols = st.columns(min(len(_run_suggestions), 4))
-    for i, q in enumerate(_run_suggestions):
-        with sug_cols[i]:
-            if st.button(q, key=f"swarm_run_sug_{i}", use_container_width=True):
-                st.session_state["_swarm_runner_pending"] = q
-
     # ── صندوق الإدخال ──────────────────────────────────────────────────
     run_q = st.text_input(
         "سؤالك للسرب",
