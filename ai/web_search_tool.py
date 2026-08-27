@@ -24,6 +24,7 @@ from __future__ import annotations
 import html
 import json
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -39,7 +40,17 @@ except Exception:  # pragma: no cover
     def offline_message(what: str = "") -> str:
         return f"وضع عدم اتصال — {what} غير متاح"
 
-_TIMEOUT = 12
+_TIMEOUT = 6
+# 🛠️ إصلاح: web_search_structured() كانت تستدعي حتى 6-7 مصادر بالتتابع
+# (duckduckgo + ddg_instant + wikipedia ar/en + wikidata + news [+ arxiv])،
+# كل واحد بمهلة _TIMEOUT ثانية. في أسوأ حالة (مصدر بطيء/محجوب فعلياً على
+# Streamlit Community Cloud) كان هذا يعني حظر تشغيل السكربت لعشرات الثواني
+# (كان يصل حتى ~80 ثانية مع _TIMEOUT=12)، مما يتسبب بانقطاع WebSocket
+# الخاص بـ Streamlit وإعادة تحميل كامل للتطبيق — وهو ما يظهر للمستخدم على
+# هيئة "الرجوع فجأة لتبويب الرئيسية" عند الضغط على إرسال في وكيل البحث.
+# _TOTAL_BUDGET يفرض سقفاً زمنياً إجمالياً: بمجرد تجاوزه تتوقف الدالة عن
+# استدعاء مصادر إضافية وتُعيد ما جمعته حتى تلك اللحظة بدل الاستمرار.
+_TOTAL_BUDGET = 15.0
 _UA = (
     "Mozilla/5.0 (compatible; NSMAgent/2.0; "
     "+https://github.com/aliahmed369000000-ai/Neural-Service-Mesh)"
@@ -321,39 +332,38 @@ def web_search_structured(
     errors: List[str] = []
     collected: List[Dict[str, str]] = []
 
-    for name, fn in (
+    # 🛠️ سقف زمني إجمالي (انظر تعليق _TOTAL_BUDGET أعلى الملف): بمجرد
+    # تجاوزه نتوقف عن استدعاء أي مصدر إضافي بدل إبقاء الطلب معلّقاً
+    # لعشرات الثواني (كان هذا يسبب انقطاع WebSocket في Streamlit وإعادة
+    # تحميل التطبيق بالكامل — يظهر للمستخدم كعودة مفاجئة لتبويب الرئيسية).
+    _start = time.monotonic()
+
+    def _budget_left() -> bool:
+        return (time.monotonic() - _start) < _TOTAL_BUDGET
+
+    _sources = [
         ("duckduckgo", lambda: _search_duckduckgo_lite(query, max_results)),
         ("ddg_instant", lambda: _search_instant_answer(query)),
-    ):
+    ]
+    if include_wiki:
+        _sources.append(("wikipedia_ar", lambda: _search_wikipedia(query, min(5, max_results), lang="ar")))
+        _sources.append(("wikipedia_en", lambda: _search_wikipedia(query, min(5, max_results), lang="en")))
+        _sources.append(("wikidata", lambda: _search_wikidata(query, 4)))
+    if include_news:
+        _sources.append(("news", lambda: _search_news_rss(query, min(5, max_results))))
+    # arXiv تلقائياً لأسئلة علمية أو بطلب صريح
+    sci_hints = ("arxiv", "بحث علمي", "ورقة", "paper", "neural", "transformer", "llm", "algorithm")
+    if include_arxiv or any(h in query.lower() for h in sci_hints):
+        _sources.append(("arxiv", lambda: _search_arxiv(query, 4)))
+
+    for name, fn in _sources:
+        if not _budget_left():
+            errors.append(f"{name}: تخطّي — تجاوز السقف الزمني الإجمالي ({_TOTAL_BUDGET:.0f}s)")
+            continue
         try:
             collected.extend(fn())
         except Exception as e:
             errors.append(f"{name}: {e}")
-
-    if include_wiki:
-        for lang in ("ar", "en"):
-            try:
-                collected.extend(_search_wikipedia(query, min(5, max_results), lang=lang))
-            except Exception as e:
-                errors.append(f"wikipedia_{lang}: {e}")
-        try:
-            collected.extend(_search_wikidata(query, 4))
-        except Exception as e:
-            errors.append(f"wikidata: {e}")
-
-    if include_news:
-        try:
-            collected.extend(_search_news_rss(query, min(5, max_results)))
-        except Exception as e:
-            errors.append(f"news: {e}")
-
-    # arXiv تلقائياً لأسئلة علمية أو بطلب صريح
-    sci_hints = ("arxiv", "بحث علمي", "ورقة", "paper", "neural", "transformer", "llm", "algorithm")
-    if include_arxiv or any(h in query.lower() for h in sci_hints):
-        try:
-            collected.extend(_search_arxiv(query, 4))
-        except Exception as e:
-            errors.append(f"arxiv: {e}")
 
     results = _dedupe(collected)[:max_results]
     return {
