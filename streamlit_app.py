@@ -111,16 +111,6 @@ render_sovereign_mind = _lazy_page("ui_pages.sovereign_mind", "render_sovereign_
 # وتبويبَي المالك ⚙️ النظام/🧪 أدوات متقدمة الظاهرين فقط بعد فتح وضع المالك).
 # ═══════════════════════════════════════════════════════════════════════════
 
-def render_knowledge_hub():
-    """📚 المعرفة: يجمع البحث المعرفي + القرآن الكريم + الأسئلة والأجوبة."""
-    sub = st.tabs(["🔍 البحث المعرفي", "📖 القرآن الكريم", "❓ الأسئلة والأجوبة"])
-    with sub[0]: render_search()
-    with sub[1]: render_quran()
-    with sub[2]: render_qa()
-
-
-
-
 def render_agents_group():
     """🤖 الوكلاء: يجمع الوكيل الموحّد + وكلاء AI + منسّق الوكلاء + السرب الذكي + لوحة السرب الموحدة."""
     st.markdown(
@@ -359,12 +349,11 @@ def main():
         # (حقن سكربت ينقر التبويب المطلوب). إضافة UX فقط.
         st.markdown("### 🧭 مركز التنقّل")
         st.caption("ابدأ من القسم الأقرب لمهمتك، أو استخدم البحث السريع للوصول المباشر.")
-        # 🆕 القائمة الآن تغطي كل الأقسام الرئيسية الستة (كانت 4 فقط وتنقص
+        # 🆕 القائمة الآن تغطي كل الأقسام الرئيسية الخمسة (كانت 4 فقط وتنقص
         # الرئيسية والتدريب) — بنفس ترتيب ظهورها في شريط التبويبات تماماً،
         # حتى يطابق الشريط الجانبي ما يراه المستخدم أعلى الصفحة بلا مفاجآت.
         _nav_items = [
             ("🏠 الرئيسية", "🏠 الرئيسية"),
-            ("📚 المعرفة", "📚 المعرفة"),
             ("💬 المحادثة", "💬 المحادثة"),
             ("🤖 الوكلاء", "🤖 الوكلاء"),
             ("🎨 إبداع", "🎨 المحتوى الإبداعي"),
@@ -595,8 +584,8 @@ def main():
     st.markdown("""
     <div class="nsm-nav-guide" aria-label="دليل أقسام النظام">
         <div class="nsm-nav-card">
-            <div class="nsm-nav-card-icon">📚</div>
-            <div><div class="nsm-nav-card-title">المعرفة والتفاعل</div><div class="nsm-nav-card-copy">بحث، قرآن، أسئلة وأجوبة، ومحادثة ذكية.</div></div>
+            <div class="nsm-nav-card-icon">💬</div>
+            <div><div class="nsm-nav-card-title">التفاعل</div><div class="nsm-nav-card-copy">محادثة ذكية، وبحث سريع عن مفهوم من الصفحة الرئيسية.</div></div>
         </div>
         <div class="nsm-nav-card">
             <div class="nsm-nav-card-icon">🤖</div>
@@ -615,7 +604,6 @@ def main():
     # محتوى محمي داخل تبويب ظاهر.
     _tab_defs = [
         ("🏠 الرئيسية", render_home),
-        ("📚 المعرفة", render_knowledge_hub),
         ("💬 المحادثة", render_chat),
         ("🤖 الوكلاء", render_agents_group),
         ("🎨 المحتوى الإبداعي", render_creative_hub),

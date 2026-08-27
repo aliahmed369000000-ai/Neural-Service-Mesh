@@ -16,12 +16,11 @@ def render_home():
     # لذلك يجب أن تبقى متوافقة مع المجموعات الرئيسية لا مع الصفحات الفرعية.
     _owner_tabs_offset = 2 if st.session_state.get("_dev_console_unlocked", False) else 0
     _tab_index_map = {
-        "📚 المعرفة": 1,
-        "💬 المحادثة": 2,
-        "🤖 الوكلاء": 3,
-        "🎨 المحتوى الإبداعي": 4,
-        "🎓 التدريب والعمليات": 5,
-        "ℹ️ عن NSM": 6 + _owner_tabs_offset,
+        "💬 المحادثة": 1,
+        "🤖 الوكلاء": 2,
+        "🎨 المحتوى الإبداعي": 3,
+        "🎓 التدريب والعمليات": 4,
+        "ℹ️ عن NSM": 5 + _owner_tabs_offset,
     }
 
     # ── 👋 ترحيب أول زيارة — يظهر مرة واحدة فقط في الجلسة، قابل للإغلاق
@@ -33,7 +32,7 @@ def render_home():
                 <div style="font-weight:700;font-size:1.02rem;margin-bottom:0.35rem;">👋 مرحباً بك في Neural Service Mesh</div>
                 <div style="color:var(--text-muted);font-size:0.9rem;line-height:1.75;">
                     ابدأ من <b>مفهوم اليوم</b> بالأسفل، أو انتقل مباشرةً إلى
-                    <b>المحادثة</b> و<b>المعرفة</b>. النظام يعمل حتى بدون أي مفتاح API.
+                    <b>المحادثة</b>، أو جرّب البحث السريع عن مفهوم أدناه. النظام يعمل حتى بدون أي مفتاح API.
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -160,16 +159,12 @@ def render_home():
     """, unsafe_allow_html=True)
 
     st.markdown('<div class="section-header">⚡ اختصارات سريعة</div>', unsafe_allow_html=True)
-    _dashboard_action_cols = st.columns(3)
+    _dashboard_action_cols = st.columns(2)
     with _dashboard_action_cols[0]:
         if st.button("💬 ابدأ محادثة", key="home_dashboard_chat", use_container_width=True):
             st.session_state["_nsm_home_jump_target"] = "💬 المحادثة"
             st.rerun()
     with _dashboard_action_cols[1]:
-        if st.button("🔍 ابحث عن مفهوم", key="home_dashboard_search", use_container_width=True):
-            st.session_state["_nsm_home_jump_target"] = "📚 المعرفة"
-            st.rerun()
-    with _dashboard_action_cols[2]:
         if st.button("🤖 راقب الوكلاء", key="home_dashboard_agents", use_container_width=True):
             st.session_state["_nsm_home_jump_target"] = "🤖 الوكلاء"
             st.rerun()
@@ -377,19 +372,11 @@ def render_home():
             </div>
             """, unsafe_allow_html=True)
 
-            _res_cols = st.columns(2)
-            with _res_cols[0]:
-                if st.button("📖 عرض النتيجة الكاملة في البحث", key="home_quick_search_open_full", use_container_width=True):
-                    st.session_state["search_query"] = _qs_q
-                    st.session_state["_nsm_home_jump_target"] = "📚 المعرفة"
-                    st.toast("تم فتح البحث الكامل", icon="🔍")
-                    st.rerun()
-            with _res_cols[1]:
-                if st.button("💬 ناقش في المحادثة", key="home_quick_search_to_chat", use_container_width=True):
-                    st.session_state._chat_pending = _qs_q
-                    st.session_state["_nsm_home_jump_target"] = "💬 المحادثة"
-                    st.toast("جارٍ فتح المحادثة…", icon="💬")
-                    st.rerun()
+            if st.button("💬 ناقش في المحادثة", key="home_quick_search_to_chat", use_container_width=True):
+                st.session_state._chat_pending = _qs_q
+                st.session_state["_nsm_home_jump_target"] = "💬 المحادثة"
+                st.toast("جارٍ فتح المحادثة…", icon="💬")
+                st.rerun()
 
     # ── 🌟 مفهوم اليوم — مفهوم عشوائي ثابت لنفس اليوم (لا يتغير بكل rerun)
     # يعتمد على تاريخ اليوم فقط، فلا يحتاج تخزين دائم ولا يغيّر أي حالة قائمة.
@@ -426,9 +413,7 @@ def render_home():
     st.markdown('<div class="section-header">🚀 استكشف NSM</div>', unsafe_allow_html=True)
 
     _features = [
-        ("🔍", "البحث المعرفي", "ابحث عن أي مفهوم (الصبر، الجاذبية، الرحمة، العدل...) وشاهد الآيات المرتبطة والجذور والعلاقات المعرفية.", "📚 المعرفة"),
         ("💬", "محادثة ذكية", "تحدّث مع النظام بالعربية الفصحى، مدعوماً بشبكة المفاهيم المعرفية.", "💬 المحادثة"),
-        ("📖", "القرآن الكريم", "بحث آية بآية، مرتبط تلقائياً بشبكة المفاهيم والجذور العربية.", "📚 المعرفة"),
         ("🤖", "الوكلاء الأذكياء", "وكلاء مستقلون للتنفيذ والتنسيق ضمن سرب ذكي متكامل.", "🤖 الوكلاء"),
         ("🎨", "المحتوى الإبداعي", "توليد نصوص ومحتوى إبداعي عربي بأسلوب متعدد الأنماط.", "🎨 المحتوى الإبداعي"),
         ("🌐", "الترجمة", "ترجمة فورية عربي ↔ لغات أخرى عبر سلسلة الاحتياط الذكية.", "🎨 المحتوى الإبداعي"),
@@ -457,8 +442,8 @@ def render_home():
     # النصية، لأن بنية DOM الداخلية لِـ st.tabs قد تختلف بين إصدارات
     # Streamlit (data-baseweb مقابل role="tab" ...إلخ)، فالاعتماد على
     # نص + فهرس معاً أكثر مقاومة لتغيّر الإصدار من نص فقط.
-    # الترتيب الحالي: 0=الرئيسية 1=المعرفة 2=المحادثة 3=الوكلاء
-    # 4=المحتوى الإبداعي 5=التدريب والعمليات، ثم أدوات المالك وعن NSM.
+    # الترتيب الحالي: 0=الرئيسية 1=المحادثة 2=الوكلاء
+    # 3=المحتوى الإبداعي 4=التدريب والعمليات، ثم أدوات المالك وعن NSM.
     # (_tab_index_map مُعرَّف أول الدالة الآن — يُستخدم هنا وبقسم البحث
     # السريع/متابعة المحادثة أعلاه بلا تكرار)
     # أداء: هذا السكربت (iframe جديد + مسح DOM) كان يُعاد حقنه بالكامل من
