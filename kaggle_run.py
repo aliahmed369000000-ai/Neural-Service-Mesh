@@ -48,7 +48,7 @@ def start_swarm_session():
         dataset = torch.load(data_path)
     else:
         print("⚠️ Training data not found. Using synthetic data for swarm initialization.")
-        dataset = [(torch.randn(1, 1024), torch.randint(0, 50257, (1, 1024))) for _ in range(100)]
+        dataset = [(torch.randint(0, 50257, (1, 1024)), torch.randint(0, 50257, (1, 1024))) for _ in range(100)]
 
     # 3. تهيئة محرك التدريب الموزع
     trainer = NSMDistributedTrainer(model, dataset)
