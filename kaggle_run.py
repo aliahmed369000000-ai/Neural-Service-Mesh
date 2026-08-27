@@ -31,9 +31,9 @@ def start_swarm_session():
     # 1. إعداد النموذج (Surah 4096)
     # ملاحظة: نستخدم بارامترات مصغرة للاختبار إذا لم تتوفر الأوزان الضخمة
     model_config = {
-        "d_model": 2048,
+        "d_model": 1024,
         "n_layers": 114,
-        "n_heads": 32,
+        "n_heads": 16,
         "vocab_size": 50257
     }
     
@@ -48,15 +48,19 @@ def start_swarm_session():
         dataset = torch.load(data_path)
     else:
         print("⚠️ Training data not found. Using synthetic data for swarm initialization.")
-        dataset = [(torch.randint(0, 50257, (1, 1024)), torch.randint(0, 50257, (1, 1024))) for _ in range(100)]
+        dataset = [(torch.randint(0, 50257, (1, 1024), dtype=torch.long), torch.randint(0, 50257, (1, 1024), dtype=torch.long)) for _ in range(2000)]
 
     # 3. تهيئة محرك التدريب الموزع
+    if not torch.cuda.is_available():
+        print("❌ CRITICAL ERROR: GPU not detected! Kaggle must have GPU enabled to run Surah.")
+        sys.exit(1)
+        
     trainer = NSMDistributedTrainer(model, dataset)
     trainer.setup()
     
     # 4. بدء الجلسة الجماعية
     print("🚀 Swarm Integrated. Beginning Collective Training Session...")
-    for epoch in range(10):
+    for epoch in range(50):
         for i, batch in enumerate(dataset):
             loss = trainer.train_step(batch, step_idx=i)
             if i % 10 == 0:
