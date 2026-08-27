@@ -1115,14 +1115,21 @@ html, body { overflow-x: hidden; }
 [data-testid="stSidebar"] { order: 2; direction: rtl; }
 [data-testid="stAppViewContainer"] > .main,
 [data-testid="stAppViewContainer"] [data-testid="stMain"] { order: 1; flex: 1 1 auto; min-width: 0; direction: rtl; }
+/* 🛠️ إصلاح نهائي (كان محاولة سابقة تُلغي هذا الترتيب على الجوال ظنّاً بأن
+   Streamlit يعرض الشريط الجانبي كطبقة منزلقة (overlay) في هذا العرض، وهو
+   افتراض غير صحيح فعلياً في هذا التطبيق — لقطات شاشة المستخدم على الجوال
+   أثبتت أن الشريط يظهر كعمود flex ثابت بجانب المحتوى تماماً كسطح المكتب،
+   لا كطبقة منزلقة. إلغاء order هناك (order:initial) كان يُعيد الشريط إلى
+   ترتيبه الطبيعي في DOM (أولاً ⇐ يسار الشاشة فعلياً بما أن الحاوية
+   direction:ltr)، وهذا بالضبط ما ظهر في الصورة: القائمة على اليسار، ويتكرر
+   عند أي rerun (كل ضغطة زر) لأن Streamlit يعيد رسم كامل الصفحة بنفس الحكم
+   المرتبط بعرض الشاشة في كل مرة. الحل الدائم: نفرض نفس ترتيب سطح المكتب
+   على كل الأحجام دون استثناء عبر !important حتى لا يطغى عليها أي قالب
+   داخلي لاحق خاص بالجوال. */
+[data-testid="stSidebar"] { order: 2 !important; }
+[data-testid="stAppViewContainer"] > .main,
+[data-testid="stAppViewContainer"] [data-testid="stMain"] { order: 1 !important; }
 @media (max-width: 768px) {
-    /* على الجوال يعرض Streamlit الشريط الجانبي كطبقة منزلقة فوق المحتوى
-       لا كعمود flex — عكس order هنا قد يقلب اتجاه الانزلاق، فنُلغي
-       التأثير ونُبقي سلوك الجوال الافتراضي كما هو. */
-    [data-testid="stSidebar"] { order: initial; }
-    [data-testid="stAppViewContainer"] > .main,
-    [data-testid="stAppViewContainer"] [data-testid="stMain"] { order: initial; }
-
     /* ── محاولة جعل انزلاق الشريط على الجوال من اليمين بدل اليسار ──
        تجريبي: Streamlit لا يوثّق آلية الانزلاق الداخلية (transform أو
        position) بدقة لكل نسخة، لذا نغطّي الاحتمالين معاً بـ!important
