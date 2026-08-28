@@ -519,6 +519,7 @@ def _run_step(step: Dict[str, Any]) -> str:
         "self_learn", "ingest_knowledge", "trending", "will_status", "will_tick", "terminal",
         "image_search", "create_artifact", "api_call", "answer",
         "preview_check", "rollback", "kaggle_status",
+        "autonomous_research", "self_evolution", "cloning_self"
     }
     if action not in _VALID_ACTIONS:
         return (f"❌ فعل غير صالح من النموذج: '{action}'\n"
@@ -805,6 +806,38 @@ def _run_step(step: Dict[str, Any]) -> str:
             return "## 🧠 self_learn\n```json\n" + _json.dumps(res, ensure_ascii=False, indent=2) + "\n```"
         except Exception as e:
             return f"❌ self_learn: {e}"
+
+    # ── autonomous_research ── 🆕 بحث مستقل عميق
+    if action == "autonomous_research":
+        try:
+            from ai.web_gateway import NeuralWebGateway
+            gw = NeuralWebGateway()
+            topic = query or step.get("topic") or "AI Research"
+            results = gw.search(topic)
+            return f"## 🔬 autonomous_research\n\nنتائج البحث عن `{topic}`:\n" + json.dumps(results, indent=2, ensure_ascii=False)
+        except Exception as e:
+            return f"❌ autonomous_research: {e}"
+
+    # ── self_evolution ── 🆕 تطور ذاتي (تعديل الكود بناءً على البحث)
+    if action == "self_evolution":
+        try:
+            from ai.task_engine import SelfTaskingEngine
+            engine = SelfTaskingEngine()
+            objective = query or step.get("objective") or "Improve agent performance"
+            res = engine.analyze_and_execute(objective)
+            return f"## 🧬 self_evolution\n\nهدف التطور: `{objective}`\nالنتيجة: {res}"
+        except Exception as e:
+            return f"❌ self_evolution: {e}"
+
+    # ── cloning_self ── 🆕 استنساخ الوكيل (Git Autonomy)
+    if action == "cloning_self":
+        try:
+            # تنفيذ أمر استنساخ آمن وحذف النسخة المحلية بعد العمل
+            cmd = "git clone https://github.com/aliahmed369000000-ai/Neural-Service-Mesh.git tmp_clone && rm -rf tmp_clone"
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60, cwd=str(ROOT))
+            return f"## 👥 cloning_self\n\nتم اختبار قدرة الاستنساخ والحذف الذاتي:\n{r.stdout or r.stderr}"
+        except Exception as e:
+            return f"❌ cloning_self: {e}"
 
     # ── ingest_knowledge ──
     if action == "ingest_knowledge":
