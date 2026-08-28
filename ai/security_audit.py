@@ -18,7 +18,10 @@ class SovereignSecurityAudit:
             "Insecure Auth": [r"password\s*=\s*['\"].*['\"]", r"verify=False"],
             "HF Model RCE": [r"torch\.load\(", r"pickle\.load\(", r"weights_only=False"],
             "HF Space Secrets": [r"st\.secrets", r"os\.environ\.get\(.*TOKEN"],
-            "Gradio Insecurity": [r"gr\.Interface\(.*share=True", r"enable_queue=True"]
+            "Gradio Insecurity": [r"gr\.Interface\(.*share=True", r"enable_queue=True"],
+            "Social API IDOR": [r"api/v1/user/\d+", r"get_profile\?id=", r"settings/update\?uid="],
+            "OAuth Vulnerability": [r"redirect_uri=", r"state=.*", r"response_type=token"],
+            "Meta Specific": [r"fb_access_token", r"graph\.facebook\.com", r"fbid=\d+"]
         }
 
     def audit_local_code(self, directory: str = ".") -> Dict[str, Any]:
