@@ -24,7 +24,10 @@ class SovereignSecurityAudit:
             "Meta Specific": [r"fb_access_token", r"graph\.facebook\.com", r"fbid=\d+"],
             "Instagram Recon": [r"i\.instagram\.com", r"instagram\.com/p/", r"stories/highlights/"],
             "Private Media Leak": [r"cdninstagram\.com", r"display_url", r"is_private\s*:\s*false"],
-            "Direct Message Auth": [r"direct_v2/threads/", r"messages/send/", r"share/item/"]
+            "Direct Message Auth": [r"direct_v2/threads/", r"messages/send/", r"share/item/"],
+            "TikTok Specific": [r"v16\.tiktokv\.com", r"tiktok\.com/@", r"aweme/v1/feed/"],
+            "Private Video Leak": [r"item/detail/", r"video_control", r"is_private\s*:\s*1"],
+            "Webview Bridge": [r"TiktokJSBridge", r"bytedance\.on\(", r"invokeMethod"]
         }
 
     def audit_local_code(self, directory: str = ".") -> Dict[str, Any]:
