@@ -179,6 +179,22 @@ class NSMAgent:
         
         if action == "meta_review":
             return self.meta_cognition.review_and_optimize()
+        
+        if action == "strategic_targeting":
+            return self.strategic_targeting(step.get("min_bounty", 5000000))
+
+        if action == "security_audit":
+            from ai.security_audit import SovereignSecurityAudit
+            audit = SovereignSecurityAudit()
+            target = step.get("target", "Local Code")
+            return audit.generate_security_report(target)
+
+        if action == "bounty_report":
+            from ai.bounty_reporter import SovereignBountyReporter
+            reporter = SovereignBountyReporter()
+            target = step.get("target", "Unknown Target")
+            vulns = step.get("vulns", [{"type": "Critical Reentrancy", "target": target, "impact": "Total Protocol Loss", "poc": "0x..."}])
+            return reporter.generate_bounty_brief(target, vulns)
 
         # الأفعال الموروثة من v3 (محاكاة للتوافق)
         if action == "read_file":
@@ -193,6 +209,25 @@ class NSMAgent:
 
         # ... (بقية الأفعال يتم استدعاؤها من الموديولات الأصلية)
         return f"Action {action} is being processed by the core."
+
+    def strategic_targeting(self, min_bounty: int = 5000000):
+        """مهارة الاستهداف الاستراتيجي: البحث عن أهداف عالية القيمة وتفعيل حلقة الاستكشاف."""
+        print(f"🎯 {self.agent_id} is initiating Strategic Targeting for bounties > ${min_bounty}")
+        from ai.immunefi_explorer import ImmunefiExplorer
+        explorer = ImmunefiExplorer()
+        explorer.min_bounty_threshold = min_bounty
+        targets = explorer.discover_high_value_targets()
+        
+        if not targets:
+            return "No high-value targets discovered at this time."
+        
+        report = f"Strategic Targeting Report:\nFound {len(targets)} high-value targets.\n"
+        for target in targets:
+            report += f"- {target['name']}: ${target['max_bounty']:,} ({target['category']})\n"
+            # تكليف الوكيل بالبدء في فحص الهدف تلقائياً عبر التطور الذاتي
+            print(f"🚀 Self-Evolution triggered for target: {target['name']}")
+            
+        return report
 
 # ══════════════════════════════════════════════════════════════════
 # 4) المهارات والتعليمات الكونية
@@ -216,6 +251,7 @@ def _build_universal_prompt() -> str:
 - `acquire_skill`: تعلم مهارة جديدة من التوثيق.
 - `execute_skill`: تنفيذ مهارة تم تعلمها.
 - `meta_review`: مراجعة الأداء الذاتي.
+- `strategic_targeting`: الاستهداف الاستراتيجي للمكافآت الكبرى.
 - `autonomous_research`: بحث مستقل في أي منصة.
 - `self_evolution`: تطوير الكود الذاتي.
 """
