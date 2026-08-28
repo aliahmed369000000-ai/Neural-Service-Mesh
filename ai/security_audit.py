@@ -15,7 +15,10 @@ class SovereignSecurityAudit:
             "Command Injection": [r"os\.system\(", r"subprocess\.run\(.*shell=True", r"eval\("],
             "Secret Leak": [r"ghp_[a-zA-Z0-9]{36}", r"hf_[a-zA-Z0-9]{34}", r"sk-[a-zA-Z0-9]{48}"],
             "Path Traversal": [r"open\(.*\.format\(", r"os\.path\.join\(.*\.\./"],
-            "Insecure Auth": [r"password\s*=\s*['\"].*['\"]", r"verify=False"]
+            "Insecure Auth": [r"password\s*=\s*['\"].*['\"]", r"verify=False"],
+            "HF Model RCE": [r"torch\.load\(", r"pickle\.load\(", r"weights_only=False"],
+            "HF Space Secrets": [r"st\.secrets", r"os\.environ\.get\(.*TOKEN"],
+            "Gradio Insecurity": [r"gr\.Interface\(.*share=True", r"enable_queue=True"]
         }
 
     def audit_local_code(self, directory: str = ".") -> Dict[str, Any]:
@@ -43,9 +46,18 @@ class SovereignSecurityAudit:
         try:
             from ai.web_gateway import NeuralWebGateway
             gw = NeuralWebGateway()
-            search_query = f"site:cve.mitre.org {topic} vulnerabilities 2026"
-            results = gw.search(search_query)
-            return json.dumps(results, indent=2, ensure_ascii=False)
+            # توسيع نطاق البحث ليشمل أخبار الأمن ومنصات المكافآت
+            queries = [
+                f"site:cve.mitre.org {topic} vulnerabilities 2026",
+                f"{topic} security bug bounty reports",
+                f"{topic} remote code execution exploit 2026"
+            ]
+            all_results = []
+            for q in queries:
+                res = gw.search(q)
+                if isinstance(res, list):
+                    all_results.extend(res)
+            return json.dumps(all_results, indent=2, ensure_ascii=False)
         except Exception as e:
             return f"❌ Security research failed: {e}"
 
