@@ -38,10 +38,11 @@ class KaggleGlobalScheduler:
             "kernel_type": "script",
             "is_private": "true",
             "enable_gpu": "true",
-            "accelerator": "gpu",
+            "accelerator": "nvidiaTeslaT4",
+            "gpu_count": 2,
             "enable_tpu": "false",
             "enable_internet": "true",
-            "dataset_sources": [],
+            "dataset_sources": [f"{username}/nsm-gpu-wheels-cu118"],
             "competition_sources": [],
             "kernel_sources": [],
             "model_sources": []
@@ -125,6 +126,36 @@ class KaggleGlobalScheduler:
         parts.append("\n# ═══ MAIN RUNNER (kaggle_run.py) ═══\n" + _strip_internal_imports(main_content))
 
         bundle = "\n".join(parts)
+        
+        # 🔐 حماية الأسرار: التوكن يتم استلامه من بيئة التشغيل في Kaggle وليس صلباً في الكود
+        header = """
+import os
+import subprocess
+import sys
+import glob
+
+# 🚀 فرض استخدام T4x2 والتحقق من الـ GPU لسرعة الإقلاع
+print("🛠️ NSM Swarm Turbo-Boot: Initializing GPU environment...")
+try:
+    import torch
+    if torch.cuda.is_available():
+        cap = torch.cuda.get_device_capability()
+        print(f"✅ GPU Found: {torch.cuda.get_device_name(0)} (sm_{cap[0]}{cap[1]})")
+    else:
+        print("⚠️ GPU not detected. Check Kaggle settings.")
+except Exception as err:
+    print(f"⚠️ GPU Check failed: {err}")
+
+# التوكن يتم حقنه عبر المجدول في بيئة التشغيل فقط
+os.environ['HF_REPO_ID'] = 'AliAhmedMo/nsm-surah-weights'
+
+try:
+    import huggingface_hub
+except ImportError:
+    subprocess.run([sys.executable, "-m", "pip", "install", "huggingface_hub"], check=True)
+"""
+        bundle = header + bundle
+
         if output_path:
             with open(output_path, "w", encoding="utf-8") as out:
                 out.write(bundle)

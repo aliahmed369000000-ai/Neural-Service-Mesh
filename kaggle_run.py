@@ -64,14 +64,30 @@ def start_swarm_session():
     
     # 4. بدء الجلسة الجماعية
     print("🚀 Swarm Integrated. Beginning Intensive Collective Training Session...")
+    import time
+    start_time = time.time()
+    total_tokens = 0
+    
     for epoch in range(100):
+        epoch_start_time = time.time()
         for i, batch in enumerate(dataset):
+            inputs, _ = batch
+            batch_tokens = inputs.numel()
+            
             loss = trainer.train_step(batch, step_idx=i)
+            total_tokens += batch_tokens
+            
             if i % 5 == 0:
-                print(f"📊 Epoch {epoch} | Step {i} | Loss: {loss:.4f} | Total Swarm Nodes: 7")
+                elapsed = time.time() - start_time
+                tokens_per_sec = total_tokens / elapsed if elapsed > 0 else 0
+                print(f"📊 Epoch {epoch} | Step {i} | Loss: {loss:.4f} | T/s: {tokens_per_sec:.2f} | Nodes: 7")
         
         # حفظ الأوزان في نهاية كل Epoch
+        print(f"🔄 Epoch {epoch} completed. Triggering Auto-Checkpoint to Hugging Face...")
         trainer.save_checkpoint(tag=f"surah_4096_epoch_{epoch}")
+        
+        epoch_elapsed = time.time() - epoch_start_time
+        print(f"✅ Epoch {epoch} finished in {epoch_elapsed:.2f}s.")
 
 if __name__ == "__main__":
     start_swarm_session()
