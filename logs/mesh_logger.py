@@ -1,9 +1,10 @@
 from __future__ import annotations
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from logging.handlers import RotatingFileHandler
 
 
 class MeshLogger:
@@ -35,10 +36,10 @@ class MeshLogger:
         ch.setLevel(log_level)
         root.addHandler(ch)
 
-        # File handler (daily log file)
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        # File handler with rotation (max 10MB per file, keep 5 backups)
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         log_file = self.log_dir / f"mesh_{today}.log"
-        fh = logging.FileHandler(log_file, encoding="utf-8")
+        fh = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5, encoding="utf-8")
         fh.setFormatter(fmt)
         fh.setLevel(log_level)
         root.addHandler(fh)
