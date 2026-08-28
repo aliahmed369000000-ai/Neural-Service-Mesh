@@ -147,6 +147,7 @@ except Exception as err:
     print(f"⚠️ GPU Check failed: {err}")
 
 # التوكن يتم حقنه عبر المجدول في بيئة التشغيل فقط
+# يرجى إضافة التوكن في Kaggle Secrets باسم 'HF_TOKEN'
 os.environ['HF_REPO_ID'] = 'AliAhmedMo/nsm-surah-weights'
 
 try:
