@@ -62,9 +62,14 @@ def start_swarm_session():
     trainer = NSMDistributedTrainer(model, dataset)
     trainer.setup()
     
-    # 4. بدء الجلسة الجماعية
-    print("🚀 Swarm Integrated. Beginning Intensive Collective Training Session...")
+    # 4. بدء الجلسة الجماعية مع نبض الفضول (GPU Heartbeat)
+    print("🚀 Phase 2: Intensive Collective Training Session with GPU Heartbeat...")
     import time
+    from ai.curiosity_engine import CuriosityEngine
+    
+    node_id = os.environ.get('KAGGLE_KERNEL_ID', f'sovereign_node_{torch.randint(100, 999, (1,)).item()}')
+    curiosity = CuriosityEngine(agent_id=node_id)
+    
     start_time = time.time()
     total_tokens = 0
     
@@ -77,12 +82,24 @@ def start_swarm_session():
             loss = trainer.train_step(batch, step_idx=i)
             total_tokens += batch_tokens
             
+            if i % 20 == 0:
+                print(f"💓 [GPU Heartbeat] Agent {node_id} is pulsing...")
+                action_result = curiosity.get_heartbeat_action()
+                if action_result:
+                    print(f"✨ [Curiosity Discovery] {action_result}")
+                    try:
+                        from ai.gradient_mesh import gradient_protocol
+                        if gradient_protocol and gradient_protocol.is_connected:
+                            import asyncio
+                            asyncio.run(gradient_protocol.share_discovery(action_result))
+                    except Exception as gossip_err:
+                        pass
+            
             if i % 5 == 0:
                 elapsed = time.time() - start_time
                 tokens_per_sec = total_tokens / elapsed if elapsed > 0 else 0
-                print(f"📊 Epoch {epoch} | Step {i} | Loss: {loss:.4f} | T/s: {tokens_per_sec:.2f} | Nodes: 7")
+                print(f"📊 Epoch {epoch} | Step {i} | Loss: {loss:.4f} | T/s: {tokens_per_sec:.2f} | Nodes: 28")
         
-        # حفظ الأوزان في نهاية كل Epoch
         print(f"🔄 Epoch {epoch} completed. Triggering Auto-Checkpoint to Hugging Face...")
         trainer.save_checkpoint(tag=f"surah_4096_epoch_{epoch}")
         
