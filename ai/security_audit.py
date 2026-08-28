@@ -21,7 +21,10 @@ class SovereignSecurityAudit:
             "Gradio Insecurity": [r"gr\.Interface\(.*share=True", r"enable_queue=True"],
             "Social API IDOR": [r"api/v1/user/\d+", r"get_profile\?id=", r"settings/update\?uid="],
             "OAuth Vulnerability": [r"redirect_uri=", r"state=.*", r"response_type=token"],
-            "Meta Specific": [r"fb_access_token", r"graph\.facebook\.com", r"fbid=\d+"]
+            "Meta Specific": [r"fb_access_token", r"graph\.facebook\.com", r"fbid=\d+"],
+            "Instagram Recon": [r"i\.instagram\.com", r"instagram\.com/p/", r"stories/highlights/"],
+            "Private Media Leak": [r"cdninstagram\.com", r"display_url", r"is_private\s*:\s*false"],
+            "Direct Message Auth": [r"direct_v2/threads/", r"messages/send/", r"share/item/"]
         }
 
     def audit_local_code(self, directory: str = ".") -> Dict[str, Any]:
