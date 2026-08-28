@@ -519,7 +519,7 @@ def _run_step(step: Dict[str, Any]) -> str:
         "self_learn", "ingest_knowledge", "trending", "will_status", "will_tick", "terminal",
         "image_search", "create_artifact", "api_call", "answer",
         "preview_check", "rollback", "kaggle_status",
-        "autonomous_research", "self_evolution", "cloning_self", "security_audit"
+        "autonomous_research", "self_evolution", "cloning_self", "security_audit", "bounty_report"
     }
     if action not in _VALID_ACTIONS:
         return (f"❌ فعل غير صالح من النموذج: '{action}'\n"
@@ -849,6 +849,25 @@ def _run_step(step: Dict[str, Any]) -> str:
             return report
         except Exception as e:
             return f"❌ security_audit: {e}"
+
+    # ── bounty_report ── 🆕 توليد تقارير مكافآت الثغرات
+    if action == "bounty_report":
+        try:
+            from ai.bounty_reporter import SovereignBountyReporter
+            reporter = SovereignBountyReporter()
+            target = query or step.get("target") or "example.com"
+            vulns = step.get("vulns") or []
+            if not vulns and "poc" in step:
+                vulns = [{
+                    "type": step.get("type", "Unknown"),
+                    "target": target,
+                    "poc": step.get("poc", ""),
+                    "impact": step.get("impact", "")
+                }]
+            brief = reporter.generate_bounty_brief(target, vulns)
+            return brief
+        except Exception as e:
+            return f"❌ bounty_report: {e}"
 
     # ── ingest_knowledge ──
     if action == "ingest_knowledge":

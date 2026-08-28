@@ -1,0 +1,89 @@
+# -*- coding: utf-8 -*-
+import json
+from typing import Dict, Any, List
+
+class SovereignBountyReporter:
+    """
+    وحدة الإبلاغ المسؤول (Sovereign Bounty Reporter):
+    تمكن الوكلاء من صياغة تقارير أمنية احترافية والبحث عن برامج المكافآت.
+    """
+    def __init__(self):
+        self.bounty_platforms = ["HackerOne", "Bugcrowd", "Intigriti", "YesWeHack"]
+
+    def find_bounty_program(self, domain: str) -> str:
+        """البحث عن وجود برنامج مكافآت للمنصة المستهدفة."""
+        try:
+            from ai.web_gateway import NeuralWebGateway
+            gw = NeuralWebGateway()
+            search_query = f"{domain} bug bounty program policy"
+            results = gw.search(search_query)
+            return json.dumps(results, indent=2, ensure_ascii=False)
+        except Exception as e:
+            return f"❌ Bounty search failed: {e}"
+
+    def draft_security_report(self, vulnerability: Dict[str, Any]) -> str:
+        """صياغة مسودة تقرير أمني احترافي."""
+        vuln_type = vulnerability.get("type", "Unknown Vulnerability")
+        target = vulnerability.get("target", "Unknown Target")
+        poc = vulnerability.get("poc", "Proof of Concept not provided")
+        impact = vulnerability.get("impact", "Potential security risk")
+
+        report = f"""
+# 🛡️ Security Vulnerability Report: {vuln_type}
+**Target:** {target}
+**Researcher:** NSM Sovereign Swarm
+
+## 1. Description
+A {vuln_type} was discovered in {target}. This vulnerability could allow an attacker to {impact}.
+
+## 2. Proof of Concept (PoC)
+```python
+{poc}
+```
+
+## 3. Impact
+{impact}
+
+## 4. Recommended Fix
+- Sanitize all user inputs.
+- Use parameterized queries or secure APIs.
+- Implement proper access controls.
+
+---
+*This report was generated autonomously by the NSM Sovereign Security Module.*
+"""
+        return report
+
+    def generate_bounty_brief(self, target: str, vulns: List[Dict[str, Any]]) -> str:
+        """توليد ملخص شامل لعملية صيد الثغرات للمنصة."""
+        print(f"💰 Generating Bounty Brief for: {target}")
+        
+        bounty_info = self.find_bounty_program(target)
+        reports = [self.draft_security_report(v) for v in vulns]
+        
+        brief = f"""
+# 💰 ملخص صيد الثغرات السيادي (NSM Bounty Brief)
+**المنصة:** {target}
+
+## 1. معلومات برنامج المكافآت
+{bounty_info}
+
+## 2. التقارير الجاهزة للإرسال
+{"".join(reports)}
+
+## 3. خطوات الإبلاغ القادمة
+- التحقق من البريد الإلكتروني المخصص للأمن (security@{target}).
+- مراجعة سياسة الإبلاغ المسؤول للمنصة لضمان الامتثال.
+- إرسال التقارير عبر القنوات الرسمية المكتشفة.
+"""
+        return brief
+
+if __name__ == "__main__":
+    reporter = SovereignBountyReporter()
+    sample_vuln = {
+        "type": "Command Injection",
+        "target": "example.com",
+        "poc": "os.system('ping ' + user_input)",
+        "impact": "Execute arbitrary commands on the server"
+    }
+    print(reporter.generate_bounty_brief("example.com", [sample_vuln]))
