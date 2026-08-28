@@ -320,6 +320,19 @@ def main():
     except Exception:
         pass
 
+    # ── شريط الحالة العام — مؤشرات محلية فقط بلا أي اتصال خارجي ────────
+    # يوضح للمستخدم حالة الجلسة والتشغيل دون عرض قيم أسرار أو الادعاء
+    # بوجود عقد/خدمات حيّة لم يتم التحقق منها.
+    _has_optional_provider = bool(os.getenv("OPENROUTER_API_KEY", "").strip())
+    _session_label = "مسجّلة" if st.session_state.get("_account") else "زائر"
+    _runtime_label = "مزود اختياري مهيّأ" if _has_optional_provider else "الاحتياطي المحلي جاهز"
+    render_status_bar([
+        {"label": "الجلسة", "value": _session_label},
+        {"label": "التشغيل", "value": _runtime_label},
+        {"label": "الأمان", "value": "حماية محلية"},
+        {"label": "الوضع", "value": "واجهة RTL"},
+    ])
+
     # ── الشريط الجانبي — OpenRouter ───────────────────────────────────────
     with st.sidebar:
         render_brand_bar("الذكاء العربي · مركز التحكم")
