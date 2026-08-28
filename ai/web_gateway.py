@@ -3,60 +3,77 @@ import requests
 from bs4 import BeautifulSoup
 import json
 import logging
+import time
 
-class NeuralWebGateway:
+class UniversalWebGateway:
+    """بوابة كونية تسمح للوكلاء بالتفاعل الذكي مع أي موقع أو API دون برمجة مسبقة."""
     def __init__(self):
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        self.logger = logging.getLogger("NSM-WebGateway")
+        self.session = requests.Session()
+        self.logger = logging.getLogger("NSM-UniversalGateway")
 
-    def search(self, query: str, num_results: int = 5):
-        """بحث سيادي في الإنترنت لاستخلاص المعرفة البحثية."""
-        # محاولة البحث عبر DuckDuckGo كخيار أول
-        search_url = f"https://html.duckduckgo.com/html/?q={query}"
+    def interact(self, url: str, action: str = "GET", params: dict = None, data: dict = None, headers: dict = None):
+        """تفاعل ديناميكي مع أي URL."""
         try:
-            response = requests.get(search_url, headers=self.headers, timeout=10)
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, 'html.parser')
-                results = []
-                for item in soup.find_all('div', class_='result', limit=num_results):
-                    link = item.find('a', class_='result__a')
-                    snippet = item.find('a', class_='result__snippet')
-                    if link:
-                        results.append({
-                            "title": link.text.strip(),
-                            "url": link.get('href'),
-                            "snippet": snippet.text.strip() if snippet else ""
-                        })
-                
-                # إضافة بحث تخصصي في arXiv للأوراق البحثية إذا كان الاستعلام تقنياً
-                if any(k in query.lower() for k in ["research", "paper", "arxiv", "ai", "deep learning"]):
-                    arxiv_results = self._search_arxiv(query, limit=3)
-                    results.extend(arxiv_results)
-                    
-                return results
-            return []
+            full_headers = self.headers.copy()
+            if headers:
+                full_headers.update(headers)
+            
+            response = self.session.request(
+                method=action,
+                url=url,
+                params=params,
+                json=data if action in ["POST", "PUT", "PATCH"] else None,
+                headers=full_headers,
+                timeout=15
+            )
+            
+            return {
+                "status": response.status_code,
+                "content_type": response.headers.get("Content-Type", ""),
+                "data": self._parse_content(response),
+                "url": response.url
+            }
         except Exception as e:
-            self.logger.error(f"Search failed: {e}")
-            return []
+            return {"error": str(e), "url": url}
 
-    def _search_arxiv(self, query: str, limit: int = 3):
-        """بحث متخصص في arXiv للأوراق البحثية."""
-        arxiv_url = f"http://export.arxiv.org/api/query?search_query=all:{query}&start=0&max_results={limit}"
-        try:
-            response = requests.get(arxiv_url, timeout=10)
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.content, 'xml')
-                papers = []
-                for entry in soup.find_all('entry'):
-                    papers.append({
-                        "title": entry.title.text.strip(),
-                        "url": entry.id.text.strip(),
-                        "summary": entry.summary.text.strip()[:200] + "...",
-                        "source": "arXiv"
-                    })
-                return papers
-            return []
-        except Exception:
-            return []
+    def _parse_content(self, response):
+        """تحليل المحتوى بذكاء بناءً على نوعه."""
+        content_type = response.headers.get("Content-Type", "").lower()
+        
+        if "json" in content_type:
+            return response.json()
+        
+        if "html" in content_type:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            # استخلاص النصوص الهامة والروابط والجداول
+            return {
+                "text": soup.get_text(separator=' ', strip=True)[:5000],
+                "links": [a.get('href') for a in soup.find_all('a', href=True)][:20],
+                "tables": [str(table) for table in soup.find_all('table')][:5]
+            }
+        
+        return response.text[:2000]
+
+    def discover_api(self, domain: str):
+        """محاولة اكتشاف نقاط نهاية الـ API لمنصة معينة."""
+        common_paths = ["/api", "/v1", "/graphql", "/swagger.json", "/api/v1"]
+        results = {}
+        for path in common_paths:
+            url = f"https://{domain.strip('/')}{path}"
+            res = self.interact(url)
+            if res.get("status") in [200, 201]:
+                results[path] = "Accessible"
+        return results
+
+# التوافق مع الكود القديم
+class NeuralWebGateway(UniversalWebGateway):
+    def search(self, query: str, num_results: int = 5):
+        search_url = f"https://html.duckduckgo.com/html/?q={query}"
+        res = self.interact(search_url)
+        if "data" in res and isinstance(res["data"], dict) and "text" in res["data"]:
+            # محاكاة بسيطة للبحث القديم
+            return [{"title": "Search Result", "snippet": res["data"]["text"][:200]}]
+        return []
