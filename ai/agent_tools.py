@@ -286,33 +286,13 @@ _SAFE_CMD_PREFIXES = (
 
 
 def run_safe_cmd(cmd: str, timeout: int = 180) -> Dict[str, Any]:
-    """تشغيل أوامر قراءة/فحص آمنة فقط (لا حذف ولا شبكة حرة ولا sudo)."""
-    c = (cmd or "").strip()
-    if not c:
-        return {"ok": False, "msg": "أمر فارغ"}
-    low = c.lower()
-    forbidden = [
-        "rm ", "rm\t", "sudo", "chmod", "chown", "mkfs", "dd ",
-        ">", ">>", "|", ";", "&&", "$(", "`", "curl ", "wget ",
-        "ssh ", "scp ", "nc ", "ncat", "python -c", "eval",
-        "os.system", "shutdown", "reboot", "kill ", "pkill",
-    ]
-    # سماح محدود بـ python -m py_compile و pytest
-    if low.startswith("python -m py_compile") or low.startswith("python3 -m py_compile"):
-        pass
-    elif low.startswith("python -m pytest") or low.startswith("python3 -m pytest"):
-        pass
-    else:
-        for bad in forbidden:
-            if bad in low:
-                return {"ok": False, "msg": f"أمر مرفوض لأسباب أمان: يحتوي على «{bad.strip()}»"}
-        if not any(low.startswith(p.strip()) or low == p.strip() for p in _SAFE_CMD_PREFIXES):
-            return {
-                "ok": False,
-                "msg": "الأمر غير ضمن القائمة الآمنة. المسموح: python/pytest/git status|log|diff|lfs، ls، grep، head، …",
-            }
-    code, out = _run(["bash", "-lc", c], timeout=timeout)
-    return {"ok": code == 0, "cmd": c, "exit_code": code, "output": out or "(لا مخرجات)"}
+    """تشغيل فحوصات الطرفية عبر allowlist وبلا shell."""
+    from ai.terminal_auto_policy import decide, run_auto
+    decision = decide(cmd)
+    if not decision.allowed:
+        return {"ok": False, "cmd": cmd, "msg": decision.reason, "automatic": False, "requires_approval": True}
+    output = run_auto(cmd, cwd=str(ROOT), timeout=timeout)
+    return {"ok": output.startswith("exit=0"), "cmd": list(decision.command), "output": output, "automatic": True}
 
 
 def format_tool_result(title: str, data: Dict[str, Any]) -> str:
