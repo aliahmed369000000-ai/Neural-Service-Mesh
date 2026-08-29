@@ -22,6 +22,16 @@ def _run_web_task(agent, task, url):
         if not text: return {"status":"failed","score":10,"result":"لم يتم العثور على نص قابل للقراءة.","sources":[url]}
         result=f"المهمة: {task}\n\nتمت قراءة الصفحة العامة بنجاح.\n\nالمحتوى المستخرج:\n{text[:3500]}"
         score=min(100, 55 + (25 if len(text)>500 else 10) + (20 if task.lower() in text.lower() else 0))
+        try:
+            from ai.llm_fallback import LLMFallback
+            prompt = f"المهمة المطلوبة: {task}\nالرابط المصدر: {url}\nمحتوى الصفحة:\n{text[:4200]}"
+            generated = LLMFallback().generate(prompt, history=[], system_prompt="أنت وكيل بحث عربي. نفذ المهمة بدقة اعتماداً على محتوى الصفحة فقط. أجب بالعربية الفصحى، واذكر اسم الصفحة وثلاث نقاط رئيسية إن كان ذلك مطلوباً. لا تختلق معلومات ولا تستخدم Markdown معقداً.")
+            summary = str(getattr(generated, "text", "") or "").strip()
+            if summary and not getattr(generated, "error", None):
+                result = summary[:5000]
+                score = min(100, score + 20)
+        except Exception:
+            pass
         return {"status":"completed","score":score,"result":result,"sources":[url]}
     except Exception as exc:
         return {"status":"failed","score":0,"result":f"تعذر تنفيذ المهمة: {type(exc).__name__}","sources":[url]}
