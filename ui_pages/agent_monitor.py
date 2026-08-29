@@ -105,6 +105,31 @@ def render_agent_monitor() -> None:
         {"label": "أقصى زمن", "value": f"{performance['max_ms']:.0f} ms", "note": "أبطأ دورة", "accent": "#c084fc"},
     ])
 
+    # ملخص تشغيلي سريع: يوضح أين تذهب الطلبات وكيف يتغير الأداء.
+    from collections import Counter
+    route_counts = Counter(
+        str((row.get("metadata") or {}).get("route") or row.get("event_type") or "غير مصنف")
+        for row in events
+    )
+    route_counts = dict(route_counts.most_common(8))
+    chart_cols = st.columns([1.15, 1])
+    with chart_cols[0]:
+        render_section_header("توزيع المسارات", "أكثر أنواع العمل ظهورًا في السجل")
+        if route_counts:
+            st.bar_chart(route_counts, height=180, use_container_width=True)
+        else:
+            st.caption("ستظهر المسارات بعد تنفيذ أول مهمة.")
+    with chart_cols[1]:
+        render_section_header("آخر لقطة تشغيل", "ملخص سريع للحالة الحالية")
+        st.markdown(
+            f'<div class="nsm-dashboard-panel" dir="rtl">'
+            f'<div class="nsm-dashboard-panel-title">{_latest_agent}</div>'
+            f'<div class="nsm-dashboard-panel-copy">الحالة: <strong>{_latest_status}</strong><br>'
+            f'الحدث: <code>{_latest_event}</code><br>'
+            f'زمن آخر دورة: <strong>{performance["last_ms"]:.0f} ms</strong></div></div>',
+            unsafe_allow_html=True,
+        )
+
     if not events:
         st.info("لا توجد أحداث بعد. نفّذ مهمة من تبويب «منسّق الوكلاء» أو «الوكيل الموحّد» لتظهر هنا.")
         return
