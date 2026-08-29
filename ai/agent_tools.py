@@ -270,6 +270,8 @@ def system_info() -> Dict[str, Any]:
             "GITHUB_TOKEN": bool(os.environ.get("GITHUB_TOKEN") or os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")),
             "GOOGLE_API_KEY": bool(os.environ.get("GOOGLE_API_KEY")),
             "GROQ_API_KEY": bool(os.environ.get("GROQ_API_KEY")),
+            "NSM_OPENAI_COMPAT_KEY": bool(os.environ.get("NSM_OPENAI_COMPAT_KEY")),
+            "NSM_OPEN_SOURCE_MODEL": bool(os.environ.get("NSM_OPEN_SOURCE_MODEL")),
         },
     }
 
