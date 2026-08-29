@@ -369,6 +369,15 @@ def handle_tool_command(user_input: str) -> Optional[str]:
     if m:
         return format_tool_result("🌐 جلب صفحة", fetch_url(m.group(2).strip()))
 
+    # فحص منصة عامة — قراءة فقط مع حماية SSRF
+    m = re.match(r"^(افحص\s*منصة|inspect\s*platform|scan\s*site)\s+(\S+)$", t, re.I)
+    if m:
+        try:
+            from ai.platform_inspector import inspect_platform
+            return format_tool_result("🌐 فحص منصة آمن", inspect_platform(m.group(2).strip()))
+        except Exception as e:
+            return format_tool_result("🌐 فحص منصة آمن", {"ok": False, "error": str(e)[:240]})
+
     # معلومات النظام
     if re.match(r"^(معلومات\s*النظام|system\s*info|بيئة)$", t, re.I):
         return format_tool_result("🖥️ معلومات النظام", system_info())
@@ -387,7 +396,7 @@ def handle_tool_command(user_input: str) -> Optional[str]:
             "| `أوجد *.py` | إيجاد ملفات |\n"
             "| `حالة git` / `سجل git` / `فرق git` | معلومات Git |\n"
             "| `تحقق path.py` | py_compile + ast |\n"
-            "| `افتح رابط https://...` | جلب نص صفحة |\n"
+            "| `افتح رابط https://...` | جلب نص صفحة |\n"            "| `افحص منصة https://...` | تحليل صفحة عامة وheaders وروابط، قراءة فقط |\n"
             "| `معلومات النظام` | بيئة التشغيل |\n"
             "| `نفّذ <أمر آمن>` | bash محدود |\n"
             "| `حالة lfs` / `اسحب lfs` | Git LFS |\n"
