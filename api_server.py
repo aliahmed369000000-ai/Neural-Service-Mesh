@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 # محاولة استيراد المكونات الداخلية
 try:
@@ -119,6 +119,35 @@ async def telegram_webhook(secret: str, request: Request):
         return JSONResponse(status_code=200, content={"status": "ok", "warning": str(e)})
 
     return {"status": "ok"}
+
+
+@app.post("/api/voice/incoming", response_class=PlainTextResponse)
+async def voice_incoming(request: Request):
+    """Webhook Twilio تجريبي: يرد بتحية عربية ويجمع كلام المتصل."""
+    twiml = """<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Gather input="speech" language="ar-SA" action="/api/voice/respond" method="POST" speechTimeout="auto">
+    <Say language="ar-SA" voice="Polly.Zeina">مرحباً، أنا وكيلك الذكي. كيف يمكنني مساعدتك؟</Say>
+  </Gather>
+  <Say language="ar-SA" voice="Polly.Zeina">لم أسمع شيئاً. إلى اللقاء.</Say>
+</Response>"""
+    return PlainTextResponse(twiml, media_type="application/xml")
+
+
+@app.post("/api/voice/respond", response_class=PlainTextResponse)
+async def voice_respond(request: Request):
+    """رد صوتي عربي تجريبي بعد تفريغ كلام المتصل."""
+    twiml = """<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say language="ar-SA" voice="Polly.Zeina">شكراً لتحدثك معي. هذا رد تجريبي، وسيتم ربط الذكاء الاصطناعي الكامل بعد إعداد حساب Twilio.</Say>
+  <Hangup />
+</Response>"""
+    return PlainTextResponse(twiml, media_type="application/xml")
+
+
+@app.get("/api/voice/health")
+async def voice_health():
+    return {"ok": True, "provider": "twilio", "mode": "demo", "language": "ar-SA", "configured": False}
 
 
 @app.get("/webhook/whatsapp")
