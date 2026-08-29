@@ -362,6 +362,27 @@ def _nsm_key_check(request: Request):
     return None
 
 
+@app.post("/agents/chat")
+async def agents_chat(payload: dict, request: Request):
+    """واجهة محادثة موحدة للوكلاء مع دعم النموذج المفتوح المصدر القابل للتبديل."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    text = str(payload.get("message") or payload.get("prompt") or "").strip()
+    if not text:
+        return JSONResponse({"ok": False, "error": "message required"}, status_code=400)
+    if len(text) > 12000:
+        return JSONResponse({"ok": False, "error": "message too long"}, status_code=413)
+    try:
+        from nsm_chat_plus import NSMChatPlus
+        bot = NSMChatPlus()
+        answer = bot.chat(text)
+        return {"ok": True, "answer": answer, "metadata": bot.last_metadata,
+                "model": bot.fallback.info()}
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)[:300]}, status_code=500)
+
+
 @app.get("/agents/states")
 async def agents_states(request: Request):
     """أحدث حالة لكل وكيل + ملخص زمن الاستجابة من ناقل الأحداث."""
