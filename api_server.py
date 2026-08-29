@@ -9,6 +9,8 @@ from __future__ import annotations
 import hmac
 import os
 import sys
+from html import escape as xml_escape
+from urllib.parse import parse_qs
 from pathlib import Path
 
 # إضافة مسار المشروع
@@ -136,10 +138,29 @@ async def voice_incoming(request: Request):
 
 @app.post("/api/voice/respond", response_class=PlainTextResponse)
 async def voice_respond(request: Request):
-    """رد صوتي عربي تجريبي بعد تفريغ كلام المتصل."""
-    twiml = """<?xml version="1.0" encoding="UTF-8"?>
+    """يحوّل SpeechResult من Twilio إلى رد عربي قصير عبر LLMFallback."""
+    raw = await request.body()
+    values = parse_qs(raw.decode("utf-8", errors="replace"))
+    spoken = (values.get("SpeechResult", [""])[0] or "").strip()[:1200]
+    reply = "لم أسمع سؤالك بوضوح. هل يمكنك تكراره من فضلك؟"
+    if spoken:
+        try:
+            from ai.llm_fallback import LLMFallback
+            result = LLMFallback(max_tokens=180, temperature=0.2).generate(
+                spoken, history=[],
+                system_prompt="أجب بالعربية الفصحى بجملة أو جملتين قصيرتين مناسبتين لمكالمة هاتفية. لا تستخدم Markdown ولا تذكر تفاصيل تقنية."
+            )
+            candidate = str(getattr(result, "text", "") or "").strip()
+            if candidate and not getattr(result, "error", None): reply = candidate[:900]
+        except Exception:
+            pass
+    safe_reply = xml_escape(reply, quote=False)
+    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say language="ar-SA" voice="Polly.Zeina">شكراً لتحدثك معي. هذا رد تجريبي، وسيتم ربط الذكاء الاصطناعي الكامل بعد إعداد حساب Twilio.</Say>
+  <Say language="ar-SA" voice="Polly.Zeina">{safe_reply}</Say>
+  <Gather input="speech" language="ar-SA" action="/api/voice/respond" method="POST" speechTimeout="auto">
+    <Say language="ar-SA" voice="Polly.Zeina">هل لديك سؤال آخر؟</Say>
+  </Gather>
   <Hangup />
 </Response>"""
     return PlainTextResponse(twiml, media_type="application/xml")
