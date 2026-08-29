@@ -80,9 +80,17 @@ def render_agent_monitor() -> None:
     running = sum(1 for row in states.values() if row.get("status") == "running")
     completed = sum(1 for row in states.values() if row.get("status") == "done")
     failures = sum(1 for row in events if row.get("status") == "error")
+    alert_error_rate = st.slider("عتبة معدل الأخطاء", 0.05, 1.0, 0.25, 0.05, key="telemetry_error_rate")
     alerts = analyze_alerts(events, slow_threshold_ms=float(slow_threshold_ms), stale_threshold_s=float(stale_threshold_s))
-    for message in _store.alerts(since=_time.time() - _days * 86400 if _days else None, latency_ms=float(slow_threshold_ms)):
+    for message in _store.alerts(since=_time.time() - _days * 86400 if _days else None, error_rate=alert_error_rate, latency_ms=float(slow_threshold_ms)):
         alerts.append({"severity": "warning", "title": "تنبيه telemetry دائم", "detail": message})
+
+    export_rows = _store.query(since=_time.time() - _days * 86400 if _days else None, route=route_filter, limit=5000)
+    export_cols = st.columns(2)
+    with export_cols[0]:
+        st.download_button("تنزيل JSON", _store.export_json(since=_time.time() - _days * 86400 if _days else None, route=route_filter), "nsm-telemetry.json", "application/json", use_container_width=True)
+    with export_cols[1]:
+        st.download_button("تنزيل CSV", _store.export_csv(since=_time.time() - _days * 86400 if _days else None, route=route_filter), "nsm-telemetry.csv", "text/csv", use_container_width=True)
     performance = performance_summary(events)
     _latest = events[-1] if events else {}
     _latest_agent = _escape(str(_latest.get("title") or _latest.get("agent_id") or "لا يوجد نشاط بعد"))

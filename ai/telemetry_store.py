@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, os, sqlite3, time
+import csv, io, json, os, sqlite3, time
 from pathlib import Path
 from typing import Any
 _DEFAULT_PATH = Path(os.getenv('NSM_TELEMETRY_DB', 'artifacts/telemetry/events.sqlite3'))
@@ -36,6 +36,18 @@ class TelemetryStore:
     def summary(self, *, since=None):
         rows=self.query(since=since,limit=5000); ls=[float(x['latency_ms']) for x in rows if x['latency_ms'] is not None]; errors=sum(x['status']=='error' for x in rows)
         return {'events':len(rows),'errors':errors,'error_rate':errors/len(rows) if rows else 0.0,'avg_latency_ms':sum(ls)/len(ls) if ls else 0.0,'max_latency_ms':max(ls,default=0.0),'routes':sorted({x['route'] for x in rows})}
+    def export_json(self, *, since=None, route=None, limit=500):
+        return json.dumps(self.query(since=since, route=route, limit=limit), ensure_ascii=False, indent=2)
+
+    def export_csv(self, *, since=None, route=None, limit=500):
+        rows = self.query(since=since, route=route, limit=limit)
+        out = io.StringIO(); fields = ["id", "created_at", "route", "agent", "confidence", "latency_ms", "status", "error", "metadata"]
+        writer = csv.DictWriter(out, fieldnames=fields); writer.writeheader()
+        for row in rows:
+            row = dict(row); row["metadata"] = json.dumps(row.get("metadata", {}), ensure_ascii=False)
+            writer.writerow({field: row.get(field, "") for field in fields})
+        return out.getvalue()
+
     def alerts(self, *, since=None, error_rate=.25, latency_ms=5000):
         s=self.summary(since=since); a=[]
         if s['events']>=4 and s['error_rate']>=error_rate: a.append(f"معدل الأخطاء مرتفع: {s['error_rate']:.0%}")
