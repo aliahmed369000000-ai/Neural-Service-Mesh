@@ -56,13 +56,18 @@ def render_agent_profiles():
             else:
                 with st.spinner("ينفذ الوكيل المهمة..."):
                     outcome = _run_web_task(selected, task, url)
-                store.record_web_task(agent=selected, task=task, url=url, status=outcome["status"], score=outcome["score"], result=outcome["result"], sources=outcome["sources"])
-                st.session_state["last_web_task"] = outcome
-    if st.session_state.get("last_web_task"):
-        outcome = st.session_state["last_web_task"]
-        st.success(f"اكتمل الاختبار بدرجة {outcome['score']}/100" if outcome["status"] == "completed" else "لم يكتمل الاختبار")
-        st.text_area("نتيجة الوكيل", outcome["result"], height=180, disabled=True)
-        st.caption("المصدر: " + ", ".join(outcome["sources"]))
+                task_id = store.record_web_task(agent=selected, task=task, url=url, status=outcome["status"], score=outcome["score"], result=outcome["result"], sources=outcome["sources"])
+                st.session_state["last_web_task_id"] = task_id
+                st.session_state["last_web_task_agent"] = selected
+                st.rerun()
+    latest_tasks = store.list_web_tasks(agent=selected, limit=1)
+    last_id = st.session_state.get("last_web_task_id")
+    last_agent = st.session_state.get("last_web_task_agent")
+    if latest_tasks and (last_agent == selected or last_id is None):
+        saved = latest_tasks[0]
+        st.success(f"اكتمل الاختبار بدرجة {saved['score']}/100" if saved["status"] == "completed" else "لم يكتمل الاختبار")
+        st.text_area("نتيجة الوكيل", saved["result"], height=180, disabled=True, key=f"web_result_{saved['id']}")
+        st.caption("المصدر: " + ", ".join(saved["sources"]))
     web_tasks = store.list_web_tasks(agent=selected, limit=20)
     if web_tasks:
         render_section_header("سجل اختبارات الإنترنت", "آخر المهام والدرجات")
