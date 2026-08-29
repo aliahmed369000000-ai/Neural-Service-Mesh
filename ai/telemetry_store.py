@@ -10,7 +10,7 @@ class TelemetryStore:
         self.path=Path(path); self.path.parent.mkdir(parents=True,exist_ok=True)
         with sqlite3.connect(self.path) as c:
             c.execute('CREATE TABLE IF NOT EXISTS agent_events (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL NOT NULL, route TEXT NOT NULL, agent TEXT NOT NULL, confidence REAL, latency_ms REAL, status TEXT NOT NULL, error TEXT, metadata_json TEXT NOT NULL DEFAULT \'{}\')')
-            c.execute('CREATE INDEX IF NOT EXISTS idx_agent_events_created ON agent_events(created_at)'); c.execute('CREATE INDEX IF NOT EXISTS idx_agent_events_route ON agent_events(route)'); c.execute('CREATE TABLE IF NOT EXISTS agent_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL NOT NULL, severity TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL, is_read INTEGER NOT NULL DEFAULT 0, muted_until REAL NOT NULL DEFAULT 0)'); c.execute("CREATE TABLE IF NOT EXISTS agent_settings (agent TEXT PRIMARY KEY, slow_threshold_ms REAL NOT NULL DEFAULT 5000, error_rate_threshold REAL NOT NULL DEFAULT 0.25, priority TEXT NOT NULL DEFAULT 'warning', notifications_enabled INTEGER NOT NULL DEFAULT 1, updated_at REAL NOT NULL)"); c.execute("CREATE TABLE IF NOT EXISTS agent_profiles (agent TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '', capabilities_json TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, updated_at REAL NOT NULL)"); c.execute("CREATE TABLE IF NOT EXISTS agent_phone_settings (agent TEXT PRIMARY KEY, phone_number TEXT NOT NULL DEFAULT '', provider TEXT NOT NULL DEFAULT 'twilio', language TEXT NOT NULL DEFAULT 'ar', webhook_path TEXT NOT NULL DEFAULT '/api/voice/incoming', enabled INTEGER NOT NULL DEFAULT 0, updated_at REAL NOT NULL)")
+            c.execute('CREATE INDEX IF NOT EXISTS idx_agent_events_created ON agent_events(created_at)'); c.execute('CREATE INDEX IF NOT EXISTS idx_agent_events_route ON agent_events(route)'); c.execute('CREATE TABLE IF NOT EXISTS agent_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL NOT NULL, severity TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL, is_read INTEGER NOT NULL DEFAULT 0, muted_until REAL NOT NULL DEFAULT 0)'); c.execute("CREATE TABLE IF NOT EXISTS agent_settings (agent TEXT PRIMARY KEY, slow_threshold_ms REAL NOT NULL DEFAULT 5000, error_rate_threshold REAL NOT NULL DEFAULT 0.25, priority TEXT NOT NULL DEFAULT 'warning', notifications_enabled INTEGER NOT NULL DEFAULT 1, updated_at REAL NOT NULL)"); c.execute("CREATE TABLE IF NOT EXISTS agent_profiles (agent TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '', capabilities_json TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, updated_at REAL NOT NULL)"); c.execute("CREATE TABLE IF NOT EXISTS agent_phone_settings (agent TEXT PRIMARY KEY, phone_number TEXT NOT NULL DEFAULT '', provider TEXT NOT NULL DEFAULT 'twilio', language TEXT NOT NULL DEFAULT 'ar', webhook_path TEXT NOT NULL DEFAULT '/api/voice/incoming', enabled INTEGER NOT NULL DEFAULT 0, updated_at REAL NOT NULL)"); c.execute("CREATE TABLE IF NOT EXISTS agent_voice_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL NOT NULL, agent TEXT NOT NULL, direction TEXT NOT NULL DEFAULT 'inbound', caller TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'received', duration_s REAL NOT NULL DEFAULT 0, language TEXT NOT NULL DEFAULT 'ar-SA', transcript TEXT NOT NULL DEFAULT '', response TEXT NOT NULL DEFAULT '')")
     @staticmethod
     def _clean(value: Any, limit=240): return ' '.join(str(value or '').split())[:limit]
     def record(self, *, route, agent, confidence=None, latency_ms=None, status='unknown', error=None, metadata=None):
@@ -119,6 +119,22 @@ class TelemetryStore:
         with sqlite3.connect(self.path) as c:
             c.execute("INSERT INTO agent_phone_settings(agent,phone_number,provider,language,webhook_path,enabled,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(agent) DO UPDATE SET phone_number=excluded.phone_number,provider=excluded.provider,language=excluded.language,webhook_path=excluded.webhook_path,enabled=excluded.enabled,updated_at=excluded.updated_at", (agent, self._clean(phone_number, 40), provider, language, webhook_path, int(bool(enabled)), time.time())); c.commit()
         return self.get_agent_phone(agent)
+
+    def record_voice_call(self, *, agent, caller="", status="received", duration_s=0, language="ar-SA", transcript="", response=""):
+        allowed = {"received", "answered", "completed", "failed"}
+        status = status if status in allowed else "received"
+        with sqlite3.connect(self.path) as c:
+            cur = c.execute("INSERT INTO agent_voice_calls(created_at,agent,caller,status,duration_s,language,transcript,response) VALUES (?,?,?,?,?,?,?,?)", (time.time(), self._clean(agent, 120) or "default", self._clean(caller, 40), status, max(0, float(duration_s or 0)), self._clean(language, 20), self._clean(transcript, 1200), self._clean(response, 1200)))
+            c.commit(); return cur.lastrowid
+
+    def list_voice_calls(self, *, agent=None, limit=100):
+        params=[]; where=""
+        if agent:
+            where=" WHERE agent=?"; params.append(self._clean(agent, 120))
+        params.append(max(1, min(int(limit), 500)))
+        with sqlite3.connect(self.path) as c:
+            c.row_factory = sqlite3.Row
+            return [dict(x) for x in c.execute(f"SELECT * FROM agent_voice_calls{where} ORDER BY created_at DESC LIMIT ?", params).fetchall()]
 
     def record_alert(self, *, severity="warning", title="تنبيه", detail=""):
         severity = severity if severity in {"critical", "warning", "info"} else "warning"

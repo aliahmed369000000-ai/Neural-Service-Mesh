@@ -26,6 +26,17 @@ def render_agent_profiles():
         if st.form_submit_button("حفظ إعدادات الهاتف", type="primary", use_container_width=True):
             store.save_agent_phone(agent=selected, phone_number=phone_number, provider=provider, language=language, webhook_path=webhook, enabled=phone_enabled)
             st.success("تم حفظ إعدادات الهاتف التجريبية."); st.rerun()
+    calls = store.list_voice_calls(agent=selected, limit=50)
+    render_section_header("سجل المكالمات", "آخر المكالمات الصوتية لهذا الوكيل")
+    call_cols = st.columns(3)
+    with call_cols[0]: st.metric("إجمالي المكالمات", len(calls))
+    with call_cols[1]: st.metric("المكتملة", sum(x["status"] == "completed" for x in calls))
+    with call_cols[2]: st.metric("متوسط المدة", f"{sum(x["duration_s"] for x in calls) / len(calls):.0f} ث" if calls else "0 ث")
+    if calls:
+        st.dataframe([{"الوقت": x["created_at"], "المتصل": x["caller"], "الحالة": x["status"], "المدة": f"{x["duration_s"]:.0f} ث", "النص": x["transcript"], "الرد": x["response"]} for x in calls], use_container_width=True, hide_index=True)
+    else:
+        st.info("لا توجد مكالمات مسجلة بعد. سيظهر السجل عند ربط Webhook بمزود الاتصال.")
+
     current = store.get_agent_profile(selected)
 
     with st.form('agent_profile_form'):
