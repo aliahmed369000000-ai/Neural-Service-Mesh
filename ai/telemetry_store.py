@@ -10,7 +10,7 @@ class TelemetryStore:
         self.path=Path(path); self.path.parent.mkdir(parents=True,exist_ok=True)
         with sqlite3.connect(self.path) as c:
             c.execute('CREATE TABLE IF NOT EXISTS agent_events (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL NOT NULL, route TEXT NOT NULL, agent TEXT NOT NULL, confidence REAL, latency_ms REAL, status TEXT NOT NULL, error TEXT, metadata_json TEXT NOT NULL DEFAULT \'{}\')')
-            c.execute('CREATE INDEX IF NOT EXISTS idx_agent_events_created ON agent_events(created_at)'); c.execute('CREATE INDEX IF NOT EXISTS idx_agent_events_route ON agent_events(route)'); c.execute('CREATE TABLE IF NOT EXISTS agent_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL NOT NULL, severity TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL, is_read INTEGER NOT NULL DEFAULT 0, muted_until REAL NOT NULL DEFAULT 0)')
+            c.execute('CREATE INDEX IF NOT EXISTS idx_agent_events_created ON agent_events(created_at)'); c.execute('CREATE INDEX IF NOT EXISTS idx_agent_events_route ON agent_events(route)'); c.execute('CREATE TABLE IF NOT EXISTS agent_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL NOT NULL, severity TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL, is_read INTEGER NOT NULL DEFAULT 0, muted_until REAL NOT NULL DEFAULT 0)'); c.execute("CREATE TABLE IF NOT EXISTS agent_settings (agent TEXT PRIMARY KEY, slow_threshold_ms REAL NOT NULL DEFAULT 5000, error_rate_threshold REAL NOT NULL DEFAULT 0.25, priority TEXT NOT NULL DEFAULT 'warning', notifications_enabled INTEGER NOT NULL DEFAULT 1, updated_at REAL NOT NULL)")
     @staticmethod
     def _clean(value: Any, limit=240): return ' '.join(str(value or '').split())[:limit]
     def record(self, *, route, agent, confidence=None, latency_ms=None, status='unknown', error=None, metadata=None):
@@ -47,6 +47,34 @@ class TelemetryStore:
             row = dict(row); row["metadata"] = json.dumps(row.get("metadata", {}), ensure_ascii=False)
             writer.writerow({field: row.get(field, "") for field in fields})
         return out.getvalue()
+
+    @staticmethod
+    def _bounded_float(value, low, high, default):
+        try: return max(low, min(high, float(value)))
+        except (TypeError, ValueError): return default
+
+    def get_agent_settings(self, agent: str):
+        agent = self._clean(agent, 120) or "default"
+        with sqlite3.connect(self.path) as c:
+            c.row_factory = sqlite3.Row
+            row = c.execute("SELECT * FROM agent_settings WHERE agent=?", (agent,)).fetchone()
+            if row: return dict(row)
+        return {"agent": agent, "slow_threshold_ms": 5000.0, "error_rate_threshold": .25, "priority": "warning", "notifications_enabled": 1}
+
+    def save_agent_settings(self, *, agent, slow_threshold_ms=5000, error_rate_threshold=.25, priority="warning", notifications_enabled=True):
+        agent = self._clean(agent, 120) or "default"
+        priority = priority if priority in {"critical", "warning", "info"} else "warning"
+        slow = self._bounded_float(slow_threshold_ms, 100, 120000, 5000)
+        rate = self._bounded_float(error_rate_threshold, .01, 1, .25)
+        with sqlite3.connect(self.path) as c:
+            c.execute("INSERT INTO agent_settings(agent,slow_threshold_ms,error_rate_threshold,priority,notifications_enabled,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(agent) DO UPDATE SET slow_threshold_ms=excluded.slow_threshold_ms,error_rate_threshold=excluded.error_rate_threshold,priority=excluded.priority,notifications_enabled=excluded.notifications_enabled,updated_at=excluded.updated_at", (agent, slow, rate, priority, int(bool(notifications_enabled)), time.time()))
+            c.commit()
+        return self.get_agent_settings(agent)
+
+    def list_agent_settings(self):
+        with sqlite3.connect(self.path) as c:
+            c.row_factory = sqlite3.Row
+            return [dict(x) for x in c.execute("SELECT * FROM agent_settings ORDER BY agent").fetchall()]
 
     def record_alert(self, *, severity="warning", title="تنبيه", detail=""):
         severity = severity if severity in {"critical", "warning", "info"} else "warning"

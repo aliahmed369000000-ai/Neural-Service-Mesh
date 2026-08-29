@@ -114,6 +114,23 @@ def render_agent_monitor() -> None:
     else:
         st.success("لا توجد أخطاء أو اختناقات تتجاوز العتبات الحالية.")
 
+    render_section_header("إعدادات الوكلاء", "خصص عتبات الأداء والتنبيهات لكل وكيل")
+    configured_agents = sorted({str(x.get("agent_id") or x.get("title") or "default") for x in events}) or ["default"]
+    selected_agent = st.selectbox("الوكيل", configured_agents, key="agent_settings_agent")
+    current = _store.get_agent_settings(selected_agent)
+    settings_cols = st.columns([1, 1, 1, 1])
+    with settings_cols[0]:
+        agent_slow = st.number_input("عتبة البطء (ms)", min_value=100, max_value=120000, value=int(current["slow_threshold_ms"]), step=100, key="agent_slow_threshold")
+    with settings_cols[1]:
+        agent_error = st.slider("معدل الأخطاء", 0.01, 1.0, float(current["error_rate_threshold"]), 0.01, key="agent_error_threshold")
+    with settings_cols[2]:
+        agent_priority = st.selectbox("أولوية التنبيه", ["critical", "warning", "info"], index=["critical", "warning", "info"].index(current["priority"]), key="agent_priority")
+    with settings_cols[3]:
+        agent_notifications = st.toggle("التنبيهات مفعلة", value=bool(current["notifications_enabled"]), key="agent_notifications")
+    if st.button("حفظ إعدادات الوكيل", type="primary", key="save_agent_settings"):
+        _store.save_agent_settings(agent=selected_agent, slow_threshold_ms=agent_slow, error_rate_threshold=agent_error, priority=agent_priority, notifications_enabled=agent_notifications)
+        st.success("تم حفظ إعدادات الوكيل.")
+
     stored_alerts = _store.list_alerts(limit=30)
     if stored_alerts:
         render_section_header("مركز التنبيهات", "إدارة الأولوية والقراءة والكتم المؤقت")
