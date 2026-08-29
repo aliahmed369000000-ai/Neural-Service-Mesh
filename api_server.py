@@ -7,10 +7,14 @@ Neural Service Mesh — FastAPI Backend
 from __future__ import annotations
 
 import hmac
+import ipaddress
+import json
 import os
+import socket
 import sys
 from html import escape as xml_escape
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
+from urllib.request import Request as URLRequest, urlopen
 from pathlib import Path
 
 # إضافة مسار المشروع
@@ -44,6 +48,62 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+
+
+def _task_auth(request: Request) -> bool:
+    configured = os.environ.get("NSM_ADMIN_KEY", "").strip()
+    provided = request.headers.get("x-api-key", "")
+    return bool(configured) and hmac.compare_digest(provided, configured)
+
+def _public_url(value: str) -> bool:
+    try:
+        parsed = urlparse(value.strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+            return False
+        addresses = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
+        return all(not (ipaddress.ip_address(item[4][0]).is_private or ipaddress.ip_address(item[4][0]).is_loopback or ipaddress.ip_address(item[4][0]).is_link_local or ipaddress.ip_address(item[4][0]).is_reserved) for item in addresses)
+    except Exception:
+        return False
+
+@app.post("/api/agent/tasks")
+async def create_agent_task(payload: dict, request: Request):
+    if not _task_auth(request):
+        return JSONResponse(status_code=403, content={"error": "مفتاح NSM_ADMIN_KEY غير مطابق أو غير مضبوط"})
+    task = str(payload.get("task", "")).strip()[:800]
+    url = str(payload.get("url", "")).strip()[:500]
+    agent = str(payload.get("agent", "default")).strip()[:120] or "default"
+    if not task or not _public_url(url):
+        return JSONResponse(status_code=400, content={"error": "أدخل مهمة ورابطاً عاماً صالحاً"})
+    try:
+        with urlopen(URLRequest(url, headers={"User-Agent": "NSM-Agent/1.0"}), timeout=12) as response:
+            html = response.read(180000).decode("utf-8", errors="replace")
+        import re
+        text = " ".join(re.sub(r"<[^>]+>", " ", html).split())[:5000]
+        result = f"تمت قراءة الصفحة بنجاح.\n\n{text[:3500]}"
+        score = min(100, 55 + (25 if len(text) > 500 else 10))
+        try:
+            from ai.llm_fallback import LLMFallback
+            generated = LLMFallback().generate(f"المهمة: {task}\nالرابط: {url}\nالمحتوى: {text[:4200]}", history=[], system_prompt="نفذ المهمة بالعربية اعتماداً على المحتوى فقط. أجب باختصار ولا تختلق معلومات.")
+            candidate = str(getattr(generated, "text", "") or "").strip()
+            if candidate and not getattr(generated, "error", None): result, score = candidate[:5000], min(100, score + 20)
+        except Exception:
+            pass
+        from ai.telemetry_store import TelemetryStore
+        task_id = TelemetryStore().record_web_task(agent=agent, task=task, url=url, status="completed", score=score, result=result, sources=[url])
+        return {"task_id": task_id, "status": "completed", "score": score, "result": result, "sources": [url]}
+    except Exception as exc:
+        return JSONResponse(status_code=502, content={"error": "تعذر الوصول إلى الصفحة العامة", "detail": type(exc).__name__})
+
+@app.get("/api/agent/tasks/{task_id}")
+async def get_agent_task(task_id: int, request: Request):
+    if not _task_auth(request):
+        return JSONResponse(status_code=403, content={"error": "مفتاح NSM_ADMIN_KEY غير مطابق أو غير مضبوط"})
+    from ai.telemetry_store import TelemetryStore
+    rows = TelemetryStore().list_web_tasks(limit=200)
+    row = next((item for item in rows if item["id"] == task_id), None)
+    if not row: return JSONResponse(status_code=404, content={"error": "المهمة غير موجودة"})
+    return row
 
 @app.get("/")
 async def root():
