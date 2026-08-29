@@ -10,7 +10,7 @@ class TelemetryStore:
         self.path=Path(path); self.path.parent.mkdir(parents=True,exist_ok=True)
         with sqlite3.connect(self.path) as c:
             c.execute('CREATE TABLE IF NOT EXISTS agent_events (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL NOT NULL, route TEXT NOT NULL, agent TEXT NOT NULL, confidence REAL, latency_ms REAL, status TEXT NOT NULL, error TEXT, metadata_json TEXT NOT NULL DEFAULT \'{}\')')
-            c.execute('CREATE INDEX IF NOT EXISTS idx_agent_events_created ON agent_events(created_at)'); c.execute('CREATE INDEX IF NOT EXISTS idx_agent_events_route ON agent_events(route)')
+            c.execute('CREATE INDEX IF NOT EXISTS idx_agent_events_created ON agent_events(created_at)'); c.execute('CREATE INDEX IF NOT EXISTS idx_agent_events_route ON agent_events(route)'); c.execute('CREATE TABLE IF NOT EXISTS agent_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL NOT NULL, severity TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL, is_read INTEGER NOT NULL DEFAULT 0, muted_until REAL NOT NULL DEFAULT 0)')
     @staticmethod
     def _clean(value: Any, limit=240): return ' '.join(str(value or '').split())[:limit]
     def record(self, *, route, agent, confidence=None, latency_ms=None, status='unknown', error=None, metadata=None):
@@ -47,6 +47,32 @@ class TelemetryStore:
             row = dict(row); row["metadata"] = json.dumps(row.get("metadata", {}), ensure_ascii=False)
             writer.writerow({field: row.get(field, "") for field in fields})
         return out.getvalue()
+
+    def record_alert(self, *, severity="warning", title="تنبيه", detail=""):
+        severity = severity if severity in {"critical", "warning", "info"} else "warning"
+        clean_title, clean_detail = self._clean(title,160), self._clean(detail,500)
+        with sqlite3.connect(self.path) as c:
+            recent = c.execute("SELECT id FROM agent_alerts WHERE title=? AND detail=? AND created_at >= ? LIMIT 1", (clean_title, clean_detail, time.time()-3600)).fetchone()
+            if recent: return int(recent[0])
+            cur = c.execute("INSERT INTO agent_alerts(created_at,severity,title,detail) VALUES (?,?,?,?)", (time.time(), self._clean(severity,20), clean_title, clean_detail))
+            c.commit(); return cur.lastrowid
+
+    def list_alerts(self, *, unread_only=False, include_muted=False, limit=100):
+        where = []
+        if unread_only: where.append("is_read = 0")
+        if not include_muted: where.append("muted_until <= ?")
+        params = [] if include_muted else [time.time()]
+        params.append(max(1, min(int(limit), 500)))
+        clause = " WHERE " + " AND ".join(where) if where else ""
+        with sqlite3.connect(self.path) as c:
+            c.row_factory = sqlite3.Row
+            return [dict(row) for row in c.execute(f"SELECT * FROM agent_alerts{clause} ORDER BY created_at DESC LIMIT ?", params).fetchall()]
+
+    def mark_alert_read(self, alert_id: int):
+        with sqlite3.connect(self.path) as c: c.execute("UPDATE agent_alerts SET is_read=1 WHERE id=?", (int(alert_id),)); c.commit()
+
+    def mute_alert(self, alert_id: int, seconds: int = 3600):
+        with sqlite3.connect(self.path) as c: c.execute("UPDATE agent_alerts SET muted_until=? WHERE id=?", (time.time()+max(60,min(int(seconds),604800)), int(alert_id))); c.commit()
 
     def alerts(self, *, since=None, error_rate=.25, latency_ms=5000):
         s=self.summary(since=since); a=[]

@@ -108,9 +108,28 @@ def render_agent_monitor() -> None:
 
     render_section_header("صحة الشبكة", "مؤشرات مباشرة من ناقل الأحداث")
     if alerts:
+        for alert in alerts:
+            _store.record_alert(severity=alert.get("severity", "warning"), title=alert.get("title", "تنبيه"), detail=alert.get("detail", ""))
         render_alert_cards(alerts)
     else:
         st.success("لا توجد أخطاء أو اختناقات تتجاوز العتبات الحالية.")
+
+    stored_alerts = _store.list_alerts(limit=30)
+    if stored_alerts:
+        render_section_header("مركز التنبيهات", "إدارة الأولوية والقراءة والكتم المؤقت")
+        unread = sum(1 for a in stored_alerts if not a["is_read"])
+        st.caption(f"غير مقروءة: {unread} · الإجمالي: {len(stored_alerts)}")
+        for alert in stored_alerts[:8]:
+            cols = st.columns([4, 1, 1])
+            with cols[0]:
+                icon = {"critical": "حرج", "warning": "تحذير", "info": "معلومة"}.get(alert["severity"], "تنبيه")
+                st.markdown(f"**[{icon}] {alert['title']}** — {alert['detail']}")
+            with cols[1]:
+                if not alert["is_read"] and st.button("تمييز كمقروء", key=f"read_alert_{alert['id']}"):
+                    _store.mark_alert_read(alert["id"]); st.rerun()
+            with cols[2]:
+                if st.button("كتم ساعة", key=f"mute_alert_{alert['id']}"):
+                    _store.mute_alert(alert["id"]); st.rerun()
 
     render_kpi_cards([
         {"label": "الأحداث", "value": len(events), "note": "في السجل الحالي", "accent": "var(--nsm-indigo)"},
