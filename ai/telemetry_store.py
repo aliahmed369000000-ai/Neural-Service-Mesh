@@ -10,7 +10,7 @@ class TelemetryStore:
         self.path=Path(path); self.path.parent.mkdir(parents=True,exist_ok=True)
         with sqlite3.connect(self.path) as c:
             c.execute('CREATE TABLE IF NOT EXISTS agent_events (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL NOT NULL, route TEXT NOT NULL, agent TEXT NOT NULL, confidence REAL, latency_ms REAL, status TEXT NOT NULL, error TEXT, metadata_json TEXT NOT NULL DEFAULT \'{}\')')
-            c.execute('CREATE INDEX IF NOT EXISTS idx_agent_events_created ON agent_events(created_at)'); c.execute('CREATE INDEX IF NOT EXISTS idx_agent_events_route ON agent_events(route)'); c.execute('CREATE TABLE IF NOT EXISTS agent_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL NOT NULL, severity TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL, is_read INTEGER NOT NULL DEFAULT 0, muted_until REAL NOT NULL DEFAULT 0)'); c.execute("CREATE TABLE IF NOT EXISTS agent_settings (agent TEXT PRIMARY KEY, slow_threshold_ms REAL NOT NULL DEFAULT 5000, error_rate_threshold REAL NOT NULL DEFAULT 0.25, priority TEXT NOT NULL DEFAULT 'warning', notifications_enabled INTEGER NOT NULL DEFAULT 1, updated_at REAL NOT NULL)"); c.execute("CREATE TABLE IF NOT EXISTS agent_profiles (agent TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '', capabilities_json TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, updated_at REAL NOT NULL)")
+            c.execute('CREATE INDEX IF NOT EXISTS idx_agent_events_created ON agent_events(created_at)'); c.execute('CREATE INDEX IF NOT EXISTS idx_agent_events_route ON agent_events(route)'); c.execute('CREATE TABLE IF NOT EXISTS agent_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL NOT NULL, severity TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL, is_read INTEGER NOT NULL DEFAULT 0, muted_until REAL NOT NULL DEFAULT 0)'); c.execute("CREATE TABLE IF NOT EXISTS agent_settings (agent TEXT PRIMARY KEY, slow_threshold_ms REAL NOT NULL DEFAULT 5000, error_rate_threshold REAL NOT NULL DEFAULT 0.25, priority TEXT NOT NULL DEFAULT 'warning', notifications_enabled INTEGER NOT NULL DEFAULT 1, updated_at REAL NOT NULL)"); c.execute("CREATE TABLE IF NOT EXISTS agent_profiles (agent TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '', capabilities_json TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, updated_at REAL NOT NULL)"); c.execute("CREATE TABLE IF NOT EXISTS agent_phone_settings (agent TEXT PRIMARY KEY, phone_number TEXT NOT NULL DEFAULT '', provider TEXT NOT NULL DEFAULT 'twilio', language TEXT NOT NULL DEFAULT 'ar', webhook_path TEXT NOT NULL DEFAULT '/api/voice/incoming', enabled INTEGER NOT NULL DEFAULT 0, updated_at REAL NOT NULL)")
     @staticmethod
     def _clean(value: Any, limit=240): return ' '.join(str(value or '').split())[:limit]
     def record(self, *, route, agent, confidence=None, latency_ms=None, status='unknown', error=None, metadata=None):
@@ -103,6 +103,22 @@ class TelemetryStore:
             try: row["capabilities"] = json.loads(row.pop("capabilities_json"))
             except json.JSONDecodeError: row["capabilities"] = []
         return rows
+
+    def get_agent_phone(self, agent: str):
+        agent = self._clean(agent, 120) or "default"
+        with sqlite3.connect(self.path) as c:
+            c.row_factory = sqlite3.Row
+            row = c.execute("SELECT * FROM agent_phone_settings WHERE agent=?", (agent,)).fetchone()
+        return dict(row) if row else {"agent": agent, "phone_number": "", "provider": "twilio", "language": "ar", "webhook_path": "/api/voice/incoming", "enabled": 0}
+
+    def save_agent_phone(self, *, agent, phone_number="", provider="twilio", language="ar", webhook_path="/api/voice/incoming", enabled=False):
+        agent = self._clean(agent, 120) or "default"
+        provider = "twilio" if provider not in {"twilio", "yemen_mobile"} else provider
+        language = "ar" if language not in {"ar", "ar-SA", "ar-YE"} else language
+        webhook_path = self._clean(webhook_path, 120) or "/api/voice/incoming"
+        with sqlite3.connect(self.path) as c:
+            c.execute("INSERT INTO agent_phone_settings(agent,phone_number,provider,language,webhook_path,enabled,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(agent) DO UPDATE SET phone_number=excluded.phone_number,provider=excluded.provider,language=excluded.language,webhook_path=excluded.webhook_path,enabled=excluded.enabled,updated_at=excluded.updated_at", (agent, self._clean(phone_number, 40), provider, language, webhook_path, int(bool(enabled)), time.time())); c.commit()
+        return self.get_agent_phone(agent)
 
     def record_alert(self, *, severity="warning", title="تنبيه", detail=""):
         severity = severity if severity in {"critical", "warning", "info"} else "warning"
