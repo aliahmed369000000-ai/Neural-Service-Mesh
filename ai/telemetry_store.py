@@ -10,7 +10,7 @@ class TelemetryStore:
         self.path=Path(path); self.path.parent.mkdir(parents=True,exist_ok=True)
         with sqlite3.connect(self.path) as c:
             c.execute('CREATE TABLE IF NOT EXISTS agent_events (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL NOT NULL, route TEXT NOT NULL, agent TEXT NOT NULL, confidence REAL, latency_ms REAL, status TEXT NOT NULL, error TEXT, metadata_json TEXT NOT NULL DEFAULT \'{}\')')
-            c.execute('CREATE INDEX IF NOT EXISTS idx_agent_events_created ON agent_events(created_at)'); c.execute('CREATE INDEX IF NOT EXISTS idx_agent_events_route ON agent_events(route)'); c.execute('CREATE TABLE IF NOT EXISTS agent_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL NOT NULL, severity TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL, is_read INTEGER NOT NULL DEFAULT 0, muted_until REAL NOT NULL DEFAULT 0)'); c.execute("CREATE TABLE IF NOT EXISTS agent_settings (agent TEXT PRIMARY KEY, slow_threshold_ms REAL NOT NULL DEFAULT 5000, error_rate_threshold REAL NOT NULL DEFAULT 0.25, priority TEXT NOT NULL DEFAULT 'warning', notifications_enabled INTEGER NOT NULL DEFAULT 1, updated_at REAL NOT NULL)")
+            c.execute('CREATE INDEX IF NOT EXISTS idx_agent_events_created ON agent_events(created_at)'); c.execute('CREATE INDEX IF NOT EXISTS idx_agent_events_route ON agent_events(route)'); c.execute('CREATE TABLE IF NOT EXISTS agent_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL NOT NULL, severity TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL, is_read INTEGER NOT NULL DEFAULT 0, muted_until REAL NOT NULL DEFAULT 0)'); c.execute("CREATE TABLE IF NOT EXISTS agent_settings (agent TEXT PRIMARY KEY, slow_threshold_ms REAL NOT NULL DEFAULT 5000, error_rate_threshold REAL NOT NULL DEFAULT 0.25, priority TEXT NOT NULL DEFAULT 'warning', notifications_enabled INTEGER NOT NULL DEFAULT 1, updated_at REAL NOT NULL)"); c.execute("CREATE TABLE IF NOT EXISTS agent_profiles (agent TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '', capabilities_json TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, updated_at REAL NOT NULL)")
     @staticmethod
     def _clean(value: Any, limit=240): return ' '.join(str(value or '').split())[:limit]
     def record(self, *, route, agent, confidence=None, latency_ms=None, status='unknown', error=None, metadata=None):
@@ -75,6 +75,34 @@ class TelemetryStore:
         with sqlite3.connect(self.path) as c:
             c.row_factory = sqlite3.Row
             return [dict(x) for x in c.execute("SELECT * FROM agent_settings ORDER BY agent").fetchall()]
+
+    def get_agent_profile(self, agent: str):
+        agent = self._clean(agent, 120) or "default"
+        with sqlite3.connect(self.path) as c:
+            c.row_factory = sqlite3.Row
+            row = c.execute("SELECT * FROM agent_profiles WHERE agent=?", (agent,)).fetchone()
+        if not row: return {"agent": agent, "description": "", "capabilities": [], "enabled": 1}
+        value = dict(row)
+        try: value["capabilities"] = json.loads(value.pop("capabilities_json"))
+        except json.JSONDecodeError: value["capabilities"] = []
+        return value
+
+    def save_agent_profile(self, *, agent, description="", capabilities=None, enabled=True):
+        agent = self._clean(agent, 120) or "default"
+        caps = [self._clean(x, 80) for x in (capabilities or []) if self._clean(x, 80)][:30]
+        with sqlite3.connect(self.path) as c:
+            c.execute("INSERT INTO agent_profiles(agent,description,capabilities_json,enabled,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(agent) DO UPDATE SET description=excluded.description,capabilities_json=excluded.capabilities_json,enabled=excluded.enabled,updated_at=excluded.updated_at", (agent, self._clean(description, 500), json.dumps(caps, ensure_ascii=False), int(bool(enabled)), time.time()))
+            c.commit()
+        return self.get_agent_profile(agent)
+
+    def list_agent_profiles(self):
+        with sqlite3.connect(self.path) as c:
+            c.row_factory = sqlite3.Row
+            rows = [dict(x) for x in c.execute("SELECT * FROM agent_profiles ORDER BY agent").fetchall()]
+        for row in rows:
+            try: row["capabilities"] = json.loads(row.pop("capabilities_json"))
+            except json.JSONDecodeError: row["capabilities"] = []
+        return rows
 
     def record_alert(self, *, severity="warning", title="تنبيه", detail=""):
         severity = severity if severity in {"critical", "warning", "info"} else "warning"
