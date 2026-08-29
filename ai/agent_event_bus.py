@@ -73,6 +73,19 @@ def emit_event(
                 del starts[agent_id]
         else:
             state[EVENTS_KEY] = events
+    # حفظ نسخة telemetry خارج جلسة Streamlit دون إفشاء الأسرار.
+    try:
+        from ai.telemetry_store import TelemetryStore
+        TelemetryStore().record(
+            route=str((event.get("metadata") or {}).get("route") or event["event_type"]),
+            agent=event["agent_id"] or event["title"],
+            latency_ms=event.get("duration_ms"),
+            status="error" if event["status"] == "error" else ("running" if event["status"] == "running" else "success"),
+            error=event.get("detail") if event["status"] == "error" else None,
+            metadata=event.get("metadata"),
+        )
+    except Exception:
+        pass
     return event
 
 

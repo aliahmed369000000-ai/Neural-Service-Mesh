@@ -7,6 +7,7 @@ from app_core import *  # noqa: F401,F403
 from typing import Any, Dict
 
 from ui_components import render_agent_cards, render_alert_cards, render_kpi_cards, render_section_header
+from ai.telemetry_store import TelemetryStore
 
 
 def _status_label(status: str) -> str:
@@ -65,16 +66,23 @@ def render_agent_monitor() -> None:
             value=45, step=5, key="agent_stale_threshold_s",
         )
 
+    telemetry_days = st.select_slider("النطاق الزمني", options=["اليوم", "7 أيام", "30 يومًا", "كل السجل"], value="7 أيام", key="agent_telemetry_days")
+    route_filter = st.selectbox("تصفية المسار", ["الكل"], key="agent_telemetry_route")
+    import time as _time
+    _days = {"اليوم": 1, "7 أيام": 7, "30 يومًا": 30}.get(telemetry_days)
+    _store = TelemetryStore()
+    _persistent = _store.query(since=_time.time() - _days * 86400 if _days else None, route=route_filter, limit=limit)
     events = get_events(limit)
+    # عند توفر telemetry دائم، اجعله مصدر العرض؛ وإلا نستخدم سجل الجلسة الحالي.
+    if _persistent:
+        events = [{"timestamp": _time.strftime("%Y-%m-%d %H:%M:%S", _time.localtime(x["created_at"])), "agent_id": x["agent"], "title": x["agent"], "event_type": x["route"], "status": "done" if x["status"] == "success" else x["status"], "duration_ms": x["latency_ms"], "metadata": x.get("metadata", {})} for x in reversed(_persistent)]
     states = current_agent_states(events)
     running = sum(1 for row in states.values() if row.get("status") == "running")
     completed = sum(1 for row in states.values() if row.get("status") == "done")
     failures = sum(1 for row in events if row.get("status") == "error")
-    alerts = analyze_alerts(
-        events,
-        slow_threshold_ms=float(slow_threshold_ms),
-        stale_threshold_s=float(stale_threshold_s),
-    )
+    alerts = analyze_alerts(events, slow_threshold_ms=float(slow_threshold_ms), stale_threshold_s=float(stale_threshold_s))
+    for message in _store.alerts(since=_time.time() - _days * 86400 if _days else None, latency_ms=float(slow_threshold_ms)):
+        alerts.append({"severity": "warning", "title": "تنبيه telemetry دائم", "detail": message})
     performance = performance_summary(events)
     _latest = events[-1] if events else {}
     _latest_agent = _escape(str(_latest.get("title") or _latest.get("agent_id") or "لا يوجد نشاط بعد"))
