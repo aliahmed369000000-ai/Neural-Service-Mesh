@@ -102,6 +102,26 @@ class TelemetryStore:
     def mute_alert(self, alert_id: int, seconds: int = 3600):
         with sqlite3.connect(self.path) as c: c.execute("UPDATE agent_alerts SET muted_until=? WHERE id=?", (time.time()+max(60,min(int(seconds),604800)), int(alert_id))); c.commit()
 
+    def alerts_for_events(self, events):
+        """يطبق إعدادات الوكيل على كل مجموعة أحداث دون تغيير عقد الأحداث."""
+        from collections import defaultdict
+        grouped = defaultdict(list)
+        for event in events:
+            agent = self._clean(event.get("agent_id") or event.get("title") or "default", 120)
+            grouped[agent].append(event)
+        result = []
+        for agent, rows in grouped.items():
+            settings = self.get_agent_settings(agent)
+            if not settings["notifications_enabled"]:
+                continue
+            latencies = [float(r.get("duration_ms")) for r in rows if r.get("duration_ms") is not None]
+            errors = sum(str(r.get("status", "")).lower() == "error" for r in rows)
+            if len(rows) >= 4 and errors / len(rows) >= settings["error_rate_threshold"]:
+                result.append({"severity": settings["priority"], "title": f"معدل أخطاء مرتفع · {agent}", "detail": f"{errors / len(rows):.0%} مقابل عتبة {settings['error_rate_threshold']:.0%}"})
+            if latencies and max(latencies) >= settings["slow_threshold_ms"]:
+                result.append({"severity": settings["priority"], "title": f"وكيل بطيء · {agent}", "detail": f"{max(latencies):.0f} ms مقابل عتبة {settings['slow_threshold_ms']:.0f} ms"})
+        return result
+
     def alerts(self, *, since=None, error_rate=.25, latency_ms=5000):
         s=self.summary(since=since); a=[]
         if s['events']>=4 and s['error_rate']>=error_rate: a.append(f"معدل الأخطاء مرتفع: {s['error_rate']:.0%}")

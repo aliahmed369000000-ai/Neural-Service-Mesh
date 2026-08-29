@@ -82,6 +82,7 @@ def render_agent_monitor() -> None:
     failures = sum(1 for row in events if row.get("status") == "error")
     alert_error_rate = st.slider("عتبة معدل الأخطاء", 0.05, 1.0, 0.25, 0.05, key="telemetry_error_rate")
     alerts = analyze_alerts(events, slow_threshold_ms=float(slow_threshold_ms), stale_threshold_s=float(stale_threshold_s))
+    alerts.extend(_store.alerts_for_events(events))
     for message in _store.alerts(since=_time.time() - _days * 86400 if _days else None, error_rate=alert_error_rate, latency_ms=float(slow_threshold_ms)):
         alerts.append({"severity": "warning", "title": "تنبيه telemetry دائم", "detail": message})
 
