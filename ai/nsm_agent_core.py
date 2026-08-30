@@ -188,9 +188,42 @@ class NSMAgent:
             self.meta_cognition.record_experience(action, error_msg, False)
             return error_msg
 
+    @staticmethod
+    def _patch_verifier(project_root: Path, proposal: Any) -> bool:
+        """بوابة تحقق محلية محدودة: فحص Python نحوياً دون Shell أو شبكة."""
+        if not proposal.target.endswith(".py"):
+            return True
+        import py_compile
+        py_compile.compile(str(project_root / proposal.target), doraise=True)
+        return True
+
+    def _generate_and_maybe_apply_patch(self, step: Dict[str, Any]) -> str:
+        from ai.llm_patch_generator import LLMPatchGenerator, proposal_to_dict
+        from ai.patch_proposal import apply_patch_atomically
+
+        target = str(step.get("target", ""))
+        problem = str(step.get("problem", "")).strip()
+        if not target or not problem:
+            return "❌ يلزم تحديد target وproblem لتوليد patch"
+        tests = tuple(str(item) for item in step.get("tests", []) if isinstance(item, str))
+        proposal = LLMPatchGenerator().generate(ROOT, target, problem, tests)
+
+        # الوضع الافتراضي اقتراح فقط. التطبيق يحتاج auto_apply صريحاً وتفويضاً إدارياً.
+        if not bool(step.get("auto_apply", False)):
+            return json.dumps({"status": "proposed", **proposal_to_dict(proposal)}, ensure_ascii=False)
+        if not self.admin_unlocked:
+            return "❌ التطبيق التلقائي مرفوض: التفويض الإداري غير مفعّل"
+        result = apply_patch_atomically(ROOT, proposal, verifier=self._patch_verifier)
+        return json.dumps({"status": result.status, "message": result.message,
+                           "target": result.target, "proposal_id": result.proposal_id,
+                           "rolled_back": result.rolled_back}, ensure_ascii=False)
+
     def _dispatch_action(self, step: Dict[str, Any]) -> str:
         action = step.get("action")
         
+        if action in {"generate_patch", "self_evolution"}:
+            return self._generate_and_maybe_apply_patch(step)
+
         # 🆕 أفعال v4 الكونية
         if action == "acquire_skill":
             return self.skill_engine.acquire_skill(step.get("skill_name"), step.get("docs"))
