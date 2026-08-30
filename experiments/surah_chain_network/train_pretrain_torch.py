@@ -75,12 +75,13 @@ WARMUP_RATIO = 0.1
 # - لا توسيع في بداية الجولة (بعد resume/قفزة LR)
 # - تهدئة بين كل توسيعين
 # - شرط «هضبة حقيقية» على نافذة عصور وليس مجرد أسوأ من best مرة أو مرتين
-PATIENCE = int(os.environ.get("SCN_EXPAND_PATIENCE", "6"))
-MAX_EXPANDS = int(os.environ.get("SCN_MAX_EXPANDS", "3"))
-EXPAND_MIN_EPOCH = int(os.environ.get("SCN_EXPAND_MIN_EPOCH", "12"))  # عمر النموذج الأدنى
-EXPAND_COOLDOWN = int(os.environ.get("SCN_EXPAND_COOLDOWN", "8"))  # عصور بين توسيعين
-EXPAND_WARMUP_RUN = int(os.environ.get("SCN_EXPAND_WARMUP_RUN", "4"))  # عصور بعد بدء الجولة
-EXPAND_FLAT_REL = float(os.environ.get("SCN_EXPAND_FLAT_REL", "0.015"))  # هضبة: تذبذب نسبي صغير
+# صبر طويل عمداً: لا توسيع بعد عصر/عصرين — هضبة ممتدة فقط
+PATIENCE = int(os.environ.get("SCN_EXPAND_PATIENCE", "20"))
+MAX_EXPANDS = int(os.environ.get("SCN_MAX_EXPANDS", "5"))
+EXPAND_MIN_EPOCH = int(os.environ.get("SCN_EXPAND_MIN_EPOCH", "25"))  # عمر النموذج الأدنى
+EXPAND_COOLDOWN = int(os.environ.get("SCN_EXPAND_COOLDOWN", "15"))  # عصور بين توسيعين
+EXPAND_WARMUP_RUN = int(os.environ.get("SCN_EXPAND_WARMUP_RUN", "8"))  # عصور بعد بدء الجولة
+EXPAND_FLAT_REL = float(os.environ.get("SCN_EXPAND_FLAT_REL", "0.01"))  # هضبة: تذبذب نسبي صغير
 STOP_PATIENCE = int(os.environ.get("SCN_STOP_PATIENCE", "0"))
 UNTIL_END = os.environ.get("SCN_UNTIL_END", "0") == "1"
 # ── Pre-tokenization (تسريع CPU 2-4×): SCN_PRE_TOKENIZE=1 يشفر كل النصوص
