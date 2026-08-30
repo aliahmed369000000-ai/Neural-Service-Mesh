@@ -786,7 +786,7 @@ class ReasoningPipeline:
             quality=quality,
             net_architecture=self.core.net.architecture_str(),
             grew=grew,
-            moe_routing=moe_summary or moe_info,
+            moe_routing=None,  # MoE مُعطَّل عمداً في وضع Surah-centric (انظر weights["_moe_routing"] أعلاه)
         )
 
     def submit_feedback(

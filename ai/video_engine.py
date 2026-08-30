@@ -396,7 +396,7 @@ class _WanFreeProvider:
 
 
 def _fetch_stock_background_image(
-    narration: str, visual_notes: str, seg_index: int,
+    narration: str, visual_notes: str, seg_index: int, professional_mode: bool = False,
 ) -> Optional["Image.Image"]:
     """يجلب صورة خلفية مجانية من Pexels تطابق مضمون المشهد، وتُرجَع كصورة
     PIL جاهزة (بعد قصّ/تكبير 'cover' لملء الإطار 9:16 + نفس تأثير
@@ -470,8 +470,8 @@ def _fetch_stock_background_image(
         yy, xx = np.mgrid[0:FRAME_H, 0:FRAME_W]
         cx, cy = FRAME_W / 2.0, FRAME_H / 2.0
         dist = np.sqrt(((xx - cx) / cx) ** 2 + ((yy - cy) / cy) ** 2).astype(np.float32)
-        strength = 0.42 if getattr(self, "_professional_mode", False) else 0.30
-        floor = 0.55 if getattr(self, "_professional_mode", False) else 0.62
+        strength = 0.42 if professional_mode else 0.30
+        floor = 0.55 if professional_mode else 0.62
         vignette = np.clip(1.0 - strength * np.clip(dist - 0.50, 0, None), floor, 1.0)
         arr *= vignette[:, :, None]
         arr = np.clip(arr, 0, 255).astype(np.uint8)
@@ -1215,6 +1215,7 @@ class VideoEngine:
         if cinematic_bg is None and self._use_stock_backgrounds:
             stock_bg_image = _fetch_stock_background_image(
                 segment.narration, segment.visual_notes, index,
+                professional_mode=getattr(self, "_professional_mode", False),
             )
         bg_base = (
             stock_bg_image if stock_bg_image is not None

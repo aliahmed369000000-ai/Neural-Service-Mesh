@@ -8,6 +8,7 @@ ai/agent_hibernation.py
 
 import json
 import os
+import re
 import time
 import logging
 from pathlib import Path

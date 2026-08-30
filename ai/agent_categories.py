@@ -1018,6 +1018,7 @@ class UnifiedAgentChat:
         try:
             from ai.adaptive_swarm import (
                 adaptive_max_agents,
+                agent_profiles,
                 announce_adaptive_exclusion,
                 announce_adaptive_ranking,
                 excluded_agents,
