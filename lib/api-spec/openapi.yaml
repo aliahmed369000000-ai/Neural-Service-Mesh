@@ -5,8 +5,8 @@ info:
   version: 0.1.0
   description: API specification
 servers:
-  - url: /api
-    description: Base API path
+  - url: /
+    description: NSM API root
 tags:
   - name: health
     description: Health operations
@@ -64,6 +64,88 @@ paths:
           description: Stored task
         "403": {description: Invalid API key}
         "404": {description: Task not found}
+  /agents/chat:
+    post:
+      operationId: agentsChat
+      tags: [agent]
+      summary: Chat with the unified NSM agent
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+      responses:
+        "200":
+          description: Agent response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+        "400": {description: Missing message}
+        "403": {description: Invalid API key}
+        "413": {description: Message too long}
+  /agents/states:
+    get:
+      operationId: agentsStates
+      tags: [agent]
+      summary: Get current agent states
+      security: [{ApiKeyAuth: []}]
+      responses:
+        "200":
+          description: Agent states and performance
+  /agents/events:
+    get:
+      operationId: agentsEvents
+      tags: [agent]
+      summary: Get recent agent events
+      security: [{ApiKeyAuth: []}]
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 80}}
+      responses:
+        "200": {description: Recent events}
+  /swarm/dashboard:
+    get:
+      operationId: swarmDashboard
+      tags: [agent]
+      summary: Get unified swarm dashboard
+      security: [{ApiKeyAuth: []}]
+      responses:
+        "200": {description: Swarm dashboard}
+  /swarm/alerts:
+    get:
+      operationId: swarmAlerts
+      tags: [agent]
+      summary: Evaluate swarm alerts
+      security: [{ApiKeyAuth: []}]
+      responses:
+        "200": {description: Alerts}
+  /swarm/apply-actions:
+    post:
+      operationId: swarmApplyActions
+      tags: [agent]
+      summary: Apply enabled automatic swarm actions
+      security: [{ApiKeyAuth: []}]
+      responses:
+        "200": {description: Applied actions}
+  /swarm/long-horizon:
+    get:
+      operationId: swarmLongHorizon
+      tags: [agent]
+      summary: Get long-horizon task status
+      security: [{ApiKeyAuth: []}]
+      responses:
+        "200": {description: Long-horizon tasks}
+  /performance/system:
+    get:
+      operationId: systemPerformance
+      tags: [agent]
+      summary: Get system performance metrics
+      security: [{ApiKeyAuth: []}]
+      responses:
+        "200": {description: Performance metrics}
 components:
   securitySchemes:
     ApiKeyAuth:
@@ -87,11 +169,26 @@ components:
       type: object
       properties:
         task_id: {type: integer}
-        status: {type: string}
-        score: {type: integer}
+        status: {type: string, enum: [completed]}
+        score: {type: integer, minimum: 0, maximum: 100}
         result: {type: string}
         sources:
           type: array
           items: {type: string, format: uri}
       required: [task_id, status, result]
+    ChatRequest:
+      type: object
+      properties:
+        message: {type: string, minLength: 1, maxLength: 12000}
+        prompt: {type: string, minLength: 1, maxLength: 12000}
+      description: Provide message or prompt.
+      minProperties: 1
+    ChatResponse:
+      type: object
+      properties:
+        ok: {type: boolean}
+        answer: {type: string}
+        metadata: {type: object, additionalProperties: true}
+        model: {type: object, additionalProperties: true}
+      required: [ok]
 
