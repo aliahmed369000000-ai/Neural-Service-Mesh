@@ -219,14 +219,16 @@ class NSMAgent:
 
         # الأفعال الموروثة من v3 (محاكاة للتوافق)
         if action == "read_file":
-            path = step.get("path")
-            f = ROOT / path
-            return f.read_text() if f.exists() else f"File {path} not found."
+            # استخدام حارس المسارات المركزي لمنع قراءة ملفات خارج المشروع.
+            from ai.code_agent import read_file
+            return read_file(step.get("path", ""))
             
         if action == "run_file":
-            cmd = step.get("cmd") or f"python3 {step.get('path')}"
-            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=str(ROOT))
-            return r.stdout + r.stderr
+            # تمرير التنفيذ عبر allowlist وبلا shell بدلاً من subprocess غير المقيد.
+            from ai.agent_tools import run_safe_cmd
+            cmd = step.get("cmd") or f"python3 {step.get('path', '')}"
+            result = run_safe_cmd(cmd, timeout=min(int(step.get("timeout", 180)), 180))
+            return json.dumps(result, ensure_ascii=False)
 
         # ... (بقية الأفعال يتم استدعاؤها من الموديولات الأصلية)
         return f"Action {action} is being processed by the core."
