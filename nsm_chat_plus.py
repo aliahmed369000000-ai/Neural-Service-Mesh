@@ -15,6 +15,8 @@ import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+logger = logging.getLogger("NSMChatPlus")
+
 import nsm_chat as _nsm_chat_module
 from nsm_chat import (
     NSMChat,
@@ -38,8 +40,6 @@ try:
 except Exception as _qsm_init_err:
     logger.debug(f"[NSMChatPlus] الذاكرة الدلالية غير متاحة: {_qsm_init_err}")
     _QDRANT_MEM = None
-
-logger = logging.getLogger("NSMChatPlus")
 
 # ⚠️ غير مُستخدَم في هذا الملف بعد حذف القاموس — أُبقي عليه فقط لأن
 # nsm_chat_cot.py القديم يستورده. لا تأثير له على مسار الردود هنا.
