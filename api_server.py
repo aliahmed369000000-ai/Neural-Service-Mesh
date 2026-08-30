@@ -51,10 +51,42 @@ app.add_middleware(
 
 
 
+def _header_api_key(request: Request) -> str:
+    """يقرأ مفتاح الطلب من x-api-key أو X-API-Key."""
+    return (
+        request.headers.get("x-api-key")
+        or request.headers.get("X-API-Key")
+        or ""
+    ).strip()
+
+
+def _secret_matches(provided: str, configured: str) -> bool:
+    """مقارنة ثابتة الزمن؛ ترفض عند اختلاف الطول."""
+    if not provided or not configured:
+        return False
+    if len(provided) != len(configured):
+        return False
+    return hmac.compare_digest(provided, configured)
+
+
+def _matches_env_secrets(provided: str, *env_names: str) -> bool:
+    """True إذا طابق المُرسل أي سر غير فارغ (fail-closed إن لم يُضبط أي مفتاح)."""
+    if not provided:
+        return False
+    for name in env_names:
+        configured = os.environ.get(name, "").strip()
+        if _secret_matches(provided, configured):
+            return True
+    return False
+
+
 def _task_auth(request: Request) -> bool:
-    configured = os.environ.get("NSM_ADMIN_KEY", "").strip()
-    provided = request.headers.get("x-api-key", "")
-    return bool(configured) and hmac.compare_digest(provided, configured)
+    """مصادقة مهام الوكيل: NSM_ADMIN_KEY أو NSM_API_KEY.
+
+    على Vercel يُفضَّل ضبط الاثنين بنفس القيمة حتى لا يحدث 403 بسبب
+    اختلاف السر بين ما يرسله العميل وما يقرأه الـDeployment.
+    """
+    return _matches_env_secrets(_header_api_key(request), "NSM_ADMIN_KEY", "NSM_API_KEY")
 
 def _public_url(value: str) -> bool:
     try:
@@ -69,7 +101,7 @@ def _public_url(value: str) -> bool:
 @app.post("/api/agent/tasks")
 async def create_agent_task(payload: dict, request: Request):
     if not _task_auth(request):
-        return JSONResponse(status_code=403, content={"error": "مفتاح NSM_ADMIN_KEY غير مطابق أو غير مضبوط"})
+        return JSONResponse(status_code=403, content={"error": "مفتاح x-api-key غير مطابق — اضبط NSM_ADMIN_KEY و/أو NSM_API_KEY بنفس القيمة في Vercel ثم Redeploy"})
     task = str(payload.get("task", "")).strip()[:800]
     url = str(payload.get("url", "")).strip()[:500]
     agent = str(payload.get("agent", "default")).strip()[:120] or "default"
@@ -98,7 +130,7 @@ async def create_agent_task(payload: dict, request: Request):
 @app.get("/api/agent/tasks/{task_id}")
 async def get_agent_task(task_id: int, request: Request):
     if not _task_auth(request):
-        return JSONResponse(status_code=403, content={"error": "مفتاح NSM_ADMIN_KEY غير مطابق أو غير مضبوط"})
+        return JSONResponse(status_code=403, content={"error": "مفتاح x-api-key غير مطابق — اضبط NSM_ADMIN_KEY و/أو NSM_API_KEY بنفس القيمة في Vercel ثم Redeploy"})
     from ai.telemetry_store import TelemetryStore
     rows = TelemetryStore().list_web_tasks(limit=200)
     row = next((item for item in rows if item["id"] == task_id), None)
@@ -128,10 +160,8 @@ async def process(payload: dict, request: Request):
     عملياً (Engine() تحتاج registry/graph/storage غير مُمرَّرة هنا)،
     لكن الحماية أُضيفت استباقياً حتى لا يصير باباً مفتوحاً بلا مصادقة
     بمجرد ما يُكمَّل ربطه مستقبلاً."""
-    configured_key = os.environ.get("NSM_API_KEY", "").strip()
-    provided_key = request.headers.get("x-api-key", "")
-    if not configured_key or not hmac.compare_digest(provided_key, configured_key):
-        return JSONResponse(status_code=403, content={"error": "X-API-Key غير مطابق أو NSM_API_KEY غير مضبوط"})
+    if not _matches_env_secrets(_header_api_key(request), "NSM_API_KEY", "NSM_ADMIN_KEY"):
+        return JSONResponse(status_code=403, content={"error": "X-API-Key غير مطابق أو NSM_API_KEY/NSM_ADMIN_KEY غير مضبوط"})
 
     if not _CORE_OK:
         return JSONResponse(
@@ -458,16 +488,15 @@ def aiaas_invoice(tenant_id: str):
 
 # ── نقاط لوحة السرب والوكلاء (NSM Agent / Swarm API) ─────────────
 def _nsm_key_check(request: Request):
-    """فحص fail-closed لمفتاح NSM_API_KEY عبر X-API-Key — نفس نمط /process:
-    لو المفتاح غير مضبوط بالبيئة تُرفض كل النقاط بـ403 بدل أن تبقى
-    مفتوحة بلا مصادقة."""
-    configured_key = os.environ.get("NSM_API_KEY", "").strip()
-    provided_key = request.headers.get("x-api-key", "")
-    if not configured_key or not hmac.compare_digest(provided_key,
-                                                      configured_key):
+    """فحص fail-closed لـ NSM_API_KEY (مع قبول NSM_ADMIN_KEY إن طابق — نفس توصية Vercel).
+
+    لو لم يُضبط أي من المفتاحين أو لم يطابق المُرسل → 403.
+    """
+    provided = _header_api_key(request)
+    if not _matches_env_secrets(provided, "NSM_API_KEY", "NSM_ADMIN_KEY"):
         return JSONResponse(
             status_code=403,
-            content={"error": "X-API-Key غير مطابق أو NSM_API_KEY غير مضبوط"},
+            content={"error": "X-API-Key غير مطابق أو NSM_API_KEY/NSM_ADMIN_KEY غير مضبوط"},
         )
     return None
 
