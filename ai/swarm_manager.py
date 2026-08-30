@@ -32,8 +32,9 @@ class SwarmManager:
         self.workers: Dict[str, Dict[str, Any]] = {}
         self.results: List[Dict[str, Any]] = []
         
-        self.mesh_node = LivingMeshNode()
-        self.mesh_node.join_network()
+        # لا تُنشأ عقدة الشبكة ولا تُنفذ join_network أثناء الإنشاء.
+        # ستُهيأ عند أول عملية تحتاج حالة الشبكة فقط.
+        self._mesh_node: Optional[LivingMeshNode] = None
         
         self.marketplace_tasks: Dict[str, Dict[str, Any]] = {}
         self.competitions: Dict[str, Dict[str, Any]] = {}
@@ -49,6 +50,14 @@ class SwarmManager:
             "auditor": {"permissions": ["read", "reflect"], "trust_min": 0.7},
             "observer": {"permissions": ["read"], "trust_min": 0.0}
         }
+
+    @property
+    def mesh_node(self) -> LivingMeshNode:
+        """تهيئة LivingMeshNode عند الحاجة فقط لتجنب آثار الشبكة الجانبية."""
+        if self._mesh_node is None:
+            self._mesh_node = LivingMeshNode()
+            self._mesh_node.join_network()
+        return self._mesh_node
 
     def check_permission(self, agent_id: str, action: str, params: Optional[Dict[str, Any]] = None) -> bool:
         if agent_id not in self.workers:

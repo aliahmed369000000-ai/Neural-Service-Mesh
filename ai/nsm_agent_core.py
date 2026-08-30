@@ -18,6 +18,7 @@ import textwrap
 import time
 import urllib.request
 import urllib.error
+from collections import deque
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
@@ -45,6 +46,7 @@ _MAX_FILE_CHARS    = 12_000
 _MAX_CONTEXT_FILES = 10
 _MAX_RUN_OUTPUT    = 4_000
 _MAX_HEAL_ATTEMPTS = 5
+_MAX_LOG_ENTRIES  = 1_000
 _IGNORED_DIRS = {".git", "__pycache__", ".streamlit", "node_modules", "venv", ".venv", "weights", "checkpoints", "logs"}
 
 # ══════════════════════════════════════════════════════════════════
@@ -128,13 +130,19 @@ class MetaCognition:
         if not self.log_file.exists():
             return "No experiences to review yet."
         
-        experiences = []
+        # قراءة أحدث السجلات فقط لتجنب تحميل ملف تاريخي كامل إلى الذاكرة.
+        experiences = deque(maxlen=_MAX_LOG_ENTRIES)
         with open(self.log_file, "r", encoding="utf-8") as f:
             for line in f:
-                experiences.append(json.loads(line))
+                if not line.strip():
+                    continue
+                try:
+                    experiences.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
         
         # تحليل بسيط للنجاح والفشل
-        failures = [e for e in experiences if not e["success"]]
+        failures = [e for e in experiences if not e.get("success", False)]
         if not failures:
             return "Performance is optimal based on recent records."
         
@@ -147,9 +155,22 @@ class MetaCognition:
 class NSMAgent:
     def __init__(self, agent_id="NSM-Alpha"):
         self.agent_id = agent_id
-        self.skill_engine = UniversalSkillEngine()
-        self.meta_cognition = MetaCognition()
+        # التهيئة الكسولة تمنع إنشاء مجلدات/قراءة سجلات عند إنشاء وكيل لا ينفذ خطوة.
+        self._skill_engine = None
+        self._meta_cognition = None
         self.admin_unlocked = _is_admin_unlocked()
+
+    @property
+    def skill_engine(self) -> UniversalSkillEngine:
+        if self._skill_engine is None:
+            self._skill_engine = UniversalSkillEngine()
+        return self._skill_engine
+
+    @property
+    def meta_cognition(self) -> MetaCognition:
+        if self._meta_cognition is None:
+            self._meta_cognition = MetaCognition()
+        return self._meta_cognition
 
     def _run_step(self, step: Dict[str, Any]) -> str:
         action = step.get("action")
