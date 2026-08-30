@@ -88,6 +88,12 @@ def render_swarm_studio():
             value=True,
             key="swarm_synthesize",
         )
+    remote_swarm = st.toggle(
+        "☁️ تنفيذ الهدف عبر NSM API المنشورة",
+        value=False,
+        key="swarm_remote_nsm",
+        help="يرسل الهدف كاملاً إلى NSM API؛ عند الفشل يعود إلى السرب المحلي.",
+    )
     debate = st.toggle(
         "💬 سرب المناقشة — جولات نقاش بين الوكلاء حول نتائج بعضهم قبل التوليف"
         " (تأييد / اعتراض / إثراء، حتى 3 جولات، وتتطلب مهمتين ناجحتين أو أكثر)",
@@ -102,6 +108,17 @@ def render_swarm_studio():
             st.caption("⟳ السرب يعمل — تفكيك الهدف وتنفيذ المهام الفرعية...")
             _skeleton(kind="cards")
             _skeleton(lines=4)
+        if remote_swarm:
+            try:
+                from ai.nsm_api_client import run_remote_task
+                _remote_data = run_remote_task(goal.strip())
+                _remote_text = str(_remote_data.get("result") or _remote_data.get("message") or _remote_data)
+                st.success("تم تنفيذ الهدف عبر NSM API المنشورة.")
+                st.markdown(_remote_text)
+                _copy_button(_remote_text, key="swarm_remote_result")
+                return
+            except Exception as _remote_error:
+                st.warning(f"تعذر التنفيذ البعيد، تم استخدام السرب المحلي: {_remote_error}")
         result = coordinator.execute(
             goal.strip(),
             data=data,
@@ -278,7 +295,7 @@ def render_swarm_studio():
             </div>
             <div class="metric-card">
                 <div class="metric-value">{_cs['done']:,}</div>
-                <div class="metric-label">✅ ناجحة بالكامل</div>
+                <div class="metric-label">��� ناجحة بالكامل</div>
             </div>
             <div class="metric-card">
                 <div class="metric-value">{_cs['partial']:,}</div>

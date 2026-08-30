@@ -87,7 +87,7 @@ def render_unified_agent():
     bot = st.session_state.unified_agent_bot
 
     # ── شريط أدوات علوي ──
-    c_metric, c_web, c_help = st.columns([1.2, 2.2, 2])
+    c_metric, c_web, c_remote, c_help = st.columns([1.2, 1.8, 2.2, 2])
     with c_metric:
         st.metric("رسائل الجلسة", st.session_state.unified_agent_count)
     with c_web:
@@ -96,6 +96,13 @@ def render_unified_agent():
             value=False,
             key="unified_agent_web",
             help="بحث DuckDuckGo قبل التوليد، أياً كان المتخصص.",
+        )
+    with c_remote:
+        remote_toggle = st.toggle(
+            "☁️ NSM API",
+            value=False,
+            key="unified_agent_remote_nsm",
+            help="إرسال المهمة إلى خدمة NSM API؛ عند الفشل يعود التشغيل المحلي تلقائياً.",
         )
     with c_help:
         with st.expander("أوامر سريعة", expanded=False):
@@ -208,7 +215,17 @@ def render_unified_agent():
             _submit_background(text)
             return
         with st.spinner("⟳ أفكر وأختار الفريق المناسب…"):
-            response, meta = bot.chat(text, force_web=web_toggle)
+            if remote_toggle:
+                try:
+                    from ai.nsm_api_client import run_remote_task
+                    remote_data = run_remote_task(text)
+                    response = str(remote_data.get("result") or remote_data.get("message") or remote_data)
+                    meta = {"route_method": "project_bridge", "provider_badge": "NSM API · تنفيذ بعيد", "category_title": "الوكيل الموحّد"}
+                except Exception as remote_error:
+                    st.warning(f"تعذر التنفيذ البعيد، تم استخدام الوكيل المحلي: {remote_error}")
+                    response, meta = bot.chat(text, force_web=web_toggle)
+            else:
+                response, meta = bot.chat(text, force_web=web_toggle)
         _append_bot(response, meta)
         st.session_state.unified_agent_count += 1
         st.rerun()
