@@ -7,6 +7,7 @@ import json
 import logging
 import requests
 import smtplib
+import time
 from email.mime.text import MIMEText
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -19,6 +20,7 @@ CONFIG_PATH = Path("/home/ubuntu/NSM-Alert-System/artifacts/alert_config.json")
 class AlertManager:
     def __init__(self):
         self.config = self._load_config()
+        self._last_alerts = {}  # لتخزين وقت آخر تنبيه من كل نوع لمنع الإغراق
 
     def _load_config(self) -> Dict[str, Any]:
         if CONFIG_PATH.exists():
@@ -37,8 +39,17 @@ class AlertManager:
         CONFIG_PATH.write_text(json.dumps(new_config, indent=2, ensure_ascii=False), encoding="utf-8")
         self.config = new_config
 
-    def send_alert(self, level: str, message: str, details: Optional[Dict[str, Any]] = None):
-        """إرسال تنبيه بناءً على الإعدادات المتاحة."""
+    def send_alert(self, level: str, message: str, details: Optional[Dict[str, Any]] = None, throttle_sec: int = 60):
+        """إرسال تنبيه بناءً على الإعدادات المتاحة مع خاصية الكبح لمنع الإغراق."""
+        now = time.time()
+        alert_key = f"{level}:{message}"
+        
+        if alert_key in self._last_alerts:
+            if now - self._last_alerts[alert_key] < throttle_sec:
+                logger.debug(f"Throttling alert: {message}")
+                return
+
+        self._last_alerts[alert_key] = now
         timestamp = datetime.now(timezone.utc).isoformat()
         full_message = f"🚨 NSM Alert [{level}]\nTime: {timestamp}\nMessage: {message}"
         if details:

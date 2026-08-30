@@ -7,6 +7,7 @@ from app_core import *  # noqa: F401,F403
 from typing import Any, Dict
 
 from ui_components import render_agent_cards, render_alert_cards, render_kpi_cards, render_section_header
+from ai.telemetry_store import TelemetryStore
 
 
 def _status_label(status: str) -> str:
@@ -65,16 +66,32 @@ def render_agent_monitor() -> None:
             value=45, step=5, key="agent_stale_threshold_s",
         )
 
+    telemetry_days = st.select_slider("النطاق الزمني", options=["اليوم", "7 أيام", "30 يومًا", "كل السجل"], value="7 أيام", key="agent_telemetry_days")
+    route_filter = st.selectbox("تصفية المسار", ["الكل"], key="agent_telemetry_route")
+    import time as _time
+    _days = {"اليوم": 1, "7 أيام": 7, "30 يومًا": 30}.get(telemetry_days)
+    _store = TelemetryStore()
+    _persistent = _store.query(since=_time.time() - _days * 86400 if _days else None, route=route_filter, limit=limit)
     events = get_events(limit)
+    # عند توفر telemetry دائم، اجعله مصدر العرض؛ وإلا نستخدم سجل الجلسة الحالي.
+    if _persistent:
+        events = [{"timestamp": _time.strftime("%Y-%m-%d %H:%M:%S", _time.localtime(x["created_at"])), "agent_id": x["agent"], "title": x["agent"], "event_type": x["route"], "status": "done" if x["status"] == "success" else x["status"], "duration_ms": x["latency_ms"], "metadata": x.get("metadata", {})} for x in reversed(_persistent)]
     states = current_agent_states(events)
     running = sum(1 for row in states.values() if row.get("status") == "running")
     completed = sum(1 for row in states.values() if row.get("status") == "done")
     failures = sum(1 for row in events if row.get("status") == "error")
-    alerts = analyze_alerts(
-        events,
-        slow_threshold_ms=float(slow_threshold_ms),
-        stale_threshold_s=float(stale_threshold_s),
-    )
+    alert_error_rate = st.slider("عتبة معدل الأخطاء", 0.05, 1.0, 0.25, 0.05, key="telemetry_error_rate")
+    alerts = analyze_alerts(events, slow_threshold_ms=float(slow_threshold_ms), stale_threshold_s=float(stale_threshold_s))
+    alerts.extend(_store.alerts_for_events(events))
+    for message in _store.alerts(since=_time.time() - _days * 86400 if _days else None, error_rate=alert_error_rate, latency_ms=float(slow_threshold_ms)):
+        alerts.append({"severity": "warning", "title": "تنبيه telemetry دائم", "detail": message})
+
+    export_rows = _store.query(since=_time.time() - _days * 86400 if _days else None, route=route_filter, limit=5000)
+    export_cols = st.columns(2)
+    with export_cols[0]:
+        st.download_button("تنزيل JSON", _store.export_json(since=_time.time() - _days * 86400 if _days else None, route=route_filter), "nsm-telemetry.json", "application/json", use_container_width=True)
+    with export_cols[1]:
+        st.download_button("تنزيل CSV", _store.export_csv(since=_time.time() - _days * 86400 if _days else None, route=route_filter), "nsm-telemetry.csv", "text/csv", use_container_width=True)
     performance = performance_summary(events)
     _latest = events[-1] if events else {}
     _latest_agent = _escape(str(_latest.get("title") or _latest.get("agent_id") or "لا يوجد نشاط بعد"))
@@ -92,9 +109,45 @@ def render_agent_monitor() -> None:
 
     render_section_header("صحة الشبكة", "مؤشرات مباشرة من ناقل الأحداث")
     if alerts:
+        for alert in alerts:
+            _store.record_alert(severity=alert.get("severity", "warning"), title=alert.get("title", "تنبيه"), detail=alert.get("detail", ""))
         render_alert_cards(alerts)
     else:
         st.success("لا توجد أخطاء أو اختناقات تتجاوز العتبات الحالية.")
+
+    render_section_header("إعدادات الوكلاء", "خصص عتبات الأداء والتنبيهات لكل وكيل")
+    configured_agents = sorted({str(x.get("agent_id") or x.get("title") or "default") for x in events}) or ["default"]
+    selected_agent = st.selectbox("الوكيل", configured_agents, key="agent_settings_agent")
+    current = _store.get_agent_settings(selected_agent)
+    settings_cols = st.columns([1, 1, 1, 1])
+    with settings_cols[0]:
+        agent_slow = st.number_input("عتبة البطء (ms)", min_value=100, max_value=120000, value=int(current["slow_threshold_ms"]), step=100, key="agent_slow_threshold")
+    with settings_cols[1]:
+        agent_error = st.slider("معدل الأخطاء", 0.01, 1.0, float(current["error_rate_threshold"]), 0.01, key="agent_error_threshold")
+    with settings_cols[2]:
+        agent_priority = st.selectbox("أولوية التنبيه", ["critical", "warning", "info"], index=["critical", "warning", "info"].index(current["priority"]), key="agent_priority")
+    with settings_cols[3]:
+        agent_notifications = st.toggle("التنبيهات مفعلة", value=bool(current["notifications_enabled"]), key="agent_notifications")
+    if st.button("حفظ إعدادات الوكيل", type="primary", key="save_agent_settings"):
+        _store.save_agent_settings(agent=selected_agent, slow_threshold_ms=agent_slow, error_rate_threshold=agent_error, priority=agent_priority, notifications_enabled=agent_notifications)
+        st.success("تم حفظ إعدادات الوكيل.")
+
+    stored_alerts = _store.list_alerts(limit=30)
+    if stored_alerts:
+        render_section_header("مركز التنبيهات", "إدارة الأولوية والقراءة والكتم المؤقت")
+        unread = sum(1 for a in stored_alerts if not a["is_read"])
+        st.caption(f"غير مقروءة: {unread} · الإجمالي: {len(stored_alerts)}")
+        for alert in stored_alerts[:8]:
+            cols = st.columns([4, 1, 1])
+            with cols[0]:
+                icon = {"critical": "حرج", "warning": "تحذير", "info": "معلومة"}.get(alert["severity"], "تنبيه")
+                st.markdown(f"**[{icon}] {alert['title']}** — {alert['detail']}")
+            with cols[1]:
+                if not alert["is_read"] and st.button("تمييز كمقروء", key=f"read_alert_{alert['id']}"):
+                    _store.mark_alert_read(alert["id"]); st.rerun()
+            with cols[2]:
+                if st.button("كتم ساعة", key=f"mute_alert_{alert['id']}"):
+                    _store.mute_alert(alert["id"]); st.rerun()
 
     render_kpi_cards([
         {"label": "الأحداث", "value": len(events), "note": "في السجل الحالي", "accent": "var(--nsm-indigo)"},
@@ -104,6 +157,31 @@ def render_agent_monitor() -> None:
         {"label": "متوسط الزمن", "value": f"{performance['avg_ms']:.0f} ms", "note": "زمن الاستجابة", "accent": "var(--nsm-amber)"},
         {"label": "أقصى زمن", "value": f"{performance['max_ms']:.0f} ms", "note": "أبطأ دورة", "accent": "#c084fc"},
     ])
+
+    # ملخص تشغيلي سريع: يوضح أين تذهب الطلبات وكيف يتغير الأداء.
+    from collections import Counter
+    route_counts = Counter(
+        str((row.get("metadata") or {}).get("route") or row.get("event_type") or "غير مصنف")
+        for row in events
+    )
+    route_counts = dict(route_counts.most_common(8))
+    chart_cols = st.columns([1.15, 1])
+    with chart_cols[0]:
+        render_section_header("توزيع المسارات", "أكثر أنواع العمل ظهورًا في السجل")
+        if route_counts:
+            st.bar_chart(route_counts, height=180, use_container_width=True)
+        else:
+            st.caption("ستظهر المسارات بعد تنفيذ أول مهمة.")
+    with chart_cols[1]:
+        render_section_header("آخر لقطة تشغيل", "ملخص سريع للحالة الحالية")
+        st.markdown(
+            f'<div class="nsm-dashboard-panel" dir="rtl">'
+            f'<div class="nsm-dashboard-panel-title">{_latest_agent}</div>'
+            f'<div class="nsm-dashboard-panel-copy">الحالة: <strong>{_latest_status}</strong><br>'
+            f'الحدث: <code>{_latest_event}</code><br>'
+            f'زمن آخر دورة: <strong>{performance["last_ms"]:.0f} ms</strong></div></div>',
+            unsafe_allow_html=True,
+        )
 
     if not events:
         st.info("لا توجد أحداث بعد. نفّذ مهمة من تبويب «منسّق الوكلاء» أو «الوكيل الموحّد» لتظهر هنا.")

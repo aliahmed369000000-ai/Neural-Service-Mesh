@@ -733,6 +733,129 @@ class SurahChainLM(nn.Module):
         }
 
 
+
+class ExpandPlateauController:
+    """توسيع الأضيق فقط بعد هضبة خسارة طويلة (عدة عصور)، وليس بعد عصر أو اثنين.
+
+    الافتراضات صارمة عمداً:
+      patience >= 7 عصور بلا تحسّن حقيقي
+      min_epoch قبل أي توسيع
+      cooldown بين توسيعين
+      نافذة loss شبه مستوية (flat) + عدم اتجاه هبوط واضح
+    """
+
+    def __init__(
+        self,
+        patience: Optional[int] = None,
+        max_expands: Optional[int] = None,
+        min_epoch: Optional[int] = None,
+        cooldown: Optional[int] = None,
+        warmup_run: Optional[int] = None,
+        flat_rel: Optional[float] = None,
+        improve_eps: float = 1e-5,
+    ) -> None:
+        self.patience = int(patience if patience is not None else os.environ.get("SCN_EXPAND_PATIENCE", "7"))
+        self.max_expands = int(max_expands if max_expands is not None else os.environ.get("SCN_MAX_EXPANDS", "5"))
+        self.min_epoch = int(min_epoch if min_epoch is not None else os.environ.get("SCN_EXPAND_MIN_EPOCH", "25"))
+        self.cooldown = int(cooldown if cooldown is not None else os.environ.get("SCN_EXPAND_COOLDOWN", "15"))
+        self.warmup_run = int(warmup_run if warmup_run is not None else os.environ.get("SCN_EXPAND_WARMUP_RUN", "8"))
+        self.flat_rel = float(flat_rel if flat_rel is not None else os.environ.get("SCN_EXPAND_FLAT_REL", "0.01"))
+        self.improve_eps = float(improve_eps)
+        self.best = float("inf")
+        self.no_improve = 0
+        self.n_expands = 0
+        self.expand_log: List[dict] = []
+        self.history: List[float] = []
+        self.start_epoch = 0
+
+    def state_dict(self) -> dict:
+        return {
+            "best": self.best,
+            "no_improve": self.no_improve,
+            "n_expands": self.n_expands,
+            "expand_log": list(self.expand_log),
+            "history": list(self.history[-200:]),
+            "start_epoch": self.start_epoch,
+        }
+
+    def load_state_dict(self, d: dict) -> None:
+        if not d:
+            return
+        self.best = float(d.get("best", self.best))
+        self.no_improve = int(d.get("no_improve", 0))
+        self.n_expands = int(d.get("n_expands", 0))
+        self.expand_log = list(d.get("expand_log") or [])
+        self.history = list(d.get("history") or [])
+        self.start_epoch = int(d.get("start_epoch", 0))
+
+    def on_epoch_end(self, model: "HybridExperimentModelTorch", epoch: int, epoch_loss: float) -> Optional[dict]:
+        """يُستدعى في نهاية كل عصر. يعيد info التوسيع إن حصل، وإلا None."""
+        if epoch_loss != epoch_loss:  # NaN
+            return None
+        self.history.append(float(epoch_loss))
+        improved = epoch_loss < self.best - self.improve_eps
+        if improved:
+            self.best = float(epoch_loss)
+            self.no_improve = 0
+            return None
+        self.no_improve += 1
+
+        epochs_into_run = epoch - self.start_epoch
+        last_expand_ep = self.expand_log[-1]["epoch"] if self.expand_log else -10**9
+        since_expand = epoch - last_expand_ep
+        window = self.history[-self.patience :]
+        flat = False
+        if len(window) >= max(5, self.patience // 2):
+            w_mean = sum(window) / len(window)
+            w_span = max(window) - min(window)
+            flat = w_mean > 0 and (w_span / w_mean) <= self.flat_rel
+        weak_trend = False
+        if len(window) >= 5:
+            # لم ينخفض بوضوح من أول النافذة لآخرها
+            weak_trend = window[-1] > window[0] - 1e-3
+
+        can = (
+            self.n_expands < self.max_expands
+            and self.no_improve >= self.patience
+            and epoch >= self.min_epoch
+            and epochs_into_run >= self.warmup_run
+            and since_expand >= self.cooldown
+            and flat
+            and weak_trend
+        )
+        if not can:
+            if self.no_improve >= self.patience and self.n_expands < self.max_expands:
+                reasons = []
+                if epoch < self.min_epoch:
+                    reasons.append(f"min_epoch({self.min_epoch})")
+                if epochs_into_run < self.warmup_run:
+                    reasons.append(f"run_warmup({self.warmup_run})")
+                if since_expand < self.cooldown:
+                    reasons.append(f"cooldown({self.cooldown})")
+                if not flat:
+                    reasons.append("not_flat")
+                if not weak_trend:
+                    reasons.append("still_trending_down")
+                if reasons and (self.no_improve == self.patience or self.no_improve % 10 == 0):
+                    print(f"  · لا توسيع بعد: {', '.join(reasons)}", flush=True)
+            return None
+
+        info = model.expand_narrowest(delta=1)
+        if info is None:
+            return None
+        self.n_expands += 1
+        self.no_improve = 0
+        rec = {"epoch": epoch, **info}
+        self.expand_log.append(rec)
+        print(
+            f"  → توسيع مدروس #{self.n_expands}: طبقة {info['layer_idx']} "
+            f"{info['old']} → out={info['new_out']} next_in={info['next_new_in']} "
+            f"(patience={self.patience}, flat_ok)",
+            flush=True,
+        )
+        return rec
+
+
 class HybridExperimentModelTorch:
     """واجهة تدريب/توليد — PyTorch فقط، دفعات حقيقية."""
 

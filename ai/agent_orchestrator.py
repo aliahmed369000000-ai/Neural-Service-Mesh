@@ -64,4 +64,21 @@ def delegate_to_unified_chat(
     return str(response or "").strip(), dict(meta or {})
 
 
-__all__ = ["should_delegate_request", "delegate_to_unified_chat"]
+def classify_request(text: str) -> Dict[str, Any]:
+    """يصنف الطلب محلياً قبل استدعاء النموذج لتقليل التخمين والتكلفة."""
+    value = re.sub(r"\s+", " ", (text or "").strip())
+    if not value:
+        return {"route": "direct", "confidence": 1.0, "reasons": ["empty"]}
+    if _contains_any(value, _CODING_HINTS):
+        route, reasons = "coding", ["coding_hint"]
+    elif _contains_any(value, _DIRECT_HINTS):
+        route, reasons = "direct", ["direct_command"]
+    elif _contains_any(value, _COMPLEX_HINTS) or value.count(" و") >= 2 or " ثم " in value:
+        route, reasons = "orchestrated", ["complexity_hint"]
+    else:
+        route, reasons = "conversation", ["default"]
+    confidence = 0.92 if reasons[0] != "default" else 0.62
+    return {"route": route, "confidence": confidence, "reasons": reasons, "language": "ar" if re.search(r"[\u0600-\u06ff]", value) else "en"}
+
+
+__all__ = ["should_delegate_request", "delegate_to_unified_chat", "classify_request"]

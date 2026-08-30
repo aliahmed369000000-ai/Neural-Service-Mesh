@@ -18,7 +18,7 @@ _REPO = _HERE.parents[1]
 sys.path.insert(0, str(_REPO))
 sys.path.insert(0, str(_HERE))
 
-from hybrid_experiment_torch import HybridExperimentModelTorch
+from hybrid_experiment_torch import HybridExperimentModelTorch, ExpandPlateauController
 
 CKPT_DIR = _HERE / "checkpoints"
 CKPT_BEST = CKPT_DIR / "best_ckg_lm_torch.pt"
@@ -182,10 +182,8 @@ def main():
     global_step = 0
     t0 = time.time()
 
-    # تحسين ذاتي: إذا توقف الـloss يوسّع الأضيق تلقائياً
-    PATIENCE = int(os.environ.get("SCN_EXPAND_PATIENCE", "2"))
-    MAX_EXPANDS = int(os.environ.get("SCN_MAX_EXPANDS", "5"))
-    no_improve = 0
+    # توسيع الأضيق فقط بعد هضبة طويلة (لا بعد عصر/عصرين)
+    expander = ExpandPlateauController()
     n_expands = 0
     expand_log = []
 
@@ -212,22 +210,14 @@ def main():
             best = mean_l
             m.save(str(CKPT_BEST))
             mark = " *best*"
-            no_improve = 0
-        else:
-            no_improve += 1
-            # توقف الـloss → توسيع ذاتي للأضيق (عمود + صف)
-            if no_improve >= PATIENCE and n_expands < MAX_EXPANDS:
-                info = m.expand_narrowest(delta=1)
-                if info is not None:
-                    n_expands += 1
-                    no_improve = 0
-                    expand_log.append({"epoch": ep, **info})
-                    mark += (
-                        f" *expand#{n_expands} L{info['layer_idx']} "
-                        f"{info['old']}→out{info['new_out']}/in{info['next_new_in']}*"
-                    )
-                    print(f"  → توسيع ذاتي: طبقة {info['layer_idx']} "
-                          f"{info['old']} → out={info['new_out']} next_in={info['next_new_in']}")
+        info = expander.on_epoch_end(m, ep, mean_l)
+        if info is not None:
+            n_expands = expander.n_expands
+            expand_log = list(expander.expand_log)
+            mark += (
+                f" *expand#{n_expands} L{info['layer_idx']} "
+                f"{info['old']}→out{info['new_out']}/in{info['next_new_in']}*"
+            )
         print(f"epoch {ep:03d}/{EPOCHS}  loss={mean_l:.4f}  lr={m.lr:.6f}{mark}")
 
     m.save(str(CKPT_LATEST))

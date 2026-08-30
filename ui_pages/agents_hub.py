@@ -18,6 +18,18 @@ def render_agents_hub():
     st.markdown('<div class="section-header">🤖 وكلاء AI المتخصصون</div>', unsafe_allow_html=True)
     st.caption("كل فئة لها وكيل مستقل وذاكرة خاصة — للأوامر التنفيذية استخدم الوكيل الموحّد أو فئة تدريب النماذج.")
 
+    # ربط اختياري بخدمة NSM API المنشورة: يبقى التشغيل المحلي متاحاً عند غياب السر.
+    _remote_nsm = st.toggle("تشغيل المهمة عبر NSM API المنشورة", value=False, key="agents_hub_remote_nsm")
+    if _remote_nsm:
+        try:
+            from ai.nsm_api_client import remote_available
+            if remote_available():
+                st.success("خدمة NSM API متاحة — ستُرسل المهام البعيدة عبرها.")
+            else:
+                st.warning("خدمة NSM API غير متاحة حالياً؛ عطّل الخيار للتشغيل المحلي.")
+        except Exception as _remote_check_error:
+            st.warning(f"تعذر فحص خدمة NSM API: {_remote_check_error}")
+
     # CSS مشترك لكل فقاعات المحادثة داخل هذا التبويب (نفس أسلوب تبويب المحادثة)
     if not st.session_state.get("_nsm_agents_hub_css_injected"):
         st.session_state["_nsm_agents_hub_css_injected"] = True
@@ -291,7 +303,7 @@ def _render_agent_page(category):
             )
             if _csv_up is not None:
                 st.caption(f"ملف جاهز: {_csv_up.name} ({_csv_up.size} بايت)")
-                if st.button("🚀 درّب على الملف المرفوع", key=f"mt_train_upload_{category.key}", use_container_width=True):
+                if st.button("🚀 ��رّب على الملف المرفوع", key=f"mt_train_upload_{category.key}", use_container_width=True):
                     with st.spinner("حفظ + تدريب…"):
                         _raw = _csv_up.getvalue()
                         _res = save_upload_and_train(
@@ -389,8 +401,19 @@ def _render_agent_page(category):
             )
 
         with st.spinner(f"⟳ {category.title} يفكّر..."):
-            response = bot.chat(_query, force_web=web_toggle, source="hub")
-        badge = bot.last_provider_badge()
+            if st.session_state.get("agents_hub_remote_nsm"):
+                try:
+                    from ai.nsm_api_client import run_remote_task
+                    _remote_result = run_remote_task(_query)
+                    response = str(_remote_result.get("result") or _remote_result.get("message") or _remote_result)
+                    badge = "NSM API · تنفيذ بعيد"
+                except Exception as _remote_error:
+                    st.warning(f"تعذر التنفيذ البعيد، تم استخدام الوكيل المحلي: {_remote_error}")
+                    response = bot.chat(_query, force_web=web_toggle, source="hub")
+                    badge = bot.last_provider_badge()
+            else:
+                response = bot.chat(_query, force_web=web_toggle, source="hub")
+                badge = bot.last_provider_badge()
         try:
             from ai.response_quality import score_response
             _q = score_response(response, query=text.strip())

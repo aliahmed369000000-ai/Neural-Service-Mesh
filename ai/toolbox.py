@@ -1,6 +1,8 @@
 import logging
 import inspect
 import os
+import threading
+import concurrent.futures
 from typing import Any, Dict, List, Callable, Optional
 
 logger = logging.getLogger("NSM-Toolbox")
@@ -43,15 +45,20 @@ class NSMToolbox:
             for name, info in self.tools.items()
         ]
 
-    def execute_tool(self, name: str, **kwargs) -> Any:
-        """تنفيذ أداة محددة مع المعاملات المطلوبة."""
+    def execute_tool(self, name: str, timeout: int = 30, **kwargs) -> Any:
+        """تنفيذ أداة محددة مع مهلة زمنية لضمان عدم تعليق العقدة."""
         tool_func = self.get_tool(name)
         if not tool_func:
             raise ValueError(f"❌ Tool '{name}' not found in toolbox.")
         
         try:
-            logger.info(f"⚙️ Executing tool: {name} with args: {kwargs}")
-            return tool_func(**kwargs)
+            logger.info(f"⚙️ Executing tool: {name} with args: {kwargs} (Timeout: {timeout}s)")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(tool_func, **kwargs)
+                return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            logger.error(f"⏱️ Tool {name} timed out after {timeout}s")
+            raise RuntimeError(f"Tool {name} execution timed out.")
         except Exception as e:
             logger.error(f"❌ Error executing tool {name}: {e}")
             raise

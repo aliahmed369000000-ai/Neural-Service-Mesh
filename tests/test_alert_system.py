@@ -17,8 +17,10 @@ class TestAlertSystem(unittest.TestCase):
 
     def test_alert_triggering(self):
         """اختبار إطلاق التنبيهات عند حدوث فشل أمني."""
-        # محاكاة عقدة
-        node = LivingMeshNode("test_node")
+        # محاكاة عقدة - نستخدم mock لتجنب الحاجة لحلقة أحداث (Event Loop)
+        from unittest.mock import MagicMock
+        node = MagicMock(spec=LivingMeshNode)
+        node.node_id = "test_node"
         
         # محاكاة هجوم (توقيع غير صالح)
         # هذا يجب أن يطلق alert_manager.send_alert("SECURITY", ...)

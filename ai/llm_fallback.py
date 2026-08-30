@@ -80,6 +80,7 @@ class Provider(Enum):
     CEREBRAS  = "cerebras"      # احتياطي فوري لـGroq — نفس أوزان gpt-oss-120b
                                  # على عتاد مختلف وحصة مجانية منفصلة (dual-homing)
     HUGGINGFACE = "huggingface"  # Falcon-Arabic-7B-Instruct — مجاني (HF Inference API)
+    OPENAI_COMPAT = "openai_compat"  # أي API متوافق مع OpenAI (HF/vLLM/OpenRouter)
     LOCAL     = "local"  # نموذج محلي عبر Ollama — للنشر المغلق بدون إنترنت (NSM_OFFLINE_MODE)
     CKG_SYNTH = "ckg_synthesis"
 
@@ -545,7 +546,7 @@ class LLMFallback:
         if pref not in (
             "auto", "groq", "cerebras", "cf", "cloudflare", "gemini",
             "openrouter", "anthropic", "openai", "together",
-            "huggingface", "hf",
+            "huggingface", "hf", "openai_compat", "compat",
         ):
             logger.warning(
                 "[LLMFallback] قيمة NSM_LLM_PROVIDER_PREF غير معروفة "
@@ -578,6 +579,13 @@ class LLMFallback:
         #      على بيئات سحابية مثل Streamlit Cloud لتفادي تأخير/أخطاء غير
         #      ضرورية)، ويُضاف كخيار قبل CKG synthesis النهائي.
         local_url = os.getenv("NSM_LOCAL_LLM_URL", "").strip()
+
+        # 0.75) API قابل للتبديل — يدعم HuggingFace/vLLM وأي endpoint OpenAI-compatible
+        compat_url = os.getenv("NSM_OPENAI_COMPAT_URL", "").strip()
+        compat_key = os.getenv("NSM_OPENAI_COMPAT_KEY", "").strip()
+        compat_model = os.getenv("NSM_OPEN_SOURCE_MODEL", "Qwen/Qwen3-Next-80B-A3B-Instruct").strip()
+        if compat_url and _keep(Provider.OPENAI_COMPAT):
+            chain.append((Provider.OPENAI_COMPAT, compat_key, compat_model))
 
         # 1) Groq — gpt-oss-120b: مجاني (14k طلب/دقيقة) وسريع جداً (~1000
         #    توكن/ثانية). يُضاف قبل الجميع لأنه مجاني وسريع — إذا حُجب أو
@@ -686,6 +694,8 @@ class LLMFallback:
                 return self._call_cerebras(query, history, sp)
             elif provider == Provider.HUGGINGFACE:
                 return self._call_huggingface(query, history, sp)
+            elif provider == Provider.OPENAI_COMPAT:
+                return self._call_openai_compat(query, history, sp)
             elif provider == Provider.LOCAL:
                 return self._call_local(query, history, sp)
             else:
@@ -974,6 +984,29 @@ class LLMFallback:
                 continue
 
         raise Exception(f"فشلت كل نماذج OpenRouter المكتشَفة: {last_err}")
+
+    # ── OpenAI-compatible / open-source endpoint ─────────────────────────
+
+    def _call_openai_compat(
+        self, query: str, history: List[Tuple[str, str]],
+        system_prompt: str = _SYSTEM_PROMPT,
+    ) -> FallbackResult:
+        """واجهة موحدة لـ HuggingFace TGI/vLLM وأي مزود OpenAI-compatible."""
+        base = os.getenv("NSM_OPENAI_COMPAT_URL", "").strip().rstrip("/")
+        url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+        messages = [{"role": "system", "content": system_prompt}]
+        for u, a in history[-4:]:
+            messages.extend([{"role": "user", "content": u}, {"role": "assistant", "content": a}])
+        messages.append({"role": "user", "content": query})
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        data = _post_json(url, {
+            "model": self._model, "messages": messages,
+            "max_tokens": self.max_tokens, "temperature": self.temperature,
+        }, headers, self.timeout)
+        text = data["choices"][0]["message"]["content"].strip()
+        return FallbackResult(text=text, provider=Provider.OPENAI_COMPAT, model=self._model)
 
     # ── OpenAI ───────────────────────────────────────────────────────────
 

@@ -7,8 +7,14 @@ Neural Service Mesh — FastAPI Backend
 from __future__ import annotations
 
 import hmac
+import ipaddress
+import json
 import os
+import socket
 import sys
+from html import escape as xml_escape
+from urllib.parse import parse_qs, urlparse
+from urllib.request import Request as URLRequest, urlopen
 from pathlib import Path
 
 # إضافة مسار المشروع
@@ -16,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 # محاولة استيراد المكونات الداخلية
 try:
@@ -43,12 +49,101 @@ app.add_middleware(
 )
 
 
+
+
+def _header_api_key(request: Request) -> str:
+    """يقرأ مفتاح الطلب من x-api-key أو X-API-Key."""
+    return (
+        request.headers.get("x-api-key")
+        or request.headers.get("X-API-Key")
+        or ""
+    ).strip()
+
+
+def _secret_matches(provided: str, configured: str) -> bool:
+    """مقارنة ثابتة الزمن؛ ترفض عند اختلاف الطول."""
+    if not provided or not configured:
+        return False
+    if len(provided) != len(configured):
+        return False
+    return hmac.compare_digest(provided, configured)
+
+
+def _matches_env_secrets(provided: str, *env_names: str) -> bool:
+    """True إذا طابق المُرسل أي سر غير فارغ (fail-closed إن لم يُضبط أي مفتاح)."""
+    if not provided:
+        return False
+    for name in env_names:
+        configured = os.environ.get(name, "").strip()
+        if _secret_matches(provided, configured):
+            return True
+    return False
+
+
+def _task_auth(request: Request) -> bool:
+    """مصادقة مهام الوكيل: NSM_ADMIN_KEY أو NSM_API_KEY.
+
+    على Vercel يُفضَّل ضبط الاثنين بنفس القيمة حتى لا يحدث 403 بسبب
+    اختلاف السر بين ما يرسله العميل وما يقرأه الـDeployment.
+    """
+    return _matches_env_secrets(_header_api_key(request), "NSM_ADMIN_KEY", "NSM_API_KEY")
+
+def _public_url(value: str) -> bool:
+    try:
+        parsed = urlparse(value.strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+            return False
+        addresses = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
+        return all(not (ipaddress.ip_address(item[4][0]).is_private or ipaddress.ip_address(item[4][0]).is_loopback or ipaddress.ip_address(item[4][0]).is_link_local or ipaddress.ip_address(item[4][0]).is_reserved) for item in addresses)
+    except Exception:
+        return False
+
+@app.post("/api/agent/tasks")
+async def create_agent_task(payload: dict, request: Request):
+    if not _task_auth(request):
+        return JSONResponse(status_code=403, content={"error": "مفتاح x-api-key غير مطابق — اضبط NSM_ADMIN_KEY و/أو NSM_API_KEY بنفس القيمة في Vercel ثم Redeploy"})
+    task = str(payload.get("task", "")).strip()[:800]
+    url = str(payload.get("url", "")).strip()[:500]
+    agent = str(payload.get("agent", "default")).strip()[:120] or "default"
+    if not task or not _public_url(url):
+        return JSONResponse(status_code=400, content={"error": "أدخل مهمة ورابطاً عاماً صالحاً"})
+    try:
+        with urlopen(URLRequest(url, headers={"User-Agent": "NSM-Agent/1.0"}), timeout=12) as response:
+            html = response.read(180000).decode("utf-8", errors="replace")
+        import re
+        text = " ".join(re.sub(r"<[^>]+>", " ", html).split())[:5000]
+        result = f"تمت قراءة الصفحة بنجاح.\n\n{text[:3500]}"
+        score = min(100, 55 + (25 if len(text) > 500 else 10))
+        try:
+            from ai.llm_fallback import LLMFallback
+            generated = LLMFallback().generate(f"المهمة: {task}\nالرابط: {url}\nالمحتوى: {text[:4200]}", history=[], system_prompt="نفذ المهمة بالعربية اعتماداً على المحتوى فقط. أجب باختصار ولا تختلق معلومات.")
+            candidate = str(getattr(generated, "text", "") or "").strip()
+            if candidate and not getattr(generated, "error", None): result, score = candidate[:5000], min(100, score + 20)
+        except Exception:
+            pass
+        from ai.telemetry_store import TelemetryStore
+        task_id = TelemetryStore().record_web_task(agent=agent, task=task, url=url, status="completed", score=score, result=result, sources=[url])
+        return {"task_id": task_id, "status": "completed", "score": score, "result": result, "sources": [url]}
+    except Exception as exc:
+        return JSONResponse(status_code=502, content={"error": "تعذر الوصول إلى الصفحة العامة", "detail": type(exc).__name__})
+
+@app.get("/api/agent/tasks/{task_id}")
+async def get_agent_task(task_id: int, request: Request):
+    if not _task_auth(request):
+        return JSONResponse(status_code=403, content={"error": "مفتاح x-api-key غير مطابق — اضبط NSM_ADMIN_KEY و/أو NSM_API_KEY بنفس القيمة في Vercel ثم Redeploy"})
+    from ai.telemetry_store import TelemetryStore
+    rows = TelemetryStore().list_web_tasks(limit=200)
+    row = next((item for item in rows if item["id"] == task_id), None)
+    if not row: return JSONResponse(status_code=404, content={"error": "المهمة غير موجودة"})
+    return row
+
 @app.get("/")
 async def root():
     return {"status": "ok", "service": "Neural Service Mesh API", "version": "1.0.0"}
 
 
 @app.get("/health")
+@app.get("/healthz")
 async def health():
     return {
         "status": "healthy",
@@ -66,10 +161,8 @@ async def process(payload: dict, request: Request):
     عملياً (Engine() تحتاج registry/graph/storage غير مُمرَّرة هنا)،
     لكن الحماية أُضيفت استباقياً حتى لا يصير باباً مفتوحاً بلا مصادقة
     بمجرد ما يُكمَّل ربطه مستقبلاً."""
-    configured_key = os.environ.get("NSM_API_KEY", "").strip()
-    provided_key = request.headers.get("x-api-key", "")
-    if not configured_key or not hmac.compare_digest(provided_key, configured_key):
-        return JSONResponse(status_code=403, content={"error": "X-API-Key غير مطابق أو NSM_API_KEY غير مضبوط"})
+    if not _matches_env_secrets(_header_api_key(request), "NSM_API_KEY", "NSM_ADMIN_KEY"):
+        return JSONResponse(status_code=403, content={"error": "X-API-Key غير مطابق أو NSM_API_KEY/NSM_ADMIN_KEY غير مضبوط"})
 
     if not _CORE_OK:
         return JSONResponse(
@@ -119,6 +212,54 @@ async def telegram_webhook(secret: str, request: Request):
         return JSONResponse(status_code=200, content={"status": "ok", "warning": str(e)})
 
     return {"status": "ok"}
+
+
+@app.post("/api/voice/incoming", response_class=PlainTextResponse)
+async def voice_incoming(request: Request):
+    """Webhook Twilio تجريبي: يرد بتحية عربية ويجمع كلام المتصل."""
+    twiml = """<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Gather input="speech" language="ar-SA" action="/api/voice/respond" method="POST" speechTimeout="auto">
+    <Say language="ar-SA" voice="Polly.Zeina">مرحباً، أنا وكيلك الذكي. كيف يمكنني مساعدتك؟</Say>
+  </Gather>
+  <Say language="ar-SA" voice="Polly.Zeina">لم أسمع شيئاً. إلى اللقاء.</Say>
+</Response>"""
+    return PlainTextResponse(twiml, media_type="application/xml")
+
+
+@app.post("/api/voice/respond", response_class=PlainTextResponse)
+async def voice_respond(request: Request):
+    """يحوّل SpeechResult من Twilio إلى رد عربي قصير عبر LLMFallback."""
+    raw = await request.body()
+    values = parse_qs(raw.decode("utf-8", errors="replace"))
+    spoken = (values.get("SpeechResult", [""])[0] or "").strip()[:1200]
+    reply = "لم أسمع سؤالك بوضوح. هل يمكنك تكراره من فضلك؟"
+    if spoken:
+        try:
+            from ai.llm_fallback import LLMFallback
+            result = LLMFallback(max_tokens=180, temperature=0.2).generate(
+                spoken, history=[],
+                system_prompt="أجب بالعربية الفصحى بجملة أو جملتين قصيرتين مناسبتين لمكالمة هاتفية. لا تستخدم Markdown ولا تذكر تفاصيل تقنية."
+            )
+            candidate = str(getattr(result, "text", "") or "").strip()
+            if candidate and not getattr(result, "error", None): reply = candidate[:900]
+        except Exception:
+            pass
+    safe_reply = xml_escape(reply, quote=False)
+    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say language="ar-SA" voice="Polly.Zeina">{safe_reply}</Say>
+  <Gather input="speech" language="ar-SA" action="/api/voice/respond" method="POST" speechTimeout="auto">
+    <Say language="ar-SA" voice="Polly.Zeina">هل لديك سؤال آخر؟</Say>
+  </Gather>
+  <Hangup />
+</Response>"""
+    return PlainTextResponse(twiml, media_type="application/xml")
+
+
+@app.get("/api/voice/health")
+async def voice_health():
+    return {"ok": True, "provider": "twilio", "mode": "demo", "language": "ar-SA", "configured": False}
 
 
 @app.get("/webhook/whatsapp")
@@ -348,18 +489,38 @@ def aiaas_invoice(tenant_id: str):
 
 # ── نقاط لوحة السرب والوكلاء (NSM Agent / Swarm API) ─────────────
 def _nsm_key_check(request: Request):
-    """فحص fail-closed لمفتاح NSM_API_KEY عبر X-API-Key — نفس نمط /process:
-    لو المفتاح غير مضبوط بالبيئة تُرفض كل النقاط بـ403 بدل أن تبقى
-    مفتوحة بلا مصادقة."""
-    configured_key = os.environ.get("NSM_API_KEY", "").strip()
-    provided_key = request.headers.get("x-api-key", "")
-    if not configured_key or not hmac.compare_digest(provided_key,
-                                                      configured_key):
+    """فحص fail-closed لـ NSM_API_KEY (مع قبول NSM_ADMIN_KEY إن طابق — نفس توصية Vercel).
+
+    لو لم يُضبط أي من المفتاحين أو لم يطابق المُرسل → 403.
+    """
+    provided = _header_api_key(request)
+    if not _matches_env_secrets(provided, "NSM_API_KEY", "NSM_ADMIN_KEY"):
         return JSONResponse(
             status_code=403,
-            content={"error": "X-API-Key غير مطابق أو NSM_API_KEY غير مضبوط"},
+            content={"error": "X-API-Key غير مطابق أو NSM_API_KEY/NSM_ADMIN_KEY غير مضبوط"},
         )
     return None
+
+
+@app.post("/agents/chat")
+async def agents_chat(payload: dict, request: Request):
+    """واجهة محادثة موحدة للوكلاء مع دعم النموذج المفتوح المصدر القابل للتبديل."""
+    auth = _nsm_key_check(request)
+    if auth is not None:
+        return auth
+    text = str(payload.get("message") or payload.get("prompt") or "").strip()
+    if not text:
+        return JSONResponse({"ok": False, "error": "message required"}, status_code=400)
+    if len(text) > 12000:
+        return JSONResponse({"ok": False, "error": "message too long"}, status_code=413)
+    try:
+        from nsm_chat_plus import NSMChatPlus
+        bot = NSMChatPlus()
+        answer = bot.chat(text)
+        return {"ok": True, "answer": answer, "metadata": bot.last_metadata,
+                "model": bot.fallback.info()}
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)[:300]}, status_code=500)
 
 
 @app.get("/agents/states")
@@ -961,11 +1122,6 @@ async def services_memory(request: Request):
         return JSONResponse({"ok": False, "error": str(e)},
                             status_code=500)
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("api_server:app", host="0.0.0.0", port=5000, reload=True)
-
-
 @app.post("/billing/checkout")
 async def billing_checkout(request: Request):
     try:
@@ -995,3 +1151,8 @@ def gtm_status():
         "mcp_server": _P("mcp_server/server.py").is_file(),
         "social_daemon": _P("scripts/social_swarm_daemon.py").is_file(),
     }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("api_server:app", host="0.0.0.0", port=int(os.environ.get("PORT", "5000")))

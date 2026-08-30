@@ -600,12 +600,65 @@ def list_experiences(limit: int = 12) -> str:
     return "\n".join(lines)
 
 
-def develop_agent_once() -> str:
-    """دورة نمو افتراضية: فحص + تكامل + اختبارات آمنة."""
-    return run_safe_mission(
-        "طوّر الوكيل: افحص المشروع وحالة التكامل وشغّل اختبارات آمنة",
-        execute=True,
+_APPROVAL_PATH = GROWTH_DIR / "pending_approval.json"
+_APPROVAL_TTL_SECONDS = 24 * 60 * 60
+
+
+def _redact_sensitive(text: str) -> str:
+    """تنقيح الأسرار من المقترح قبل حفظه أو عرضه."""
+    patterns = (
+        r"(?i)(api[_-]?key|token|password|secret|authorization)\s*[:=]\s*[^\s,;]+",
+        r"gh[pousr]_[A-Za-z0-9_]+",
+        r"sk-[A-Za-z0-9_-]+",
     )
+    for pattern in patterns:
+        text = re.sub(pattern, "[REDACTED]", text)
+    return text
+
+
+def propose_self_improvement() -> str:
+    """ينشئ اقتراحاً فقط؛ لا يكتب كوداً ولا ينفذ Git."""
+    plan = decompose_goal("طوّر الوكيل: افحص المشروع وحالة التكامل وشغّل اختبارات آمنة")
+    proposal = {
+        "created_at": time.time(),
+        "status": "pending",
+        "goal": _redact_sensitive(plan["goal"]),
+        "steps": plan["steps"],
+        "tools": plan["tools"],
+        "policy": "يتطلب موافقة بشرية صريحة قبل أي patch أو commit أو push",
+    }
+    _ensure_dirs()
+    _APPROVAL_PATH.write_text(json.dumps(proposal, ensure_ascii=False, indent=2), encoding="utf-8")
+    return (
+        "## اقتراح تحسين ذاتي بانتظار الموافقة\n\n"
+        "تم إنشاء اقتراح آمن ولم يتم تعديل الكود أو رفع أي شيء.\n"
+        f"- الأدوات: {', '.join(f'`{t}`' for t in proposal['tools'])}\n"
+        "- الحالة: `pending`\n\n"
+        "للموافقة الصريحة استخدم: `وافق على تحسين الوكيل`"
+    )
+
+
+def approve_self_improvement() -> str:
+    """لا ينفذ التعديل تلقائياً؛ يغير الحالة فقط ويترك التطبيق للمشغّل."""
+    if not _APPROVAL_PATH.is_file():
+        return "لا يوجد اقتراح تحسين معلّق. استخدم: `طوّر الوكيل`"
+    try:
+        proposal = json.loads(_APPROVAL_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return "تعذر قراءة اقتراح التحسين؛ أُوقف التنفيذ حفاظاً على السلامة."
+    if time.time() - float(proposal.get("created_at", 0)) > _APPROVAL_TTL_SECONDS:
+        return "انتهت صلاحية اقتراح التحسين؛ أنشئ اقتراحاً جديداً قبل الموافقة."
+    if proposal.get("status") != "pending":
+        return f"لا يوجد اقتراح معلّق (الحالة: {proposal.get('status', 'unknown')})."
+    proposal["status"] = "approved"
+    proposal["approved_at"] = time.time()
+    _APPROVAL_PATH.write_text(json.dumps(proposal, ensure_ascii=False, indent=2), encoding="utf-8")
+    return "تم تسجيل الموافقة فقط. لم يُعدّل الكود ولم يُنفّذ commit أو push تلقائياً."
+
+
+def develop_agent_once() -> str:
+    """دورة نمو افتراضية آمنة: اقتراح فقط، ثم موافقة بشرية منفصلة."""
+    return propose_self_improvement()
 
 
 def handle_growth_command(user_input: str) -> Optional[str]:
@@ -618,6 +671,9 @@ def handle_growth_command(user_input: str) -> Optional[str]:
 
     if re.search(r"(خبرات\s*الوكيل|experiences\s*agent|ذاكرة\s*الوكيل)", text, re.I):
         return list_experiences()
+
+    if re.search(r"وافق\s+على\s+تحسين\s*الوكيل|approve\s+self.?improvement", text, re.I):
+        return approve_self_improvement()
 
     if re.search(r"(^| )طو[ّ]?ر\s*الوكيل|develop\s*agent|growth\s*cycle", text, re.I):
         return develop_agent_once()

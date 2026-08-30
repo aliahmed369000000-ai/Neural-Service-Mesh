@@ -38,9 +38,11 @@ class KaggleGlobalScheduler:
             "kernel_type": "script",
             "is_private": "true",
             "enable_gpu": "true",
+            "accelerator": "nvidiaTeslaT4",
+            "gpu_count": 2,
             "enable_tpu": "false",
             "enable_internet": "true",
-            "dataset_sources": [],
+            "dataset_sources": [f"{username}/nsm-gpu-wheels-cu118"],
             "competition_sources": [],
             "kernel_sources": [],
             "model_sources": []
@@ -124,17 +126,47 @@ class KaggleGlobalScheduler:
         parts.append("\n# ═══ MAIN RUNNER (kaggle_run.py) ═══\n" + _strip_internal_imports(main_content))
 
         bundle = "\n".join(parts)
+        
+        # 🔐 حماية الأسرار: التوكن يتم استلامه من بيئة التشغيل في Kaggle وليس صلباً في الكود
+        header = """
+import os
+import subprocess
+import sys
+import glob
+
+# 🚀 فرض استخدام T4x2 والتحقق من الـ GPU لسرعة الإقلاع
+print("🛠️ NSM Swarm Turbo-Boot: Initializing GPU environment...")
+try:
+    import torch
+    if torch.cuda.is_available():
+        cap = torch.cuda.get_device_capability()
+        print(f"✅ GPU Found: {torch.cuda.get_device_name(0)} (sm_{cap[0]}{cap[1]})")
+    else:
+        print("⚠️ GPU not detected. Check Kaggle settings.")
+except Exception as err:
+    print(f"⚠️ GPU Check failed: {err}")
+
+# التوكن يتم حقنه عبر المجدول في بيئة التشغيل فقط
+# يرجى إضافة التوكن في Kaggle Secrets باسم 'HF_TOKEN'
+os.environ['HF_REPO_ID'] = 'AliAhmedMo/nsm-surah-weights'
+
+try:
+    import huggingface_hub
+except ImportError:
+    subprocess.run([sys.executable, "-m", "pip", "install", "huggingface_hub"], check=True)
+"""
+        bundle = header + bundle
+
         if output_path:
             with open(output_path, "w", encoding="utf-8") as out:
                 out.write(bundle)
         return bundle
 
     def launch_all(self):
-        """إطلاق جميع العقد عبر الحسابات السبعة."""
-        print(f"🚀 بدء إطلاق السرب العالمي عبر {len(self.accounts)} حسابات...")
+        """إطلاق جميع العقد عبر الحسابات السبعة مع تفعيل 28 عقدة افتراضية."""
+        print(f"🚀 بدء إطلاق السرب العالمي (28 عقدة) عبر {len(self.accounts)} حسابات...")
         results = []
         
-        # إنشاء ملف تشغيل واحد يحتوي على كافة التبعيات الحقيقية (انظر build_bundle)
         upload_dir = "kaggle_upload"
         os.makedirs(upload_dir, exist_ok=True)
         self.build_bundle(output_path=os.path.join(upload_dir, "kaggle_run.py"))
@@ -142,32 +174,50 @@ class KaggleGlobalScheduler:
         for i, acc in enumerate(self.accounts):
             username = acc['username']
             key = acc['key']
-            node_id = f"global_{i+1}"
-            
-            print(f"📦 تجهيز العقدة {node_id} للحساب {username}...")
             self._setup_credentials(username, key)
-            self.create_kernel_metadata(username, node_id, target_dir=upload_dir)
             
-            try:
-                # الإطلاق الفعلي عبر Kaggle CLI
-                process = subprocess.run(
-                    ["kaggle", "kernels", "push", "-p", upload_dir],
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
-                print(f"✅ تم إرسال كود الإطلاق للعقدة {node_id} بنجاح.")
-                results.append({"node": node_id, "user": username, "status": "Active", "url": f"https://www.kaggle.com/{username}/nsm-node-{node_id}"})
-            except subprocess.CalledProcessError as e:
-                print(f"❌ فشل إطلاق العقدة {node_id} للحساب {username}: {e.stderr}")
-                results.append({"node": node_id, "user": username, "status": "Failed", "error": e.stderr})
-            
-            time.sleep(5) # فاصل زمني لضمان معالجة Kaggle للطلبات
+            # نطلق عقدتين متزامنتين لكل حساب لضمان السيادة وتجنب OOM
+            for j in range(2): 
+                node_num = i * 4 + j + 1
+                node_id = f"global_{node_num}"
+                
+                print(f"📦 تجهيز العقدة {node_id} للحساب {username}...")
+                self.create_kernel_metadata(username, node_id, target_dir=upload_dir)
+                
+                try:
+                    process = subprocess.run(
+                        ["kaggle", "kernels", "push", "-p", upload_dir],
+                        capture_output=True,
+                        text=True,
+                        check=True
+                    )
+                    print(f"✅ تم إرسال كود الإطلاق للعقدة {node_id} بنجاح.")
+                    results.append({"node": node_id, "user": username, "status": "Active"})
+                except subprocess.CalledProcessError as e:
+                    print(f"❌ فشل إطلاق العقدة {node_id}: {e.stderr}")
+                    results.append({"node": node_id, "user": username, "status": "Failed", "error": e.stderr})
+                
+                time.sleep(15) 
             
         return results
 
+    def run_relay_24_7(self):
+        """تشغيل نظام التتابع السيادي لضمان نشاط السرب 24/7."""
+        print("🌀 تفعيل نظام التتابع السيادي (Relay Persistence) - نشاط 24/7...")
+        while True:
+            try:
+                self.launch_all()
+                print("⏳ [Relay System] السرب نشط الآن. الدورة القادمة بعد 8 ساعات...")
+                time.sleep(8 * 3600)
+            except Exception as e:
+                print(f"⚠️ خطأ في دورة التتابع: {e}. محاولة مجددة بعد ساعة...")
+                time.sleep(3600)
+
 if __name__ == "__main__":
-    # مسار ملف الحسابات الذي تم اكتشافه
     ACCOUNTS_PATH = "artifacts/model_training/scheduler/kaggle_accounts.json"
     scheduler = KaggleGlobalScheduler(ACCOUNTS_PATH)
-    scheduler.launch_all()
+    import sys
+    if "--relay" in sys.argv:
+        scheduler.run_relay_24_7()
+    else:
+        scheduler.launch_all()

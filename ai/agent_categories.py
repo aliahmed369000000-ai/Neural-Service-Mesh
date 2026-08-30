@@ -43,10 +43,24 @@ except Exception:
 # المُستخدَمة أصلاً في nsm_agent_core.py وcode_agent.py، بدون أي تكرار.
 try:
     from ai.web_search_tool import web_search as _web_search
+    from ai.web_search_tool import web_search_structured as _web_search_structured
     _WEB_SEARCH_OK = True
 except Exception:
     _web_search = None
+    _web_search_structured = None
     _WEB_SEARCH_OK = False
+
+# بروتوكولات تشغيل مشتركة للوكلاء الثلاثة المطوّرة: البحث والبرمجة والصيانة.
+try:
+    from ai.specialist_runtime import (
+        format_research_context as _format_research_context,
+        get_specialist_protocol as _get_specialist_protocol,
+    )
+    _SPECIALIST_RUNTIME_OK = True
+except Exception:
+    _format_research_context = None
+    _get_specialist_protocol = None
+    _SPECIALIST_RUNTIME_OK = False
 
 # محاولة استيراد أوامر Code Agent الحقيقية (افحص/قائمة/اقترح/ملخص/صحح/عدل/أنشئ/ارفع)
 # نفس الدوال المُستخدَمة أصلاً في تبويب "المحادثة" — بدون أي تغيير عليها.
@@ -641,10 +655,21 @@ class CategoryAgentChat:
         # من الواجهة (تفعيل/تعطيل لكل سؤال بغض النظر عن الفئة).
         use_web = getattr(self.category, "web_enabled", False) if force_web is None else force_web
         sp = self.category.system_prompt
+        if _SPECIALIST_RUNTIME_OK and _get_specialist_protocol is not None:
+            protocol = _get_specialist_protocol(self.category.key)
+            if protocol:
+                sp = sp + "\n\n" + protocol
         searched = False
         if use_web and _WEB_SEARCH_OK:
             try:
-                web_results = _web_search(user_input.strip(), max_results=5)
+                if _web_search_structured is not None:
+                    _records = _web_search_structured(user_input.strip(), max_results=5)
+                    web_results = (
+                        _format_research_context(_records, max_results=5)
+                        if _format_research_context is not None else ""
+                    )
+                else:
+                    web_results = _web_search(user_input.strip(), max_results=5)
             except Exception as _web_err:
                 web_results = f"❌ تعذّر البحث: {_web_err}"
             if web_results and not web_results.startswith("❌"):

@@ -9,8 +9,18 @@ import streamlit as st
 
 _DESIGN_CSS = r"""
 <style>
+@font-face {
+  font-family: 'NSM Arabic';
+  src: url('/app/static/assets/fonts/NotoNaskhArabic-Regular.ttf') format('truetype');
+  font-display: swap;
+}
 :root {
   --nsm-indigo: #6d5dfc;
+}
+html, body, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], button, input, textarea, select {
+  font-family: 'NSM Arabic', 'Noto Naskh Arabic', 'Tahoma', sans-serif !important;
+}
+:root {
   --nsm-cyan: #2dd4bf;
   --nsm-amber: #f6c453;
   --nsm-danger: #fb7185;
@@ -75,9 +85,16 @@ _DESIGN_CSS = r"""
 .main .block-container { max-width:1440px; padding-top:1.25rem; padding-bottom:2.2rem; }
 .stTabs [data-baseweb="tab-list"] { overflow-x:auto !important; scrollbar-width:thin; }
 .stTabs [data-baseweb="tab"]:focus-visible, .stButton>button:focus-visible, input:focus-visible, textarea:focus-visible { outline:2px solid var(--nsm-cyan) !important; outline-offset:2px; }
-.stButton>button { min-height:2.45rem; font-weight:750 !important; transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease !important; }
-.stButton>button:hover { transform:translateY(-1px); box-shadow:0 8px 20px rgba(0,0,0,.12) !important; }
-[data-testid="stTextInput"] input, [data-testid="stTextArea"] textarea { border-radius:12px !important; }
+.stButton>button { min-height:2.55rem; border:1px solid rgba(124,92,252,.28) !important; border-radius:12px !important; font-weight:750 !important; background:linear-gradient(135deg,rgba(124,92,252,.16),rgba(45,212,191,.10)) !important; color:var(--text) !important; transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease !important; }
+.stButton>button:hover { transform:translateY(-1px); border-color:rgba(45,212,191,.62) !important; box-shadow:0 8px 20px rgba(45,212,191,.12) !important; }
+.stButton>button[kind="primary"] { background:linear-gradient(135deg,#7c5cfc,#2dd4bf) !important; color:#071018 !important; border-color:transparent !important; }
+[data-testid="stTextInput"] input, [data-testid="stTextArea"] textarea { border-radius:12px !important; border-color:rgba(124,92,252,.28) !important; background:rgba(15,23,42,.56) !important; }
+[data-testid="stTextInput"] input:focus, [data-testid="stTextArea"] textarea:focus { border-color:#2dd4bf !important; box-shadow:0 0 0 3px rgba(45,212,191,.12) !important; }
+[data-testid="stSidebar"] { border-left:1px solid rgba(148,163,184,.14); background:linear-gradient(180deg,#101827 0%,#0a0e17 100%); }
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] { direction:rtl; }
+.stExpander { border:1px solid var(--nsm-line) !important; border-radius:15px !important; background:rgba(255,255,255,.025) !important; }
+.stAlert { border-radius:14px !important; }
+.stDataFrame, [data-testid="stMetric"] { border-radius:14px; }
 @media (max-width:640px) {
   .nsm-status-bar { align-items:flex-start; flex-direction:column; gap:.4rem; }
   .nsm-status-divider { display:none; }

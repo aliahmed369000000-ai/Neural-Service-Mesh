@@ -19,7 +19,9 @@ class UnifiedMemoryManager:
         self.sharding = ShardingEngine(self.base_dir, num_shards=num_shards)
         
         self.index_path = self.base_dir / "unified_ann_index.json"
-        self._load_initial_state()
+        self._index_built = False
+        # لا نقوم بالتحميل الكامل عند التهيئ (Lazy Loading) لتقليل زمن البدء
+        # self._load_initial_state() سيعمل عند أول طلب بحث أو إضافة
 
     def _load_initial_state(self):
         """تحميل الفهرس الحالي من ملفات التخزين."""
@@ -38,10 +40,14 @@ class UnifiedMemoryManager:
 
     def store_experience(self, experience: Dict[str, Any], embedding: Optional[List[float]] = None):
         """
-        تخزين خبرة جديدة في الذاكرة الموحدة.
+        تخزين خبرة جديدة في الذاكرة الموحدة مع ضمان اتساق الفهرس.
         1. حفظ في Sharding للتخزين الدائم.
         2. إضافة للفهرس ANN للبحث السريع.
         """
+        if not self._index_built:
+            self._load_initial_state()
+            self._index_built = True
+
         if "id" not in experience:
             import uuid
             experience["id"] = str(uuid.uuid4())
@@ -63,7 +69,11 @@ class UnifiedMemoryManager:
         return experience["id"], shard_idx
 
     def semantic_search(self, query_vector: List[float], top_k: int = 5) -> List[Dict[str, Any]]:
-        """البحث الدلالي السريع باستخدام ANN."""
+        """البحث الدلالي السريع باستخدام ANN مع ضمان تحميل الفهرس."""
+        if not self._index_built:
+            self._load_initial_state()
+            self._index_built = True
+            
         vector = np.array(query_vector)
         results = self.ann.search(vector, top_k=top_k)
         # إرجاع الميتا بيانات فقط (الخبرات)

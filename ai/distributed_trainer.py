@@ -47,17 +47,17 @@ class NSMDistributedTrainer:
     def _default_config(self):
         """إعدادات DeepSpeed ZeRO-3 للتحسين الهجومي (Aggressive Optimization) لـ 7 بطاقات GPU."""
         return {
-            "train_batch_size": 128,
-            "train_micro_batch_size_per_gpu": 16,
+            "train_batch_size": 256,
+            "train_micro_batch_size_per_gpu": 32,
             "gradient_accumulation_steps": 1,
             "steps_per_print": 1,
             "optimizer": {
                 "type": "Adam",
                 "params": {
-                    "lr": 1e-4,
-                    "betas": [0.9, 0.95],
+                    "lr": 2e-4,
+                    "betas": [0.9, 0.98],
                     "eps": 1e-8,
-                    "weight_decay": 1e-6
+                    "weight_decay": 1e-5
                 }
             },
             "zero_optimization": {
@@ -103,11 +103,20 @@ class NSMDistributedTrainer:
         else:
             # التراجع إلى DDP التقليدي أو التدريب المحلي
             if torch.cuda.is_available():
-                if not dist.is_initialized():
-                    dist.init_process_group(backend="nccl")
-                torch.cuda.set_device(self.local_rank)
-                self.model = self.model.to(self.local_rank)
-                self.model = DDP(self.model, device_ids=[self.local_rank])
+                if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
+                    try:
+                        if not dist.is_initialized():
+                            dist.init_process_group(backend="nccl")
+                        torch.cuda.set_device(self.local_rank)
+                        self.model = self.model.to(self.local_rank)
+                        self.model = DDP(self.model, device_ids=[self.local_rank])
+                        print("✅ DDP Initialized successfully.")
+                    except Exception as e:
+                        print(f"⚠️ DDP Init failed: {e}. Falling back to single-node mode.")
+                        self.model = self.model.cuda()
+                else:
+                    print("ℹ️ Standalone mode: RANK/WORLD_SIZE not set. Using local GPU.")
+                    self.model = self.model.cuda()
             else:
                 print("⚠️ Running in Local CPU mode (No CUDA detected).")
                 self.model = self.model.to("cpu")
@@ -120,7 +129,7 @@ class NSMDistributedTrainer:
         
         if deepspeed:
             outputs = self.model_engine(inputs)
-            loss = torch.nn.functional.cross_entropy(outputs, labels)
+            loss = torch.nn.functional.cross_entropy(outputs.view(-1, outputs.size(-1)), labels.view(-1))
             self.model_engine.backward(loss)
             
             # تبادل التدرجات عبر الشبكة العالمية قبل تحديث الأوزان
@@ -130,11 +139,26 @@ class NSMDistributedTrainer:
             self.model_engine.step()
         else:
             device = self.local_rank if torch.cuda.is_available() else "cpu"
-            inputs, labels = inputs.to(device), labels.to(device)
-            self.optimizer.zero_grad()
-            outputs = self.model(inputs)
-            loss = torch.nn.functional.cross_entropy(outputs, labels)
-            loss.backward()
+            try:
+                inputs, labels = inputs.to(device), labels.to(device)
+                self.optimizer.zero_grad()
+                outputs = self.model(inputs)
+                loss = torch.nn.functional.cross_entropy(outputs.view(-1, outputs.size(-1)), labels.view(-1))
+                loss.backward()
+            except RuntimeError as e:
+                if "no kernel image is available" in str(e) or "CUDA error" in str(e) or "Expected all tensors to be on the same device" in str(e):
+                    print(f"⚠️ Device/CUDA Error detected: {e}. Switching to CPU for stable training.")
+                    device = "cpu"
+                    self.model = self.model.to(device)
+                    # إعادة تهيئة المحسن ليعمل على CPU لأن المحسن القديم قد يحتوي على حالات GPU
+                    self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-4)
+                    inputs, labels = inputs.to(device), labels.to(device)
+                    self.optimizer.zero_grad()
+                    outputs = self.model(inputs)
+                    loss = torch.nn.functional.cross_entropy(outputs.view(-1, outputs.size(-1)), labels.view(-1))
+                    loss.backward()
+                else:
+                    raise e
             
             # تبادل التدرجات عبر الشبكة العالمية
             if step_idx % 5 == 0:
@@ -164,16 +188,61 @@ class NSMDistributedTrainer:
                 print(f"✨ Evolutionary Patch Proposed: {p['type']}")
 
     def save_checkpoint(self, tag):
-        """حفظ الأوزان الموزعة وتأمينها في مسار Kaggle."""
+        """حفظ الأوزان الموزعة وتأمينها في مسار Kaggle ورفعها إلى Hugging Face."""
         if self.local_rank == 0:
             save_path = os.path.join(self.checkpoint_dir, tag)
-            if deepspeed:
-                self.model_engine.save_checkpoint(self.checkpoint_dir, tag=tag)
-                # ملاحظة: DeepSpeed يحفظ عدة ملفات، التشفير يحتاج معالجة خاصة للمجلد
+            try:
+                if deepspeed:
+                    self.model_engine.save_checkpoint(self.checkpoint_dir, tag=tag)
+                else:
+                    torch.save(self.model.state_dict(), save_path)
+                    self.security.encrypt_weights(save_path)
+                
+                print(f"💾 Checkpoint '{tag}' saved locally at {self.checkpoint_dir}")
+                
+                # الرفع التلقائي إلى Hugging Face
+                self._upload_to_hf(save_path, tag)
+            except Exception as e:
+                print(f"❌ Error during checkpoint saving: {e}")
+
+    def _upload_to_hf(self, file_path, tag):
+        """رفع الأوزان إلى Hugging Face Hub باستخدام HfApi."""
+        hf_token = os.environ.get("HF_TOKEN")
+        repo_id = os.environ.get("HF_REPO_ID", "AliAhmedMo/nsm-surah-weights")
+        
+        if not hf_token:
+            print("⚠️ HF_TOKEN not found. Skipping Hugging Face upload.")
+            return
+
+        try:
+            from huggingface_hub import HfApi
+            api = HfApi()
+            
+            # التأكد من وجود المستودع
+            api.create_repo(repo_id=repo_id, token=hf_token, repo_type="model", exist_ok=True)
+            
+            print(f"☁️ Uploading checkpoint '{tag}' to Hugging Face: {repo_id}...")
+            
+            # الرفع (إذا كان مجلداً مثل DeepSpeed أو ملفاً واحداً)
+            if os.path.isdir(file_path):
+                api.upload_folder(
+                    folder_path=file_path,
+                    repo_id=repo_id,
+                    path_in_repo=f"checkpoints/{tag}",
+                    token=hf_token
+                )
             else:
-                torch.save(self.model.state_dict(), save_path)
-                self.security.encrypt_weights(save_path)
-            print(f"💾 Checkpoint '{tag}' saved and secured at {self.checkpoint_dir}")
+                api.upload_file(
+                    path_or_fileobj=file_path,
+                    path_in_repo=f"checkpoints/{tag}",
+                    repo_id=repo_id,
+                    token=hf_token
+                )
+            print(f"✅ Successfully uploaded '{tag}' to Hugging Face.")
+        except ImportError:
+            print("⚠️ huggingface_hub not installed. Run: pip install huggingface_hub")
+        except Exception as e:
+            print(f"❌ Failed to upload to Hugging Face: {e}")
 
 if __name__ == "__main__":
     # مثال توضيحي للتشغيل في Kaggle

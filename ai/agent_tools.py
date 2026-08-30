@@ -270,6 +270,8 @@ def system_info() -> Dict[str, Any]:
             "GITHUB_TOKEN": bool(os.environ.get("GITHUB_TOKEN") or os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")),
             "GOOGLE_API_KEY": bool(os.environ.get("GOOGLE_API_KEY")),
             "GROQ_API_KEY": bool(os.environ.get("GROQ_API_KEY")),
+            "NSM_OPENAI_COMPAT_KEY": bool(os.environ.get("NSM_OPENAI_COMPAT_KEY")),
+            "NSM_OPEN_SOURCE_MODEL": bool(os.environ.get("NSM_OPEN_SOURCE_MODEL")),
         },
     }
 
@@ -284,33 +286,13 @@ _SAFE_CMD_PREFIXES = (
 
 
 def run_safe_cmd(cmd: str, timeout: int = 180) -> Dict[str, Any]:
-    """تشغيل أوامر قراءة/فحص آمنة فقط (لا حذف ولا شبكة حرة ولا sudo)."""
-    c = (cmd or "").strip()
-    if not c:
-        return {"ok": False, "msg": "أمر فارغ"}
-    low = c.lower()
-    forbidden = [
-        "rm ", "rm\t", "sudo", "chmod", "chown", "mkfs", "dd ",
-        ">", ">>", "|", ";", "&&", "$(", "`", "curl ", "wget ",
-        "ssh ", "scp ", "nc ", "ncat", "python -c", "eval",
-        "os.system", "shutdown", "reboot", "kill ", "pkill",
-    ]
-    # سماح محدود بـ python -m py_compile و pytest
-    if low.startswith("python -m py_compile") or low.startswith("python3 -m py_compile"):
-        pass
-    elif low.startswith("python -m pytest") or low.startswith("python3 -m pytest"):
-        pass
-    else:
-        for bad in forbidden:
-            if bad in low:
-                return {"ok": False, "msg": f"أمر مرفوض لأسباب أمان: يحتوي على «{bad.strip()}»"}
-        if not any(low.startswith(p.strip()) or low == p.strip() for p in _SAFE_CMD_PREFIXES):
-            return {
-                "ok": False,
-                "msg": "الأمر غير ضمن القائمة الآمنة. المسموح: python/pytest/git status|log|diff|lfs، ls، grep، head، …",
-            }
-    code, out = _run(["bash", "-lc", c], timeout=timeout)
-    return {"ok": code == 0, "cmd": c, "exit_code": code, "output": out or "(لا مخرجات)"}
+    """تشغيل فحوصات الطرفية عبر allowlist وبلا shell."""
+    from ai.terminal_auto_policy import decide, run_auto
+    decision = decide(cmd)
+    if not decision.allowed:
+        return {"ok": False, "cmd": cmd, "msg": decision.reason, "automatic": False, "requires_approval": True}
+    output = run_auto(cmd, cwd=str(ROOT), timeout=timeout)
+    return {"ok": output.startswith("exit=0"), "cmd": list(decision.command), "output": output, "automatic": True}
 
 
 def format_tool_result(title: str, data: Dict[str, Any]) -> str:
@@ -367,6 +349,15 @@ def handle_tool_command(user_input: str) -> Optional[str]:
     if m:
         return format_tool_result("🌐 جلب صفحة", fetch_url(m.group(2).strip()))
 
+    # فحص منصة عامة — قراءة فقط مع حماية SSRF
+    m = re.match(r"^(افحص\s*منصة|inspect\s*platform|scan\s*site)\s+(\S+)$", t, re.I)
+    if m:
+        try:
+            from ai.platform_inspector import inspect_platform
+            return format_tool_result("🌐 فحص منصة آمن", inspect_platform(m.group(2).strip()))
+        except Exception as e:
+            return format_tool_result("🌐 فحص منصة آمن", {"ok": False, "error": str(e)[:240]})
+
     # معلومات النظام
     if re.match(r"^(معلومات\s*النظام|system\s*info|بيئة)$", t, re.I):
         return format_tool_result("🖥️ معلومات النظام", system_info())
@@ -385,7 +376,7 @@ def handle_tool_command(user_input: str) -> Optional[str]:
             "| `أوجد *.py` | إيجاد ملفات |\n"
             "| `حالة git` / `سجل git` / `فرق git` | معلومات Git |\n"
             "| `تحقق path.py` | py_compile + ast |\n"
-            "| `افتح رابط https://...` | جلب نص صفحة |\n"
+            "| `افتح رابط https://...` | جلب نص صفحة |\n"            "| `افحص منصة https://...` | تحليل صفحة عامة وheaders وروابط، قراءة فقط |\n"
             "| `معلومات النظام` | بيئة التشغيل |\n"
             "| `نفّذ <أمر آمن>` | bash محدود |\n"
             "| `حالة lfs` / `اسحب lfs` | Git LFS |\n"

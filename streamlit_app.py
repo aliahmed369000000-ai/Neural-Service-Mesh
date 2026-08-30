@@ -1,4 +1,5 @@
 """
+# -*- coding: utf-8 -*-
 Neural Service Mesh — واجهة المستخدم المعرفية
 ================================================
 Streamlit front-end لمشروع النظام المعرفي العربي.
@@ -96,6 +97,8 @@ def _render_agent_page(*a, **kw):
 render_system_core = _lazy_page("ui_pages.system_core", "render_system_core")
 render_agent_orchestrator = _lazy_page("ui_pages.agent_orchestrator", "render_agent_orchestrator")
 render_agent_monitor = _lazy_page("ui_pages.agent_monitor", "render_agent_monitor")
+render_agent_settings = _lazy_page("ui_pages.agent_settings", "render_agent_settings")
+render_agent_profiles = _lazy_page("ui_pages.agent_profiles", "render_agent_profiles")
 render_swarm_studio = _lazy_page("ui_pages.swarm_studio", "render_swarm_studio")
 render_unified_swarm_dashboard = _lazy_page("ui_pages.unified_swarm_dashboard", "render_unified_swarm_dashboard")
 render_backend_data_panel = _lazy_page("ui_pages.backend_data_panel", "render_backend_data_panel")
@@ -118,7 +121,7 @@ def render_agents_group():
         unsafe_allow_html=True,
     )
     st.caption("الوكيل الموحّد للمحادثة اليومية · وكلاء متخصصون · منسّق · سرب")
-    sub = st.tabs(["🎯 الوكيل الموحّد", "🤖 وكلاء AI", "🤝 منسّق الوكلاء", "📡 مراقبة حيّة", "🐝 السرب الذكي", "🧭 لوحة السرب الموحدة", "🗄️ مركز البيانات"])
+    sub = st.tabs(["🎯 الوكيل الموحّد", "🤖 وكلاء AI", "🤝 منسّق الوكلاء", "📡 مراقبة حيّة", "⚙️ إعدادات الوكلاء", "👤 ملفات الوكلاء", "🐝 السرب الذكي", "🧭 لوحة السرب الموحدة", "🗄️ مركز البيانات"])
     # 🆕 توضيح مختصر أعلى كل تبويب فرعي — الأربعة تبدو متشابهة لأول وهلة
     # (كلها "وكلاء")، فهذا يفرّق فوراً متى يُستخدم كل واحد بدون قراءة الكود.
     with sub[0]:
@@ -144,6 +147,10 @@ def render_agents_group():
     with sub[3]:
         render_agent_monitor()
     with sub[4]:
+        render_agent_settings()
+    with sub[5]:
+        render_agent_profiles()
+    with sub[6]:
         st.info(
             "🐝 **لهدف معقّد متعدد الخطوات**: يفكّك الهدف تلقائياً إلى أدوار "
             "(بحث، ترجمة، مراجعة، برمجة...) وينفّذها بالتسلسل — للمهام الكبيرة "
@@ -151,14 +158,14 @@ def render_agents_group():
             icon="🐝",
         )
         render_swarm_studio()
-    with sub[5]:
+    with sub[7]:
         st.info(
             "🧭 **لوحة قيادة واحدة**: حالة كل الوكلاء + السرب + المهام طويلة الأمد + "
             "تنبيهات قابلة للتخصيص وإجراءات تلقائية (إعادة تشغيل/تجميد/إشعار).",
             icon="🧭",
         )
         render_unified_swarm_dashboard()
-    with sub[6]:
+    with sub[8]:
         st.info(
             "🗄️ **الخلفية والبيانات**: سجل الوكلاء والمهام والذاكرة والرسائل "
             "(SQLite) + الموصلات الخارجية (دفع/خرائط/رسائل) + الخدمات المصغرة "
@@ -319,6 +326,19 @@ def main():
         render_skip_link()
     except Exception:
         pass
+
+    # ── شريط الحالة العام — مؤشرات محلية فقط بلا أي اتصال خارجي ────────
+    # يوضح للمستخدم حالة الجلسة والتشغيل دون عرض قيم أسرار أو الادعاء
+    # بوجود عقد/خدمات حيّة لم يتم التحقق منها.
+    _has_optional_provider = bool(os.getenv("OPENROUTER_API_KEY", "").strip())
+    _session_label = "مسجّلة" if st.session_state.get("_account") else "زائر"
+    _runtime_label = "مزود اختياري مهيّأ" if _has_optional_provider else "الاحتياطي المحلي جاهز"
+    render_status_bar([
+        {"label": "الجلسة", "value": _session_label},
+        {"label": "التشغيل", "value": _runtime_label},
+        {"label": "الأمان", "value": "حماية محلية"},
+        {"label": "الوضع", "value": "واجهة RTL"},
+    ])
 
     # ── الشريط الجانبي — OpenRouter ───────────────────────────────────────
     with st.sidebar:

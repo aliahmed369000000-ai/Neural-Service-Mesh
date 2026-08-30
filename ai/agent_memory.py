@@ -20,6 +20,7 @@ ai/agent_memory.py
 from __future__ import annotations
 import json
 import logging
+import re
 import sqlite3
 import threading
 import time
@@ -73,7 +74,13 @@ class AgentMemory:
         importance: int = 5,
         ttl_seconds: Optional[int] = None,
     ) -> int:
-        """تخزين معلومة في الذاكرة."""
+        """تخزين معلومة في الذاكرة بعد تنقيح الأسرار والتحقق من الحدود."""
+        content = self._sanitize(str(content or "")).strip()
+        if not content:
+            raise ValueError("لا يمكن تخزين ذاكرة فارغة")
+        importance = max(1, min(10, int(importance)))
+        if ttl_seconds is not None:
+            ttl_seconds = max(60, int(ttl_seconds))
         now = datetime.now(timezone.utc).isoformat()
         with _db_lock:
             conn = sqlite3.connect(str(self._db_path), timeout=10)
@@ -98,6 +105,7 @@ class AgentMemory:
         try:
             with _db_lock:
                 conn = sqlite3.connect(str(self._db_path), timeout=10)
+                conn.execute("DELETE FROM memories WHERE ttl_seconds IS NOT NULL AND created_at < datetime('now', '-' || ttl_seconds || ' seconds')")
                 # FTS search
                 rows = conn.execute(
                     """SELECT m.id, m.content, m.category, m.importance,
@@ -182,7 +190,7 @@ class AgentMemory:
         with _db_lock:
             conn = sqlite3.connect(str(self._db_path), timeout=10)
             conn.execute("DELETE FROM memories WHERE agent_id = ?", (self.agent_id,))
-            conn.execute("DELETE FROM memories_fts")
+            conn.execute("DELETE FROM memories_fts WHERE rowid NOT IN (SELECT id FROM memories)")
             deleted = conn.execute("SELECT changes()").fetchone()[0]
             conn.commit()
             conn.close()
@@ -205,6 +213,18 @@ class AgentMemory:
             "categories": {c[0]: c[1] for c in categories},
             "db_path": str(self._db_path),
         }
+
+    @staticmethod
+    def _sanitize(content: str) -> str:
+        """إخفاء مفاتيح شائعة قبل حفظها في الذاكرة الدائمة."""
+        patterns = (
+            r"(?i)(api[_-]?key|token|password|secret|authorization)\s*[:=]\s*[^\s,;]+",
+            r"gh[pousr]_[A-Za-z0-9_]+",
+            r"sk-[A-Za-z0-9_-]+",
+        )
+        for pattern in patterns:
+            content = re.sub(pattern, lambda m: m.group(0).split(':', 1)[0].split('=', 1)[0] + ": [REDACTED]", content)
+        return content
 
     def _mark_accessed(self, mem_id: int):
         """تحديث accessed_at و access_count."""

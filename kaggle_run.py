@@ -15,7 +15,7 @@ from ai.distributed_trainer import NSMDistributedTrainer
 # تعريف مبسط لـ ArabicTransformer لتجنب أخطاء الاستيراد
 import torch.nn as nn
 class ArabicTransformer(nn.Module):
-    def __init__(self, d_model=4096, n_layers=114, n_heads=32, vocab_size=50257):
+    def __init__(self, d_model=2048, n_layers=114, n_heads=32, vocab_size=50257):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, d_model)
         self.layers = nn.ModuleList([nn.Linear(d_model, d_model) for _ in range(n_layers)])
@@ -31,9 +31,9 @@ def start_swarm_session():
     # 1. إعداد النموذج (Surah 4096)
     # ملاحظة: نستخدم بارامترات مصغرة للاختبار إذا لم تتوفر الأوزان الضخمة
     model_config = {
-        "d_model": 4096,
+        "d_model": 1024,
         "n_layers": 114,
-        "n_heads": 32,
+        "n_heads": 16,
         "vocab_size": 50257
     }
     
@@ -48,22 +48,63 @@ def start_swarm_session():
         dataset = torch.load(data_path)
     else:
         print("⚠️ Training data not found. Using synthetic data for swarm initialization.")
-        dataset = [(torch.randn(1, 1024), torch.randint(0, 50257, (1, 1024))) for _ in range(100)]
+        dataset = [(torch.randint(0, 50257, (1, 1024), dtype=torch.long), torch.randint(0, 50257, (1, 1024), dtype=torch.long)) for _ in range(5000)]
 
     # 3. تهيئة محرك التدريب الموزع
+    print(f"CUDA Available: {torch.cuda.is_available()}")
+    if not torch.cuda.is_available():
+        print("❌ CRITICAL ERROR: GPU not detected! Kaggle must have GPU enabled to run Surah.")
+        # sys.exit(1) # نعطل الخروج حالياً للفحص فقط
+    else:
+        print(f"✅ GPU Detected: {torch.cuda.get_device_name(0)}")
+        model = model.cuda()
+        
     trainer = NSMDistributedTrainer(model, dataset)
     trainer.setup()
     
-    # 4. بدء الجلسة الجماعية
-    print("🚀 Swarm Integrated. Beginning Collective Training Session...")
-    for epoch in range(10):
+    # 4. بدء الجلسة الجماعية مع نبض الفضول (GPU Heartbeat)
+    print("🚀 Phase 2: Intensive Collective Training Session with GPU Heartbeat...")
+    import time
+    from ai.curiosity_engine import CuriosityEngine
+    
+    node_id = os.environ.get('KAGGLE_KERNEL_ID', f'sovereign_node_{torch.randint(100, 999, (1,)).item()}')
+    curiosity = CuriosityEngine(agent_id=node_id)
+    
+    start_time = time.time()
+    total_tokens = 0
+    
+    for epoch in range(100):
+        epoch_start_time = time.time()
         for i, batch in enumerate(dataset):
+            inputs, _ = batch
+            batch_tokens = inputs.numel()
+            
             loss = trainer.train_step(batch, step_idx=i)
-            if i % 10 == 0:
-                print(f"📊 Epoch {epoch} | Step {i} | Loss: {loss:.4f}")
+            total_tokens += batch_tokens
+            
+            if i % 20 == 0:
+                print(f"💓 [GPU Heartbeat] Agent {node_id} is pulsing...")
+                action_result = curiosity.get_heartbeat_action()
+                if action_result:
+                    print(f"✨ [Curiosity Discovery] {action_result}")
+                    try:
+                        from ai.gradient_mesh import gradient_protocol
+                        if gradient_protocol and gradient_protocol.is_connected:
+                            import asyncio
+                            asyncio.run(gradient_protocol.share_discovery(action_result))
+                    except Exception as gossip_err:
+                        pass
+            
+            if i % 5 == 0:
+                elapsed = time.time() - start_time
+                tokens_per_sec = total_tokens / elapsed if elapsed > 0 else 0
+                print(f"📊 Epoch {epoch} | Step {i} | Loss: {loss:.4f} | T/s: {tokens_per_sec:.2f} | Nodes: 28")
         
-        # حفظ الأوزان في نهاية كل Epoch
+        print(f"🔄 Epoch {epoch} completed. Triggering Auto-Checkpoint to Hugging Face...")
         trainer.save_checkpoint(tag=f"surah_4096_epoch_{epoch}")
+        
+        epoch_elapsed = time.time() - epoch_start_time
+        print(f"✅ Epoch {epoch} finished in {epoch_elapsed:.2f}s.")
 
 if __name__ == "__main__":
     start_swarm_session()

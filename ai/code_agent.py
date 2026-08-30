@@ -107,8 +107,13 @@ def edit_file(path: str, old: str, new: str) -> str:
         if old not in content:
             return f"❌ النص القديم غير موجود في {path}"
         updated = content.replace(old, new, 1)
+        if f.suffix == ".py":
+            try:
+                ast.parse(updated)
+            except SyntaxError as e:
+                return f"❌ أُحبط التعديل: الكود الناتج غير صالح نحوياً (السطر {e.lineno}): {e.msg}"
         f.write_text(updated, encoding="utf-8")
-        return f"✅ تم التعديل في {path}"
+        return f"✅ تم التعديل في {path} (تم اجتياز فحص syntax)"
     except Exception as e:
         return f"❌ خطأ في التعديل: {e}"
 
@@ -121,9 +126,16 @@ def create_file(path: str, content: str) -> str:
         f = _safe_path(path)
         if f is None:
             return _UNSAFE_PATH_MSG
+        if f.exists():
+            return f"❌ الملف موجود مسبقاً: {path} — استخدم تعديل بدلاً من الكتابة فوقه"
+        if f.suffix == ".py":
+            try:
+                ast.parse(content)
+            except SyntaxError as e:
+                return f"❌ أُحبط الإنشاء: الكود غير صالح نحوياً (السطر {e.lineno}): {e.msg}"
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(content, encoding="utf-8")
-        return f"✅ تم إنشاء {path}"
+        return f"✅ تم إنشاء {path} (تم اجتياز فحص syntax)"
     except Exception as e:
         return f"❌ خطأ في الإنشاء: {e}"
 

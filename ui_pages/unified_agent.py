@@ -87,7 +87,7 @@ def render_unified_agent():
     bot = st.session_state.unified_agent_bot
 
     # ── شريط أدوات علوي ──
-    c_metric, c_web, c_help = st.columns([1.2, 2.2, 2])
+    c_metric, c_web, c_remote, c_help = st.columns([1.2, 1.8, 2.2, 2])
     with c_metric:
         st.metric("رسائل الجلسة", st.session_state.unified_agent_count)
     with c_web:
@@ -97,6 +97,21 @@ def render_unified_agent():
             key="unified_agent_web",
             help="بحث DuckDuckGo قبل التوليد، أياً كان المتخصص.",
         )
+    with c_remote:
+        remote_toggle = st.toggle(
+            "☁️ NSM API",
+            value=False,
+            key="unified_agent_remote_nsm",
+            help="إرسال المهمة إلى خدمة NSM API؛ عند الفشل يعود التشغيل المحلي تلقائياً.",
+        )
+    remote_url = ""
+    if remote_toggle:
+        remote_url = st.text_input(
+            "رابط الصفحة للمهمة البعيدة",
+            placeholder="https://example.com",
+            key="unified_agent_remote_url",
+            help="واجهة Agent API الحالية تتطلب رابطاً عاماً لقراءته.",
+        ).strip()
     with c_help:
         with st.expander("أوامر سريعة", expanded=False):
             st.markdown(
@@ -166,7 +181,7 @@ def render_unified_agent():
         height=0,
     )
 
-    # ── وضع الخلفية ────────────────────────────────────────────────
+    # ── وضع الخلفية ────────────────��───────────────────────────────
     if "_bg_task_manager_ok" not in st.session_state:
         try:
             from ai.background_tasks import get_background_task_manager  # noqa: F401
@@ -208,7 +223,19 @@ def render_unified_agent():
             _submit_background(text)
             return
         with st.spinner("⟳ أفكر وأختار الفريق المناسب…"):
-            response, meta = bot.chat(text, force_web=web_toggle)
+            if remote_toggle:
+                try:
+                    from ai.nsm_api_client import run_remote_task
+                    if not remote_url:
+                        raise ValueError("أدخل رابطاً عاماً عند تفعيل NSM API.")
+                    remote_data = run_remote_task(text, url=remote_url)
+                    response = str(remote_data.get("result") or remote_data.get("message") or remote_data)
+                    meta = {"route_method": "project_bridge", "provider_badge": "NSM API · تنفيذ بعيد", "category_title": "الوكيل الموحّد"}
+                except Exception as remote_error:
+                    st.warning(f"تعذر التنفيذ البعيد، تم استخدام الوكيل المحلي: {remote_error}")
+                    response, meta = bot.chat(text, force_web=web_toggle)
+            else:
+                response, meta = bot.chat(text, force_web=web_toggle)
         _append_bot(response, meta)
         st.session_state.unified_agent_count += 1
         st.rerun()

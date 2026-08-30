@@ -213,3 +213,42 @@ class TestMcpTools:
         assert isinstance(data["tasks"], list)
         for task in data["tasks"]:
             assert (task.get("status") or "").lower() == "done"
+
+
+class TestAgentContract:
+    def test_health_aliases_are_available(self):
+        import api_server
+        from fastapi.testclient import TestClient
+        c = TestClient(api_server.app)
+        assert c.get("/health").status_code == 200
+        assert c.get("/healthz").status_code == 200
+
+    def test_agent_task_requires_authentication(self, monkeypatch):
+        import api_server
+        from fastapi.testclient import TestClient
+        monkeypatch.setenv("NSM_API_KEY", "contract-test-key")
+        c = TestClient(api_server.app)
+        response = c.post("/api/agent/tasks", json={"task": "اختبار", "url": "https://example.com"})
+        assert response.status_code == 403
+        assert "error" in response.json()
+
+    def test_agent_task_rejects_invalid_public_url(self, monkeypatch):
+        import api_server
+        from fastapi.testclient import TestClient
+        monkeypatch.setenv("NSM_API_KEY", "contract-test-key")
+        c = TestClient(api_server.app)
+        response = c.post(
+            "/api/agent/tasks",
+            headers={"x-api-key": "contract-test-key"},
+            json={"task": "اختبار", "url": "http://127.0.0.1:5000"},
+        )
+        assert response.status_code == 400
+
+    def test_chat_rejects_empty_message(self, monkeypatch):
+        import api_server
+        from fastapi.testclient import TestClient
+        monkeypatch.setenv("NSM_API_KEY", "contract-test-key")
+        c = TestClient(api_server.app)
+        response = c.post("/agents/chat", headers={"x-api-key": "contract-test-key"}, json={})
+        assert response.status_code == 400
+        assert response.json()["ok"] is False
