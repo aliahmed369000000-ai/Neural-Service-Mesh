@@ -738,7 +738,7 @@ class ExpandPlateauController:
     """توسيع الأضيق فقط بعد هضبة خسارة طويلة (عدة عصور)، وليس بعد عصر أو اثنين.
 
     الافتراضات صارمة عمداً:
-      patience >= 20 عصراً بلا تحسّن حقيقي
+      patience >= 7 عصور بلا تحسّن حقيقي
       min_epoch قبل أي توسيع
       cooldown بين توسيعين
       نافذة loss شبه مستوية (flat) + عدم اتجاه هبوط واضح
@@ -754,7 +754,7 @@ class ExpandPlateauController:
         flat_rel: Optional[float] = None,
         improve_eps: float = 1e-5,
     ) -> None:
-        self.patience = int(patience if patience is not None else os.environ.get("SCN_EXPAND_PATIENCE", "20"))
+        self.patience = int(patience if patience is not None else os.environ.get("SCN_EXPAND_PATIENCE", "7"))
         self.max_expands = int(max_expands if max_expands is not None else os.environ.get("SCN_MAX_EXPANDS", "5"))
         self.min_epoch = int(min_epoch if min_epoch is not None else os.environ.get("SCN_EXPAND_MIN_EPOCH", "25"))
         self.cooldown = int(cooldown if cooldown is not None else os.environ.get("SCN_EXPAND_COOLDOWN", "15"))

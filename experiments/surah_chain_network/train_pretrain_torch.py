@@ -76,7 +76,7 @@ WARMUP_RATIO = 0.1
 # - تهدئة بين كل توسيعين
 # - شرط «هضبة حقيقية» على نافذة عصور وليس مجرد أسوأ من best مرة أو مرتين
 # صبر طويل عمداً: لا توسيع بعد عصر/عصرين — هضبة ممتدة فقط
-PATIENCE = int(os.environ.get("SCN_EXPAND_PATIENCE", "20"))
+PATIENCE = int(os.environ.get("SCN_EXPAND_PATIENCE", "7"))
 MAX_EXPANDS = int(os.environ.get("SCN_MAX_EXPANDS", "5"))
 EXPAND_MIN_EPOCH = int(os.environ.get("SCN_EXPAND_MIN_EPOCH", "25"))  # عمر النموذج الأدنى
 EXPAND_COOLDOWN = int(os.environ.get("SCN_EXPAND_COOLDOWN", "15"))  # عصور بين توسيعين
