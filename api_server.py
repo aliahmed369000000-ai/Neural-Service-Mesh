@@ -143,6 +143,7 @@ async def root():
 
 
 @app.get("/health")
+@app.get("/healthz")
 async def health():
     return {
         "status": "healthy",
@@ -1121,11 +1122,6 @@ async def services_memory(request: Request):
         return JSONResponse({"ok": False, "error": str(e)},
                             status_code=500)
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("api_server:app", host="0.0.0.0", port=5000, reload=True)
-
-
 @app.post("/billing/checkout")
 async def billing_checkout(request: Request):
     try:
@@ -1155,3 +1151,8 @@ def gtm_status():
         "mcp_server": _P("mcp_server/server.py").is_file(),
         "social_daemon": _P("scripts/social_swarm_daemon.py").is_file(),
     }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("api_server:app", host="0.0.0.0", port=int(os.environ.get("PORT", "5000")))

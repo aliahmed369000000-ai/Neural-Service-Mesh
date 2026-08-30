@@ -10,13 +10,14 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: agent
+    description: NSM Agent operations
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,13 +25,73 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /agent/tasks:
+    post:
+      operationId: createAgentTask
+      tags: [agent]
+      summary: Execute a public-URL agent task
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentTaskRequest"
+      responses:
+        "200":
+          description: Completed task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentTaskResponse"
+        "400": {description: Invalid task or URL}
+        "403": {description: Invalid API key}
+  /agent/tasks/{task_id}:
+    get:
+      operationId: getAgentTask
+      tags: [agent]
+      summary: Retrieve a completed agent task
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        "200":
+          description: Stored task
+        "403": {description: Invalid API key}
+        "404": {description: Task not found}
 components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
   schemas:
     HealthStatus:
       type: object
       properties:
-        status:
-          type: string
-      required:
-        - status
+        status: {type: string}
+      required: [status]
+    AgentTaskRequest:
+      type: object
+      required: [task, url]
+      properties:
+        task: {type: string, maxLength: 800}
+        url: {type: string, format: uri}
+        agent: {type: string, default: default, maxLength: 120}
+    AgentTaskResponse:
+      type: object
+      properties:
+        task_id: {type: integer}
+        status: {type: string}
+        score: {type: integer}
+        result: {type: string}
+        sources:
+          type: array
+          items: {type: string, format: uri}
+      required: [task_id, status, result]
 
