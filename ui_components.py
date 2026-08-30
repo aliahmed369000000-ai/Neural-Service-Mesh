@@ -9,8 +9,18 @@ import streamlit as st
 
 _DESIGN_CSS = r"""
 <style>
+@font-face {
+  font-family: 'NSM Arabic';
+  src: url('/app/static/assets/fonts/NotoNaskhArabic-Regular.ttf') format('truetype');
+  font-display: swap;
+}
 :root {
   --nsm-indigo: #6d5dfc;
+}
+html, body, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], button, input, textarea, select {
+  font-family: 'NSM Arabic', 'Noto Naskh Arabic', 'Tahoma', sans-serif !important;
+}
+:root {
   --nsm-cyan: #2dd4bf;
   --nsm-amber: #f6c453;
   --nsm-danger: #fb7185;
