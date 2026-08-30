@@ -59,7 +59,7 @@ def run_remote_task(task: str, url: str | None = None, timeout: float = 45.0) ->
 
 def remote_available(timeout: float = 8.0) -> bool:
     """يتحقق من صحة الخدمة دون إرسال مهمة أو كشف أي سر."""
-    base = (os.getenv("NSM_API_URL") or "https://world-cup-2026-fun-guide.vercel.app").rstrip("/")
+    base = (_setting("NSM_API_URL") or "https://world-cup-2026-fun-guide.vercel.app").rstrip("/")
     try:
         return requests.get(f"{base}/health", timeout=timeout).ok
     except requests.RequestException:

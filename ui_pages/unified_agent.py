@@ -104,6 +104,14 @@ def render_unified_agent():
             key="unified_agent_remote_nsm",
             help="إرسال المهمة إلى خدمة NSM API؛ عند الفشل يعود التشغيل المحلي تلقائياً.",
         )
+    remote_url = ""
+    if remote_toggle:
+        remote_url = st.text_input(
+            "رابط الصفحة للمهمة البعيدة",
+            placeholder="https://example.com",
+            key="unified_agent_remote_url",
+            help="واجهة Agent API الحالية تتطلب رابطاً عاماً لقراءته.",
+        ).strip()
     with c_help:
         with st.expander("أوامر سريعة", expanded=False):
             st.markdown(
@@ -173,7 +181,7 @@ def render_unified_agent():
         height=0,
     )
 
-    # ── وضع الخلفية ────────────────────────────────────────────────
+    # ── وضع الخلفية ────────────────��───────────────────────────────
     if "_bg_task_manager_ok" not in st.session_state:
         try:
             from ai.background_tasks import get_background_task_manager  # noqa: F401
@@ -218,7 +226,9 @@ def render_unified_agent():
             if remote_toggle:
                 try:
                     from ai.nsm_api_client import run_remote_task
-                    remote_data = run_remote_task(text)
+                    if not remote_url:
+                        raise ValueError("أدخل رابطاً عاماً عند تفعيل NSM API.")
+                    remote_data = run_remote_task(text, url=remote_url)
                     response = str(remote_data.get("result") or remote_data.get("message") or remote_data)
                     meta = {"route_method": "project_bridge", "provider_badge": "NSM API · تنفيذ بعيد", "category_title": "الوكيل الموحّد"}
                 except Exception as remote_error:

@@ -25,7 +25,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
-  /agent/tasks:
+  /api/agent/tasks:
     post:
       operationId: createAgentTask
       tags: [agent]
@@ -47,7 +47,7 @@ paths:
                 $ref: "#/components/schemas/AgentTaskResponse"
         "400": {description: Invalid task or URL}
         "403": {description: Invalid API key}
-  /agent/tasks/{task_id}:
+  /api/agent/tasks/{task_id}:
     get:
       operationId: getAgentTask
       tags: [agent]
