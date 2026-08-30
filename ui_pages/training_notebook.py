@@ -445,7 +445,7 @@ def render_training_notebook():
             if st.session_state.get("nb_show_export"):
                 from ai.notebook_engine import export_ipynb as _export
                 ipynb_text = _export(nb)
-                safe_name = re.sub(r"[^A-Za-z0-9_\u0600-\u06FF\-]", "_", nb.name)[:60] or "nsm_lab"
+                safe_name = _nre.sub(r"[^A-Za-z0-9_\u0600-\u06FF\-]", "_", nb.name)[:60] or "nsm_lab"
                 st.download_button("⬇️ تنزيل {}.ipynb".format(safe_name),
                                    data=ipynb_text,
                                    file_name=f"{safe_name}.ipynb",

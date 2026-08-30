@@ -243,7 +243,7 @@ def _train_round_with_healing(
         env["SCN_BATCH"] = str(batch_size)
         proc = subprocess.run(
             [sys.executable, "-u", cmd],
-            cwd=str(ROOT), env=env, timeout=timeout,
+            cwd=str(_ROOT), env=env, timeout=timeout,
         )
         if proc.returncode == 0:
             return {"ok": True, "rc": 0, "batch": batch_size, "timeout": timeout}
@@ -333,7 +333,7 @@ def _train_round_bare(texts: list, start_from: Path | None, round_idx: int,
     print(f"[worker-{WORKER_ID}] بدء round {round_idx + 1}/{ROUNDS} (epochs={EPOCHS})...")
     r = subprocess.run(
         [sys.executable, "-u", str(_HERE / "train_pretrain_torch.py")],
-        cwd=str(ROOT), env=env,
+        cwd=str(_ROOT), env=env,
     )
     return {"rc": r.returncode, "tag": tag, "batch": current_batch}
 
