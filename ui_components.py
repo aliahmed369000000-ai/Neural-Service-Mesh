@@ -12,6 +12,13 @@ _DESIGN_CSS = r"""
 :root {
   --nsm-indigo: #6d5dfc;
 }
+[data-testid="stAppViewContainer"] { position:relative; overflow:hidden; background:#0a0e17; }
+[data-testid="stAppViewContainer"]::before { content:""; position:fixed; inset:0; z-index:0; pointer-events:none; background:linear-gradient(180deg,rgba(10,14,23,.78),rgba(10,14,23,.92)),url('/nsm-neural-bg.png') center/cover no-repeat; opacity:.72; animation:nsm-bg-drift 24s ease-in-out infinite alternate; }
+[data-testid="stAppViewContainer"] > .main { position:relative; z-index:1; }
+[data-testid="stSidebar"] { position:relative; z-index:2; }
+@keyframes nsm-bg-drift { from { transform:scale(1.02) translate3d(0,0,0); } to { transform:scale(1.07) translate3d(0,-.7%,0); } }
+@media (prefers-reduced-motion: reduce) { [data-testid="stAppViewContainer"]::before { animation:none; } }
+
 html, body, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], button, input, textarea, select {
   font-family: Arial, Tahoma, 'Noto Naskh Arabic', sans-serif !important;
 }
