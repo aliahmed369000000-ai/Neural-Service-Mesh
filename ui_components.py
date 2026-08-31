@@ -145,18 +145,21 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], butto
 .nsm-nav-card-title { color:var(--text); font-size:.78rem; font-weight:850; }
 .nsm-nav-card-copy { margin-top:.18rem; color:var(--text-muted); font-size:.68rem; line-height:1.55; }
 .stTabs [data-baseweb="tab-list"] {
-  gap:.3rem !important; padding:.3rem !important; border:1px solid var(--nsm-line);
-  border-radius:16px; background:linear-gradient(135deg,var(--nsm-glass-strong),var(--nsm-glass));
+  position:sticky; top:.35rem; z-index:5; display:flex; gap:.3rem !important; padding:.3rem !important;
+  border:1px solid var(--nsm-line); border-radius:16px; background:rgba(15,23,42,.92);
+  box-shadow:0 10px 26px rgba(0,0,0,.16); backdrop-filter:blur(12px);
+  overflow-x:auto !important; scrollbar-width:thin;
 }
 .stTabs [data-baseweb="tab"] {
-  min-height:2.5rem; padding:.5rem .82rem !important; border-radius:11px;
+  min-height:2.5rem; padding:.5rem .82rem !important; border-radius:11px; flex:0 0 auto;
   color:var(--text-muted); font-weight:800; transition:background .16s ease,color .16s ease,transform .16s ease;
 }
 .stTabs [data-baseweb="tab"]:hover { background:rgba(45,212,191,.09); color:var(--text); transform:translateY(-1px); }
 .stTabs [data-baseweb="tab"][aria-selected="true"] { color:var(--text); background:linear-gradient(135deg,rgba(109,93,252,.22),rgba(45,212,191,.14)); }
 .stTabs [data-baseweb="tab-highlight"] { background:var(--nsm-cyan) !important; height:3px !important; border-radius:999px; }
 .stTabs [data-baseweb="tab-border"] { display:none !important; }
-.stTabs [data-baseweb="tab-panel"] { padding-top:1rem; }
+.stTabs [data-baseweb="tab-panel"] { padding-top:1.1rem; animation:nsm-tab-enter .22s ease-out; }
+@keyframes nsm-tab-enter { from { opacity:.35; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
 .stTabs [data-baseweb="tab"] p { margin:0 !important; line-height:1.35; }
 .stTabs [data-baseweb="tab"]:has(+ [aria-selected="true"]) { color:var(--text); }
 @media (max-width:900px) { .nsm-nav-guide{grid-template-columns:1fr;} .nsm-nav-card{min-height:auto;} .nsm-agent-monitor-hero{flex-direction:column;} }
