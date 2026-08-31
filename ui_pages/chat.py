@@ -240,6 +240,24 @@ def render_chat():
     .chat-composer-hint span { padding:0.18rem 0.45rem;border-radius:7px;background:var(--surface);border:1px solid var(--border); }
 
     /* ── استجابة الجوال ── */
+    /* طبقة المحادثة الاحترافية: حاوية أنظف، رموز أوضح، وفصل بصري بين الأدوار */
+    .chat-box { background:linear-gradient(180deg,rgba(15,23,42,.88),rgba(10,14,23,.96)); border-color:rgba(45,212,191,.18); }
+    .chat-user .bbl { background:linear-gradient(135deg,#6d5dfc,#2dd4bf); color:#071018; border:1px solid rgba(255,255,255,.16); box-shadow:0 8px 24px rgba(45,212,191,.13); }
+    .chat-nsm .bbl { background:rgba(255,255,255,.055); border-color:rgba(148,163,184,.2); box-shadow:0 7px 22px rgba(0,0,0,.16); }
+    .chat-nsm::before { content:"NSM"; display:grid; place-items:center; flex:0 0 auto; width:30px; height:30px; border-radius:10px; color:#071018; background:linear-gradient(135deg,#2dd4bf,#6d5dfc); font-size:.58rem; font-weight:950; letter-spacing:.04em; box-shadow:0 5px 14px rgba(45,212,191,.16); }
+    .chat-user::after { content:"أنت"; order:-1; align-self:flex-end; margin-bottom:.35rem; color:var(--text-muted); font-size:.65rem; font-weight:800; }
+    .chat-nsm .bbl, .chat-user .bbl { transition:transform .16s ease,box-shadow .16s ease; }
+    .chat-nsm .bbl:hover, .chat-user .bbl:hover { transform:translateY(-1px); }
+    .chat-hero { border-color:rgba(45,212,191,.2); background:linear-gradient(135deg,rgba(109,93,252,.18),rgba(15,23,42,.76) 60%,rgba(45,212,191,.1)); }
+    .chat-hero-title { font-size:1.08rem; }
+    .chat-hero-pill { background:rgba(255,255,255,.055); border-color:rgba(148,163,184,.2); }
+    .chat-composer-hint span { border-color:rgba(45,212,191,.18); background:rgba(45,212,191,.06); }
+    [data-testid="stChatInput"] { margin-top:.25rem; }
+    [data-testid="stChatInput"] > div { border:1px solid rgba(45,212,191,.28) !important; border-radius:16px !important; background:rgba(15,23,42,.9) !important; box-shadow:0 10px 28px rgba(0,0,0,.16); }
+    [data-testid="stChatInput"] textarea { min-height:48px !important; padding:.8rem 3rem .8rem .9rem !important; direction:rtl; }
+    [data-testid="stChatInput"] button { border-radius:11px !important; background:linear-gradient(135deg,#6d5dfc,#2dd4bf) !important; color:#071018 !important; }
+    .chat-box-wrap { filter:drop-shadow(0 10px 24px rgba(0,0,0,.08)); }
+
     @media (max-width: 640px) {
         .chat-box {
             height:56vh;min-height:320px;max-height:520px;
