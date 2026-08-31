@@ -201,6 +201,17 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], butto
 .nsm-empty-state { padding:1rem; border:1px dashed var(--nsm-line); border-radius:14px; color:var(--text-muted); text-align:center; font-size:.78rem; }
 @media (max-width:900px) { .nsm-health-grid{grid-template-columns:repeat(2,minmax(0,1fr));} .nsm-system-columns{grid-template-columns:1fr;} }
 @media (max-width:640px) { .nsm-health-grid{grid-template-columns:1fr 1fr; gap:.55rem;} .nsm-health-card{min-height:102px; padding:.75rem;} .nsm-health-value{font-size:1.22rem;} .nsm-provider-grid{grid-template-columns:1fr;} .nsm-event-row{grid-template-columns:auto 1fr;} .nsm-event-time{grid-column:2;} }
+
+/* تحسينات واجهة موحّدة: مساحة عمل أهدأ، RTL ثابت، وتسلسل بصري أوضح */
+[data-testid="stAppViewContainer"] { background: linear-gradient(160deg, #0a0e17 0%, #0f172a 54%, #111827 100%); }
+[data-testid="stSidebar"] { width: 17.5rem !important; }
+[data-testid="stSidebar"] > div:first-child { padding: 1.15rem .9rem 1.5rem; }
+.main .block-container { max-width: 1380px; padding-left: 2rem; padding-right: 2rem; }
+.hero-wrap { margin-bottom: 1.1rem !important; }
+.hero-split { border: 1px solid rgba(45,212,191,.2) !important; background: linear-gradient(135deg, rgba(124,92,252,.18), rgba(15,23,42,.72) 58%, rgba(45,212,191,.1)) !important; box-shadow: 0 18px 50px rgba(0,0,0,.22) !important; }
+.stTabs [data-baseweb="tab-list"] { position: sticky; z-index: 4; }
+.stTabs [data-baseweb="tab"] p { font-size: .86rem; }
+@media (max-width: 640px) { .main .block-container { padding-left: .8rem; padding-right: .8rem; } [data-testid="stSidebar"] { width: 100% !important; } }
 </style>
 """
 
