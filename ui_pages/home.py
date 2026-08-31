@@ -170,6 +170,21 @@ def render_home():
             st.rerun()
     st.markdown('<div class="nsm-dashboard-action-note">هذه الاختصارات تنقلك إلى الصفحات الأصلية نفسها؛ لا توجد نسخة بديلة أو مسار معزول.</div>', unsafe_allow_html=True)
 
+    # مسارات العمل الأكثر استخداماً — طبقة إرشاد سريعة قبل التفاصيل الطويلة
+    st.markdown('<div class="section-header">🧭 مسارات العمل</div>', unsafe_allow_html=True)
+    _workflow_cards = [
+        ("💬", "اسأل واستكشف", "ابدأ محادثة عربية أو ابحث في شبكة المفاهيم.", "💬 المحادثة"),
+        ("🤖", "شغّل الوكلاء", "راقب المهام الجارية وحالة الوكلاء في مكان واحد.", "🤖 الوكلاء"),
+        ("📊", "راجع المعرفة", "تابع نمو المفاهيم والعلاقات والنتائج المستخرجة.", "🎓 التدريب والعمليات"),
+    ]
+    _workflow_cols = st.columns(3)
+    for _col, (_icon, _title, _copy, _target) in zip(_workflow_cols, _workflow_cards):
+        with _col:
+            st.markdown(f'<div class="nsm-workflow-card"><div class="nsm-workflow-icon">{_icon}</div><div class="nsm-workflow-title">{_title}</div><div class="nsm-workflow-copy">{_copy}</div></div>', unsafe_allow_html=True)
+            if st.button(f"فتح {_title}", key=f"home_workflow_{_title}", use_container_width=True):
+                st.session_state["_nsm_home_jump_target"] = _target
+                st.rerun()
+
     # ══════════════════════════════════════════════════════════════════
     # 📊 الشبكة المعرفية بالأرقام — أعداد حقيقية من CKG المحمَّل فعلياً
     # (لا بيانات وهمية). تُخفى الفقرة كاملة تلقائياً إن تعذّر تحميل

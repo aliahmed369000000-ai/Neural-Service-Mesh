@@ -209,6 +209,11 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], butto
 @media (max-width:900px) { .nsm-health-grid{grid-template-columns:repeat(2,minmax(0,1fr));} .nsm-system-columns{grid-template-columns:1fr;} }
 @media (max-width:640px) { .nsm-health-grid{grid-template-columns:1fr 1fr; gap:.55rem;} .nsm-health-card{min-height:102px; padding:.75rem;} .nsm-health-value{font-size:1.22rem;} .nsm-provider-grid{grid-template-columns:1fr;} .nsm-event-row{grid-template-columns:auto 1fr;} .nsm-event-time{grid-column:2;} }
 
+.nsm-workflow-card { min-height:112px; padding:.8rem .85rem; border:1px solid var(--nsm-line); border-radius:16px; background:linear-gradient(145deg,var(--nsm-glass-strong),var(--nsm-glass)); transition:transform .16s ease,border-color .16s ease; direction:rtl; }
+.nsm-workflow-card:hover { transform:translateY(-2px); border-color:rgba(45,212,191,.5); }
+.nsm-workflow-icon { display:grid; place-items:center; width:32px; height:32px; margin-bottom:.45rem; border-radius:10px; background:rgba(109,93,252,.16); font-size:1rem; }
+.nsm-workflow-title { color:var(--text); font-size:.82rem; font-weight:900; }
+.nsm-workflow-copy { margin-top:.18rem; color:var(--text-muted); font-size:.7rem; line-height:1.55; }
 /* تحسينات واجهة موحّدة: مساحة عمل أهدأ، RTL ثابت، وتسلسل بصري أوضح */
 [data-testid="stAppViewContainer"] { background: linear-gradient(160deg, #0a0e17 0%, #0f172a 54%, #111827 100%); }
 [data-testid="stSidebar"] { width: 17.5rem !important; }
