@@ -24,9 +24,12 @@ def run_mesh_node():
     except Exception as e:
         logger.error(f"❌ Failed to run NSM Node: {e}")
 
-# بدء تشغيل العقدة في خيط منفصل (Thread) لضمان عدم حجز واجهة Streamlit
-if "node_started" not in st.session_state:
-    thread = threading.Thread(target=run_mesh_node, daemon=True)
+# تشغيل عقدة الشبكة اختياري فقط؛ تشغيل aiohttp داخل Streamlit Cloud
+# قد يحجز منفذاً إضافياً أو يعيد تشغيل التطبيق عند فشل العقدة.
+# فعّله صراحةً عبر NSM_ENABLE_NODE=true في البيئات التي تحتاجه.
+_enable_node = os.getenv("NSM_ENABLE_NODE", "false").strip().lower() in {"1", "true", "yes", "on"}
+if _enable_node and "node_started" not in st.session_state:
+    thread = threading.Thread(target=run_mesh_node, daemon=True, name="nsm-mesh-node")
     thread.start()
     st.session_state["node_started"] = True
     logger.info("🚀 NSM Background Node Started via Streamlit.")
