@@ -212,6 +212,19 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], butto
 .stTabs [data-baseweb="tab-list"] { position: sticky; z-index: 4; }
 .stTabs [data-baseweb="tab"] p { font-size: .86rem; }
 @media (max-width: 640px) { .main .block-container { padding-left: .8rem; padding-right: .8rem; } [data-testid="stSidebar"] { width: 100% !important; } }
+
+/* الجولة الثانية: تنقّل أوضح وهوية لونية أكثر هدوءاً على كل المقاسات */
+[data-testid="stSidebar"] .stButton > button { min-height: 2.35rem; border: 1px solid rgba(148,163,184,.16); border-radius: 11px; background: rgba(255,255,255,.035); color: var(--text); font-size: .78rem; transition: background .16s ease, border-color .16s ease, transform .16s ease; }
+[data-testid="stSidebar"] .stButton > button:hover { border-color: rgba(45,212,191,.5); background: rgba(45,212,191,.1); transform: translateY(-1px); }
+[data-testid="stSidebar"] .stButton > button:focus-visible { outline: 2px solid var(--nsm-cyan); outline-offset: 2px; }
+[data-testid="stSidebar"] [data-testid="stExpander"] { border: 1px solid rgba(148,163,184,.16); border-radius: 14px; background: rgba(255,255,255,.025); }
+[data-testid="stSidebar"] hr { border-color: rgba(148,163,184,.14); margin: .85rem 0; }
+.stTabs [data-baseweb="tab-list"] { gap: .35rem; padding: .35rem; border: 1px solid rgba(148,163,184,.16); border-radius: 14px; background: rgba(15,23,42,.76); overflow-x: auto; scrollbar-width: thin; }
+.stTabs [data-baseweb="tab"] { min-height: 2.5rem; border-radius: 10px; color: var(--text-muted); white-space: nowrap; }
+.stTabs [aria-selected="true"] { background: rgba(45,212,191,.12); color: var(--nsm-cyan); }
+[data-testid="stMetric"] { padding: .8rem .9rem; border: 1px solid rgba(148,163,184,.15); border-radius: 15px; background: rgba(255,255,255,.035); }
+[data-testid="stMetricLabel"] p { color: var(--text-muted) !important; }
+@media (max-width: 640px) { .stTabs [data-baseweb="tab-list"] { margin-inline: -.35rem; } [data-testid="stSidebar"] .stButton > button { font-size: .74rem; } }
 </style>
 """
 
