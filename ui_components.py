@@ -225,6 +225,10 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], butto
 .stTabs [data-baseweb="tab"] p { font-size: .86rem; }
 @media (max-width: 640px) { .main .block-container { padding-left: .8rem; padding-right: .8rem; } [data-testid="stSidebar"] { width: 100% !important; } }
 
+.stDataFrame, [data-testid="stDataEditor"] { border:1px solid var(--nsm-line); border-radius:14px; overflow:hidden; }
+[data-testid="stForm"] { padding:1rem; border:1px solid var(--nsm-line); border-radius:16px; background:rgba(255,255,255,.025); }
+[data-testid="stTextInput"] input, [data-baseweb="select"] > div, [data-testid="stTextArea"] textarea { border-radius:10px; }
+[data-testid="stFileUploader"] { border:1px dashed rgba(45,212,191,.35); border-radius:14px; background:rgba(45,212,191,.035); }
 /* الجولة الثانية: تنقّل أوضح وهوية لونية أكثر هدوءاً على كل المقاسات */
 [data-testid="stSidebar"] .stButton > button { min-height: 2.35rem; border: 1px solid rgba(148,163,184,.16); border-radius: 11px; background: rgba(255,255,255,.035); color: var(--text); font-size: .78rem; transition: background .16s ease, border-color .16s ease, transform .16s ease; }
 [data-testid="stSidebar"] .stButton > button:hover { border-color: rgba(45,212,191,.5); background: rgba(45,212,191,.1); transform: translateY(-1px); }
