@@ -44,7 +44,7 @@ class NSMDistributedTrainer:
         # نمرّر host/port ليُنشئ GradientExchangeProtocol عقدة living_mesh خفيفة إن أمكن
         self.gradient_mesh = GradientExchangeProtocol(
             node_id=node_id,
-            alpha_url=alpha_url,  # توافق خلفي فقط
+            alpha_url=alpha_url,  # بذرة اكتشاف أقران فقط (ليس تجميعاً مركزياً)
             host=os.environ.get("MESH_HOST", "127.0.0.1"),
             port=int(os.environ.get("MESH_PORT", "0") or 0) or None,
         )

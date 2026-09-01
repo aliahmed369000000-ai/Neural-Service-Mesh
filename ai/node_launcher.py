@@ -43,49 +43,34 @@ async def handle_status(request):
     return web.json_response(status, dumps=lambda x: json.dumps(x, indent=2))
 
 async def handle_ws(request):
-    """معالج WebSocket عبر aiohttp لضمان التوافق مع Hugging Face."""
+    """معالج WebSocket موحّد عبر مسار الرسائل الموقّعة في LivingMeshNode.
+    أُزيل مسار التجميع المركزي القديم (gradient_buffer / All-Reduce المحلي).
+    كل الرسائل — بما فيها gradient_push — تمر عبر _handle_aiohttp_ws_msg.
+    """
     ws = web.WebSocketResponse()
     await ws.prepare(request)
     node = request.app['node']
-    
-    # تخزين التدرجات المجمعة في ذاكرة العقدة
-    if not hasattr(node, 'gradient_buffer'):
-        node.gradient_buffer = {}
-    
-    async for msg in ws:
-        if msg.type == web.WSMsgType.TEXT:
-            data = json.loads(msg.data)
-            if data.get("type") == "gradient_push":
-                import time
-                recv_time = time.time()
-                push_time = data.get("timestamp", recv_time)
-                network_latency = (recv_time - push_time) * 1000
-                
-                node.gradient_buffer[data["node_id"]] = {
-                    "data": data["data"],
-                    "timestamp": data.get("timestamp"),
-                    "latency_ms": network_latency
-                }
-                
-                logger.info(f"📥 Received gradients from {data['node_id']}. Latency: {network_latency:.2f}ms")
-                
-                # All-Reduce: إرسال التدرجات المجمعة لبقية السرب
-                if len(node.gradient_buffer) >= 2:
-                    # نستخدم أحدث تدرج مجمع
-                    latest_node = max(node.gradient_buffer.items(), key=lambda x: x[1]['timestamp'])[0]
-                    aggregated_data = node.gradient_buffer[latest_node]["data"]
-                    
-                    for conn in node.active_connections:
-                        await conn.send_str(json.dumps({
-                            "type": "gradient_pull",
-                            "data": aggregated_data,
-                            "timestamp": node.gradient_buffer[latest_node]["timestamp"]
-                        }))
-            else:
+
+    # تتبع الاتصالات النشطة (للمراقبة فقط — ليس للتجميع المركزي)
+    if not hasattr(node, 'active_connections') or node.active_connections is None:
+        node.active_connections = set()
+    node.active_connections.add(ws)
+
+    try:
+        async for msg in ws:
+            if msg.type == web.WSMsgType.TEXT:
+                try:
+                    data = json.loads(msg.data)
+                except Exception as e:
+                    logger.warning(f"⚠️ Invalid WS JSON: {e}")
+                    continue
+                # مسار موحّد موقّع — يشمل peer_discovery و gradient_push و Gossip
                 await node._handle_aiohttp_ws_msg(ws, data)
-        elif msg.type == web.WSMsgType.ERROR:
-            logger.error(f"WS connection closed with exception {ws.exception()}")
-            
+            elif msg.type == web.WSMsgType.ERROR:
+                logger.error(f"WS connection closed with exception {ws.exception()}")
+    finally:
+        node.active_connections.discard(ws)
+
     return ws
 
 async def main():

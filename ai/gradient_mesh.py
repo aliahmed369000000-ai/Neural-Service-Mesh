@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""🚀 NSM Gradient Mesh — بروتوكول تبادل التدرجات اللحظي للسرب (P2P + مركزي).
-يربط عقد التدريب ببعضها عبر بروتوكول living_mesh اللامركزي (send_to_peer)
-مع الإبقاء على alpha_url كمسار مركزي ثابت (dual-path) لضمان الاستقرار أثناء الانتقال.
+"""🚀 NSM Gradient Mesh — تبادل التدرجات عبر بروتوكول P2P الحقيقي.
+يحوّل الاتصال من WebSocket مركزي دائم إلى LivingMeshNode.send_to_peer.
+alpha_url يُستخدم كبذرة لاكتشاف الأقران فقط (وليس مسار تجميع مركزي دائم).
 """
 import asyncio
 import json
@@ -10,10 +10,11 @@ import base64
 import io
 import logging
 import time
-import random
 from typing import Dict, Any, List, Optional, Callable
+from urllib.parse import urlparse
 
 logger = logging.getLogger("GradientMesh")
+
 
 def _get_living_mesh_node_class():
     try:
@@ -21,6 +22,27 @@ def _get_living_mesh_node_class():
         return LivingMeshNode
     except Exception as e:
         logger.warning(f"⚠️ LivingMeshNode unavailable ({e}); P2P path disabled")
+        return None
+
+
+def _parse_seed_from_alpha_url(alpha_url: Optional[str]):
+    """استخراج host/port من alpha_url لاستخدامه كبذرة اكتشاف فقط."""
+    if not alpha_url:
+        return None
+    try:
+        raw = alpha_url.strip()
+        if "://" not in raw:
+            raw = "ws://" + raw
+        parsed = urlparse(raw)
+        host = parsed.hostname
+        if not host:
+            return None
+        port = parsed.port
+        if port is None:
+            port = 443 if parsed.scheme in ("wss", "https") else 80
+        return {"host": host, "port": int(port)}
+    except Exception as e:
+        logger.warning(f"⚠️ Could not parse alpha_url as seed: {e}")
         return None
 
 
@@ -35,29 +57,40 @@ class GradientExchangeProtocol:
     ):
         """
         node_id: معرف العقدة.
-        alpha_url: مسار مركزي ثابت (يُستخدم دائماً إن وُجد — ليس مجرد fallback).
-        mesh_node: كائن LivingMeshNode جاهز (مفضل للمسار P2P).
-        host/port: يُستخدمان عند إنشاء mesh_node داخلياً.
+        alpha_url: بذرة لاكتشاف الأقران فقط (seed)، وليس مسار تجميع مركزي دائم.
+        mesh_node: LivingMeshNode جاهز (مفضل).
+        host/port: عند إنشاء mesh_node داخلياً.
         """
         self.node_id = node_id
         self.alpha_url = alpha_url
-        self.ws = None
-        self._alpha_session = None
-        self.is_connected = False          # حالة المسار المركزي
-        self.p2p_ready = False            # حالة المسار P2P
+        self.is_connected = False
+        self.p2p_ready = False
         self._model_callback: Optional[Callable] = None
         self._pending_grads: List[Dict[str, Any]] = []
+        self._last_broadcast_stats: Dict[str, Any] = {}
 
         self.mesh_node = mesh_node
-        if self.mesh_node is None and (host is not None or port is not None):
+        if self.mesh_node is None:
             LivingMeshNode = _get_living_mesh_node_class()
             if LivingMeshNode is not None:
                 try:
-                    self.mesh_node = LivingMeshNode(node_id=node_id, host=host, port=port or 0)
-                    self.mesh_node.join_network()
+                    self.mesh_node = LivingMeshNode(
+                        node_id=node_id,
+                        host=host or "127.0.0.1",
+                        port=port or 0,
+                    )
+                    seed_nodes = []
+                    seed = _parse_seed_from_alpha_url(alpha_url)
+                    if seed:
+                        seed_nodes.append({
+                            "id": "alpha_seed",
+                            "host": seed["host"],
+                            "port": seed["port"],
+                        })
+                    self.mesh_node.join_network(seed_nodes=seed_nodes or None)
                     self.p2p_ready = True
                 except Exception as e:
-                    logger.warning(f"⚠️ LivingMesh join_network soft-fail: {e}")
+                    logger.warning(f"⚠️ LivingMesh init soft-fail: {e}")
                     self.mesh_node = None
 
         if self.mesh_node is not None:
@@ -65,7 +98,7 @@ class GradientExchangeProtocol:
             self._register_gradient_handler()
 
     def _register_gradient_handler(self):
-        """يربط استقبال رسائل gradient_push بمعالج محلي داخل الـ mesh_node."""
+        """معالج موحّد وغير متزامن لاستقبال gradient_push."""
         original = getattr(self.mesh_node, "_process_secure_message", None)
         if original is None or getattr(self.mesh_node, "_gradient_handler_installed", False):
             return
@@ -80,7 +113,7 @@ class GradientExchangeProtocol:
                 if kind == "gradient_push":
                     exp_data = payload.get("data") or {}
                     sender = payload.get("from")
-                    logger.info(f"📥 Gradient push received from {sender} (via living_mesh P2P)")
+                    logger.info(f"📥 gradient_push from {sender} (unified async handler)")
                     protocol._pending_grads.append(exp_data)
                     if protocol._model_callback is not None:
                         try:
@@ -93,57 +126,41 @@ class GradientExchangeProtocol:
 
         self.mesh_node._process_secure_message = wrapped_process
         self.mesh_node._gradient_handler_installed = True
-        logger.info("✅ Gradient handler registered on LivingMeshNode")
+        logger.info("✅ Unified gradient_push handler registered on LivingMeshNode")
 
     def set_model_callback(self, callback: Callable):
-        """تسجيل دالة تُستدعى عند استقبال تدرجات جديدة (data dict)."""
         self._model_callback = callback
 
     async def connect(self):
-        """الاتصال بالمسار المركزي (alpha) إن وُجد — بشكل مستقل عن P2P.
-        المساران يعملان معاً (dual-path).
-        """
-        if self.mesh_node is not None:
-            self.p2p_ready = True
-            logger.info(f"✅ Node {self.node_id} P2P path ready via LivingMesh.")
-
-        if not self.alpha_url:
-            if not self.p2p_ready:
-                logger.warning("⚠️ No mesh_node and no alpha_url — gradient exchange disabled.")
-            return
-
-        if self.ws is not None and self.is_connected:
-            return
-
-        try:
-            import aiohttp
-            self._alpha_session = aiohttp.ClientSession()
-            self.ws = await self._alpha_session.ws_connect(self.alpha_url)
-            self.is_connected = True
-            logger.info(f"✅ Node {self.node_id} connected to Alpha central path: {self.alpha_url}")
-            await self.ws.send_str(json.dumps({
-                "type": "register",
-                "node_id": self.node_id,
-                "role": "worker"
-            }))
-        except Exception as e:
-            logger.error(f"❌ Alpha central connection failed: {e}")
+        """جاهزية P2P + اكتشاف أقران عبر بذرة alpha_url إن وُجدت."""
+        if self.mesh_node is None:
             self.is_connected = False
-            self.ws = None
+            logger.warning("⚠️ No LivingMeshNode — gradient P2P disabled.")
+            return
+
+        self.p2p_ready = True
+        self.is_connected = True
+        seed = _parse_seed_from_alpha_url(self.alpha_url)
+        if seed:
+            ok = await self.mesh_node.request_peers(seed["host"], seed["port"])
+            if ok:
+                logger.info(f"✅ Peer discovery via alpha seed {seed['host']}:{seed['port']} succeeded")
+            else:
+                logger.warning(f"⚠️ Peer discovery via alpha seed failed (will retry on broadcast)")
+        else:
+            logger.info(f"✅ Node {self.node_id} P2P ready (no alpha seed configured)")
 
     def serialize_gradients(self, model: torch.nn.Module) -> str:
-        """تحويل التدرجات إلى صيغة قابلة للنقل عبر الشبكة."""
         grads = {}
         for name, param in model.named_parameters():
             if param.grad is not None:
                 grads[name] = param.grad.detach().cpu().half().numpy().tolist()
-
         buffer = io.BytesIO()
         torch.save(grads, buffer)
         return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
     def deserialize_and_apply(self, model: torch.nn.Module, grad_data_b64: str):
-        """استقبال وتطبيق التدرجات المجمعة من السرب."""
+        """دمج التدرجات الواردة مع تدرجات النموذج المحلي (متوسط All-Reduce بسيط)."""
         grad_bytes = base64.b64decode(grad_data_b64)
         buffer = io.BytesIO(grad_bytes)
         remote_grads = torch.load(buffer)
@@ -157,112 +174,109 @@ class GradientExchangeProtocol:
                     else:
                         param.grad = (param.grad + remote_grad) / 2.0
 
-    async def broadcast_gradients(self, model: torch.nn.Module):
-        """بث التدرجات عبر مسارين معاً:
-        1) P2P عبر living_mesh (send_to_peer) — لامركزي.
-        2) alpha_url — مسار مركزي ثابت للاستقرار.
+    async def broadcast_gradients(self, model: torch.nn.Module) -> Dict[str, Any]:
+        """بث التدرجات مباشرة إلى جميع الأقران المكتشفين عبر send_to_peer.
+        يُرجع إحصائيات النجاح/الفشل صراحةً (لا نجاح صامت).
         """
-        # تأكد من جاهزية المسار المركزي إن وُجد رابط
-        if self.alpha_url and not self.is_connected:
+        if self.mesh_node is None:
+            stats = {"ok": 0, "failed": 0, "peers": 0, "error": "no_mesh_node"}
+            self._last_broadcast_stats = stats
+            logger.warning("⚠️ broadcast_gradients: no mesh_node")
+            return stats
+
+        if not self.is_connected and not self.p2p_ready:
             await self.connect()
 
         start_time = time.time()
         grad_data = self.serialize_gradients(model)
-        serialization_time = time.time() - start_time
+        serialization_ms = (time.time() - start_time) * 1000
 
         payload_data = {
             "node_id": self.node_id,
             "data": grad_data,
             "timestamp": start_time,
-            "serialization_ms": serialization_time * 1000,
+            "serialization_ms": serialization_ms,
         }
 
-        p2p_sent = 0
-        alpha_sent = False
+        active_peers = self.mesh_node._get_active_peers_list()
+        targets = [
+            p for p in active_peers
+            if p.get("id") != self.node_id and p.get("host") and p.get("port") is not None
+        ]
 
-        # ---- المسار 1: P2P عبر living_mesh ----
-        if self.mesh_node is not None:
-            try:
+        # إن لم يوجد أقران بعد، أعد محاولة الاكتشاف عبر بذرة alpha
+        if not targets:
+            seed = _parse_seed_from_alpha_url(self.alpha_url)
+            if seed:
+                await self.mesh_node.request_peers(seed["host"], seed["port"])
                 active_peers = self.mesh_node._get_active_peers_list()
                 targets = [
                     p for p in active_peers
                     if p.get("id") != self.node_id and p.get("host") and p.get("port") is not None
                 ]
-                if targets:
-                    sample_size = min(len(targets), 3)
-                    chosen = random.sample(targets, sample_size)
-                    for peer in chosen:
-                        host = peer.get("host")
-                        port = peer.get("port")
-                        try:
-                            await self.mesh_node.send_to_peer(
-                                host, port, "gradient_push", payload_data, hops=0
-                            )
-                            p2p_sent += 1
-                        except Exception as e:
-                            logger.warning(f"⚠️ send_to_peer gradient failed for {host}:{port}: {e}")
-                else:
-                    logger.info("📡 P2P: no active peers yet.")
-            except Exception as e:
-                logger.error(f"❌ P2P gradient broadcast failed: {e}")
 
-        # ---- المسار 2: مركزي ثابت (alpha_url) — لا يُتخطى حتى لو نجح P2P ----
-        if self.ws is not None and self.is_connected:
+        ok_count = 0
+        fail_count = 0
+        failures: List[str] = []
+
+        # إرسال مباشر إلى جميع الأقران المكتشفين (وليس عينة عشوائية)
+        for peer in targets:
+            host = peer.get("host")
+            port = peer.get("port")
+            peer_id = peer.get("id", f"{host}:{port}")
             try:
-                await self.ws.send_str(json.dumps({
-                    "type": "gradient_push",
-                    "node_id": self.node_id,
-                    "data": grad_data,
-                    "timestamp": start_time,
-                    "serialization_ms": serialization_time * 1000,
-                }))
-                alpha_sent = True
+                success = await self.mesh_node.send_to_peer(
+                    host, port, "gradient_push", payload_data, hops=0
+                )
+                if success:
+                    ok_count += 1
+                else:
+                    fail_count += 1
+                    failures.append(str(peer_id))
             except Exception as e:
-                logger.error(f"❌ Alpha central gradient push failed: {e}")
-                self.is_connected = False
+                fail_count += 1
+                failures.append(f"{peer_id}:{e}")
+                logger.warning(f"⚠️ gradient send failed for {peer_id}: {e}")
 
-        if p2p_sent or alpha_sent:
-            logger.info(
-                f"📤 Gradients broadcast — P2P peers={p2p_sent}, alpha={'yes' if alpha_sent else 'no'}, "
-                f"serialization={serialization_time*1000:.2f}ms"
+        stats = {
+            "ok": ok_count,
+            "failed": fail_count,
+            "peers": len(targets),
+            "failures": failures,
+            "serialization_ms": round(serialization_ms, 2),
+        }
+        self._last_broadcast_stats = stats
+
+        if ok_count == 0 and fail_count == 0:
+            logger.warning("⚠️ Gradients not sent — no discovered peers yet.")
+        elif fail_count > 0:
+            logger.warning(
+                f"⚠️ Gradients partial: ok={ok_count} failed={fail_count}/{len(targets)} "
+                f"failures={failures}"
             )
         else:
-            logger.warning("⚠️ Gradients not sent on any path (no peers and no alpha connection).")
+            logger.info(
+                f"📤 Gradients pushed to ALL {ok_count} peer(s) via P2P. "
+                f"serialization={serialization_ms:.2f}ms"
+            )
+        return stats
 
     async def listen_for_updates(self, model: torch.nn.Module):
-        """تطبيق التدرجات الواردة من P2P + الاستماع على المسار المركزي إن وُجد."""
-        # 1) تطبيق أي تدرجات وصلت عبر living_mesh
+        """تطبيق التدرجات الواردة عبر المعالج الموحّد (غير متزامن / قائمة انتظار)."""
+        applied = 0
         while self._pending_grads:
             exp = self._pending_grads.pop(0)
             data_b64 = exp.get("data")
-            if data_b64:
-                try:
-                    self.deserialize_and_apply(model, data_b64)
-                    latency = (time.time() - exp.get("timestamp", time.time())) * 1000
-                    logger.info(f"🔄 Gradients integrated (P2P). Approx latency: {latency:.2f}ms")
-                except Exception as e:
-                    logger.error(f"❌ Failed to apply pending P2P gradient: {e}")
-
-        # 2) المسار المركزي — استماع مستمر إن كان متصلاً
-        if self.ws is None or not self.is_connected:
-            return
-
-        try:
-            import aiohttp
-            async for msg in self.ws:
-                if msg.type == aiohttp.WSMsgType.TEXT:
-                    data = json.loads(msg.data)
-                    if data.get("type") in ("gradient_pull", "gradient_push"):
-                        recv_time = time.time()
-                        push_time = data.get("timestamp", recv_time)
-                        latency = (recv_time - push_time) * 1000
-                        payload = data.get("data")
-                        if payload:
-                            self.deserialize_and_apply(model, payload)
-                            logger.info(f"🔄 Gradients integrated (alpha central). E2E Latency: {latency:.2f}ms")
-        except Exception as e:
-            logger.error(f"❌ Alpha listen loop ended: {e}")
-            self.is_connected = False
+            if not data_b64:
+                continue
+            try:
+                self.deserialize_and_apply(model, data_b64)
+                latency = (time.time() - exp.get("timestamp", time.time())) * 1000
+                logger.info(f"🔄 Merged remote gradients into local model. latency≈{latency:.2f}ms")
+                applied += 1
+            except Exception as e:
+                logger.error(f"❌ Failed to merge pending gradient: {e}")
+        return applied
 
 
 gradient_protocol = None

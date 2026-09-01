@@ -423,27 +423,44 @@ class LivingMeshNode:
         sig = self.sign_message(json.dumps(payload, sort_keys=True))
         return json.dumps({"payload": payload, "signature": sig})
 
-    async def request_peers(self, seed_host: str, seed_port: int):
-        """يتصل فعلياً بعقدة بذرة عبر WebSocket ويطلب قائمة أقرانها (مع إرفاق مفتاحنا العام)."""
+    async def request_peers(self, seed_host: str, seed_port: int, retries: int = 3, retry_delay: float = 0.8):
+        """يتصل فعلياً بعقدة بذرة عبر WebSocket ويطلب قائمة أقرانها (مع إرفاق مفتاحنا العام).
+        يعيد المحاولة بعدد محدود عند فشل الاتصال (منفذ غير جاهز أو مهلة قصيرة).
+        """
         url = self._peer_ws_url(seed_host, seed_port)
         my_info = getattr(self, "node_info", {"id": self.node_id, "host": self.host, "port": self.port})
         msg = self._build_signed_payload(
             "peer_discovery_request",
             {"public_key": self._pub_pem(), "node_info": my_info},
         )
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.ws_connect(url, timeout=10) as ws:
-                    await ws.send_str(msg)
-                    resp = await asyncio.wait_for(ws.receive(), timeout=10)
-                    if resp.type == aiohttp.WSMsgType.TEXT:
-                        await self._handle_aiohttp_ws_msg(ws, json.loads(resp.data))
-                        logger.info(f"🔎 Node {self.node_id} discovered peers via {seed_host}:{seed_port}")
-        except Exception as e:
-            logger.error(f"❌ request_peers to {seed_host}:{seed_port} failed: {e}")
+        last_err = None
+        for attempt in range(1, max(1, retries) + 1):
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.ws_connect(url, timeout=10) as ws:
+                        await ws.send_str(msg)
+                        resp = await asyncio.wait_for(ws.receive(), timeout=10)
+                        if resp.type == aiohttp.WSMsgType.TEXT:
+                            await self._handle_aiohttp_ws_msg(ws, json.loads(resp.data))
+                            logger.info(
+                                f"🔎 Node {self.node_id} discovered peers via {seed_host}:{seed_port} "
+                                f"(attempt {attempt}/{retries})"
+                            )
+                            return True
+            except Exception as e:
+                last_err = e
+                logger.warning(
+                    f"⚠️ request_peers attempt {attempt}/{retries} to {seed_host}:{seed_port} failed: {e}"
+                )
+                if attempt < retries:
+                    await asyncio.sleep(retry_delay)
+        logger.error(f"❌ request_peers to {seed_host}:{seed_port} failed after {retries} attempts: {last_err}")
+        return False
 
-    async def send_to_peer(self, host: str, port: int, kind: str, data: Dict[str, Any], hops: int = 0):
-        """يتصل فعلياً بعقدة هدف عبر WebSocket ويرسل لها رسالة موقّعة (Gossip)."""
+    async def send_to_peer(self, host: str, port: int, kind: str, data: Dict[str, Any], hops: int = 0) -> bool:
+        """يتصل فعلياً بعقدة هدف عبر WebSocket ويرسل لها رسالة موقّعة (Gossip).
+        يُرجع True عند نجاح الإرسال، False عند الفشل (لا يُعتبر الفشل نجاحاً صامتاً).
+        """
         url = self._peer_ws_url(host, port)
         msg = self._build_signed_payload(kind, data, hops=hops)
         try:
@@ -451,5 +468,7 @@ class LivingMeshNode:
                 async with session.ws_connect(url, timeout=10) as ws:
                     await ws.send_str(msg)
                     logger.info(f"📤 Node {self.node_id} sent '{kind}' to {host}:{port}")
+                    return True
         except Exception as e:
             logger.error(f"❌ send_to_peer to {host}:{port} failed: {e}")
+            return False

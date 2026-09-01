@@ -39,6 +39,20 @@ GAMMA_PORT = 8903
 HOST = "127.0.0.1"
 
 
+def _wait_port_ready(host: str, port: int, timeout: float = 8.0, interval: float = 0.15) -> bool:
+    """ينتظر حتى يصبح المنفذ قابلاً للاتصال فعلياً بدل الاعتماد على مهلة ثابتة فقط."""
+    import socket
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=0.4):
+                return True
+        except OSError:
+            time.sleep(interval)
+    return False
+
+
+
 def _isolate_node_storage(tmp_root: str, node_id: str):
     """يعزل هذه العملية بمجلد artifacts/keys خاص بها فقط — قبل أي استيراد لـ
     ai.living_mesh — عشان نضمن عدم مشاركة أي حالة بين العقد الثلاث."""
@@ -140,7 +154,11 @@ def run_test():
             args=(tmp_root, "node_alpha", ALPHA_PORT, None, str(results_dir / "alpha.json"), 12.0),
         )
         p_alpha.start()
-        time.sleep(1.5)  # امنح Alpha وقت كافي لتشغيل الخادم قبل أي اتصال بها
+        if not _wait_port_ready(HOST, ALPHA_PORT, timeout=8.0):
+            print("❌ Alpha port not ready in time")
+            return False
+        # هامش قصير بعد جاهزية المنفذ
+        time.sleep(0.3)
 
         # 2) Beta: تكتشف Alpha
         p_beta = ctx.Process(
@@ -149,7 +167,10 @@ def run_test():
                   {"host": HOST, "port": ALPHA_PORT}, str(results_dir / "beta.json"), 3.0),
         )
         p_beta.start()
-        time.sleep(2.0)  # امنح Beta وقت تسجّل بيه Alpha قبل ما تدخل Gamma
+        if not _wait_port_ready(HOST, BETA_PORT, timeout=8.0):
+            print("❌ Beta port not ready in time")
+            return False
+        time.sleep(0.5)  # هامش لتسجيل Beta لدى Alpha قبل دخول Gamma
 
         # 3) Gamma: تكتشف Alpha، وتتعلم عن Beta بشكل غير مباشر (متعدد القفزات)
         #    ثم ترسل رسالة مباشرة لـ Beta
