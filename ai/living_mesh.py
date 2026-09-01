@@ -115,7 +115,8 @@ class LivingMeshNode:
             "last_seen": datetime.now(timezone.utc).isoformat(),
             "evolution_score": self.local_evolution_score,
             "behavioral_weights": self.behavioral_weights,
-            "capabilities": capabilities
+            "capabilities": capabilities,
+            "public_key": self._pub_pem()
         }
         
         state["nodes"][self.node_id] = self.node_info
@@ -229,6 +230,13 @@ class LivingMeshNode:
         )
         (self.keys_dir / f"{self.node_id}.pub").write_bytes(pub_pem)
 
+    def _pub_pem(self) -> str:
+        """المفتاح العام للعقدة بصيغة PEM نصية (يُرفق برسائل الاكتشاف P2P)."""
+        return self.public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        ).decode()
+
     def sign_message(self, message: str) -> str:
         signature = self.private_key.sign(
             message.encode(),
@@ -276,9 +284,10 @@ class LivingMeshNode:
             pub_key_path = self.keys_dir / f"{sender_id}.pub"
             
             if not pub_key_path.exists():
-                if payload.get("kind") == "peer_discovery_request":
-                    pub_pem = payload["data"].get("public_key")
+                if payload.get("kind") in ("peer_discovery_request", "peer_discovery_response"):
+                    pub_pem = (payload.get("data") or {}).get("public_key")
                     if pub_pem: pub_key_path.write_text(pub_pem)
+                    else: return
                 else: return
             
             pub_key_pem = pub_key_path.read_bytes()
@@ -290,11 +299,18 @@ class LivingMeshNode:
             hops = payload.get("p2p_hops", 0)
             
             if kind == "peer_discovery_request" and websocket:
+                # سجّل الطالب كعقدة معروفة (تسجيل متبادل) — بدونه لا يمكن لأي عقدة
+                # ثالثة اكتشافه لاحقاً عبر عقدة وسيطة (multi-hop discovery)
+                sender_info = (exp_data or {}).get("node_info")
+                if sender_info and sender_id != self.node_id:
+                    state = self._load_state()
+                    state["nodes"][sender_id] = sender_info
+                    self._save_state(state)
                 peers_list = self._get_active_peers_list()
                 response = {
                     "id": f"resp_{uuid.uuid4().hex[:8]}",
                     "kind": "peer_discovery_response",
-                    "data": {"peers": peers_list},
+                    "data": {"peers": peers_list, "public_key": self._pub_pem()},
                     "from": self.node_id,
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }
@@ -306,6 +322,10 @@ class LivingMeshNode:
                     await websocket.send(resp_msg)
             
             elif kind == "peer_discovery_response":
+                # احفظ المفتاح العام للعقدة المستجيبة نفسها (تم التحقق منه أعلاه بالفعل)
+                resp_pub_key = exp_data.get("public_key")
+                if resp_pub_key and not pub_key_path.exists():
+                    pub_key_path.write_text(resp_pub_key)
                 new_peers = exp_data.get("peers", [])
                 for peer in new_peers:
                     peer_id = peer.get("id")
@@ -314,6 +334,11 @@ class LivingMeshNode:
                         if peer_id not in state["nodes"]:
                             state["nodes"][peer_id] = peer
                             self._save_state(state)
+                        # اكتشاف مفتاح متعدد القفزات: احفظ مفتاح عقدة لم نتواصل معها مباشرة بعد
+                        peer_pub_key = peer.get("public_key")
+                        peer_key_path = self.keys_dir / f"{peer_id}.pub"
+                        if peer_pub_key and not peer_key_path.exists():
+                            peer_key_path.write_text(peer_pub_key)
             elif kind == "evolution_task":
                 logger.info(f"🧬 Node {self.node_id} received Evolution Task: {exp_data.get('task')}")
                 asyncio.create_task(self._execute_evolution(exp_data))
@@ -374,10 +399,52 @@ class LivingMeshNode:
                 active_peers.append(peer_record)
         return active_peers
 
+    def _peer_ws_url(self, host: str, port: int) -> str:
+        scheme = "wss" if port == 443 else "ws"
+        # منافذ HTTP/HTTPS القياسية لا تُكتب صراحة بالرابط
+        if port in (80, 443):
+            return f"{scheme}://{host}/ws"
+        return f"{scheme}://{host}:{port}/ws"
+
+    def _build_signed_payload(self, kind: str, data: Dict[str, Any], hops: int = 0) -> str:
+        payload = {
+            "id": f"msg_{uuid.uuid4().hex[:8]}",
+            "kind": kind,
+            "data": data,
+            "from": self.node_id,
+            "p2p_hops": hops,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        sig = self.sign_message(json.dumps(payload, sort_keys=True))
+        return json.dumps({"payload": payload, "signature": sig})
+
     async def request_peers(self, seed_host: str, seed_port: int):
-        # منطق طلب الأقران
-        pass
+        """يتصل فعلياً بعقدة بذرة عبر WebSocket ويطلب قائمة أقرانها (مع إرفاق مفتاحنا العام)."""
+        url = self._peer_ws_url(seed_host, seed_port)
+        my_info = getattr(self, "node_info", {"id": self.node_id, "host": self.host, "port": self.port})
+        msg = self._build_signed_payload(
+            "peer_discovery_request",
+            {"public_key": self._pub_pem(), "node_info": my_info},
+        )
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.ws_connect(url, timeout=10) as ws:
+                    await ws.send_str(msg)
+                    resp = await asyncio.wait_for(ws.receive(), timeout=10)
+                    if resp.type == aiohttp.WSMsgType.TEXT:
+                        await self._handle_aiohttp_ws_msg(ws, json.loads(resp.data))
+                        logger.info(f"🔎 Node {self.node_id} discovered peers via {seed_host}:{seed_port}")
+        except Exception as e:
+            logger.error(f"❌ request_peers to {seed_host}:{seed_port} failed: {e}")
 
     async def send_to_peer(self, host: str, port: int, kind: str, data: Dict[str, Any], hops: int = 0):
-        # منطق إرسال البيانات للأقران
-        pass
+        """يتصل فعلياً بعقدة هدف عبر WebSocket ويرسل لها رسالة موقّعة (Gossip)."""
+        url = self._peer_ws_url(host, port)
+        msg = self._build_signed_payload(kind, data, hops=hops)
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.ws_connect(url, timeout=10) as ws:
+                    await ws.send_str(msg)
+                    logger.info(f"📤 Node {self.node_id} sent '{kind}' to {host}:{port}")
+        except Exception as e:
+            logger.error(f"❌ send_to_peer to {host}:{port} failed: {e}")
