@@ -346,6 +346,11 @@ class LivingMeshNode:
                 # طلب تنفيذ أداة محددة من السرب
                 logger.info(f"🛠️ Node {self.node_id} received Tool Request: {exp_data.get('tool_name')}")
                 asyncio.create_task(self._handle_tool_request(exp_data))
+            elif kind == "gradient_push":
+                # تدرجات من بروتوكول Gradient Mesh — نقبلها ونمررها كـ gossip محدود
+                logger.info(f"📥 Node {self.node_id} received gradient_push from {sender_id} (hops={hops})")
+                if hops < 3:
+                    self.sync_experience(kind, exp_data, hops + 1)
             else:
                 self.sync_experience(kind, exp_data, hops + 1)
         except Exception as e:

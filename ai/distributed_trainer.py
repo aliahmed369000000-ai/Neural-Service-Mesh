@@ -38,9 +38,16 @@ class NSMDistributedTrainer:
             except Exception as e:
                 print(f"⚠️ Warning: Could not create checkpoint directory {self.checkpoint_dir}: {e}")
         
-        # تهيئة بروتوكول تبادل التدرجات العالمي
+        # تهيئة بروتوكول تبادل التدرجات العالمي — يفضّل مسار living_mesh P2P
         alpha_url = os.environ.get("ALPHA_NODE_WS_URL", "wss://aliahmedmo-nsm-alpha-node.hf.space/ws")
-        self.gradient_mesh = GradientExchangeProtocol(node_id=f"kaggle_{os.environ.get('KAGGLE_USERNAME', 'unknown')}", alpha_url=alpha_url)
+        node_id = f"kaggle_{os.environ.get('KAGGLE_USERNAME', 'unknown')}"
+        # نمرّر host/port ليُنشئ GradientExchangeProtocol عقدة living_mesh خفيفة إن أمكن
+        self.gradient_mesh = GradientExchangeProtocol(
+            node_id=node_id,
+            alpha_url=alpha_url,  # توافق خلفي فقط
+            host=os.environ.get("MESH_HOST", "127.0.0.1"),
+            port=int(os.environ.get("MESH_PORT", "0") or 0) or None,
+        )
         
         print(f"🛡️ Security Protocol Active. Initializing NSM Distributed Swarm with {self.world_size} GPUs...")
 
