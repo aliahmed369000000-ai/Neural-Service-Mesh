@@ -298,7 +298,7 @@ class LivingMeshNode:
             exp_data = payload.get("data")
             hops = payload.get("p2p_hops", 0)
             
-            if kind == "peer_discovery_request" and websocket:
+            if kind == "peer_discovery_request" and websocket is not None:
                 # سجّل الطالب كعقدة معروفة (تسجيل متبادل) — بدونه لا يمكن لأي عقدة
                 # ثالثة اكتشافه لاحقاً عبر عقدة وسيطة (multi-hop discovery)
                 sender_info = (exp_data or {}).get("node_info")
