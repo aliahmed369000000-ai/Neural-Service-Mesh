@@ -17,6 +17,7 @@ from aiohttp import web
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from ai.living_mesh import LivingMeshNode
+from ai.node_health_layer import NodeHealthLayer
 
 # إعداد السجلات
 logging.basicConfig(
@@ -44,7 +45,10 @@ async def handle_status(request):
 
 
 async def handle_health(request):
-    """Endpoint صحة الشبكة — Node 2.0."""
+    """Endpoint صحة الشبكة — عبر NodeHealthLayer إن وُجدت."""
+    health = request.app.get('health')
+    if health is not None:
+        return web.json_response(health.health())
     node = request.app['node']
     snap = node.network_health_snapshot()
     snap["status"] = "healthy" if snap.get("node_id") else "degraded"
@@ -88,6 +92,38 @@ h1{{margin:0 0 8px;font-size:1.4rem}} .muted{{color:#8b9bb8;font-size:.9rem}}
 <div class="card"><div class="muted">API: /health · /v2/status · /ws · /status</div></div>
 </body></html>"""
     return web.Response(text=html, content_type="text/html")
+
+
+async def handle_routes(request):
+    health = request.app.get("health")
+    if health is None:
+        return web.json_response({"error": "health_layer_missing"}, status=500)
+    return web.json_response(health.routes_table())
+
+async def handle_tasks(request):
+    health = request.app.get("health")
+    if health is None:
+        return web.json_response({"error": "health_layer_missing"}, status=500)
+    return web.json_response({"tasks": health.recent_tasks()})
+
+async def handle_submit_task(request):
+    """POST JSON: {kind, payload, local?} — مهمة قابلة للتحقق."""
+    health = request.app.get("health")
+    if health is None:
+        return web.json_response({"error": "health_layer_missing"}, status=500)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid_json"}, status=400)
+    kind = body.get("kind")
+    payload = body.get("payload") or {}
+    local = bool(body.get("local", True))
+    if not kind:
+        return web.json_response({"error": "kind_required"}, status=400)
+    result = await health.submit_verifiable_task(kind, payload, local=local)
+    if result.get("receipt") and result.get("result"):
+        result["verification"] = health.verify_receipt(result["receipt"], result["result"])
+    return web.json_response(result)
 
 async def handle_ws(request):
     """معالج WebSocket موحّد عبر مسار الرسائل الموقّعة في LivingMeshNode.
@@ -166,10 +202,14 @@ async def main():
     # إعداد تطبيق aiohttp
     app = web.Application()
     app['node'] = node
+    app['health'] = NodeHealthLayer(node)
     app.add_routes([
         web.get('/status', handle_status),
         web.get('/health', handle_health),
         web.get('/v2/status', handle_v2_status),
+        web.get('/v2/routes', handle_routes),
+        web.get('/v2/tasks', handle_tasks),
+        web.post('/v2/task', handle_submit_task),
         web.get('/dashboard', handle_dashboard),
         web.get('/ws', handle_ws),
         web.get('/', handle_status),
