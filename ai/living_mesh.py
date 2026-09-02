@@ -126,6 +126,7 @@ class LivingMeshNode:
             "tasks_duplicate_rejected": 0,
             "tasks_cancelled": 0,
             "tasks_acked": 0,
+            "messages_processing_errors": 0,
         }
 
     async def _load_surah_pretrain(self):
@@ -411,21 +412,23 @@ class LivingMeshNode:
             for k, _ in sorted_items[: len(self._seen_nonces) - NONCE_CACHE_MAX]:
                 self._seen_nonces.pop(k, None)
 
-    def _is_replay(self, request_id: Optional[str], nonce: Optional[str]) -> bool:
-        """يتحقق إن كانت الرسالة مكررة (replay) عبر request_id أو nonce."""
+    def _is_replay(self, request_id: Optional[str], nonce: Optional[str], msg_id: Optional[str] = None) -> bool:
+        """يتحقق إن كانت الرسالة مكررة (replay) عبر request_id أو nonce أو id."""
         self._purge_expired_nonces()
         keys = []
         if request_id:
             keys.append(f"rid:{request_id}")
         if nonce:
             keys.append(f"n:{nonce}")
+        if msg_id:
+            keys.append(f"mid:{msg_id}")
         if not keys:
+            # بدون أي معرّف فريد: اعتبرها غير قابلة للتتبع — تُرفض في الطبقة الأعلى للأنواع الحساسة
             return False
         now = time.time()
         for k in keys:
             if k in self._seen_nonces:
                 return True
-        # سجّل الآن
         expiry = now + NONCE_TTL_SEC
         for k in keys:
             self._seen_nonces[k] = expiry
@@ -445,18 +448,21 @@ class LivingMeshNode:
         """
         يتحقق من حقول البروتوكول v1.1.
         يُرجع None إن كانت صالحة، أو سبب الرفض كنص.
+        #14: منع معالجة نفس الرسالة أكثر من مرة عبر request_id/nonce/id.
         """
-        # الإصدار (اختياري للتوافق الخلفي مع عقد قديمة، لكن نفضّل 1.1+)
         ver = payload.get("protocol_version")
         if ver is not None and ver != PROTOCOL_VERSION:
-            # نقبل 1.0 و 1.1 فقط حالياً
             if ver not in ("1.0", "1.1"):
                 return "unsupported_protocol_version"
 
-        # الطابع الزمني
+        kind = payload.get("kind") or ""
+        bootstrap_kinds = {
+            "peer_discovery_request", "peer_discovery_response",
+            "ping_request", "ping_response",
+        }
+
         ts_unix = payload.get("ts_unix")
         if ts_unix is None:
-            # حاول من timestamp ISO
             ts_str = payload.get("timestamp")
             if ts_str:
                 try:
@@ -469,10 +475,16 @@ class LivingMeshNode:
             if skew > MAX_TIMESTAMP_SKEW_SEC:
                 return "timestamp_skew"
 
-        # request_id / nonce (إن وُجدا نفحص Replay)
-        request_id = payload.get("request_id") or payload.get("id")
+        request_id = payload.get("request_id")
         nonce = payload.get("nonce")
-        if self._is_replay(request_id, nonce):
+        msg_id = payload.get("id")
+
+        # #14 للرسائل غير الاكتشاف/الـping: اطلب معرّفاً فريداً واحداً على الأقل
+        if kind not in bootstrap_kinds:
+            if not (request_id or nonce or msg_id):
+                return "missing_message_id"
+
+        if self._is_replay(request_id, nonce, msg_id=msg_id):
             return "replay"
 
         return None
@@ -509,6 +521,7 @@ class LivingMeshNode:
                     "replay": "messages_rejected_replay",
                     "timestamp_skew": "messages_rejected_skew",
                     "unsupported_protocol_version": "messages_rejected_version",
+                    "missing_message_id": "messages_rejected_replay",
                 }.get(reject_reason, "messages_rejected_replay")
                 self._metrics[metric_key] = self._metrics.get(metric_key, 0) + 1
                 logger.warning(f"🚫 Message rejected from {sender_id}: {reject_reason}")
@@ -607,9 +620,26 @@ class LivingMeshNode:
                 logger.info(f"🧬 Node {self.node_id} received Evolution Task: {exp_data.get('task')}")
                 asyncio.create_task(self._execute_evolution(exp_data))
             elif kind == "tool_request":
-                # طلب تنفيذ أداة محددة من السرب
-                logger.info(f"🛠️ Node {self.node_id} received Tool Request: {exp_data.get('tool_name')}")
-                asyncio.create_task(self._handle_tool_request(exp_data))
+                # طلب تنفيذ أداة محددة من السرب — أظهر الأخطاء ولا تبتلعها (#16)
+                logger.info(f"🛠️ Node {self.node_id} received Tool Request: {(exp_data or {}).get('tool_name')}")
+                tool_res = await self._handle_tool_request(exp_data, websocket=websocket, sender_id=sender_id)
+                if websocket is not None and tool_res is not None:
+                    try:
+                        resp_payload = {
+                            "id": f"tres_{uuid.uuid4().hex[:8]}",
+                            "kind": "tool_result",
+                            "data": tool_res,
+                            "from": self.node_id,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        }
+                        sig = self.sign_message(json.dumps(resp_payload, sort_keys=True))
+                        msg = json.dumps({"payload": resp_payload, "signature": sig})
+                        if hasattr(websocket, "send_str"):
+                            await websocket.send_str(msg)
+                        else:
+                            await websocket.send(msg)
+                    except Exception as e:
+                        logger.error(f"❌ Failed to send tool_result: {e}")
             elif kind == "gradient_push":
                 # تدرجات من بروتوكول Gradient Mesh — نقبلها ونمررها كـ gossip محدود
                 logger.info(f"📥 Node {self.node_id} received gradient_push from {sender_id} (hops={hops})")
@@ -657,24 +687,63 @@ class LivingMeshNode:
             else:
                 self.sync_experience(kind, exp_data, hops + 1)
         except Exception as e:
-            logger.error(f"❌ Error processing WS message: {e}")
+            # #16: لا تبتلع الأخطاء بصمت — سجّل وعدّ
+            self._metrics["messages_rejected_sig"] = self._metrics.get("messages_rejected_sig", 0)
+            logger.error(f"❌ Error processing WS message from {locals().get('sender_id', '?')}: {type(e).__name__}: {e}")
+            if "messages_processing_errors" not in self._metrics:
+                self._metrics["messages_processing_errors"] = 0
+            self._metrics["messages_processing_errors"] += 1
 
-    async def _handle_tool_request(self, request_data: Dict[str, Any]):
-        """معالجة طلب تنفيذ أداة ومشاركة النتيجة."""
+    async def _handle_tool_request(self, request_data: Dict[str, Any], websocket=None, sender_id: str = None):
+        """معالجة طلب تنفيذ أداة ومشاركة النتيجة — مع إرجاع الخطأ صراحة (#16)."""
+        tool_name = (request_data or {}).get("tool_name")
+        args = (request_data or {}).get("args") or {}
+        task_id = (request_data or {}).get("task_id") or f"tool_{uuid.uuid4().hex[:10]}"
+        # #15: قائمة أدوات مسموحة فقط للتنفيذ عن بُعد (لا توليد كود)
+        SAFE_REMOTE_TOOLS = {
+            "code_analyzer", "security_scanner", "data_processor", "translator",
+            "distributed_trainer", "speed_benchmark", "security_monitor", "cognitive_tracker",
+        }
         try:
-            tool_name = request_data.get("tool_name")
-            args = request_data.get("args", {})
-            
+            if not tool_name:
+                raise ValueError("missing tool_name")
+            if tool_name not in SAFE_REMOTE_TOOLS:
+                raise PermissionError(
+                    f"tool '{tool_name}' is not allowed for remote execution "
+                    f"(allowed={sorted(SAFE_REMOTE_TOOLS)})"
+                )
+            if tool_name == "tool_generator" or "code" in args:
+                raise PermissionError("arbitrary code execution is forbidden")
+
             result = self.toolbox.execute_tool(tool_name, **args)
-            
-            # مشاركة نتيجة تنفيذ الأداة مع الشبكة
-            self.sync_experience("tool_result", {
+            payload = {
+                "ok": True,
+                "task_id": task_id,
                 "tool_name": tool_name,
                 "result": result,
-                "node": self.node_id
-            })
+                "node": self.node_id,
+                "error": None,
+            }
+            self.sync_experience("tool_result", payload)
+            logger.info(f"✅ Tool {tool_name} ok task_id={task_id}")
+            return payload
         except Exception as e:
-            logger.error(f"❌ Tool Execution Request Failed: {e}")
+            err = f"{type(e).__name__}: {e}"
+            logger.error(f"❌ Tool Execution Request Failed: {err}")
+            payload = {
+                "ok": False,
+                "task_id": task_id,
+                "tool_name": tool_name,
+                "result": None,
+                "node": self.node_id,
+                "error": err,
+            }
+            # أظهر الفشل في الخبرة الجماعية بدلاً من الصمت
+            try:
+                self.sync_experience("tool_result", payload)
+            except Exception as e2:
+                logger.error(f"❌ Failed to publish tool error: {e2}")
+            return payload
 
     async def _execute_evolution(self, task_data: Dict[str, Any]):
         """تنفيذ مهمة التطوير الذاتي برمجياً."""
@@ -1494,11 +1563,17 @@ class LivingMeshNode:
             logger.info(f"🛑 Task cancelled before execute id={task_id}")
             return
 
-        result = mesh_tasks.dispatch_task(kind, exp_data or {})
+        try:
+            result = mesh_tasks.dispatch_task(kind, exp_data or {})
+        except Exception as e:
+            err = f"{type(e).__name__}: {e}"
+            logger.error(f"❌ Mesh task execution error kind={kind} id={task_id}: {err}")
+            result = {"ok": False, "error": err, "task_id": task_id}
         if result is None:
             logger.warning(f"⚠️ Unknown mesh task kind={kind}")
             self._register_task(task_id, kind, mesh_tasks.TASK_STATUS_FAILED, extra={"error": "unknown_kind"})
-            return
+            # #16 أعد خطأ واضحاً للطالب إن أمكن
+            result = {"ok": False, "error": f"unknown_kind:{kind}", "task_id": task_id}
         self._metrics["tasks_executed"] += 1
         result_kind = mesh_tasks.result_kind_for(kind)
         result["task_id"] = task_id

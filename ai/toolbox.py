@@ -45,20 +45,33 @@ class NSMToolbox:
             for name, info in self.tools.items()
         ]
 
+    # أدوات محظورة دائماً (كود غير موثوق / توليد ديناميكي)
+    BLOCKED_TOOLS = frozenset({"tool_generator", "generate_custom_tool", "eval", "exec", "run_code"})
+
     def execute_tool(self, name: str, timeout: int = 30, **kwargs) -> Any:
-        """تنفيذ أداة محددة مع مهلة زمنية لضمان عدم تعليق العقدة."""
+        """تنفيذ أداة مسجّلة فقط — مع حظر مسارات الكود غير الموثوق (#15)."""
+        if not name or name in self.BLOCKED_TOOLS:
+            raise PermissionError(f"Tool '{name}' is blocked for security (#15)")
+        # ارفض أي وسيط يبدو ككود قابل للتنفيذ
+        for k, v in (kwargs or {}).items():
+            if k in ("code", "source", "script", "python", "body") and isinstance(v, str) and len(v) > 0:
+                raise PermissionError(
+                    f"Refusing kwargs[{k!r}]: untrusted code parameters are not allowed (#15)"
+                )
         tool_func = self.get_tool(name)
         if not tool_func:
             raise ValueError(f"❌ Tool '{name}' not found in toolbox.")
-        
+
         try:
-            logger.info(f"⚙️ Executing tool: {name} with args: {kwargs} (Timeout: {timeout}s)")
+            logger.info(f"⚙️ Executing tool: {name} (Timeout: {timeout}s)")
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(tool_func, **kwargs)
                 return future.result(timeout=timeout)
         except concurrent.futures.TimeoutError:
             logger.error(f"⏱️ Tool {name} timed out after {timeout}s")
             raise RuntimeError(f"Tool {name} execution timed out.")
+        except PermissionError:
+            raise
         except Exception as e:
             logger.error(f"❌ Error executing tool {name}: {e}")
             raise
@@ -68,31 +81,18 @@ nsm_toolbox = NSMToolbox()
 
 def generate_custom_tool(name: str, code: str, description: str):
     """
-    توليد أداة جديدة برمجياً ودمجها في الصندوق فوراً.
-    تسمح للوكلاء بابتكار حلول للمشاكل الجديدة.
+    #15: مُعطّل عمداً — لا يُسمح بتنفيذ كود غير موثوق عبر exec.
+    كان هذا المسار يسمح بتوليد أدوات ديناميكية؛ أُغلق لأسباب أمنية.
     """
-    try:
-        # تنفيذ الكود في بيئة معزولة (محاكاة)
-        local_scope = {}
-        exec(code, {}, local_scope)
-        
-        # البحث عن الدالة المولدة (يجب أن تحمل نفس اسم الأداة)
-        if name in local_scope:
-            nsm_toolbox.register_tool(name, local_scope[name], description, "autonomous")
-            logger.info(f"✨ Autonomous Tool Generated: {name}")
-            return True
-        else:
-            raise ValueError(f"Function '{name}' not found in generated code.")
-    except Exception as e:
-        logger.error(f"❌ Failed to generate autonomous tool: {e}")
-        return False
+    logger.error(
+        "🚫 generate_custom_tool blocked: arbitrary code execution is forbidden (#15). "
+        f"requested_name={name!r}"
+    )
+    raise PermissionError(
+        "tool_generator is disabled: running untrusted code on mesh nodes is not allowed"
+    )
 
-nsm_toolbox.register_tool(
-    "tool_generator", 
-    generate_custom_tool, 
-    "توليد أدوات جديدة برمجياً ودمجها في الصندوق", 
-    "autonomous"
-)
+# لا نُسجّل tool_generator كأداة قابلة للاستدعاء عن بُعد
 
 # --- أدوات أساسية مدمجة ---
 
