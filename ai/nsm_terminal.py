@@ -972,8 +972,27 @@ class NSMTerminal:
                     j = self._jobs.get(job_id)
                     if j:
                         j.exit_code = proc.returncode
-                        j.stdout = redact(j.stdout or "")[:_MAX_OUTPUT]
-                        j.stderr = redact(j.stderr or "")[:_MAX_OUTPUT]
+                        # 🐛 إصلاح خطأ حقيقي: كان هذا يقرأ j.stdout/j.stderr
+                        # ليعيد كتابتهما لنفسيهما — لكنهما لم يُملآ من أي
+                        # مصدر آخر إطلاقاً (يبقيان "" دائماً)، بينما المخرجات
+                        # الحقيقية للأمر كانت تُخزَّن فقط داخل j.live_lines
+                        # الممزوجة معاً بوسم "[out] "/"[err] " (البث الحي
+                        # أعلاه). نتيجة ذلك: حقل stdout/stderr في job.to_dict()
+                        # كان فارغاً دائماً لكل مهمة خلفية ناجحة، مهما كانت
+                        # مخرجاتها — ما يجعل أي ميزة "عرض المخرجات" بالواجهة
+                        # (ui_pages/nsm_terminal.py) عديمة الفائدة عملياً. الآن
+                        # نفصل stdout عن stderr فعلياً من live_lines حسب الوسم.
+                        with j.live_lock:
+                            _out_lines = [
+                                _ln[len("[out] "):] for _ln in j.live_lines
+                                if _ln.startswith("[out] ")
+                            ]
+                            _err_lines = [
+                                _ln[len("[err] "):] for _ln in j.live_lines
+                                if _ln.startswith("[err] ")
+                            ]
+                        j.stdout = redact("\n".join(_out_lines))[:_MAX_OUTPUT]
+                        j.stderr = redact("\n".join(_err_lines))[:_MAX_OUTPUT]
                         # إبقاء status=timed_out إن ضُبط أثناء الحلقة
                         if j.status == "running":
                             j.status = "done"
