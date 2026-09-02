@@ -25,6 +25,8 @@ ROOT = Path(__file__).resolve().parent.parent
 MESH_DIR = ROOT / "artifacts" / "model_training" / "super_ai" / "swarm"
 MESH_DIR.mkdir(parents=True, exist_ok=True)
 STATE_PATH = MESH_DIR / "mesh_state.json"
+OUTBOX_MAX = 500   # أقصى عدد رسائل outbox محفوظة؛ الأقدم يُقصّ
+INBOX_MAX = 2000   # أقصى عدد رسائل inbox (نسخة لكل عقدة بكل بث، لذا حدّها أكبر)
 
 
 def _now() -> str:
@@ -75,10 +77,14 @@ def broadcast_experience(
         "ts": _now(),
     }
     state.setdefault("outbox", []).append(msg)
+    if len(state["outbox"]) > OUTBOX_MAX:
+        state["outbox"] = state["outbox"][-OUTBOX_MAX:]
     # محاكاة انتشار: كل العقد الأخرى تستقبل
     for nid in state.get("nodes", {}):
         if nid != node_id:
             state.setdefault("inbox", []).append({**msg, "to": nid})
+    if len(state.get("inbox", [])) > INBOX_MAX:
+        state["inbox"] = state["inbox"][-INBOX_MAX:]
     state["nodes"][node_id]["last_seen"] = _now()
     _save(state)
     try:
