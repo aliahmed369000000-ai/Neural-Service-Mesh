@@ -33,6 +33,8 @@ ROOT = Path(__file__).resolve().parent.parent
 LIVING_MESH_DIR = ROOT / "artifacts" / "living_mesh"
 LIVING_MESH_DIR.mkdir(parents=True, exist_ok=True)
 NETWORK_STATE = LIVING_MESH_DIR / "network_state.json"
+CONTENT_DIR = LIVING_MESH_DIR / "content"
+CONTENT_DIR.mkdir(parents=True, exist_ok=True)
 
 class LivingMeshNode:
     def __init__(self, node_id: str = None, host: str = "127.0.0.1", port: int = None):
@@ -106,7 +108,10 @@ class LivingMeshNode:
         state = self._load_state()
         is_rejoining = self.node_id in state["nodes"]
         
-        capabilities = ["text", "image", "audio", "video", "tf_engine", "self_evolution"]
+        capabilities = [
+            "text", "image", "audio", "video", "tf_engine", "self_evolution",
+            "storage", "checkpoint", "GPU_HIGH", "GPU_LOW", "CPU",
+        ]
 
         self.node_info = {
             "id": self.node_id,
@@ -307,11 +312,21 @@ class LivingMeshNode:
                     state = self._load_state()
                     state["nodes"][sender_id] = sender_info
                     self._save_state(state)
-                peers_list = self._get_active_peers_list()
+                filter_caps = (exp_data or {}).get("require_capabilities") or (exp_data or {}).get("capabilities")
+                peers_list = self._get_active_peers_list(require_capabilities=filter_caps)
+                # أضف نفس العقدة إن طابقت الفلتر
+                my_caps = (getattr(self, "node_info", {}) or {}).get("capabilities") or []
+                if filter_caps:
+                    need = set(filter_caps if isinstance(filter_caps, (list, tuple, set)) else [filter_caps])
+                    if need.issubset(set(my_caps)):
+                        me = dict(getattr(self, "node_info", {}) or {})
+                        me.setdefault("id", self.node_id)
+                        if not any(p.get("id") == self.node_id for p in peers_list):
+                            peers_list = peers_list + [me]
                 response = {
                     "id": f"resp_{uuid.uuid4().hex[:8]}",
                     "kind": "peer_discovery_response",
-                    "data": {"peers": peers_list, "public_key": self._pub_pem()},
+                    "data": {"peers": peers_list, "public_key": self._pub_pem(), "filter": filter_caps},
                     "from": self.node_id,
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }
@@ -385,6 +400,12 @@ class LivingMeshNode:
                 await self._handle_multisig_sign(exp_data or {}, sender_id=sender_id)
             elif kind in mesh_tasks.ALL_TASK_KINDS:
                 await self._handle_mesh_task(kind, exp_data or {}, sender_id=sender_id, hops=hops, websocket=websocket)
+            elif kind in (
+                "checkpoint_store", "checkpoint_store_result",
+                "content_get", "content_get_result",
+                "content_put", "content_put_result",
+            ):
+                await self._handle_storage_task(kind, exp_data or {}, sender_id=sender_id, hops=hops, websocket=websocket)
             else:
                 self.sync_experience(kind, exp_data, hops + 1)
         except Exception as e:
@@ -428,13 +449,25 @@ class LivingMeshNode:
         except Exception as e:
             logger.error(f"❌ Evolution Execution Failed: {e}")
 
-    def _get_active_peers_list(self) -> List[Dict[str, Any]]:
+    def _get_active_peers_list(self, require_capabilities=None) -> List[Dict[str, Any]]:
+        """قائمة الأقران النشطين مع تصفية اختيارية حسب القدرات (مثل GPU_HIGH)."""
         state = self._load_state()
         active_peers = []
+        need = None
+        if require_capabilities:
+            if isinstance(require_capabilities, str):
+                need = {require_capabilities}
+            else:
+                need = set(require_capabilities)
         for nid, info in state.get("nodes", {}).items():
             if info.get("status") == "online":
+                if need:
+                    caps = set(info.get("capabilities") or [])
+                    if not need.issubset(caps):
+                        continue
                 peer_record = info.copy()
-                if "id" not in peer_record: peer_record["id"] = nid
+                if "id" not in peer_record:
+                    peer_record["id"] = nid
                 active_peers.append(peer_record)
         return active_peers
 
@@ -457,16 +490,27 @@ class LivingMeshNode:
         sig = self.sign_message(json.dumps(payload, sort_keys=True))
         return json.dumps({"payload": payload, "signature": sig})
 
-    async def request_peers(self, seed_host: str, seed_port: int, retries: int = 3, retry_delay: float = 0.8):
+    async def request_peers(
+        self,
+        seed_host: str,
+        seed_port: int,
+        retries: int = 3,
+        retry_delay: float = 0.8,
+        require_capabilities=None,
+    ):
         """يتصل فعلياً بعقدة بذرة عبر WebSocket ويطلب قائمة أقرانها (مع إرفاق مفتاحنا العام).
-        يعيد المحاولة بعدد محدود عند فشل الاتصال (منفذ غير جاهز أو مهلة قصيرة).
+        require_capabilities: تصفية اختيارية (مثل ["GPU_HIGH"] أو "storage").
         """
         url = self._peer_ws_url(seed_host, seed_port)
         my_info = getattr(self, "node_info", {"id": self.node_id, "host": self.host, "port": self.port})
-        msg = self._build_signed_payload(
-            "peer_discovery_request",
-            {"public_key": self._pub_pem(), "node_info": my_info},
-        )
+        disc_data = {"public_key": self._pub_pem(), "node_info": my_info}
+        if require_capabilities is not None:
+            disc_data["require_capabilities"] = (
+                list(require_capabilities)
+                if not isinstance(require_capabilities, str)
+                else [require_capabilities]
+            )
+        msg = self._build_signed_payload("peer_discovery_request", disc_data)
         last_err = None
         for attempt in range(1, max(1, retries) + 1):
             try:
@@ -673,6 +717,13 @@ class LivingMeshNode:
             # معالجة مباشرة لأنواع آمنة فقط بدون إعادة توقيع مزيفة
             if inner_kind in mesh_tasks.ALL_TASK_KINDS:
                 await self._handle_mesh_task(
+                    inner_kind, inner_data, sender_id=origin or sender_id, hops=hops + 1
+                )
+            elif inner_kind in (
+                "checkpoint_store", "content_get", "content_put",
+                "checkpoint_store_result", "content_get_result", "content_put_result",
+            ):
+                await self._handle_storage_task(
                     inner_kind, inner_data, sender_id=origin or sender_id, hops=hops + 1
                 )
             elif inner_kind in ("gradient_push", "evolution_task", "tool_request", "sovereign_gossip"):
@@ -992,3 +1043,195 @@ class LivingMeshNode:
         inbox = self.collect_task_results(task_ids)
         results = [v.get("data") for v in inbox.values()]
         return mesh_tasks.reduce_map_results(op, results)
+
+    # ------------------------------------------------------------------
+    # #3 تخزين موزّع واسترجاع (Checkpoint + Content-ID)
+    # ------------------------------------------------------------------
+    def _content_path(self, content_id: str) -> Path:
+        # content_id = sha256 hex
+        safe = "".join(c for c in content_id if c.isalnum())[:64]
+        return CONTENT_DIR / f"{safe}.bin"
+
+    def _sha256_bytes(self, data: bytes) -> str:
+        return hashlib.sha256(data).hexdigest()
+
+    def store_content_local(self, data: bytes, filename: str = None) -> Dict[str, Any]:
+        """يخزّن بايتات محلياً ويعيد Content-ID = sha256."""
+        if not isinstance(data, (bytes, bytearray)):
+            data = bytes(data)
+        content_id = self._sha256_bytes(data)
+        path = self._content_path(content_id)
+        if not path.exists():
+            path.write_bytes(data)
+        meta = {
+            "content_id": content_id,
+            "size": len(data),
+            "filename": filename,
+            "node_id": self.node_id,
+            "stored_at": datetime.now(timezone.utc).isoformat(),
+        }
+        meta_path = path.with_suffix(".json")
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+        logger.info(f"💾 Stored content {content_id[:16]}… size={len(data)}")
+        return meta
+
+    def get_content_local(self, content_id: str) -> Dict[str, Any]:
+        """يسترجع ملفاً محلياً بالـ Content-ID مع التحقق من الهاش."""
+        path = self._content_path(content_id)
+        if not path.exists():
+            return {"ok": False, "error": "not_found", "content_id": content_id}
+        data = path.read_bytes()
+        actual = self._sha256_bytes(data)
+        if actual != content_id and not content_id.startswith(actual[:16]):
+            # تطابق كامل مطلوب
+            if actual != content_id:
+                return {"ok": False, "error": "hash_mismatch", "content_id": content_id, "actual": actual}
+        return {
+            "ok": True,
+            "content_id": actual,
+            "size": len(data),
+            "data_b64": base64.b64encode(data).decode("ascii"),
+            "node_id": self.node_id,
+        }
+
+    async def _handle_storage_task(
+        self, kind: str, exp_data: Dict[str, Any], sender_id: str = None, hops: int = 0, websocket=None
+    ):
+        result = None
+        result_kind = None
+        if kind in ("checkpoint_store", "content_put"):
+            raw_b64 = exp_data.get("data_b64") or exp_data.get("content_b64")
+            filename = exp_data.get("filename") or exp_data.get("name") or "blob.bin"
+            if not raw_b64:
+                result = {"ok": False, "error": "missing_data_b64", "task_id": exp_data.get("task_id")}
+            else:
+                try:
+                    data = base64.b64decode(raw_b64)
+                except Exception as e:
+                    result = {"ok": False, "error": f"b64_decode: {e}", "task_id": exp_data.get("task_id")}
+                    data = None
+                if data is not None:
+                    # حد أقصى معقول لكل طلب (32MB) لحماية العقدة
+                    if len(data) > 32 * 1024 * 1024:
+                        result = {"ok": False, "error": "too_large", "size": len(data)}
+                    else:
+                        meta = self.store_content_local(data, filename=filename)
+                        result = {
+                            "ok": True,
+                            "content_id": meta["content_id"],
+                            "hash": meta["content_id"],
+                            "size": meta["size"],
+                            "filename": filename,
+                            "node_id": self.node_id,
+                            "task_id": exp_data.get("task_id"),
+                        }
+            result_kind = "checkpoint_store_result" if kind == "checkpoint_store" else "content_put_result"
+        elif kind == "content_get":
+            cid = exp_data.get("content_id") or exp_data.get("cid")
+            if not cid:
+                result = {"ok": False, "error": "missing_content_id", "task_id": exp_data.get("task_id")}
+            else:
+                got = self.get_content_local(cid)
+                got["task_id"] = exp_data.get("task_id")
+                result = got
+            result_kind = "content_get_result"
+        elif kind.endswith("_result"):
+            # خزّن النتيجة في inbox
+            task_id = exp_data.get("task_id") or f"store_{uuid.uuid4().hex[:8]}"
+            state = self._task_inbox()
+            state["task_inbox"][task_id] = {
+                "kind": kind,
+                "from": sender_id,
+                "data": exp_data,
+                "received_at": datetime.now(timezone.utc).isoformat(),
+            }
+            self._save_state(state)
+            logger.info(f"📥 Storage result {kind} id={task_id} from={sender_id}")
+            return
+        else:
+            return
+
+        if result is None:
+            return
+        # رد مباشر أو عبر الشبكة
+        if websocket is not None:
+            try:
+                resp_payload = {
+                    "id": f"sres_{uuid.uuid4().hex[:8]}",
+                    "kind": result_kind,
+                    "data": result,
+                    "from": self.node_id,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+                sig = self.sign_message(json.dumps(resp_payload, sort_keys=True))
+                msg = json.dumps({"payload": resp_payload, "signature": sig})
+                if hasattr(websocket, "send_str"):
+                    await websocket.send_str(msg)
+                else:
+                    await websocket.send(msg)
+                return
+            except Exception as e:
+                logger.warning(f"⚠️ storage WS reply failed: {e}")
+        state = self._load_state()
+        sender_info = (state.get("nodes") or {}).get(sender_id or "")
+        if sender_info and sender_info.get("host") and sender_info.get("port") is not None:
+            await self.send_to_peer_with_relay(
+                sender_info["host"], int(sender_info["port"]), result_kind, result,
+                hops=hops + 1, target_id=sender_id,
+            )
+
+    async def request_checkpoint_store(
+        self, hosts: List[Dict[str, Any]], data: bytes, filename: str = "model.pth", replicas: int = 3
+    ) -> Dict[str, Any]:
+        """
+        يطلب من حتى `replicas` عقد تخزين نسخة من الملف وإرجاع Hash.
+        hosts: [{"host","port","id"?}, ...]
+        """
+        data_b64 = base64.b64encode(data).decode("ascii")
+        content_id = self._sha256_bytes(data)
+        task_id = f"ckpt_{uuid.uuid4().hex[:10]}"
+        targets = list(hosts or [])[: max(1, replicas)]
+        # إن لم تُمرَّر أهداف، اختر أقران storage/checkpoint
+        if not targets:
+            peers = self._get_active_peers_list(require_capabilities=["storage"])
+            if not peers:
+                peers = self._get_active_peers_list()
+            targets = peers[: max(1, replicas)]
+        sent = []
+        for peer in targets:
+            host, port = peer.get("host"), peer.get("port")
+            if not host or port is None:
+                continue
+            r = await self.dispatch_mesh_task(
+                host, int(port), "checkpoint_store",
+                {
+                    "task_id": f"{task_id}_{peer.get('id', host)}",
+                    "data_b64": data_b64,
+                    "filename": filename,
+                    "expected_hash": content_id,
+                },
+                target_id=peer.get("id"),
+            )
+            sent.append({"peer": peer.get("id") or f"{host}:{port}", "dispatch": r})
+        # خزّن محلياً أيضاً كنسخة
+        local = self.store_content_local(data, filename=filename)
+        return {
+            "ok": True,
+            "content_id": content_id,
+            "hash": content_id,
+            "filename": filename,
+            "replicas_requested": len(sent),
+            "local": local,
+            "dispatches": sent,
+            "task_id": task_id,
+        }
+
+    async def request_content_get(self, host: str, port: int, content_id: str) -> Dict[str, Any]:
+        """طلب استرجاع ملف بالـ Content-ID من عقدة معيّنة."""
+        return await self.dispatch_mesh_task(
+            host, int(port), "content_get",
+            {"content_id": content_id, "task_id": f"get_{uuid.uuid4().hex[:10]}"},
+        )
+
+    def verify_content_hash(self, data: bytes, expected_hash: str) -> bool:
+        return self._sha256_bytes(data) == expected_hash
