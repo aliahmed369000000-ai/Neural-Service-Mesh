@@ -845,10 +845,14 @@ class LivingMeshNode:
         return f"{scheme}://{host}:{port}/ws"
 
     def _build_signed_payload(self, kind: str, data: Dict[str, Any], hops: int = 0) -> str:
-        """يبني حمولة موقّعة وفق بروتوكول v1.1 (request_id + nonce + version + timestamp)."""
+        """يبني حمولة موقّعة وفق بروتوكول v1.1 (request_id + nonce + version + timestamp).
+        يُرفق public_key داخل data إن لم يوجد حتى تتعرّف العقد الجديدة على المرسل.
+        """
         now = datetime.now(timezone.utc)
         request_id = f"req_{uuid.uuid4().hex}"
         nonce = uuid.uuid4().hex
+        data = dict(data or {})
+        data.setdefault("public_key", self._pub_pem())
         payload = {
             "protocol_version": PROTOCOL_VERSION,
             "id": f"msg_{uuid.uuid4().hex[:8]}",
