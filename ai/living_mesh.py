@@ -351,6 +351,37 @@ class LivingMeshNode:
                 logger.info(f"📥 Node {self.node_id} received gradient_push from {sender_id} (hops={hops})")
                 if hops < 3:
                     self.sync_experience(kind, exp_data, hops + 1)
+            elif kind == "ping_request" and websocket is not None:
+                # #2 قياس زمن الاستجابة — رد فوري بـ timestamp محلي
+                t_server = time.time()
+                resp_payload = {
+                    "id": f"pong_{uuid.uuid4().hex[:8]}",
+                    "kind": "ping_response",
+                    "data": {
+                        "echo_ts": (exp_data or {}).get("client_ts"),
+                        "server_ts": t_server,
+                        "node_id": self.node_id,
+                    },
+                    "from": self.node_id,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+                sig = self.sign_message(json.dumps(resp_payload, sort_keys=True))
+                resp_msg = json.dumps({"payload": resp_payload, "signature": sig})
+                if hasattr(websocket, "send_str"):
+                    await websocket.send_str(resp_msg)
+                else:
+                    await websocket.send(resp_msg)
+            elif kind == "ping_response":
+                # يُعالَج عادةً داخل measure/ping المنتظر للرد — نسجّل فقط
+                logger.debug(f"📶 ping_response from {sender_id}: {exp_data}")
+            elif kind == "relay_task":
+                # #3 تمرير رسالة عبر عقدة وسيطة عند تعذر الاتصال المباشر
+                await self._handle_relay_task(exp_data or {}, sender_id=sender_id, hops=hops)
+            elif kind == "multisig_propose":
+                # #4 اقتراح عملية مكافأة تتطلب توقيعات متعددة
+                await self._handle_multisig_propose(exp_data or {}, sender_id=sender_id)
+            elif kind == "multisig_sign":
+                await self._handle_multisig_sign(exp_data or {}, sender_id=sender_id)
             else:
                 self.sync_experience(kind, exp_data, hops + 1)
         except Exception as e:
@@ -472,3 +503,339 @@ class LivingMeshNode:
         except Exception as e:
             logger.error(f"❌ send_to_peer to {host}:{port} failed: {e}")
             return False
+
+    # ------------------------------------------------------------------
+    # #2 قياس صحة الأقران وزمن الاستجابة (Peer Health / Latency)
+    # ------------------------------------------------------------------
+    async def ping_peer(self, host: str, port: int, timeout: float = 5.0) -> Dict[str, Any]:
+        """يرسل ping_request موقّعاً ويقيس RTT بالميلي ثانية."""
+        url = self._peer_ws_url(host, port)
+        client_ts = time.time()
+        msg = self._build_signed_payload("ping_request", {"client_ts": client_ts})
+        result = {
+            "host": host,
+            "port": port,
+            "ok": False,
+            "rtt_ms": None,
+            "error": None,
+        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.ws_connect(url, timeout=timeout) as ws:
+                    await ws.send_str(msg)
+                    resp = await asyncio.wait_for(ws.receive(), timeout=timeout)
+                    t1 = time.time()
+                    if resp.type != aiohttp.WSMsgType.TEXT:
+                        result["error"] = "non_text_response"
+                        return result
+                    raw = json.loads(resp.data)
+                    payload = raw.get("payload") or raw
+                    # تحقق توقيع خفيف إن وُجد مفتاح المرسل
+                    sender = payload.get("from")
+                    sig = raw.get("signature")
+                    if sender and sig:
+                        key_path = self.keys_dir / f"{sender}.pub"
+                        if key_path.exists():
+                            if not self.verify_signature(
+                                key_path.read_bytes(),
+                                json.dumps(payload, sort_keys=True),
+                                sig,
+                            ):
+                                result["error"] = "bad_signature"
+                                return result
+                    data = payload.get("data") or {}
+                    echo = data.get("echo_ts", client_ts)
+                    rtt_ms = (t1 - float(echo)) * 1000.0
+                    result["ok"] = True
+                    result["rtt_ms"] = round(rtt_ms, 2)
+                    result["peer_id"] = sender or data.get("node_id")
+                    # تحديث حالة الأقران بزمن الاستجابة
+                    state = self._load_state()
+                    for nid, info in state.get("nodes", {}).items():
+                        if info.get("host") == host and int(info.get("port") or -1) == int(port):
+                            info["last_rtt_ms"] = result["rtt_ms"]
+                            info["last_seen"] = datetime.now(timezone.utc).isoformat()
+                            info["status"] = "online"
+                            self._save_state(state)
+                            break
+                    return result
+        except Exception as e:
+            result["error"] = str(e)
+            logger.warning(f"⚠️ ping_peer {host}:{port} failed: {e}")
+            return result
+
+    async def measure_peers_health(self, timeout: float = 5.0) -> List[Dict[str, Any]]:
+        """يقيس صحة وزمن استجابة جميع الأقران النشطين المعروفي العنوان."""
+        peers = self._get_active_peers_list()
+        results = []
+        for peer in peers:
+            if peer.get("id") == self.node_id:
+                continue
+            host, port = peer.get("host"), peer.get("port")
+            if not host or port is None:
+                results.append({"peer_id": peer.get("id"), "ok": False, "error": "no_address"})
+                continue
+            r = await self.ping_peer(host, int(port), timeout=timeout)
+            r["peer_id"] = r.get("peer_id") or peer.get("id")
+            results.append(r)
+        healthy = sum(1 for r in results if r.get("ok"))
+        logger.info(f"📶 Peer health: {healthy}/{len(results)} reachable")
+        return results
+
+    # ------------------------------------------------------------------
+    # #3 Relay — تمرير العمل عبر عقدة وسيطة عند تعذر الاتصال المباشر
+    # ------------------------------------------------------------------
+    async def send_to_peer_with_relay(
+        self,
+        host: str,
+        port: int,
+        kind: str,
+        data: Dict[str, Any],
+        hops: int = 0,
+        target_id: str = None,
+    ) -> Dict[str, Any]:
+        """يحاول الإرسال المباشر أولاً؛ عند الفشل يمرّر عبر أقران وسيطين (Relay)."""
+        direct_ok = await self.send_to_peer(host, port, kind, data, hops=hops)
+        if direct_ok:
+            return {"ok": True, "mode": "direct", "relays_tried": 0}
+
+        # اختيار وسطاء محتملين (أقران نشطون غير الهدف)
+        candidates = [
+            p for p in self._get_active_peers_list()
+            if p.get("id") != self.node_id
+            and p.get("host")
+            and p.get("port") is not None
+            and not (p.get("host") == host and int(p.get("port")) == int(port))
+        ]
+        import random
+        random.shuffle(candidates)
+        relays_tried = 0
+        for relay in candidates[:3]:
+            relays_tried += 1
+            relay_payload = {
+                "target_host": host,
+                "target_port": int(port),
+                "target_id": target_id,
+                "inner_kind": kind,
+                "inner_data": data,
+                "origin": self.node_id,
+            }
+            ok = await self.send_to_peer(
+                relay["host"], int(relay["port"]), "relay_task", relay_payload, hops=hops + 1
+            )
+            if ok:
+                logger.info(
+                    f"🔀 Relayed '{kind}' to {host}:{port} via {relay.get('id')} "
+                    f"({relay['host']}:{relay['port']})"
+                )
+                return {
+                    "ok": True,
+                    "mode": "relay",
+                    "relay_id": relay.get("id"),
+                    "relays_tried": relays_tried,
+                }
+        logger.error(f"❌ Direct and relay delivery failed for {host}:{port} kind={kind}")
+        return {"ok": False, "mode": "failed", "relays_tried": relays_tried}
+
+    async def _handle_relay_task(self, exp_data: Dict[str, Any], sender_id: str = None, hops: int = 0):
+        """تنفيذ مهمة Relay: إعادة توجيه الرسالة الداخلية للهدف إن أمكن."""
+        if hops > 4:
+            logger.warning("⚠️ Relay hops exceeded — dropping")
+            return
+        target_host = exp_data.get("target_host")
+        target_port = exp_data.get("target_port")
+        inner_kind = exp_data.get("inner_kind")
+        inner_data = exp_data.get("inner_data") or {}
+        origin = exp_data.get("origin")
+        if not target_host or target_port is None or not inner_kind:
+            logger.warning("⚠️ Malformed relay_task")
+            return
+        # لا نعيد التوجيه لأنفسنا كهدف إن كنا الهدف
+        if (self.host == target_host and int(self.port or -1) == int(target_port)) or (
+            exp_data.get("target_id") and exp_data.get("target_id") == self.node_id
+        ):
+            # نحن الهدف النهائي — عالج الرسالة الداخلية محلياً
+            logger.info(f"📥 Relay delivered local message kind={inner_kind} from origin={origin}")
+            fake = {
+                "payload": {
+                    "id": f"relayed_{uuid.uuid4().hex[:8]}",
+                    "kind": inner_kind,
+                    "data": inner_data,
+                    "from": origin or sender_id,
+                    "p2p_hops": hops + 1,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+                "signature": "relay_local",  # لن يمر التحقق — نمرّر للمعالجة المباشرة بحذر
+            }
+            # معالجة مباشرة لأنواع آمنة فقط بدون إعادة توقيع مزيفة
+            if inner_kind in ("gradient_push", "evolution_task", "tool_request", "sovereign_gossip"):
+                self.sync_experience(inner_kind, inner_data, hops + 1)
+            return
+
+        ok = await self.send_to_peer(
+            target_host, int(target_port), inner_kind, inner_data, hops=hops + 1
+        )
+        if ok:
+            logger.info(f"✅ Relay forwarded {inner_kind} → {target_host}:{target_port} (from {origin})")
+        else:
+            # محاولة قفزة إضافية عبر وسيط آخر إن فشلت المباشرة من هنا
+            logger.warning(f"⚠️ Relay forward failed; trying secondary hop for {inner_kind}")
+            await self.send_to_peer_with_relay(
+                target_host, int(target_port), inner_kind, inner_data, hops=hops + 1,
+                target_id=exp_data.get("target_id"),
+            )
+
+    # ------------------------------------------------------------------
+    # #4 Multi-signature — تحقق آمن من عمليات المكافآت
+    # ------------------------------------------------------------------
+    def _multisig_state(self) -> Dict[str, Any]:
+        state = self._load_state()
+        if "multisig" not in state:
+            state["multisig"] = {}
+            self._save_state(state)
+        return state
+
+    async def propose_multisig(
+        self,
+        agreement: Dict[str, Any],
+        required_signatures: int = 4,
+        agreement_id: str = None,
+    ) -> str:
+        """يقترح عملية مكافأة/اتفاقية تتطلب عدداً من التوقيعات قبل التنفيذ."""
+        agreement_id = agreement_id or f"msig_{uuid.uuid4().hex[:10]}"
+        canonical = json.dumps(agreement, sort_keys=True, ensure_ascii=False)
+        my_sig = self.sign_message(canonical)
+        state = self._multisig_state()
+        state["multisig"][agreement_id] = {
+            "agreement": agreement,
+            "canonical": canonical,
+            "required": int(required_signatures),
+            "signatures": {self.node_id: my_sig},
+            "status": "pending",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "executed": False,
+        }
+        self._save_state(state)
+
+        payload = {
+            "agreement_id": agreement_id,
+            "agreement": agreement,
+            "required": int(required_signatures),
+            "proposer": self.node_id,
+        }
+        # بث الاقتراح للأقران
+        for peer in self._get_active_peers_list():
+            if peer.get("id") == self.node_id or not peer.get("host") or peer.get("port") is None:
+                continue
+            await self.send_to_peer_with_relay(
+                peer["host"], int(peer["port"]), "multisig_propose", payload, target_id=peer.get("id")
+            )
+        logger.info(
+            f"✍️ Multisig proposed {agreement_id} requires {required_signatures} signatures"
+        )
+        return agreement_id
+
+    async def _handle_multisig_propose(self, exp_data: Dict[str, Any], sender_id: str = None):
+        agreement_id = exp_data.get("agreement_id")
+        agreement = exp_data.get("agreement")
+        required = int(exp_data.get("required") or 4)
+        if not agreement_id or not isinstance(agreement, dict):
+            return
+        canonical = json.dumps(agreement, sort_keys=True, ensure_ascii=False)
+        state = self._multisig_state()
+        entry = state["multisig"].get(agreement_id)
+        if entry is None:
+            state["multisig"][agreement_id] = {
+                "agreement": agreement,
+                "canonical": canonical,
+                "required": required,
+                "signatures": {},
+                "status": "pending",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "executed": False,
+            }
+            self._save_state(state)
+            entry = state["multisig"][agreement_id]
+        # توقّع محلياً ونُبلغ الشبكة
+        if self.node_id not in entry["signatures"]:
+            my_sig = self.sign_message(entry["canonical"])
+            entry["signatures"][self.node_id] = my_sig
+            self._save_state(state)
+            sign_payload = {
+                "agreement_id": agreement_id,
+                "signer": self.node_id,
+                "signature": my_sig,
+            }
+            for peer in self._get_active_peers_list():
+                if peer.get("id") == self.node_id or not peer.get("host") or peer.get("port") is None:
+                    continue
+                await self.send_to_peer(
+                    peer["host"], int(peer["port"]), "multisig_sign", sign_payload
+                )
+            logger.info(f"✍️ Signed multisig {agreement_id} ({len(entry['signatures'])}/{entry['required']})")
+        await self._try_finalize_multisig(agreement_id)
+
+    async def _handle_multisig_sign(self, exp_data: Dict[str, Any], sender_id: str = None):
+        agreement_id = exp_data.get("agreement_id")
+        signer = exp_data.get("signer") or sender_id
+        signature = exp_data.get("signature")
+        if not agreement_id or not signer or not signature:
+            return
+        state = self._multisig_state()
+        entry = state["multisig"].get(agreement_id)
+        if not entry or entry.get("executed"):
+            return
+        # تحقق التوقيع بمفتاح الموقّع المعروف
+        key_path = self.keys_dir / f"{signer}.pub"
+        if not key_path.exists():
+            logger.warning(f"⚠️ multisig_sign from unknown key owner {signer}")
+            return
+        if not self.verify_signature(key_path.read_bytes(), entry["canonical"], signature):
+            logger.warning(f"⚠️ Rejected forged/invalid multisig signature from {signer}")
+            return
+        entry["signatures"][signer] = signature
+        self._save_state(state)
+        logger.info(
+            f"✅ Valid multisig signature from {signer} "
+            f"({len(entry['signatures'])}/{entry['required']}) on {agreement_id}"
+        )
+        await self._try_finalize_multisig(agreement_id)
+
+    async def _try_finalize_multisig(self, agreement_id: str):
+        state = self._multisig_state()
+        entry = state["multisig"].get(agreement_id)
+        if not entry or entry.get("executed"):
+            return
+        # أعد التحقق من كل التوقيعات قبل التنفيذ
+        valid = {}
+        for signer, sig in list(entry.get("signatures", {}).items()):
+            key_path = self.keys_dir / f"{signer}.pub"
+            if signer == self.node_id:
+                pub = self._pub_pem().encode()
+                if self.verify_signature(pub, entry["canonical"], sig):
+                    valid[signer] = sig
+                continue
+            if key_path.exists() and self.verify_signature(key_path.read_bytes(), entry["canonical"], sig):
+                valid[signer] = sig
+        entry["signatures"] = valid
+        self._save_state(state)
+        if len(valid) < int(entry.get("required") or 4):
+            return
+        entry["status"] = "approved"
+        entry["executed"] = True
+        entry["executed_at"] = datetime.now(timezone.utc).isoformat()
+        self._save_state(state)
+        logger.info(
+            f"🏅 Multisig APPROVED & executed {agreement_id} "
+            f"with {len(valid)} signatures — agreement={entry.get('agreement')}"
+        )
+        # سجل كخبرة جماعية
+        self.sync_experience(
+            "multisig_executed",
+            {
+                "agreement_id": agreement_id,
+                "agreement": entry.get("agreement"),
+                "signers": list(valid.keys()),
+            },
+            hops=0,
+        )

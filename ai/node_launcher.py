@@ -135,11 +135,21 @@ async def main():
     
     logger.info(f"🚀 NSM Hybrid Node '{node.node_id}' is LIVE on port {port}")
     
-    # مهمة نبض القلب الدورية
+    # مهمة نبض القلب الدورية + قياس صحة الأقران دورياً
     async def heartbeat_loop():
+        tick = 0
         while True:
             node.send_heartbeat()
             node.check_network_health()
+            tick += 1
+            # كل ~60 ثانية: قياس RTT للأقران (#2)
+            if tick % 4 == 0:
+                try:
+                    health = await node.measure_peers_health(timeout=4.0)
+                    reachable = sum(1 for h in health if h.get("ok"))
+                    logger.info(f"📶 Peer health check: {reachable}/{len(health)} reachable")
+                except Exception as e:
+                    logger.warning(f"⚠️ Peer health check failed: {e}")
             await asyncio.sleep(15)
     
     asyncio.create_task(heartbeat_loop())
