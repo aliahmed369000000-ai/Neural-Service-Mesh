@@ -431,6 +431,162 @@ class MeshJobOrchestrator:
                 ledger.pop(k, None)
         self.node._save_state(state)
 
+
+    async def submit_collective_summary(
+        self,
+        query: str,
+        sources: List[Dict[str, Any]],
+        *,
+        n_workers: int = 3,
+        redundancy: int = 1,
+        strategy: str = STRATEGY_MAJORITY,
+        quorum: int = 2,
+        timeout_per_task: float = 12.0,
+        require_capabilities=None,
+        worker_list: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """
+        تلخيص جماعي لمصادر محلية مع إثبات:
+          - كل مصدر له source_id + source_hash
+          - يُوزَّع على العمال (مع redundancy اختيارية)
+          - يُجمع الملخص والفائز عبر submit_job / أو دمج ملخصات المصادر
+        sources: [{"source_id": str, "text": str}, ...]
+        لا يصل للشبكة الخارجية — آمن افتراضياً.
+        """
+        from ai import mesh_task_protocol as mt
+
+        query = (query or "").strip()
+        sources = [s for s in (sources or []) if (s.get("text") or "").strip()]
+        if not sources:
+            return {"ok": False, "error": "no_sources", "query": query}
+
+        workers = worker_list or self._rank_workers(
+            require_capabilities=require_capabilities or ["text"],
+            max_workers=max(n_workers, len(sources) * max(1, redundancy)),
+        )
+        if not workers:
+            return {"ok": False, "error": "no_workers_available", "query": query}
+
+        job_id = f"csum_{uuid.uuid4().hex[:12]}"
+        per_source = []
+        t0 = time.time()
+
+        # لكل مصدر: redundancy عمال (أو 1)
+        red = max(1, min(int(redundancy), 3))
+        for si, src in enumerate(sources):
+            sid = src.get("source_id") or f"src_{si}"
+            text = (src.get("text") or "").strip()
+            source_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            # اختر عمالاً لهذا المصدر
+            picks = []
+            for r in range(red):
+                w = workers[(si + r) % len(workers)]
+                picks.append(w)
+            # فريدون
+            seen = set()
+            uniq = []
+            for w in picks:
+                pid = w.get("peer_id") or w.get("id")
+                if pid in seen:
+                    continue
+                seen.add(pid)
+                uniq.append(w)
+            if not uniq:
+                uniq = workers[:1]
+
+            report = await self.submit_job(
+                mt.KIND_SUMMARIZE,
+                {
+                    "job_id": job_id,
+                    "source_id": sid,
+                    "text": text,
+                    "query": query,
+                    "max_chars": int(src.get("max_chars") or 240),
+                },
+                n_workers=len(uniq),
+                strategy=strategy,
+                quorum=min(quorum, len(uniq)),
+                timeout_per_task=timeout_per_task,
+                retry_failed=1,
+                worker_list=uniq,
+                require_capabilities=require_capabilities or ["text"],
+            )
+            winner_res = ((report.get("winner") or {}).get("result")) or {}
+            per_source.append({
+                "source_id": sid,
+                "source_hash": source_hash,
+                "ok": report.get("ok"),
+                "quorum_met": report.get("quorum_met"),
+                "agreement": (report.get("selection") or {}).get("agreement"),
+                "summary": winner_res.get("summary") or winner_res.get("output"),
+                "winner_worker": (report.get("winner") or {}).get("worker"),
+                "winner_digest": (report.get("winner") or {}).get("digest"),
+                "job_id": report.get("job_id"),
+                "attempts": report.get("all_results"),
+            })
+
+        ok_sources = [s for s in per_source if s.get("ok") and s.get("summary")]
+        combined = " | ".join(
+            f"[{s['source_id']}] {s['summary']}" for s in ok_sources
+        )
+        provenance = [
+            {
+                "source_id": s["source_id"],
+                "source_hash": s["source_hash"],
+                "worker": s.get("winner_worker"),
+                "digest": s.get("winner_digest"),
+                "quorum_met": s.get("quorum_met"),
+            }
+            for s in per_source
+        ]
+        out = {
+            "ok": len(ok_sources) > 0,
+            "job_id": job_id,
+            "kind": "collective_summary",
+            "query": query,
+            "sources_total": len(sources),
+            "sources_ok": len(ok_sources),
+            "combined_summary": combined,
+            "per_source": per_source,
+            "provenance": provenance,
+            "elapsed_ms": round((time.time() - t0) * 1000, 2),
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }
+        try:
+            self._persist_job_decision({
+                "job_id": job_id,
+                "kind": "collective_summary",
+                "ok": out["ok"],
+                "strategy": strategy,
+                "quorum_required": quorum,
+                "quorum_met": all(s.get("quorum_met") for s in ok_sources) if ok_sources else False,
+                "selection": {"agreement": None},
+                "winner": {"worker": None, "digest": None},
+                "success_count": len(ok_sources),
+                "attempts_count": len(sources),
+                "all_results": [{"worker": p.get("worker")} for p in provenance],
+                "ts": out["ts"],
+                "error": None if out["ok"] else "all_sources_failed",
+            })
+        except Exception:
+            pass
+        self._jobs[job_id] = out
+        logger.info(
+            f"📚 collective_summary {job_id} ok={out['ok']} "
+            f"sources={out['sources_ok']}/{out['sources_total']}"
+        )
+        return out
+
+    def list_decisions(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """قرارات محفوظة في حالة العقدة (دفتر خفيف)."""
+        if not hasattr(self.node, "_load_state"):
+            return []
+        state = self.node._load_state()
+        ledger = state.get("job_decisions") or {}
+        items = list(ledger.values())
+        items.sort(key=lambda x: x.get("ts") or "", reverse=True)
+        return items[: max(1, limit)]
+
     def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
         return self._jobs.get(job_id)
 

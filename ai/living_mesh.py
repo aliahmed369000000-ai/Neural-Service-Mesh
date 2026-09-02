@@ -60,6 +60,7 @@ ALLOWED_TASK_CAPABILITIES = {
     "map_reduce_map": {"CPU", "GPU_LOW", "GPU_HIGH"},
     "sim_chunk": {"CPU", "GPU_LOW", "GPU_HIGH"},
     "keyspace_scan": {"CPU"},
+    "summarize_chunk": {"text", "CPU", "tf_engine"},
 }
 
 class LivingMeshNode:

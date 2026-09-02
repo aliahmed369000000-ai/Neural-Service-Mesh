@@ -102,7 +102,7 @@ h1{{margin:0 0 8px;font-size:1.4rem}} .muted{{color:#8b9bb8;font-size:.9rem}}
 <div class="metric"><b>{snap.get('identity_pub_fingerprint')}</b>بصمة الهوية</div>
 </div>
 <div class="card"><div class="muted">Surah: {snap.get('surah_awareness')}</div></div>
-<div class="card"><div class="muted">API: /health · /v2/status · /ws · /status</div></div>
+<div class="card"><div class="muted">API: /health · /v2/status · /v2/jobs · /v2/job · /v2/collective-summary · /ws · /status</div></div>
 </body></html>"""
     return web.Response(text=html, content_type="text/html")
 
@@ -170,7 +170,36 @@ async def handle_list_jobs(request):
     if health is None:
         return web.json_response({"error": "health_layer_missing"}, status=500)
     orch = health.orchestrator()
-    return web.json_response({"jobs": orch.list_jobs(limit=int(request.query.get("limit") or 20))})
+    limit = int(request.query.get("limit") or 20)
+    return web.json_response({
+        "jobs": orch.list_jobs(limit=limit),
+        "decisions": orch.list_decisions(limit=limit),
+    })
+
+
+async def handle_collective_summary(request):
+    """POST JSON: {query, sources:[{source_id,text}], n_workers?, redundancy?, quorum?, strategy?}"""
+    health = request.app.get("health")
+    if health is None:
+        return web.json_response({"error": "health_layer_missing"}, status=500)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid_json"}, status=400)
+    sources = body.get("sources") or []
+    if not sources:
+        return web.json_response({"error": "sources_required"}, status=400)
+    orch = health.orchestrator()
+    report = await orch.submit_collective_summary(
+        body.get("query") or "",
+        sources,
+        n_workers=int(body.get("n_workers") or 3),
+        redundancy=int(body.get("redundancy") or 1),
+        strategy=body.get("strategy") or "majority",
+        quorum=int(body.get("quorum") or 2),
+        timeout_per_task=float(body.get("timeout_per_task") or 12.0),
+    )
+    return web.json_response(report)
 
 
 async def handle_join_info(request):
@@ -558,6 +587,7 @@ async def main():
         web.post("/v2/task", handle_submit_task),
         web.post("/v2/job", handle_submit_job),
         web.get("/v2/jobs", handle_list_jobs),
+        web.post("/v2/collective-summary", handle_collective_summary),
         web.post("/v2/first-task", handle_first_verified_task),
         web.post("/v2/dispatch-task", handle_dispatch_task),
         web.get("/dashboard", handle_dashboard),

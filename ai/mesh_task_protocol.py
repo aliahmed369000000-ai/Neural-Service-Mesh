@@ -37,6 +37,8 @@ KIND_SIM = "sim_chunk"
 KIND_SIM_RESULT = "sim_chunk_result"
 KIND_KEYSPACE = "keyspace_scan"
 KIND_KEYSPACE_RESULT = "keyspace_scan_result"
+KIND_SUMMARIZE = "summarize_chunk"
+KIND_SUMMARIZE_RESULT = "summarize_chunk_result"
 
 # إدارة دورة حياة المهمة (v1.1+)
 KIND_TASK_ACK = "task_ack"
@@ -51,6 +53,7 @@ ALL_TASK_KINDS = {
     KIND_MAP, KIND_MAP_RESULT,
     KIND_SIM, KIND_SIM_RESULT,
     KIND_KEYSPACE, KIND_KEYSPACE_RESULT,
+    KIND_SUMMARIZE, KIND_SUMMARIZE_RESULT,
     KIND_TASK_ACK, KIND_TASK_CANCEL,
     KIND_TASK_STATUS, KIND_TASK_STATUS_RESULT,
 }
@@ -490,6 +493,46 @@ def execute_keyspace_scan(task: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+
+def execute_summarize_chunk(task: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    تلخيص قطعة مصدر محلية (آمن — بلا شبكة).
+    task: {source_id, text, query?, max_chars?}
+    يُرجع ملخصاً حتمياً + hash المصدر لإثبات provenance.
+    """
+    t0 = time.time()
+    text = (task.get("text") or task.get("content") or "").strip()
+    source_id = task.get("source_id") or task.get("chunk_id") or "src_unknown"
+    query = (task.get("query") or "").strip()
+    max_chars = max(40, min(int(task.get("max_chars") or 240), 2000))
+    if not text:
+        return {"ok": False, "error": "empty_source", "task_id": task.get("task_id"), "source_id": source_id}
+    source_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    # ملخص حتمي: جمل/أجزاء مرتبطة بالاستعلام إن وُجد
+    parts = [p.strip() for p in text.replace("\n", " ").split(".") if p.strip()]
+    if query:
+        q = query.lower()
+        ranked = sorted(parts, key=lambda s: (0 if q in s.lower() else 1, -len(s)))
+        picked = ranked[:3] if ranked else [text[:max_chars]]
+    else:
+        picked = parts[:3] if parts else [text[:max_chars]]
+    summary = ". ".join(picked)
+    if len(summary) > max_chars:
+        summary = summary[: max_chars - 3] + "..."
+    return {
+        "ok": True,
+        "source_id": source_id,
+        "source_hash": source_hash,
+        "query": query[:200] if query else None,
+        "summary": summary,
+        "output": summary,  # للتوافق مع semantic digest
+        "chars_in": len(text),
+        "chars_out": len(summary),
+        "elapsed_ms": round((time.time() - t0) * 1000, 2),
+        "task_id": task.get("task_id"),
+    }
+
+
 def dispatch_task(kind: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """موجّه مركزي لتنفيذ مهمة حسب النوع."""
     data = data or {}
@@ -505,6 +548,8 @@ def dispatch_task(kind: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return execute_sim_chunk(data)
     if kind == KIND_KEYSPACE:
         return execute_keyspace_scan(data)
+    if kind == KIND_SUMMARIZE:
+        return execute_summarize_chunk(data)
     return None
 
 
@@ -516,5 +561,6 @@ def result_kind_for(request_kind: str) -> str:
         KIND_MAP: KIND_MAP_RESULT,
         KIND_SIM: KIND_SIM_RESULT,
         KIND_KEYSPACE: KIND_KEYSPACE_RESULT,
+        KIND_SUMMARIZE: KIND_SUMMARIZE_RESULT,
         KIND_TASK_STATUS: KIND_TASK_STATUS_RESULT,
     }.get(request_kind, request_kind + "_result")
