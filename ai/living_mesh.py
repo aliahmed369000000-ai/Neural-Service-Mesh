@@ -807,6 +807,131 @@ class LivingMeshNode:
             logger.error(f"❌ send_to_peer to {host}:{port} failed: {e}")
             return False
 
+    async def request_from_peer(
+        self,
+        host: str,
+        port: int,
+        kind: str,
+        data: Dict[str, Any],
+        timeout: float = 15.0,
+        hops: int = 0,
+        expect_result_kind: str = None,
+    ) -> Dict[str, Any]:
+        """
+        طلب/رد متزامن على نفس اتصال WebSocket.
+        يرسل الرسالة ثم ينتظر رداً (ACK اختيارياً ثم نتيجة) ضمن المهلة.
+        عند استلام نتيجة مهمة: يخزّنها في task_inbox والسجل المحلي.
+        """
+        data = dict(data or {})
+        task_id = data.get("task_id") or f"task_{uuid.uuid4().hex[:10]}"
+        data["task_id"] = task_id
+        if expect_result_kind is None:
+            expect_result_kind = mesh_tasks.result_kind_for(kind)
+
+        url = self._peer_ws_url(host, port)
+        msg = self._build_signed_payload(kind, data, hops=hops)
+        out: Dict[str, Any] = {
+            "ok": False,
+            "mode": "rpc",
+            "task_id": task_id,
+            "host": host,
+            "port": port,
+            "acked": False,
+            "result": None,
+            "error": None,
+        }
+        self._register_task(task_id, kind, mesh_tasks.TASK_STATUS_PENDING, extra={"target": f"{host}:{port}"})
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.ws_connect(url, timeout=min(10.0, timeout)) as ws:
+                    await ws.send_str(msg)
+                    logger.info(f"📤 RPC Node {self.node_id} sent '{kind}' id={task_id} → {host}:{port}")
+                    deadline = time.time() + max(1.0, float(timeout))
+                    while time.time() < deadline:
+                        remaining = max(0.1, deadline - time.time())
+                        try:
+                            resp = await asyncio.wait_for(ws.receive(), timeout=remaining)
+                        except asyncio.TimeoutError:
+                            out["error"] = "timeout"
+                            self._register_task(task_id, kind, mesh_tasks.TASK_STATUS_TIMEOUT)
+                            break
+                        if resp.type != aiohttp.WSMsgType.TEXT:
+                            if resp.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                                out["error"] = "connection_closed"
+                                break
+                            continue
+                        try:
+                            raw = json.loads(resp.data)
+                        except Exception:
+                            continue
+                        payload = raw.get("payload") or raw
+                        rkind = payload.get("kind")
+                        rdata = payload.get("data") or {}
+                        r_task = rdata.get("task_id")
+
+                        if rkind == mesh_tasks.KIND_TASK_ACK:
+                            if not r_task or r_task == task_id:
+                                out["acked"] = True
+                                self._register_task(task_id, kind, mesh_tasks.TASK_STATUS_ACKED)
+                                self._metrics["tasks_acked"] += 1
+                                logger.info(f"✅ RPC ACK id={task_id} from {payload.get('from')}")
+                            continue
+
+                        if rkind == expect_result_kind or (
+                            isinstance(rkind, str)
+                            and rkind.endswith("_result")
+                            and (not r_task or r_task == task_id)
+                        ):
+                            sender = payload.get("from")
+                            sig = raw.get("signature")
+                            if sender and sig:
+                                key_path = self.keys_dir / f"{sender}.pub"
+                                if key_path.exists():
+                                    if not self.verify_signature(
+                                        key_path.read_bytes(),
+                                        json.dumps(payload, sort_keys=True),
+                                        sig,
+                                    ):
+                                        logger.warning(f"🚫 RPC result bad signature from {sender}")
+                                        continue
+
+                            state = self._task_inbox()
+                            state["task_inbox"][task_id] = {
+                                "kind": rkind,
+                                "from": sender,
+                                "data": rdata,
+                                "received_at": datetime.now(timezone.utc).isoformat(),
+                            }
+                            self._save_state(state)
+                            final_st = (
+                                mesh_tasks.TASK_STATUS_COMPLETED
+                                if rdata.get("ok", True)
+                                else mesh_tasks.TASK_STATUS_FAILED
+                            )
+                            self._register_task(task_id, kind, final_st, sender_id=sender)
+                            out["ok"] = bool(rdata.get("ok", True))
+                            out["result"] = rdata
+                            out["result_kind"] = rkind
+                            out["from"] = sender
+                            logger.info(
+                                f"📥 RPC result id={task_id} kind={rkind} ok={out['ok']} from={sender}"
+                            )
+                            return out
+
+                        try:
+                            await self._process_secure_message(resp.data, websocket=ws)
+                        except Exception:
+                            pass
+                    if not out.get("result") and not out.get("error"):
+                        out["error"] = "timeout"
+                        self._register_task(task_id, kind, mesh_tasks.TASK_STATUS_TIMEOUT)
+        except Exception as e:
+            out["error"] = str(e)
+            logger.error(f"❌ request_from_peer {host}:{port} failed: {e}")
+            self._register_task(task_id, kind, mesh_tasks.TASK_STATUS_FAILED, extra={"error": str(e)})
+        return out
+
     # ------------------------------------------------------------------
     # #2 قياس صحة الأقران وزمن الاستجابة (Peer Health / Latency)
     # ------------------------------------------------------------------
@@ -1438,16 +1563,44 @@ class LivingMeshNode:
         data: Dict[str, Any],
         target_id: str = None,
         use_relay: bool = True,
+        wait_result: bool = True,
+        timeout: float = 15.0,
     ) -> Dict[str, Any]:
-        """يرسل مهمة موزّعة إلى عقدة هدف (مع Relay اختياري)."""
+        """
+        يرسل مهمة موزّعة إلى عقدة هدف.
+        افتراضياً ينتظر النتيجة على نفس الاتصال (RPC).
+        use_relay يُستخدم فقط عند فشل المسار المباشر أو عند wait_result=False.
+        """
         data = dict(data or {})
         data.setdefault("task_id", f"task_{uuid.uuid4().hex[:10]}")
+        task_id = data["task_id"]
+
+        if wait_result:
+            rpc = await self.request_from_peer(
+                host, int(port), kind, data, timeout=timeout, hops=0
+            )
+            if rpc.get("result") is not None or rpc.get("ok"):
+                return rpc
+            # فشل RPC المباشر — جرّب relay بدون انتظار إن طُلب
+            if use_relay:
+                relay = await self.send_to_peer_with_relay(
+                    host, int(port), kind, data, target_id=target_id
+                )
+                return {
+                    "ok": bool(relay.get("ok")),
+                    "mode": f"relay_after_rpc_fail:{relay.get('mode')}",
+                    "task_id": task_id,
+                    "rpc_error": rpc.get("error"),
+                    "relay": relay,
+                }
+            return rpc
+
         if use_relay:
             return await self.send_to_peer_with_relay(
                 host, int(port), kind, data, target_id=target_id
             )
         ok = await self.send_to_peer(host, int(port), kind, data)
-        return {"ok": ok, "mode": "direct" if ok else "failed", "task_id": data["task_id"]}
+        return {"ok": ok, "mode": "direct" if ok else "failed", "task_id": task_id}
 
     async def request_submodel_train(self, host: str, port: int, **task) -> Dict[str, Any]:
         return await self.dispatch_mesh_task(host, port, mesh_tasks.KIND_SUBMODEL_TRAIN, task)

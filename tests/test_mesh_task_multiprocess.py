@@ -160,20 +160,28 @@ def _run_alpha(tmp_root: str, result_path: str):
             "model_hint": "local",
         }
         disp = await node.dispatch_mesh_task(
-            HOST, BETA_PORT, mt.KIND_INFERENCE, payload, target_id="node_beta", use_relay=False
+            HOST, BETA_PORT, mt.KIND_INFERENCE, payload,
+            target_id="node_beta", use_relay=False, wait_result=True, timeout=12.0,
         )
-        out["steps"]["dispatch1"] = disp
-        await asyncio.sleep(2.0)
-
-        # جمع النتيجة من inbox
+        out["steps"]["dispatch1"] = {
+            "ok": disp.get("ok"),
+            "mode": disp.get("mode"),
+            "task_id": disp.get("task_id"),
+            "acked": disp.get("acked"),
+            "error": disp.get("error"),
+            "from": disp.get("from"),
+            "has_result": disp.get("result") is not None,
+        }
+        # النتيجة يجب أن تكون في inbox فوراً عبر مسار RPC
         inbox = node.collect_task_results([task_id])
         out["steps"]["inbox_after_1"] = {
             k: {"kind": v.get("kind"), "from": v.get("from"), "ok": (v.get("data") or {}).get("ok")}
             for k, v in inbox.items()
         }
-        # تحقق من وجود إيصال موقّع إن وصلت النتيجة
-        result_data = (inbox.get(task_id) or {}).get("data") or {}
-        receipt = result_data.get("receipt") or {}
+        result_data = (disp.get("result") if isinstance(disp.get("result"), dict) else None) or (
+            (inbox.get(task_id) or {}).get("data") or {}
+        )
+        receipt = (result_data or {}).get("receipt") or {}
         out["steps"]["has_receipt"] = bool(receipt.get("signature") and receipt.get("result_digest"))
         out["steps"]["receipt_node"] = receipt.get("node_id")
 
@@ -282,19 +290,19 @@ def run_test() -> bool:
             ok = False
 
         inbox = steps.get("inbox_after_1") or {}
-        if inbox:
-            print(f"✅ نتيجة وصلت لصندوق Alpha: {list(inbox.keys())}")
+        d1 = steps.get("dispatch1") or {}
+        if inbox or d1.get("has_result"):
+            print(f"✅ نتيجة وصلت عبر RPC/inbox: keys={list(inbox.keys())} acked={d1.get('acked')}")
             for tid, meta in inbox.items():
                 print(f"   {tid}: kind={meta.get('kind')} from={meta.get('from')} ok={meta.get('ok')}")
         else:
-            # قد تصل النتيجة متأخرة أو عبر مسار مختلف — نتحقق من Beta
-            print("⚠️ لا نتيجة في inbox Alpha بعد المهلة (قد يكون التوقيت ضيقاً)")
+            print(f"❌ لا نتيجة في RPC/inbox — error={d1.get('error')}")
+            ok = False
 
         if steps.get("has_receipt"):
             print(f"✅ إيصال موقّع موجود من {steps.get('receipt_node')}")
         else:
-            # ليس فشلاً حاسماً إن وصلت النتيجة بدون حقل receipt في الملخص
-            print("⚠️ لم يُلتقط receipt في ملخص Alpha (راجع بيانات Beta)")
+            print("⚠️ لم يُلتقط receipt (قد تكون النتيجة بلا حقل receipt)")
 
         print("\n── رفض التكرار ──")
         beta_steps = beta.get("steps") or {}
