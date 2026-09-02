@@ -168,29 +168,56 @@ def _coordinator(tmp_root: str, ports: list[int], ids: list[str]) -> dict:
 
         results = {"assignments": [], "pings": [], "maps": [], "fed": None, "checkpoint": None}
 
-        # 1) Ping كل العقد
+        # 0) تبادل اكتشاف مع البذرة لتسجيل مفتاح المنسّق
+        if ports:
+            try:
+                await coord.request_peers(HOST, ports[0], retries=5, retry_delay=0.4)
+            except Exception as e:
+                results["seed_discovery_error"] = str(e)
+
+        # 1) Ping كل العقد مع إعادة محاولة حتى الجاهزية الحقيقية
         for nid, port in zip(ids, ports):
-            r = await coord.ping_peer(HOST, port, timeout=5.0)
+            r = {"ok": False, "error": "not_tried"}
+            for attempt in range(1, 8):
+                r = await coord.ping_peer(HOST, port, timeout=4.0)
+                if r.get("ok"):
+                    r["attempts"] = attempt
+                    break
+                await asyncio.sleep(0.35 * attempt)
+            else:
+                r["attempts"] = 7
             results["pings"].append({"node": nid, **r})
 
+        reachable = [p for p in results["pings"] if p.get("ok")]
+        results["reachable_count"] = len(reachable)
+
         # 2) Map-Reduce موزّع: شريحة لكل عقدة
-        corpus = [
+        # حمل أثقل: 40 سطراً لكل شريحة
+        base_lines = [
             "alpha beta gamma mesh learning",
             "beta gamma delta neural service",
             "gamma mesh federated round",
             "delta checkpoint content hash",
             "epsilon relay ping latency",
+            "zeta gradient push receipt",
+            "eta quorum federated weights",
+            "theta content id storage hash",
         ]
         map_task_ids = []
+        reachable_ids = {p["node"] for p in results["pings"] if p.get("ok")}
         for i, (nid, port) in enumerate(zip(ids, ports)):
-            lines = [corpus[i % len(corpus)], f"node {nid} shard"]
+            lines = [f"{base_lines[j % len(base_lines)]} shard-{i}-{j}" for j in range(40)]
+            lines.append(f"node {nid} shard")
             tid = f"mapcoord_{nid}"
             map_task_ids.append(tid)
-            disp = await coord.dispatch_mesh_task(
-                HOST, port, mt.KIND_MAP,
-                {"task_id": tid, "chunk_id": nid, "lines": lines, "op": "wordcount"},
-                target_id=nid,
-            )
+            if nid in reachable_ids:
+                disp = await coord.dispatch_mesh_task(
+                    HOST, port, mt.KIND_MAP,
+                    {"task_id": tid, "chunk_id": nid, "lines": lines, "op": "wordcount"},
+                    target_id=nid,
+                )
+            else:
+                disp = {"ok": False, "mode": "skipped_unreachable"}
             results["maps"].append({"node": nid, "task_id": tid, "dispatch": disp})
 
         await asyncio.sleep(1.5)
@@ -202,7 +229,7 @@ def _coordinator(tmp_root: str, ports: list[int], ids: list[str]) -> dict:
                 remote_maps.append(mt.execute_map({
                     "task_id": f"mapcoord_{nid}",
                     "chunk_id": nid,
-                    "lines": [corpus[i % len(corpus)], f"node {nid} shard"],
+                    "lines": [f"{base_lines[j % len(base_lines)]} shard-{i}-{j}" for j in range(40)] + [f"node {nid} shard"],
                     "op": "wordcount",
                 }))
         reduced = mt.reduce_map_results("wordcount", remote_maps)
@@ -214,7 +241,7 @@ def _coordinator(tmp_root: str, ports: list[int], ids: list[str]) -> dict:
 
         # 3) جولة FL بنصاب
         workers = [{"id": nid, "host": HOST, "port": port} for nid, port in zip(ids, ports)]
-        fed = await coord.federated_round(worker_peers=workers, steps=4, quorum=min(3, len(workers)))
+        fed = await coord.federated_round(worker_peers=workers, steps=8, quorum=min(4, len(workers)))
         results["fed"] = {
             "ok": fed.get("ok"),
             "round_id": fed.get("round_id"),
@@ -390,6 +417,8 @@ def main():
     # Ping الشبكي مكافأة إضافية (قد يفشل في بعض البيئات بسبب دورة حياة المنافذ)
     success = local_tasks_ok >= max(2, n - 1) and fed_ok and ck_ok
     print(f"  ملخص: local_tasks={local_tasks_ok}/{n} pings={pings_ok}/{n} fed={fed_ok} ckpt={ck_ok}")
+    if pings_ok > 0:
+        print(f"  قناة المنسّق↔العمال: {pings_ok}/{n} reachable عبر Ping")
     print("\n" + ("🏆 النتيجة: نجح تكليف العقد الأساسي" if success else "💥 النتيجة: فشل جزئي — راجع التفاصيل"))
     return 0 if success else 1
 

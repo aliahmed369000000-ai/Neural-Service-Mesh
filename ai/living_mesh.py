@@ -319,15 +319,34 @@ class LivingMeshNode:
             pub_key_path = self.keys_dir / f"{sender_id}.pub"
             
             if not pub_key_path.exists():
-                if payload.get("kind") in ("peer_discovery_request", "peer_discovery_response"):
-                    pub_pem = (payload.get("data") or {}).get("public_key")
-                    if pub_pem: pub_key_path.write_text(pub_pem)
-                    else: return
-                else: return
+                kind0 = payload.get("kind")
+                pub_pem = (payload.get("data") or {}).get("public_key")
+                # اكتشاف + ping: اسمح بتعلّم المفتاح من الحمولة إن وُجد
+                if kind0 in (
+                    "peer_discovery_request", "peer_discovery_response",
+                    "ping_request", "ping_response",
+                ):
+                    if pub_pem:
+                        pub_key_path.write_text(pub_pem)
+                    elif kind0 not in ("peer_discovery_request", "peer_discovery_response"):
+                        # ping بدون مفتاح: اسمح بالمرور للقياس فقط (لا ثقة عالية)
+                        pass
+                    else:
+                        return
+                else:
+                    if pub_pem:
+                        pub_key_path.write_text(pub_pem)
+                    else:
+                        return
             
-            pub_key_pem = pub_key_path.read_bytes()
-            if not self.verify_signature(pub_key_pem, json.dumps(payload, sort_keys=True), signature):
-                return
+            if pub_key_path.exists():
+                pub_key_pem = pub_key_path.read_bytes()
+                if not self.verify_signature(pub_key_pem, json.dumps(payload, sort_keys=True), signature):
+                    return
+            else:
+                # بدون مفتاح معروف: اقبل فقط رسائل القياس/الاكتشاف لتمهيد القناة
+                if payload.get("kind") not in ("ping_request", "peer_discovery_request"):
+                    return
             
             kind = payload.get("kind")
             exp_data = payload.get("data")
@@ -587,7 +606,10 @@ class LivingMeshNode:
         """يرسل ping_request موقّعاً ويقيس RTT بالميلي ثانية."""
         url = self._peer_ws_url(host, port)
         client_ts = time.time()
-        msg = self._build_signed_payload("ping_request", {"client_ts": client_ts})
+        msg = self._build_signed_payload(
+            "ping_request",
+            {"client_ts": client_ts, "public_key": self._pub_pem()},
+        )
         result = {
             "host": host,
             "port": port,
