@@ -1,11 +1,13 @@
 # NSM Release Notes — إصدار إنتاجي مستقر (نواة الاتحاد)
 
-**حالة البوابة:** شغّل `python3 scripts/release_gate.py` → يجب `GATE: PASS`
+**الإصدار:** `v0.1.0-federation-core`  
+**الوسم:** git tag `v0.1.0-federation-core`  
+**حالة البوابة:** شغّل `python3 scripts/release_gate.py` → يجب `GATE: PASS`  
+**CI:** `.github/workflows/federation-release-gate.yml` على PR/push لمسارات الاتحاد
 
 **بروتوكول الانضمام:** `nsm-join-v1`
 
 ---
-
 ## ما هو مدعوم في هذا الإصدار
 
 ### API عقدة (`ai.node_launcher`)

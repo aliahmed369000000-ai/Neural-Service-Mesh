@@ -1,0 +1,76 @@
+# شرط استقرار نواة الاتحاد — يجب PASS قبل دمج تغييرات تمس /v2 أو طبقات الاتحاد
+name: Federation Release Gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ai/living_mesh.py"
+      - "ai/node_launcher.py"
+      - "ai/node_health_layer.py"
+      - "ai/verifiable_cognitive_net.py"
+      - "ai/collective_cognitive_ledger.py"
+      - "ai/leader_election.py"
+      - "ai/byzantine_decision_guard.py"
+      - "ai/private_federated_learning.py"
+      - "ai/mesh_task_protocol.py"
+      - "scripts/release_gate.py"
+      - "scripts/prove_federation.py"
+      - "scripts/run_live_join_demo.py"
+      - "tests/test_verifiable_cognitive_net.py"
+      - "tests/test_collective_cognitive_ledger.py"
+      - "tests/test_byzantine_decision_guard.py"
+      - "tests/test_leader_election.py"
+      - "tests/test_private_federated_learning.py"
+      - "tests/test_identity_select_failover.py"
+      - "tests/test_mesh_*.py"
+      - "tests/test_nsm_node_v2_slice.py"
+      - ".github/workflows/federation-release-gate.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "ai/living_mesh.py"
+      - "ai/node_launcher.py"
+      - "ai/node_health_layer.py"
+      - "ai/verifiable_cognitive_net.py"
+      - "ai/collective_cognitive_ledger.py"
+      - "ai/leader_election.py"
+      - "ai/byzantine_decision_guard.py"
+      - "ai/private_federated_learning.py"
+      - "ai/mesh_task_protocol.py"
+      - "scripts/release_gate.py"
+      - "scripts/prove_federation.py"
+      - "scripts/run_live_join_demo.py"
+      - "tests/test_verifiable_cognitive_net.py"
+      - "tests/test_collective_cognitive_ledger.py"
+      - "tests/test_byzantine_decision_guard.py"
+      - "tests/test_leader_election.py"
+      - "tests/test_private_federated_learning.py"
+      - "tests/test_identity_select_failover.py"
+      - "tests/test_mesh_*.py"
+      - "tests/test_nsm_node_v2_slice.py"
+      - ".github/workflows/federation-release-gate.yml"
+  workflow_dispatch:
+
+jobs:
+  release-gate:
+    name: release_gate.py → PASS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: اعتماديات البوابة
+        run: |
+          pip install -q cryptography aiohttp
+          # cryptography مطلوب للتوقيع؛ aiohttp لانضمام حي
+      - name: بوابة الإصدار
+        run: python3 scripts/release_gate.py
+      - name: رفع تقرير البوابة
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-gate-report
+          path: artifacts/release_gate_report.json
+          if-no-files-found: ignore
