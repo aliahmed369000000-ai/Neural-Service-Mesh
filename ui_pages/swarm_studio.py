@@ -20,17 +20,12 @@ def render_swarm_studio():
     Planning/Monitor/Optimization/Coding) وتنفيذها فعلياً عبر محرك
     NSMAgent (نفس محرك تبويب 💬 المحادثة)، مع عرض حي لنتيجة كل مهمة.
     """
-    st.markdown("""
-    <div style="text-align:center;padding:1rem 0 0.5rem">
-        <span style="font-size:2rem">🐝</span>
-        <div style="font-size:1.5rem;font-weight:900;color:var(--gold)">
-            السرب الذكي — Multi-Agent Swarm
-        </div>
-        <div style="color:var(--text-muted);font-size:0.85rem;direction:rtl">
-            هدف واحد ← تفكيك تلقائي ← تنفيذ فعلي متوازٍ عبر عدة وكلاء متخصصين
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    # 🆕 تبسيط: استُبدلت اللافتة الزخرفية الكبيرة (أيقونة ضخمة + عنوان بخط
+    # كبير + وصف) بعنوان قياسي بنفس نمط section-header المستخدم بكل صفحات
+    # NSM الأخرى (صحة النظام، المحادثة، ...) — نفس المعلومة، حجم أهدأ
+    # ومتّسق مع بقية الواجهة.
+    st.markdown('<div class="section-header">🐝 السرب الذكي — Multi-Agent Swarm</div>', unsafe_allow_html=True)
+    st.caption("هدف واحد ← تفكيك تلقائي ← تنفيذ فعلي متوازٍ عبر عدة وكلاء متخصصين")
 
     if not _SWARM_OK:
         st.error("⚠️ تعذّر تحميل نظام السرب. تأكد من وجود ai/agent_factory.py و ai/swarm_coordinator.py.")
@@ -295,7 +290,7 @@ def render_swarm_studio():
             </div>
             <div class="metric-card">
                 <div class="metric-value">{_cs['done']:,}</div>
-                <div class="metric-label">��� ناجحة بالكامل</div>
+                <div class="metric-label">✅ ناجحة بالكامل</div>
             </div>
             <div class="metric-card">
                 <div class="metric-value">{_cs['partial']:,}</div>
