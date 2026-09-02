@@ -67,6 +67,7 @@ async def make_app(node_id: str, host: str, port: int, data_dir: Path):
     app.router.add_post("/v2/join", nl.handle_join)
     app.router.add_post("/v2/accept-peer-key", nl.handle_accept_peer_key)
     app.router.add_post("/v2/first-task", nl.handle_first_verified_task)
+    app.router.add_post("/v2/dispatch-task", nl.handle_dispatch_task)
     app.router.add_post("/v2/task", nl.handle_submit_task)
     app.router.add_get("/v2/tasks", nl.handle_tasks)
     runner = web.AppRunner(app)
@@ -154,8 +155,6 @@ async def main():
         print("[5] first-task on WORKER", task.get("task_id"), "signer=", receipt.get("node_id"))
 
         # 6 seed verifies worker receipt offline (same process keys)
-        from ai.node_health_layer import NodeHealthLayer
-        # use seed_health with worker pub already stored
         seed_ver = seed_health.verify_receipt(receipt, task.get("result"))
         steps.append({
             "step": "seed_verifies_worker_receipt",
@@ -164,16 +163,47 @@ async def main():
         })
         print("[6] seed verifies worker receipt", seed_ver)
 
+        # 7 seed DISPATCHES new task to worker over HTTP and verifies
+        dispatched = http_json("POST", f"{seed_base}/v2/dispatch-task", {
+            "target_url": worker_base,
+            "target_node_id": worker.node_id,
+            "path": "/v2/first-task",
+            "payload": {
+                "lines": [
+                    "seed dispatched this task",
+                    f"worker {worker.node_id} executes",
+                    "seed verifies automatically",
+                ],
+            },
+        })
+        d_ok = bool(dispatched.get("ok")) and bool(
+            (dispatched.get("verification_on_seed") or {}).get("ok")
+        )
+        steps.append({
+            "step": "seed_dispatch_worker_execute_seed_verify",
+            "ok": d_ok,
+            "task_id": (dispatched.get("worker_result") or {}).get("task_id"),
+            "verification_on_seed": dispatched.get("verification_on_seed"),
+            "receipt_node_id": ((dispatched.get("worker_result") or {}).get("receipt") or {}).get("node_id"),
+        })
+        print("[7] dispatch loop", d_ok, steps[-1].get("task_id"))
+
         return {
             "ok": all(s.get("ok") for s in steps),
             "seed_base": seed_base,
             "worker_base": worker_base,
             "external_node_id": worker.node_id,
             "task_id": task.get("task_id"),
+            "dispatch_task_id": (dispatched.get("worker_result") or {}).get("task_id"),
             "receipt_node_id": receipt.get("node_id"),
             "receipt_digest": receipt.get("result_digest"),
             "verification": ver,
             "seed_verification_of_worker": seed_ver,
+            "dispatch": {
+                "ok": d_ok,
+                "verification_on_seed": dispatched.get("verification_on_seed"),
+                "task_id": (dispatched.get("worker_result") or {}).get("task_id"),
+            },
             "steps": steps,
         }
 

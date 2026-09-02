@@ -72,3 +72,19 @@ curl -s -X POST http://SEED:7860/v2/first-task \
 python3 scripts/run_live_join_demo.py
 # worker:19901 · seed:19876
 ```
+
+
+## حلقة التكليف من البذرة (dispatch)
+
+```
+POST seed/v2/dispatch-task
+{
+  "target_url": "http://worker:19901",
+  "path": "/v2/first-task",
+  "payload": {"lines": ["..."]}
+}
+→ العامل ينفّذ ويوقّع الإيصال
+→ البذرة تتحقق verification_on_seed
+```
+
+بروتوكول: `nsm-dispatch-v1`

@@ -143,6 +143,7 @@ async def handle_join_info(request):
             "join_info": "GET /v2/join-info",
             "join": "POST /v2/join",
             "accept_peer_key": "POST /v2/accept-peer-key",
+            "dispatch_task": "POST /v2/dispatch-task",
             "health": "GET /health",
             "task": "POST /v2/task",
             "tasks": "GET /v2/tasks",
@@ -275,6 +276,120 @@ async def handle_first_verified_task(request):
     )
     return web.json_response(result)
 
+
+async def handle_dispatch_task(request):
+    """
+    البذرة تطلب · العامل ينفّذ · البذرة تتحقق.
+    JSON:
+      {
+        "target_url": "http://worker:19901",   # أو
+        "target_node_id": "external_live_1",  # يُستنتج من network_state
+        "kind": "map_reduce_map",
+        "payload": {...},
+        "path": "/v2/first-task" | "/v2/task"
+      }
+    """
+    import aiohttp
+    node = request.app["node"]
+    health = request.app.get("health")
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "invalid_json"}, status=400)
+
+    target_url = (body.get("target_url") or "").rstrip("/")
+    target_node_id = body.get("target_node_id")
+    if not target_url and target_node_id:
+        state = node._load_state()
+        peer = (state.get("nodes") or {}).get(target_node_id) or {}
+        host = peer.get("host")
+        port = peer.get("port")
+        if host and port:
+            target_url = f"http://{host}:{port}"
+    if not target_url:
+        return web.json_response(
+            {"ok": False, "error": "target_url_or_resolvable_target_node_id_required"},
+            status=400,
+        )
+
+    path = body.get("path") or "/v2/first-task"
+    if not path.startswith("/"):
+        path = "/" + path
+    kind = body.get("kind") or "map_reduce_map"
+    payload = body.get("payload")
+    if path.endswith("first-task"):
+        req_body = body.get("task_body") or {
+            "lines": (payload or {}).get("lines")
+            or ["dispatch from seed", "worker executes", "seed verifies"],
+            "kind": kind,
+            "payload": payload or {},
+        }
+    else:
+        req_body = {
+            "kind": kind,
+            "payload": payload or {"lines": ["dispatch", "task"], "op": "wordcount"},
+            "local": True,
+        }
+
+    url = target_url + path
+    try:
+        timeout = aiohttp.ClientTimeout(total=float(body.get("timeout_s") or 30))
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=req_body) as resp:
+                raw = await resp.text()
+                try:
+                    worker_result = json.loads(raw) if raw else {}
+                except Exception:
+                    return web.json_response({
+                        "ok": False,
+                        "error": "worker_non_json",
+                        "status": resp.status,
+                        "raw": raw[:500],
+                    }, status=502)
+                if resp.status >= 400:
+                    return web.json_response({
+                        "ok": False,
+                        "error": "worker_http_error",
+                        "status": resp.status,
+                        "worker_result": worker_result,
+                    }, status=502)
+    except Exception as e:
+        return web.json_response({"ok": False, "error": f"dispatch_failed:{e}"}, status=502)
+
+    receipt = worker_result.get("receipt")
+    result = worker_result.get("result")
+    verification = None
+    if health is not None and receipt and result is not None:
+        verification = health.verify_receipt(receipt, result)
+    elif receipt and result is not None:
+        # تحقق مبسّط عبر مفتاح العامل المخزّن
+        signer = receipt.get("node_id")
+        key_path = node.keys_dir / f"{signer}.pub"
+        verification = {"ok": False, "error": "no_health_layer"}
+        if key_path.exists() and hasattr(node, "verify_signature"):
+            digest = receipt.get("result_digest")
+            # الاعتماد على health إن وُجدت فقط
+            verification = {"ok": False, "error": "install_health_for_full_verify", "signer": signer}
+
+    ok = bool(worker_result.get("ok")) and bool((verification or {}).get("ok"))
+    return web.json_response({
+        "ok": ok,
+        "protocol": "nsm-dispatch-v1",
+        "dispatcher_node_id": node.node_id,
+        "target_url": target_url,
+        "target_node_id": target_node_id or (receipt or {}).get("node_id"),
+        "path": path,
+        "worker_result": {
+            "ok": worker_result.get("ok"),
+            "task_id": worker_result.get("task_id"),
+            "receipt": receipt,
+            "result": result,
+            "verification_on_worker": worker_result.get("verification"),
+        },
+        "verification_on_seed": verification,
+        "loop": "seed_requests · worker_executes · seed_verifies",
+    })
+
 async def handle_ws(request):
     """معالج WebSocket موحّد عبر مسار الرسائل الموقّعة في LivingMeshNode.
     أُزيل مسار التجميع المركزي القديم (gradient_buffer / All-Reduce المحلي).
@@ -364,6 +479,7 @@ async def main():
         web.get('/v2/tasks', handle_tasks),
         web.post('/v2/task', handle_submit_task),
         web.post('/v2/first-task', handle_first_verified_task),
+        web.post('/v2/dispatch-task', handle_dispatch_task),
         web.get('/dashboard', handle_dashboard),
         web.get('/ws', handle_ws),
         web.get('/', handle_status),
