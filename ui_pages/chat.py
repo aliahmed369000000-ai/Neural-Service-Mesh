@@ -310,21 +310,11 @@ def render_chat():
             st.markdown(f'<div class="ctx-tag">📎 {ctx}</div>', unsafe_allow_html=True)
         st.metric("رسائل الجلسة", st.session_state.nsm_count)
 
-    st.markdown("""
-    <div class="chat-hero">
-        <div class="chat-hero-icon">🧠</div>
-        <div>
-            <div class="chat-hero-title">مساحتك للحوار والفهم المتدرّج</div>
-            <div class="chat-hero-subtitle">اسأل بحرية، تابع السياق، واستكشف الإجابة من أكثر من زاوية دون مغادرة المحادثة.</div>
-        </div>
-        <div class="chat-hero-pills">
-            <span class="chat-hero-pill">🧠 فهم السياق</span>
-            <span class="chat-hero-pill">📚 شبكة معرفية</span>
-            <span class="chat-hero-pill">📋 نسخ الرد</span>
-            <span class="chat-hero-pill">⌘+Enter إرسال</span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    # 🆕 تبسيط: أُزيلت لافتة "chat-hero" الزخرفية (كانت تكرر بصرياً ما يقوله
+    # عنوان القسم والـcaption أعلاها — أيقونة + عنوان + وصف + 4 "حبات"
+    # زخرفية) لتقليل الازدحام أعلى شاشة المحادثة. لا تغيير في أي منطق أو
+    # حالة؛ العنوان والوصف الفعليان ما زالا ظاهرين بالـsection-header
+    # والـcaption أعلاه.
 
     # ── تهيئة حالة الملفات المرفَقة (تُستخدم لاحقاً في قسم الكتابة) ───────
     if "chat_pending_files" not in st.session_state:
@@ -453,25 +443,33 @@ def render_chat():
                     st.warning(f"⚠️ تعذّر قراءة سجل الجلسات: {_list_exc}")
     # ══════════════════════════════════════════════════════════════════════
     # 📊 إحصائيات الجلسة + فلتر الرسائل المرجعية
+    # 🆕 تبسيط: بطاقات الإحصائيات الأربع (الرسائل/الكلمات/متوسط الرد/
+    # المفضلة) كانت تظهر دائماً فوق كل محادثة وتُغرق أعلى الصفحة بأرقام
+    # قبل حتى قراءة أي رسالة. أصبحت الآن خلف expander مطوي اختيارياً —
+    # نفس الحسابات والقيم بالضبط. فلتر «عرض الرسائل المفضلة فقط» وزر
+    # «مسح المفضلة» يبقيان ظاهرين كما هما لأنهما عنصرا تحكّم فعليان
+    # يؤثران في الرسائل المعروضة أدناه (_show_bookmarks_only)، وليسا
+    # مجرد عرض إحصائي.
     # ══════════════════════════════════════════════════════════════════════
     if st.session_state.nsm_messages:
-        _stats_cols = st.columns(4)
         _total_msgs = len(st.session_state.nsm_messages)
         _user_msgs = sum(1 for m in st.session_state.nsm_messages if m[0] == "user")
         _nsm_msgs = sum(1 for m in st.session_state.nsm_messages if m[0] == "nsm")
         _total_words = sum(len(m[1].split()) for m in st.session_state.nsm_messages)
         _bookmarks = st.session_state.get("nsm_bookmarks", set())
-        
-        with _stats_cols[0]:
-            st.metric("📨 الرسائل", _total_msgs, delta=f"{_user_msgs} أنت / {_nsm_msgs} NSM")
-        with _stats_cols[1]:
-            st.metric("📝 الكلمات", _total_words)
-        with _stats_cols[2]:
-            _avg_len = _total_words // max(1, _nsm_msgs)
-            st.metric("📊 متوسط الرد", f"{_avg_len} كلمة")
-        with _stats_cols[3]:
-            st.metric("⭐ المفضلة", len(_bookmarks))
-        
+
+        with st.expander("📊 إحصائيات المحادثة (اختياري)", expanded=False):
+            _stats_cols = st.columns(4)
+            with _stats_cols[0]:
+                st.metric("📨 الرسائل", _total_msgs, delta=f"{_user_msgs} أنت / {_nsm_msgs} NSM")
+            with _stats_cols[1]:
+                st.metric("📝 الكلمات", _total_words)
+            with _stats_cols[2]:
+                _avg_len = _total_words // max(1, _nsm_msgs)
+                st.metric("📊 متوسط الرد", f"{_avg_len} كلمة")
+            with _stats_cols[3]:
+                st.metric("⭐ المفضلة", len(_bookmarks))
+
         # فلتر الرسائل المرجعية
         _filter_cols = st.columns([3, 1])
         with _filter_cols[0]:
