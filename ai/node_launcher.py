@@ -458,6 +458,31 @@ async def handle_list_jobs(request):
 
 
 
+
+async def handle_predict_task(request):
+    """POST JSON: {series:[numbers], horizon?, n_workers?, quorum?} — تنبّؤ موزّع."""
+    health = request.app.get("health")
+    if health is None:
+        return web.json_response({"error": "health_layer_missing"}, status=500)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid_json"}, status=400)
+    series = body.get("series") or body.get("values")
+    if not series:
+        return web.json_response({"error": "series_required"}, status=400)
+    from ai import mesh_task_protocol as mt
+    orch = health.orchestrator()
+    report = await orch.submit_job(
+        mt.KIND_PREDICT,
+        {"series": series, "horizon": int(body.get("horizon") or 1)},
+        n_workers=int(body.get("n_workers") or 2),
+        strategy=body.get("strategy") or "majority",
+        quorum=int(body.get("quorum") or 2),
+        timeout_per_task=float(body.get("timeout_per_task") or 12.0),
+    )
+    return web.json_response(report)
+
 async def handle_web_task(request):
     """POST JSON: {url, n_workers?, strategy?, quorum?, max_chars?, allowlist?}
     مهمة إنترنت آمنة: HTTPS فقط + حماية SSRF.
@@ -939,6 +964,7 @@ async def main():
         web.post("/v2/collective-summary", handle_collective_summary),
         web.post("/v2/collective-search", handle_collective_search),
         web.post("/v2/web-task", handle_web_task),
+        web.post("/v2/predict", handle_predict_task),
         web.post("/v2/first-task", handle_first_verified_task),
         web.post("/v2/dispatch-task", handle_dispatch_task),
         web.get("/dashboard", handle_dashboard),

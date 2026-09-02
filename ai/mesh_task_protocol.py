@@ -43,6 +43,8 @@ KIND_SEARCH = "search_chunk"
 KIND_SEARCH_RESULT = "search_chunk_result"
 KIND_WEB_FETCH = "web_fetch"
 KIND_WEB_FETCH_RESULT = "web_fetch_result"
+KIND_PREDICT = "predict"
+KIND_PREDICT_RESULT = "predict_result"
 
 # إدارة دورة حياة المهمة (v1.1+)
 KIND_TASK_ACK = "task_ack"
@@ -60,6 +62,7 @@ ALL_TASK_KINDS = {
     KIND_SUMMARIZE, KIND_SUMMARIZE_RESULT,
     KIND_SEARCH, KIND_SEARCH_RESULT,
     KIND_WEB_FETCH, KIND_WEB_FETCH_RESULT,
+    KIND_PREDICT, KIND_PREDICT_RESULT,
     KIND_TASK_ACK, KIND_TASK_CANCEL,
     KIND_TASK_STATUS, KIND_TASK_STATUS_RESULT,
 }
@@ -758,6 +761,53 @@ def execute_web_fetch(task: Dict[str, Any]) -> Dict[str, Any]:
         }
 
 
+
+def execute_predict(task: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    تنبّؤ حتمي بسيط:
+      - series: قائمة أرقام → يتنبأ بالقيمة التالية (انحدار خطي بسيط)
+      - أو values + horizon
+    """
+    t0 = time.time()
+    series = task.get("series") or task.get("values") or []
+    try:
+        series = [float(x) for x in series]
+    except Exception:
+        return {"ok": False, "error": "invalid_series", "task_id": task.get("task_id")}
+    if len(series) < 2:
+        return {"ok": False, "error": "series_too_short", "task_id": task.get("task_id")}
+    horizon = max(1, min(int(task.get("horizon") or 1), 10))
+    n = len(series)
+    xs = list(range(n))
+    mean_x = sum(xs) / n
+    mean_y = sum(series) / n
+    num = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, series))
+    den = sum((x - mean_x) ** 2 for x in xs) or 1.0
+    slope = num / den
+    intercept = mean_y - slope * mean_x
+    preds = []
+    for h in range(1, horizon + 1):
+        preds.append(round(intercept + slope * (n - 1 + h), 6))
+    # اتجاه
+    direction = "صاعد" if slope > 1e-9 else ("هابط" if slope < -1e-9 else "مستقر")
+    conf = min(0.99, abs(slope) / (abs(mean_y) + 1e-9) * n / 10 + 0.5)
+    out = {
+        "ok": True,
+        "method": "simple_linear_regression",
+        "series_len": n,
+        "slope": round(slope, 6),
+        "intercept": round(intercept, 6),
+        "direction": direction,
+        "predictions": preds,
+        "next_value": preds[0],
+        "output": f"next={preds[0]}; direction={direction}",
+        "confidence_hint": round(conf, 3),
+        "task_id": task.get("task_id"),
+        "elapsed_ms": round((time.time() - t0) * 1000, 2),
+    }
+    return out
+
+
 def dispatch_task(kind: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """موجّه مركزي لتنفيذ مهمة حسب النوع."""
     data = data or {}
@@ -779,6 +829,8 @@ def dispatch_task(kind: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return execute_search_chunk(data)
     if kind == KIND_WEB_FETCH:
         return execute_web_fetch(data)
+    if kind == KIND_PREDICT:
+        return execute_predict(data)
     return None
 
 
@@ -793,5 +845,6 @@ def result_kind_for(request_kind: str) -> str:
         KIND_SUMMARIZE: KIND_SUMMARIZE_RESULT,
         KIND_SEARCH: KIND_SEARCH_RESULT,
         KIND_WEB_FETCH: KIND_WEB_FETCH_RESULT,
+        KIND_PREDICT: KIND_PREDICT_RESULT,
         KIND_TASK_STATUS: KIND_TASK_STATUS_RESULT,
     }.get(request_kind, request_kind + "_result")

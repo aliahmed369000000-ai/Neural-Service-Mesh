@@ -66,6 +66,7 @@ ALLOWED_TASK_CAPABILITIES = {
     "summarize_chunk": {"text", "CPU", "tf_engine"},
     "search_chunk": {"text", "CPU", "tf_engine"},
     "web_fetch": {"text", "CPU", "web", "tf_engine"},
+    "predict": {"text", "CPU", "tf_engine"},
 }
 
 class LivingMeshNode:
