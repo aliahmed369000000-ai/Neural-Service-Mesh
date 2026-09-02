@@ -271,16 +271,38 @@ class LivingMeshNode:
                 
         return dead_nodes
         
-    def sync_experience(self, kind: str, experience_data: Dict[str, Any], hops: int = 0):
-        """مشاركة خبرة جديدة عبر بروتوكول Gossip."""
+    def sync_experience(self, kind: str, experience_data: Dict[str, Any], hops: int = 0,
+                         origin_node: str = None):
+        """مشاركة خبرة جديدة عبر بروتوكول Gossip.
+
+        origin_node: هوية العقدة الأصلية التي صدرت عنها الخبرة فعلياً (لا العقدة
+        التي رحّلتها لنا). إن لم تُمرَّر، تُعتبر الخبرة صادرة محلياً من هذه العقدة.
+
+        تحمل experience_data معرّف gossip ثابت (_gossip_id) يبقى كما هو عبر كل
+        القفزات — يُستخدم لمنع إعادة بث نفس الخبرة أكثر من مرة بين نفس العقد
+        (عاصفة Gossip)، بدل الاعتماد فقط على سقف الـ hops.
+        """
         if hops > 15: return
-        
+
+        experience_data = dict(experience_data or {})
+        gossip_id = experience_data.get("_gossip_id")
+        if not gossip_id:
+            gossip_id = f"gsp_{uuid.uuid4().hex[:12]}"
+            experience_data["_gossip_id"] = gossip_id
+
+        if not hasattr(self, "_seen_gossip_ids"):
+            self._seen_gossip_ids: Set[str] = set()
+        if gossip_id in self._seen_gossip_ids:
+            # سبق أن استقبلنا/رحّلنا هذه الخبرة بعينها — امتصّها ولا تُعِد بثّها
+            return
+        self._seen_gossip_ids.add(gossip_id)
+
         state = self._load_state()
         exp_entry = {
             "kind": kind,
             "data": experience_data,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "node": self.node_id
+            "node": origin_node or self.node_id
         }
         if "global_experience" not in state: state["global_experience"] = []
         state["global_experience"].append(exp_entry)
@@ -693,7 +715,7 @@ class LivingMeshNode:
                 # تدرجات من بروتوكول Gradient Mesh — نقبلها ونمررها كـ gossip محدود
                 logger.info(f"📥 Node {self.node_id} received gradient_push from {sender_id} (hops={hops})")
                 if hops < 3:
-                    self.sync_experience(kind, exp_data, hops + 1)
+                    self.sync_experience(kind, exp_data, hops + 1, origin_node=sender_id)
             elif kind == "ping_request" and websocket is not None:
                 # #2 قياس زمن الاستجابة — رد فوري بـ timestamp محلي
                 t_server = time.time()
@@ -734,7 +756,7 @@ class LivingMeshNode:
             ):
                 await self._handle_storage_task(kind, exp_data or {}, sender_id=sender_id, hops=hops, websocket=websocket)
             else:
-                self.sync_experience(kind, exp_data, hops + 1)
+                self.sync_experience(kind, exp_data, hops + 1, origin_node=sender_id)
         except Exception as e:
             # #16: لا تبتلع الأخطاء بصمت — سجّل وعدّ
             self._metrics["messages_rejected_sig"] = self._metrics.get("messages_rejected_sig", 0)
@@ -1241,7 +1263,7 @@ class LivingMeshNode:
                     inner_kind, inner_data, sender_id=origin or sender_id, hops=hops + 1
                 )
             elif inner_kind in ("gradient_push", "evolution_task", "tool_request", "sovereign_gossip"):
-                self.sync_experience(inner_kind, inner_data, hops + 1)
+                self.sync_experience(inner_kind, inner_data, hops + 1, origin_node=origin or sender_id)
             return
 
         ok = await self.send_to_peer(
