@@ -90,7 +90,14 @@ def run_against_seed(seed_base: str, node_id: str, host: str, port: int) -> dict
     print("[5] GET /health →", health.get("node_id") or health.get("status"))
 
     ok = all(s.get("ok") for s in steps)
-    return {"ok": ok, "steps": steps, "seed": seed_base, "external_node_id": node.node_id}
+    report = {
+        "ok": ok,
+        "steps": steps,
+        "seed": seed_base,
+        "external_node_id": node.node_id,
+        "first_task": next((s for s in steps if s.get("step") == "first-task"), {}),
+    }
+    return report
 
 
 def run_local_demo() -> dict:
@@ -222,6 +229,23 @@ def main():
     print("\n📊 الملخص")
     for s in result.get("steps", []):
         print(f"  {'✅' if s.get('ok') else '❌'} {s.get('step')}: { {k:v for k,v in s.items() if k!='step'} }")
+    # تقرير انضمام تلقائي
+    out_dir = REPO / "artifacts"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    report_path = out_dir / "join_live_report.json"
+    first = next((s for s in result.get("steps", []) if s.get("step") == "first-task"), {})
+    payload = {
+        "ok": result.get("ok"),
+        "seed": result.get("seed"),
+        "external_node_id": result.get("external_node_id"),
+        "mode": result.get("mode"),
+        "task_id": first.get("task_id"),
+        "verification": first.get("verification"),
+        "receipt_digest": first.get("receipt_digest"),
+        "steps": result.get("steps"),
+    }
+    report_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+    print(f"📁 تقرير الانضمام: {report_path}")
     print("🏆 النجاح" if result.get("ok") else "💥 فشل")
     return 0 if result.get("ok") else 1
 
