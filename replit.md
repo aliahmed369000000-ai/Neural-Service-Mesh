@@ -56,3 +56,27 @@
 - `ai/web_search_tool.py`, `ai/image_search_tool.py` — أدوات البحث
 - `core/artifacts_store.py` — تخزين الواجهات التفاعلية + إعدادات المستخدم الدائمة
 - `nsm_memory.py` — منطق الذاكرة الكامل
+
+
+## Living Mesh — تشغيل عقد دائمة
+
+- **بذرة (seed) دائمة:**
+  ```bash
+  python ai/node_launcher.py --id mesh_seed --host 0.0.0.0 --port $PORT
+  ```
+  أو: `bash scripts/run_mesh_seed.sh` (يستخدم `PORT` و`NODE_ID` و`NSM_NODE_DATA_DIR`).
+
+- **عامل:**
+  ```bash
+  SEED_NODE_URL=127.0.0.1:7860 NODE_ID=worker_1 PORT=7861 bash scripts/run_mesh_worker.sh
+  ```
+
+- **مجموعة محلية محافظة:** `NSM_NODE_COUNT=1` (افتراضي=بذرة فقط) حتى 10 كحد أقصى:
+  ```bash
+  NSM_NODE_COUNT=3 python scripts/run_local_mesh.py
+  ```
+
+- كل عقدة لها مجلد بيانات مستقل: `artifacts/living_mesh/nodes/<NODE_ID>/` (مفاتيح + `network_state.json`).
+- الحالة: `GET /status` و`GET /health` و`GET /v2/status` وWebSocket `/ws`.
+- في Replit/Streamlit Cloud غالباً منفذ خارجي واحد؛ البذرة تُعرَّض خارجياً والعمال محليون عبر `SEED_NODE_URL`.
+- لا تُكتب عقد وهمية يدوياً في `network_state.json` — العقد تظهر بعد `join_network` وتشغيل العملية فعلياً.

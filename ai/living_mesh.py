@@ -63,9 +63,25 @@ ALLOWED_TASK_CAPABILITIES = {
 }
 
 class LivingMeshNode:
-    def __init__(self, node_id: str = None, host: str = "127.0.0.1", port: int = None):
-        self.keys_dir = LIVING_MESH_DIR / "keys"
+    def __init__(
+        self,
+        node_id: str = None,
+        host: str = "127.0.0.1",
+        port: int = None,
+        data_dir: str | Path | None = None,
+    ):
+        # عزل حالة كل عقدة: data_dir خاص → مفاتيح وnetwork_state منفصلة
+        if data_dir is not None:
+            self.data_dir = Path(data_dir)
+        else:
+            env_dir = os.getenv("NSM_NODE_DATA_DIR")
+            self.data_dir = Path(env_dir) if env_dir else LIVING_MESH_DIR
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.keys_dir = self.data_dir / "keys"
         self.keys_dir.mkdir(exist_ok=True)
+        self.network_state_path = self.data_dir / "network_state.json"
+        self.content_dir = self.data_dir / "content"
+        self.content_dir.mkdir(exist_ok=True)
         # #5 استعادة هوية دائمة (node_id + مفاتيح) بعد إعادة التشغيل
         self.node_id = self._resolve_persistent_node_id(node_id)
         self.host = host
@@ -84,7 +100,7 @@ class LivingMeshNode:
         self.active_connections: Set = set()
         
         # تهيئة الذاكرة الموحدة (ANN + Sharding)
-        self.memory = UnifiedMemoryManager(base_dir=str(LIVING_MESH_DIR / "memory"))
+        self.memory = UnifiedMemoryManager(base_dir=str(self.data_dir / "memory"))
         
         # هوية دائمة: تحميل مفتاح RSA المحفوظ لهذه العقدة
         self.private_key, self.public_key = self._load_or_create_identity()
@@ -201,6 +217,18 @@ class LivingMeshNode:
                 self.local_evolution_score = max(self.local_evolution_score, exp["data"].get("score", 0.0))
         logger.info(f"🧠 Node {self.node_id} synchronized state: Evolution Score = {self.local_evolution_score}")
 
+    def mark_offline(self) -> None:
+        """يعلّم هذه العقدة offline في حالتها المحلية (عند الإيقاف الرشيق)."""
+        try:
+            state = self._load_state()
+            if self.node_id in state.get("nodes", {}):
+                state["nodes"][self.node_id]["status"] = "offline"
+                state["nodes"][self.node_id]["last_seen"] = datetime.now(timezone.utc).isoformat()
+                self._save_state(state)
+                logger.info(f"📴 Node {self.node_id} marked offline")
+        except Exception as e:
+            logger.warning(f"⚠️ mark_offline failed: {e}")
+
     def send_heartbeat(self):
         """إرسال نبض قلب لتأكيد الوجود وتحديث الحالة."""
         state = self._load_state()
@@ -272,15 +300,18 @@ class LivingMeshNode:
                     asyncio.create_task(self.send_to_peer(t_host, t_port, kind, experience_data, hops + 1))
 
     def _load_state(self) -> Dict[str, Any]:
-        if not NETWORK_STATE.exists():
+        path = getattr(self, "network_state_path", None) or NETWORK_STATE
+        if not Path(path).exists():
             return {"nodes": {}, "global_experience": []}
         try:
-            return json.loads(NETWORK_STATE.read_text())
-        except:
+            return json.loads(Path(path).read_text())
+        except Exception:
             return {"nodes": {}, "global_experience": []}
 
     def _save_state(self, state: Dict[str, Any]):
-        NETWORK_STATE.write_text(json.dumps(state, indent=2))
+        path = getattr(self, "network_state_path", None) or NETWORK_STATE
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text(json.dumps(state, indent=2, ensure_ascii=False))
 
     def _identity_record_path(self) -> Path:
         return self.keys_dir / "node_identity.json"
@@ -1743,7 +1774,7 @@ class LivingMeshNode:
     def _content_path(self, content_id: str) -> Path:
         # content_id = sha256 hex
         safe = "".join(c for c in content_id if c.isalnum())[:64]
-        return CONTENT_DIR / f"{safe}.bin"
+        return self.content_dir / f"{safe}.bin"
 
     def _sha256_bytes(self, data: bytes) -> str:
         return hashlib.sha256(data).hexdigest()
@@ -2007,7 +2038,7 @@ class LivingMeshNode:
             "reputation_self": (rep.get(self.node_id) or {}).get("score", 0),
             "receipts": len(state.get("receipts") or {}),
             "task_inbox": len(state.get("task_inbox") or {}),
-            "content_objects": len(list(CONTENT_DIR.glob("*.bin"))) if CONTENT_DIR.exists() else 0,
+            "content_objects": len(list(self.content_dir.glob("*.bin"))) if self.content_dir.exists() else 0,
             "surah_awareness": getattr(self, "surah_awareness", {}),
             "ts": datetime.now(timezone.utc).isoformat(),
         }

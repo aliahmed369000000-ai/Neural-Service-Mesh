@@ -31,17 +31,30 @@ logging.basicConfig(
 logger = logging.getLogger("NodeLauncher")
 
 async def handle_status(request):
-    """صفحة حالة العقدة لعرض وعي Surah والأقران."""
+    """حالة العقدة الحية — من network_state وليس من قائمة peers الفارغة."""
     node = request.app['node']
+    state = node._load_state()
+    nodes = state.get("nodes") or {}
+    online = [
+        {"id": nid, "host": info.get("host"), "port": info.get("port"), "last_seen": info.get("last_seen")}
+        for nid, info in nodes.items()
+        if info.get("status") == "online"
+    ]
     status = {
         "node_id": node.node_id,
         "status": "Running",
-        "surah_awareness": getattr(node, 'surah_awareness', {"status": "unknown"}),
-        "peers_count": len(node.peers),
-        "active_connections": len(node.active_connections),
-        "public_address": f"ws://{node.host}:{node.port}"
+        "host": node.host,
+        "port": node.port,
+        "data_dir": str(getattr(node, "data_dir", "")),
+        "surah_awareness": getattr(node, "surah_awareness", {"status": "unknown"}),
+        "peers_count": len(online),
+        "online_nodes": online,
+        "known_nodes": len(nodes),
+        "active_connections": len(getattr(node, "active_connections", set()) or set()),
+        "public_address": f"ws://{node.host}:{node.port}",
+        "ws_path": "/ws",
     }
-    return web.json_response(status, dumps=lambda x: json.dumps(x, indent=2))
+    return web.json_response(status, dumps=lambda x: json.dumps(x, indent=2, ensure_ascii=False))
 
 
 async def handle_health(request):
@@ -421,21 +434,57 @@ async def handle_ws(request):
 
     return ws
 
+def _parse_seed_url(url: str) -> dict:
+    """يفسّر SEED_NODE_URL بصيغ: host:port | http(s)://host:port | ws(s)://host:port/path"""
+    raw = (url or "").strip()
+    if not raw:
+        return {}
+    cleaned = raw.replace("https://", "").replace("http://", "").replace("wss://", "").replace("ws://", "")
+    cleaned = cleaned.split("/")[0]  # drop path
+    host, port = cleaned, None
+    if ":" in cleaned:
+        host, port_s = cleaned.rsplit(":", 1)
+        try:
+            port = int(port_s)
+        except ValueError:
+            host, port = cleaned, None
+    if port is None:
+        port = 443 if ".hf.space" in host else 7860
+    return {"id": "seed_node", "host": host, "port": port}
+
+
+async def _wait_port_ready(host: str, port: int, timeout: float = 15.0) -> bool:
+    import socket
+    deadline = asyncio.get_event_loop().time() + timeout
+    probe_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+    while asyncio.get_event_loop().time() < deadline:
+        try:
+            with socket.create_connection((probe_host, port), timeout=0.4):
+                return True
+        except OSError:
+            await asyncio.sleep(0.15)
+    return False
+
+
 async def main():
     parser = argparse.ArgumentParser(description="NSM Distributed Node Launcher")
-    parser.add_argument("--id", type=str, help="Node ID")
+    parser.add_argument("--id", type=str, help="Node ID (default: mesh_seed or NODE_ID)")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host IP to bind")
     parser.add_argument("--port", type=int, default=7860, help="Port to listen on")
     parser.add_argument("--seed-host", type=str, help="Seed node host IP")
     parser.add_argument("--seed-port", type=int, help="Seed node port")
-    
+    parser.add_argument("--data-dir", type=str, help="Isolated data directory for this node")
     args = parser.parse_args()
-    
-    # دعم متغيرات بيئة المنصات السحابية
-    node_id = args.id or os.getenv("NODE_ID", "mesh_alpha_seed")
+
+    node_id = args.id or os.getenv("NODE_ID", "mesh_seed")
     bind_host = args.host
     port = int(os.getenv("PORT", args.port))
-    
+
+    # مجلد بيانات معزول لكل عقدة (هوية + network_state مستقلان)
+    root = Path(__file__).resolve().parent.parent
+    default_data = root / "artifacts" / "living_mesh" / "nodes" / node_id
+    data_dir = args.data_dir or os.getenv("NSM_NODE_DATA_DIR") or str(default_data)
+
     hf_space_id = os.getenv("SPACE_ID")
     if hf_space_id:
         space_user, space_name = hf_space_id.split("/")
@@ -443,82 +492,108 @@ async def main():
     else:
         node_host = bind_host if bind_host != "0.0.0.0" else "127.0.0.1"
 
-    logger.info(f"🔮 Initializing Distributed Node with Surah Awareness: {node_id}")
-    node = LivingMeshNode(node_id=node_id, host=node_host, port=port)
-    
+    logger.info(f"🔮 Initializing node id={node_id} data_dir={data_dir}")
+    node = LivingMeshNode(node_id=node_id, host=node_host, port=port, data_dir=data_dir)
+
     seed_nodes = []
-    # دعم اكتشاف عقدة البذور عبر متغيرات البيئة (مفيد للتوسع السريع)
     env_seed_url = os.getenv("SEED_NODE_URL")
     if env_seed_url:
-        seed_host = env_seed_url.replace("https://", "").replace("http://", "").replace("wss://", "").replace("ws://", "").strip("/")
-        seed_nodes.append({
-            "id": "seed_node",
-            "host": seed_host,
-            "port": 443 if ".hf.space" in seed_host else 80
-        })
-        logger.info(f"🌐 Found seed node via environment: {seed_host}")
+        parsed = _parse_seed_url(env_seed_url)
+        if parsed:
+            seed_nodes.append(parsed)
+            logger.info(f"🌐 Seed via SEED_NODE_URL: {parsed['host']}:{parsed['port']}")
     elif args.seed_host:
         seed_nodes.append({
             "id": "seed_node",
             "host": args.seed_host,
-            "port": args.seed_port or 80
+            "port": int(args.seed_port or 7860),
         })
 
-    # إعداد تطبيق aiohttp
     app = web.Application()
-    app['node'] = node
-    app['health'] = NodeHealthLayer(node)
+    app["node"] = node
+    app["health"] = NodeHealthLayer(node)
     app.add_routes([
-        web.get('/status', handle_status),
-        web.get('/health', handle_health),
-        web.get('/v2/status', handle_v2_status),
-        web.get('/v2/join-info', handle_join_info),
-        web.post('/v2/join', handle_join),
-        web.post('/v2/accept-peer-key', handle_accept_peer_key),
-        web.get('/v2/routes', handle_routes),
-        web.get('/v2/tasks', handle_tasks),
-        web.post('/v2/task', handle_submit_task),
-        web.post('/v2/first-task', handle_first_verified_task),
-        web.post('/v2/dispatch-task', handle_dispatch_task),
-        web.get('/dashboard', handle_dashboard),
-        web.get('/ws', handle_ws),
-        web.get('/', handle_status),
+        web.get("/status", handle_status),
+        web.get("/health", handle_health),
+        web.get("/v2/status", handle_v2_status),
+        web.get("/v2/join-info", handle_join_info),
+        web.post("/v2/join", handle_join),
+        web.post("/v2/accept-peer-key", handle_accept_peer_key),
+        web.get("/v2/routes", handle_routes),
+        web.get("/v2/tasks", handle_tasks),
+        web.post("/v2/task", handle_submit_task),
+        web.post("/v2/first-task", handle_first_verified_task),
+        web.post("/v2/dispatch-task", handle_dispatch_task),
+        web.get("/dashboard", handle_dashboard),
+        web.get("/ws", handle_ws),
+        web.get("/", handle_status),
     ])
-    
+
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, bind_host, port)
     await site.start()
-    
-    # الانضمام للشبكة
+
+    ready = await _wait_port_ready(bind_host, port, timeout=15.0)
+    if not ready:
+        logger.error(f"❌ Port {port} not ready — node will still attempt to run")
+    else:
+        logger.info(f"✅ Readiness OK — port {port} accepting connections")
+
     node.join_network(seed_nodes=seed_nodes)
-    
-    logger.info(f"🚀 NSM Hybrid Node '{node.node_id}' is LIVE on port {port}")
-    
-    # مهمة نبض القلب الدورية + قياس صحة الأقران دورياً
+    # إن وُجدت بذرة: اطلب الأقران فعلياً عبر الشبكة
+    for s in seed_nodes:
+        try:
+            ok = await node.request_peers(s["host"], int(s["port"]))
+            logger.info(f"🔎 request_peers → {s['host']}:{s['port']} ok={ok}")
+        except Exception as e:
+            logger.warning(f"⚠️ request_peers failed: {e}")
+
+    logger.info(f"🚀 NSM Node '{node.node_id}' LIVE on {bind_host}:{port} (advertise {node_host}:{port})")
+
+    stop_event = asyncio.Event()
+
     async def heartbeat_loop():
         tick = 0
-        while True:
-            node.send_heartbeat()
-            node.check_network_health()
-            tick += 1
-            # كل ~60 ثانية: قياس RTT للأقران (#2)
-            if tick % 4 == 0:
-                try:
-                    health = await node.measure_peers_health(timeout=4.0)
-                    reachable = sum(1 for h in health if h.get("ok"))
-                    logger.info(f"📶 Peer health check: {reachable}/{len(health)} reachable")
-                except Exception as e:
-                    logger.warning(f"⚠️ Peer health check failed: {e}")
-            await asyncio.sleep(15)
-    
-    asyncio.create_task(heartbeat_loop())
-    
-    # إبقاء السكربت يعمل
-    await asyncio.Future()
+        while not stop_event.is_set():
+            try:
+                node.send_heartbeat()
+                # علّم العقد المتوقفة stale/offline عبر last_seen
+                dead = node.check_network_health(timeout_seconds=int(os.getenv("NSM_PEER_STALE_SEC", "45")))
+                if dead:
+                    logger.info(f"📴 Marked stale/offline: {dead}")
+                tick += 1
+                if tick % 4 == 0:
+                    try:
+                        health = await node.measure_peers_health(timeout=4.0)
+                        reachable = sum(1 for h in health if h.get("ok"))
+                        logger.info(f"📶 Peer health: {reachable}/{len(health)} reachable")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Peer health check failed: {e}")
+            except Exception as e:
+                logger.error(f"❌ heartbeat error: {e}")
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=15.0)
+            except asyncio.TimeoutError:
+                pass
+
+    hb_task = asyncio.create_task(heartbeat_loop())
+
+    try:
+        await asyncio.Future()
+    finally:
+        stop_event.set()
+        hb_task.cancel()
+        try:
+            node.mark_offline()
+        except Exception:
+            pass
+        await runner.cleanup()
+        logger.info("👋 Node shutdown complete")
+
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("👋 Node shutting down gracefully...")
+        logger.info("👋 Node shutting down gracefully (KeyboardInterrupt)...")

@@ -123,3 +123,8 @@ artifacts/hierarchical_moe/*.pt
 artifacts/hierarchical_moe/*.npy
 ai/models/initial_weights.npy
 experiments/**/checkpoints/
+
+# per-node mesh state & keys
+artifacts/living_mesh/nodes/
+artifacts/living_mesh/network_state.json
+node_activity.log
