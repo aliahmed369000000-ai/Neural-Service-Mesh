@@ -124,6 +124,25 @@ print(multi_gpu_training_snippet())
 
 الكود: `ai/remote_training_orchestrator.py` — تدريب فعّال (AMP + DataParallel + AdamW + early stop).
 
+## تشغيل عقدة Living Mesh حية (P2P) على Kaggle
+
+Kaggle — تماماً مثل Streamlit Community Cloud — يسمح بالاتصال **الصادر** فقط،
+فلا يمكن لعقدة `ai/node_launcher.py` وحدها أن تكون مرئية لعقد أخرى إن شُغّلت هنا
+كما هي (راجع `docs/real_p2p_design.md`). السكربت `scripts/run_mesh_seed_kaggle.py`
+يحل هذا بنفس أسلوب `scripts/run_mesh_seed_termux.sh`: يشغّل العقدة محلياً ثم
+يفتح Cloudflare Quick Tunnel (اتصال صادر) لتعريضها برابط عام.
+
+```python
+!git clone https://github.com/aliahmed369000000-ai/Neural-Service-Mesh.git
+%cd Neural-Service-Mesh
+!PORT=7860 NODE_ID=mesh_seed_kaggle DURATION_HOURS=12 python scripts/run_mesh_seed_kaggle.py
+```
+
+- يطبع رابط `*.trycloudflare.com` وقيمة `SEED_NODE_URL` الجاهزة لأسرار Streamlit Cloud.
+- يوقف نفسه تلقائياً بعد `DURATION_HOURS` (افتراضياً 12) لتفادي انقطاع مفاجئ من حد جلسة Kaggle.
+- لتشغيل حقيقي دون إبقاء المتصفح مفتوحاً: **Save Version → Save & Run All** (نفس أسلوب SurahChain أدناه).
+- الرابط عشوائي ويتغيّر مع كل تشغيل جديد؛ حدّث `SEED_NODE_URL` بعد كل إعادة تشغيل.
+
 ## SurahChain Pre-train ليلي على Kaggle
 
 الملف: `notebooks/SurahChain_Pretrain_Kaggle.ipynb`
