@@ -71,6 +71,7 @@ render_training_monitor = _lazy_page("ui_pages.training_monitor", "render_traini
 render_moe_agent_studio = _lazy_page("ui_pages.moe_agent_studio", "render_moe_agent_studio")
 render_memory = _lazy_page("ui_pages.memory", "render_memory")
 render_health = _lazy_page("ui_pages.health", "render_health")
+render_federation_hub = _lazy_page("ui_pages.federation_hub", "render_federation_hub")
 render_advanced_api = _lazy_page("ui_pages.advanced_api", "render_advanced_api")
 render_artifacts_studio = _lazy_page("ui_pages.artifacts_studio", "render_artifacts_studio")
 render_dev_console = _lazy_page("ui_pages.dev_console", "render_dev_console")
@@ -230,16 +231,17 @@ def render_system_group():
             st.session_state["_dev_console_unlocked"] = False
             st.rerun()
 
-    sub = st.tabs(["🧠 الذاكرة", "👁️ الوعي السيادي", "🏥 صحة النظام", "🔬 API متقدمة",
-                   "⚙️ النظام الداخلي", "🖥️ لوحة المطوّر", "💻 Terminal", "⚡ Terminal Live"])
+    sub = st.tabs(["🧠 الذاكرة", "👁️ الوعي السيادي", "🏥 صحة النظام", "🏛️ الاتحاد",
+                   "🔬 API متقدمة", "⚙️ النظام الداخلي", "🖥️ لوحة المطوّر", "💻 Terminal", "⚡ Terminal Live"])
     with sub[0]: render_memory()
     with sub[1]: render_sovereign_mind()
     with sub[2]: render_health()
-    with sub[3]: render_advanced_api()
-    with sub[4]: render_system_core()
-    with sub[5]: render_dev_console()
-    with sub[6]: render_nsm_terminal()
-    with sub[7]: render_nsm_terminal_live()
+    with sub[3]: render_federation_hub()
+    with sub[4]: render_advanced_api()
+    with sub[5]: render_system_core()
+    with sub[6]: render_dev_console()
+    with sub[7]: render_nsm_terminal()
+    with sub[8]: render_nsm_terminal_live()
 
 
 

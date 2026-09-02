@@ -30,3 +30,8 @@ python3 scripts/prove_federation.py
 ## الرؤية
 
 > اتحاد عقد مفتوح: تنضم، تعمل، تتحقق، وتتعلم معاً — بلا اعتماد دائم على مركز واحد.
+
+## الواجهة ودليل الانضمام
+
+- Streamlit: **النظام → 🏛️ الاتحاد** (`ui_pages/federation_hub.py`)
+- دليل دقيقة واحدة: [docs/JOIN_FEDERATION.md](docs/JOIN_FEDERATION.md)
