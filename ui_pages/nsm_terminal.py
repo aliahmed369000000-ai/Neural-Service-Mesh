@@ -296,7 +296,14 @@ def render_nsm_terminal():
                     icon = {"running": "🟡", "done": "🟢", "killed": "🔴", "error": "⚫"}.get(j["status"], "⚪")
                     st.markdown(f"{icon} `{j['id']}` **{j['status']}** — `{_esc(j['cmd'])}`")
                     if j["status"] in ("done", "error") and (j.get("stdout") or j.get("stderr") or j.get("error")):
-                        with st.expander("مخرجات", expanded=False):
+                        # 🐛 إصلاح خطأ حقيقي: كان هنا st.expander("مخرجات") متداخل
+                        # داخل st.expander("🧵 مهام خلفية") الخارجي — وStreamlit
+                        # يرفض تعشيش expander داخل expander إطلاقاً (يرمي
+                        # StreamlitAPIException وقت التشغيل فعلياً بمجرد وجود
+                        # أي مهمة منتهية/فاشلة لها مخرجات، وهو سيناريو شائع لا
+                        # حافة نادرة). استُبدل بمفتاح إظهار/إخفاء (checkbox) بلا
+                        # تعشيش — نفس الإتاحة الاختيارية لعرض المخرجات بلا خطأ.
+                        if st.checkbox("📄 عرض المخرجات", key=f"nsm_term_out_{j['id']}"):
                             if j.get("stdout"):
                                 st.code(j["stdout"], language="text")
                             if j.get("stderr"):

@@ -317,6 +317,13 @@ def render_health():
                             st.error(f"❌ خطأ غير متوقع: {_gh_err}")
 
             # عرض آخر commit
+            # 🐛 إصلاح خطأ حقيقي (اكتُشف بالفحص الشامل بعد إصلاح مشابه):
+            # كان هنا st.expander("📋 آخر 3 commits") أصبح متداخلاً داخل
+            # st.expander("🚀 رفع إلى GitHub") الخارجي بعد لفّ القسم بالكامل
+            # بطيّة — يظهر فقط عند ضبط GITHUB_PERSONAL_ACCESS_TOKEN، ولذلك
+            # لم يظهر بالاختبار الأول (لا يوجد التوكن ببيئة الاختبار). استُبدل
+            # بعرض مباشر (بلا طيّة ثانية) بما أن القسم كله أصلاً خلف الطيّة
+            # الخارجية.
             try:
                 import subprocess as _sp2
                 _log = _sp2.run(
@@ -324,8 +331,8 @@ def render_health():
                     cwd=str(BASE), capture_output=True, text=True, timeout=5
                 )
                 if _log.stdout.strip():
-                    with st.expander("📋 آخر 3 commits"):
-                        st.code(_log.stdout.strip(), language="text")
+                    st.caption("📋 آخر 3 commits")
+                    st.code(_log.stdout.strip(), language="text")
             except Exception:
                 pass
 
