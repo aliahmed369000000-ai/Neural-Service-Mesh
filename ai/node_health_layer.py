@@ -376,3 +376,9 @@ class NodeHealthLayer:
             or t.get("mode") == "failover_exhausted"
         ]
         return pending
+
+
+    def cognitive_net(self, quorum: int = 2, require_independent: bool = True):
+        """واجهة مختصرة لشبكة التنفيذ المعرفي القابلة للتحقق."""
+        from ai.verifiable_cognitive_net import VerifiableCognitiveNet
+        return VerifiableCognitiveNet(self.node, quorum=quorum, require_independent=require_independent)
