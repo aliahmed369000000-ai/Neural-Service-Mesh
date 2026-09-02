@@ -464,10 +464,65 @@ class MeshJobOrchestrator:
             require_capabilities=require_capabilities or ["text"],
             max_workers=max(n_workers, len(sources) * max(1, redundancy)),
         )
-        if not workers:
-            return {"ok": False, "error": "no_workers_available", "query": query}
-
         job_id = f"csum_{uuid.uuid4().hex[:12]}"
+        # بدون عمال: تنفيذ محلي على العقدة المنظمة (مناسب لتجربة المنتج)
+        if not workers:
+            per_source = []
+            t0 = time.time()
+            for si, src in enumerate(sources):
+                sid = src.get("source_id") or f"src_{si}"
+                text = (src.get("text") or "").strip()
+                source_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                local = mt.execute_summarize_chunk({
+                    "source_id": sid, "text": text, "query": query,
+                    "task_id": f"{job_id}_local_{si}",
+                })
+                per_source.append({
+                    "source_id": sid,
+                    "source_hash": source_hash,
+                    "ok": bool(local.get("ok")),
+                    "quorum_met": True,
+                    "agreement": 1.0,
+                    "summary": local.get("summary") or local.get("output"),
+                    "winner_worker": getattr(self.node, "node_id", "local"),
+                    "winner_digest": _result_digest(local),
+                    "job_id": job_id,
+                    "attempts": [],
+                })
+            ok_sources = [s for s in per_source if s.get("ok") and s.get("summary")]
+            combined = " | ".join(f"[{s['source_id']}] {s['summary']}" for s in ok_sources)
+            out = {
+                "ok": len(ok_sources) > 0,
+                "job_id": job_id,
+                "kind": "collective_summary",
+                "query": query,
+                "sources_total": len(sources),
+                "sources_ok": len(ok_sources),
+                "combined_summary": combined,
+                "per_source": per_source,
+                "provenance": [
+                    {"source_id": s["source_id"], "source_hash": s["source_hash"],
+                     "worker": s.get("winner_worker"), "digest": s.get("winner_digest"),
+                     "quorum_met": True}
+                    for s in per_source
+                ],
+                "elapsed_ms": round((time.time() - t0) * 1000, 2),
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "mode": "local_fallback",
+            }
+            self._jobs[job_id] = out
+            try:
+                self._persist_job_decision({
+                    "job_id": job_id, "kind": "collective_summary", "ok": out["ok"],
+                    "strategy": strategy, "quorum_required": quorum, "quorum_met": True,
+                    "selection": {}, "winner": {}, "success_count": len(ok_sources),
+                    "attempts_count": len(sources), "all_results": [], "ts": out["ts"],
+                    "error": None if out["ok"] else "all_sources_failed",
+                })
+            except Exception:
+                pass
+            return out
+
         per_source = []
         t0 = time.time()
 

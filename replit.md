@@ -110,3 +110,8 @@ curl -s -X POST "http://127.0.0.1:$PORT/v2/collective-search" \
 ### ملاحظات البيئة
 - على Replit / Streamlit Cloud غالباً منفذ خارجي واحد: البذرة تُعرَّض للخارج والعمال محليون عبر `SEED_NODE_URL`.
 - سكربتات مساعدة: `scripts/run_mesh_seed.sh`, `scripts/run_mesh_worker.sh`, `scripts/run_local_mesh.py`, `scripts/bench_mesh_rpc.py`.
+
+### العرض التجاري (تجريبي)
+- صفحة: `/pricing`
+- API: `POST /v2/product/summarize`
+- مفاتيح: `NSM_PRODUCT_API_KEYS` · حد التجربة: `NSM_TRIAL_DAILY_LIMIT`

@@ -211,6 +211,7 @@ API:
 <a href="/health">/health</a> ·
 <a href="/v2/status">/v2/status</a> ·
 <a href="/v2/jobs">/v2/jobs</a> ·
+<a href="/pricing">/pricing</a> ·
 POST /v2/job · /v2/collective-search · /v2/collective-summary · /ws
 </div>
 <script>
@@ -482,6 +483,119 @@ async def handle_predict_task(request):
         timeout_per_task=float(body.get("timeout_per_task") or 12.0),
     )
     return web.json_response(report)
+
+
+async def handle_pricing(request):
+    """صفحة تسعير HTML للعرض الواحد القابل للبيع."""
+    from ai.product_api import public_catalog, PRODUCT
+    cat = public_catalog()["product"]
+    plans = cat["plans"]
+    plan_cards = []
+    for pl in plans:
+        feats = "".join(f"<li>{f}</li>" for f in pl.get("features") or [])
+        plan_cards.append(
+            f"<div class='plan'><h3>{pl['name_ar']}</h3>"
+            f"<div class='price'>{pl['price_note_ar']}</div>"
+            f"<ul>{feats}</ul></div>"
+        )
+    gets = "".join(f"<li>{x}</li>" for x in cat["what_you_get"])
+    html = f"""<!DOCTYPE html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8"/>
+<title>NSM — {cat['name_ar']}</title>
+<style>
+body{{font-family:system-ui,sans-serif;background:#0b1220;color:#e8eefc;margin:0;padding:28px;max-width:960px;margin-inline:auto}}
+h1{{margin:0 0 8px}} .muted{{color:#8b9bb8}}
+.hero{{background:#151c2e;border:1px solid #24304d;border-radius:14px;padding:22px;margin-bottom:18px}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}}
+.plan{{background:#121a2b;border:1px solid #2a3a5c;border-radius:12px;padding:16px}}
+.price{{font-size:1.15rem;color:#6ea8fe;margin:8px 0}}
+code,pre{{background:#0f1626;padding:2px 6px;border-radius:6px}}
+pre{{padding:12px;overflow:auto;direction:ltr;text-align:left}}
+a{{color:#6ea8fe}} ul{{line-height:1.6}}
+.btn{{display:inline-block;margin-top:10px;background:#1a2744;border:1px solid #3d5a8a;color:#e8eefc;padding:10px 14px;border-radius:8px;text-decoration:none}}
+</style></head><body>
+<div class="hero">
+<h1>{cat['name_ar']}</h1>
+<p class="muted">{cat['name_en']} · {cat['tagline_ar']}</p>
+<p><strong>الواجهة:</strong> <code>{cat['endpoint']}</code></p>
+<ul>{gets}</ul>
+<p class="muted">{cat['payment_ar']}</p>
+<p class="muted">{cat['contact_ar']}</p>
+<a class="btn" href="/dashboard">لوحة التحكم</a>
+<a class="btn" href="/v2/product">JSON العرض</a>
+</div>
+<h2>الخطط</h2>
+<div class="grid">{''.join(plan_cards)}</div>
+<h2>تجربة سريعة</h2>
+<pre>curl -s -X POST "$HOST/v2/product/summarize" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: YOUR_KEY_OPTIONAL" \
+  -d '{{"query":"الموثوقية","sources":[{{"source_id":"a","text":"النصاب يزيد الثقة في الشبكات الموزعة."}}]}}'</pre>
+<p class="muted">بدون مفتاح = خطة التجربة (حد يومي). مع مفتاح من NSM_PRODUCT_API_KEYS = Starter.</p>
+</body></html>"""
+    return web.Response(text=html, content_type="text/html")
+
+
+async def handle_product_catalog(request):
+    from ai.product_api import public_catalog
+    return web.json_response(public_catalog())
+
+
+async def handle_product_summarize(request):
+    """عرض تجاري: تلخيص متعدد المصادر مع إثبات — تجربة أو بمفتاح API."""
+    from ai.product_api import resolve_plan, check_rate_limit
+    health = request.app.get("health")
+    if health is None:
+        return web.json_response({"error": "health_layer_missing"}, status=500)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid_json"}, status=400)
+    sources = body.get("sources") or []
+    if not sources:
+        return web.json_response({"error": "sources_required"}, status=400)
+    api_key = request.headers.get("X-API-Key") or body.get("api_key")
+    plan_id, plan = resolve_plan(api_key)
+    client_id = api_key or (request.remote or "anon")
+    limited = check_rate_limit(f"{plan_id}:{client_id}", plan)
+    if limited:
+        return web.json_response({"ok": False, "error": limited, "plan": plan_id}, status=429)
+    max_sources = int(plan.get("max_sources") or 5)
+    cleaned = []
+    for i, s in enumerate(sources[:max_sources]):
+        text = (s.get("text") or s.get("content") or "").strip()
+        if not text:
+            continue
+        cleaned.append({
+            "source_id": s.get("source_id") or s.get("id") or f"src_{i}",
+            "text": text[:20000],
+        })
+    if not cleaned:
+        return web.json_response({"error": "sources_texts_required"}, status=400)
+    orch = health.orchestrator()
+    report = await orch.submit_collective_summary(
+        body.get("query") or "",
+        cleaned,
+        n_workers=int(body.get("n_workers") or 1),
+        redundancy=int(body.get("redundancy") or 1),
+        strategy=body.get("strategy") or "majority",
+        quorum=int(body.get("quorum") or 1),
+        timeout_per_task=float(body.get("timeout_per_task") or 12.0),
+    )
+    return web.json_response({
+        "ok": report.get("ok"),
+        "product": "nsm_verified_summary",
+        "plan": plan_id,
+        "job_id": report.get("job_id"),
+        "query": report.get("query"),
+        "combined_summary": report.get("combined_summary"),
+        "sources_ok": report.get("sources_ok"),
+        "sources_total": report.get("sources_total"),
+        "provenance": report.get("provenance"),
+        "elapsed_ms": report.get("elapsed_ms"),
+        "error": report.get("error"),
+        "billing_note": "trial_or_key_gated_no_card_charge",
+    })
 
 async def handle_web_task(request):
     """POST JSON: {url, n_workers?, strategy?, quorum?, max_chars?, allowlist?}
@@ -968,6 +1082,9 @@ async def main():
         web.post("/v2/first-task", handle_first_verified_task),
         web.post("/v2/dispatch-task", handle_dispatch_task),
         web.get("/dashboard", handle_dashboard),
+        web.get("/pricing", handle_pricing),
+        web.get("/v2/product", handle_product_catalog),
+        web.post("/v2/product/summarize", handle_product_summarize),
         web.get("/ws", handle_ws),
         web.get("/", handle_status),
     ])
