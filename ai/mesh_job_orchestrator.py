@@ -587,6 +587,183 @@ class MeshJobOrchestrator:
         items.sort(key=lambda x: x.get("ts") or "", reverse=True)
         return items[: max(1, limit)]
 
+
+    async def submit_collective_search(
+        self,
+        query: str,
+        corpus: List[Dict[str, Any]],
+        *,
+        top_k: int = 5,
+        n_workers: int = 3,
+        strategy: str = STRATEGY_MAJORITY,
+        quorum: int = 1,
+        timeout_per_task: float = 12.0,
+        then_summarize: bool = False,
+        require_capabilities=None,
+        worker_list: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """
+        بحث معرفي متعدد المصادر — corpus مُمرَّر فقط (لا HTTP خارجي / لا SSRF).
+        يوزّع الوثائق على العمال، يدمج النتائج حسب score، ويعيد hashes + snippets.
+        إن then_summarize=True يمرّر أفضل المصادر إلى submit_collective_summary.
+        """
+        from ai import mesh_task_protocol as mt
+
+        query = (query or "").strip()
+        corpus = [d for d in (corpus or []) if (d.get("text") or d.get("content") or "").strip()]
+        if not query:
+            return {"ok": False, "error": "empty_query"}
+        if not corpus:
+            return {"ok": False, "error": "empty_corpus"}
+
+        workers = worker_list or self._rank_workers(
+            require_capabilities=require_capabilities or ["text"],
+            max_workers=max(1, n_workers),
+        )
+        workers = workers[: max(1, n_workers)]
+        job_id = f"csearch_{uuid.uuid4().hex[:12]}"
+        t0 = time.time()
+
+        # توزيع الوثائق على العمال (شرائح)
+        if workers:
+            shards: List[List[Dict[str, Any]]] = [[] for _ in workers]
+            for i, doc in enumerate(corpus):
+                shards[i % len(workers)].append(doc)
+            attempts = []
+            for i, w in enumerate(workers):
+                docs = shards[i]
+                if not docs:
+                    continue
+                payload = {
+                    "job_id": job_id,
+                    "query": query,
+                    "documents": [
+                        {
+                            "source_id": d.get("source_id") or d.get("id") or f"doc_{i}_{j}",
+                            "text": d.get("text") or d.get("content") or "",
+                        }
+                        for j, d in enumerate(docs)
+                    ],
+                    "top_k": top_k,
+                }
+                att = await self._dispatch_one(w, mt.KIND_SEARCH, payload, timeout_per_task)
+                attempts.append(att)
+        else:
+            # محلي على العقدة المنظمة
+            local = mt.execute_search_chunk({
+                "query": query,
+                "documents": corpus,
+                "top_k": top_k,
+                "task_id": f"{job_id}_local",
+            })
+            attempts = [{
+                "ok": bool(local.get("ok")),
+                "worker": getattr(self.node, "node_id", "local"),
+                "result": local,
+                "error": local.get("error"),
+                "rtt_ms": local.get("elapsed_ms"),
+                "digest": _result_digest(local),
+            }]
+
+        # دمج الإصابات
+        merged: Dict[str, Dict[str, Any]] = {}
+        for att in attempts:
+            if not att.get("ok"):
+                continue
+            hits = ((att.get("result") or {}).get("hits") or [])
+            for h in hits:
+                sid = h.get("source_id")
+                if not sid:
+                    continue
+                prev = merged.get(sid)
+                if prev is None or float(h.get("score") or 0) > float(prev.get("score") or 0):
+                    entry = dict(h)
+                    entry["worker"] = att.get("worker")
+                    merged[sid] = entry
+        ranked = sorted(merged.values(), key=lambda x: float(x.get("score") or 0), reverse=True)[: max(1, top_k)]
+
+        out = {
+            "ok": len(ranked) > 0,
+            "job_id": job_id,
+            "kind": "collective_search",
+            "query": query,
+            "corpus_size": len(corpus),
+            "hit_count": len(ranked),
+            "hits": ranked,
+            "provenance": [
+                {
+                    "source_id": h.get("source_id"),
+                    "source_hash": h.get("source_hash"),
+                    "score": h.get("score"),
+                    "worker": h.get("worker"),
+                }
+                for h in ranked
+            ],
+            "workers_used": [a.get("worker") for a in attempts],
+            "attempts_ok": sum(1 for a in attempts if a.get("ok")),
+            "elapsed_ms": round((time.time() - t0) * 1000, 2),
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }
+        if not out["ok"]:
+            out["error"] = "no_hits"
+
+        # تلخيص اختياري لأفضل المصادر
+        if then_summarize and ranked:
+            # استرجع النص الكامل من corpus
+            by_id = {
+                (d.get("source_id") or d.get("id")): (d.get("text") or d.get("content") or "")
+                for d in corpus
+            }
+            sources = []
+            for h in ranked:
+                sid = h.get("source_id")
+                text = by_id.get(sid) or ""
+                if text:
+                    sources.append({"source_id": sid, "text": text})
+            if sources:
+                summary = await self.submit_collective_summary(
+                    query,
+                    sources,
+                    n_workers=max(1, len(workers) or 1),
+                    redundancy=1,
+                    strategy=strategy,
+                    quorum=min(quorum, max(1, len(workers) or 1)),
+                    timeout_per_task=timeout_per_task,
+                    worker_list=workers or None,
+                    require_capabilities=require_capabilities or ["text"],
+                )
+                out["summary"] = {
+                    "ok": summary.get("ok"),
+                    "combined_summary": summary.get("combined_summary"),
+                    "provenance": summary.get("provenance"),
+                    "job_id": summary.get("job_id"),
+                }
+
+        try:
+            self._persist_job_decision({
+                "job_id": job_id,
+                "kind": "collective_search",
+                "ok": out["ok"],
+                "strategy": strategy,
+                "quorum_required": quorum,
+                "quorum_met": out.get("attempts_ok", 0) >= max(1, min(quorum, len(workers) or 1)),
+                "selection": {"agreement": None},
+                "winner": {"worker": None, "digest": None},
+                "success_count": out.get("hit_count"),
+                "attempts_count": len(attempts),
+                "all_results": [{"worker": a.get("worker")} for a in attempts],
+                "ts": out["ts"],
+                "error": out.get("error"),
+            })
+        except Exception:
+            pass
+        self._jobs[job_id] = out
+        logger.info(
+            f"🔎 collective_search {job_id} ok={out['ok']} hits={out.get('hit_count')} "
+            f"corpus={len(corpus)}"
+        )
+        return out
+
     def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
         return self._jobs.get(job_id)
 

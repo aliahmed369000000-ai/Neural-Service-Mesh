@@ -102,7 +102,7 @@ h1{{margin:0 0 8px;font-size:1.4rem}} .muted{{color:#8b9bb8;font-size:.9rem}}
 <div class="metric"><b>{snap.get('identity_pub_fingerprint')}</b>بصمة الهوية</div>
 </div>
 <div class="card"><div class="muted">Surah: {snap.get('surah_awareness')}</div></div>
-<div class="card"><div class="muted">API: /health · /v2/status · /v2/jobs · /v2/job · /v2/collective-summary · /ws · /status</div></div>
+<div class="card"><div class="muted">API: /health · /v2/status · /v2/jobs · /v2/job · /v2/collective-summary · /v2/collective-search · /ws · /status</div></div>
 </body></html>"""
     return web.Response(text=html, content_type="text/html")
 
@@ -176,6 +176,49 @@ async def handle_list_jobs(request):
         "decisions": orch.list_decisions(limit=limit),
     })
 
+
+
+async def handle_collective_search(request):
+    """POST JSON: {query, corpus:[{source_id,text}], top_k?, n_workers?, then_summarize?}
+    corpus إلزامي — لا جلب من الإنترنت.
+    """
+    health = request.app.get("health")
+    if health is None:
+        return web.json_response({"error": "health_layer_missing"}, status=500)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid_json"}, status=400)
+    query = body.get("query")
+    corpus = body.get("corpus") or body.get("sources") or []
+    if not query:
+        return web.json_response({"error": "query_required"}, status=400)
+    if not corpus:
+        return web.json_response({"error": "corpus_required"}, status=400)
+    # رفض أي محاولة لتمرير روابط كمصدر وحيد بلا نص
+    cleaned = []
+    for d in corpus:
+        text = (d.get("text") or d.get("content") or "").strip()
+        if not text:
+            continue
+        cleaned.append({
+            "source_id": d.get("source_id") or d.get("id") or f"doc_{len(cleaned)}",
+            "text": text,
+        })
+    if not cleaned:
+        return web.json_response({"error": "corpus_texts_required"}, status=400)
+    orch = health.orchestrator()
+    report = await orch.submit_collective_search(
+        query,
+        cleaned,
+        top_k=int(body.get("top_k") or 5),
+        n_workers=int(body.get("n_workers") or 3),
+        strategy=body.get("strategy") or "majority",
+        quorum=int(body.get("quorum") or 1),
+        timeout_per_task=float(body.get("timeout_per_task") or 12.0),
+        then_summarize=bool(body.get("then_summarize") or False),
+    )
+    return web.json_response(report)
 
 async def handle_collective_summary(request):
     """POST JSON: {query, sources:[{source_id,text}], n_workers?, redundancy?, quorum?, strategy?}"""
@@ -588,6 +631,7 @@ async def main():
         web.post("/v2/job", handle_submit_job),
         web.get("/v2/jobs", handle_list_jobs),
         web.post("/v2/collective-summary", handle_collective_summary),
+        web.post("/v2/collective-search", handle_collective_search),
         web.post("/v2/first-task", handle_first_verified_task),
         web.post("/v2/dispatch-task", handle_dispatch_task),
         web.get("/dashboard", handle_dashboard),

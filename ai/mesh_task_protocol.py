@@ -39,6 +39,8 @@ KIND_KEYSPACE = "keyspace_scan"
 KIND_KEYSPACE_RESULT = "keyspace_scan_result"
 KIND_SUMMARIZE = "summarize_chunk"
 KIND_SUMMARIZE_RESULT = "summarize_chunk_result"
+KIND_SEARCH = "search_chunk"
+KIND_SEARCH_RESULT = "search_chunk_result"
 
 # إدارة دورة حياة المهمة (v1.1+)
 KIND_TASK_ACK = "task_ack"
@@ -54,6 +56,7 @@ ALL_TASK_KINDS = {
     KIND_SIM, KIND_SIM_RESULT,
     KIND_KEYSPACE, KIND_KEYSPACE_RESULT,
     KIND_SUMMARIZE, KIND_SUMMARIZE_RESULT,
+    KIND_SEARCH, KIND_SEARCH_RESULT,
     KIND_TASK_ACK, KIND_TASK_CANCEL,
     KIND_TASK_STATUS, KIND_TASK_STATUS_RESULT,
 }
@@ -533,6 +536,68 @@ def execute_summarize_chunk(task: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+
+def execute_search_chunk(task: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    بحث دلالي خفيف داخل مصدر/مصادر محلية مُمرَّرة (بلا شبكة).
+    task: {query, documents:[{source_id,text}], top_k?}
+    """
+    t0 = time.time()
+    query = (task.get("query") or "").strip().lower()
+    docs = task.get("documents") or task.get("sources") or []
+    top_k = max(1, min(int(task.get("top_k") or 5), 20))
+    if not query:
+        return {"ok": False, "error": "empty_query", "task_id": task.get("task_id")}
+    if not docs:
+        return {"ok": False, "error": "empty_documents", "task_id": task.get("task_id")}
+    tokens = [tok for tok in query.replace("،", " ").split() if tok]
+    hits = []
+    for d in docs:
+        text = (d.get("text") or d.get("content") or "").strip()
+        if not text:
+            continue
+        sid = d.get("source_id") or d.get("id") or "src"
+        low = text.lower()
+        score = 0.0
+        for tok in tokens:
+            if tok in low:
+                score += 1.0 + low.count(tok) * 0.1
+        # مكافأة ظهور العبارة كاملة
+        if query in low:
+            score += 2.0
+        if score <= 0:
+            continue
+        # مقتطف حول أول تطابق
+        pos = low.find(tokens[0]) if tokens else 0
+        if pos < 0:
+            pos = 0
+        start = max(0, pos - 40)
+        snippet = text[start: start + 180].strip()
+        if start > 0:
+            snippet = "…" + snippet
+        if start + 180 < len(text):
+            snippet = snippet + "…"
+        sh = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        hits.append({
+            "source_id": sid,
+            "source_hash": sh,
+            "score": round(score, 3),
+            "snippet": snippet,
+            "chars": len(text),
+        })
+    hits.sort(key=lambda h: h["score"], reverse=True)
+    hits = hits[:top_k]
+    return {
+        "ok": True,
+        "query": task.get("query"),
+        "hits": hits,
+        "hit_count": len(hits),
+        "output": json.dumps([h.get("source_id") for h in hits], ensure_ascii=False),
+        "elapsed_ms": round((time.time() - t0) * 1000, 2),
+        "task_id": task.get("task_id"),
+    }
+
+
 def dispatch_task(kind: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """موجّه مركزي لتنفيذ مهمة حسب النوع."""
     data = data or {}
@@ -550,6 +615,8 @@ def dispatch_task(kind: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return execute_keyspace_scan(data)
     if kind == KIND_SUMMARIZE:
         return execute_summarize_chunk(data)
+    if kind == KIND_SEARCH:
+        return execute_search_chunk(data)
     return None
 
 
@@ -562,5 +629,6 @@ def result_kind_for(request_kind: str) -> str:
         KIND_SIM: KIND_SIM_RESULT,
         KIND_KEYSPACE: KIND_KEYSPACE_RESULT,
         KIND_SUMMARIZE: KIND_SUMMARIZE_RESULT,
+        KIND_SEARCH: KIND_SEARCH_RESULT,
         KIND_TASK_STATUS: KIND_TASK_STATUS_RESULT,
     }.get(request_kind, request_kind + "_result")
