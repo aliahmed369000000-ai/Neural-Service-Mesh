@@ -55,11 +55,13 @@ async def run(host: str, base_port: int, workers: int, tasks: int) -> dict:
             {"task_id": src["task_id"], "prompt": "dup", "max_tokens": 8},
             timeout=6.0,
         )
+        result_err = ((dres.get("result") or {}) if isinstance(dres.get("result"), dict) else {}).get("error")
         dup = {
             "task_id": src["task_id"],
             "ok": dres.get("ok"),
-            "error": dres.get("error"),
+            "error": dres.get("error") or result_err,
             "has_result": dres.get("result") is not None,
+            "explicit_duplicate": result_err == "duplicate_rejected",
             "rtt_ms": round((time.time() - t0) * 1000, 2),
         }
     oks = [r for r in results if r["ok"]]

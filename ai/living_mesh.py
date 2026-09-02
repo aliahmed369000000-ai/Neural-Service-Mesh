@@ -1492,6 +1492,48 @@ class LivingMeshNode:
         self._metrics["tasks_cancelled"] += 1
         return {"ok": True, "task_id": task_id, "status": mesh_tasks.TASK_STATUS_CANCELLED}
 
+
+    async def _reply_task_outcome(
+        self,
+        websocket,
+        *,
+        kind: str,
+        task_id: str,
+        ok: bool,
+        error: str = None,
+        status: str = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """يرسل رداً صريحاً على نفس WebSocket (نتيجة أو رفض) حتى لا ينتظر العميل حتى المهلة."""
+        if websocket is None:
+            return
+        result_kind = mesh_tasks.result_kind_for(kind) if not str(kind).endswith("_result") else kind
+        data = {
+            "ok": bool(ok),
+            "task_id": task_id,
+            "worker_node": self.node_id,
+            "error": error,
+            "status": status,
+        }
+        if extra:
+            data.update(extra)
+        try:
+            resp_payload = {
+                "id": f"tres_{uuid.uuid4().hex[:8]}",
+                "kind": result_kind,
+                "data": data,
+                "from": self.node_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            sig = self.sign_message(json.dumps(resp_payload, sort_keys=True))
+            msg = json.dumps({"payload": resp_payload, "signature": sig})
+            if hasattr(websocket, "send_str"):
+                await websocket.send_str(msg)
+            else:
+                await websocket.send(msg)
+        except Exception as e:
+            logger.warning(f"⚠️ _reply_task_outcome failed id={task_id}: {e}")
+
     async def _handle_mesh_task(
         self,
         kind: str,
@@ -1568,9 +1610,26 @@ class LivingMeshNode:
         ):
             self._metrics["tasks_duplicate_rejected"] += 1
             logger.warning(f"🚫 Duplicate task execution rejected id={task_id} status={existing.get('status')}")
+            await self._reply_task_outcome(
+                websocket,
+                kind=kind,
+                task_id=task_id,
+                ok=False,
+                error="duplicate_rejected",
+                status=mesh_tasks.TASK_STATUS_DUPLICATE,
+                extra={"prior_status": existing.get("status")},
+            )
             return
         if existing and existing.get("status") == mesh_tasks.TASK_STATUS_CANCELLED:
             logger.info(f"🛑 Task already cancelled, skip execution id={task_id}")
+            await self._reply_task_outcome(
+                websocket,
+                kind=kind,
+                task_id=task_id,
+                ok=False,
+                error="task_cancelled",
+                status=mesh_tasks.TASK_STATUS_CANCELLED,
+            )
             return
 
         required_caps = ALLOWED_TASK_CAPABILITIES.get(kind)
@@ -1583,6 +1642,15 @@ class LivingMeshNode:
                 )
                 self._register_task(task_id, kind, mesh_tasks.TASK_STATUS_FAILED, sender_id=sender_id,
                                     extra={"error": "missing_capabilities"})
+                await self._reply_task_outcome(
+                    websocket,
+                    kind=kind,
+                    task_id=task_id,
+                    ok=False,
+                    error="missing_capabilities",
+                    status=mesh_tasks.TASK_STATUS_FAILED,
+                    extra={"have": sorted(my_caps), "need_any_of": sorted(required_caps)},
+                )
                 return
 
         # سجّل كـ running وأرسل ACK إن أمكن

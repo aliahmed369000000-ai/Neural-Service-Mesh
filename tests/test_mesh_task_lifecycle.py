@@ -116,10 +116,48 @@ def test_local_dispatch_updates_registry():
         print("✅ local dispatch updates registry →", st["status"])
 
 
+
+def test_duplicate_sends_explicit_error_reply():
+    """# رفض التكرار يجب أن يعيد نتيجة ok=false وليس صمتاً."""
+    with tempfile.TemporaryDirectory() as td:
+        node = _isolated_node(Path(td), "life-dup")
+        node.node_info = {"id": node.node_id, "capabilities": ["text", "tf_engine", "CPU"]}
+        tid = f"task_{uuid.uuid4().hex[:8]}"
+        # أول تنفيذ
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(
+            node._handle_mesh_task(mt.KIND_INFERENCE, {"task_id": tid, "prompt": "a", "max_tokens": 8}, sender_id="c")
+        )
+        # محاكاة websocket يجمع الرسائل
+        sent = []
+        class FakeWS:
+            async def send_str(self, m):
+                sent.append(m)
+            async def send(self, m):
+                sent.append(m)
+        loop.run_until_complete(
+            node._handle_mesh_task(
+                mt.KIND_INFERENCE,
+                {"task_id": tid, "prompt": "a", "max_tokens": 8},
+                sender_id="c",
+                websocket=FakeWS(),
+            )
+        )
+        loop.close()
+        assert sent, "expected explicit reply on duplicate"
+        import json
+        payload = json.loads(sent[-1]).get("payload") or {}
+        data = payload.get("data") or {}
+        assert data.get("ok") is False
+        assert data.get("error") == "duplicate_rejected"
+        assert data.get("task_id") == tid
+        print("✅ explicit duplicate_rejected reply")
+
 if __name__ == "__main__":
     test_register_and_status()
     test_cancel_before_complete()
     test_duplicate_execution_rejected()
     test_list_tasks_and_metrics()
     test_local_dispatch_updates_registry()
+    test_duplicate_sends_explicit_error_reply()
     print("\n🎉 All task lifecycle tests passed")
