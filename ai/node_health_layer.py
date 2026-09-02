@@ -378,6 +378,17 @@ class NodeHealthLayer:
         return pending
 
 
+    def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """حالة مهمة من سجل LivingMeshNode المحلي."""
+        return self.node.get_task_status(task_id)
+
+    def cancel_task(self, task_id: str) -> Dict[str, Any]:
+        """إلغاء مهمة محلية عبر السجل."""
+        return self.node.cancel_local_task(task_id)
+
+    def list_tasks(self, status: str = None, limit: int = 50) -> List[Dict[str, Any]]:
+        return self.node.list_tasks(status=status, limit=limit)
+
     def cognitive_net(self, quorum: int = 2, require_independent: bool = True):
         """واجهة مختصرة لشبكة التنفيذ المعرفي القابلة للتحقق."""
         from ai.verifiable_cognitive_net import VerifiableCognitiveNet

@@ -38,6 +38,12 @@ KIND_SIM_RESULT = "sim_chunk_result"
 KIND_KEYSPACE = "keyspace_scan"
 KIND_KEYSPACE_RESULT = "keyspace_scan_result"
 
+# إدارة دورة حياة المهمة (v1.1+)
+KIND_TASK_ACK = "task_ack"
+KIND_TASK_CANCEL = "task_cancel"
+KIND_TASK_STATUS = "task_status"
+KIND_TASK_STATUS_RESULT = "task_status_result"
+
 ALL_TASK_KINDS = {
     KIND_SUBMODEL_TRAIN, KIND_SUBMODEL_RESULT,
     KIND_INFERENCE, KIND_INFERENCE_RESULT,
@@ -45,7 +51,19 @@ ALL_TASK_KINDS = {
     KIND_MAP, KIND_MAP_RESULT,
     KIND_SIM, KIND_SIM_RESULT,
     KIND_KEYSPACE, KIND_KEYSPACE_RESULT,
+    KIND_TASK_ACK, KIND_TASK_CANCEL,
+    KIND_TASK_STATUS, KIND_TASK_STATUS_RESULT,
 }
+
+# حالات دورة حياة المهمة
+TASK_STATUS_PENDING = "pending"
+TASK_STATUS_ACKED = "acked"
+TASK_STATUS_RUNNING = "running"
+TASK_STATUS_COMPLETED = "completed"
+TASK_STATUS_FAILED = "failed"
+TASK_STATUS_CANCELLED = "cancelled"
+TASK_STATUS_TIMEOUT = "timeout"
+TASK_STATUS_DUPLICATE = "duplicate_rejected"
 
 
 def _safe_float(x, default=0.0) -> float:
@@ -498,4 +516,5 @@ def result_kind_for(request_kind: str) -> str:
         KIND_MAP: KIND_MAP_RESULT,
         KIND_SIM: KIND_SIM_RESULT,
         KIND_KEYSPACE: KIND_KEYSPACE_RESULT,
+        KIND_TASK_STATUS: KIND_TASK_STATUS_RESULT,
     }.get(request_kind, request_kind + "_result")

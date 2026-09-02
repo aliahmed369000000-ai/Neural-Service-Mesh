@@ -111,6 +111,8 @@ class LivingMeshNode:
         self._seen_nonces: Dict[str, float] = {}
         # معدل الطلبات لكل نظير: {peer_id: [timestamps]}
         self._peer_msg_times: Dict[str, List[float]] = {}
+        # سجل مهام محلي (دورة حياة): task_id → {status, kind, ...}
+        self._task_registry: Dict[str, Dict[str, Any]] = {}
         # إحصائيات بسيطة للمراقبة
         self._metrics = {
             "messages_received": 0,
@@ -121,6 +123,9 @@ class LivingMeshNode:
             "messages_rejected_rate": 0,
             "messages_rejected_version": 0,
             "tasks_executed": 0,
+            "tasks_duplicate_rejected": 0,
+            "tasks_cancelled": 0,
+            "tasks_acked": 0,
         }
 
     async def _load_surah_pretrain(self):
@@ -1163,7 +1168,7 @@ class LivingMeshNode:
         )
 
     # ------------------------------------------------------------------
-    # بروتوكول المهام الموزّعة (AI + Scientific)
+    # بروتوكول المهام الموزّعة (AI + Scientific) + مدير دورة الحياة
     # ------------------------------------------------------------------
     def _task_inbox(self) -> Dict[str, Any]:
         state = self._load_state()
@@ -1171,6 +1176,74 @@ class LivingMeshNode:
             state["task_inbox"] = {}
             self._save_state(state)
         return state
+
+    def _register_task(
+        self,
+        task_id: str,
+        kind: str,
+        status: str,
+        sender_id: str = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """يسجّل أو يحدّث حالة مهمة في السجل المحلي."""
+        now = datetime.now(timezone.utc).isoformat()
+        entry = self._task_registry.get(task_id) or {
+            "task_id": task_id,
+            "kind": kind,
+            "created_at": now,
+            "history": [],
+        }
+        entry["status"] = status
+        entry["kind"] = kind or entry.get("kind")
+        entry["updated_at"] = now
+        if sender_id:
+            entry["sender_id"] = sender_id
+        if extra:
+            entry.update(extra)
+        entry.setdefault("history", []).append({"status": status, "ts": now})
+        entry["history"] = entry["history"][-20:]
+        self._task_registry[task_id] = entry
+        return entry
+
+    def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """حالة مهمة من السجل المحلي أو صندوق الوارد."""
+        if task_id in self._task_registry:
+            return dict(self._task_registry[task_id])
+        inbox = (self._load_state().get("task_inbox") or {}).get(task_id)
+        if inbox:
+            return {
+                "task_id": task_id,
+                "status": mesh_tasks.TASK_STATUS_COMPLETED,
+                "kind": inbox.get("kind"),
+                "from": inbox.get("from"),
+                "received_at": inbox.get("received_at"),
+            }
+        return None
+
+    def list_tasks(self, status: str = None, limit: int = 50) -> List[Dict[str, Any]]:
+        """قائمة المهام المحلية مع تصفية اختيارية بالحالة."""
+        items = list(self._task_registry.values())
+        if status:
+            items = [t for t in items if t.get("status") == status]
+        items.sort(key=lambda x: x.get("updated_at") or x.get("created_at") or "", reverse=True)
+        return items[: max(1, limit)]
+
+    def cancel_local_task(self, task_id: str) -> Dict[str, Any]:
+        """يلغي مهمة محلية إن لم تكتمل بعد."""
+        entry = self._task_registry.get(task_id)
+        if not entry:
+            return {"ok": False, "error": "unknown_task", "task_id": task_id}
+        st = entry.get("status")
+        if st in (
+            mesh_tasks.TASK_STATUS_COMPLETED,
+            mesh_tasks.TASK_STATUS_FAILED,
+            mesh_tasks.TASK_STATUS_CANCELLED,
+            mesh_tasks.TASK_STATUS_TIMEOUT,
+        ):
+            return {"ok": False, "error": f"already_{st}", "task_id": task_id, "status": st}
+        self._register_task(task_id, entry.get("kind") or "", mesh_tasks.TASK_STATUS_CANCELLED)
+        self._metrics["tasks_cancelled"] += 1
+        return {"ok": True, "task_id": task_id, "status": mesh_tasks.TASK_STATUS_CANCELLED}
 
     async def _handle_mesh_task(
         self,
@@ -1180,8 +1253,31 @@ class LivingMeshNode:
         hops: int = 0,
         websocket=None,
     ):
-        """تنفيذ مهمة واردة أو تخزين نتيجتها في صندوق الوارد."""
-        # نتائج: خزّنها للطالب المحلي
+        """تنفيذ مهمة واردة أو تخزين نتيجتها في صندوق الوارد + إدارة دورة الحياة."""
+        # --- إدارة دورة الحياة: ACK / Cancel / Status ---
+        if kind == mesh_tasks.KIND_TASK_ACK:
+            tid = (exp_data or {}).get("task_id")
+            if tid:
+                self._register_task(tid, (exp_data or {}).get("original_kind") or "", mesh_tasks.TASK_STATUS_ACKED, sender_id=sender_id)
+                self._metrics["tasks_acked"] += 1
+                logger.info(f"✅ task_ack received id={tid} from={sender_id}")
+            return
+
+        if kind == mesh_tasks.KIND_TASK_CANCEL:
+            tid = (exp_data or {}).get("task_id")
+            if tid:
+                res = self.cancel_local_task(tid)
+                logger.info(f"🛑 task_cancel id={tid} from={sender_id} → {res}")
+            return
+
+        if kind == mesh_tasks.KIND_TASK_STATUS:
+            tid = (exp_data or {}).get("task_id")
+            st = self.get_task_status(tid) if tid else None
+            # الرد يُعالج لاحقاً إن لزم؛ نخزّن محلياً فقط الآن
+            logger.debug(f"📊 task_status query id={tid} → {st}")
+            return
+
+        # نتائج: خزّنها للطالب المحلي + امنع التكرار
         if kind.endswith("_result") or kind in (
             mesh_tasks.KIND_SUBMODEL_RESULT,
             mesh_tasks.KIND_INFERENCE_RESULT,
@@ -1191,6 +1287,12 @@ class LivingMeshNode:
             mesh_tasks.KIND_KEYSPACE_RESULT,
         ):
             task_id = (exp_data or {}).get("task_id") or f"anon_{uuid.uuid4().hex[:8]}"
+            # رفض الإيصال المكرر إن كانت المهمة مكتملة مسبقاً
+            existing = self._task_registry.get(task_id)
+            if existing and existing.get("status") == mesh_tasks.TASK_STATUS_COMPLETED:
+                self._metrics["tasks_duplicate_rejected"] += 1
+                logger.warning(f"🚫 Duplicate result rejected id={task_id} from={sender_id}")
+                return
             state = self._task_inbox()
             state["task_inbox"][task_id] = {
                 "kind": kind,
@@ -1199,10 +1301,31 @@ class LivingMeshNode:
                 "received_at": datetime.now(timezone.utc).isoformat(),
             }
             self._save_state(state)
+            self._register_task(
+                task_id,
+                kind,
+                mesh_tasks.TASK_STATUS_COMPLETED if (exp_data or {}).get("ok", True) else mesh_tasks.TASK_STATUS_FAILED,
+                sender_id=sender_id,
+                extra={"result_preview": str((exp_data or {}).get("ok"))},
+            )
             logger.info(f"📥 Task result stored id={task_id} kind={kind} from={sender_id}")
             return
 
-        # طلبات تنفيذ: تحقق القدرات أولاً ثم نفّذ محلياً
+        # طلبات تنفيذ: منع التكرار + تحقق القدرات + ACK ثم تنفيذ
+        task_id = (exp_data or {}).get("task_id") or f"task_{uuid.uuid4().hex[:10]}"
+        existing = self._task_registry.get(task_id)
+        if existing and existing.get("status") in (
+            mesh_tasks.TASK_STATUS_RUNNING,
+            mesh_tasks.TASK_STATUS_COMPLETED,
+            mesh_tasks.TASK_STATUS_ACKED,
+        ):
+            self._metrics["tasks_duplicate_rejected"] += 1
+            logger.warning(f"🚫 Duplicate task execution rejected id={task_id} status={existing.get('status')}")
+            return
+        if existing and existing.get("status") == mesh_tasks.TASK_STATUS_CANCELLED:
+            logger.info(f"🛑 Task already cancelled, skip execution id={task_id}")
+            return
+
         required_caps = ALLOWED_TASK_CAPABILITIES.get(kind)
         if required_caps:
             my_caps = set((getattr(self, "node_info", {}) or {}).get("capabilities") or [])
@@ -1211,19 +1334,53 @@ class LivingMeshNode:
                     f"🚫 Task {kind} rejected: node lacks required capabilities "
                     f"(have={sorted(my_caps)}, need_any_of={sorted(required_caps)})"
                 )
+                self._register_task(task_id, kind, mesh_tasks.TASK_STATUS_FAILED, sender_id=sender_id,
+                                    extra={"error": "missing_capabilities"})
                 return
+
+        # سجّل كـ running وأرسل ACK إن أمكن
+        self._register_task(task_id, kind, mesh_tasks.TASK_STATUS_RUNNING, sender_id=sender_id)
+        if websocket is not None:
+            try:
+                ack_payload = {
+                    "id": f"ack_{uuid.uuid4().hex[:8]}",
+                    "kind": mesh_tasks.KIND_TASK_ACK,
+                    "data": {
+                        "task_id": task_id,
+                        "original_kind": kind,
+                        "status": mesh_tasks.TASK_STATUS_ACKED,
+                        "worker_node": self.node_id,
+                    },
+                    "from": self.node_id,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+                sig = self.sign_message(json.dumps(ack_payload, sort_keys=True))
+                ack_msg = json.dumps({"payload": ack_payload, "signature": sig})
+                if hasattr(websocket, "send_str"):
+                    await websocket.send_str(ack_msg)
+                else:
+                    await websocket.send(ack_msg)
+                self._metrics["tasks_acked"] += 1
+            except Exception as e:
+                logger.debug(f"task_ack send skipped: {e}")
+
+        # أعد التحقق من الإلغاء قبل التنفيذ الفعلي
+        if (self._task_registry.get(task_id) or {}).get("status") == mesh_tasks.TASK_STATUS_CANCELLED:
+            logger.info(f"🛑 Task cancelled before execute id={task_id}")
+            return
 
         result = mesh_tasks.dispatch_task(kind, exp_data or {})
         if result is None:
             logger.warning(f"⚠️ Unknown mesh task kind={kind}")
+            self._register_task(task_id, kind, mesh_tasks.TASK_STATUS_FAILED, extra={"error": "unknown_kind"})
             return
         self._metrics["tasks_executed"] += 1
         result_kind = mesh_tasks.result_kind_for(kind)
-        result["task_id"] = (exp_data or {}).get("task_id") or result.get("task_id")
+        result["task_id"] = task_id
         result["worker_node"] = self.node_id
         # إيصال تنفيذ موقّع (Node 2.0)
         try:
-            receipt = self.issue_execution_receipt(result["task_id"], kind, result)
+            receipt = self.issue_execution_receipt(task_id, kind, result)
             result["receipt"] = {
                 "task_id": receipt.get("task_id"),
                 "result_digest": receipt.get("result_digest"),
@@ -1232,9 +1389,12 @@ class LivingMeshNode:
             }
         except Exception as e:
             logger.warning(f"⚠️ receipt issue failed: {e}")
+
+        final_status = mesh_tasks.TASK_STATUS_COMPLETED if result.get("ok", True) else mesh_tasks.TASK_STATUS_FAILED
+        self._register_task(task_id, kind, final_status, sender_id=sender_id)
         logger.info(
             f"⚙️ Executed {kind} → {result_kind} ok={result.get('ok')} "
-            f"task_id={result.get('task_id')}"
+            f"task_id={task_id}"
         )
 
         # رد مباشر على نفس اتصال WebSocket إن وُجد
@@ -1318,6 +1478,10 @@ class LivingMeshNode:
     def get_mesh_metrics(self) -> Dict[str, Any]:
         """إحصائيات بسيطة للمراقبة والصحة (structured metrics)."""
         self._purge_expired_nonces()
+        by_status: Dict[str, int] = {}
+        for t in self._task_registry.values():
+            st = t.get("status") or "unknown"
+            by_status[st] = by_status.get(st, 0) + 1
         return {
             "protocol_version": PROTOCOL_VERSION,
             "node_id": self.node_id,
@@ -1325,6 +1489,8 @@ class LivingMeshNode:
             "seen_nonces_count": len(self._seen_nonces),
             "tracked_peers_rate": len(self._peer_msg_times),
             "active_connections": len(getattr(self, "active_connections", set()) or set()),
+            "task_registry_size": len(self._task_registry),
+            "tasks_by_status": by_status,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
