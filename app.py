@@ -27,12 +27,25 @@ def run_mesh_node():
 # تشغيل عقدة الشبكة اختياري فقط؛ تشغيل aiohttp داخل Streamlit Cloud
 # قد يحجز منفذاً إضافياً أو يعيد تشغيل التطبيق عند فشل العقدة.
 # فعّله صراحةً عبر NSM_ENABLE_NODE=true في البيئات التي تحتاجه.
+#
+# تنبيه معماري مهم: حتى لو فُعِّل هذا المتغير، Streamlit Community Cloud
+# يعرض للإنترنت منفذ خادم Streamlit نفسه فقط (لا يوجد بروكسي عام لأي منفذ
+# إضافي يفتحه thread داخلي). هذا يعني أن نقاط النهاية الخاصة بعقدة aiohttp
+# (/status, /health, /v2/status) لن تكون قابلة للوصول من رابط النشر العام
+# لتطبيق Streamlit نفسه — الطلبات لتلك المسارات ستُعالَج (أو تُرفَض) من
+# خادم Streamlit، لا من عملية aiohttp. لتشغيل عقدة قابلة للوصول فعلياً عبر
+# HTTP علنياً، استخدم مساراً منفصلاً حيث تكون عملية node_launcher.py هي
+# الخادم الرئيسي المُعرَّض (راجع Dockerfile / Procfile المُعدَّين لهذا الغرض،
+# مثل Hugging Face Spaces)، لا الاعتماد على thread خلفي داخل Streamlit Cloud.
 _enable_node = os.getenv("NSM_ENABLE_NODE", "false").strip().lower() in {"1", "true", "yes", "on"}
 if _enable_node and "node_started" not in st.session_state:
     thread = threading.Thread(target=run_mesh_node, daemon=True, name="nsm-mesh-node")
     thread.start()
     st.session_state["node_started"] = True
-    logger.info("🚀 NSM Background Node Started via Streamlit.")
+    logger.info(
+        "🚀 NSM Background Node Started via Streamlit "
+        "(ملاحظة: منفذ aiohttp داخلي فقط، غير معروض علناً عبر Streamlit Cloud)."
+    )
 
 # استيراد وتشغيل التطبيق الأصلي
 try:
