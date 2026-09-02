@@ -45,6 +45,7 @@ class LeaderElection:
             "role": "follower",  # follower | candidate | leader
         })
         self.rounds: Dict[str, Dict[str, Any]] = self._load(self.rounds_path, {})
+        self.guard = None  # ByzantineDecisionGuard اختياري
 
     @staticmethod
     def _load(path: Path, default):
@@ -213,6 +214,26 @@ class LeaderElection:
             valid.append(vid)
 
         won = len(set(valid)) >= majority
+        guard_result = None
+        if won and self.guard is not None:
+            guard_result = self.guard.validate_leader_claim(
+                term=term,
+                leader_id=self.node.node_id,
+                vote_count=len(set(valid)),
+            )
+            if not guard_result.get("ok"):
+                return {
+                    "won": False,
+                    "valid_votes": list(set(valid)),
+                    "count": len(set(valid)),
+                    "majority": majority,
+                    "term": term,
+                    "leader_id": None,
+                    "guard": guard_result,
+                }
+            # استخدم majority الاتحاد إن كان أكبر
+            majority = max(majority, self.guard.majority())
+            won = len(set(valid)) >= majority
         if won and term == int(self.state.get("term") or 0):
             self.become_leader(term)
         return {
@@ -222,6 +243,7 @@ class LeaderElection:
             "majority": majority,
             "term": term,
             "leader_id": self.state.get("leader_id") if won else None,
+            "guard": guard_result,
         }
 
     def become_leader(self, term: int = None) -> Dict[str, Any]:

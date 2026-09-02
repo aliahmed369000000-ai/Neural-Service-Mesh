@@ -39,6 +39,7 @@ class CollectiveCognitiveLedger:
             mesh_node, quorum=quorum, require_independent=require_independent
         )
         self.quorum = self.vcen.quorum
+        self.guard = None  # يُربط اختيارياً بـ ByzantineDecisionGuard
         root = storage_dir or (Path(getattr(mesh_node, "keys_dir", Path("."))).parent / "collective")
         self.storage_dir = Path(root)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
@@ -264,10 +265,15 @@ class CollectiveCognitiveLedger:
         self._audit("decision_vote", {"decision_id": decision_id, "approve": approve})
         return {"ok": True, "votes": len(dec["votes"]), "decision_id": decision_id}
 
-    def finalize_decision(self, decision_id: str, voter_keys: Dict[str, bytes] = None) -> Dict[str, Any]:
+    def finalize_decision(
+        self,
+        decision_id: str,
+        voter_keys: Dict[str, bytes] = None,
+        observed_leaders: List[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """
         يغلق القرار إن بلغ النصاب من الأصوات الموقّعة الصالحة.
-        voter_keys: {node_id: pub_pem_bytes} اختياري للتحقق.
+        مع ByzantineDecisionGuard: نصاب الاتحاد الكامل + منع split-brain.
         """
         dec = self.decisions.get(decision_id)
         if not dec:
@@ -308,6 +314,16 @@ class CollectiveCognitiveLedger:
                 "threshold": threshold,
                 "status": dec.get("status"),
             }
+
+        # حماية بيزنطية / انقسام شبكة
+        if self.guard is not None:
+            gate = self.guard.safe_finalize_gate(
+                dec,
+                verified_yes_voters=[v.get("voter_id") for v in valid_yes],
+                observed_leaders=observed_leaders,
+            )
+            if not gate.get("ok"):
+                return {"ok": False, "error": gate.get("reason"), "guard": gate}
 
         dec["status"] = "accepted"
         dec["finalized_at"] = datetime.now(timezone.utc).isoformat()
