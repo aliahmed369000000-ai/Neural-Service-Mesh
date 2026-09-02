@@ -42,6 +42,26 @@ NETWORK_STATE = LIVING_MESH_DIR / "network_state.json"
 CONTENT_DIR = LIVING_MESH_DIR / "content"
 CONTENT_DIR.mkdir(parents=True, exist_ok=True)
 
+# ---------------------------------------------------------------------------
+# بروتوكول الرسائل الموحّد (v1.1) — إصدارات واضحة + مكافحة Replay + حدود
+# ---------------------------------------------------------------------------
+PROTOCOL_VERSION = "1.1"
+MAX_MESSAGE_BYTES = 256 * 1024          # 256 KB حد أقصى لأي رسالة واردة
+MAX_TIMESTAMP_SKEW_SEC = 300            # ±5 دقائق
+NONCE_CACHE_MAX = 4096                  # أقصى عدد nonces محفوظة في الذاكرة
+NONCE_TTL_SEC = 600                     # عمر الـ nonce في الكاش (10 دقائق)
+RATE_LIMIT_WINDOW_SEC = 10.0            # نافذة معدل الطلبات
+RATE_LIMIT_MAX_PER_PEER = 60            # أقصى رسائل لكل نظير داخل النافذة
+ALLOWED_TASK_CAPABILITIES = {
+    # kind → مجموعة القدرات المطلوبة عند المنفذ
+    "submodel_train": {"GPU_HIGH", "GPU_LOW", "CPU", "tf_engine"},
+    "inference_request": {"text", "tf_engine", "GPU_HIGH", "GPU_LOW", "CPU"},
+    "model_eval": {"tf_engine", "GPU_HIGH", "GPU_LOW", "CPU"},
+    "map_reduce_map": {"CPU", "GPU_LOW", "GPU_HIGH"},
+    "sim_chunk": {"CPU", "GPU_LOW", "GPU_HIGH"},
+    "keyspace_scan": {"CPU"},
+}
+
 class LivingMeshNode:
     def __init__(self, node_id: str = None, host: str = "127.0.0.1", port: int = None):
         self.keys_dir = LIVING_MESH_DIR / "keys"
@@ -86,6 +106,22 @@ class LivingMeshNode:
         
         # ربط صندوق الأدوات
         self.toolbox = nsm_toolbox
+
+        # كاش مكافحة Replay: {nonce_or_request_id: expiry_ts}
+        self._seen_nonces: Dict[str, float] = {}
+        # معدل الطلبات لكل نظير: {peer_id: [timestamps]}
+        self._peer_msg_times: Dict[str, List[float]] = {}
+        # إحصائيات بسيطة للمراقبة
+        self._metrics = {
+            "messages_received": 0,
+            "messages_rejected_replay": 0,
+            "messages_rejected_sig": 0,
+            "messages_rejected_size": 0,
+            "messages_rejected_skew": 0,
+            "messages_rejected_rate": 0,
+            "messages_rejected_version": 0,
+            "tasks_executed": 0,
+        }
 
     async def _load_surah_pretrain(self):
         """تحميل أوزان Surah المسبقة من Hugging Face."""
@@ -357,14 +393,122 @@ class LivingMeshNode:
         else:
             await self._process_secure_message(data, websocket=ws)
 
+    def _purge_expired_nonces(self) -> None:
+        """ينظف الكاش من الـ nonces المنتهية."""
+        now = time.time()
+        expired = [k for k, exp in self._seen_nonces.items() if exp <= now]
+        for k in expired:
+            del self._seen_nonces[k]
+        # حد أقصى للحجم (FIFO تقريبي)
+        if len(self._seen_nonces) > NONCE_CACHE_MAX:
+            # احذف الأقدم (أصغر expiry)
+            sorted_items = sorted(self._seen_nonces.items(), key=lambda x: x[1])
+            for k, _ in sorted_items[: len(self._seen_nonces) - NONCE_CACHE_MAX]:
+                self._seen_nonces.pop(k, None)
+
+    def _is_replay(self, request_id: Optional[str], nonce: Optional[str]) -> bool:
+        """يتحقق إن كانت الرسالة مكررة (replay) عبر request_id أو nonce."""
+        self._purge_expired_nonces()
+        keys = []
+        if request_id:
+            keys.append(f"rid:{request_id}")
+        if nonce:
+            keys.append(f"n:{nonce}")
+        if not keys:
+            return False
+        now = time.time()
+        for k in keys:
+            if k in self._seen_nonces:
+                return True
+        # سجّل الآن
+        expiry = now + NONCE_TTL_SEC
+        for k in keys:
+            self._seen_nonces[k] = expiry
+        return False
+
+    def _check_rate_limit(self, sender_id: str) -> bool:
+        """يُرجع True إذا تجاوز المرسل حد المعدل (يُرفض)."""
+        now = time.time()
+        window_start = now - RATE_LIMIT_WINDOW_SEC
+        times = self._peer_msg_times.get(sender_id) or []
+        times = [t for t in times if t >= window_start]
+        times.append(now)
+        self._peer_msg_times[sender_id] = times
+        return len(times) > RATE_LIMIT_MAX_PER_PEER
+
+    def _validate_protocol_fields(self, payload: Dict[str, Any]) -> Optional[str]:
+        """
+        يتحقق من حقول البروتوكول v1.1.
+        يُرجع None إن كانت صالحة، أو سبب الرفض كنص.
+        """
+        # الإصدار (اختياري للتوافق الخلفي مع عقد قديمة، لكن نفضّل 1.1+)
+        ver = payload.get("protocol_version")
+        if ver is not None and ver != PROTOCOL_VERSION:
+            # نقبل 1.0 و 1.1 فقط حالياً
+            if ver not in ("1.0", "1.1"):
+                return "unsupported_protocol_version"
+
+        # الطابع الزمني
+        ts_unix = payload.get("ts_unix")
+        if ts_unix is None:
+            # حاول من timestamp ISO
+            ts_str = payload.get("timestamp")
+            if ts_str:
+                try:
+                    dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                    ts_unix = int(dt.timestamp())
+                except Exception:
+                    ts_unix = None
+        if ts_unix is not None:
+            skew = abs(int(time.time()) - int(ts_unix))
+            if skew > MAX_TIMESTAMP_SKEW_SEC:
+                return "timestamp_skew"
+
+        # request_id / nonce (إن وُجدا نفحص Replay)
+        request_id = payload.get("request_id") or payload.get("id")
+        nonce = payload.get("nonce")
+        if self._is_replay(request_id, nonce):
+            return "replay"
+
+        return None
+
     async def _process_secure_message(self, data, websocket=None):
         try:
-            msg = json.loads(data)
-            payload = msg.get("payload") or msg # دعم كلا الصيغتين
+            # حد الحجم أولاً
+            if isinstance(data, (str, bytes)):
+                raw_len = len(data) if isinstance(data, (str, bytes)) else 0
+                if raw_len > MAX_MESSAGE_BYTES:
+                    self._metrics["messages_rejected_size"] += 1
+                    logger.warning(f"🚫 Message rejected: size {raw_len} > {MAX_MESSAGE_BYTES}")
+                    return
+
+            msg = json.loads(data) if isinstance(data, (str, bytes)) else data
+            payload = msg.get("payload") or msg  # دعم كلا الصيغتين
             signature = msg.get("signature")
-            if not payload or not signature: return
-            
-            sender_id = payload.get("from")
+            if not payload or not signature:
+                return
+
+            self._metrics["messages_received"] += 1
+            sender_id = payload.get("from") or "unknown"
+
+            # معدل الطلبات
+            if self._check_rate_limit(sender_id):
+                self._metrics["messages_rejected_rate"] += 1
+                logger.warning(f"🚫 Rate limit exceeded from {sender_id}")
+                return
+
+            # حقول البروتوكول + مكافحة Replay
+            reject_reason = self._validate_protocol_fields(payload)
+            if reject_reason:
+                metric_key = {
+                    "replay": "messages_rejected_replay",
+                    "timestamp_skew": "messages_rejected_skew",
+                    "unsupported_protocol_version": "messages_rejected_version",
+                }.get(reject_reason, "messages_rejected_replay")
+                self._metrics[metric_key] = self._metrics.get(metric_key, 0) + 1
+                logger.warning(f"🚫 Message rejected from {sender_id}: {reject_reason}")
+                return
+
             pub_key_path = self.keys_dir / f"{sender_id}.pub"
             
             if not pub_key_path.exists():
@@ -391,6 +535,8 @@ class LivingMeshNode:
             if pub_key_path.exists():
                 pub_key_pem = pub_key_path.read_bytes()
                 if not self.verify_signature(pub_key_pem, json.dumps(payload, sort_keys=True), signature):
+                    self._metrics["messages_rejected_sig"] += 1
+                    logger.warning(f"🚫 Invalid signature from {sender_id}")
                     return
             else:
                 # بدون مفتاح معروف: اقبل فقط رسائل القياس/الاكتشاف لتمهيد القناة
@@ -576,13 +722,21 @@ class LivingMeshNode:
         return f"{scheme}://{host}:{port}/ws"
 
     def _build_signed_payload(self, kind: str, data: Dict[str, Any], hops: int = 0) -> str:
+        """يبني حمولة موقّعة وفق بروتوكول v1.1 (request_id + nonce + version + timestamp)."""
+        now = datetime.now(timezone.utc)
+        request_id = f"req_{uuid.uuid4().hex}"
+        nonce = uuid.uuid4().hex
         payload = {
+            "protocol_version": PROTOCOL_VERSION,
             "id": f"msg_{uuid.uuid4().hex[:8]}",
+            "request_id": request_id,
+            "nonce": nonce,
             "kind": kind,
             "data": data,
             "from": self.node_id,
             "p2p_hops": hops,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": now.isoformat(),
+            "ts_unix": int(now.timestamp()),
         }
         sig = self.sign_message(json.dumps(payload, sort_keys=True))
         return json.dumps({"payload": payload, "signature": sig})
@@ -1048,11 +1202,22 @@ class LivingMeshNode:
             logger.info(f"📥 Task result stored id={task_id} kind={kind} from={sender_id}")
             return
 
-        # طلبات تنفيذ: نفّذ محلياً وأعد النتيجة للمرسل إن أمكن
+        # طلبات تنفيذ: تحقق القدرات أولاً ثم نفّذ محلياً
+        required_caps = ALLOWED_TASK_CAPABILITIES.get(kind)
+        if required_caps:
+            my_caps = set((getattr(self, "node_info", {}) or {}).get("capabilities") or [])
+            if not (my_caps & required_caps):
+                logger.warning(
+                    f"🚫 Task {kind} rejected: node lacks required capabilities "
+                    f"(have={sorted(my_caps)}, need_any_of={sorted(required_caps)})"
+                )
+                return
+
         result = mesh_tasks.dispatch_task(kind, exp_data or {})
         if result is None:
             logger.warning(f"⚠️ Unknown mesh task kind={kind}")
             return
+        self._metrics["tasks_executed"] += 1
         result_kind = mesh_tasks.result_kind_for(kind)
         result["task_id"] = (exp_data or {}).get("task_id") or result.get("task_id")
         result["worker_node"] = self.node_id
@@ -1149,6 +1314,19 @@ class LivingMeshNode:
         if task_ids is None:
             return dict(inbox)
         return {tid: inbox[tid] for tid in task_ids if tid in inbox}
+
+    def get_mesh_metrics(self) -> Dict[str, Any]:
+        """إحصائيات بسيطة للمراقبة والصحة (structured metrics)."""
+        self._purge_expired_nonces()
+        return {
+            "protocol_version": PROTOCOL_VERSION,
+            "node_id": self.node_id,
+            "metrics": dict(self._metrics),
+            "seen_nonces_count": len(self._seen_nonces),
+            "tracked_peers_rate": len(self._peer_msg_times),
+            "active_connections": len(getattr(self, "active_connections", set()) or set()),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
 
     def merge_submodel_inbox(self, task_ids: List[str]) -> Dict[str, Any]:
         inbox = self.collect_task_results(task_ids)
