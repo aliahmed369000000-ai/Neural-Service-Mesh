@@ -57,27 +57,12 @@ def render_unified_agent():
             unsafe_allow_html=True,
         )
 
-    # ── رأس منظم ──
-    st.markdown(
-        """
-<div class="nsm-hero-panel">
-  <div class="nsm-hero-title">🎯 الوكيل الموحّد — مدير مشروعك الشخصي</div>
-  <p class="nsm-hero-sub">
-    أنا الواجهة الواحدة التي تجمع كل شيء: أفكر، وأقرر متى أبحث في الويب، ومتى أولّد صوراً،
-    ومتى أكتب كوداً، ومتى أطلق الوكلاء المتخصصين تحتي. هم ينفّذون المهام وأنا أجمع النتائج
-    وأتحمل المسؤولية النهائية عن الجواب. أعطني الهدف فقط.
-  </p>
-  <div class="nsm-chip-row">
-    <span class="nsm-chip nsm-chip--accent">مدير واحد</span>
-    <span class="nsm-chip">تفويض ذكي</span>
-    <span class="nsm-chip">توليف نهائي</span>
-    <span class="nsm-chip">أوامر مشروع حقيقية</span>
-    <span class="nsm-chip">بحث ويب</span>
-  </div>
-</div>
-        """,
-        unsafe_allow_html=True,
-    )
+    # 🆕 تبسيط: أُزيلت لافتة "nsm-hero-panel" الزخرفية (عنوان + وصف طويل +
+    # 5 "شرائح" وصفية ثابتة بلا أي بيانات ديناميكية) بنفس منهجية تبسيط
+    # الصفحة الرئيسية وصفحة المحادثة — تقليل الازدحام أعلى الشاشة دون أي
+    # تغيير في المنطق أو الحالة. اسم الصفحة وغرضها واضحان أصلاً من عنوان
+    # التبويب "🎯 الوكيل الموحّد" ومن الرسالة التوضيحية (st.info) الظاهرة
+    # فوقها مباشرة في مجموعة "🤖 الوكلاء".
 
     if "unified_agent_bot" not in st.session_state:
         st.session_state.unified_agent_bot = UnifiedAgentChat()
