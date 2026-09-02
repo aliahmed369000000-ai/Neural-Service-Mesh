@@ -160,6 +160,7 @@ async def handle_submit_job(request):
         require_capabilities=body.get("require_capabilities"),
         timeout_per_task=float(body.get("timeout_per_task") or 12.0),
         retry_failed=int(body.get("retry_failed") or 1),
+        quorum=int(body.get("quorum") or 2),
     )
     return web.json_response(report)
 

@@ -33,19 +33,39 @@ NON_RETRYABLE_ERRORS = frozenset({
 })
 
 
+# حقول دلالية فقط — تُستبعد المعرّفات الفريدة لكل عامل (task_id/worker/receipt/…)
+_SEMANTIC_KEYS = (
+    "ok", "output", "error", "modality", "model_hint", "prompt_preview",
+    "counts", "mean_loss", "accuracy", "loss", "found", "value",
+    "layers_count", "text_out", "summary",
+)
+
+
+def semantic_payload(result: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """يستخرج الجسم الدلالي للمقارنة بين عمال مختلفين."""
+    if not result or not isinstance(result, dict):
+        return {}
+    body = {}
+    for k in _SEMANTIC_KEYS:
+        if k in result:
+            body[k] = result.get(k)
+    # إن لم يوجد أي مفتاح معروف: خذ كل شيء عدا الحقول الفريدة
+    if not body:
+        skip = {
+            "task_id", "worker_node", "receipt", "node_id", "elapsed_ms",
+            "job_id", "retry_of", "from", "signature",
+        }
+        body = {k: v for k, v in result.items() if k not in skip}
+    return body
+
+
 def _result_digest(result: Optional[Dict[str, Any]]) -> Optional[str]:
+    """هاش دلالي للاتفاق — لا يعتمد على task_id/worker_node/receipt."""
     if not result or not isinstance(result, dict):
         return None
-    receipt = result.get("receipt") or {}
-    if receipt.get("result_digest"):
-        return str(receipt["result_digest"])
-    # بدون إيصال: هاش للمخرجات المستقرة
-    body = {
-        "ok": result.get("ok"),
-        "output": result.get("output"),
-        "prompt_preview": result.get("prompt_preview"),
-        "error": result.get("error"),
-    }
+    body = semantic_payload(result)
+    if not body:
+        return None
     return hashlib.sha256(
         json.dumps(body, sort_keys=True, default=str, ensure_ascii=False).encode()
     ).hexdigest()
@@ -222,6 +242,7 @@ class MeshJobOrchestrator:
         timeout_per_task: float = 12.0,
         retry_failed: int = 1,
         worker_list: Optional[List[Dict[str, Any]]] = None,
+        quorum: int = 2,
     ) -> Dict[str, Any]:
         """
         يرسل المهمة إلى عدة عمال ويجمع النتائج ويختار فائزاً.
@@ -293,29 +314,52 @@ class MeshJobOrchestrator:
         selection = self._select_winner(attempts, strategy)
         winner = selection.get("winner")
 
-        # تحديث سمعة بسيط
+        # --- المرحلة B: نصاب الاتفاق + سمعة أوثق ---
+        quorum_n = max(1, int(quorum))
+        cluster_size = int(selection.get("cluster_size") or (1 if winner else 0))
+        success_count = sum(1 for a in attempts if a.get("ok"))
+        quorum_met = False
+        if winner and strategy == STRATEGY_MAJORITY:
+            quorum_met = cluster_size >= quorum_n
+        elif winner and strategy in (STRATEGY_FIRST, STRATEGY_REPUTATION):
+            # نجاح واحد كافٍ لهذه الاستراتيجيات، لكن نسجّل إن وصل النصاب
+            quorum_met = success_count >= quorum_n
+        elif winner:
+            quorum_met = True
+
+        winner_digest = (winner or {}).get("digest")
         for a in attempts:
             pid = a.get("worker")
             if not pid:
                 continue
             try:
-                if a.get("ok"):
+                if not a.get("ok"):
+                    if a.get("error") not in NON_RETRYABLE_ERRORS:
+                        self.node.update_reputation(pid, delta=-1, reason=f"job_fail:{job_id}")
+                    continue
+                # نجاح ضمن كتلة الاتفاق
+                if winner_digest and a.get("digest") == winner_digest and quorum_met:
+                    self.node.update_reputation(pid, delta=2, reason=f"job_quorum_agree:{job_id}")
+                elif a.get("ok") and quorum_met and a.get("digest") != winner_digest:
+                    # نتيجة ناجحة لكنها خارجة عن الأغلبية
+                    self.node.update_reputation(pid, delta=0, reason=f"job_dissent:{job_id}")
+                elif a.get("ok"):
                     self.node.update_reputation(pid, delta=1, reason=f"job_ok:{job_id}")
-                elif a.get("error") not in NON_RETRYABLE_ERRORS:
-                    self.node.update_reputation(pid, delta=-1, reason=f"job_fail:{job_id}")
             except Exception:
                 pass
 
         report = {
-            "ok": winner is not None,
+            "ok": winner is not None and (quorum_met if strategy == STRATEGY_MAJORITY else True),
             "job_id": job_id,
             "kind": kind,
             "strategy": strategy,
             "n_workers_targeted": len(workers),
             "attempts_count": len(attempts),
-            "success_count": sum(1 for a in attempts if a.get("ok")),
+            "success_count": success_count,
             "retries_done": retries_done,
             "elapsed_ms": round((time.time() - t0) * 1000, 2),
+            "quorum_required": quorum_n,
+            "quorum_met": quorum_met,
             "selection": {k: v for k, v in selection.items() if k != "winner"},
             "winner": {
                 "worker": winner.get("worker"),
@@ -339,12 +383,53 @@ class MeshJobOrchestrator:
             ],
             "ts": datetime.now(timezone.utc).isoformat(),
         }
+        if strategy == STRATEGY_MAJORITY and winner and not quorum_met:
+            report["ok"] = False
+            report["error"] = "quorum_not_met"
+            report["reason"] = (
+                f"cluster_size={cluster_size} < quorum_required={quorum_n}"
+            )
+
+        # سجل قرار قابل للتدقيق على حالة العقدة المنظمة
+        try:
+            self._persist_job_decision(report)
+        except Exception as e:
+            logger.warning(f"⚠️ persist job decision failed: {e}")
+
         self._jobs[job_id] = report
         logger.info(
             f"📦 job {job_id} ok={report['ok']} success={report['success_count']}/"
-            f"{report['attempts_count']} strategy={strategy}"
+            f"{report['attempts_count']} quorum_met={quorum_met} strategy={strategy}"
         )
         return report
+
+    def _persist_job_decision(self, report: Dict[str, Any]) -> None:
+        """يحفظ قرار المهمة في network_state للعقدة المنظمة (provenance خفيف)."""
+        if not hasattr(self.node, "_load_state"):
+            return
+        state = self.node._load_state()
+        ledger = state.setdefault("job_decisions", {})
+        ledger[report["job_id"]] = {
+            "job_id": report.get("job_id"),
+            "kind": report.get("kind"),
+            "ok": report.get("ok"),
+            "strategy": report.get("strategy"),
+            "quorum_required": report.get("quorum_required"),
+            "quorum_met": report.get("quorum_met"),
+            "agreement": (report.get("selection") or {}).get("agreement"),
+            "winner_worker": (report.get("winner") or {}).get("worker"),
+            "winner_digest": (report.get("winner") or {}).get("digest"),
+            "success_count": report.get("success_count"),
+            "attempts_count": report.get("attempts_count"),
+            "workers": [a.get("worker") for a in (report.get("all_results") or [])],
+            "ts": report.get("ts"),
+            "error": report.get("error"),
+        }
+        # احتفظ بآخر 200 قرار
+        if len(ledger) > 200:
+            for k in sorted(ledger.keys())[: len(ledger) - 200]:
+                ledger.pop(k, None)
+        self.node._save_state(state)
 
     def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
         return self._jobs.get(job_id)

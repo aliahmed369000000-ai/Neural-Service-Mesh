@@ -48,6 +48,17 @@ def test_digest_stable():
     print("✅ digest stable")
 
 
+
+
+def test_semantic_digest_ignores_worker_fields():
+    from ai.mesh_job_orchestrator import _result_digest
+    a = {"ok": True, "output": "نفس النص", "task_id": "t1", "worker_node": "w1", "receipt": {"signature": "x"}}
+    b = {"ok": True, "output": "نفس النص", "task_id": "t2", "worker_node": "w2", "receipt": {"signature": "y"}}
+    assert _result_digest(a) == _result_digest(b)
+    c = {"ok": True, "output": "نص آخر", "task_id": "t3", "worker_node": "w3"}
+    assert _result_digest(a) != _result_digest(c)
+    print("✅ semantic digest ignores worker/task fields")
+
 def test_majority_selection():
     node = FakeNode()
     orch = MeshJobOrchestrator(node)
@@ -135,6 +146,7 @@ def test_non_retryable_duplicate_not_counted_success():
 
 if __name__ == "__main__":
     test_digest_stable()
+    test_semantic_digest_ignores_worker_fields()
     test_majority_selection()
     test_first_success_lowest_rtt()
     test_submit_job_with_mock_dispatch()
