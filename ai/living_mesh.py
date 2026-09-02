@@ -899,6 +899,8 @@ class LivingMeshNode:
         logger.info(
             f"✍️ Multisig proposed {agreement_id} requires {required_signatures} signatures"
         )
+        # إن اكتمل النصاب محلياً (مثلاً required=1) نفّذ فوراً
+        await self._try_finalize_multisig(agreement_id)
         return agreement_id
 
     async def _handle_multisig_propose(self, exp_data: Dict[str, Any], sender_id: str = None):
