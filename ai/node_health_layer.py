@@ -202,3 +202,177 @@ class NodeHealthLayer:
 
     def recent_tasks(self, limit: int = 20) -> List[Dict[str, Any]]:
         return self._task_log[-limit:]
+
+    # ------------------------------------------------------------------
+    # #6 اختيار أفضل عامل حسب الصحة والكمون والسمعة
+    # ------------------------------------------------------------------
+    def rank_workers(
+        self,
+        require_capabilities=None,
+        max_workers: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """يرتب العمال: reachable أولاً، ثم أقل RTT، ثم أعلى سمعة."""
+        table = self.routes_table()["routes"]
+        need = None
+        if require_capabilities:
+            need = {require_capabilities} if isinstance(require_capabilities, str) else set(require_capabilities)
+
+        ranked = []
+        for r in table:
+            if need and not need.issubset(set(r.get("capabilities") or [])):
+                continue
+            score = 0.0
+            if r.get("reachable") is True:
+                score += 1000.0
+            elif r.get("reachable") is False:
+                score -= 500.0
+            rtt = r.get("last_rtt_ms")
+            if rtt is not None:
+                score += max(0.0, 200.0 - float(rtt))  # أسرع = أعلى
+            score += float(r.get("reputation") or 0) * 5.0
+            ranked.append({**r, "selection_score": round(score, 2)})
+
+        # إن لم يوجد كاش، استخدم الأقران النشطين
+        if not ranked:
+            peers = self.node._get_active_peers_list(require_capabilities=require_capabilities)
+            for p in peers:
+                if p.get("id") == self.node.node_id:
+                    continue
+                if not p.get("host") or p.get("port") is None:
+                    continue
+                ranked.append({
+                    "peer_id": p.get("id"),
+                    "host": p.get("host"),
+                    "port": p.get("port"),
+                    "capabilities": p.get("capabilities") or [],
+                    "last_rtt_ms": p.get("last_rtt_ms"),
+                    "reachable": None,
+                    "reputation": 0,
+                    "path": "direct",
+                    "selection_score": 100.0,
+                })
+
+        ranked.sort(key=lambda x: -x.get("selection_score", 0))
+        return ranked[: max(1, max_workers)]
+
+    def select_best_worker(self, require_capabilities=None) -> Optional[Dict[str, Any]]:
+        """#6 يختار أفضل عامل واحد."""
+        ranked = self.rank_workers(require_capabilities=require_capabilities, max_workers=1)
+        return ranked[0] if ranked else self.best_route(require_capabilities=require_capabilities)
+
+    # ------------------------------------------------------------------
+    # #7 استمرار المهام عند سقوط عامل (failover)
+    # ------------------------------------------------------------------
+    async def submit_with_failover(
+        self,
+        kind: str,
+        payload: Dict[str, Any],
+        require_capabilities=None,
+        max_attempts: int = 3,
+        prefer_local_fallback: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        يكلّف أفضل عامل؛ عند الفشل ينتقل للتالي.
+        يحفظ حالة المهمة في task journal لاستئناف لاحق.
+        """
+        from ai import mesh_task_protocol as mt
+
+        task_id = payload.get("task_id") or f"fo_{int(time.time()*1000)}_{kind[:8]}"
+        payload = dict(payload)
+        payload["task_id"] = task_id
+        journal = {
+            "task_id": task_id,
+            "kind": kind,
+            "payload": payload,
+            "status": "pending",
+            "attempts": [],
+            "created_at": time.time(),
+        }
+        self._task_log.append({"task_id": task_id, "kind": kind, "mode": "failover_start"})
+
+        workers = self.rank_workers(require_capabilities=require_capabilities, max_workers=max_attempts)
+        t0 = time.time()
+
+        for i, w in enumerate(workers[:max_attempts]):
+            host, port = w.get("host"), w.get("port")
+            if not host or port is None:
+                continue
+            attempt = {
+                "worker": w.get("peer_id"),
+                "host": host,
+                "port": port,
+                "selection_score": w.get("selection_score"),
+                "attempt": i + 1,
+            }
+            try:
+                disp = await self.node.dispatch_mesh_task(
+                    host, int(port), kind, payload, target_id=w.get("peer_id"), use_relay=True
+                )
+                attempt["dispatch"] = disp
+                if disp.get("ok"):
+                    journal["status"] = "dispatched"
+                    journal["assigned_worker"] = w.get("peer_id")
+                    journal["attempts"].append(attempt)
+                    entry = {
+                        "task_id": task_id,
+                        "kind": kind,
+                        "mode": "failover_remote",
+                        "ok": True,
+                        "worker": w.get("peer_id"),
+                        "attempts": i + 1,
+                        "elapsed_ms": round((time.time() - t0) * 1000, 2),
+                        "dispatch": disp,
+                        "journal": journal,
+                    }
+                    self._task_log.append(entry)
+                    self.node.update_reputation(w.get("peer_id") or "unknown", delta=1, reason="failover_success")
+                    return entry
+                attempt["error"] = "dispatch_not_ok"
+            except Exception as e:
+                attempt["error"] = str(e)
+            journal["attempts"].append(attempt)
+            # عامل ساقط — خفّض سمعته قليلاً
+            if w.get("peer_id"):
+                self.node.update_reputation(w["peer_id"], delta=-1, reason="failover_worker_down")
+
+        # كل العمال فشلوا — تنفيذ محلي كاستمرارية
+        if prefer_local_fallback:
+            result = mt.dispatch_task(kind, payload)
+            if result is not None:
+                receipt = self.node.issue_execution_receipt(task_id, kind, result)
+                journal["status"] = "completed_local_fallback"
+                entry = {
+                    "task_id": task_id,
+                    "kind": kind,
+                    "mode": "failover_local",
+                    "ok": bool(result.get("ok")),
+                    "attempts": len(journal["attempts"]),
+                    "elapsed_ms": round((time.time() - t0) * 1000, 2),
+                    "result": result,
+                    "receipt": receipt,
+                    "journal": journal,
+                }
+                self._task_log.append(entry)
+                return entry
+
+        journal["status"] = "failed"
+        entry = {
+            "task_id": task_id,
+            "kind": kind,
+            "mode": "failover_exhausted",
+            "ok": False,
+            "attempts": len(journal["attempts"]),
+            "elapsed_ms": round((time.time() - t0) * 1000, 2),
+            "journal": journal,
+        }
+        self._task_log.append(entry)
+        return entry
+
+    def resume_pending_tasks(self) -> List[Dict[str, Any]]:
+        """يعيد المهام التي بقيت pending/failed من السجل (للاستئناف بعد إعادة التشغيل)."""
+        pending = [
+            t for t in self._task_log
+            if (t.get("journal") or {}).get("status") in ("pending", "failed", "dispatched")
+            or t.get("mode") == "failover_exhausted"
+        ]
+        return pending

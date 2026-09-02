@@ -44,7 +44,10 @@ CONTENT_DIR.mkdir(parents=True, exist_ok=True)
 
 class LivingMeshNode:
     def __init__(self, node_id: str = None, host: str = "127.0.0.1", port: int = None):
-        self.node_id = node_id or f"mesh_{uuid.uuid4().hex[:8]}"
+        self.keys_dir = LIVING_MESH_DIR / "keys"
+        self.keys_dir.mkdir(exist_ok=True)
+        # #5 استعادة هوية دائمة (node_id + مفاتيح) بعد إعادة التشغيل
+        self.node_id = self._resolve_persistent_node_id(node_id)
         self.host = host
         self.port = port
         self.peers = []
@@ -63,11 +66,10 @@ class LivingMeshNode:
         # تهيئة الذاكرة الموحدة (ANN + Sharding)
         self.memory = UnifiedMemoryManager(base_dir=str(LIVING_MESH_DIR / "memory"))
         
-        # هوية دائمة: تحميل مفتاح RSA محفوظ أو إنشاءه مرة واحدة
-        self.keys_dir = LIVING_MESH_DIR / "keys"
-        self.keys_dir.mkdir(exist_ok=True)
+        # هوية دائمة: تحميل مفتاح RSA المحفوظ لهذه العقدة
         self.private_key, self.public_key = self._load_or_create_identity()
         self._save_public_key()
+        self._persist_identity_record()
         
         # تحميل وعي Surah المسبق
         self.surah_awareness = {"status": "loading"}
@@ -237,6 +239,53 @@ class LivingMeshNode:
 
     def _save_state(self, state: Dict[str, Any]):
         NETWORK_STATE.write_text(json.dumps(state, indent=2))
+
+    def _identity_record_path(self) -> Path:
+        return self.keys_dir / "node_identity.json"
+
+    def _resolve_persistent_node_id(self, node_id: str = None) -> str:
+        """#5 يحافظ على node_id بعد إعادة التشغيل عبر node_identity.json."""
+        path = self.keys_dir / "node_identity.json"
+        if node_id:
+            return node_id
+        # متغير بيئة اختياري
+        import os
+        env_id = os.environ.get("NODE_ID") or os.environ.get("NSM_NODE_ID")
+        if env_id:
+            return env_id
+        if path.exists():
+            try:
+                data = json.loads(path.read_text())
+                if data.get("node_id"):
+                    logger.info(f"♻️ Restored persistent node_id={data['node_id']}")
+                    return data["node_id"]
+            except Exception as e:
+                logger.warning(f"⚠️ identity record unreadable: {e}")
+        return f"mesh_{uuid.uuid4().hex[:8]}"
+
+    def _persist_identity_record(self):
+        """يحفظ سجل الهوية الدائمة (id + بصمة المفتاح العام)."""
+        path = self._identity_record_path()
+        rec = {
+            "node_id": self.node_id,
+            "public_key_fingerprint": hashlib.sha256(self._pub_pem().encode()).hexdigest()[:32],
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "host": self.host,
+            "port": self.port,
+        }
+        path.write_text(json.dumps(rec, indent=2, ensure_ascii=False))
+
+    def identity_info(self) -> Dict[str, Any]:
+        path = self._identity_record_path()
+        if path.exists():
+            try:
+                return json.loads(path.read_text())
+            except Exception:
+                pass
+        return {
+            "node_id": self.node_id,
+            "public_key_fingerprint": hashlib.sha256(self._pub_pem().encode()).hexdigest()[:32],
+        }
 
     def _load_or_create_identity(self):
         """هوية دائمة للعقدة: يعيد استخدام المفتاح الخاص إن وُجد، وإلا ينشئه مرة واحدة."""
