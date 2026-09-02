@@ -1,13 +1,18 @@
 ---
-title: NSM Alpha Node
-emoji: 🧠
+title: NSM Mesh Seed
+emoji: 🕸️
 colorFrom: green
 colorTo: blue
-sdk: streamlit
-sdk_version: 1.30.0
-app_file: streamlit_app.py
+sdk: docker
+app_port: 7860
 pinned: false
 ---
+
+> **هذا الفرع (`hf-mesh-seed-deploy`) مخصص فقط للنشر على Hugging Face Space كعقدة بذرة
+> Living Mesh (عبر Dockerfile/node_launcher.py)** — وليس فرع النشر الرئيسي لتطبيق
+> Streamlit (`main`). لا تدمج هذا الفرع في `main`؛ الفرق الوحيد المقصود بينهما هو
+> frontmatter هذا الملف (sdk: docker بدل streamlit) ليتوافق مع Dockerfile الموجود
+> أصلاً بالمستودع.
 
 # Neural Service Mesh (NSM)
 
