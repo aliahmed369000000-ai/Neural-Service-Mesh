@@ -70,7 +70,10 @@ def render_economic_engine():
                 use_container_width=True,
                 hide_index=True,
             )
-        st.json(dash)
+        # 🆕 تبسيط: تفريغ JSON الخام كان يظهر دائماً ومفتوحاً أسفل الجدول
+        # بلا حاجة — نفس البيانات، خلف طيّة اختيارية الآن.
+        with st.expander("🔧 بيانات خام (JSON)"):
+            st.json(dash)
 
     with t_aiaas:
         st.markdown("#### الذكاء الاصطناعي كخدمة (اشتراكات)")
@@ -156,7 +159,8 @@ def render_economic_engine():
         m1.metric("تكلفة Spot", f"${q['cost_usd']:.2f}")
         m2.metric("إيراد تقديري", f"${q['revenue_usd']:.2f}")
         m3.metric("الهامش", f"${q['margin_usd']:.2f}", f"{q['margin_pct']}%")
-        st.json(q)
+        with st.expander("🔧 بيانات خام (JSON)"):
+            st.json(q)
         if st.button("تسجيل هامش دفتري", type="primary"):
             r = book_arbitrage_demo(prov, hours)
             if r.get("ok"):
@@ -172,7 +176,8 @@ def render_economic_engine():
         domain = st.selectbox("المجال", ["general", "medical", "finance", "nlp_ar"])
         pricing = price_synthetic_batch(int(n), quality, domain)
         st.metric("السعر التقديري", f"${pricing['price_usd']:.2f}")
-        st.json(pricing)
+        with st.expander("🔧 بيانات خام (JSON)"):
+            st.json(pricing)
         if st.button("توليد دفعة + تسجيل بيع دفتري", type="primary"):
             r = sell_synthetic_demo(int(n), quality, domain)
             st.success(f"تم — path=`{r.get('batch_path')}` · ${r['pricing']['price_usd']}")
