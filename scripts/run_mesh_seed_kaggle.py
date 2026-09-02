@@ -105,9 +105,20 @@ def start_node(node_id: str, port: int, data_dir: Path, log_path: Path) -> subpr
 
 def start_tunnel(cloudflared_bin: Path, port: int, log_path: Path) -> subprocess.Popen:
     log_f = open(log_path, "a", buffering=1, encoding="utf-8")
-    _log("🌐 تشغيل Cloudflare Quick Tunnel...")
+    _log("🌐 تشغيل Cloudflare Quick Tunnel (--protocol http2)...")
+    # القيمة الافتراضية لـcloudflared (auto) تجرّب QUIC عبر UDP أولاً، وشبكة
+    # Kaggle تحجب/تُسقط UDP الصادر بصمت — فيعلق cloudflared بلا أي رابط ولا
+    # أي رسالة خطأ واضحة (يتكرر هذا كل ~35 دقيقة حسب مهلات إعادة المحاولة
+    # الداخلية لديه). --protocol http2 يفرض النقل عبر TCP:443 مباشرة ويتفادى
+    # محاولة QUIC كلياً — هذا هو الإصلاح الموثّق لهذه الحالة تحديداً في بيئات
+    # تحجب UDP الصادر (راجع: github.com/cloudflare/cloudflared/issues/758).
     return subprocess.Popen(
-        [str(cloudflared_bin), "tunnel", "--url", f"http://localhost:{port}"],
+        [
+            str(cloudflared_bin),
+            "tunnel",
+            "--protocol", "http2",
+            "--url", f"http://localhost:{port}",
+        ],
         cwd=str(ROOT),
         stdout=log_f,
         stderr=subprocess.STDOUT,
