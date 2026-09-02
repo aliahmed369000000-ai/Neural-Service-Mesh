@@ -764,6 +764,46 @@ class MeshJobOrchestrator:
         )
         return out
 
+
+    async def submit_web_task(
+        self,
+        url: str,
+        *,
+        n_workers: int = 1,
+        strategy: str = STRATEGY_FIRST,
+        quorum: int = 1,
+        max_chars: int = 6000,
+        timeout_per_task: float = 20.0,
+        allowlist: Optional[List[str]] = None,
+        worker_list: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """تكليف عامل/عمال بجلب صفحة HTTPS عامة (محمي من SSRF)."""
+        from ai import mesh_task_protocol as mt
+        url = (url or "").strip()
+        if not url:
+            return {"ok": False, "error": "empty_url"}
+        payload = {
+            "url": url,
+            "max_chars": max_chars,
+            "timeout": timeout_per_task,
+        }
+        if allowlist:
+            payload["allowlist"] = list(allowlist)
+        report = await self.submit_job(
+            mt.KIND_WEB_FETCH,
+            payload,
+            n_workers=max(1, n_workers),
+            strategy=strategy,
+            quorum=max(1, quorum),
+            timeout_per_task=timeout_per_task,
+            retry_failed=1,
+            worker_list=worker_list,
+            require_capabilities=["web"],
+        )
+        report["task_type"] = "web_fetch"
+        report["url"] = url
+        return report
+
     def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
         return self._jobs.get(job_id)
 

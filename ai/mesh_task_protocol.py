@@ -41,6 +41,8 @@ KIND_SUMMARIZE = "summarize_chunk"
 KIND_SUMMARIZE_RESULT = "summarize_chunk_result"
 KIND_SEARCH = "search_chunk"
 KIND_SEARCH_RESULT = "search_chunk_result"
+KIND_WEB_FETCH = "web_fetch"
+KIND_WEB_FETCH_RESULT = "web_fetch_result"
 
 # إدارة دورة حياة المهمة (v1.1+)
 KIND_TASK_ACK = "task_ack"
@@ -57,6 +59,7 @@ ALL_TASK_KINDS = {
     KIND_KEYSPACE, KIND_KEYSPACE_RESULT,
     KIND_SUMMARIZE, KIND_SUMMARIZE_RESULT,
     KIND_SEARCH, KIND_SEARCH_RESULT,
+    KIND_WEB_FETCH, KIND_WEB_FETCH_RESULT,
     KIND_TASK_ACK, KIND_TASK_CANCEL,
     KIND_TASK_STATUS, KIND_TASK_STATUS_RESULT,
 }
@@ -598,6 +601,163 @@ def execute_search_chunk(task: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+
+def _is_public_ip(ip: str) -> bool:
+    """يرفض العناوين الخاصة/الحلقية/الرابط المحلي (حماية SSRF)."""
+    import ipaddress
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return not (
+        addr.is_private
+        or addr.is_loopback
+        or addr.is_link_local
+        or addr.is_reserved
+        or addr.is_multicast
+        or addr.is_unspecified
+    )
+
+
+def _validate_public_https_url(url: str, allowlist: Optional[List[str]] = None) -> Dict[str, Any]:
+    from urllib.parse import urlparse
+    import socket
+    url = (url or "").strip()
+    if not url:
+        return {"ok": False, "error": "empty_url"}
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        return {"ok": False, "error": "https_only"}
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return {"ok": False, "error": "missing_host"}
+    if host in ("localhost", "localhost.localdomain") or host.endswith(".local"):
+        return {"ok": False, "error": "blocked_host"}
+    # قائمة سماح اختيارية (نطاقات)
+    if allowlist:
+        allowed = False
+        for dom in allowlist:
+            dom = (dom or "").lower().strip()
+            if not dom:
+                continue
+            if host == dom or host.endswith("." + dom):
+                allowed = True
+                break
+        if not allowed:
+            return {"ok": False, "error": "domain_not_allowlisted", "host": host}
+    # حل DNS ورفض IP خاص
+    try:
+        infos = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+    except socket.gaierror as e:
+        return {"ok": False, "error": f"dns_failed:{e}"}
+    ips = []
+    for info in infos:
+        ip = info[4][0]
+        ips.append(ip)
+        if not _is_public_ip(ip):
+            return {"ok": False, "error": "private_or_local_ip", "ip": ip}
+    return {"ok": True, "host": host, "ips": ips[:5]}
+
+
+def execute_web_fetch(task: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    جلب صفحة عامة عبر HTTPS فقط مع حماية SSRF.
+    task: {url, max_chars?, allowlist?}
+    allowlist: قائمة نطاقات اختيارية؛ أو من البيئة NSM_WEB_ALLOWLIST
+    """
+    import os
+    import re
+    import urllib.request
+    import urllib.error
+    from urllib.parse import urlparse
+
+    t0 = time.time()
+    url = (task.get("url") or task.get("target_url") or "").strip()
+    max_chars = max(200, min(int(task.get("max_chars") or 6000), 20000))
+    env_allow = [x.strip() for x in (os.getenv("NSM_WEB_ALLOWLIST") or "").split(",") if x.strip()]
+    allowlist = task.get("allowlist") or env_allow or None
+    if isinstance(allowlist, str):
+        allowlist = [x.strip() for x in allowlist.split(",") if x.strip()]
+
+    v = _validate_public_https_url(url, allowlist=allowlist)
+    if not v.get("ok"):
+        return {
+            "ok": False,
+            "error": v.get("error"),
+            "url": url,
+            "task_id": task.get("task_id"),
+            "elapsed_ms": round((time.time() - t0) * 1000, 2),
+        }
+
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "NSM-Mesh-Worker/1.0 (+https://github.com/aliahmed369000000-ai/Neural-Service-Mesh)",
+                "Accept": "text/html,application/xhtml+xml,application/json,text/plain;q=0.9,*/*;q=0.5",
+            },
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=float(task.get("timeout") or 15)) as resp:
+            final_url = resp.geturl()
+            # أعد التحقق بعد التحويلات
+            v2 = _validate_public_https_url(final_url, allowlist=allowlist)
+            if not v2.get("ok"):
+                return {
+                    "ok": False,
+                    "error": f"redirect_blocked:{v2.get('error')}",
+                    "url": url,
+                    "final_url": final_url,
+                    "task_id": task.get("task_id"),
+                    "elapsed_ms": round((time.time() - t0) * 1000, 2),
+                }
+            raw = resp.read(max_chars + 4000)
+            ctype = resp.headers.get("Content-Type", "")
+            code = getattr(resp, "status", None) or 200
+        text = raw.decode("utf-8", errors="replace")
+        text = re.sub(r"(?is)<script[^>]*>.*?</script>", " ", text)
+        text = re.sub(r"(?is)<style[^>]*>.*?</style>", " ", text)
+        text = re.sub(r"(?s)<[^>]+>", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        truncated = len(text) > max_chars
+        if truncated:
+            text = text[:max_chars]
+        preview = text[:280]
+        content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        return {
+            "ok": True,
+            "url": url,
+            "final_url": final_url,
+            "status_code": code,
+            "content_type": ctype,
+            "truncated": truncated,
+            "chars": len(text),
+            "text": text,
+            "output": preview,  # للاتفاق الدلالي المختصر
+            "content_hash": content_hash,
+            "host": v.get("host"),
+            "elapsed_ms": round((time.time() - t0) * 1000, 2),
+            "task_id": task.get("task_id"),
+            "worker_note": "https_only_ssrf_protected",
+        }
+    except urllib.error.HTTPError as e:
+        return {
+            "ok": False,
+            "error": f"http_{e.code}",
+            "url": url,
+            "task_id": task.get("task_id"),
+            "elapsed_ms": round((time.time() - t0) * 1000, 2),
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "error": f"{type(e).__name__}:{e}",
+            "url": url,
+            "task_id": task.get("task_id"),
+            "elapsed_ms": round((time.time() - t0) * 1000, 2),
+        }
+
+
 def dispatch_task(kind: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """موجّه مركزي لتنفيذ مهمة حسب النوع."""
     data = data or {}
@@ -617,6 +777,8 @@ def dispatch_task(kind: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return execute_summarize_chunk(data)
     if kind == KIND_SEARCH:
         return execute_search_chunk(data)
+    if kind == KIND_WEB_FETCH:
+        return execute_web_fetch(data)
     return None
 
 
@@ -630,5 +792,6 @@ def result_kind_for(request_kind: str) -> str:
         KIND_KEYSPACE: KIND_KEYSPACE_RESULT,
         KIND_SUMMARIZE: KIND_SUMMARIZE_RESULT,
         KIND_SEARCH: KIND_SEARCH_RESULT,
+        KIND_WEB_FETCH: KIND_WEB_FETCH_RESULT,
         KIND_TASK_STATUS: KIND_TASK_STATUS_RESULT,
     }.get(request_kind, request_kind + "_result")

@@ -65,6 +65,7 @@ ALLOWED_TASK_CAPABILITIES = {
     "keyspace_scan": {"CPU"},
     "summarize_chunk": {"text", "CPU", "tf_engine"},
     "search_chunk": {"text", "CPU", "tf_engine"},
+    "web_fetch": {"text", "CPU", "web", "tf_engine"},
 }
 
 class LivingMeshNode:
@@ -184,7 +185,7 @@ class LivingMeshNode:
         
         capabilities = [
             "text", "image", "audio", "video", "tf_engine", "self_evolution",
-            "storage", "checkpoint", "GPU_HIGH", "GPU_LOW", "CPU",
+            "storage", "checkpoint", "GPU_HIGH", "GPU_LOW", "CPU", "web",
         ]
 
         self.node_info = {

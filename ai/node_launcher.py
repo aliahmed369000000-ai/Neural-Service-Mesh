@@ -188,6 +188,7 @@ a{{color:#6ea8fe}}
 <button class="btn" id="btn-search" onclick="runSearch()">بحث جماعي تجريبي</button>
 <button class="btn" id="btn-summary" onclick="runSummary()">تلخيص جماعي تجريبي</button>
 <button class="btn" id="btn-search-sum" onclick="runSearchThenSummary()">بحث + تلخيص</button>
+<button class="btn" id="btn-web" onclick="runWebTask()">مهمة ويب (example.com)</button>
 <pre id="trial-out" class="muted">اضغط زرّاً لعرض النتيجة هنا وتحديث الجداول.</pre>
 </div>
 <div class="card">
@@ -248,7 +249,7 @@ const DEMO_CORPUS = [
 ];
 
 function setBusy(busy) {{
-  ["btn-search","btn-summary","btn-search-sum"].forEach(id => {{
+  ["btn-search","btn-summary","btn-search-sum","btn-web"].forEach(id => {{
     const el = document.getElementById(id);
     if (el) el.disabled = !!busy;
   }});
@@ -312,6 +313,38 @@ async function runSummary() {{
       combined_summary: d.combined_summary,
       provenance: d.provenance,
       error: d.error
+    }});
+    await refreshTables();
+  }} catch (e) {{ showOut("خطأ: " + e); }}
+  setBusy(false);
+}}
+
+
+async function runWebTask() {{
+  setBusy(true);
+  showOut("جاري تكليف مهمة ويب آمنة…");
+  try {{
+    const r = await fetch("/v2/web-task", {{
+      method: "POST",
+      headers: {{"Content-Type": "application/json"}},
+      body: JSON.stringify({{
+        url: "https://example.com/",
+        n_workers: 1,
+        quorum: 1,
+        max_chars: 3000
+      }})
+    }});
+    const d = await r.json();
+    const w = d.winner || {{}};
+    const res = (w.result) || {{}};
+    showOut({{
+      ok: d.ok,
+      job_id: d.job_id,
+      url: d.url,
+      winner: w.worker,
+      content_hash: res.content_hash,
+      preview: (res.output || res.text || "").slice(0, 200),
+      error: d.error || res.error
     }});
     await refreshTables();
   }} catch (e) {{ showOut("خطأ: " + e); }}
@@ -423,6 +456,33 @@ async def handle_list_jobs(request):
     })
 
 
+
+
+async def handle_web_task(request):
+    """POST JSON: {url, n_workers?, strategy?, quorum?, max_chars?, allowlist?}
+    مهمة إنترنت آمنة: HTTPS فقط + حماية SSRF.
+    """
+    health = request.app.get("health")
+    if health is None:
+        return web.json_response({"error": "health_layer_missing"}, status=500)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid_json"}, status=400)
+    url = (body.get("url") or "").strip()
+    if not url:
+        return web.json_response({"error": "url_required"}, status=400)
+    orch = health.orchestrator()
+    report = await orch.submit_web_task(
+        url,
+        n_workers=int(body.get("n_workers") or 1),
+        strategy=body.get("strategy") or "first_success",
+        quorum=int(body.get("quorum") or 1),
+        max_chars=int(body.get("max_chars") or 6000),
+        timeout_per_task=float(body.get("timeout_per_task") or 20.0),
+        allowlist=body.get("allowlist"),
+    )
+    return web.json_response(report)
 
 async def handle_collective_search(request):
     """POST JSON: {query, corpus:[{source_id,text}], top_k?, n_workers?, then_summarize?}
@@ -878,6 +938,7 @@ async def main():
         web.get("/v2/jobs", handle_list_jobs),
         web.post("/v2/collective-summary", handle_collective_summary),
         web.post("/v2/collective-search", handle_collective_search),
+        web.post("/v2/web-task", handle_web_task),
         web.post("/v2/first-task", handle_first_verified_task),
         web.post("/v2/dispatch-task", handle_dispatch_task),
         web.get("/dashboard", handle_dashboard),

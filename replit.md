@@ -97,6 +97,7 @@ NSM_NODE_COUNT=3 python scripts/run_local_mesh.py
 | `POST /v2/job` | مهمة متعددة العمال (`kind`, `payload`, `n_workers`, `strategy`, `quorum`) |
 | `POST /v2/collective-search` | بحث جماعي — **corpus مُمرَّر فقط** (بلا SSRF) |
 | `POST /v2/collective-summary` | تلخيص جماعي مع `source_hash` و provenance |
+| `POST /v2/web-task` | مهمة ويب آمنة (HTTPS فقط + حماية SSRF) |
 | `GET /ws` | WebSocket P2P موقّع |
 
 ### مثال بحث جماعي
