@@ -239,95 +239,95 @@ def render_health():
     except Exception as _ve:
         st.info(f"تعذّر تحميل تقرير الجاهزية: {_ve}")
 
-    # ── GitHub Push ───────────────────────────────────────────────────────
-    st.markdown("---")
-    st.markdown('<div class="section-header">🚀 رفع إلى GitHub</div>', unsafe_allow_html=True)
+    # 🆕 تبسيط: أصبحت ميزة "رفع إلى GitHub" (نادرة الاستخدام يومياً)
+    # خلف عنصر قابل للطي بدل الظهور الدائم المفتوح — نفس النموذج ونفس
+    # منطق git add/commit/push بالضبط بلا أي تعديل.
+    with st.expander("🚀 رفع إلى GitHub", expanded=False):
+        _gh_token = os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN", "").strip()
+        if not _gh_token:
+            st.warning("🔑 أضف **GITHUB_PERSONAL_ACCESS_TOKEN** في Secrets لتفعيل هذه الميزة.")
+        else:
+            col_gh1, col_gh2 = st.columns([3, 1])
+            with col_gh1:
+                commit_msg = st.text_input(
+                    "رسالة الـ Commit",
+                    value="NSM update — رفع من الواجهة",
+                    key="gh_commit_msg",
+                    label_visibility="visible",
+                )
+            with col_gh2:
+                st.markdown("<br>", unsafe_allow_html=True)
+                push_btn = st.button("⬆️ Push", key="gh_push_btn", use_container_width=True, type="primary")
 
-    _gh_token = os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN", "").strip()
-    if not _gh_token:
-        st.warning("🔑 أضف **GITHUB_PERSONAL_ACCESS_TOKEN** في Secrets لتفعيل هذه الميزة.")
-    else:
-        col_gh1, col_gh2 = st.columns([3, 1])
-        with col_gh1:
-            commit_msg = st.text_input(
-                "رسالة الـ Commit",
-                value="NSM update — رفع من الواجهة",
-                key="gh_commit_msg",
-                label_visibility="visible",
-            )
-        with col_gh2:
-            st.markdown("<br>", unsafe_allow_html=True)
-            push_btn = st.button("⬆️ Push", key="gh_push_btn", use_container_width=True, type="primary")
-
-        if push_btn:
-            if not commit_msg.strip():
-                st.warning("أدخل رسالة commit أولاً.")
-            else:
-                import subprocess as _sp
-                with st.spinner("⟳ جارٍ الرفع إلى GitHub..."):
-                    try:
-                        # git add
-                        r_add = _sp.run(
-                            ["git", "add", "-A"],
-                            cwd=str(BASE), capture_output=True, text=True, timeout=15
-                        )
-                        if r_add.returncode != 0:
-                            st.error(f"❌ فشل git add:\n{r_add.stderr[:400] or r_add.stdout[:400]}")
-                            raise RuntimeError("git add failed")
-                        # git commit
-                        r_commit = _sp.run(
-                            ["git", "-c", "user.email=nsm@replit.com",
-                             "-c", "user.name=NSM Agent",
-                             "commit", "-m", commit_msg.strip()],
-                            cwd=str(BASE), capture_output=True, text=True, timeout=15,
-                            env={**os.environ,
-                                 "GIT_AUTHOR_NAME": "NSM Agent",
-                                 "GIT_AUTHOR_EMAIL": "nsm@replit.com",
-                                 "GIT_COMMITTER_NAME": "NSM Agent",
-                                 "GIT_COMMITTER_EMAIL": "nsm@replit.com"},
-                        )
-                        # إذا لا يوجد تغيير جديد، نكمل الـ push للـ commit الحالي
-                        nothing_to_commit = (
-                            r_commit.returncode != 0 and
-                            "nothing to commit" in (r_commit.stdout + r_commit.stderr)
-                        )
-                        if r_commit.returncode != 0 and not nothing_to_commit:
-                            st.error(f"❌ فشل Commit:\n{r_commit.stderr[:400] or r_commit.stdout[:400]}")
-                        else:
-                            # git push
-                            _remote = (
-                                f"https://aliahmed369000000-ai:{_gh_token}"
-                                "@github.com/aliahmed369000000-ai/Neural-Service-Mesh.git"
+            if push_btn:
+                if not commit_msg.strip():
+                    st.warning("أدخل رسالة commit أولاً.")
+                else:
+                    import subprocess as _sp
+                    with st.spinner("⟳ جارٍ الرفع إلى GitHub..."):
+                        try:
+                            # git add
+                            r_add = _sp.run(
+                                ["git", "add", "-A"],
+                                cwd=str(BASE), capture_output=True, text=True, timeout=15
                             )
-                            r_push = _sp.run(
-                                ["git", "push", _remote, "main"],
-                                cwd=str(BASE), capture_output=True, text=True, timeout=30
+                            if r_add.returncode != 0:
+                                st.error(f"❌ فشل git add:\n{r_add.stderr[:400] or r_add.stdout[:400]}")
+                                raise RuntimeError("git add failed")
+                            # git commit
+                            r_commit = _sp.run(
+                                ["git", "-c", "user.email=nsm@replit.com",
+                                 "-c", "user.name=NSM Agent",
+                                 "commit", "-m", commit_msg.strip()],
+                                cwd=str(BASE), capture_output=True, text=True, timeout=15,
+                                env={**os.environ,
+                                     "GIT_AUTHOR_NAME": "NSM Agent",
+                                     "GIT_AUTHOR_EMAIL": "nsm@replit.com",
+                                     "GIT_COMMITTER_NAME": "NSM Agent",
+                                     "GIT_COMMITTER_EMAIL": "nsm@replit.com"},
                             )
-                            if r_push.returncode == 0:
-                                st.success("✅ تم الرفع إلى GitHub بنجاح!")
-                                # عرض معلومات الـ commit الأخير
-                                r_log = _sp.run(
-                                    ["git", "log", "--oneline", "-1"],
-                                    cwd=str(BASE), capture_output=True, text=True
-                                )
-                                st.code(r_log.stdout.strip(), language="text")
+                            # إذا لا يوجد تغيير جديد، نكمل الـ push للـ commit الحالي
+                            nothing_to_commit = (
+                                r_commit.returncode != 0 and
+                                "nothing to commit" in (r_commit.stdout + r_commit.stderr)
+                            )
+                            if r_commit.returncode != 0 and not nothing_to_commit:
+                                st.error(f"❌ فشل Commit:\n{r_commit.stderr[:400] or r_commit.stdout[:400]}")
                             else:
-                                st.error(f"❌ فشل Push:\n{r_push.stderr[:400] or r_push.stdout[:400]}")
-                    except Exception as _gh_err:
-                        st.error(f"❌ خطأ غير متوقع: {_gh_err}")
+                                # git push
+                                _remote = (
+                                    f"https://aliahmed369000000-ai:{_gh_token}"
+                                    "@github.com/aliahmed369000000-ai/Neural-Service-Mesh.git"
+                                )
+                                r_push = _sp.run(
+                                    ["git", "push", _remote, "main"],
+                                    cwd=str(BASE), capture_output=True, text=True, timeout=30
+                                )
+                                if r_push.returncode == 0:
+                                    st.success("✅ تم الرفع إلى GitHub بنجاح!")
+                                    # عرض معلومات الـ commit الأخير
+                                    r_log = _sp.run(
+                                        ["git", "log", "--oneline", "-1"],
+                                        cwd=str(BASE), capture_output=True, text=True
+                                    )
+                                    st.code(r_log.stdout.strip(), language="text")
+                                else:
+                                    st.error(f"❌ فشل Push:\n{r_push.stderr[:400] or r_push.stdout[:400]}")
+                        except Exception as _gh_err:
+                            st.error(f"❌ خطأ غير متوقع: {_gh_err}")
 
-        # عرض آخر commit
-        try:
-            import subprocess as _sp2
-            _log = _sp2.run(
-                ["git", "log", "--oneline", "-3"],
-                cwd=str(BASE), capture_output=True, text=True, timeout=5
-            )
-            if _log.stdout.strip():
-                with st.expander("📋 آخر 3 commits"):
-                    st.code(_log.stdout.strip(), language="text")
-        except Exception:
-            pass
+            # عرض آخر commit
+            try:
+                import subprocess as _sp2
+                _log = _sp2.run(
+                    ["git", "log", "--oneline", "-3"],
+                    cwd=str(BASE), capture_output=True, text=True, timeout=5
+                )
+                if _log.stdout.strip():
+                    with st.expander("📋 آخر 3 commits"):
+                        st.code(_log.stdout.strip(), language="text")
+            except Exception:
+                pass
 
     # أزرار الإجراءات
     st.markdown("---")
@@ -348,48 +348,53 @@ def render_health():
     # سجل مستقل تماماً عن CKG (القرآن) — يتتبّع فقط استدعاءات وكلاء AI
     # (ai/agent_categories.py) من "hub" أو "orchestrator" لأغراض التشخيص.
     st.markdown("---")
-    st.markdown('<div class="section-header">🔎 رقابة وكلاء AI (Observability)</div>', unsafe_allow_html=True)
-    try:
-        from ai.agent_audit import get_default_audit_log
-        _audit = get_default_audit_log()
-        _summary = _audit.summary()
-    except Exception as _audit_err:
-        _audit = None
-        _summary = None
-        st.caption(f"⚠️ تعذّر تحميل سجل تدقيق الوكلاء: {_audit_err}")
+    with st.expander("🔎 رقابة وكلاء AI (Observability)", expanded=False):
+        try:
+            from ai.agent_audit import get_default_audit_log
+            _audit = get_default_audit_log()
+            _summary = _audit.summary()
+        except Exception as _audit_err:
+            _audit = None
+            _summary = None
+            st.caption(f"⚠️ تعذّر تحميل سجل تدقيق الوكلاء: {_audit_err}")
 
-    if _summary:
-        if _summary["total_events"] == 0:
-            st.caption("لا توجد تفاعلات مسجَّلة بعد — استخدم تبويب \"🤖 وكلاء AI\" أو \"🤝 منسّق الوكلاء\" أولاً.")
-        else:
-            m1, m2, m3 = st.columns(3)
-            m1.metric("إجمالي التفاعلات", _summary["total_events"])
-            m2.metric("عبر hub", _summary["by_source"].get("hub", 0))
-            m3.metric("عبر orchestrator", _summary["by_source"].get("orchestrator", 0))
+        if _summary:
+            if _summary["total_events"] == 0:
+                st.caption("لا توجد تفاعلات مسجَّلة بعد — استخدم تبويب \"🤖 وكلاء AI\" أو \"🤝 منسّق الوكلاء\" أولاً.")
+            else:
+                m1, m2, m3 = st.columns(3)
+                m1.metric("إجمالي التفاعلات", _summary["total_events"])
+                m2.metric("عبر hub", _summary["by_source"].get("hub", 0))
+                m3.metric("عبر orchestrator", _summary["by_source"].get("orchestrator", 0))
 
-            web_pct = (
-                (_summary["web_used_count"] / _summary["total_events"]) * 100
-                if _summary["total_events"] else 0
-            )
-            st.caption(f"🌐 استخدم بحث ويب حقيقي في {_summary['web_used_count']} تفاعل ({web_pct:.0f}%)")
-
-            if _summary["by_category"]:
-                st.markdown(
-                    "**حسب الوكيل:** " + "، ".join(
-                        f"{k}: {v}" for k, v in _summary["by_category"].items()
-                    )
+                web_pct = (
+                    (_summary["web_used_count"] / _summary["total_events"]) * 100
+                    if _summary["total_events"] else 0
                 )
+                st.caption(f"🌐 استخدم بحث ويب حقيقي في {_summary['web_used_count']} تفاعل ({web_pct:.0f}%)")
 
-            with st.expander("📋 آخر التفاعلات المسجَّلة"):
+                if _summary["by_category"]:
+                    st.markdown(
+                        "**حسب الوكيل:** " + "، ".join(
+                            f"{k}: {v}" for k, v in _summary["by_category"].items()
+                        )
+                    )
+
+                # 🆕 ملاحظة: كان هذا أصلاً st.expander متداخل داخل expander آخر —
+                # Streamlit لا يدعم تعشيش expander داخل expander (يرفع
+                # StreamlitAPIException وقت التشغيل). بما أن القسم كله أصلاً
+                # أصبح خلف طيّة "🔎 رقابة وكلاء AI" الخارجية، استُبدل بعنوان
+                # فرعي بسيط بدل طيّة ثانية — نفس المحتوى والبيانات بالضبط.
+                st.markdown("**📋 آخر التفاعلات المسجَّلة**")
                 recent = _audit.get_recent(15)
                 for entry in recent:
-                    web_tag = "🌐" if entry.get("web_used") else ""
-                    src_tag = "🤝" if entry.get("source") == "orchestrator" else "🤖"
-                    st.markdown(
-                        f"{src_tag} **{entry.get('category_title', '')}** "
-                        f"{web_tag} — {entry.get('provider', '') or '—'} "
-                        f"— {entry.get('timestamp', '')[:19]}"
-                    )
-                    q = entry.get("question_preview", "")
-                    if q:
-                        st.caption(f"س: {q[:120]}{'…' if len(q) > 120 else ''}")
+                        web_tag = "🌐" if entry.get("web_used") else ""
+                        src_tag = "🤝" if entry.get("source") == "orchestrator" else "🤖"
+                        st.markdown(
+                            f"{src_tag} **{entry.get('category_title', '')}** "
+                            f"{web_tag} — {entry.get('provider', '') or '—'} "
+                            f"— {entry.get('timestamp', '')[:19]}"
+                        )
+                        q = entry.get("question_preview", "")
+                        if q:
+                            st.caption(f"س: {q[:120]}{'…' if len(q) > 120 else ''}")
