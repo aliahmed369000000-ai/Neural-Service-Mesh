@@ -12,6 +12,7 @@ import time
 import uuid
 import base64
 import asyncio
+from collections import deque
 try:
     import websockets
 except ImportError:
@@ -50,6 +51,7 @@ MAX_MESSAGE_BYTES = 256 * 1024          # 256 KB حد أقصى لأي رسالة
 MAX_TIMESTAMP_SKEW_SEC = 300            # ±5 دقائق
 NONCE_CACHE_MAX = 4096                  # أقصى عدد nonces محفوظة في الذاكرة
 NONCE_TTL_SEC = 600                     # عمر الـ nonce في الكاش (10 دقائق)
+GOSSIP_ID_CACHE_MAX = 4096              # أقصى عدد معرّفات gossip محفوظة لمنع تسرّب الذاكرة
 RATE_LIMIT_WINDOW_SEC = 10.0            # نافذة معدل الطلبات
 RATE_LIMIT_MAX_PER_PEER = 60            # أقصى رسائل لكل نظير داخل النافذة
 ALLOWED_TASK_CAPABILITIES = {
@@ -293,10 +295,16 @@ class LivingMeshNode:
 
         if not hasattr(self, "_seen_gossip_ids"):
             self._seen_gossip_ids: Set[str] = set()
+            self._seen_gossip_order: deque = deque()
         if gossip_id in self._seen_gossip_ids:
             # سبق أن استقبلنا/رحّلنا هذه الخبرة بعينها — امتصّها ولا تُعِد بثّها
             return
         self._seen_gossip_ids.add(gossip_id)
+        self._seen_gossip_order.append(gossip_id)
+        # حد أقصى للكاش لمنع تسرّب الذاكرة على عقدة تعمل لفترة طويلة (نفس منهج NONCE_CACHE_MAX)
+        while len(self._seen_gossip_order) > GOSSIP_ID_CACHE_MAX:
+            oldest = self._seen_gossip_order.popleft()
+            self._seen_gossip_ids.discard(oldest)
 
         state = self._load_state()
         exp_entry = {
@@ -1860,6 +1868,7 @@ class LivingMeshNode:
             "metrics": dict(self._metrics),
             "seen_nonces_count": len(self._seen_nonces),
             "tracked_peers_rate": len(self._peer_msg_times),
+            "seen_gossip_ids_count": len(getattr(self, "_seen_gossip_ids", set())),
             "active_connections": len(getattr(self, "active_connections", set()) or set()),
             "task_registry_size": len(self._task_registry),
             "tasks_by_status": by_status,
