@@ -18,17 +18,12 @@ def render_agent_orchestrator():
     المستخدَمة في تبويب Agents Hub)، ثم يعرض ردودهم، مع توليف اختياري
     لإجابة موحّدة. يطبّق نمط Multi-Agent Systems: تفويض مهمة رئيسية إلى
     وكلاء متخصصين ثم تجميع نتائجهم عبر وكيل "منسّق"."""
-    st.markdown("""
-    <div style="text-align:center;padding:1rem 0 0.5rem">
-        <span style="font-size:2rem">🤝</span>
-        <div style="font-size:1.5rem;font-weight:900;color:var(--gold)">
-            منسّق الوكلاء
-        </div>
-        <div style="color:var(--text-muted);font-size:0.85rem;direction:rtl">
-            وزّع مهمتك تلقائياً على وكلاء "🤖 وكلاء AI" المتخصصين، ثم احصل على إجابة موحّدة
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    # 🆕 تبسيط: استُبدلت اللافتة الزخرفية (أيقونة كبيرة + عنوان بخط كبير)
+    # بعنوان section-header القياسي — بنفس منهجية باقي صفحات NSM. الغرض من
+    # الصفحة موضّح أصلاً في صندوق st.info الظاهر فوقها مباشرة من التبويب
+    # الأب (مجموعة "🤖 الوكلاء")، فلا داعٍ لتكرار نفس المعنى بلافتة أكبر.
+    st.markdown('<div class="section-header">🤝 منسّق الوكلاء</div>', unsafe_allow_html=True)
+    st.caption('وزّع مهمتك تلقائياً على وكلاء "🤖 وكلاء AI" المتخصصين، ثم احصل على إجابة موحّدة')
 
     if not _AGENTS_HUB_OK or not _ORCHESTRATOR_OK:
         st.error("⚠️ تعذّر تحميل وحدات الوكلاء (ai/agent_categories.py أو ai/godmode.py).")
