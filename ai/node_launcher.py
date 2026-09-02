@@ -167,6 +167,10 @@ th{{color:#8b9bb8;font-weight:600}}
 code{{font-size:.8rem;color:#c4d4f5}}
 .ok{{color:#3dd68c}} .bad{{color:#f07178}}
 a{{color:#6ea8fe}}
+.btn{{background:#1a2744;color:#e8eefc;border:1px solid #3d5a8a;border-radius:8px;padding:10px 14px;margin:4px 6px 4px 0;cursor:pointer;font-size:.9rem}}
+.btn:hover{{background:#243556}}
+.btn:disabled{{opacity:.5;cursor:wait}}
+#trial-out{{margin-top:10px;white-space:pre-wrap;font-size:.85rem;color:#b8c7e6}}
 </style></head><body>
 <h1>NSM Mesh Dashboard</h1>
 <p class="muted">{_esc(snap.get('node_id'))} · {_esc(snap.get('host'))}:{_esc(snap.get('port'))} · {_esc(snap.get('ts'))} · تحديث كل 15ث</p>
@@ -177,6 +181,14 @@ a{{color:#6ea8fe}}
 <div class="metric"><b>{_esc(snap.get('receipts'))}</b>إيصالات</div>
 <div class="metric"><b>{len(jobs)}</b>مهام في الذاكرة</div>
 <div class="metric"><b>{len(decisions)}</b>قرارات</div>
+</div>
+<div class="card">
+<h2>تجربة سريعة (محلية — بلا إنترنت)</h2>
+<p class="muted">نصوص تجريبية مضمّنة تُرسل إلى واجهات البحث/التلخيص على هذه العقدة.</p>
+<button class="btn" id="btn-search" onclick="runSearch()">بحث جماعي تجريبي</button>
+<button class="btn" id="btn-summary" onclick="runSummary()">تلخيص جماعي تجريبي</button>
+<button class="btn" id="btn-search-sum" onclick="runSearchThenSummary()">بحث + تلخيص</button>
+<pre id="trial-out" class="muted">اضغط زرّاً لعرض النتيجة هنا وتحديث الجداول.</pre>
 </div>
 <div class="card">
 <h2>آخر المهام (jobs)</h2>
@@ -228,6 +240,114 @@ async function refreshTables(){{
   }} catch (e) {{ console.warn(e); }}
 }}
 setInterval(refreshTables, 5000);
+
+const DEMO_CORPUS = [
+  {{source_id: "edu", text: "الذكاء الاصطناعي في التعليم يحسّن التخصيص والجودة. التقييم المستمر يدعم المعلم."}},
+  {{source_id: "mesh", text: "الشبكات الموزعة والنصاب يرفعان موثوقية النتائج. الإيصالات الموقّعة تمنع التزوير."}},
+  {{source_id: "ops", text: "مراقبة الصحة وإعادة المحاولة الذكية تقلّلان توقف الخدمة في الأنظمة الموزعة."}}
+];
+
+function setBusy(busy) {{
+  ["btn-search","btn-summary","btn-search-sum"].forEach(id => {{
+    const el = document.getElementById(id);
+    if (el) el.disabled = !!busy;
+  }});
+}}
+
+function showOut(obj) {{
+  const el = document.getElementById("trial-out");
+  if (!el) return;
+  el.textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+}}
+
+async function runSearch() {{
+  setBusy(true);
+  showOut("جاري البحث الجماعي…");
+  try {{
+    const r = await fetch("/v2/collective-search", {{
+      method: "POST",
+      headers: {{"Content-Type": "application/json"}},
+      body: JSON.stringify({{
+        query: "نصاب شبكات",
+        corpus: DEMO_CORPUS,
+        top_k: 3,
+        n_workers: 1,
+        quorum: 1,
+        then_summarize: false
+      }})
+    }});
+    const d = await r.json();
+    showOut({{
+      ok: d.ok,
+      job_id: d.job_id,
+      hit_count: d.hit_count,
+      hits: (d.hits || []).map(h => ({{id: h.source_id, score: h.score, hash: (h.source_hash||"").slice(0,12)}})),
+      error: d.error
+    }});
+    await refreshTables();
+  }} catch (e) {{ showOut("خطأ: " + e); }}
+  setBusy(false);
+}}
+
+async function runSummary() {{
+  setBusy(true);
+  showOut("جاري التلخيص الجماعي…");
+  try {{
+    const r = await fetch("/v2/collective-summary", {{
+      method: "POST",
+      headers: {{"Content-Type": "application/json"}},
+      body: JSON.stringify({{
+        query: "موثوقية",
+        sources: DEMO_CORPUS,
+        n_workers: 1,
+        redundancy: 1,
+        quorum: 1
+      }})
+    }});
+    const d = await r.json();
+    showOut({{
+      ok: d.ok,
+      job_id: d.job_id,
+      sources_ok: d.sources_ok,
+      combined_summary: d.combined_summary,
+      provenance: d.provenance,
+      error: d.error
+    }});
+    await refreshTables();
+  }} catch (e) {{ showOut("خطأ: " + e); }}
+  setBusy(false);
+}}
+
+async function runSearchThenSummary() {{
+  setBusy(true);
+  showOut("جاري البحث ثم التلخيص…");
+  try {{
+    const r = await fetch("/v2/collective-search", {{
+      method: "POST",
+      headers: {{"Content-Type": "application/json"}},
+      body: JSON.stringify({{
+        query: "نصاب شبكات",
+        corpus: DEMO_CORPUS,
+        top_k: 2,
+        n_workers: 1,
+        quorum: 1,
+        then_summarize: true
+      }})
+    }});
+    const d = await r.json();
+    showOut({{
+      ok: d.ok,
+      job_id: d.job_id,
+      hit_count: d.hit_count,
+      hits: (d.hits || []).map(h => ({{id: h.source_id, score: h.score}})),
+      summary_ok: d.summary && d.summary.ok,
+      combined_summary: d.summary && d.summary.combined_summary,
+      error: d.error
+    }});
+    await refreshTables();
+  }} catch (e) {{ showOut("خطأ: " + e); }}
+  setBusy(false);
+}}
 </script>
 </body></html>"""
     return web.Response(text=html, content_type="text/html")
