@@ -42,6 +42,53 @@ async def handle_status(request):
     }
     return web.json_response(status, dumps=lambda x: json.dumps(x, indent=2))
 
+
+async def handle_health(request):
+    """Endpoint صحة الشبكة — Node 2.0."""
+    node = request.app['node']
+    snap = node.network_health_snapshot()
+    snap["status"] = "healthy" if snap.get("node_id") else "degraded"
+    return web.json_response(snap)
+
+async def handle_v2_status(request):
+    node = request.app['node']
+    snap = node.network_health_snapshot()
+    snap["reputation_ledger"] = node.get_reputation()
+    state = node._load_state()
+    snap["federated_rounds"] = list((state.get("federated_rounds") or {}).keys())[-5:]
+    return web.json_response(snap)
+
+async def handle_dashboard(request):
+    """لوحة حالة مختصرة HTML."""
+    node = request.app['node']
+    snap = node.network_health_snapshot()
+    rep = node.get_reputation(node.node_id)
+    html = f"""<!DOCTYPE html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8"/>
+<title>NSM Node 2.0 — {snap.get('node_id')}</title>
+<style>
+body{{font-family:system-ui,sans-serif;background:#0b1220;color:#e8eefc;margin:0;padding:24px}}
+.card{{background:#151c2e;border-radius:12px;padding:16px 20px;margin-bottom:12px;border:1px solid #24304d}}
+h1{{margin:0 0 8px;font-size:1.4rem}} .muted{{color:#8b9bb8;font-size:.9rem}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}}
+.metric{{background:#0f1626;border-radius:8px;padding:12px;text-align:center}}
+.metric b{{display:block;font-size:1.3rem;color:#6ea8fe}}
+</style></head><body>
+<h1>NSM Node 2.0 Vertical Slice</h1>
+<p class="muted">{snap.get('node_id')} · {snap.get('host')}:{snap.get('port')} · {snap.get('ts')}</p>
+<div class="grid">
+<div class="metric"><b>{snap.get('online_peers')}</b>أقران متصلون</div>
+<div class="metric"><b>{snap.get('known_nodes')}</b>عقد معروفة</div>
+<div class="metric"><b>{snap.get('reputation_self')}</b>السمعة</div>
+<div class="metric"><b>{snap.get('receipts')}</b>إيصالات</div>
+<div class="metric"><b>{snap.get('content_objects')}</b>محتوى</div>
+<div class="metric"><b>{snap.get('identity_pub_fingerprint')}</b>بصمة الهوية</div>
+</div>
+<div class="card"><div class="muted">Surah: {snap.get('surah_awareness')}</div></div>
+<div class="card"><div class="muted">API: /health · /v2/status · /ws · /status</div></div>
+</body></html>"""
+    return web.Response(text=html, content_type="text/html")
+
 async def handle_ws(request):
     """معالج WebSocket موحّد عبر مسار الرسائل الموقّعة في LivingMeshNode.
     أُزيل مسار التجميع المركزي القديم (gradient_buffer / All-Reduce المحلي).
@@ -121,8 +168,11 @@ async def main():
     app['node'] = node
     app.add_routes([
         web.get('/status', handle_status),
+        web.get('/health', handle_health),
+        web.get('/v2/status', handle_v2_status),
+        web.get('/dashboard', handle_dashboard),
         web.get('/ws', handle_ws),
-        web.get('/', handle_status) # Health check endpoint
+        web.get('/', handle_status),
     ])
     
     runner = web.AppRunner(app)
