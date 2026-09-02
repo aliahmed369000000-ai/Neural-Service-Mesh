@@ -55,3 +55,20 @@ curl -s -X POST http://SEED:7860/v2/first-task \
 - `/v2/join` يحفظ مفتاح العقدة في `keys/{node_id}.pub` ويسجّلها في `network_state`
 - المهمة الأولى الافتراضية: `map_reduce_map` محلية على البذرة مع إيصال قابل للتحقق
 - للتنفيذ على عقدتك أنت: شغّل `node_launcher` محلياً ثم `POST /v2/first-task` على **منفذ عقدتك**
+
+
+## مسار المهمة على العامل (إيصال من العقدة الخارجية)
+
+```
+1) GET  seed/v2/join-info
+2) POST seed/v2/join              ← البذرة تحفظ مفتاح العامل
+3) POST worker/v2/accept-peer-key ← العامل يحفظ مفتاح البذرة
+4) POST seed/v2/accept-peer-key   ← تأكيد ثنائي (اختياري إن تم في 2)
+5) POST worker/v2/first-task      ← المهمة تُنفَّذ على العامل؛ الإيصال موقّع منه
+6) البذرة تتحقق من الإيصال بمفتاح العامل المخزّن
+```
+
+```bash
+python3 scripts/run_live_join_demo.py
+# worker:19901 · seed:19876
+```

@@ -142,6 +142,7 @@ async def handle_join_info(request):
         "endpoints": {
             "join_info": "GET /v2/join-info",
             "join": "POST /v2/join",
+            "accept_peer_key": "POST /v2/accept-peer-key",
             "health": "GET /health",
             "task": "POST /v2/task",
             "tasks": "GET /v2/tasks",
@@ -209,13 +210,40 @@ async def handle_join(request):
         "seed_public_key": node._pub_pem(),
         "ws_url": f"ws://{node.host}:{node.port}/ws",
         "next_steps": [
-            "GET /health on seed to verify reachability",
-            "POST /v2/task with local=true for first verified task on your node, or against seed",
+            "Store seed_public_key via POST /v2/accept-peer-key on your node",
+            "POST /v2/first-task on YOUR node HTTP for worker-signed receipt",
+            "Optional: seed verifies worker receipt using stored public_key",
             "Open WS /ws for P2P discovery and signed messaging",
         ],
         "peer_record": {k: v for k, v in info.items() if k != "public_key"},
     })
 
+
+
+async def handle_accept_peer_key(request):
+    """
+    تبادل مفاتيح ثنائي: تحفظ هذه العقدة مفتاح نظير معروف.
+    JSON: {node_id, public_key}
+    """
+    node = request.app["node"]
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "invalid_json"}, status=400)
+    peer_id = body.get("node_id") or body.get("id")
+    pub = body.get("public_key")
+    if not peer_id or not pub:
+        return web.json_response({"ok": False, "error": "node_id_and_public_key_required"}, status=400)
+    try:
+        (node.keys_dir / f"{peer_id}.pub").write_text(pub if isinstance(pub, str) else pub.decode())
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)}, status=500)
+    return web.json_response({
+        "ok": True,
+        "stored_peer": peer_id,
+        "self_node_id": node.node_id,
+        "self_public_key": node._pub_pem(),
+    })
 
 async def handle_first_verified_task(request):
     """
@@ -331,6 +359,7 @@ async def main():
         web.get('/v2/status', handle_v2_status),
         web.get('/v2/join-info', handle_join_info),
         web.post('/v2/join', handle_join),
+        web.post('/v2/accept-peer-key', handle_accept_peer_key),
         web.get('/v2/routes', handle_routes),
         web.get('/v2/tasks', handle_tasks),
         web.post('/v2/task', handle_submit_task),
