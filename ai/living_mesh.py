@@ -602,7 +602,10 @@ class LivingMeshNode:
                 sender_info = (exp_data or {}).get("node_info")
                 if sender_info and sender_id != self.node_id:
                     state = self._load_state()
-                    state["nodes"][sender_id] = sender_info
+                    info = dict(sender_info)
+                    info["status"] = "online"
+                    info["last_seen"] = datetime.now(timezone.utc).isoformat()
+                    state["nodes"][sender_id] = info
                     self._save_state(state)
                 filter_caps = (exp_data or {}).get("require_capabilities") or (exp_data or {}).get("capabilities")
                 peers_list = self._get_active_peers_list(require_capabilities=filter_caps)
@@ -634,14 +637,29 @@ class LivingMeshNode:
                 resp_pub_key = exp_data.get("public_key")
                 if resp_pub_key and not pub_key_path.exists():
                     pub_key_path.write_text(resp_pub_key)
+                # حدّث حالة المرسل (البذرة) كـ online فور الاستجابة
+                if sender_id and sender_id != self.node_id:
+                    state = self._load_state()
+                    prev = dict(state.get("nodes", {}).get(sender_id) or {})
+                    prev.update({
+                        "id": sender_id,
+                        "status": "online",
+                        "last_seen": datetime.now(timezone.utc).isoformat(),
+                    })
+                    if resp_pub_key:
+                        prev.setdefault("public_key", resp_pub_key)
+                    state.setdefault("nodes", {})[sender_id] = prev
+                    self._save_state(state)
                 new_peers = exp_data.get("peers", [])
                 for peer in new_peers:
                     peer_id = peer.get("id")
                     if peer_id and peer_id != self.node_id:
                         state = self._load_state()
-                        if peer_id not in state["nodes"]:
-                            state["nodes"][peer_id] = peer
-                            self._save_state(state)
+                        info = dict(peer)
+                        info["status"] = "online"
+                        info["last_seen"] = datetime.now(timezone.utc).isoformat()
+                        state.setdefault("nodes", {})[peer_id] = info
+                        self._save_state(state)
                         # اكتشاف مفتاح متعدد القفزات: احفظ مفتاح عقدة لم نتواصل معها مباشرة بعد
                         peer_pub_key = peer.get("public_key")
                         peer_key_path = self.keys_dir / f"{peer_id}.pub"
