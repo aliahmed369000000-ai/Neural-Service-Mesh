@@ -5,6 +5,7 @@ ui_pages/home.py
 from __future__ import annotations
 
 from app_core import *  # noqa: F401,F403 — إعادة تصدير كل الاستيرادات والدوال المساعدة المشتركة
+from ui_components import render_greeting_hero
 
 
 
@@ -22,6 +23,22 @@ def render_home():
         "🎓 التدريب والعمليات": 4,
         "ℹ️ عن NSM": 5 + _owner_tabs_offset,
     }
+
+    # ── 👋 ترويسة ترحيب مبسّطة — أول ما يراه الزائر الآن، بروح تطبيقات
+    # المحادثة الحديثة (أيقونة + عبارة ترحيب حسب الوقت + سطر واحد فقط)،
+    # بدل لوحة التحكم المزدحمة التي كانت تظهر مباشرة سابقاً. لا تغيّر أي
+    # منطق أو حالة قائمة — إضافة عرض فقط.
+    _greet_hour = datetime.now().hour
+    if _greet_hour < 12:
+        _greet_word = "صباح الخير"
+    elif _greet_hour < 18:
+        _greet_word = "مساء الخير"
+    else:
+        _greet_word = "مساء الخير"
+    _greet_account = st.session_state.get("_account")
+    _greet_name = _greet_account.get("username") if _greet_account else None
+    _greet_title = f"{_greet_word}، {_greet_name}" if _greet_name else _greet_word
+    render_greeting_hero(_greet_title, "اسأل عن أي مفهوم إسلامي أو عربي، أو تابع من حيث توقفت.")
 
     # ── 👋 ترحيب أول زيارة — يظهر مرة واحدة فقط في الجلسة، قابل للإغلاق
     # إضافة UX فقط: لا يغيّر أي مسار بيانات أو منطق قائم.
@@ -115,75 +132,81 @@ def render_home():
                 st.rerun()
         st.markdown("")
 
-    # ══════════════════════════════════════════════════════════════════
-    # 🧭 لوحة التحكم — ملخص تشغيلي واختصارات سريعة من دون تكرار منطق الصفحات
-    # ══════════════════════════════════════════════════════════════════
-    import html as _dashboard_html
-    _dashboard_ckg_stats = load_ckg_stats()
-    _dashboard_message_count = len(_prev_msgs)
-    _dashboard_status = "جلسة نشطة" if _dashboard_message_count else "جاهزة للبدء"
-    _dashboard_last_text = _last_user_msg.strip().replace("\n", " ") if _last_user_msg else "لم تبدأ محادثة بعد — اطرح أول سؤال من تبويب المحادثة."
-    if len(_dashboard_last_text) > 135:
-        _dashboard_last_text = _dashboard_last_text[:135].rstrip() + "…"
-    _dashboard_last_text = _dashboard_html.escape(_dashboard_last_text)
-    _dashboard_concepts = _dashboard_ckg_stats.get("concepts", "—") if _dashboard_ckg_stats else "—"
-    _dashboard_relations = _dashboard_ckg_stats.get("relations", "—") if _dashboard_ckg_stats else "—"
-    _dashboard_knowledge_state = "متاحة" if _dashboard_ckg_stats else "قيد التهيئة"
+    # 🆕 تبسيط: هذا القسم (لوحة التحكم + الإحصائيات + مسارات العمل) كان
+    # يظهر مفتوحاً دائماً فوراً أعلى الصفحة الرئيسية ويُغرقها بمعلومات
+    # كثيفة. أصبح الآن داخل عنصر قابل للطي (مطوي افتراضياً) — نفس
+    # المحتوى والمنطق والأزرار تماماً بلا أي حذف، فقط خلف نقرة اختيارية
+    # لمن يريد التفاصيل، بينما تبقى الشاشة الأولى نظيفة وهادئة.
+    with st.expander("📊 نظرة عامة وإحصائيات سريعة (اختياري)", expanded=False):
+        # ══════════════════════════════════════════════════════════════════
+        # 🧭 لوحة التحكم — ملخص تشغيلي واختصارات سريعة من دون تكرار منطق الصفحات
+        # ══════════════════════════════════════════════════════════════════
+        import html as _dashboard_html
+        _dashboard_ckg_stats = load_ckg_stats()
+        _dashboard_message_count = len(_prev_msgs)
+        _dashboard_status = "جلسة نشطة" if _dashboard_message_count else "جاهزة للبدء"
+        _dashboard_last_text = _last_user_msg.strip().replace("\n", " ") if _last_user_msg else "لم تبدأ محادثة بعد — اطرح أول سؤال من تبويب المحادثة."
+        if len(_dashboard_last_text) > 135:
+            _dashboard_last_text = _dashboard_last_text[:135].rstrip() + "…"
+        _dashboard_last_text = _dashboard_html.escape(_dashboard_last_text)
+        _dashboard_concepts = _dashboard_ckg_stats.get("concepts", "—") if _dashboard_ckg_stats else "—"
+        _dashboard_relations = _dashboard_ckg_stats.get("relations", "—") if _dashboard_ckg_stats else "—"
+        _dashboard_knowledge_state = "متاحة" if _dashboard_ckg_stats else "قيد التهيئة"
 
-    st.markdown(f"""
-    <section class="nsm-dashboard-hero" aria-label="لوحة تحكم NSM">
-        <div class="nsm-dashboard-eyebrow">لوحة التحكم الرئيسية · متابعة سريعة</div>
-        <h2 class="nsm-dashboard-title">مرحباً بك في مركز القيادة المعرفي</h2>
-        <div class="nsm-dashboard-subtitle">
-            ابدأ من هنا للوصول إلى المحادثة والبحث والوكلاء. يعرض هذا الملخص حالة الجلسة
-            وأهم مؤشرات الشبكة من دون إخفاء أي أداة أو تغيير مسارها الأصلي.
+        st.markdown(f"""
+        <section class="nsm-dashboard-hero" aria-label="لوحة تحكم NSM">
+            <div class="nsm-dashboard-eyebrow">لوحة التحكم الرئيسية · متابعة سريعة</div>
+            <h2 class="nsm-dashboard-title">مرحباً بك في مركز القيادة المعرفي</h2>
+            <div class="nsm-dashboard-subtitle">
+                ابدأ من هنا للوصول إلى المحادثة والبحث والوكلاء. يعرض هذا الملخص حالة الجلسة
+                وأهم مؤشرات الشبكة من دون إخفاء أي أداة أو تغيير مسارها الأصلي.
+            </div>
+        </section>
+        <div class="nsm-dashboard-grid" role="list" aria-label="مؤشرات NSM الرئيسية">
+            <div class="nsm-dashboard-stat" role="listitem"><div class="nsm-dashboard-stat-value nsm-dashboard-stat-accent">{_dashboard_status}</div><div class="nsm-dashboard-stat-label">حالة الجلسة الحالية</div></div>
+            <div class="nsm-dashboard-stat" role="listitem"><div class="nsm-dashboard-stat-value">{_dashboard_message_count}</div><div class="nsm-dashboard-stat-label">رسائل هذه الجلسة</div></div>
+            <div class="nsm-dashboard-stat" role="listitem"><div class="nsm-dashboard-stat-value">{_dashboard_concepts}</div><div class="nsm-dashboard-stat-label">مفاهيم في الشبكة</div></div>
+            <div class="nsm-dashboard-stat" role="listitem"><div class="nsm-dashboard-stat-value">{_dashboard_knowledge_state}</div><div class="nsm-dashboard-stat-label">حالة المعرفة</div></div>
         </div>
-    </section>
-    <div class="nsm-dashboard-grid" role="list" aria-label="مؤشرات NSM الرئيسية">
-        <div class="nsm-dashboard-stat" role="listitem"><div class="nsm-dashboard-stat-value nsm-dashboard-stat-accent">{_dashboard_status}</div><div class="nsm-dashboard-stat-label">حالة الجلسة الحالية</div></div>
-        <div class="nsm-dashboard-stat" role="listitem"><div class="nsm-dashboard-stat-value">{_dashboard_message_count}</div><div class="nsm-dashboard-stat-label">رسائل هذه الجلسة</div></div>
-        <div class="nsm-dashboard-stat" role="listitem"><div class="nsm-dashboard-stat-value">{_dashboard_concepts}</div><div class="nsm-dashboard-stat-label">مفاهيم في الشبكة</div></div>
-        <div class="nsm-dashboard-stat" role="listitem"><div class="nsm-dashboard-stat-value">{_dashboard_knowledge_state}</div><div class="nsm-dashboard-stat-label">حالة المعرفة</div></div>
-    </div>
-    <div class="nsm-dashboard-lower">
-        <div class="nsm-dashboard-panel">
-            <div class="nsm-dashboard-panel-title">🕘 آخر نشاط</div>
-            <div class="nsm-dashboard-panel-copy">{_dashboard_last_text}</div>
-            <div class="nsm-dashboard-action-note">العلاقات المعرفية الحالية: {_dashboard_relations}</div>
+        <div class="nsm-dashboard-lower">
+            <div class="nsm-dashboard-panel">
+                <div class="nsm-dashboard-panel-title">🕘 آخر نشاط</div>
+                <div class="nsm-dashboard-panel-copy">{_dashboard_last_text}</div>
+                <div class="nsm-dashboard-action-note">العلاقات المعرفية الحالية: {_dashboard_relations}</div>
+            </div>
+            <div class="nsm-dashboard-panel">
+                <div class="nsm-dashboard-panel-title">⚡ جاهز للعمل</div>
+                <div class="nsm-dashboard-panel-copy">استخدم الاختصارات أدناه أو انتقل إلى أي تبويب من التبويبات الرئيسية. كل المكوّنات الحالية تعمل من مكانها المعتاد.</div>
+            </div>
         </div>
-        <div class="nsm-dashboard-panel">
-            <div class="nsm-dashboard-panel-title">⚡ جاهز للعمل</div>
-            <div class="nsm-dashboard-panel-copy">استخدم الاختصارات أدناه أو انتقل إلى أي تبويب من التبويبات الرئيسية. كل المكوّنات الحالية تعمل من مكانها المعتاد.</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
-    st.markdown('<div class="section-header">⚡ اختصارات سريعة</div>', unsafe_allow_html=True)
-    _dashboard_action_cols = st.columns(2)
-    with _dashboard_action_cols[0]:
-        if st.button("💬 ابدأ محادثة", key="home_dashboard_chat", use_container_width=True):
-            st.session_state["_nsm_home_jump_target"] = "💬 المحادثة"
-            st.rerun()
-    with _dashboard_action_cols[1]:
-        if st.button("🤖 راقب الوكلاء", key="home_dashboard_agents", use_container_width=True):
-            st.session_state["_nsm_home_jump_target"] = "🤖 الوكلاء"
-            st.rerun()
-    st.markdown('<div class="nsm-dashboard-action-note">هذه الاختصارات تنقلك إلى الصفحات الأصلية نفسها؛ لا توجد نسخة بديلة أو مسار معزول.</div>', unsafe_allow_html=True)
-
-    # مسارات العمل الأكثر استخداماً — طبقة إرشاد سريعة قبل التفاصيل الطويلة
-    st.markdown('<div class="section-header">🧭 مسارات العمل</div>', unsafe_allow_html=True)
-    _workflow_cards = [
-        ("💬", "اسأل واستكشف", "ابدأ محادثة عربية أو ابحث في شبكة المفاهيم.", "💬 المحادثة"),
-        ("🤖", "شغّل الوكلاء", "راقب المهام الجارية وحالة الوكلاء في مكان واحد.", "🤖 الوكلاء"),
-        ("📊", "راجع المعرفة", "تابع نمو المفاهيم والعلاقات والنتائج المستخرجة.", "🎓 التدريب والعمليات"),
-    ]
-    _workflow_cols = st.columns(3)
-    for _col, (_icon, _title, _copy, _target) in zip(_workflow_cols, _workflow_cards):
-        with _col:
-            st.markdown(f'<div class="nsm-workflow-card"><div class="nsm-workflow-icon">{_icon}</div><div class="nsm-workflow-title">{_title}</div><div class="nsm-workflow-copy">{_copy}</div></div>', unsafe_allow_html=True)
-            if st.button(f"فتح {_title}", key=f"home_workflow_{_title}", use_container_width=True):
-                st.session_state["_nsm_home_jump_target"] = _target
+        st.markdown('<div class="section-header">⚡ اختصارات سريعة</div>', unsafe_allow_html=True)
+        _dashboard_action_cols = st.columns(2)
+        with _dashboard_action_cols[0]:
+            if st.button("💬 ابدأ محادثة", key="home_dashboard_chat", use_container_width=True):
+                st.session_state["_nsm_home_jump_target"] = "💬 المحادثة"
                 st.rerun()
+        with _dashboard_action_cols[1]:
+            if st.button("🤖 راقب الوكلاء", key="home_dashboard_agents", use_container_width=True):
+                st.session_state["_nsm_home_jump_target"] = "🤖 الوكلاء"
+                st.rerun()
+        st.markdown('<div class="nsm-dashboard-action-note">هذه الاختصارات تنقلك إلى الصفحات الأصلية نفسها؛ لا توجد نسخة بديلة أو مسار معزول.</div>', unsafe_allow_html=True)
+
+        # مسارات العمل الأكثر استخداماً — طبقة إرشاد سريعة قبل التفاصيل الطويلة
+        st.markdown('<div class="section-header">🧭 مسارات العمل</div>', unsafe_allow_html=True)
+        _workflow_cards = [
+            ("💬", "اسأل واستكشف", "ابدأ محادثة عربية أو ابحث في شبكة المفاهيم.", "💬 المحادثة"),
+            ("🤖", "شغّل الوكلاء", "راقب المهام الجارية وحالة الوكلاء في مكان واحد.", "🤖 الوكلاء"),
+            ("📊", "راجع المعرفة", "تابع نمو المفاهيم والعلاقات والنتائج المستخرجة.", "🎓 التدريب والعمليات"),
+        ]
+        _workflow_cols = st.columns(3)
+        for _col, (_icon, _title, _copy, _target) in zip(_workflow_cols, _workflow_cards):
+            with _col:
+                st.markdown(f'<div class="nsm-workflow-card"><div class="nsm-workflow-icon">{_icon}</div><div class="nsm-workflow-title">{_title}</div><div class="nsm-workflow-copy">{_copy}</div></div>', unsafe_allow_html=True)
+                if st.button(f"فتح {_title}", key=f"home_workflow_{_title}", use_container_width=True):
+                    st.session_state["_nsm_home_jump_target"] = _target
+                    st.rerun()
 
     # ══════════════════════════════════════════════════════════════════
     # 📊 الشبكة المعرفية بالأرقام — أعداد حقيقية من CKG المحمَّل فعلياً

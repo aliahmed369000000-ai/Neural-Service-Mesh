@@ -247,12 +247,37 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], butto
 """
 
 
+_MINIMAL_HERO_CSS = r"""
+<style>
+/* 🆕 ترويسة ترحيب مبسّطة للصفحة الرئيسية — بديل هادئ للوحة التحكم
+   المزدحمة السابقة، بروح واجهات المحادثة الحديثة: أيقونة صغيرة + عبارة
+   ترحيب + سطر واحد خفيف، بلا بطاقات أو أرقام. */
+.nsm-greeting-hero { direction:rtl; text-align:center; padding:2.1rem 1rem 1.4rem; margin:0 0 .4rem; }
+.nsm-greeting-mark { width:46px; height:46px; margin:0 auto .9rem; display:grid; place-items:center; border-radius:14px; font-size:1.5rem; background:linear-gradient(135deg,var(--nsm-indigo),var(--nsm-cyan)); box-shadow:0 10px 24px rgba(45,212,191,.2); }
+.nsm-greeting-title { font-size:1.5rem; font-weight:800; color:var(--text); letter-spacing:-.01em; }
+.nsm-greeting-sub { margin-top:.4rem; color:var(--text-muted); font-size:.85rem; }
+@media (max-width:640px) { .nsm-greeting-hero { padding:1.4rem .5rem 1rem; } .nsm-greeting-title { font-size:1.22rem; } }
+</style>
+"""
+
+
 def inject_design_system() -> None:
     """يحقن CSS مرة واحدة لكل جلسة، مع احترام متغيرات ثيم NSM الحالية."""
     if st.session_state.get("_nsm_design_system_loaded"):
         return
     st.markdown(_DESIGN_CSS, unsafe_allow_html=True)
+    st.markdown(_MINIMAL_HERO_CSS, unsafe_allow_html=True)
     st.session_state["_nsm_design_system_loaded"] = True
+
+
+def render_greeting_hero(title: str, subtitle: str = "") -> None:
+    """ترويسة ترحيب مبسّطة (أيقونة + عبارة + سطر فرعي اختياري)."""
+    sub_html = f'<div class="nsm-greeting-sub">{escape(subtitle)}</div>' if subtitle else ""
+    st.markdown(
+        f'<div class="nsm-greeting-hero"><div class="nsm-greeting-mark">✦</div>'
+        f'<div class="nsm-greeting-title">{escape(title)}</div>{sub_html}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def render_brand_bar(caption: str = "الذكاء العربي · مراقبة حيّة") -> None:
@@ -425,4 +450,4 @@ def render_system_events(events: Sequence[Mapping[str, Any]], limit: int = 8) ->
     st.markdown("".join(html), unsafe_allow_html=True)
 
 
-__all__ = ["inject_design_system", "render_brand_bar", "render_status_bar", "render_section_header", "render_kpi_cards", "render_alert_cards", "render_agent_cards", "render_health_cards", "render_provider_cards", "render_system_events"]
+__all__ = ["inject_design_system", "render_brand_bar", "render_status_bar", "render_greeting_hero", "render_section_header", "render_kpi_cards", "render_alert_cards", "render_agent_cards", "render_health_cards", "render_provider_cards", "render_system_events"]

@@ -329,18 +329,11 @@ def main():
     except Exception:
         pass
 
-    # ── شريط الحالة العام — مؤشرات محلية فقط بلا أي اتصال خارجي ────────
-    # يوضح للمستخدم حالة الجلسة والتشغيل دون عرض قيم أسرار أو الادعاء
-    # بوجود عقد/خدمات حيّة لم يتم التحقق منها.
-    _has_optional_provider = bool(os.getenv("OPENROUTER_API_KEY", "").strip())
-    _session_label = "مسجّلة" if st.session_state.get("_account") else "زائر"
-    _runtime_label = "مزود اختياري مهيّأ" if _has_optional_provider else "الاحتياطي المحلي جاهز"
-    render_status_bar([
-        {"label": "الجلسة", "value": _session_label},
-        {"label": "التشغيل", "value": _runtime_label},
-        {"label": "الأمان", "value": "حماية محلية"},
-        {"label": "الوضع", "value": "واجهة RTL"},
-    ])
+    # 🆕 تبسيط الواجهة: أُزيل شريط الحالة العام الذي كان يظهر دائماً أعلى كل
+    # صفحة (الجلسة/التشغيل/الأمان/الوضع) — كان عرضاً زخرفياً بحتاً بلا أي
+    # منطق متصل به (لا حالة session_state تُقرأ أو تُكتب هنا)، وإزالته لا
+    # تغيّر أي سلوك أو مسار بيانات؛ فقط تُخفّف الازدحام البصري أعلى الشاشة
+    # لتقريب الواجهة من بساطة تطبيقات المحادثة الحديثة.
 
     # ── الشريط الجانبي — OpenRouter ───────────────────────────────────────
     with st.sidebar:
@@ -577,59 +570,16 @@ def main():
         st.caption("✅ يعمل بدون أي مفتاح API (احتياطي محلي كامل)")
 
     # ── العنوان ──────────────────────────────────────────────────────────
-    st.markdown("""
-    <div class="hero-wrap">
-    <div class="hero-split">
-        <div class="hero-split-text">
-            <div class="hero-badges">
-                <div class="hero-badge"><span class="dot"></span> شبكة معرفية حيّة</div>
-                <div class="hero-badge"><span class="dot"></span> عربي 100٪</div>
-                <div class="hero-badge"><span class="dot"></span> مبني على القرآن الكريم</div>
-            </div>
-            <div class="main-title">🧠 النظام المعرفي العربي</div>
-            <div class="subtitle">Neural Service Mesh · ذكاء اصطناعي عربي</div>
-            <div class="welcome-line">
-                اسأل عن أي مفهوم إسلامي أو عربي، وسيربطه النظام بشبكة معرفية حيّة
-                مبنية على القرآن الكريم وعلوم اللغة — بحث، محادثة، ومحتوى إبداعي، كل ذلك بالعربية.
-            </div>
-        </div>
-        <div class="hero-split-visual">
-            <div class="hero-chip hero-chip--top">📖 قرآن كريم</div>
-            <div class="hero-visual-panel">
-                <div class="hero-visual-icon">🧠</div>
-            </div>
-            <div class="hero-chip hero-chip--bottom">🕸️ شبكة معرفية</div>
-        </div>
-    </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    render_status_bar([
-        {"label": "الحالة", "value": "تشغيل حي"},
-        {"label": "اللغة", "value": "العربية"},
-        {"label": "الاحتياطي", "value": "محلي جاهز"},
-        {"label": "الوصول", "value": "24/7"},
-    ])
-
-    # ── دليل التنقّل ───────────────────────────────────────────────────────
-    # ملخص بصري للمجموعات الرئيسية قبل شريط التبويبات؛ لا يستبدل أي تبويب
-    # ولا يغيّر ترتيب الصفحات أو آلية القفز الموجودة.
-    st.markdown("""
-    <div class="nsm-nav-guide" aria-label="دليل أقسام النظام">
-        <div class="nsm-nav-card">
-            <div class="nsm-nav-card-icon">💬</div>
-            <div><div class="nsm-nav-card-title">التفاعل</div><div class="nsm-nav-card-copy">محادثة ذكية، وبحث سريع عن مفهوم من الصفحة الرئيسية.</div></div>
-        </div>
-        <div class="nsm-nav-card">
-            <div class="nsm-nav-card-icon">🤖</div>
-            <div><div class="nsm-nav-card-title">الوكلاء والإبداع</div><div class="nsm-nav-card-copy">وكلاء متخصصون، محتوى إبداعي، ترجمة، ونشر اجتماعي.</div></div>
-        </div>
-        <div class="nsm-nav-card">
-            <div class="nsm-nav-card-icon">🎓</div>
-            <div><div class="nsm-nav-card-title">التدريب والعمليات</div><div class="nsm-nav-card-copy">Notebook، Surah، AIaaS، المجدول، وأدوات التشغيل.</div></div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    # 🆕 تبسيط جوهري: استُبدلت اللافتة الكبيرة السابقة (hero-split ثنائي
+    # الأعمدة + شارات + شريط حالة ثانٍ + 3 بطاقات "دليل التنقّل") — كانت
+    # كلها عناصر عرض ثابتة بلا أي منطق أو حالة مرتبطة، تظهر فوق كل صفحة
+    # بغضّ النظر عن التبويب المفتوح، فتُغرق شريط التبويبات وأول شاشة يراها
+    # الزائر بمعلومات مكرَّرة (الاسم/الوصف يتكرران أيضاً في تبويب "🏠
+    # الرئيسية" وتبويب "ℹ️ عن NSM"). بترويسة مصغّرة واحدة يبقى نفس الاسم
+    # والهوية البصرية ظاهرين فوراً، مع مساحة أهدأ أقرب لواجهات المحادثة
+    # الحديثة، دون حذف أي محتوى تعريفي فعلي (كله موجود كاملاً بتبويب
+    # "ℹ️ عن NSM" ولوحة الرئيسية).
+    render_brand_bar("الذكاء العربي · نظام معرفي عربي مبني على القرآن الكريم")
 
     # ── التبويبات ─────────────────────────────────────────────────────────
     # تبويب ⚙️ النظام لا يُضاف لقائمة التبويبات أصلاً إلا بعد فتح وضع المالك
