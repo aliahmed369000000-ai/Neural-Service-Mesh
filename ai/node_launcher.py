@@ -76,33 +76,159 @@ async def handle_v2_status(request):
     return web.json_response(snap)
 
 async def handle_dashboard(request):
-    """لوحة حالة مختصرة HTML."""
-    node = request.app['node']
+    """لوحة حالة + آخر المهام/القرارات (jobs/decisions) مع تحديث دوري."""
+    node = request.app["node"]
+    health = request.app.get("health")
     snap = node.network_health_snapshot()
-    rep = node.get_reputation(node.node_id)
+    jobs, decisions = [], []
+    try:
+        if health is not None:
+            orch = health.orchestrator()
+            jobs = orch.list_jobs(limit=12)
+            decisions = orch.list_decisions(limit=12)
+    except Exception:
+        pass
+    # إن لم توجد في الذاكرة، اعرض قرارات الحالة المستمرة
+    if not decisions:
+        try:
+            state = node._load_state()
+            decisions = list((state.get("job_decisions") or {}).values())
+            decisions.sort(key=lambda x: x.get("ts") or "", reverse=True)
+            decisions = decisions[:12]
+        except Exception:
+            decisions = []
+
+    def _esc(s):
+        return (
+            str(s if s is not None else "")
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+        )
+
+    def _job_rows(items):
+        if not items:
+            return "<tr><td colspan='6' class='muted'>لا مهام بعد</td></tr>"
+        rows = []
+        for j in items:
+            jid = _esc((j.get("job_id") or "")[:18])
+            kind = _esc(j.get("kind") or "—")
+            ok = j.get("ok")
+            ok_s = "✓" if ok else "✗"
+            ok_c = "#3dd68c" if ok else "#f07178"
+            qm = j.get("quorum_met")
+            if qm is None and isinstance(j.get("selection"), dict):
+                qm = j.get("selection", {}).get("agreement")
+            qm_s = _esc(qm if qm is not None else "—")
+            sc = _esc(j.get("success_count") if j.get("success_count") is not None else j.get("hit_count") if j.get("hit_count") is not None else j.get("sources_ok") if j.get("sources_ok") is not None else "—")
+            ts = _esc((j.get("ts") or "")[:19].replace("T", " "))
+            rows.append(
+                f"<tr><td><code>{jid}</code></td><td>{kind}</td>"
+                f"<td style='color:{ok_c}'>{ok_s}</td><td>{qm_s}</td><td>{sc}</td><td class='muted'>{ts}</td></tr>"
+            )
+        return "".join(rows)
+
+    def _dec_rows(items):
+        if not items:
+            return "<tr><td colspan='5' class='muted'>لا قرارات بعد</td></tr>"
+        rows = []
+        for d in items:
+            jid = _esc((d.get("job_id") or "")[:18])
+            kind = _esc(d.get("kind") or "—")
+            ok = d.get("ok")
+            ok_s = "✓" if ok else "✗"
+            ok_c = "#3dd68c" if ok else "#f07178"
+            q = f"{_esc(d.get('quorum_met'))}/{_esc(d.get('quorum_required'))}"
+            ts = _esc((d.get("ts") or "")[:19].replace("T", " "))
+            rows.append(
+                f"<tr><td><code>{jid}</code></td><td>{kind}</td>"
+                f"<td style='color:{ok_c}'>{ok_s}</td><td>{q}</td><td class='muted'>{ts}</td></tr>"
+            )
+        return "".join(rows)
+
+    jobs_html = _job_rows(jobs)
+    dec_html = _dec_rows(decisions)
     html = f"""<!DOCTYPE html>
 <html lang="ar" dir="rtl"><head><meta charset="utf-8"/>
-<title>NSM Node 2.0 — {snap.get('node_id')}</title>
+<meta http-equiv="refresh" content="15"/>
+<title>NSM Mesh Dashboard — {_esc(snap.get('node_id'))}</title>
 <style>
 body{{font-family:system-ui,sans-serif;background:#0b1220;color:#e8eefc;margin:0;padding:24px}}
 .card{{background:#151c2e;border-radius:12px;padding:16px 20px;margin-bottom:12px;border:1px solid #24304d}}
-h1{{margin:0 0 8px;font-size:1.4rem}} .muted{{color:#8b9bb8;font-size:.9rem}}
-.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}}
+h1{{margin:0 0 8px;font-size:1.4rem}} h2{{margin:0 0 12px;font-size:1.05rem;color:#9db7e8}}
+.muted{{color:#8b9bb8;font-size:.9rem}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px}}
 .metric{{background:#0f1626;border-radius:8px;padding:12px;text-align:center}}
 .metric b{{display:block;font-size:1.3rem;color:#6ea8fe}}
+table{{width:100%;border-collapse:collapse;font-size:.9rem}}
+th,td{{text-align:right;padding:8px 10px;border-bottom:1px solid #24304d}}
+th{{color:#8b9bb8;font-weight:600}}
+code{{font-size:.8rem;color:#c4d4f5}}
+.ok{{color:#3dd68c}} .bad{{color:#f07178}}
+a{{color:#6ea8fe}}
 </style></head><body>
-<h1>NSM Node 2.0 Vertical Slice</h1>
-<p class="muted">{snap.get('node_id')} · {snap.get('host')}:{snap.get('port')} · {snap.get('ts')}</p>
+<h1>NSM Mesh Dashboard</h1>
+<p class="muted">{_esc(snap.get('node_id'))} · {_esc(snap.get('host'))}:{_esc(snap.get('port'))} · {_esc(snap.get('ts'))} · تحديث كل 15ث</p>
 <div class="grid">
-<div class="metric"><b>{snap.get('online_peers')}</b>أقران متصلون</div>
-<div class="metric"><b>{snap.get('known_nodes')}</b>عقد معروفة</div>
-<div class="metric"><b>{snap.get('reputation_self')}</b>السمعة</div>
-<div class="metric"><b>{snap.get('receipts')}</b>إيصالات</div>
-<div class="metric"><b>{snap.get('content_objects')}</b>محتوى</div>
-<div class="metric"><b>{snap.get('identity_pub_fingerprint')}</b>بصمة الهوية</div>
+<div class="metric"><b>{_esc(snap.get('online_peers'))}</b>أقران متصلون</div>
+<div class="metric"><b>{_esc(snap.get('known_nodes'))}</b>عقد معروفة</div>
+<div class="metric"><b>{_esc(snap.get('reputation_self'))}</b>السمعة</div>
+<div class="metric"><b>{_esc(snap.get('receipts'))}</b>إيصالات</div>
+<div class="metric"><b>{len(jobs)}</b>مهام في الذاكرة</div>
+<div class="metric"><b>{len(decisions)}</b>قرارات</div>
 </div>
-<div class="card"><div class="muted">Surah: {snap.get('surah_awareness')}</div></div>
-<div class="card"><div class="muted">API: /health · /v2/status · /v2/jobs · /v2/job · /v2/collective-summary · /v2/collective-search · /ws · /status</div></div>
+<div class="card">
+<h2>آخر المهام (jobs)</h2>
+<table>
+<thead><tr><th>job_id</th><th>النوع</th><th>ok</th><th>نصاب/اتفاق</th><th>نجاح</th><th>الوقت</th></tr></thead>
+<tbody id="jobs-body">{jobs_html}</tbody>
+</table>
+</div>
+<div class="card">
+<h2>قرارات قابلة للتدقيق (decisions)</h2>
+<table>
+<thead><tr><th>job_id</th><th>النوع</th><th>ok</th><th>نصاب</th><th>الوقت</th></tr></thead>
+<tbody id="dec-body">{dec_html}</tbody>
+</table>
+</div>
+<div class="card muted">
+API:
+<a href="/status">/status</a> ·
+<a href="/health">/health</a> ·
+<a href="/v2/status">/v2/status</a> ·
+<a href="/v2/jobs">/v2/jobs</a> ·
+POST /v2/job · /v2/collective-search · /v2/collective-summary · /ws
+</div>
+<script>
+async function refreshTables(){{
+  try {{
+    const r = await fetch('/v2/jobs?limit=12');
+    const d = await r.json();
+    const jobs = d.jobs || [];
+    const dec = d.decisions || [];
+    const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const jobRows = jobs.length ? jobs.map(j => {{
+      const ok = j.ok; const c = ok ? '#3dd68c' : '#f07178';
+      const qm = j.quorum_met ?? (j.selection && j.selection.agreement) ?? '—';
+      const sc = j.success_count ?? j.hit_count ?? j.sources_ok ?? '—';
+      const ts = (j.ts || '').slice(0,19).replace('T',' ');
+      return `<tr><td><code>${{esc((j.job_id||'').slice(0,18))}}</code></td><td>${{esc(j.kind||'—')}}</td>`+
+        `<td style="color:${{c}}">${{ok?'✓':'✗'}}</td><td>${{esc(qm)}}</td><td>${{esc(sc)}}</td><td class="muted">${{esc(ts)}}</td></tr>`;
+    }}).join('') : '<tr><td colspan="6" class="muted">لا مهام بعد</td></tr>';
+    const decRows = dec.length ? dec.map(x => {{
+      const ok = x.ok; const c = ok ? '#3dd68c' : '#f07178';
+      const q = `${{esc(x.quorum_met)}}/${{esc(x.quorum_required)}}`;
+      const ts = (x.ts || '').slice(0,19).replace('T',' ');
+      return `<tr><td><code>${{esc((x.job_id||'').slice(0,18))}}</code></td><td>${{esc(x.kind||'—')}}</td>`+
+        `<td style="color:${{c}}">${{ok?'✓':'✗'}}</td><td>${{q}}</td><td class="muted">${{esc(ts)}}</td></tr>`;
+    }}).join('') : '<tr><td colspan="5" class="muted">لا قرارات بعد</td></tr>';
+    document.getElementById('jobs-body').innerHTML = jobRows;
+    document.getElementById('dec-body').innerHTML = decRows;
+  }} catch (e) {{ console.warn(e); }}
+}}
+setInterval(refreshTables, 5000);
+</script>
 </body></html>"""
     return web.Response(text=html, content_type="text/html")
 
