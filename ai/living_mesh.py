@@ -22,6 +22,7 @@ from ai.unified_memory import UnifiedMemoryManager
 from ai.git_manager import GitManager
 from ai.toolbox import nsm_toolbox
 from typing import Any, Dict, List, Optional, Set
+from ai import mesh_task_protocol as mesh_tasks
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization
@@ -382,6 +383,8 @@ class LivingMeshNode:
                 await self._handle_multisig_propose(exp_data or {}, sender_id=sender_id)
             elif kind == "multisig_sign":
                 await self._handle_multisig_sign(exp_data or {}, sender_id=sender_id)
+            elif kind in mesh_tasks.ALL_TASK_KINDS:
+                await self._handle_mesh_task(kind, exp_data or {}, sender_id=sender_id, hops=hops, websocket=websocket)
             else:
                 self.sync_experience(kind, exp_data, hops + 1)
         except Exception as e:
@@ -668,7 +671,11 @@ class LivingMeshNode:
                 "signature": "relay_local",  # لن يمر التحقق — نمرّر للمعالجة المباشرة بحذر
             }
             # معالجة مباشرة لأنواع آمنة فقط بدون إعادة توقيع مزيفة
-            if inner_kind in ("gradient_push", "evolution_task", "tool_request", "sovereign_gossip"):
+            if inner_kind in mesh_tasks.ALL_TASK_KINDS:
+                await self._handle_mesh_task(
+                    inner_kind, inner_data, sender_id=origin or sender_id, hops=hops + 1
+                )
+            elif inner_kind in ("gradient_push", "evolution_task", "tool_request", "sovereign_gossip"):
                 self.sync_experience(inner_kind, inner_data, hops + 1)
             return
 
@@ -839,3 +846,149 @@ class LivingMeshNode:
             },
             hops=0,
         )
+
+    # ------------------------------------------------------------------
+    # بروتوكول المهام الموزّعة (AI + Scientific)
+    # ------------------------------------------------------------------
+    def _task_inbox(self) -> Dict[str, Any]:
+        state = self._load_state()
+        if "task_inbox" not in state:
+            state["task_inbox"] = {}
+            self._save_state(state)
+        return state
+
+    async def _handle_mesh_task(
+        self,
+        kind: str,
+        exp_data: Dict[str, Any],
+        sender_id: str = None,
+        hops: int = 0,
+        websocket=None,
+    ):
+        """تنفيذ مهمة واردة أو تخزين نتيجتها في صندوق الوارد."""
+        # نتائج: خزّنها للطالب المحلي
+        if kind.endswith("_result") or kind in (
+            mesh_tasks.KIND_SUBMODEL_RESULT,
+            mesh_tasks.KIND_INFERENCE_RESULT,
+            mesh_tasks.KIND_MODEL_EVAL_RESULT,
+            mesh_tasks.KIND_MAP_RESULT,
+            mesh_tasks.KIND_SIM_RESULT,
+            mesh_tasks.KIND_KEYSPACE_RESULT,
+        ):
+            task_id = (exp_data or {}).get("task_id") or f"anon_{uuid.uuid4().hex[:8]}"
+            state = self._task_inbox()
+            state["task_inbox"][task_id] = {
+                "kind": kind,
+                "from": sender_id,
+                "data": exp_data,
+                "received_at": datetime.now(timezone.utc).isoformat(),
+            }
+            self._save_state(state)
+            logger.info(f"📥 Task result stored id={task_id} kind={kind} from={sender_id}")
+            return
+
+        # طلبات تنفيذ: نفّذ محلياً وأعد النتيجة للمرسل إن أمكن
+        result = mesh_tasks.dispatch_task(kind, exp_data or {})
+        if result is None:
+            logger.warning(f"⚠️ Unknown mesh task kind={kind}")
+            return
+        result_kind = mesh_tasks.result_kind_for(kind)
+        result["task_id"] = (exp_data or {}).get("task_id") or result.get("task_id")
+        result["worker_node"] = self.node_id
+        logger.info(
+            f"⚙️ Executed {kind} → {result_kind} ok={result.get('ok')} "
+            f"task_id={result.get('task_id')}"
+        )
+
+        # رد مباشر على نفس اتصال WebSocket إن وُجد
+        if websocket is not None:
+            try:
+                resp_payload = {
+                    "id": f"tres_{uuid.uuid4().hex[:8]}",
+                    "kind": result_kind,
+                    "data": result,
+                    "from": self.node_id,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+                sig = self.sign_message(json.dumps(resp_payload, sort_keys=True))
+                msg = json.dumps({"payload": resp_payload, "signature": sig})
+                if hasattr(websocket, "send_str"):
+                    await websocket.send_str(msg)
+                else:
+                    await websocket.send(msg)
+                return
+            except Exception as e:
+                logger.warning(f"⚠️ Could not reply on same WS: {e}")
+
+        # وإلا أرسل للمرسل عبر الشبكة إن عرفنا عنوانه
+        state = self._load_state()
+        sender_info = (state.get("nodes") or {}).get(sender_id or "")
+        if sender_info and sender_info.get("host") and sender_info.get("port") is not None:
+            await self.send_to_peer_with_relay(
+                sender_info["host"],
+                int(sender_info["port"]),
+                result_kind,
+                result,
+                hops=hops + 1,
+                target_id=sender_id,
+            )
+
+    async def dispatch_mesh_task(
+        self,
+        host: str,
+        port: int,
+        kind: str,
+        data: Dict[str, Any],
+        target_id: str = None,
+        use_relay: bool = True,
+    ) -> Dict[str, Any]:
+        """يرسل مهمة موزّعة إلى عقدة هدف (مع Relay اختياري)."""
+        data = dict(data or {})
+        data.setdefault("task_id", f"task_{uuid.uuid4().hex[:10]}")
+        if use_relay:
+            return await self.send_to_peer_with_relay(
+                host, int(port), kind, data, target_id=target_id
+            )
+        ok = await self.send_to_peer(host, int(port), kind, data)
+        return {"ok": ok, "mode": "direct" if ok else "failed", "task_id": data["task_id"]}
+
+    async def request_submodel_train(self, host: str, port: int, **task) -> Dict[str, Any]:
+        return await self.dispatch_mesh_task(host, port, mesh_tasks.KIND_SUBMODEL_TRAIN, task)
+
+    async def request_inference(self, host: str, port: int, **task) -> Dict[str, Any]:
+        return await self.dispatch_mesh_task(host, port, mesh_tasks.KIND_INFERENCE, task)
+
+    async def request_model_eval(self, host: str, port: int, **task) -> Dict[str, Any]:
+        return await self.dispatch_mesh_task(host, port, mesh_tasks.KIND_MODEL_EVAL, task)
+
+    async def request_map_chunk(self, host: str, port: int, **task) -> Dict[str, Any]:
+        return await self.dispatch_mesh_task(host, port, mesh_tasks.KIND_MAP, task)
+
+    async def request_sim_chunk(self, host: str, port: int, **task) -> Dict[str, Any]:
+        return await self.dispatch_mesh_task(host, port, mesh_tasks.KIND_SIM, task)
+
+    async def request_keyspace_scan(self, host: str, port: int, **task) -> Dict[str, Any]:
+        return await self.dispatch_mesh_task(host, port, mesh_tasks.KIND_KEYSPACE, task)
+
+    def collect_task_results(self, task_ids: List[str] = None) -> Dict[str, Any]:
+        """يجمع نتائج المهام من صندوق الوارد (بعد وصولها عبر الشبكة)."""
+        state = self._load_state()
+        inbox = state.get("task_inbox") or {}
+        if task_ids is None:
+            return dict(inbox)
+        return {tid: inbox[tid] for tid in task_ids if tid in inbox}
+
+    def merge_submodel_inbox(self, task_ids: List[str]) -> Dict[str, Any]:
+        inbox = self.collect_task_results(task_ids)
+        results = [v.get("data") for v in inbox.values()]
+        return mesh_tasks.merge_submodel_results(results)
+
+    def merge_eval_inbox(self, task_ids: List[str]) -> Dict[str, Any]:
+        inbox = self.collect_task_results(task_ids)
+        results = [v.get("data") for v in inbox.values()]
+        return mesh_tasks.merge_eval_results(results)
+
+    def reduce_map_inbox(self, task_ids: List[str], op: str = "wordcount") -> Dict[str, Any]:
+        inbox = self.collect_task_results(task_ids)
+        results = [v.get("data") for v in inbox.values()]
+        return mesh_tasks.reduce_map_results(op, results)
