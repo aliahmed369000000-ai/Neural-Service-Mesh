@@ -18,12 +18,20 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("NodeHealthLayer")
 
+TASK_LOG_MAX = 2000  # أقصى عدد إدخالات في سجل المهام؛ الأقدم يُحذف أولاً
+
 
 class NodeHealthLayer:
     def __init__(self, mesh_node):
         self.node = mesh_node
         self._route_cache: Dict[str, Dict[str, Any]] = {}
         self._task_log: List[Dict[str, Any]] = []
+
+    def _log_task(self, entry: Dict[str, Any]) -> None:
+        """إضافة إدخال لسجل المهام مع حد أقصى لمنع تسرّب الذاكرة على عقدة طويلة التشغيل."""
+        self._task_log.append(entry)
+        if len(self._task_log) > TASK_LOG_MAX:
+            del self._task_log[: len(self._task_log) - TASK_LOG_MAX]
 
     # ------------------------------------------------------------------
     # صحة
@@ -185,7 +193,7 @@ class NodeHealthLayer:
                 "receipt": receipt,
                 "result": result,
             }
-            self._task_log.append(entry)
+            self._log_task(entry)
             return entry
 
         disp = await self.node.dispatch_mesh_task(host, int(port), kind, payload)
@@ -197,7 +205,7 @@ class NodeHealthLayer:
             "elapsed_ms": round((time.time() - t0) * 1000, 2),
             "ok": bool(disp.get("ok")),
         }
-        self._task_log.append(entry)
+        self._log_task(entry)
         return entry
 
     def recent_tasks(self, limit: int = 20) -> List[Dict[str, Any]]:
@@ -288,7 +296,7 @@ class NodeHealthLayer:
             "attempts": [],
             "created_at": time.time(),
         }
-        self._task_log.append({"task_id": task_id, "kind": kind, "mode": "failover_start"})
+        self._log_task({"task_id": task_id, "kind": kind, "mode": "failover_start"})
 
         workers = self.rank_workers(require_capabilities=require_capabilities, max_workers=max_attempts)
         t0 = time.time()
@@ -324,7 +332,7 @@ class NodeHealthLayer:
                         "dispatch": disp,
                         "journal": journal,
                     }
-                    self._task_log.append(entry)
+                    self._log_task(entry)
                     self.node.update_reputation(w.get("peer_id") or "unknown", delta=1, reason="failover_success")
                     return entry
                 attempt["error"] = "dispatch_not_ok"
@@ -352,7 +360,7 @@ class NodeHealthLayer:
                     "receipt": receipt,
                     "journal": journal,
                 }
-                self._task_log.append(entry)
+                self._log_task(entry)
                 return entry
 
         journal["status"] = "failed"
@@ -365,7 +373,7 @@ class NodeHealthLayer:
             "elapsed_ms": round((time.time() - t0) * 1000, 2),
             "journal": journal,
         }
-        self._task_log.append(entry)
+        self._log_task(entry)
         return entry
 
     def resume_pending_tasks(self) -> List[Dict[str, Any]]:

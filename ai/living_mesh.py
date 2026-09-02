@@ -52,6 +52,7 @@ MAX_TIMESTAMP_SKEW_SEC = 300            # ±5 دقائق
 NONCE_CACHE_MAX = 4096                  # أقصى عدد nonces محفوظة في الذاكرة
 NONCE_TTL_SEC = 600                     # عمر الـ nonce في الكاش (10 دقائق)
 GOSSIP_ID_CACHE_MAX = 4096              # أقصى عدد معرّفات gossip محفوظة لمنع تسرّب الذاكرة
+TASK_REGISTRY_MAX = 5000                # أقصى عدد مهام في السجل المحلي؛ الأقدم يُحذف أولاً
 RATE_LIMIT_WINDOW_SEC = 10.0            # نافذة معدل الطلبات
 RATE_LIMIT_MAX_PER_PEER = 60            # أقصى رسائل لكل نظير داخل النافذة
 ALLOWED_TASK_CAPABILITIES = {
@@ -1481,7 +1482,13 @@ class LivingMeshNode:
             entry.update(extra)
         entry.setdefault("history", []).append({"status": status, "ts": now})
         entry["history"] = entry["history"][-20:]
+        is_new = task_id not in self._task_registry
         self._task_registry[task_id] = entry
+        if is_new and len(self._task_registry) > TASK_REGISTRY_MAX:
+            # dict يحافظ على ترتيب الإدخال — أول مفتاح هو الأقدم إنشاءً؛ احذفه لتحرير الذاكرة
+            oldest_id = next(iter(self._task_registry))
+            if oldest_id != task_id:
+                self._task_registry.pop(oldest_id, None)
         return entry
 
     def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
