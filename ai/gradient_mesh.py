@@ -10,6 +10,7 @@ import base64
 import io
 import logging
 import time
+import uuid
 from typing import Dict, Any, List, Optional, Callable
 from urllib.parse import urlparse
 
@@ -196,6 +197,13 @@ class GradientExchangeProtocol:
             "data": grad_data,
             "timestamp": start_time,
             "serialization_ms": serialization_ms,
+            # معرّف ثابت لهذه اللقطة المنطقية الواحدة من التدرجات — يُستخدَم بواسطة
+            # sync_experience() في living_mesh.py (آلية _seen_gossip_ids الموجودة
+            # فعلاً) لمنع تكرار تطبيق/إعادة بث نفس التدرجات لو وصلت لعقدة عبر أكثر
+            # من مسار (إرسال مباشر + ترحيل Gossip محدود hops<3). بدون هذا المعرّف،
+            # كل عقدة تستقبل الرسالة (مباشرة أو مُرحَّلة) كانت تفترضها "جديدة" فتُعيد
+            # بثّها، ما يضخّم عدد النسخ المستلمة فعلياً (تحقّقنا: 5 بث → 13 استقبال).
+            "_gossip_id": f"grad_{uuid.uuid4().hex[:12]}",
         }
 
         active_peers = self.mesh_node._get_active_peers_list()
