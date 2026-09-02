@@ -44,3 +44,7 @@ python3 scripts/prove_federation.py
 4. القرارات بنصاب اتحادي ومقاومة للانقسام
 
 التفاصيل: [FEDERATION.md](../FEDERATION.md)
+
+## مسار API الكامل
+انظر [API_JOIN_PATH.md](API_JOIN_PATH.md) و`scripts/join_external_path.py`.
+

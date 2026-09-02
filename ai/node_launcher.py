@@ -125,6 +125,128 @@ async def handle_submit_task(request):
         result["verification"] = health.verify_receipt(result["receipt"], result["result"])
     return web.json_response(result)
 
+
+async def handle_join_info(request):
+    """معلومات عامة لانضمام عقدة خارجية — بلا أسرار."""
+    node = request.app["node"]
+    health = request.app.get("health")
+    snap = health.health() if health else node.network_health_snapshot()
+    return web.json_response({
+        "ok": True,
+        "protocol": "nsm-join-v1",
+        "seed_node_id": node.node_id,
+        "ws_url": f"ws://{node.host}:{node.port}/ws",
+        "http_base": f"http://{node.host}:{node.port}",
+        "public_key": node._pub_pem(),
+        "identity_fp": snap.get("identity_fp") or snap.get("identity_pub_fingerprint"),
+        "endpoints": {
+            "join_info": "GET /v2/join-info",
+            "join": "POST /v2/join",
+            "health": "GET /health",
+            "task": "POST /v2/task",
+            "tasks": "GET /v2/tasks",
+            "ws": "GET /ws",
+        },
+        "first_task_example": {
+            "kind": "map_reduce_map",
+            "payload": {"lines": ["hello federation", "nsm join path"], "op": "wordcount"},
+            "local": True,
+        },
+    })
+
+
+async def handle_join(request):
+    """
+    تسجيل عقدة خارجية لدى البذرة.
+    JSON: {node_id, host, port, public_key, capabilities?}
+    """
+    node = request.app["node"]
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "invalid_json"}, status=400)
+
+    peer_id = body.get("node_id") or body.get("id")
+    pub = body.get("public_key")
+    host = body.get("host")
+    port = body.get("port")
+    if not peer_id or not pub:
+        return web.json_response(
+            {"ok": False, "error": "node_id_and_public_key_required"}, status=400
+        )
+    if peer_id == node.node_id:
+        return web.json_response({"ok": False, "error": "cannot_join_as_self"}, status=400)
+
+    # احفظ المفتاح العام
+    try:
+        key_path = node.keys_dir / f"{peer_id}.pub"
+        key_path.write_text(pub if isinstance(pub, str) else pub.decode())
+    except Exception as e:
+        return web.json_response({"ok": False, "error": f"key_store_failed:{e}"}, status=500)
+
+    # سجّل في حالة الشبكة
+    state = node._load_state()
+    info = {
+        "id": peer_id,
+        "host": host or "unknown",
+        "port": port,
+        "status": "online",
+        "capabilities": body.get("capabilities") or ["text", "storage"],
+        "public_key": pub if isinstance(pub, str) else None,
+        "joined_via": "api_v2_join",
+        "last_seen": __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        ).isoformat(),
+    }
+    state.setdefault("nodes", {})[peer_id] = info
+    node._save_state(state)
+
+    return web.json_response({
+        "ok": True,
+        "protocol": "nsm-join-v1",
+        "registered_as": peer_id,
+        "seed_node_id": node.node_id,
+        "seed_public_key": node._pub_pem(),
+        "ws_url": f"ws://{node.host}:{node.port}/ws",
+        "next_steps": [
+            "GET /health on seed to verify reachability",
+            "POST /v2/task with local=true for first verified task on your node, or against seed",
+            "Open WS /ws for P2P discovery and signed messaging",
+        ],
+        "peer_record": {k: v for k, v in info.items() if k != "public_key"},
+    })
+
+
+async def handle_first_verified_task(request):
+    """
+    مسار موثّق: ينفّذ أول مهمة محلية قابلة للتحقق على هذه العقدة.
+    لا يحتاج جسماً — أو JSON اختياري {lines?, kind?}.
+    """
+    health = request.app.get("health")
+    if health is None:
+        return web.json_response({"ok": False, "error": "health_layer_missing"}, status=500)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    kind = body.get("kind") or "map_reduce_map"
+    payload = body.get("payload") or {
+        "lines": body.get("lines") or [
+            "nsm external join",
+            "first verified task",
+            "federation wordcount",
+        ],
+        "op": "wordcount",
+    }
+    result = await health.submit_verifiable_task(kind, payload, local=True)
+    if result.get("receipt") and result.get("result"):
+        result["verification"] = health.verify_receipt(result["receipt"], result["result"])
+    result["documented_path"] = "POST /v2/first-task"
+    result["ok"] = bool(result.get("ok")) and bool(
+        (result.get("verification") or {}).get("ok", result.get("ok"))
+    )
+    return web.json_response(result)
+
 async def handle_ws(request):
     """معالج WebSocket موحّد عبر مسار الرسائل الموقّعة في LivingMeshNode.
     أُزيل مسار التجميع المركزي القديم (gradient_buffer / All-Reduce المحلي).
@@ -207,9 +329,12 @@ async def main():
         web.get('/status', handle_status),
         web.get('/health', handle_health),
         web.get('/v2/status', handle_v2_status),
+        web.get('/v2/join-info', handle_join_info),
+        web.post('/v2/join', handle_join),
         web.get('/v2/routes', handle_routes),
         web.get('/v2/tasks', handle_tasks),
         web.post('/v2/task', handle_submit_task),
+        web.post('/v2/first-task', handle_first_verified_task),
         web.get('/dashboard', handle_dashboard),
         web.get('/ws', handle_ws),
         web.get('/', handle_status),
