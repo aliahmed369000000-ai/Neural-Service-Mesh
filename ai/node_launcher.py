@@ -139,6 +139,39 @@ async def handle_submit_task(request):
     return web.json_response(result)
 
 
+async def handle_submit_job(request):
+    """POST JSON: {kind, payload, n_workers?, strategy?, require_capabilities?, timeout_per_task?, retry_failed?}"""
+    health = request.app.get("health")
+    if health is None:
+        return web.json_response({"error": "health_layer_missing"}, status=500)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid_json"}, status=400)
+    kind = body.get("kind")
+    if not kind:
+        return web.json_response({"error": "kind_required"}, status=400)
+    payload = body.get("payload") or {}
+    report = await health.submit_job(
+        kind,
+        payload,
+        n_workers=int(body.get("n_workers") or 3),
+        strategy=body.get("strategy") or "majority",
+        require_capabilities=body.get("require_capabilities"),
+        timeout_per_task=float(body.get("timeout_per_task") or 12.0),
+        retry_failed=int(body.get("retry_failed") or 1),
+    )
+    return web.json_response(report)
+
+
+async def handle_list_jobs(request):
+    health = request.app.get("health")
+    if health is None:
+        return web.json_response({"error": "health_layer_missing"}, status=500)
+    orch = health.orchestrator()
+    return web.json_response({"jobs": orch.list_jobs(limit=int(request.query.get("limit") or 20))})
+
+
 async def handle_join_info(request):
     """معلومات عامة لانضمام عقدة خارجية — بلا أسرار."""
     node = request.app["node"]
@@ -522,6 +555,8 @@ async def main():
         web.get("/v2/routes", handle_routes),
         web.get("/v2/tasks", handle_tasks),
         web.post("/v2/task", handle_submit_task),
+        web.post("/v2/job", handle_submit_job),
+        web.get("/v2/jobs", handle_list_jobs),
         web.post("/v2/first-task", handle_first_verified_task),
         web.post("/v2/dispatch-task", handle_dispatch_task),
         web.get("/dashboard", handle_dashboard),

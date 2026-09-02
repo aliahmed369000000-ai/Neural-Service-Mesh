@@ -389,6 +389,16 @@ class NodeHealthLayer:
     def list_tasks(self, status: str = None, limit: int = 50) -> List[Dict[str, Any]]:
         return self.node.list_tasks(status=status, limit=limit)
 
+    def orchestrator(self):
+        """مدير مهام متعدد العمال (مرحلة A)."""
+        from ai.mesh_job_orchestrator import MeshJobOrchestrator
+        if not hasattr(self, "_orchestrator") or self._orchestrator is None:
+            self._orchestrator = MeshJobOrchestrator(self.node, health_layer=self)
+        return self._orchestrator
+
+    async def submit_job(self, kind: str, payload: dict = None, **kwargs):
+        return await self.orchestrator().submit_job(kind, payload, **kwargs)
+
     def cognitive_net(self, quorum: int = 2, require_independent: bool = True):
         """واجهة مختصرة لشبكة التنفيذ المعرفي القابلة للتحقق."""
         from ai.verifiable_cognitive_net import VerifiableCognitiveNet
