@@ -196,6 +196,7 @@ def render_system_core():
         "🌐 بحث الويب المباشر",
         "🌍 التغذية من العالم",
         "⚡ الأداء (كاش الأسئلة)",
+        "🪞 التأمل الذاتي",
     ])
 
     # ══════════════════ 1. النواة العصبية ══════════════════
@@ -782,3 +783,60 @@ def render_system_core():
                 _cleared = _ac.clear()
                 st.success(f"تم إفراغ {_cleared} عنصراً من الكاش.")
                 st.rerun()
+
+    # ══════════════════ 8. التأمل الذاتي (Self-Reflection) ══════════════════
+    with core_tabs[7]:
+        st.markdown('<div class="section-header">🪞 التأمل الذاتي (Self-Reflection Engine)</div>',
+                    unsafe_allow_html=True)
+        st.markdown(
+            '<p style="color:var(--text-muted);direction:rtl">يقرأ ai/self_reflection.py آخر تفاعلات '
+            'الوكلاء الحقيقية من سجل التدقيق (ai/agent_audit.py — تبويبا "🤖 وكلاء AI" و"🤝 منسّق الوكلاء")، '
+            'يستخلص منها دروساً (نجاح/فشل لكل نوع مهمة)، ويحدّث قاعدة خبرة تراكمية '
+            '(artifacts/learning/experience_db.json) — تمهيداً لتحسين الوكلاء بناءً على أدائهم الفعلي.</p>',
+            unsafe_allow_html=True,
+        )
+        try:
+            from ai.self_reflection import reflection_engine, reflect_on_recent_audit
+            _sr_ok = True
+        except Exception as _sr_e:
+            _sr_ok = False
+            st.warning(f"⚠️ تعذّر تحميل محرك التأمل الذاتي: {_sr_e}")
+
+        if _sr_ok:
+            try:
+                _sr_data = json.loads(reflection_engine.db_path.read_text(encoding="utf-8"))
+                if not isinstance(_sr_data, list):
+                    _sr_data = []
+            except Exception:
+                _sr_data = []
+
+            _sr_total = len(_sr_data)
+            _sr_success = sum(1 for lesson in _sr_data if lesson.get("success"))
+            _sr_rate = f"{(_sr_success / _sr_total * 100):.0f}%" if _sr_total else "—"
+
+            col_sr1, col_sr2, col_sr3 = st.columns(3)
+            with col_sr1:
+                metric_card(_sr_total, "دروس مخزَّنة (آخر 1000)")
+            with col_sr2:
+                metric_card(_sr_success, "تفاعلات ناجحة")
+            with col_sr3:
+                metric_card(_sr_rate, "نسبة النجاح")
+
+            if st.button("🔍 تحليل النشاط الأخير الآن", key="sr_run"):
+                _sr_result = reflect_on_recent_audit(limit=50)
+                if _sr_result.get("ok"):
+                    st.success(_sr_result["summary"])
+                    st.rerun()
+                else:
+                    st.info(_sr_result.get("message", "لا نتيجة."))
+
+            if _sr_data:
+                st.markdown("**آخر 5 دروس مستخلَصة:**")
+                for lesson in reversed(_sr_data[-5:]):
+                    _icon = "✅" if lesson.get("success") else "⚠️"
+                    st.markdown(
+                        f"{_icon} **{lesson.get('task_type', '؟')}** "
+                        f"({lesson.get('agent_id', '؟')}) — {lesson.get('lesson', '')}"
+                    )
+            else:
+                st.info("لا دروس مستخلَصة بعد — اضغط «تحليل النشاط الأخير الآن» بعد استخدام وكلاء AI.")

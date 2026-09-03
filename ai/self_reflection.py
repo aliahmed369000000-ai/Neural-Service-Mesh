@@ -75,3 +75,40 @@ class SelfReflectionEngine:
             f.truncate()
 
 reflection_engine = SelfReflectionEngine()
+
+
+def reflect_on_recent_audit(limit: int = 50) -> Dict[str, Any]:
+    """يجسّر بين ai/agent_audit.py (سجل تفاعلات الوكلاء الحقيقي، SQLite) وبين
+    محرك التأمل الذاتي أعلاه: يسحب آخر `limit` تفاعلاً فعلياً حدث مع وكلاء AI
+    (تبويب "🤖 وكلاء AI" أو "🤝 منسّق الوكلاء")، يحوّلها لصيغة السجلات التي
+    يتوقعها reflect_on_activity()، ثم يستخلص منها دروساً ويحدّث experience_db.json.
+
+    لا يرفع أي استثناء أبداً — أي فشل (لا قاعدة بيانات، سجل تدقيق فارغ، إلخ)
+    يُرجَع كنتيجة {"ok": False, ...} هادئة، بنفس فلسفة بقية الطبقات الاختيارية
+    في هذا المشروع (لا مسار حرج يعتمد على نجاح التأمل الذاتي).
+    """
+    try:
+        from ai.agent_audit import get_default_audit_log
+    except Exception as e:
+        return {"ok": False, "message": f"تعذّر تحميل سجل تدقيق الوكلاء: {e}"}
+
+    try:
+        audit_entries = get_default_audit_log().get_recent(limit)
+    except Exception as e:
+        return {"ok": False, "message": f"تعذّر قراءة سجل التدقيق: {e}"}
+
+    if not audit_entries:
+        return {"ok": False, "message": "سجل تدقيق الوكلاء فارغ — لا توجد تفاعلات بعد."}
+
+    activity_logs = []
+    for entry in audit_entries:
+        response = (entry.get("response_preview") or "").strip()
+        if not response:
+            continue
+        activity_logs.append({
+            "agent_id": entry.get("category_key", "unknown"),
+            "task": entry.get("category_title", "مهمة غير معروفة"),
+            "result": response,
+        })
+
+    return reflection_engine.reflect_on_activity(activity_logs)
