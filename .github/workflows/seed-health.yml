@@ -1,0 +1,27 @@
+name: مراقبة صحة البذرة
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * *"
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: فحص Seed Node
+        env:
+          SEED_HEALTH_URL: ${{ secrets.SEED_HEALTH_URL }}
+        run: |
+          test -n "$SEED_HEALTH_URL"
+          python3 - <<'PY'
+          import json, os, urllib.request
+          url = os.environ["SEED_HEALTH_URL"]
+          with urllib.request.urlopen(url, timeout=10) as response:
+              if response.status != 200:
+                  raise SystemExit(f"HTTP status: {response.status}")
+              payload = json.load(response)
+          if payload.get("ok", True) is False:
+              raise SystemExit(f"Seed unhealthy: {payload!r}")
+          print("Seed health: PASS")
+          PY
