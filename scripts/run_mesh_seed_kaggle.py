@@ -74,6 +74,8 @@ from typing import Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 
+from ai.tunnel_providers import TunnelCandidate, verify_tunnel
+
 BORE_RELEASES_API = "https://api.github.com/repos/ekzhang/bore/releases/latest"
 BORE_ASSET_PATTERNS = (
     re.compile(r"^bore-v[\d.]+-x86_64-unknown-linux-musl\.tar\.gz$"),
@@ -395,6 +397,19 @@ def read_ssh_tunnel_url(log_path: Path, domain_suffixes: tuple, timeout: float =
 TUNNEL_PROVIDERS = ("bore", "ngrok", "serveo", "localhost_run")
 
 
+def _verified_tunnel(provider: str, proc: subprocess.Popen, url: str):
+    """تحقق فعلي من /health قبل إعلان نجاح أي نفق."""
+    candidate = TunnelCandidate(provider, url, lambda: proc.poll() is None)
+    if verify_tunnel(candidate, timeout=float(os.environ.get("TUNNEL_HEALTH_TIMEOUT", "5"))):
+        return proc, url
+    _log(f"❌ الرابط {url} ظهر لكن /health لم يثبت صلاحية النفق — رفض الإعلان.")
+    try:
+        proc.terminate()
+    except OSError:
+        pass
+    return None, ""
+
+
 def try_start_tunnel(provider: str, port: int, log_dir: Path, node_id: str):
     """يحاول تشغيل بديل نفق واحد. يُعيد (proc, public_url) أو (None, "") عند الفشل.
     يتحقق أن العملية ما زالت حيّة بعد استخراج الرابط لتجنب الإعلان الكاذب.
@@ -416,7 +431,7 @@ def try_start_tunnel(provider: str, port: int, log_dir: Path, node_id: str):
             except Exception:
                 pass
             return None, ""
-        return proc, url
+        return _verified_tunnel(provider, proc, f"https://{url}")
 
     if provider == "ngrok":
         authtoken = (
@@ -443,8 +458,8 @@ def try_start_tunnel(provider: str, port: int, log_dir: Path, node_id: str):
             except Exception:
                 pass
             return None, ""
-        # نُرجع الرابط الكامل (https://....ngrok-free.app) ليستخدم مباشرة كـ SEED_NODE_URL
-        return proc, url
+        # لا نعلن الرابط قبل نجاح فحص /health فعلياً.
+        return _verified_tunnel(provider, proc, url)
 
     if provider == "serveo":
         log_path = log_dir / f"serveo_{node_id}.log"
@@ -459,7 +474,7 @@ def try_start_tunnel(provider: str, port: int, log_dir: Path, node_id: str):
             except Exception:
                 pass
             return None, ""
-        return proc, f"{host}:443"
+        return _verified_tunnel(provider, proc, f"https://{host}:443")
 
     if provider == "localhost_run":
         log_path = log_dir / f"localhost_run_{node_id}.log"
@@ -474,7 +489,7 @@ def try_start_tunnel(provider: str, port: int, log_dir: Path, node_id: str):
             except Exception:
                 pass
             return None, ""
-        return proc, f"{host}:443"
+        return _verified_tunnel(provider, proc, f"https://{host}:443")
 
     return None, ""
 

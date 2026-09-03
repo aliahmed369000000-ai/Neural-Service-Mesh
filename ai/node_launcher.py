@@ -18,6 +18,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from ai.living_mesh import LivingMeshNode
 from ai.node_health_layer import NodeHealthLayer
+from ai.mesh_network_config import public_url
 
 # إعداد السجلات
 logging.basicConfig(
@@ -51,7 +52,7 @@ async def handle_status(request):
         "online_nodes": online,
         "known_nodes": len(nodes),
         "active_connections": len(getattr(node, "active_connections", set()) or set()),
-        "public_address": f"ws://{node.host}:{node.port}",
+        "public_address": public_url("PUBLIC_WS_URL"),
         "ws_path": "/ws",
     }
     return web.json_response(status, dumps=lambda x: json.dumps(x, indent=2, ensure_ascii=False))
