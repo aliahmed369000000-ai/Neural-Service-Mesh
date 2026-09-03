@@ -8,6 +8,31 @@
 #   nsm-mcp  — MCP stdio غير معرّض كمنفذ؛ يُشغَّل عبر وكيل/SSH أو بوابة منفصلة
 
 services:
+  nsm-seed:
+    build: .
+    container_name: nsm-seed
+    restart: unless-stopped
+    command: >
+      python3 ai/node_launcher.py --id ${NODE_ID:-mesh_seed_a}
+      --host 0.0.0.0 --port ${NODE_PORT:-8765}
+    ports:
+      - "${NODE_PORT:-8765}:${NODE_PORT:-8765}"
+    environment:
+      - NSM_ENV=production
+      - NODE_ID=${NODE_ID:-mesh_seed_a}
+      - NODE_PORT=${NODE_PORT:-8765}
+      - PUBLIC_WS_URL=${PUBLIC_WS_URL:-}
+      - SEED_NODE_URL=${SEED_NODE_URL:-}
+      - SEED_NODE_URLS=${SEED_NODE_URLS:-}
+      - TUNNEL_HEALTH_TIMEOUT=${TUNNEL_HEALTH_TIMEOUT:-5}
+    volumes:
+      - nsm_seed_keys:/app/artifacts/living_mesh
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${NODE_PORT:-8765}/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
   nsm-api:
     build: .
     container_name: nsm-api
@@ -64,6 +89,7 @@ services:
       - nsm-api
 
 volumes:
+  nsm_seed_keys:
   nsm_data:
   nsm_models:
   nsm_aiaas:
