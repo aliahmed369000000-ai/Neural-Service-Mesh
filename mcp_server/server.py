@@ -331,10 +331,6 @@ def check_project_health() -> str:
     return json.dumps(summary, ensure_ascii=False)
 
 
-if __name__ == "__main__":
-    mcp.run(transport="stdio")
-
-
 @mcp.tool()
 def reasoning_answer(question: str, train_on_query: bool = False) -> str:
     """يشغّل ReasoningPipeline (مع DeepRouting إن توفّر) على سؤال عربي
@@ -503,3 +499,7 @@ def nsm_call_service(service: str, action: str, payload_json: str = "{}"
             ensure_ascii=False, default=str)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")
