@@ -21,8 +21,9 @@ QUIC وحده. لذلك أُزيل Cloudflare من هذا السكربت كلي�
 لا تعتمد على نطاق Cloudflare إطلاقاً:
 
   1. bore.pub  — نفق TCP خام عبر ثنائي `bore` الرسمي (github.com/ekzhang/bore).
-  2. serveo.net — نفق عبر SSH العادي (منفذ 22 صادر)، بلا أي تثبيت إضافي.
-  3. localhost.run — نفس أسلوب SSH، كبديل أخير إن حُجب serveo.net أيضاً.
+  2. ngrok     — إن وُجد NGROK_AUTHTOKEN في البيئة (موثوق أكثر عند توفر التوكن).
+  3. serveo.net — نفق عبر SSH العادي (منفذ 22 صادر)، بلا أي تثبيت إضافي.
+  4. localhost.run — نفس أسلوب SSH، كبديل أخير إن حُجب serveo.net أيضاً.
 
 يُجرَّب كل بديل بالترتيب أعلاه لمدة محدودة، وأول من ينجح يُستخدم لبقية الجلسة
 (مع محاولة استئناف نفس البديل الناجح إن انقطع، والانتقال للتالي بعد عدة فشل).
@@ -32,6 +33,8 @@ v12.1 (إصلاح مهم): رفض الإعلان الكاذب عن نجاح bore
 السبب الذي جعل تشغيل Kaggle السابق يتوقف عند bore الفاشل ولا يجرّب SSH.
 الآن يُشترط ظهور العبارة الإيجابية "listening at bore.pub:..." + بقاء
 العملية حيّة قبل اعتبار البديل ناجحاً.
+
+v12.2: إضافة ngrok كبديل (يُفعَّل فقط عند وجود NGROK_AUTHTOKEN).
 
 الاستخدام داخل خلية Kaggle (بعد استنساخ المستودع):
     !python scripts/run_mesh_seed_kaggle.py
@@ -226,7 +229,110 @@ def read_bore_url(log_path: Path, timeout: float = 30.0) -> str:
 
 
 # ---------------------------------------------------------------------------
-# البديل 2 و3: serveo.net و localhost.run (كلاهما نفق عبر SSH القياسي)
+# البديل 2: ngrok (يتطلب NGROK_AUTHTOKEN — يُتخطى تلقائياً إن غاب)
+# ---------------------------------------------------------------------------
+
+NGROK_DOWNLOAD_URL = (
+    "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz"
+)
+
+
+def ensure_ngrok(bin_dir: Path) -> Optional[Path]:
+    """يحمّل ثنائي ngrok الرسمي إن لم يكن متوفراً."""
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    target = bin_dir / "ngrok"
+    if target.exists() and os.access(target, os.X_OK):
+        _log(f"✅ ngrok موجود مسبقاً: {target}")
+        return target
+    try:
+        _log(f"⬇️ تحميل ngrok: {NGROK_DOWNLOAD_URL}")
+        with urllib.request.urlopen(NGROK_DOWNLOAD_URL, timeout=90) as resp:
+            data = resp.read()
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tf:
+            member = next(
+                (m for m in tf.getmembers() if m.name.split("/")[-1] == "ngrok"),
+                None,
+            )
+            if member is None:
+                _log("❌ لم يُعثر على ملف ngrok داخل الأرشيف.")
+                return None
+            extracted = tf.extractfile(member)
+            if extracted is None:
+                return None
+            target.write_bytes(extracted.read())
+        target.chmod(target.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+        _log(f"✅ تم تحميل ngrok: {target}")
+        return target
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError, tarfile.TarError) as e:
+        _log(f"❌ فشل تحميل ngrok: {e}")
+        return None
+
+
+def start_ngrok(ngrok_bin: Path, port: int, log_path: Path, authtoken: str) -> Optional[subprocess.Popen]:
+    """يشغّل ngrok http بعد ضبط الـ authtoken."""
+    # ضبط التوكن (مرة واحدة — يكتب في ~/.ngrok2 أو config محلي)
+    try:
+        cfg_dir = ROOT / "artifacts" / "ngrok_cfg"
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        # نمرّر التوكن عبر متغير بيئة + أمر config لتجنب الاعتماد على ملف المستخدم
+        env = os.environ.copy()
+        env["NGROK_AUTHTOKEN"] = authtoken
+        # config add-authtoken (صامت إن نجح سابقاً)
+        subprocess.run(
+            [str(ngrok_bin), "config", "add-authtoken", authtoken],
+            cwd=str(cfg_dir),
+            env=env,
+            capture_output=True,
+            timeout=20,
+            check=False,
+        )
+        log_f = open(log_path, "a", buffering=1, encoding="utf-8")
+        _log("🌐 تشغيل نفق ngrok...")
+        # --log=stdout يجعل الرسائل تظهر في الملف الذي نراقبه
+        return subprocess.Popen(
+            [
+                str(ngrok_bin),
+                "http",
+                str(port),
+                "--log=stdout",
+                "--log-format=logfmt",
+            ],
+            cwd=str(cfg_dir),
+            env=env,
+            stdout=log_f,
+            stderr=subprocess.STDOUT,
+        )
+    except Exception as e:
+        _log(f"❌ فشل بدء ngrok: {e}")
+        return None
+
+
+def read_ngrok_url(log_path: Path, timeout: float = 35.0) -> str:
+    """يستخرج رابط https://xxxx.ngrok-free.app أو ngrok.io من سجل ngrok."""
+    deadline = time.time() + timeout
+    # صيغ شائعة: url=https://xxxx.ngrok-free.app  أو  Forwarding  https://...
+    patterns = [
+        re.compile(r"url=(https://[a-zA-Z0-9.-]+\.ngrok(?:-free)?\.(?:app|io|dev)[^\s]*)"),
+        re.compile(r"https://[a-zA-Z0-9.-]+\.ngrok(?:-free)?\.(?:app|io|dev)"),
+        re.compile(r"Forwarding\s+(https://[a-zA-Z0-9.-]+\.ngrok[^\s]*)"),
+    ]
+    while time.time() < deadline:
+        if log_path.exists():
+            text = log_path.read_text(encoding="utf-8", errors="ignore")
+            for pat in patterns:
+                m = pat.search(text)
+                if m:
+                    url = m.group(1) if m.lastindex else m.group(0)
+                    # نظّف أي محارف زائدة
+                    url = url.strip().rstrip('"').rstrip("'")
+                    if url.startswith("https://"):
+                        return url
+        time.sleep(1.0)
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# البديل 3 و4: serveo.net و localhost.run (كلاهما نفق عبر SSH القياسي)
 # ---------------------------------------------------------------------------
 
 def start_ssh_tunnel(remote_host: str, remote_user: str, port: int, log_path: Path) -> Optional[subprocess.Popen]:
@@ -266,7 +372,7 @@ def read_ssh_tunnel_url(log_path: Path, domain_suffixes: tuple, timeout: float =
     return ""
 
 
-TUNNEL_PROVIDERS = ("bore", "serveo", "localhost_run")
+TUNNEL_PROVIDERS = ("bore", "ngrok", "serveo", "localhost_run")
 
 
 def try_start_tunnel(provider: str, port: int, log_dir: Path, node_id: str):
@@ -290,6 +396,34 @@ def try_start_tunnel(provider: str, port: int, log_dir: Path, node_id: str):
             except Exception:
                 pass
             return None, ""
+        return proc, url
+
+    if provider == "ngrok":
+        authtoken = (
+            os.environ.get("NGROK_AUTHTOKEN")
+            or os.environ.get("NGROK_TOKEN")
+            or os.environ.get("NSM_NGROK_AUTHTOKEN")
+            or ""
+        ).strip()
+        if not authtoken:
+            _log("⏭️ تخطّي ngrok — لا يوجد NGROK_AUTHTOKEN في البيئة.")
+            return None, ""
+        ngrok_bin = ensure_ngrok(ROOT / "artifacts" / "bin")
+        if ngrok_bin is None:
+            return None, ""
+        log_path = log_dir / f"ngrok_{node_id}.log"
+        proc = start_ngrok(ngrok_bin, port, log_path, authtoken)
+        if proc is None:
+            return None, ""
+        url = read_ngrok_url(log_path)
+        if not url or proc.poll() is not None:
+            _log(f"❌ لم يظهر رابط ngrok خلال المهلة (أو توقفت العملية). راجع السجل: {log_path}")
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            return None, ""
+        # نُرجع الرابط الكامل (https://....ngrok-free.app) ليستخدم مباشرة كـ SEED_NODE_URL
         return proc, url
 
     if provider == "serveo":
@@ -359,7 +493,8 @@ def main() -> None:
     provider, tunnel_proc, public_url = start_any_tunnel(port, log_dir, node_id)
 
     if not public_url:
-        _log("❌ فشلت كل البدائل الثلاثة (bore.pub / serveo.net / localhost.run).")
+        _log("❌ فشلت كل البدائل (bore.pub / ngrok / serveo.net / localhost.run).")
+        _log("   إن أردت تفعيل ngrok: صدّر NGROK_AUTHTOKEN قبل التشغيل.")
         _log("   إذا لم يظهر الرابط هنا، آخر خيار عملي هو تشغيل عقدة البذرة خارج")
         _log("   Kaggle (VPS أو جهازك عبر scripts/run_mesh_seed_termux.sh).")
         _log("   راجع سجلات artifacts/living_mesh/logs/ للتفاصيل.")
