@@ -197,6 +197,7 @@ def render_system_core():
         "🌍 التغذية من العالم",
         "⚡ الأداء (كاش الأسئلة)",
         "🪞 التأمل الذاتي",
+        "🗄️ صيانة القواعد",
     ])
 
     # ══════════════════ 1. النواة العصبية ══════════════════
@@ -882,3 +883,61 @@ def render_system_core():
                         "كلمات متكررة في التعليقات السلبية: "
                         + "، ".join(list(_fbl_insights["negative_keywords"].keys())[:5])
                     )
+
+    # ══════════════════ 9. صيانة القواعد (DB Maintenance) ══════════════════
+    with core_tabs[8]:
+        st.markdown('<div class="section-header">🗄️ صيانة قواعد SQLite (DB Maintenance)</div>',
+                    unsafe_allow_html=True)
+        st.markdown(
+            '<p style="color:var(--text-muted);direction:rtl">يدير ai/db_maintenance.py أرشفة الصفوف '
+            'الأقدم من 30 يوماً (نقل، لا حذف نهائي) في قواعد memory/*.db (المحادثات، سجل التوجيه، '
+            'خبرة السرب، الذاكرة الجماعية، الحلقات العصبية) ثم VACUUM لاستعادة مساحة القرص فعلياً — '
+            'مهم على قرص Streamlit Community Cloud المحدود. تعمل دورة تلقائية كل 24 ساعة (بدأت فعلياً '
+            'الآن مع أول تحميل للتطبيق بعد هذا التحديث).</p>',
+            unsafe_allow_html=True,
+        )
+        try:
+            from ai.db_maintenance import get_maintenance_stats, run_maintenance_once, DB_MAINT_TABLES
+            _dbm_ok = True
+        except Exception as _dbm_e:
+            _dbm_ok = False
+            st.warning(f"⚠️ تعذّر تحميل وحدة صيانة القواعد: {_dbm_e}")
+
+        if _dbm_ok:
+            _dbm_stats = get_maintenance_stats()
+            _dbm_sizes = _dbm_stats.get("db_sizes", {})
+            _dbm_total_mb = sum(_dbm_sizes.values()) / (1024 * 1024)
+
+            col_dbm1, col_dbm2 = st.columns(2)
+            with col_dbm1:
+                metric_card(f"{_dbm_total_mb:.2f} MB", "إجمالي حجم القواعد المُدارة")
+            with col_dbm2:
+                _dbm_last = _dbm_stats.get("last_run")
+                metric_card("نعم" if _dbm_last else "لا", "تم تشغيل دورة صيانة بعد")
+
+            with st.expander("📦 حجم كل قاعدة على حدة"):
+                for _db_path, _table, _ in DB_MAINT_TABLES:
+                    _size = _dbm_sizes.get(_db_path.name, 0)
+                    st.caption(f"{_db_path.name} ({_table}): {_size / 1024:.1f} KB")
+
+            col_dbm_btn1, col_dbm_btn2 = st.columns(2)
+            with col_dbm_btn1:
+                if st.button("🔍 معاينة (دون تعديل)", key="dbm_dry_run"):
+                    _dbm_preview = run_maintenance_once(days=30, dry_run=True)
+                    _total_candidates = sum(t["archived"] for t in _dbm_preview["tables_archived"])
+                    if _total_candidates:
+                        st.info(f"📋 {_total_candidates} صفاً مؤهَّلاً للأرشفة (أقدم من 30 يوماً) عبر القواعد كلها.")
+                    else:
+                        st.success("✅ لا صفوف مؤهَّلة للأرشفة حالياً — كل البيانات حديثة.")
+            with col_dbm_btn2:
+                if st.button("🧹 شغّل الصيانة الآن", key="dbm_run_now", type="primary"):
+                    with st.spinner("جارٍ الأرشفة و VACUUM..."):
+                        _dbm_result = run_maintenance_once(days=30, dry_run=False)
+                    _total_archived = sum(t["archived"] for t in _dbm_result["tables_archived"])
+                    st.success(
+                        f"✅ اكتملت الصيانة: {_total_archived} صف مؤرشَف، "
+                        f"{len(_dbm_result['vacuumed'])} قاعدة تمت إعادة ضغطها (VACUUM)."
+                    )
+                    if _dbm_result["errors"]:
+                        st.warning(f"⚠️ أخطاء في {len(_dbm_result['errors'])} قاعدة — راجع السجلات.")
+                    st.rerun()

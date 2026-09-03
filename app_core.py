@@ -28,6 +28,19 @@ import streamlit as st
 
 logger = logging.getLogger("NSM.streamlit_app")
 
+# ── ai/db_maintenance.py: صيانة دورية لقواعد SQLite (VACUUM + أرشفة) ──────
+# الوحدة كانت موجودة وجاهزة تماماً (تُشغِّل نفسها ذاتياً عند الاستيراد —
+# راجع نهاية الملف نفسه) لكن لم يستوردها أي ملف في المشروع، فبقيت خاملة
+# كلياً منذ كتابتها: لا أرشفة، لا VACUUM، نمو تراكمي غير محدود لقواعد
+# memory/*.db على قرص Streamlit Community Cloud المحدود. الاستيراد هنا
+# (مرة واحدة لكل عملية، عبر app_core الذي يحمّله كل ملفات ui_pages) كافٍ
+# لتفعيلها؛ لا حاجة لأي استدعاء إضافي. فشل الاستيراد (مثلاً بيئة اختبار
+# بلا صلاحية كتابة) يُصمَّت بالكامل — لا يجوز أن يمنع إقلاع الواجهة.
+try:
+    import ai.db_maintenance as _db_maintenance  # noqa: F401 — للتأثير الجانبي فقط
+except Exception as _dbm_e:
+    logger.warning("[app_core] تعذّر تفعيل db_maintenance: %s", _dbm_e)
+
 # ── OpenRouter — مزوّد موازٍ اختياري ─────────────────────────────────────
 try:
     import requests as _requests
