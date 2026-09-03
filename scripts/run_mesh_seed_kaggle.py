@@ -27,6 +27,12 @@ QUIC وحده. لذلك أُزيل Cloudflare من هذا السكربت كلي�
 يُجرَّب كل بديل بالترتيب أعلاه لمدة محدودة، وأول من ينجح يُستخدم لبقية الجلسة
 (مع محاولة استئناف نفس البديل الناجح إن انقطع، والانتقال للتالي بعد عدة فشل).
 
+v12.1 (إصلاح مهم): رفض الإعلان الكاذب عن نجاح bore عندما تظهر كلمة
+"bore.pub:PORT" داخل رسالة خطأ (timed out / could not connect). كان هذا
+السبب الذي جعل تشغيل Kaggle السابق يتوقف عند bore الفاشل ولا يجرّب SSH.
+الآن يُشترط ظهور العبارة الإيجابية "listening at bore.pub:..." + بقاء
+العملية حيّة قبل اعتبار البديل ناجحاً.
+
 الاستخدام داخل خلية Kaggle (بعد استنساخ المستودع):
     !python scripts/run_mesh_seed_kaggle.py
 
@@ -190,15 +196,31 @@ def start_bore(bore_bin: Path, port: int, log_path: Path) -> subprocess.Popen:
     )
 
 
-def read_bore_url(log_path: Path, timeout: float = 25.0) -> str:
+def read_bore_url(log_path: Path, timeout: float = 30.0) -> str:
+    """يستخرج رابط bore فقط عند ظهور العبارة الإيجابية الحقيقية.
+    يرفض صراحةً رسائل الخطأ التي تحتوي على bore.pub:PORT (كان هذا سبب
+    الإعلان الكاذب عن نجاح في تشغيل Kaggle السابق).
+    """
     deadline = time.time() + timeout
-    pattern = re.compile(r"listening at bore\.pub:(\d+)")
+    positive = re.compile(r"listening at bore\.pub:(\d+)", re.IGNORECASE)
+    # كلمات تدل على فشل الاتصال — إن وُجدت قرب المطابقة نرفضها
+    negative = re.compile(
+        r"(could not connect|timed out|Error:|connection refused|failed to|unable to)",
+        re.IGNORECASE,
+    )
     while time.time() < deadline:
         if log_path.exists():
             text = log_path.read_text(encoding="utf-8", errors="ignore")
-            m = pattern.search(text)
+            m = positive.search(text)
             if m:
-                return f"bore.pub:{m.group(1)}"
+                # افحص نافذة حول المطابقة بحثاً عن كلمات فشل
+                start = max(0, m.start() - 150)
+                snippet = text[start : m.end() + 60]
+                if negative.search(snippet):
+                    # مطابقة داخل رسالة خطأ — تجاهل وانتظر أكثر
+                    pass
+                else:
+                    return f"bore.pub:{m.group(1)}"
         time.sleep(1.0)
     return ""
 
@@ -248,7 +270,9 @@ TUNNEL_PROVIDERS = ("bore", "serveo", "localhost_run")
 
 
 def try_start_tunnel(provider: str, port: int, log_dir: Path, node_id: str):
-    """يحاول تشغيل بديل نفق واحد. يُعيد (proc, public_url) أو (None, "") عند الفشل."""
+    """يحاول تشغيل بديل نفق واحد. يُعيد (proc, public_url) أو (None, "") عند الفشل.
+    يتحقق أن العملية ما زالت حيّة بعد استخراج الرابط لتجنب الإعلان الكاذب.
+    """
     if provider == "bore":
         bore_bin = ensure_bore(ROOT / "artifacts" / "bin")
         if bore_bin is None:
@@ -256,9 +280,15 @@ def try_start_tunnel(provider: str, port: int, log_dir: Path, node_id: str):
         log_path = log_dir / f"bore_{node_id}.log"
         proc = start_bore(bore_bin, port, log_path)
         url = read_bore_url(log_path)
-        if not url:
-            _log(f"❌ لم يظهر رابط bore.pub خلال المهلة. راجع السجل: {log_path}")
-            proc.terminate()
+        if not url or proc.poll() is not None:
+            if not url:
+                _log(f"❌ لم يظهر رابط bore.pub الإيجابي خلال المهلة. راجع السجل: {log_path}")
+            else:
+                _log("❌ ظهرت عبارة bore لكن العملية توقفت فوراً — اعتباره فشلاً.")
+            try:
+                proc.terminate()
+            except Exception:
+                pass
             return None, ""
         return proc, url
 
@@ -267,10 +297,13 @@ def try_start_tunnel(provider: str, port: int, log_dir: Path, node_id: str):
         proc = start_ssh_tunnel("serveo.net", "", port, log_path)
         if proc is None:
             return None, ""
-        host = read_ssh_tunnel_url(log_path, (".serveo.net",))
-        if not host:
-            _log(f"❌ لم يظهر رابط serveo.net خلال المهلة. راجع السجل: {log_path}")
-            proc.terminate()
+        host = read_ssh_tunnel_url(log_path, (".serveo.net",), timeout=35.0)
+        if not host or proc.poll() is not None:
+            _log(f"❌ لم يظهر رابط serveo.net خلال المهلة (أو انقطع SSH). راجع السجل: {log_path}")
+            try:
+                proc.terminate()
+            except Exception:
+                pass
             return None, ""
         return proc, f"{host}:443"
 
@@ -279,10 +312,13 @@ def try_start_tunnel(provider: str, port: int, log_dir: Path, node_id: str):
         proc = start_ssh_tunnel("localhost.run", "nokey", port, log_path)
         if proc is None:
             return None, ""
-        host = read_ssh_tunnel_url(log_path, (".lhr.life", ".localhost.run"))
-        if not host:
-            _log(f"❌ لم يظهر رابط localhost.run خلال المهلة. راجع السجل: {log_path}")
-            proc.terminate()
+        host = read_ssh_tunnel_url(log_path, (".lhr.life", ".localhost.run"), timeout=35.0)
+        if not host or proc.poll() is not None:
+            _log(f"❌ لم يظهر رابط localhost.run خلال المهلة (أو انقطع SSH). راجع السجل: {log_path}")
+            try:
+                proc.terminate()
+            except Exception:
+                pass
             return None, ""
         return proc, f"{host}:443"
 
@@ -326,13 +362,16 @@ def main() -> None:
         _log("❌ فشلت كل البدائل الثلاثة (bore.pub / serveo.net / localhost.run).")
         _log("   إذا لم يظهر الرابط هنا، آخر خيار عملي هو تشغيل عقدة البذرة خارج")
         _log("   Kaggle (VPS أو جهازك عبر scripts/run_mesh_seed_termux.sh).")
+        _log("   راجع سجلات artifacts/living_mesh/logs/ للتفاصيل.")
     else:
         url_file.write_text(public_url + "\n", encoding="utf-8")
-        _log(f"✅ v12 (NO Cloudflare) — العقدة شغّالة وظاهرة عبر {provider.upper()} |")
+        prov = (provider or "unknown").upper()
+        _log(f"✅ v12 (NO Cloudflare) — العقدة شغّالة وظاهرة عبر {prov}")
         _log("📋 بإعدادات Streamlit Cloud (Secrets) أضف:")
         _log("   NSM_ENABLE_NODE = true")
         _log(f"   TUNNEL_URL = {provider}")
         _log(f"   SEED_NODE_URL = {public_url}")
+        print(f"\n*** COPY ***\nSEED_NODE_URL={public_url}\nMODE={prov}\n", flush=True)
 
     _log(f"📄 سجل العقدة: {node_log}")
     _log(f"⏱️ سيستمر التشغيل حتى {duration_hours:g} ساعة أو حتى إيقاف الدفتر يدوياً.")
