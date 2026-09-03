@@ -34,6 +34,8 @@ jobs:
             tests/test_unified_semantic_memory.py \
             tests/test_training_experience_registry.py \
             tests/test_critical_modules.py
+            tests/test_mesh_network_config.py
+            tests/test_tunnel_providers.py
 
   full:
     name: pytest + py_compile
@@ -50,7 +52,6 @@ jobs:
         run: pip install -q pytest numpy requests scikit-learn ipykernel
       - name: تشغيل pytest
         run: python3 -m pytest -q --tb=line
-        continue-on-error: true
       - name: فحص صياغي (py_compile)
         run: |
           find . -name "*.py" -not -path "./node_modules/*" \
