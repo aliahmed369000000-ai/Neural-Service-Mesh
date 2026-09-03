@@ -442,6 +442,45 @@ def _get_safety_checker():
     return _SAFETY_CHECK_FN
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# تخزين مؤقت (ai/agent_performance_cache.py) — لتسريع الأسئلة المتكررة
+# ═══════════════════════════════════════════════════════════════════════════
+# يُخزَّن الناتج فقط للمسار الرمزي القطعي (لا توليد حر عشوائي، لا سياق محادثة
+# سابقة يغيّر المعنى، لا فحص تأسيس مكلف) — بقية الحالات تمرّ دون كاش دائماً.
+_AGENT_CACHE = None
+_AGENT_CACHE_TRIED = False
+
+
+def _get_agent_cache():
+    """يُحمِّل AgentCache مرة واحدة. يُرجع None عند أي فشل (لا يعطّل النظام)."""
+    global _AGENT_CACHE, _AGENT_CACHE_TRIED
+    if _AGENT_CACHE_TRIED:
+        return _AGENT_CACHE
+    _AGENT_CACHE_TRIED = True
+    try:
+        from ai.agent_performance_cache import AgentCache
+        _AGENT_CACHE = AgentCache(max_size=2000, ttl_seconds=1800)
+        logger.info("[qa_engine] طبقة تخزين مؤقت agent_performance_cache.py محمَّلة ومتصلة")
+    except Exception as e:
+        _AGENT_CACHE = None
+        logger.warning(f"[qa_engine] تعذّر تحميل طبقة التخزين المؤقت — سيستمر النظام بدونها: {e}")
+    return _AGENT_CACHE
+
+
+def _cacheable(
+    generation_mode: bool,
+    include_faithfulness_check: bool,
+    conversation_history: Optional[List[Dict[str, str]]],
+) -> bool:
+    """معايير الأهلية للتخزين المؤقت — أي حالة فيها عشوائية أو سياق أو تحقق
+    مكلف تُستبعد كلياً كي لا يُرجَع ناتج قديم أو غير مناسب للسياق الحالي."""
+    return (
+        not generation_mode
+        and not include_faithfulness_check
+        and not conversation_history
+    )
+
+
 def _blocked_response(question: str, domain: str, hint: str) -> Dict[str, Any]:
     """رد موحَّد الشكل عند رفض فحص الأمان — بنفس بنية نتيجة answer_question العادية تماماً."""
     return {
@@ -1484,6 +1523,68 @@ def _auto_yemeni_rag_boost(
 
 
 def answer_question(
+    question: str,
+    ckg: Dict[str, Any],
+    ayat: List[Dict[str, Any]],
+    max_verses: int = 5,
+    max_related: int = 8,
+    entities: Optional[Dict[str, Any]] = None,
+    generation_mode: bool = False,
+    generation_backend: str = "llm_fallback",  # "llm_fallback" أو "yemeni_decoder"
+    dialect: str = "عام",
+    temperature: float = 0.8,
+    top_p: float = 0.95,
+    top_k: int = 50,
+    include_reasoning_trace: bool = False,
+    include_images: bool = False,
+    include_faithfulness_check: bool = False,
+    conversation_history: Optional[List[Dict[str, str]]] = None,
+) -> Dict[str, Any]:
+    """غلاف رقيق حول _answer_question_impl() يضيف تخزيناً مؤقتاً اختيارياً.
+
+    يُستخدَم الكاش فقط للحالات القطعية 100% (راجع _cacheable أعلاه) —
+    أي فشل بالكاش نفسه (لا استيراد، لا مساحة قرص، إلخ) يُصمَّت تماماً
+    وتُحسَب الإجابة من الصفر كالمعتاد؛ لا يوجد أي مسار يعتمد على الكاش.
+    """
+    cache = None
+    cache_key = None
+    if _cacheable(generation_mode, include_faithfulness_check, conversation_history):
+        cache = _get_agent_cache()
+        if cache is not None:
+            try:
+                cache_key = cache._make_key(
+                    "qa_v1", question.strip(), max_verses, max_related,
+                    include_reasoning_trace, include_images,
+                )
+                cached = cache.get(cache_key)
+                if cached is not None:
+                    import copy
+                    result = copy.deepcopy(cached)
+                    result["from_cache"] = True
+                    return result
+            except Exception as e:
+                logger.warning(f"[qa_engine] فشل قراءة الكاش — سيُحسَب السؤال بشكل طبيعي: {e}")
+
+    result = _answer_question_impl(
+        question, ckg, ayat,
+        max_verses=max_verses, max_related=max_related, entities=entities,
+        generation_mode=generation_mode, generation_backend=generation_backend,
+        dialect=dialect, temperature=temperature, top_p=top_p, top_k=top_k,
+        include_reasoning_trace=include_reasoning_trace, include_images=include_images,
+        include_faithfulness_check=include_faithfulness_check,
+        conversation_history=conversation_history,
+    )
+
+    if cache is not None and cache_key is not None and not result.get("safety_blocked"):
+        try:
+            cache.set(cache_key, result)
+        except Exception as e:
+            logger.warning(f"[qa_engine] فشل كتابة الكاش — لا يؤثر على الإجابة الحالية: {e}")
+
+    return result
+
+
+def _answer_question_impl(
     question: str,
     ckg: Dict[str, Any],
     ayat: List[Dict[str, Any]],

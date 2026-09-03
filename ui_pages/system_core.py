@@ -195,6 +195,7 @@ def render_system_core():
         "🔬 التحليل اللغوي",
         "🌐 بحث الويب المباشر",
         "🌍 التغذية من العالم",
+        "⚡ الأداء (كاش الأسئلة)",
     ])
 
     # ══════════════════ 1. النواة العصبية ══════════════════
@@ -743,3 +744,41 @@ def render_system_core():
                         )
                 else:
                     st.info("لا عناصر مقبولة بعد — اضغط «اسحب الآن يدوياً» لتجربة السحب الحقيقي.")
+
+    # ══════════════════ 7. الأداء (كاش الأسئلة) ══════════════════
+    with core_tabs[6]:
+        st.markdown('<div class="section-header">⚡ كاش الأسئلة المتكررة (Agent Cache)</div>',
+                    unsafe_allow_html=True)
+        st.markdown(
+            '<p style="color:var(--text-muted);direction:rtl">يخزّن ai/agent_performance_cache.py '
+            'إجابات المسار الرمزي القطعي فقط (بلا توليد حر، بلا سياق محادثة سابقة) لمدة 30 دقيقة — '
+            'يسرّع الأسئلة المتكررة (أسئلة FAQ شائعة، إعادة تحميل الصفحة) دون أي تأثير على دقة أو حداثة '
+            'الإجابات ذات السياق أو التوليد الحر.</p>',
+            unsafe_allow_html=True,
+        )
+        try:
+            from knowledge.qa_engine import _get_agent_cache
+            _ac = _get_agent_cache()
+        except Exception:
+            _ac = None
+
+        if _ac is None:
+            st.warning("⚠️ طبقة الكاش غير محمَّلة بعد (تُحمَّل تلقائياً عند أول سؤال في هذه الجلسة).")
+        else:
+            _ac_stats = _ac.stats()
+            col_ac1, col_ac2, col_ac3, col_ac4 = st.columns(4)
+            with col_ac1:
+                metric_card(_ac_stats["size"], "عناصر مخزَّنة حالياً")
+            with col_ac2:
+                metric_card(_ac_stats["hit_rate"], "نسبة الإصابة (Hit Rate)")
+            with col_ac3:
+                metric_card(_ac_stats["hits"], "إجابات مُسرَّعة من الكاش")
+            with col_ac4:
+                metric_card(_ac_stats["misses"], "أسئلة جديدة (تُحسَب من الصفر)")
+
+            st.caption(f"الحد الأقصى: {_ac_stats['max_size']} عنصر · مدة الصلاحية: {_ac_stats['ttl_seconds']//60} دقيقة")
+
+            if st.button("🗑️ إفراغ الكاش الآن", key="ac_clear"):
+                _cleared = _ac.clear()
+                st.success(f"تم إفراغ {_cleared} عنصراً من الكاش.")
+                st.rerun()
