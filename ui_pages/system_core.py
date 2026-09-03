@@ -840,3 +840,45 @@ def render_system_core():
                     )
             else:
                 st.info("لا دروس مستخلَصة بعد — اضغط «تحليل النشاط الأخير الآن» بعد استخدام وكلاء AI.")
+
+        st.markdown("---")
+        st.markdown('<div class="section-header">📊 ملاحظات المستخدمين (Feedback Learner)</div>',
+                    unsafe_allow_html=True)
+        st.markdown(
+            '<p style="color:var(--text-muted);direction:rtl">يجمع ai/agent_learning_feedback.py تقييمات '
+            'المستخدمين الفعلية (👍/👎 من تبويب ❓ الأسئلة والأجوبة) ويحلّل الأنماط — نوع الإجراء الأفضل '
+            'والأسوأ تقييماً، والاتجاه الزمني. هذا مسار تسجيل وتحليل منفصل تماماً عن تدريب LoRA الخفيف '
+            '(الذي يعمل من الإجابات الإيجابية فقط).</p>',
+            unsafe_allow_html=True,
+        )
+        try:
+            from ai.agent_learning_feedback import FeedbackLearner
+            _fbl = FeedbackLearner()
+            _fbl_insights = _fbl.get_insights(min_samples=5)
+        except Exception as _fbl_e:
+            _fbl_insights = None
+            st.warning(f"⚠️ تعذّر تحميل نظام التغذية الراجعة: {_fbl_e}")
+
+        if _fbl_insights is not None:
+            if _fbl_insights.get("status") == "insufficient_data":
+                st.info(
+                    f"بيانات غير كافية بعد للتحليل ({_fbl_insights['count']}/"
+                    f"{_fbl_insights['needed']} تقييمات مطلوبة) — قيّم بعض الإجابات "
+                    "في تبويب ❓ الأسئلة والأجوبة أولاً."
+                )
+            else:
+                col_fb1, col_fb2, col_fb3 = st.columns(3)
+                with col_fb1:
+                    metric_card(_fbl_insights["total_feedbacks"], "إجمالي التقييمات")
+                with col_fb2:
+                    metric_card(_fbl_insights["avg_score"], "متوسط التقييم (من 5)")
+                with col_fb3:
+                    _trend_label = {"improving": "📈 تحسّن", "declining": "📉 تراجع",
+                                     "stable": "➡️ مستقر"}.get(_fbl_insights["trend"], "؟")
+                    metric_card(_trend_label, "الاتجاه الزمني (آخر 10)")
+
+                if _fbl_insights.get("negative_keywords"):
+                    st.caption(
+                        "كلمات متكررة في التعليقات السلبية: "
+                        + "، ".join(list(_fbl_insights["negative_keywords"].keys())[:5])
+                    )

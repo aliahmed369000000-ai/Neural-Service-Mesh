@@ -7,6 +7,25 @@ from __future__ import annotations
 from app_core import *  # noqa: F401,F403 — إعادة تصدير كل الاستيرادات والدوال المساعدة المشتركة
 
 
+_FEEDBACK_LEARNER = None
+_FEEDBACK_LEARNER_TRIED = False
+
+
+def _get_feedback_learner():
+    """يحمّل ai/agent_learning_feedback.FeedbackLearner مرة واحدة فقط.
+    يُرجع None عند أي فشل (استيراد، صلاحيات كتابة، إلخ) — لا يُعطّل شاشة
+    الأسئلة والأجوبة أبداً؛ نفس فلسفة _get_agent_cache في qa_engine.py."""
+    global _FEEDBACK_LEARNER, _FEEDBACK_LEARNER_TRIED
+    if _FEEDBACK_LEARNER_TRIED:
+        return _FEEDBACK_LEARNER
+    _FEEDBACK_LEARNER_TRIED = True
+    try:
+        from ai.agent_learning_feedback import FeedbackLearner
+        _FEEDBACK_LEARNER = FeedbackLearner()
+    except Exception:
+        _FEEDBACK_LEARNER = None
+    return _FEEDBACK_LEARNER
+
 
 def render_qa():
     """تبويب الأسئلة والأجوبة القرآني — يعتمد على CKG والآيات فقط."""
@@ -242,6 +261,23 @@ def render_qa():
         st.caption("قيّم هذه الإجابة:")
         _fb_selected = st.feedback("thumbs", key=f"{_fb_key}_widget")
         if _fb_selected is not None:
+            # تسجيل دائم لكل التقييمات (إيجابي وسلبي) عبر
+            # ai/agent_learning_feedback.py — منفصل تماماً عن مسار تدريب
+            # LoRA أدناه (record_positive_feedback)؛ فشل هذا التسجيل لا
+            # يؤثر إطلاقاً على تجربة المستخدم أو مسار التدريب.
+            _learner = _get_feedback_learner()
+            if _learner is not None:
+                try:
+                    _learner.record_feedback(
+                        response_id=f"qa_{hash(question)}",
+                        score=5 if _fb_selected == 1 else 1,
+                        comment="",
+                        agent_type="qa_engine",
+                        action_type="qa_answer",
+                        extra={"question_preview": question[:200]},
+                    )
+                except Exception:
+                    pass
             if _fb_selected == 1:
                 try:
                     record_positive_feedback(question, result.get("summary", ""))
