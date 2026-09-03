@@ -144,89 +144,160 @@ def render_agent_orchestrator():
             responses: Dict[str, str] = {}
             failed_keys: set = set()
             final_answer: Optional[str] = None
+
+            # ── تجهيز كائنات الوكلاء مسبقاً (يجب أن يتم في الخيط الرئيسي —
+            # الوصول إلى st.session_state من خيوط فرعية غير آمن في Streamlit) ──
+            _bots: Dict[str, "CategoryAgentChat"] = {}
             for key in selected:
                 cat = AGENT_CATEGORIES[key]
                 bot_key = f"agent_bot_{cat.key}"
                 if bot_key not in st.session_state:
                     st.session_state[bot_key] = CategoryAgentChat(cat.key)
-                bot = st.session_state[bot_key]
+                _bots[key] = st.session_state[bot_key]
 
-                # ── النمط المتسلسل: يُرفَق ملخّص ردود الوكلاء السابقين
-                # بنص المهمة، بحيث يبني كل وكيل على ما سبقه (سير عمل حقيقي
-                # بدل مجرد ردود متوازية منفصلة). النمط المتوازي يمرّر
-                # المهمة الأصلية فقط لكل وكيل، بدون أي تعديل. ──
-                if exec_mode == "sequential" and responses:
-                    prior = "\n\n".join(
-                        f"[{AGENT_CATEGORIES[k].title}]\n{v}"
-                        for k, v in responses.items() if k not in failed_keys
-                    )
-                    agent_input = (
-                        f"{task.strip()}\n\n"
-                        f"── ردود وكلاء سابقين في نفس سير العمل (ابنِ عليها، لا تكررها) ──\n"
-                        f"{prior}"
-                    )
-                else:
-                    agent_input = task.strip()
-
-                emit_event(
-                    "agent_started",
-                    agent_id=cat.key,
-                    title=cat.title,
-                    status="running",
-                    detail="بدأ الوكيل تنفيذ المهمة",
-                )
-                render_agent_live_trace(_live_trace)
-                _orch_skel_ph = st.empty()
-                with _orch_skel_ph.container():
-                    st.caption(f"⟳ {cat.title} يعمل على المهمة...")
-                    _skeleton(lines=3)
-                # 🆕 نظام التقييم الذاتي (Self-Reflection): يراجع فشل الوكيل
-                # ويصنّف سببه ويعيد المحاولة باستراتيجية مصححة تلقائياً حتى
-                # استنفاد دورات التقييم — بنفس الروح المضافة في UnifiedAgentChat.
+            if exec_mode == "parallel" and len(selected) > 1:
+                # 🆕 تنفيذ متوازٍ فعلي عبر ai/agent_collaboration.py (كان غير
+                # مستخدَم إطلاقاً). قبل هذا التعديل كان "⚡ متوازٍ" اسماً فقط —
+                # الحلقة كانت تسلسلية دائماً (كل وكيل ينتظر انتهاء سابقه)، رغم
+                # أن الوضع المتوازي لا يحتاج فعلياً لهذا الانتظار (كل وكيل
+                # يستقل تماماً عن غيره في هذا الوضع). الآن يُنفَّذ فعلياً عبر
+                # ThreadPoolExecutor داخل CollaborativePlanner.execute_collaborative.
+                #
+                # ملاحظة أمان: on_retry الذي يستدعي render_agent_live_trace غير
+                # مُمرَّر هنا عمداً — استدعاء دوال Streamlit من خيط فرعي غير
+                # مدعوم؛ إعادة المحاولة الذاتية (reflecting_call) تعمل بصمت في
+                # الخلفية كالمعتاد دون تحديث حي لكل محاولة على حدة.
+                from ai.agent_collaboration import CollaborativePlanner
                 from ai.agent_reflection import ReflectionContext, reflecting_call
-                _orch_ref_ctx = ReflectionContext()
-                resp, _ok = None, False
-                try:
-                    def _orch_call() -> str:
-                        return bot.chat(agent_input, source="orchestrator")
-                    def _orch_retry(_att: int, info: dict) -> None:
-                        _strategy_note = {
-                            "retry_with_backoff": "إعادة المحاولة بعد انتظار قصير",
-                            "switch_provider_hint": "محاولة عبر مسار مزوّد بديل",
-                            "simplify_prompt": "تبسيط الطلب وإعادة المحاولة",
-                        }.get(info.get("strategy", ""), "إعادة المحاولة")
-                        emit_event(
-                            "agent_started",
-                            agent_id=cat.key,
-                            title=cat.title,
-                            status="running",
-                            detail=f"إعادة محاولة ذاتية: {_strategy_note}",
-                        )
-                        render_agent_live_trace(_live_trace)
-                    resp = reflecting_call(cat.key, cat.title, _orch_call, _orch_ref_ctx, on_retry=_orch_retry)
-                    _ok = True
-                except Exception as _orch_err:
-                    resp = f"⚠️ خطأ: {_orch_err}"
-                if not _ok:
-                    failed_keys.add(key)
-                    emit_event("agent_error", agent_id=cat.key, title=cat.title, status="error", detail=str(resp)[:180])
-                else:
-                    emit_event("agent_done", agent_id=cat.key, title=cat.title, status="done", detail="اكتمل رد الوكيل")
-                _orch_skel_ph.empty()
-                responses[key] = resp
+
+                for key in selected:
+                    emit_event("agent_started", agent_id=key, title=AGENT_CATEGORIES[key].title,
+                                status="running", detail="بدأ الوكيل تنفيذ المهمة (متوازٍ)")
                 render_agent_live_trace(_live_trace)
-                # 🆕 شارة جودة موحّدة لكل رد وكيل (نفس ميزة تبويب "🤖 وكلاء AI"
-                # ووحدة إعادة التوليد التلقائي المدمجة الآن في CategoryAgentChat).
-                _q_label = ""
-                if _ok and hasattr(bot, "last_quality_badge"):
+
+                def _parallel_execute(subtask: dict) -> str:
+                    _key = subtask["agent_type"]
+                    _cat = AGENT_CATEGORIES[_key]
+                    _bot = _bots[_key]
+                    _ctx = ReflectionContext()
+                    return reflecting_call(_cat.key, _cat.title, lambda: _bot.chat(task.strip(), source="orchestrator"), _ctx)
+
+                planner = CollaborativePlanner(max_workers=min(len(selected), 4), timeout_per_subtask=180)
+                collab = planner.execute_collaborative(
+                    task=task.strip(),
+                    subtasks=[{"agent_type": key, "prompt": task.strip()} for key in selected],
+                    execute_fn=_parallel_execute,
+                )
+                _by_key = {r["agent_type"]: r for r in collab["results"]}
+                for key in selected:
+                    r = _by_key.get(key)
+                    if r is not None and r.get("ok"):
+                        responses[key] = r["result"]
+                        emit_event("agent_done", agent_id=key, title=AGENT_CATEGORIES[key].title,
+                                    status="done", detail="اكتمل رد الوكيل (متوازٍ)")
+                    else:
+                        _err = r.get("error", "لم يكتمل ضمن المهلة") if r is not None else "لم يكتمل ضمن المهلة"
+                        responses[key] = f"⚠️ خطأ: {_err}"
+                        failed_keys.add(key)
+                        emit_event("agent_error", agent_id=key, title=AGENT_CATEGORIES[key].title,
+                                    status="error", detail=str(_err)[:180])
+                render_agent_live_trace(_live_trace)
+
+                for key in selected:
+                    cat = AGENT_CATEGORIES[key]
+                    bot = _bots[key]
+                    resp = responses[key]
+                    _ok = key not in failed_keys
+                    _q_label = ""
+                    if _ok and hasattr(bot, "last_quality_badge"):
+                        try:
+                            _qb = bot.last_quality_badge()
+                            _q_label = f" — {_qb}" if _qb else ""
+                        except Exception:
+                            _q_label = ""
+                    with st.expander(f"{cat.emoji} {cat.title}{_q_label}", expanded=not synth):
+                        st.markdown(resp)
+                        _copy_button(resp, key=f"orch_{key}")
+            else:
+                for key in selected:
+                    cat = AGENT_CATEGORIES[key]
+                    bot = _bots[key]
+
+                    # ── النمط المتسلسل: يُرفَق ملخّص ردود الوكلاء السابقين
+                    # بنص المهمة، بحيث يبني كل وكيل على ما سبقه (سير عمل حقيقي
+                    # بدل مجرد ردود متوازية منفصلة). ──
+                    if exec_mode == "sequential" and responses:
+                        prior = "\n\n".join(
+                            f"[{AGENT_CATEGORIES[k].title}]\n{v}"
+                            for k, v in responses.items() if k not in failed_keys
+                        )
+                        agent_input = (
+                            f"{task.strip()}\n\n"
+                            f"── ردود وكلاء سابقين في نفس سير العمل (ابنِ عليها، لا تكررها) ──\n"
+                            f"{prior}"
+                        )
+                    else:
+                        agent_input = task.strip()
+
+                    emit_event(
+                        "agent_started",
+                        agent_id=cat.key,
+                        title=cat.title,
+                        status="running",
+                        detail="بدأ الوكيل تنفيذ المهمة",
+                    )
+                    render_agent_live_trace(_live_trace)
+                    _orch_skel_ph = st.empty()
+                    with _orch_skel_ph.container():
+                        st.caption(f"⟳ {cat.title} يعمل على المهمة...")
+                        _skeleton(lines=3)
+                    # 🆕 نظام التقييم الذاتي (Self-Reflection): يراجع فشل الوكيل
+                    # ويصنّف سببه ويعيد المحاولة باستراتيجية مصححة تلقائياً حتى
+                    # استنفاد دورات التقييم — بنفس الروح المضافة في UnifiedAgentChat.
+                    from ai.agent_reflection import ReflectionContext, reflecting_call
+                    _orch_ref_ctx = ReflectionContext()
+                    resp, _ok = None, False
                     try:
-                        _qb = bot.last_quality_badge()
-                        _q_label = f" — {_qb}" if _qb else ""
-                    except Exception:
-                        _q_label = ""
-                with st.expander(f"{cat.emoji} {cat.title}{_q_label}", expanded=not synth):
-                    st.markdown(resp)
-                    _copy_button(resp, key=f"orch_{key}")
+                        def _orch_call() -> str:
+                            return bot.chat(agent_input, source="orchestrator")
+                        def _orch_retry(_att: int, info: dict) -> None:
+                            _strategy_note = {
+                                "retry_with_backoff": "إعادة المحاولة بعد انتظار قصير",
+                                "switch_provider_hint": "محاولة عبر مسار مزوّد بديل",
+                                "simplify_prompt": "تبسيط الطلب وإعادة المحاولة",
+                            }.get(info.get("strategy", ""), "إعادة المحاولة")
+                            emit_event(
+                                "agent_started",
+                                agent_id=cat.key,
+                                title=cat.title,
+                                status="running",
+                                detail=f"إعادة محاولة ذاتية: {_strategy_note}",
+                            )
+                            render_agent_live_trace(_live_trace)
+                        resp = reflecting_call(cat.key, cat.title, _orch_call, _orch_ref_ctx, on_retry=_orch_retry)
+                        _ok = True
+                    except Exception as _orch_err:
+                        resp = f"⚠️ خطأ: {_orch_err}"
+                    if not _ok:
+                        failed_keys.add(key)
+                        emit_event("agent_error", agent_id=cat.key, title=cat.title, status="error", detail=str(resp)[:180])
+                    else:
+                        emit_event("agent_done", agent_id=cat.key, title=cat.title, status="done", detail="اكتمل رد الوكيل")
+                    _orch_skel_ph.empty()
+                    responses[key] = resp
+                    render_agent_live_trace(_live_trace)
+                    # 🆕 شارة جودة موحّدة لكل رد وكيل (نفس ميزة تبويب "🤖 وكلاء AI"
+                    # ووحدة إعادة التوليد التلقائي المدمجة الآن في CategoryAgentChat).
+                    _q_label = ""
+                    if _ok and hasattr(bot, "last_quality_badge"):
+                        try:
+                            _qb = bot.last_quality_badge()
+                            _q_label = f" — {_qb}" if _qb else ""
+                        except Exception:
+                            _q_label = ""
+                    with st.expander(f"{cat.emoji} {cat.title}{_q_label}", expanded=not synth):
+                        st.markdown(resp)
+                        _copy_button(resp, key=f"orch_{key}")
 
             valid_responses = {k: v for k, v in responses.items() if k not in failed_keys}
             if synth and responses:
