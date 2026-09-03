@@ -39,6 +39,18 @@ def configured_seed_urls() -> tuple[SeedEndpoint, ...]:
     return parse_seed_urls(os.getenv("SEED_NODE_URLS") or os.getenv("SEED_NODE_URL"))
 
 
+def seed_retry_order(seeds: tuple[SeedEndpoint, ...], failed_url: str = "") -> tuple[SeedEndpoint, ...]:
+    """رتّب البذور بحيث تُجرّب البدائل قبل البذرة الفاشلة."""
+    return tuple(seed for seed in seeds if seed.url != failed_url) + tuple(
+        seed for seed in seeds if seed.url == failed_url
+    )
+
+
+def reconnect_delay(attempt: int, base: float = 1.0, maximum: float = 60.0) -> float:
+    """تأخير exponential backoff محدود لإعادة الاتصال."""
+    return min(maximum, base * (2 ** max(0, attempt)))
+
+
 def public_url(name: str, fallback: str = "") -> str:
     """لا تعلن bind address داخلياً كرابط عام."""
     value = os.getenv(name, fallback).strip().rstrip("/")
@@ -52,4 +64,11 @@ def public_url(name: str, fallback: str = "") -> str:
     return value
 
 
-__all__ = ["SeedEndpoint", "configured_seed_urls", "parse_seed_urls", "public_url"]
+__all__ = [
+    "SeedEndpoint",
+    "configured_seed_urls",
+    "parse_seed_urls",
+    "public_url",
+    "reconnect_delay",
+    "seed_retry_order",
+]
