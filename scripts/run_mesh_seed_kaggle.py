@@ -268,6 +268,25 @@ def ensure_ngrok(bin_dir: Path) -> Optional[Path]:
         return None
 
 
+def write_ngrok_config_file(cfg_dir: Path, authtoken: str) -> Optional[Path]:
+    """يكتب ملف تهيئة ngrok الرسمي (v3) بشكل صريح، إضافةً لأمر add-authtoken
+    (وليس بديلاً عنه) — يفيد في نسخ ngrok/بيئات Kaggle التي لا تلتقط أمر
+    config add-authtoken بشكل موثوق، عبر تمرير --config صراحةً لاحقاً."""
+    try:
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        cfg_path = cfg_dir / "ngrok.yml"
+        # صيغة v3 الرسمية (agent.authtoken) — بدون أي اعتماد على مكتبة yaml خارجية
+        cfg_path.write_text(
+            "version: 3\nagent:\n  authtoken: " + authtoken + "\n",
+            encoding="utf-8",
+        )
+        _log(f"📝 كُتب ملف تهيئة ngrok الإضافي: {cfg_path}")
+        return cfg_path
+    except OSError as e:
+        _log(f"⚠️ تعذّرت كتابة ملف تهيئة ngrok الإضافي (لن يوقف التشغيل): {e}")
+        return None
+
+
 def start_ngrok(ngrok_bin: Path, port: int, log_path: Path, authtoken: str) -> Optional[subprocess.Popen]:
     """يشغّل ngrok http بعد ضبط الـ authtoken."""
     # ضبط التوكن (مرة واحدة — يكتب في ~/.ngrok2 أو config محلي)
@@ -286,17 +305,18 @@ def start_ngrok(ngrok_bin: Path, port: int, log_path: Path, authtoken: str) -> O
             timeout=20,
             check=False,
         )
+        # إضافي (لا يستبدل السطر أعلاه): ملف تهيئة v3 صريح + تمريره بـ --config
+        # كطبقة أمان ثانية إن لم يلتقط ngrok أمر add-authtoken لأي سبب.
+        explicit_cfg = write_ngrok_config_file(cfg_dir, authtoken)
         log_f = open(log_path, "a", buffering=1, encoding="utf-8")
         _log("🌐 تشغيل نفق ngrok...")
+        cmd = [str(ngrok_bin)]
+        if explicit_cfg is not None:
+            cmd += ["--config", str(explicit_cfg)]
+        cmd += ["http", str(port), "--log=stdout", "--log-format=logfmt"]
         # --log=stdout يجعل الرسائل تظهر في الملف الذي نراقبه
         return subprocess.Popen(
-            [
-                str(ngrok_bin),
-                "http",
-                str(port),
-                "--log=stdout",
-                "--log-format=logfmt",
-            ],
+            cmd,
             cwd=str(cfg_dir),
             env=env,
             stdout=log_f,
