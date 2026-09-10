@@ -182,6 +182,20 @@ class NSMAgent:
         except Exception:
             return False
 
+    @staticmethod
+    def _mark_if_degraded(result: "FallbackResult") -> str:
+        """يضيف بادئة ⚠️ إن كان الرد من CKG Synthesis (رد احتياطي جاهز
+        بدون أي LLM حي فعلياً) — بدلاً من إرجاعه كنص عادي يبدو كإجابة
+        نموذج حقيقي. هذا ضروري لأن AgentInstance.execute() في
+        agent_factory.py يحدّد success فقط من وجود ❌/⚠️ في النص؛ بدون
+        هذه البادئة كانت كل مهمة تُنفَّذ بدون مفتاح API تُسجَّل كـ"نجاح"
+        في سجل الأداء (performance_score) وتقارير SwarmCoordinator رغم
+        أنها لم تصل فعلياً لأي نموذج."""
+        text = result.text or ""
+        if result.provider.value == "ckg_synthesis" and not text.startswith(("❌", "⚠️")):
+            return f"⚠️ {text}"
+        return text
+
     def run(self, task: str) -> str:
         """تنفيذ مهمة نصية دفعة واحدة عبر محرك LLM الحقيقي، مع تبديل
         تلقائي بين المزوّدين عند الفشل (انظر ai/llm_fallback.py)."""
@@ -189,7 +203,7 @@ class NSMAgent:
             result = self.llm_fallback.generate(task)
         except Exception as e:
             return f"❌ خطأ في التنفيذ: {e}"
-        return result.text
+        return self._mark_if_degraded(result)
 
     def run_stream(self, task: str) -> Generator[str, None, None]:
         """نفس run() لكن يبثّ الرد تدريجياً (تقسيم على الكلمات) ليتوافق مع
@@ -201,7 +215,7 @@ class NSMAgent:
         except Exception as e:
             yield f"❌ خطأ في التنفيذ: {e}"
             return
-        text = result.text or ""
+        text = self._mark_if_degraded(result)
         if not text:
             yield "⚠️ لم يُرجع المزوّد أي نص."
             return
