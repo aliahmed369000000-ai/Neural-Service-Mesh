@@ -12,6 +12,7 @@ import time
 import uuid
 import base64
 import asyncio
+import threading
 from collections import deque
 try:
     import websockets
@@ -106,6 +107,12 @@ class LivingMeshNode:
         }
         self.server = None
         self.active_connections: Set = set()
+        self._capability_watch_stop = threading.Event()
+        self._capability_watch_thread = None
+        self._capability_watch_interval = max(
+            5.0, float(os.getenv("NSM_CAPABILITY_WATCH_INTERVAL_SEC", "60"))
+        )
+        self._capability_attestation = None
         
         # تهيئة الذاكرة الموحدة (ANN + Sharding)
         self.memory = UnifiedMemoryManager(base_dir=str(self.data_dir / "memory"))
@@ -205,6 +212,8 @@ class LivingMeshNode:
         state["nodes"][self.node_id] = self.node_info
         self._save_state(state)
         
+        self.start_capability_watch()
+
         if seed_nodes:
             for seed in seed_nodes:
                 if seed["id"] != self.node_id:
@@ -215,6 +224,67 @@ class LivingMeshNode:
             self.recover_collective_state()
         else:
             logger.info(f"Node {self.node_id} joined the living mesh.")
+
+    def start_capability_watch(self) -> bool:
+        """بدء مراقب daemon واحد لتغيرات العتاد والاعتماديات."""
+        if self._capability_watch_thread and self._capability_watch_thread.is_alive():
+            return False
+        self._capability_watch_stop.clear()
+        self._capability_watch_thread = threading.Thread(
+            target=self._capability_watch_loop,
+            name=f"nsm-capability-watch-{self.node_id[:8]}",
+            daemon=True,
+        )
+        self._capability_watch_thread.start()
+        return True
+
+    def stop_capability_watch(self, timeout: float = 2.0) -> None:
+        """إيقاف المراقب دون ترك خيط خلف العقدة."""
+        self._capability_watch_stop.set()
+        thread = self._capability_watch_thread
+        if thread and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=max(0.0, timeout))
+        self._capability_watch_thread = None
+
+    def refresh_capability_attestation(self) -> bool:
+        """قياس الشهادة وتحديث سجل العقدة فقط عند تغير البصمة."""
+        attestation = collect_capabilities()
+        previous_id = (self._capability_attestation or {}).get("attestation_id")
+        self._capability_attestation = attestation
+        if previous_id == attestation["attestation_id"]:
+            return False
+
+        self.node_info["capabilities"] = attestation["capabilities"]
+        self.node_info["capability_attestation"] = attestation
+        state = self._load_state()
+        if self.node_id in state.get("nodes", {}):
+            state["nodes"][self.node_id]["capabilities"] = attestation["capabilities"]
+            state["nodes"][self.node_id]["capability_attestation"] = attestation
+            state["nodes"][self.node_id]["last_seen"] = datetime.now(timezone.utc).isoformat()
+            self._save_state(state)
+        if previous_id is not None:
+            try:
+                self.sync_experience(
+                    "capability_attestation_updated",
+                    {
+                        "node_id": self.node_id,
+                        "previous_id": previous_id,
+                        "attestation_id": attestation["attestation_id"],
+                        "capabilities": attestation["capabilities"],
+                    },
+                )
+            except Exception as exc:
+                logger.warning("Capability update gossip failed: %s", exc)
+        logger.info("Capability attestation updated for %s: %s", self.node_id, attestation["capabilities"])
+        return True
+
+    def _capability_watch_loop(self) -> None:
+        while not self._capability_watch_stop.is_set():
+            try:
+                self.refresh_capability_attestation()
+            except Exception as exc:
+                logger.warning("Capability watch failed: %s", exc)
+            self._capability_watch_stop.wait(self._capability_watch_interval)
 
     def recover_collective_state(self):
         """استعادة آخر حالة وعي للشبكة عند التعافي."""
@@ -227,6 +297,7 @@ class LivingMeshNode:
 
     def mark_offline(self) -> None:
         """يعلّم هذه العقدة offline في حالتها المحلية (عند الإيقاف الرشيق)."""
+        self.stop_capability_watch()
         try:
             state = self._load_state()
             if self.node_id in state.get("nodes", {}):
