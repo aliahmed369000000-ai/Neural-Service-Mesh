@@ -92,6 +92,16 @@ LIVE_LLM_PROVIDERS = frozenset(
     p for p in Provider if p is not Provider.CKG_SYNTH
 )
 
+# 🆕 المزوّدون الذين يُنفَّذ لهم streaming حقيقي (SSE) عبر
+# LLMFallback.generate_stream()/_stream_provider(). البقية (Cloudflare،
+# Gemini، HuggingFace، OpenAI_COMPAT، Local، CKG) تعمل ضمن generate_stream
+# أيضاً لكن كدفعة واحدة غير مجزَّأة (يُستدعى _call_provider العادي لهم)
+# بدل تعطيل السلسلة بالكامل حين يكون الدور عليهم.
+_STREAM_CAPABLE_PROVIDERS = frozenset({
+    Provider.GROQ, Provider.CEREBRAS, Provider.OPENAI,
+    Provider.TOGETHER, Provider.OPENROUTER, Provider.ANTHROPIC,
+})
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # System Prompt المتخصص في المعرفة العربية الإسلامية
@@ -245,6 +255,32 @@ def _get_json(url: str, headers: dict, timeout: int = 10) -> dict:
     req = urllib.request.Request(url, headers=headers, method="GET")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+def _post_json_stream(url: str, payload: dict, headers: dict, timeout: int = 15):
+    """🆕 نسخة streaming من _post_json: تفتح اتصال POST وتُعيد مولّداً
+    لكائنات JSON مفكوكة من صيغة Server-Sent Events القياسية المستخدمة
+    من طرف كل الـ APIs المتوافقة مع OpenAI (وAnthropic، بصيغة أحداثها
+    الخاصة أعلى نفس بروتوكول SSE):
+        data: {...}\\n\\n
+        ...
+        data: [DONE]\\n\\n
+    لا تلتقط أي استثناء (اتصال/401/429/...) — تُترَك للمستدعي (منطق
+    التبديل التلقائي بين المزوّدين في LLMFallback.generate_stream)."""
+    body = json.dumps({**payload, "stream": True}, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        for raw_line in resp:
+            line = raw_line.decode("utf-8", "replace").strip()
+            if not line or not line.startswith("data:"):
+                continue
+            data_str = line[len("data:"):].strip()
+            if data_str == "[DONE]":
+                return
+            try:
+                yield json.loads(data_str)
+            except json.JSONDecodeError:
+                continue
 
 
 def discover_openrouter_models(
@@ -702,6 +738,174 @@ class LLMFallback:
                 raise ValueError(f"مزوّد غير معروف: {provider}")
         finally:
             self._api_key, self._model = old_key, old_model
+
+    # ── 🆕 Streaming حقيقي (SSE) ─────────────────────────────────────────
+
+    @staticmethod
+    def _std_messages(system_prompt: str, history: List[Tuple[str, str]], query: str) -> List[dict]:
+        """بناء قائمة رسائل موحّدة بصيغة OpenAI/Anthropic chat (نفس نمط
+        كل دوال _call_* أعلاه) — يستخدمها مسار streaming فقط."""
+        messages = [{"role": "system", "content": system_prompt}]
+        for u, a in history[-4:]:
+            messages += [{"role": "user", "content": u}, {"role": "assistant", "content": a}]
+        messages.append({"role": "user", "content": query})
+        return messages
+
+    def _stream_openai_compat(
+        self, url: str, query: str, history: List[Tuple[str, str]], sp: str,
+        extra_headers: Optional[Dict[str, str]] = None,
+    ):
+        """مولّد قطع نصية حقيقية عبر SSE لأي API متوافق مع صيغة OpenAI
+        chat/completions (Groq/Cerebras/OpenAI/Together/OpenRouter)."""
+        messages = self._std_messages(sp, history, query)
+        headers = {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}
+        if extra_headers:
+            headers.update(extra_headers)
+        payload = {
+            "model": self._model, "messages": messages,
+            "max_tokens": self.max_tokens, "temperature": self.temperature,
+        }
+        for chunk in _post_json_stream(url, payload, headers, self.timeout):
+            try:
+                delta = chunk["choices"][0].get("delta", {})
+            except (KeyError, IndexError, TypeError):
+                continue
+            piece = delta.get("content")
+            if piece:
+                yield piece
+
+    def _stream_anthropic(self, query: str, history: List[Tuple[str, str]], sp: str):
+        """مولّد قطع نصية حقيقية عبر SSE من Anthropic — صيغة أحداثها
+        الخاصة (content_block_delta/text_delta) تختلف عن OpenAI، لذا
+        دالة منفصلة بدل إعادة استخدام _stream_openai_compat."""
+        messages = []
+        for u, a in history[-4:]:
+            messages += [{"role": "user", "content": u}, {"role": "assistant", "content": a}]
+        messages.append({"role": "user", "content": query})
+        headers = {
+            "x-api-key": self._api_key,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": self._model, "system": sp, "messages": messages,
+            "max_tokens": self.max_tokens, "temperature": self.temperature,
+        }
+        for chunk in _post_json_stream(
+            "https://api.anthropic.com/v1/messages", payload, headers, self.timeout
+        ):
+            ctype = chunk.get("type")
+            if ctype == "content_block_delta":
+                delta = chunk.get("delta", {})
+                if delta.get("type") == "text_delta":
+                    text = delta.get("text", "")
+                    if text:
+                        yield text
+            elif ctype == "error":
+                raise Exception(str(chunk.get("error")))
+
+    def _stream_provider(
+        self, provider: Provider, api_key: str, model: str,
+        query: str, history: List[Tuple[str, str]], sp: str,
+    ):
+        """يوجّه لدالة الـstreaming الصحيحة حسب المزوّد — فقط للمزوّدين في
+        _STREAM_CAPABLE_PROVIDERS. يرفع ValueError لأي مزوّد آخر."""
+        old_key, old_model = self._api_key, self._model
+        self._api_key, self._model = api_key, model
+        try:
+            if provider == Provider.GROQ:
+                yield from self._stream_openai_compat(
+                    "https://api.groq.com/openai/v1/chat/completions", query, history, sp)
+            elif provider == Provider.CEREBRAS:
+                yield from self._stream_openai_compat(_CEREBRAS_URL, query, history, sp)
+            elif provider == Provider.OPENAI:
+                yield from self._stream_openai_compat(
+                    "https://api.openai.com/v1/chat/completions", query, history, sp)
+            elif provider == Provider.TOGETHER:
+                yield from self._stream_openai_compat(
+                    "https://api.together.xyz/v1/chat/completions", query, history, sp)
+            elif provider == Provider.OPENROUTER:
+                yield from self._stream_openai_compat(
+                    _OPENROUTER_URL, query, history, sp,
+                    extra_headers={
+                        "HTTP-Referer": "https://neural-service-mesh.streamlit.app",
+                        "X-Title": "Neural Service Mesh",
+                    })
+            elif provider == Provider.ANTHROPIC:
+                yield from self._stream_anthropic(query, history, sp)
+            else:
+                raise ValueError(f"streaming حي غير مدعوم لهذا المزوّد بعد: {provider.value}")
+        finally:
+            self._api_key, self._model = old_key, old_model
+
+    def generate_stream(
+        self,
+        query:   str,
+        history: Optional[List[Tuple[str, str]]] = None,
+        system_prompt: Optional[str] = None,
+    ):
+        """🆕 نسخة streaming حقيقية من generate(): نفس منطق سلسلة المزوّدين
+        والتبديل التلقائي عند الفشل والـcooldown، لكن تبثّ القطع فور
+        وصولها (SSE) بدل انتظار اكتمال الرد الكامل.
+
+        فروقات متعمَّدة عن generate():
+          - المزوّدون خارج _STREAM_CAPABLE_PROVIDERS (Cloudflare/Gemini/
+            HuggingFace/OpenAI_COMPAT/Local) يعملون هنا أيضاً، لكن
+            كدفعة واحدة (يُستدعى _call_provider العادي ثم تُبثّ نتيجته
+            الكاملة كقطعة واحدة) بدل تعطيل السلسلة كلياً حين يكون
+            الدور عليهم.
+          - لا تُطبَّق نفس إعادة المحاولة على الأخطاء العابرة
+            (429/502/503/504) الموجودة في generate() — عند فشل مزوّد
+            أثناء streaming يُنتقَل للتالي مباشرة مع cooldown كامل،
+            تفادياً لتعقيد كبير في مولّد يبثّ للمستخدم مباشرة.
+          - self._provider يُحدَّث بتفاؤل فور بدء محاولة كل مزوّد (وليس
+            بعد نجاحه الكامل كما في generate())، حتى يعكس .provider
+            بدقة أي مزوّد أنتج القطعة التي وصلت للمستدعي للتو أثناء
+            التدفق الحي.
+          - محدودية معروفة: إن فشل مزوّد بعد بثّ بعض القطع بنجاح (مثلاً
+            انقطاع شبكي منتصف التدفق)، تلك القطع الجزئية تبقى قد وصلت
+            فعلاً للمستخدم قبل الانتقال للمزوّد التالي — لا تراجع ممكن
+            في streaming حي حقيقي دون تأخير ظهور أول رمز.
+        """
+        history = history or []
+        sp      = system_prompt or _SYSTEM_PROMPT
+        now     = time.time()
+
+        ckg_context = _build_ckg_context(query, self.ckg)
+        if ckg_context:
+            sp = f"{sp}\n\n{ckg_context}"
+
+        chain = self._build_provider_chain()
+
+        for (prov, key, mdl) in chain:
+            if self._failed_until.get(prov, 0) > now:
+                continue
+            self._provider, self._api_key, self._model = prov, key, mdl
+            try:
+                got_any = False
+                if prov in _STREAM_CAPABLE_PROVIDERS:
+                    for piece in self._stream_provider(prov, key, mdl, query, history, sp):
+                        got_any = True
+                        yield piece
+                else:
+                    result = self._call_provider(prov, key, mdl, query, history, sp)
+                    if (result.text or "").strip():
+                        got_any = True
+                        yield result.text
+                if not got_any:
+                    raise Exception("رد فارغ من المزوّد")
+                self._failed_until.pop(prov, None)
+                return
+            except Exception as exc:
+                logger.warning(
+                    f"[StreamRotation] فشل {prov.value}: {str(exc)[:120]} — جرّب التالي..."
+                )
+                self._failed_until[prov] = now + _FAILURE_COOLDOWN_SEC
+                continue
+
+        # كل المزوّدين فشلوا → CKG Synthesis (نفس fallback الأخير في generate())
+        self._provider, self._api_key, self._model = Provider.CKG_SYNTH, "", "ckg-synthesis-v1"
+        yield _ckg_synthesize(query, self.ckg)
 
     # ── الواجهة العامة مع التبديل التلقائي ──────────────────────────────
 

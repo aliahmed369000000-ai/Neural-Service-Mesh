@@ -206,22 +206,28 @@ class NSMAgent:
         return self._mark_if_degraded(result)
 
     def run_stream(self, task: str) -> Generator[str, None, None]:
-        """نفس run() لكن يبثّ الرد تدريجياً (تقسيم على الكلمات) ليتوافق مع
-        واجهات streaming في ui_pages/chat.py. LLMFallback.generate ليس
-        Streaming حقيقياً عبر كل المزوّدين، لذا نحاكي التدفق بعد الحصول
-        على الرد الكامل بدل تجميد الواجهة حتى وصول الرد بالكامل."""
+        """🆕 streaming حقيقي (SSE) عبر LLMFallback.generate_stream() حين
+        يدعمه المزوّد النشط (Groq/Cerebras/OpenAI/Together/OpenRouter/
+        Anthropic) — القطع تصل فور توليدها فعلياً وليس بعد اكتمال الرد
+        كاملاً. بقية المزوّدين (Cloudflare/Gemini/HuggingFace/محلي) أو
+        CKG Synthesis عند غياب أي مزوّد حي تصل كقطعة واحدة (دفعة واحدة)،
+        وهذه الحالة الأخيرة تُعلَّم بـ⚠️ بنفس منطق _mark_if_degraded."""
+        got_any = False
         try:
-            result = self.llm_fallback.generate(task)
+            for i, piece in enumerate(self.llm_fallback.generate_stream(task)):
+                if (
+                    i == 0
+                    and self.llm_fallback.provider.value == "ckg_synthesis"
+                    and not piece.startswith(("❌", "⚠️"))
+                ):
+                    piece = f"⚠️ {piece}"
+                got_any = True
+                yield piece
         except Exception as e:
             yield f"❌ خطأ في التنفيذ: {e}"
             return
-        text = self._mark_if_degraded(result)
-        if not text:
+        if not got_any:
             yield "⚠️ لم يُرجع المزوّد أي نص."
-            return
-        words = text.split(" ")
-        for i, w in enumerate(words):
-            yield w if i == len(words) - 1 else w + " "
 
     @property
     def skill_engine(self) -> UniversalSkillEngine:
