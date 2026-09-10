@@ -15,6 +15,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from ai.capability_attestation import collect_capabilities
 
 logger = logging.getLogger("NodeHealthLayer")
 
@@ -39,9 +40,12 @@ class NodeHealthLayer:
     def health(self) -> Dict[str, Any]:
         snap = self.node.network_health_snapshot()
         rep = self.node.get_reputation(self.node.node_id)
+        attestation = collect_capabilities()
         return {
             "status": "ok",
             "layer": "nsm-health-v1",
+            "capabilities": attestation["capabilities"],
+            "capability_attestation_id": attestation["attestation_id"],
             "node_id": snap.get("node_id"),
             "online_peers": snap.get("online_peers"),
             "known_nodes": snap.get("known_nodes"),

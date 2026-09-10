@@ -28,6 +28,7 @@ from ai.alert_manager import alert_manager
 from ai.unified_memory import UnifiedMemoryManager
 from ai.git_manager import GitManager
 from ai.toolbox import nsm_toolbox
+from ai.capability_attestation import collect_capabilities
 from typing import Any, Dict, List, Optional, Set
 from ai import mesh_task_protocol as mesh_tasks
 from cryptography.hazmat.primitives import hashes
@@ -184,10 +185,9 @@ class LivingMeshNode:
         state = self._load_state()
         is_rejoining = self.node_id in state["nodes"]
         
-        capabilities = [
-            "text", "image", "audio", "video", "tf_engine", "self_evolution",
-            "storage", "checkpoint", "GPU_HIGH", "GPU_LOW", "CPU", "web",
-        ]
+        # إعلان القدرات يجب أن يستند إلى قياس محلي فعلي، لا إلى قائمة ثابتة.
+        attestation = collect_capabilities()
+        capabilities = attestation["capabilities"]
 
         self.node_info = {
             "id": self.node_id,
@@ -198,6 +198,7 @@ class LivingMeshNode:
             "evolution_score": self.local_evolution_score,
             "behavioral_weights": self.behavioral_weights,
             "capabilities": capabilities,
+            "capability_attestation": attestation,
             "public_key": self._pub_pem()
         }
         
