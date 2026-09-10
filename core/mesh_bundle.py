@@ -36,6 +36,8 @@ from typing import Any, Dict, Optional
 
 from core.node import BaseNode, NodeSchema
 from core.registry import NodeRegistry
+from core.graph import ServiceGraph
+from core.node_channel import NodeChannel
 from storage.file_storage import FileStorage
 from storage.db import SQLiteStorage
 
@@ -45,6 +47,11 @@ from ai.reputation_engine import NodeReputationEngine
 from ai.system_dna import SystemDNA
 from ai.agent_factory import AgentFactory, AGENT_CATALOGUE
 from ai.swarm_coordinator import SwarmCoordinator
+from ai.gap_detector import GapDetectionEngine
+from ai.service_generator import ServiceGeneratorEngine
+from ai.governor import AIGovernanceLayer
+from ai.capability_marketplace import CapabilityMarketplace
+from ai.evolution_engine import EvolutionEngine
 
 logger = logging.getLogger(__name__)
 
@@ -151,12 +158,44 @@ class MeshBundle:
         self.agent_factory = AgentFactory()
         self.coordinator = SwarmCoordinator(self.agent_factory, max_agents=20)
 
+        # ── التواصل الحقيقي بين العُقد + رسم بياني حيّ للطوبولوجيا ──────────
+        # (core/node_channel.py) قناة رسائل دائمة بين node_id حقيقية، و
+        # (core/graph.py) رسم بياني يُستخدم فعلياً من GapDetectionEngine
+        # لاكتشاف الفجوات ومن AIGovernanceLayer لفحص المسارات — كلاهما كان
+        # موجوداً ومكتوباً بالكامل لكن بلا رسم بياني حيّ يُغذّيه.
+        self.channel = NodeChannel(self.storage)
+        self.graph = ServiceGraph()
+
         self._lock = threading.Lock()
         self.role_node_ids: Dict[str, str] = {}
         self.mcp_tool_node_ids: Dict[str, str] = {}
         self._root_node_id = self._register_roles()
         self._register_mcp_tools()
         self._sync_nodes_to_exec_log()
+        self._sync_nodes_to_graph()
+
+        # ── التطوّر الذاتي الحقيقي (Phase 5/7): GapDetector → ServiceGenerator
+        # → AIGovernanceLayer → تسجيل عقدة جديدة فعلياً في الـregistry نفسه ──
+        # كانت هذه المحركات الأربعة مكتوبة بالكامل (ai/gap_detector.py،
+        # ai/service_generator.py، ai/governor.py، ai/capability_marketplace.py،
+        # ai/evolution_engine.py) لكن EvolutionEngine._mesh كان None دائماً —
+        # لا تُستدعى أبداً من streamlit_app.py، ولا رسم بياني حقيقياً تعمل عليه.
+        self.governance = AIGovernanceLayer(
+            graph=self.graph, reputation_engine=self.reputation_engine,
+        )
+        self.gap_detector = GapDetectionEngine(
+            graph=self.graph, memory_engine=self.memory_engine,
+            scoring_engine=self.scoring_engine,
+        )
+        self.service_generator = ServiceGeneratorEngine(governance=self.governance)
+        self.marketplace = CapabilityMarketplace()
+        self.evolution = EvolutionEngine(
+            mesh=self,
+            gap_detector=self.gap_detector,
+            service_generator=self.service_generator,
+            governance=self.governance,
+            capability_marketplace=self.marketplace,
+        )
 
         logger.info(
             "MeshBundle initialised: %d nodes registered, db=%s",
@@ -190,6 +229,46 @@ class MeshBundle:
     def _sync_nodes_to_exec_log(self) -> None:
         for node in self.registry.list_all():
             self.exec_log.upsert_node(node.to_dict())
+
+    # ── مزامنة عُقد الـregistry إلى ServiceGraph (core/graph.py) ────────────
+    # يبني طوبولوجيا أولية حقيقية (كل دور/أداة متصل بعقدة SwarmCoordinator
+    # الجذرية) حتى يكون لدى GapDetectionEngine رسم بياني فعلي يفحصه بدل
+    # رسم فارغ — بدون هذا، pass الفجوات الهيكلية (routing gaps) لا يجد شيئاً
+    # لأن ServiceGraph فارغ دائماً.
+    def _sync_nodes_to_graph(self) -> None:
+        for node in self.registry.list_all():
+            self.graph.add_node(node.node_id, node.to_dict())
+        if self._root_node_id and self.graph.has_node(self._root_node_id):
+            for node_id in list(self.role_node_ids.values()) + list(self.mcp_tool_node_ids.values()):
+                if node_id != self._root_node_id and self.graph.has_node(node_id):
+                    self.graph.add_edge(self._root_node_id, node_id, label="mesh_member")
+
+    # ── واجهة التسجيل التي يتوقّعها EvolutionEngine (mesh.register_node) ────
+    # EvolutionEngine._mesh.register_node(node, connect_to=...) هي نقطة
+    # الوصل الوحيدة التي كان ينقصها — بدونها EvolutionEngine._mesh=None دائماً
+    # ولا تُسجَّل أي عقدة مُولَّدة ذاتياً في الـregistry الحقيقي.
+    def register_node(self, node: BaseNode, connect_to: Optional[str] = None) -> str:
+        node_id = self.registry.register(node)
+        self.graph.add_node(node_id, node.to_dict())
+        self.exec_log.upsert_node(node.to_dict())
+        source = connect_to if (connect_to and self.graph.has_node(connect_to)) else self._root_node_id
+        if source and self.graph.has_node(source) and source != node_id:
+            self.graph.add_edge(source, node_id, label="self_evolved")
+            self.exec_log.upsert_connection(source, node_id, weight=1.0, label="self_evolved")
+        # تواصل فعلي: العقدة الجديدة تُعلن نفسها لجيرانها في الرسم البياني —
+        # هذا هو "التواصل بين العُقد" الحقيقي، وليس سجلّ عرض واجهة فقط.
+        neighbors = [source] + self.graph.get_neighbors(source) if source else []
+        self.channel.broadcast(
+            from_id=node_id,
+            to_ids=[n for n in neighbors if n and n != node_id],
+            topic="node_joined",
+            payload={
+                "name": node.name,
+                "description": node.description,
+                "tags": node.tags,
+            },
+        )
+        return node_id
 
     # ── تسجيل كل الأدوار الموجودة في الكتالوج كعُقد حقيقية داخل الـregistry ──
     def _register_roles(self) -> str:
@@ -271,6 +350,21 @@ class MeshBundle:
                 self.exec_log.upsert_connection(
                     self._root_node_id, node_id, weight=1.0, label=role or ""
                 )
+                if self.graph.has_node(self._root_node_id) and self.graph.has_node(node_id):
+                    self.graph.add_edge(self._root_node_id, node_id, label=role or "")
+                # تواصل حقيقي مرتبط بالتنفيذ الفعلي: عقدة التنسيق الجذرية
+                # تُرسل للعقدة التي نفّذت المهمة فعلاً نتيجة تنفيذها — رسالة
+                # حقيقية محفوظة في صندوق بريد node_id، وليست سطراً في سجلّ عرض.
+                self.channel.send(
+                    from_id=self._root_node_id,
+                    to_id=node_id,
+                    topic="task_result",
+                    payload={
+                        "success": success,
+                        "latency_ms": latency,
+                        "role": role,
+                    },
+                )
                 self.exec_log.save_run({
                     "run_id": getattr(task, "task_id", "") or f"task_{id(task)}",
                     "status": "success" if success else "failed",
@@ -325,6 +419,49 @@ class MeshBundle:
             except Exception as e:
                 logger.warning("MeshBundle: DNA snapshot failed: %s", e)
 
+    # ── دورة تطوّر ذاتي حقيقية (تُستدعى يدوياً أو من مجدوَل خلفي) ────────────
+    # تشغّل EvolutionEngine.run_cycle() الحقيقي: يفحص الرسم البياني الفعلي
+    # (self.graph) بحثاً عن فجوات، يولّد عقداً جديدة، يمرّرها على
+    # AIGovernanceLayer (حدود صارمة: لا حلقات، حد أقصى للتوليد، سمعة دنيا)،
+    # ثم يسجّل المعتمَد منها فعلياً في self.registry عبر register_node أعلاه.
+    def run_evolution_cycle(self) -> dict:
+        with self._lock:
+            cycle = self.evolution.run_cycle(auto_register=True, verbose=False)
+            self._apply_reputation_feedback()
+            try:
+                self.dna.snapshot(
+                    registry=self.registry,
+                    scoring_engine=self.scoring_engine,
+                    memory_engine=self.memory_engine,
+                    notes=f"evolution_cycle:{cycle.cycle_number}",
+                )
+            except Exception as e:
+                logger.warning("MeshBundle: DNA snapshot after evolution failed: %s", e)
+            return cycle.to_dict() if hasattr(cycle, "to_dict") else cycle.summary
+
+    # ── تغذية السمعة إلى قرارات حيّة (حجر/رفع حجر) + إبلاغ الجيران ──────────
+    # جزء من "التطوّر الذاتي": عقدة سمعتها منخفضة باستمرار تُحجَر (quarantine)
+    # فعلياً في NodeReputationEngine (فتُستبعد من التوجيه)، وتُبلَّغ جيرانها
+    # في الرسم البياني بذلك عبر NodeChannel — إشعار حقيقي، وليس مجرد رقم
+    # في لوحة تحكم لا يقرأه أحد.
+    def _apply_reputation_feedback(self, low_threshold: float = 25.0) -> None:
+        for rep in self.reputation_engine.low_reputation_nodes(threshold=low_threshold):
+            node_id = rep.get("node_id")
+            if not node_id or rep.get("is_quarantined"):
+                continue
+            if rep.get("total_runs", 0) < 5:
+                continue  # بيانات غير كافية بعد لاتخاذ قرار
+            self.reputation_engine.quarantine(node_id)
+            if self.graph.has_node(node_id):
+                neighbors = self.graph.get_neighbors(node_id)
+                self.channel.broadcast(
+                    from_id=node_id,
+                    to_ids=neighbors,
+                    topic="node_quarantined",
+                    payload={"reason": "low_reputation", "score": rep.get("reputation_score")},
+                )
+            logger.info("MeshBundle: quarantined low-reputation node %s", node_id[:8])
+
     def summary(self) -> dict:
         _cm_summary = {}
         try:
@@ -340,6 +477,13 @@ class MeshBundle:
             "reputation": self.reputation_engine.summary(),
             "dna_versions": len(self.dna.history(limit=1000)),
             "exec_log": self.exec_log.db_stats(),
+            "graph": self.graph.stats(),
+            "channel": self.channel.stats(),
+            "evolution": {
+                "cycles_run": len(self.evolution._history),
+                "generated": self.service_generator.summary(),
+                "governance": self.governance.summary(),
+            },
         }
 
 
