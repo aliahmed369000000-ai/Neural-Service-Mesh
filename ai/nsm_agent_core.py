@@ -158,7 +158,56 @@ class NSMAgent:
         # التهيئة الكسولة تمنع إنشاء مجلدات/قراءة سجلات عند إنشاء وكيل لا ينفذ خطوة.
         self._skill_engine = None
         self._meta_cognition = None
+        self._llm_fallback = None
         self.admin_unlocked = _is_admin_unlocked()
+        # 🆕 يُحسب فوراً (فحص متغيرات بيئة فقط، بلا اتصال شبكي) لأن
+        # المستدعين (mcp_server/server.py، ui_pages/chat.py) يقرأون
+        # agent.available كخاصية مباشرة بعد الإنشاء.
+        self.available = self._check_available()
+
+    @property
+    def llm_fallback(self) -> "LLMFallback":
+        """نسخة كسولة من محرك التوليد الحقيقي (Groq/Cerebras/Cloudflare/
+        Gemini/OpenRouter/Anthropic/OpenAI/Together/HuggingFace/محلي)."""
+        if self._llm_fallback is None:
+            from ai.llm_fallback import LLMFallback
+            self._llm_fallback = LLMFallback()
+        return self._llm_fallback
+
+    def _check_available(self) -> bool:
+        """هل يوجد مزوّد LLM حي فعلياً (وليس CKG synthesis فقط)؟
+        لا يقوم بأي طلب شبكة — فقط فحص متغيرات البيئة عبر LLMFallback."""
+        try:
+            return self.llm_fallback.has_live_llm()
+        except Exception:
+            return False
+
+    def run(self, task: str) -> str:
+        """تنفيذ مهمة نصية دفعة واحدة عبر محرك LLM الحقيقي، مع تبديل
+        تلقائي بين المزوّدين عند الفشل (انظر ai/llm_fallback.py)."""
+        try:
+            result = self.llm_fallback.generate(task)
+        except Exception as e:
+            return f"❌ خطأ في التنفيذ: {e}"
+        return result.text
+
+    def run_stream(self, task: str) -> Generator[str, None, None]:
+        """نفس run() لكن يبثّ الرد تدريجياً (تقسيم على الكلمات) ليتوافق مع
+        واجهات streaming في ui_pages/chat.py. LLMFallback.generate ليس
+        Streaming حقيقياً عبر كل المزوّدين، لذا نحاكي التدفق بعد الحصول
+        على الرد الكامل بدل تجميد الواجهة حتى وصول الرد بالكامل."""
+        try:
+            result = self.llm_fallback.generate(task)
+        except Exception as e:
+            yield f"❌ خطأ في التنفيذ: {e}"
+            return
+        text = result.text or ""
+        if not text:
+            yield "⚠️ لم يُرجع المزوّد أي نص."
+            return
+        words = text.split(" ")
+        for i, w in enumerate(words):
+            yield w if i == len(words) - 1 else w + " "
 
     @property
     def skill_engine(self) -> UniversalSkillEngine:
