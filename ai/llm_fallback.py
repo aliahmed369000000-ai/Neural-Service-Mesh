@@ -854,18 +854,21 @@ class LLMFallback:
             كدفعة واحدة (يُستدعى _call_provider العادي ثم تُبثّ نتيجته
             الكاملة كقطعة واحدة) بدل تعطيل السلسلة كلياً حين يكون
             الدور عليهم.
-          - لا تُطبَّق نفس إعادة المحاولة على الأخطاء العابرة
-            (429/502/503/504) الموجودة في generate() — عند فشل مزوّد
-            أثناء streaming يُنتقَل للتالي مباشرة مع cooldown كامل،
-            تفادياً لتعقيد كبير في مولّد يبثّ للمستخدم مباشرة.
+          - 🆕 نفس منطق إعادة المحاولة على الأخطاء العابرة
+            (429/502/503/504/RATE LIMIT/TIMEOUT) المطبَّق في generate()
+            مُطبَّق هنا أيضاً، لكن فقط إذا فشل المزوّد *قبل* بثّ أي قطعة
+            فعلية للمستدعي (got_any=False) — إعادتان بانتظار متصاعد
+            (1.5ث ثم 3ث) على نفس المزوّد قبل الانتقال للتالي.
           - self._provider يُحدَّث بتفاؤل فور بدء محاولة كل مزوّد (وليس
             بعد نجاحه الكامل كما في generate())، حتى يعكس .provider
             بدقة أي مزوّد أنتج القطعة التي وصلت للمستدعي للتو أثناء
             التدفق الحي.
-          - محدودية معروفة: إن فشل مزوّد بعد بثّ بعض القطع بنجاح (مثلاً
-            انقطاع شبكي منتصف التدفق)، تلك القطع الجزئية تبقى قد وصلت
-            فعلاً للمستخدم قبل الانتقال للمزوّد التالي — لا تراجع ممكن
-            في streaming حي حقيقي دون تأخير ظهور أول رمز.
+          - محدودية معروفة (موثَّقة صراحةً، متروكة عمداً): إن فشل مزوّد
+            *بعد* بثّ بعض القطع بنجاح (مثلاً انقطاع شبكي منتصف التدفق)،
+            لا تُطبَّق إعادة المحاولة على الإطلاق — ينتقل النظام للمزوّد
+            التالي فوراً مع cooldown كامل، لأن تلك القطع الجزئية تكون قد
+            وصلت فعلاً للمستخدم قبل التبديل — لا تراجع ممكن في streaming
+            حي حقيقي دون تأخير ظهور أول رمز.
         """
         history = history or []
         sp      = system_prompt or _SYSTEM_PROMPT
@@ -881,8 +884,8 @@ class LLMFallback:
             if self._failed_until.get(prov, 0) > now:
                 continue
             self._provider, self._api_key, self._model = prov, key, mdl
+            got_any = False
             try:
-                got_any = False
                 if prov in _STREAM_CAPABLE_PROVIDERS:
                     for piece in self._stream_provider(prov, key, mdl, query, history, sp):
                         got_any = True
@@ -897,6 +900,63 @@ class LLMFallback:
                 self._failed_until.pop(prov, None)
                 return
             except Exception as exc:
+                # 🆕 الحزمة 4: نفس إعادة المحاولة الذكية للأخطاء العابرة
+                # الموجودة في generate() — لكن فقط طالما لم تُبثّ أي قطعة
+                # فعلية بعد لهذا المزوّد (got_any=False)؛ إن كانت قد بُثّت
+                # قطع جزئياً فلا رجوع ممكن (انظر المحدودية الموثَّقة في
+                # docstring أعلاه) فنسقط مباشرة لمزوّد آخر بـcooldown كامل.
+                if not got_any:
+                    _retry_exc_str = str(exc)[:100].upper()
+                    _is_transient = (
+                        isinstance(exc, (TimeoutError, OSError, ConnectionError))
+                        or any(_tk in _retry_exc_str for _tk in (
+                            "429", "502", "503", "504",
+                            "RATE LIMIT", "TIMEOUT", "TEMPORARILY UNAVAILABLE",
+                        ))
+                    )
+                    if _is_transient:
+                        _rb = 1.5  # أول انتظار 1.5ث ثم مضاعف — مطابق لـgenerate()
+                        for _retry_i in range(2):
+                            time.sleep(_rb)
+                            _rb *= 2
+                            logger.info(
+                                f"[StreamRotation] إعادة محاولة عابرة #{_retry_i+1}/2 → {prov.value}"
+                            )
+                            try:
+                                got_retry = False
+                                if prov in _STREAM_CAPABLE_PROVIDERS:
+                                    for piece in self._stream_provider(prov, key, mdl, query, history, sp):
+                                        got_retry = True
+                                        yield piece
+                                else:
+                                    result = self._call_provider(prov, key, mdl, query, history, sp)
+                                    if (result.text or "").strip():
+                                        got_retry = True
+                                        yield result.text
+                                if not got_retry:
+                                    raise Exception("رد فارغ من المزوّد (إعادة محاولة)")
+                                self._failed_until.pop(prov, None)
+                                logger.info(
+                                    f"[StreamRotation] نجح {prov.value} بإعادة محاولة عابرة #{_retry_i+1}"
+                                )
+                                return
+                            except Exception as _retry_exc:
+                                exc = _retry_exc
+                                if got_retry:
+                                    # بُثّت قطع جزئياً أثناء إعادة المحاولة نفسها
+                                    # → لا رجوع ولا إعادة إضافية، اخرج من حلقة
+                                    # الإعادة واسقط للمزوّد التالي (كود cooldown
+                                    # + continue الموحَّد أسفل الحلقتين).
+                                    break
+                                _re_str = str(_retry_exc)[:100].upper()
+                                if not (
+                                    isinstance(_retry_exc, (TimeoutError, OSError, ConnectionError))
+                                    or any(_tk in _re_str for _tk in (
+                                        "429", "502", "503", "504", "RATE LIMIT", "TIMEOUT",
+                                    ))
+                                ):
+                                    break  # خطأ غير عابر خلال الإعادة → لا نُعيد أكثر
+
                 logger.warning(
                     f"[StreamRotation] فشل {prov.value}: {str(exc)[:120]} — جرّب التالي..."
                 )
