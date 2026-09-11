@@ -1024,9 +1024,16 @@ class FableEngine:
         parts = [p.strip() for p in parts if p.strip()]
         if not parts:
             parts = [text]
-        # توسيع/تقليص لعدد اللقطات
+        # توسيع/تقليص لعدد اللقطات — الدوران على الجمل الأصلية بالترتيب
+        # (وليس تكرار الجملة الأولى فقط، وهو ما كان يحدث فعلياً بسبب خلل:
+        # `parts[len(parts) % max(1, len(parts))]` يُعطي دائماً 0 لأن أي
+        # عدد % نفسه = صفر، فكان كل عنصر إضافي = parts[0] حرفياً).
+        _original_parts = list(parts)
+        _orig_n = len(_original_parts)
+        _cycle_i = 0
         while len(parts) < n_beats:
-            parts.append(parts[len(parts) % max(1, len(parts))])
+            parts.append(_original_parts[_cycle_i % _orig_n])
+            _cycle_i += 1
         parts = parts[:n_beats]
         sec_each = max(4, target_seconds // max(1, len(parts)))
 
