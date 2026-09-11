@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from ai.tts_engine import TTSEngine
+from ai.llm_fallback import humanize_fallback_error
 
 logger = logging.getLogger("FableEngine")
 
@@ -984,7 +985,7 @@ class FableEngine:
                 source_text, target_seconds, n_beats, style
             )
             if err:
-                offline.error = f"LLM: {err} · استُخدم المولّد المحلي"
+                offline.error = f"{humanize_fallback_error(err)} · استُخدم المولّد المحلي"
             else:
                 offline.error = offline.error or "مولّد محلي (fallback)"
             return offline

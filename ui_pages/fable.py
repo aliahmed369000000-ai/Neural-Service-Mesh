@@ -216,7 +216,11 @@ def render_fable():
                         )
 
             if cur.error:
-                st.caption(f"⚠️ ملاحظة تقنية: {cur.error}")
+                try:
+                    from ai.llm_fallback import humanize_fallback_error
+                    st.caption(f"⚠️ {humanize_fallback_error(cur.error)}")
+                except Exception:
+                    st.caption("⚠️ تعذّر الوصول لنموذج حيّ — استُخدم رد احتياطي.")
 
             st.markdown("**ماذا يحدث بعد ذلك؟**")
             cols = st.columns(len(cur.choices) or 1)
@@ -446,7 +450,11 @@ def render_fable():
                 f"({script.total_seconds} ثانية) · المزوّد: {script.provider}"
             )
             if script.error:
-                st.caption(f"⚠️ ملاحظة تقنية: {script.error}")
+                try:
+                    from ai.llm_fallback import humanize_fallback_error
+                    st.caption(f"⚠️ {humanize_fallback_error(script.error)}")
+                except Exception:
+                    st.caption("⚠️ تعذّر الوصول لنموذج حيّ — استُخدم رد احتياطي.")
 
             for seg in script.segments:
                 st.markdown(f"""
@@ -572,7 +580,11 @@ def render_fable():
                 f"النمط: {st.session_state.get('shorts_style_sel', '—')}"
             )
             if short.error:
-                st.caption(f"⚠️ ملاحظة تقنية: {short.error}")
+                try:
+                    from ai.llm_fallback import humanize_fallback_error
+                    st.caption(f"⚠️ {humanize_fallback_error(short.error)}")
+                except Exception:
+                    st.caption("⚠️ تعذّر الوصول لنموذج حيّ — استُخدم رد احتياطي.")
 
             for seg in short.segments:
                 st.markdown(f"""

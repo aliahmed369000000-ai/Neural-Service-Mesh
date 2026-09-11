@@ -112,7 +112,14 @@ def render_translate():
         </div>
         """, unsafe_allow_html=True)
         provider_label = getattr(result.provider, "value", str(result.provider))
-        st.caption(f"المزوّد: {provider_label}" + (f" · ⚠️ {result.error}" if getattr(result, "error", None) else ""))
+        _friendly_err = ""
+        if getattr(result, "error", None):
+            try:
+                from ai.llm_fallback import humanize_fallback_error
+                _friendly_err = humanize_fallback_error(result.error)
+            except Exception:
+                _friendly_err = "تعذّر الوصول لنموذج حيّ — استُخدم رد احتياطي."
+        st.caption(f"المزوّد: {provider_label}" + (f" · ⚠️ {_friendly_err}" if _friendly_err else ""))
         _copy_col, _dl_col = st.columns([1, 2])
         with _copy_col:
             _copy_button(result.text, key="tr_result")
