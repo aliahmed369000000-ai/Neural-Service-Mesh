@@ -2,6 +2,7 @@ import os
 import subprocess
 import shutil
 import logging
+import tempfile
 from typing import Optional, List
 
 logger = logging.getLogger("NSM-GitManager")
@@ -15,7 +16,12 @@ class GitManager:
     def __init__(self, token: Optional[str] = None, repo_url: str = "github.com/aliahmed369000000-ai/Neural-Service-Mesh.git"):
         self.token = token or os.getenv("HF_TOKEN") or os.getenv("GITHUB_TOKEN")
         self.repo_url = repo_url
-        self.base_dir = "/tmp/nsm_evolution"
+        # 🆕 tempfile.gettempdir() بدل "/tmp" الثابت: يحترم TMPDIR/TEMP/TMP
+        # ويسقط لبدائل قابلة للكتابة تلقائياً — "/tmp" وحدها غير موجودة
+        # أو غير قابلة للكتابة عند الجذر على بيئات مثل Termux/أندرويد،
+        # ما كان يُسقط GitManager() (ومن ثمّ LivingMeshNode كاملاً) بخطأ
+        # "OSError: [Errno 30] Read-only file system: '/tmp'" فور الإنشاء.
+        self.base_dir = os.path.join(tempfile.gettempdir(), "nsm_evolution")
         
         if not os.path.exists(self.base_dir):
             os.makedirs(self.base_dir)
