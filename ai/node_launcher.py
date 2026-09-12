@@ -7,6 +7,8 @@ NSM Distributed Node Launcher — مشغل العقد الموزعة لمشرو�
 import argparse
 import asyncio
 import logging
+import re
+import shutil
 import sys
 import os
 import json
@@ -1018,6 +1020,59 @@ async def _wait_port_ready(host: str, port: int, timeout: float = 15.0) -> bool:
     return False
 
 
+async def _start_cloudflare_tunnel(port: int, timeout: float = 20.0):
+    """يشغّل Cloudflare Quick Tunnel (cloudflared) محلياً ويعيد (process, public_host).
+
+    بدون بطاقة/حساب/تسجيل دخول — يحتاج فقط ثنائي cloudflared مثبتاً على الجهاز:
+    https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
+    يُرجع (None, None) إن لم يوجد الثنائي أو فشل التشغيل، و(process, None) إن شُغّل
+    لكن لم يظهر الرابط خلال المهلة.
+    """
+    binary = shutil.which("cloudflared")
+    if not binary:
+        logger.warning(
+            "⚠️ لم يتم العثور على cloudflared — تخطّي Cloudflare Tunnel. ثبّته من: "
+            "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"
+        )
+        return None, None
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            binary, "tunnel", "--url", f"http://127.0.0.1:{port}", "--no-autoupdate",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+    except Exception as e:
+        logger.warning(f"⚠️ فشل تشغيل cloudflared: {e}")
+        return None, None
+
+    url_pattern = re.compile(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
+    public_host = None
+
+    async def _read_until_url():
+        nonlocal public_host
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                break
+            match = url_pattern.search(line.decode(errors="ignore"))
+            if match:
+                public_host = match.group(0)
+                break
+
+    try:
+        await asyncio.wait_for(_read_until_url(), timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.warning("⚠️ لم يظهر رابط trycloudflare.com خلال المهلة — قد يحتاج وقتاً أطول")
+
+    if public_host:
+        host_only = public_host.replace("https://", "").replace("http://", "")
+        logger.info(f"🌍 Cloudflare Tunnel جاهز: {public_host}")
+        return proc, host_only
+
+    return proc, None
+
+
 async def main():
     parser = argparse.ArgumentParser(description="NSM Distributed Node Launcher")
     parser.add_argument("--id", type=str, help="Node ID (default: mesh_seed or NODE_ID)")
@@ -1026,6 +1081,10 @@ async def main():
     parser.add_argument("--seed-host", type=str, help="Seed node host IP")
     parser.add_argument("--seed-port", type=int, help="Seed node port")
     parser.add_argument("--data-dir", type=str, help="Isolated data directory for this node")
+    parser.add_argument(
+        "--tunnel", action="store_true",
+        help="شغّل Cloudflare Quick Tunnel تلقائياً وأعلن رابطه العام كـ seed حقيقي (بدون بطاقة/حساب)",
+    )
     args = parser.parse_args()
 
     node_id = args.id or os.getenv("NODE_ID", "mesh_seed")
@@ -1044,8 +1103,20 @@ async def main():
     else:
         node_host = bind_host if bind_host != "0.0.0.0" else "127.0.0.1"
 
+    tunnel_proc = None
+    tunnel_host = None
+    use_tunnel = args.tunnel or os.getenv("NSM_CLOUDFLARE_TUNNEL") == "1"
+    if use_tunnel and not hf_space_id:
+        tunnel_proc, tunnel_host = await _start_cloudflare_tunnel(port)
+        if tunnel_host:
+            node_host = tunnel_host
+
     logger.info(f"🔮 Initializing node id={node_id} data_dir={data_dir}")
     node = LivingMeshNode(node_id=node_id, host=node_host, port=port, data_dir=data_dir)
+    if tunnel_host:
+        # Cloudflare Tunnel يعرض 443 فقط للخارج؛ الاستماع المحلي يبقى على port الأصلي
+        node.port = 443
+        logger.info(f"🔗 seed حقيقي جاهز — لعقدة أخرى: --seed-host {node_host} --seed-port 443")
 
     seed_nodes = []
     env_seed_url = os.getenv("SEED_NODE_URL")
@@ -1110,7 +1181,7 @@ async def main():
         except Exception as e:
             logger.warning(f"⚠️ request_peers failed: {e}")
 
-    logger.info(f"🚀 NSM Node '{node.node_id}' LIVE on {bind_host}:{port} (advertise {node_host}:{port})")
+    logger.info(f"🚀 NSM Node '{node.node_id}' LIVE on {bind_host}:{port} (advertise {node_host}:{node.port})")
 
     stop_event = asyncio.Event()
 
@@ -1150,6 +1221,11 @@ async def main():
         except Exception:
             pass
         await runner.cleanup()
+        if tunnel_proc is not None:
+            try:
+                tunnel_proc.terminate()
+            except Exception:
+                pass
         logger.info("👋 Node shutdown complete")
 
 
