@@ -5,6 +5,7 @@
 """
 import json
 import logging
+import os
 import requests
 import smtplib
 import time
@@ -15,7 +16,12 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger("NSM-AlertManager")
 
-CONFIG_PATH = Path("/home/ubuntu/NSM-Alert-System/artifacts/alert_config.json")
+# 🆕 Path.home() بدل "/home/ubuntu" الثابت: يعمل على أي بيئة (Termux،
+# Hugging Face Docker، Streamlit Cloud، أي جهاز تطوير) بدل الانهيار خارج
+# جهاز تطوير محدد. قابل للتخصيص عبر NSM_ALERT_CONFIG_DIR عند الحاجة
+# (مثلاً لمشاركة نفس الإعدادات بين عدة عمليات على نفس الخادم).
+CONFIG_DIR = Path(os.getenv("NSM_ALERT_CONFIG_DIR") or (Path.home() / ".nsm" / "alerts"))
+CONFIG_PATH = CONFIG_DIR / "alert_config.json"
 
 class AlertManager:
     def __init__(self):
