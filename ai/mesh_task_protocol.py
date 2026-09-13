@@ -45,6 +45,8 @@ KIND_WEB_FETCH = "web_fetch"
 KIND_WEB_FETCH_RESULT = "web_fetch_result"
 KIND_PREDICT = "predict"
 KIND_PREDICT_RESULT = "predict_result"
+KIND_TEMPORAL_FORECAST = "temporal_forecast"
+KIND_TEMPORAL_FORECAST_RESULT = "temporal_forecast_result"
 
 # إدارة دورة حياة المهمة (v1.1+)
 KIND_TASK_ACK = "task_ack"
@@ -63,6 +65,7 @@ ALL_TASK_KINDS = {
     KIND_SEARCH, KIND_SEARCH_RESULT,
     KIND_WEB_FETCH, KIND_WEB_FETCH_RESULT,
     KIND_PREDICT, KIND_PREDICT_RESULT,
+    KIND_TEMPORAL_FORECAST, KIND_TEMPORAL_FORECAST_RESULT,
     KIND_TASK_ACK, KIND_TASK_CANCEL,
     KIND_TASK_STATUS, KIND_TASK_STATUS_RESULT,
 }
@@ -808,6 +811,21 @@ def execute_predict(task: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def execute_temporal_forecast(task: Dict[str, Any]) -> Dict[str, Any]:
+    """تحليل تواريخ مستقبلية من ملاحظات صريحة؛ لا يجلب بيانات ولا يتنبأ بحدث بلا مدخلات."""
+    try:
+        from ai.temporal_forecast import forecast_timeline
+        result = forecast_timeline(
+            task.get("observations") or [],
+            task.get("future_dates") or [],
+            target_date=task.get("target_date"),
+        )
+        result["task_id"] = task.get("task_id")
+        return result
+    except (TypeError, ValueError) as exc:
+        return {"ok": False, "error": str(exc), "task_id": task.get("task_id")}
+
+
 def dispatch_task(kind: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """موجّه مركزي لتنفيذ مهمة حسب النوع."""
     data = data or {}
@@ -831,6 +849,8 @@ def dispatch_task(kind: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return execute_web_fetch(data)
     if kind == KIND_PREDICT:
         return execute_predict(data)
+    if kind == KIND_TEMPORAL_FORECAST:
+        return execute_temporal_forecast(data)
     return None
 
 
@@ -846,5 +866,6 @@ def result_kind_for(request_kind: str) -> str:
         KIND_SEARCH: KIND_SEARCH_RESULT,
         KIND_WEB_FETCH: KIND_WEB_FETCH_RESULT,
         KIND_PREDICT: KIND_PREDICT_RESULT,
+        KIND_TEMPORAL_FORECAST: KIND_TEMPORAL_FORECAST_RESULT,
         KIND_TASK_STATUS: KIND_TASK_STATUS_RESULT,
     }.get(request_kind, request_kind + "_result")
