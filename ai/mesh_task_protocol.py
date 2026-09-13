@@ -187,7 +187,14 @@ def execute_inference(task: Dict[str, Any]) -> Dict[str, Any]:
       "model_hint": "llama" | "sd" | "local",
       "max_tokens": int
     }
-    يُنتج رداً حتمياً قابلاً للتوقيع (يمكن لاحقاً ربطه بنموذج حقيقي).
+    🆕 للنصوص: يستدعي محرك LLMFallback الحقيقي (ai/llm_fallback.py — نفس
+    محرك NSMAgent، بتبديل تلقائي بين Groq/Cerebras/Cloudflare/Gemini/
+    OpenRouter/Anthropic/OpenAI/Together/HuggingFace/محلي، وسقوط أخير
+    لـCKG Synthesis) بدل المولّد الوهمي القائم على hash سابقاً. أي عقدة
+    في الشبكة اللامركزية تستقبل الآن استدلالاً حقيقياً فعلياً، وليس رداً
+    حتمياً بلا معنى.
+    الصور (image_desc) تبقى بمولّد وصفي رمزي كما كانت — توليد صور حقيقي
+    خارج نطاق هذا الربط.
     """
     t0 = time.time()
     prompt = (task.get("prompt") or "").strip()
@@ -198,9 +205,8 @@ def execute_inference(task: Dict[str, Any]) -> Dict[str, Any]:
     if not prompt:
         return {"ok": False, "error": "empty_prompt", "task_id": task.get("task_id")}
 
-    # مولّد محلي حتمي يعتمد على الهاش (بديل آمن حتى ربط Llama/SD)
-    digest = hashlib.sha256(f"{model_hint}:{modality}:{prompt}".encode()).hexdigest()
     if modality.startswith("image"):
+        digest = hashlib.sha256(f"{model_hint}:{modality}:{prompt}".encode()).hexdigest()
         output = {
             "type": "image_descriptor",
             "prompt": prompt[:500],
@@ -209,15 +215,28 @@ def execute_inference(task: Dict[str, Any]) -> Dict[str, Any]:
             "palette": [digest[i:i+6] for i in range(0, 18, 6)],
         }
         text_out = json.dumps(output, ensure_ascii=False)
+        used_llm = False
     else:
-        words = prompt.split()
-        cont = []
-        for i in range(min(max_tokens // 4, 40)):
-            cont.append(digest[(i * 2) % 60:(i * 2) % 60 + 4])
-        text_out = (
-            f"[mesh-inference/{model_hint}] {prompt[:200]} "
-            f"→ {' '.join(cont)}"
-        )[: max_tokens * 4]
+        try:
+            from ai.llm_fallback import LLMFallback
+            fb = LLMFallback(max_tokens=max_tokens)
+            result = fb.generate(prompt)
+            text_out = (result.text or "").strip()
+            used_llm = fb.provider.value != "ckg_synthesis"
+            if not text_out:
+                raise ValueError("رد فارغ من LLMFallback")
+        except Exception as exc:
+            logger.warning(f"[MeshInference] فشل LLMFallback: {str(exc)[:120]} — سقوط للمولّد الوهمي القديم")
+            digest = hashlib.sha256(f"{model_hint}:{modality}:{prompt}".encode()).hexdigest()
+            words = prompt.split()
+            cont = []
+            for i in range(min(max_tokens // 4, 40)):
+                cont.append(digest[(i * 2) % 60:(i * 2) % 60 + 4])
+            text_out = (
+                f"[mesh-inference/{model_hint}/fallback] {prompt[:200]} "
+                f"→ {' '.join(cont)}"
+            )[: max_tokens * 4]
+            used_llm = False
 
     return {
         "ok": True,
@@ -225,6 +244,7 @@ def execute_inference(task: Dict[str, Any]) -> Dict[str, Any]:
         "model_hint": model_hint,
         "prompt_preview": prompt[:120],
         "output": text_out,
+        "used_real_llm": used_llm,
         "elapsed_ms": round((time.time() - t0) * 1000, 2),
         "task_id": task.get("task_id"),
     }
