@@ -32,6 +32,7 @@ from ai.toolbox import nsm_toolbox
 from ai.capability_attestation import collect_capabilities
 from typing import Any, Dict, List, Optional, Set
 from ai import mesh_task_protocol as mesh_tasks
+from ai.forecast_consensus import aggregate_forecasts, merge_forecast_memory
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization
@@ -49,6 +50,7 @@ CONTENT_DIR.mkdir(parents=True, exist_ok=True)
 # بروتوكول الرسائل الموحّد (v1.1) — إصدارات واضحة + مكافحة Replay + حدود
 # ---------------------------------------------------------------------------
 PROTOCOL_VERSION = "1.1"
+FORECAST_SHARE_KIND = "temporal_forecast_share"
 MAX_MESSAGE_BYTES = 256 * 1024          # 256 KB حد أقصى لأي رسالة واردة
 MAX_TIMESTAMP_SKEW_SEC = 300            # ±5 دقائق
 NONCE_CACHE_MAX = 4096                  # أقصى عدد nonces محفوظة في الذاكرة
@@ -796,6 +798,30 @@ class LivingMeshNode:
                             await websocket.send(msg)
                     except Exception as e:
                         logger.error(f"❌ Failed to send tool_result: {e}")
+            elif kind == FORECAST_SHARE_KIND:
+                # نتيجة تنبؤ موقعة؛ طبقة الرسائل تحققت من RSA والـ replay قبل الوصول هنا.
+                share = dict(exp_data or {})
+                forecast = share.get("forecast") or {}
+                rep = self.get_reputation(sender_id).get("score", 0)
+                candidate = {"node_id": sender_id, "forecast": forecast, "reputation": rep}
+                memory_key = str(share.get("forecast_id") or share.get("task_id") or "default")
+                current = (self.collective_memory.get("temporal_forecasts") or {}).get(memory_key, {})
+                candidates = list(current.get("candidates") or [])
+                if not any(item.get("node_id") == sender_id for item in candidates):
+                    candidates.append(candidate)
+                aggregate = aggregate_forecasts(candidates)
+                aggregate["updated_at"] = datetime.now(timezone.utc).isoformat()
+                aggregate["forecast_id"] = memory_key
+                aggregate["source_node"] = sender_id
+                forecasts_memory = dict(self.collective_memory.get("temporal_forecasts") or {})
+                forecasts_memory[memory_key] = merge_forecast_memory(
+                    {"candidates": candidates}, aggregate
+                )
+                self.collective_memory["temporal_forecasts"] = forecasts_memory
+                logger.info(
+                    "📊 Forecast share accepted from %s: accepted=%s rejected=%s",
+                    sender_id, aggregate.get("accepted", 0), len(aggregate.get("rejected", [])),
+                )
             elif kind == "gradient_push":
                 # تدرجات من بروتوكول Gradient Mesh — نقبلها ونمررها كـ gossip محدود
                 logger.info(f"📥 Node {self.node_id} received gradient_push from {sender_id} (hops={hops})")
@@ -1019,6 +1045,23 @@ class LivingMeshNode:
                     await asyncio.sleep(retry_delay)
         logger.error(f"❌ request_peers to {seed_host}:{seed_port} failed after {retries} attempts: {last_err}")
         return False
+
+    async def share_temporal_forecast(
+        self, forecast: Dict[str, Any], forecast_id: str | None = None, hops: int = 0
+    ) -> int:
+        """يبث نتيجة التنبؤ الموقعة إلى جميع الأقران المعروفين فعلياً."""
+        share = {
+            "forecast_id": forecast_id or forecast.get("task_id") or f"forecast_{uuid.uuid4().hex[:10]}",
+            "forecast": dict(forecast),
+            "task_id": forecast.get("task_id") or f"forecast_{uuid.uuid4().hex[:10]}",
+        }
+        peers = self._get_active_peers_list()
+        results = await asyncio.gather(
+            *(self.send_to_peer(p["host"], int(p["port"]), FORECAST_SHARE_KIND, share, hops=hops)
+              for p in peers if p.get("host") and p.get("port") is not None),
+            return_exceptions=True,
+        )
+        return sum(result is True for result in results)
 
     async def send_to_peer(self, host: str, port: int, kind: str, data: Dict[str, Any], hops: int = 0) -> bool:
         """يتصل فعلياً بعقدة هدف عبر WebSocket ويرسل لها رسالة موقّعة (Gossip).
