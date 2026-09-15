@@ -7,6 +7,7 @@ NSM_NODE_COUNT=3 → بذرة + عاملين
 """
 from __future__ import annotations
 
+import json
 import os
 import signal
 import subprocess
@@ -16,7 +17,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SEED_PORT = int(os.getenv("PORT", "7860"))
-COUNT = max(1, min(int(os.getenv("NSM_NODE_COUNT", "1")), 10))  # سقف آمن 10
+MANIFEST = ROOT / "config" / "mesh_nodes_28.json"
+with MANIFEST.open(encoding="utf-8") as handle:
+    NODE_MANIFEST = json.load(handle)
+MAX_NODES = int(NODE_MANIFEST["node_count"])
+COUNT = max(1, min(int(os.getenv("NSM_NODE_COUNT", "1")), MAX_NODES))
 
 
 def main() -> int:
@@ -38,9 +43,10 @@ def main() -> int:
     ))
     time.sleep(2.0)
 
-    for i in range(1, COUNT):
-        wid = f"worker_{i}"
-        port = SEED_PORT + i
+    workers = NODE_MANIFEST["workers"][: COUNT - 1]
+    for worker in workers:
+        wid = worker["id"]
+        port = SEED_PORT + int(worker["port_offset"])
         wdata = ROOT / "artifacts" / "living_mesh" / "nodes" / wid
         wdata.mkdir(parents=True, exist_ok=True)
         wenv = env_base.copy()
@@ -73,7 +79,7 @@ def main() -> int:
 
     signal.signal(signal.SIGINT, _stop)
     signal.signal(signal.SIGTERM, _stop)
-    print(f"✅ local mesh running: {COUNT} process(es). Ctrl+C to stop.")
+    print(f"✅ local mesh running: {COUNT} process(es) from {MANIFEST.name}. Ctrl+C to stop.")
     while True:
         alive = [p for p in procs if p.poll() is None]
         if not alive:

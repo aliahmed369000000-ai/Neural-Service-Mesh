@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "description_ar": "تعريف نشر محلي اختباري مكوّن من بذرة و27 عاملاً. لا يعني أن الأجهزة متصلة فعلياً قبل تشغيلها.",
+  "node_count": 28,
+  "seed": {
+    "id": "mesh_seed",
+    "port_offset": 0
+  },
+  "workers": [
+    {"id": "worker_1", "port_offset": 1},
+    {"id": "worker_2", "port_offset": 2},
+    {"id": "worker_3", "port_offset": 3},
+    {"id": "worker_4", "port_offset": 4},
+    {"id": "worker_5", "port_offset": 5},
+    {"id": "worker_6", "port_offset": 6},
+    {"id": "worker_7", "port_offset": 7},
+    {"id": "worker_8", "port_offset": 8},
+    {"id": "worker_9", "port_offset": 9},
+    {"id": "worker_10", "port_offset": 10},
+    {"id": "worker_11", "port_offset": 11},
+    {"id": "worker_12", "port_offset": 12},
+    {"id": "worker_13", "port_offset": 13},
+    {"id": "worker_14", "port_offset": 14},
+    {"id": "worker_15", "port_offset": 15},
+    {"id": "worker_16", "port_offset": 16},
+    {"id": "worker_17", "port_offset": 17},
+    {"id": "worker_18", "port_offset": 18},
+    {"id": "worker_19", "port_offset": 19},
+    {"id": "worker_20", "port_offset": 20},
+    {"id": "worker_21", "port_offset": 21},
+    {"id": "worker_22", "port_offset": 22},
+    {"id": "worker_23", "port_offset": 23},
+    {"id": "worker_24", "port_offset": 24},
+    {"id": "worker_25", "port_offset": 25},
+    {"id": "worker_26", "port_offset": 26},
+    {"id": "worker_27", "port_offset": 27}
+  ]
+}
