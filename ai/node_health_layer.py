@@ -20,19 +20,42 @@ from ai.capability_attestation import collect_capabilities
 logger = logging.getLogger("NodeHealthLayer")
 
 TASK_LOG_MAX = 2000  # أقصى عدد إدخالات في سجل المهام؛ الأقدم يُحذف أولاً
+TASK_JOURNAL_KEY = "task_journal"
 
 
 class NodeHealthLayer:
     def __init__(self, mesh_node):
         self.node = mesh_node
         self._route_cache: Dict[str, Dict[str, Any]] = {}
-        self._task_log: List[Dict[str, Any]] = []
+        self._task_log: List[Dict[str, Any]] = self._load_task_log()
+
+    def _load_task_log(self) -> List[Dict[str, Any]]:
+        """استعادة سجل المهام من حالة العقدة بعد إعادة التشغيل."""
+        try:
+            state = self.node._load_state()
+            saved = state.get(TASK_JOURNAL_KEY) or []
+            if isinstance(saved, list):
+                return saved[-TASK_LOG_MAX:]
+        except Exception as exc:
+            logger.warning("تعذر استعادة سجل المهام: %s", exc)
+        return []
+
+    def _persist_task_log(self) -> None:
+        """حفظ السجل في network_state عبر مسار الحفظ الموجود في العقدة."""
+        try:
+            state = self.node._load_state()
+            state[TASK_JOURNAL_KEY] = self._task_log[-TASK_LOG_MAX:]
+            self.node._save_state(state)
+        except Exception as exc:
+            # لا يمنع فشل التخزين المحلي تنفيذ المهمة أو إرسال الإيصال.
+            logger.warning("تعذر حفظ سجل المهام: %s", exc)
 
     def _log_task(self, entry: Dict[str, Any]) -> None:
-        """إضافة إدخال لسجل المهام مع حد أقصى لمنع تسرّب الذاكرة على عقدة طويلة التشغيل."""
+        """إضافة إدخال لسجل المهام مع حد أقصى واستمرارية عبر إعادة التشغيل."""
         self._task_log.append(entry)
         if len(self._task_log) > TASK_LOG_MAX:
             del self._task_log[: len(self._task_log) - TASK_LOG_MAX]
+        self._persist_task_log()
 
     # ------------------------------------------------------------------
     # صحة
