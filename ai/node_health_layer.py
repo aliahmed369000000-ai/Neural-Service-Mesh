@@ -64,7 +64,7 @@ class NodeHealthLayer:
         snap = self.node.network_health_snapshot()
         rep = self.node.get_reputation(self.node.node_id)
         attestation = collect_capabilities()
-        return {
+        report = {
             "status": "ok",
             "layer": "nsm-health-v1",
             "capabilities": attestation["capabilities"],
@@ -80,6 +80,19 @@ class NodeHealthLayer:
             "tasks_logged": len(self._task_log),
             "ts": datetime.now(timezone.utc).isoformat(),
         }
+        canonical = json.dumps(report, sort_keys=True, separators=(",", ":"))
+        report["signature"] = self.node.sign_message(canonical)
+        return report
+
+    @staticmethod
+    def verify_health_report(public_key_pem: bytes, report: Dict[str, Any]) -> bool:
+        """التحقق من أن تقرير الصحة لم يُعدّل بعد توقيعه."""
+        if not isinstance(report, dict) or not report.get("signature"):
+            return False
+        body = {key: value for key, value in report.items() if key != "signature"}
+        canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
+        from ai.living_mesh import LivingMeshNode
+        return bool(LivingMeshNode.verify_signature(public_key_pem, canonical, report["signature"]))
 
     def routes_table(self) -> Dict[str, Any]:
         """جدول مسارات معروف: أقران + آخر RTT + سمعة."""
