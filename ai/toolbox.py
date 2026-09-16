@@ -146,9 +146,23 @@ def data_processor(data: List[Any], operation: str = "summary") -> Dict[str, Any
     return {"status": "Operation completed"}
 
 def language_translator(text: str, target_lang: str = "ar") -> str:
-    """محاكاة ترجمة النصوص بين اللغات المختلفة."""
-    # في النسخة الكاملة سيتم ربطها بـ LLM
-    return f"[Translated to {target_lang}]: {text}"
+    """ترجمة نصوص عبر محرك LLM حقيقي (ai/llm_fallback.py)، مع سقوط آمن
+    لعلامة توضيحية بدل انهيار الأداة عند فشل كل المزوّدين."""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    try:
+        from ai.llm_fallback import LLMFallback
+        fb = LLMFallback()
+        prompt = f"ترجم النص التالي إلى اللغة ({target_lang}) فقط، بدون أي شرح أو مقدمة إضافية:\n\n{text}"
+        result = fb.generate(prompt)
+        translated = (result.text or "").strip()
+        if translated and fb.provider.value != "ckg_synthesis":
+            return translated
+    except Exception as e:
+        logger.warning(f"[Translator] فشل الاتصال بمحرك LLM: {str(e)[:120]}")
+    # سقوط آمن: لا يوجد مزوّد LLM حي متاح حالياً
+    return f"[⚠️ لا يوجد مزوّد LLM حي متاح للترجمة إلى {target_lang}]: {text}"
 
 nsm_toolbox.register_tool(
     "data_processor", 
