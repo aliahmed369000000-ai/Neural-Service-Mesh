@@ -24,6 +24,7 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from datetime import datetime, timezone
@@ -298,7 +299,9 @@ def upload_handoff_checkpoint(
     src_dir = Path(files_dir) if files_dir else (SCHEDULER_DIR / "handoff" / job_id)
     if not src_dir.is_dir():
         return {"ok": False, "error": f"لا مجلد checkpoints للحركة {src_dir}"}
-    tmp = Path("/tmp/nsm_handoff_push")
+    # 🆕 tempfile.gettempdir() بدل "/tmp" الثابت: "/tmp" غير قابل للكتابة
+    # على بيئات مثل Termux/أندرويد، فيسقط هذا السطر التنفيذ فور وصوله.
+    tmp = Path(tempfile.gettempdir()) / "nsm_handoff_push"
     import shutil
     import subprocess
 

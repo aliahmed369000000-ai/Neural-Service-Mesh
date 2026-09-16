@@ -13,6 +13,7 @@ agent_auto_reply.py — الرد التلقائي الذكي على إيميلا
 """
 import json
 import os
+import tempfile
 import time
 import re
 import threading
@@ -35,7 +36,9 @@ class AutoReplyAgent:
         """
         self.token = gmail_access_token or os.environ.get("GMAIL_TOKEN", "")
         self.llm_key = llm_api_key or os.environ.get("GROQ_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
-        self.log_dir = Path(log_dir or os.environ.get("AUTO_REPLY_LOG_DIR", "/tmp/nsm_auto_reply"))
+        # 🆕 tempfile.gettempdir() بدل "/tmp" الثابت كقيمة احتياطية أخيرة
+        self.log_dir = Path(log_dir or os.environ.get("AUTO_REPLY_LOG_DIR")
+                             or os.path.join(tempfile.gettempdir(), "nsm_auto_reply"))
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.log_file = self.log_dir / "replies.jsonl"
         self.rules = []

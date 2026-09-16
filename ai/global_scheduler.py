@@ -3,6 +3,7 @@ import json
 import re
 import subprocess
 import time
+from pathlib import Path
 from typing import List, Dict
 
 class KaggleGlobalScheduler:
@@ -12,7 +13,10 @@ class KaggleGlobalScheduler:
     def __init__(self, accounts_file: str):
         self.accounts_file = accounts_file
         self.accounts = self._load_accounts()
-        self.base_dir = "/home/ubuntu/.kaggle"
+        # 🆕 Path.home() بدل "/home/ubuntu" الثابت: يعمل على أي بيئة، وهو
+        # أيضاً بالضبط المسار الذي تتوقعه أداة kaggle CLI الرسمية نفسها
+        # (~/.kaggle/kaggle.json) — إصلاح دلالي وليس فقط قابلية نقل.
+        self.base_dir = str(Path.home() / ".kaggle")
         os.makedirs(self.base_dir, exist_ok=True)
 
     def _load_accounts(self) -> List[Dict]:

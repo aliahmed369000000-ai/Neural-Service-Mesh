@@ -17,6 +17,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from typing import Dict, List, Optional, Tuple
 
 
@@ -73,7 +74,8 @@ def kaggle_kernels_list(args: List[str]) -> Tuple[int, str, str]:
 def kaggle_kernel_output(args: List[str]) -> Tuple[int, str, str]:
     """تحميل مخرجات kernel إلى مجلد — args: [slug] أو [slug, dest_dir]."""
     slug = args[0] if args else ""
-    dest_dir = args[1] if len(args) > 1 else "/tmp/nsm_kag_output"
+    # 🆕 tempfile.gettempdir() بدل "/tmp" الثابت
+    dest_dir = args[1] if len(args) > 1 else os.path.join(tempfile.gettempdir(), "nsm_kag_output")
     if not re.match(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$", slug):
         return 1, "", "صيغة slug غير صالحة"
     os.makedirs(dest_dir, exist_ok=True)

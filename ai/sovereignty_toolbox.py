@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import json
+import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 
@@ -33,15 +34,19 @@ class SovereigntyToolbox:
         except Exception as e:
             return 1, str(e)
 
-    def autonomous_clone(self, token: str, target_dir: str = "/tmp/nsm_sovereign") -> Dict[str, Any]:
+    def autonomous_clone(self, token: str, target_dir: Optional[str] = None) -> Dict[str, Any]:
         """استنساخ المستودع باستخدام التوكن إلى مجلد مؤقت."""
+        # 🆕 tempfile.gettempdir() بدل "/tmp" الثابت في القيمة الافتراضية
+        # وفي cwd أدناه — "/tmp" غير قابل للكتابة على بيئات مثل Termux.
+        tmp_root = tempfile.gettempdir()
+        target_dir = target_dir or os.path.join(tmp_root, "nsm_sovereign")
         if os.path.exists(target_dir):
             shutil.rmtree(target_dir)
         
         # إخفاء التوكن في رابط الاستنساخ
         auth_url = self.repo_url.replace("https://", f"https://{token}@")
         
-        code, out = self._run_cmd(["git", "clone", auth_url, target_dir], cwd="/tmp")
+        code, out = self._run_cmd(["git", "clone", auth_url, target_dir], cwd=tmp_root)
         
         if code == 0:
             # ضبط هوية البوت فور الاستنساخ
