@@ -63,9 +63,15 @@ class NSMSecurityGuard:
         print(f"🔒 Weights secured and encrypted at {weights_path}.secure")
 
     def monitor_compute_integrity(self):
-        """مراقبة استهلاك الموارد لاكتشاف محاولات الاختطاف الحسابي."""
-        # محاكاة مراقبة الموارد
-        import torch
+        """مراقبة استهلاك الموارد لاكتشاف محاولات الاختطاف الحسابي.
+        🆕 استيراد torch محمي بـtry/except: على بيئات بلا torch (مثل
+        الحزمة المصغّرة الحالية على Hugging Face/Termux)، تُسجَّل ملاحظة
+        وتخرج بأمان بدل ImportError غير متوقَّع."""
+        try:
+            import torch
+        except ImportError:
+            self.integrity_log.append("ℹ️ Monitoring: torch غير متاح — تخطي فحص GPU.")
+            return
         if torch.cuda.is_available():
             for i in range(torch.cuda.device_count()):
                 usage = torch.cuda.utilization(i) if hasattr(torch.cuda, 'utilization') else 0
