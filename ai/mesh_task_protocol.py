@@ -47,6 +47,8 @@ KIND_PREDICT = "predict"
 KIND_PREDICT_RESULT = "predict_result"
 KIND_TEMPORAL_FORECAST = "temporal_forecast"
 KIND_TEMPORAL_FORECAST_RESULT = "temporal_forecast_result"
+KIND_CLASSIC_SHOWCASE = "classic_showcase"
+KIND_CLASSIC_SHOWCASE_RESULT = "classic_showcase_result"
 
 # إدارة دورة حياة المهمة (v1.1+)
 KIND_TASK_ACK = "task_ack"
@@ -66,6 +68,7 @@ ALL_TASK_KINDS = {
     KIND_WEB_FETCH, KIND_WEB_FETCH_RESULT,
     KIND_PREDICT, KIND_PREDICT_RESULT,
     KIND_TEMPORAL_FORECAST, KIND_TEMPORAL_FORECAST_RESULT,
+    KIND_CLASSIC_SHOWCASE, KIND_CLASSIC_SHOWCASE_RESULT,
     KIND_TASK_ACK, KIND_TASK_CANCEL,
     KIND_TASK_STATUS, KIND_TASK_STATUS_RESULT,
 }
@@ -831,6 +834,83 @@ def execute_predict(task: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+
+def execute_classic_showcase(task: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    عروض حسابية/تراثية شهيرة قابلة للتحقق:
+      mode: pi_leibniz | primes | fibonacci | muallaqa_stats
+    """
+    import math
+    t0 = time.time()
+    mode = (task.get("mode") or task.get("showcase") or "pi_leibniz").lower()
+    out: Dict[str, Any] = {"ok": True, "mode": mode, "task_id": task.get("task_id")}
+
+    if mode in ("pi", "pi_leibniz", "leibniz"):
+        n = max(100, min(int(task.get("terms") or 20000), 200000))
+        s = 0.0
+        for k in range(n):
+            s += ((-1) ** k) / (2 * k + 1)
+        pi_est = 4.0 * s
+        out.update({
+            "terms": n,
+            "pi_estimate": pi_est,
+            "pi_reference": math.pi,
+            "abs_error": abs(pi_est - math.pi),
+            "headline": f"π ≈ {pi_est:.12f} (Leibniz n={n})",
+        })
+    elif mode in ("primes", "prime_sieve"):
+        limit = max(10, min(int(task.get("limit") or 5000), 200000))
+        sieve = bytearray(b"\x01") * (limit + 1)
+        sieve[0:2] = b"\x00\x00"
+        for i in range(2, int(limit ** 0.5) + 1):
+            if sieve[i]:
+                step = i
+                start = i * i
+                sieve[start: limit + 1: step] = b"\x00" * (((limit - start) // step) + 1)
+        primes = [i for i in range(2, limit + 1) if sieve[i]]
+        out.update({
+            "limit": limit,
+            "prime_count": len(primes),
+            "last_primes": primes[-15:],
+            "headline": f"{len(primes)} primes ≤ {limit}",
+        })
+    elif mode in ("fibonacci", "fib"):
+        n = max(2, min(int(task.get("n") or 60), 200))
+        seq = [0, 1]
+        while len(seq) < n:
+            seq.append(seq[-1] + seq[-2])
+        out.update({
+            "n": n,
+            "fibonacci": seq,
+            "last": seq[-1],
+            "headline": f"F({n-1}) = {seq[-1]}",
+        })
+    elif mode in ("muallaqa", "muallaqa_stats", "arabic_classic"):
+        lines = task.get("lines") or [
+            "قفا نبك من ذكرى حبيب ومنزل بسقط اللوى بين الدخول فحومل",
+            "فتوضح فالمقراة لم يعف رسمها لما نسجتها من جنوب وشمأل",
+            "وقوف بها صحبي علي مطيهم يقولون لا تهلك أسى وتجمل",
+        ]
+        counts: Dict[str, int] = {}
+        for ln in lines:
+            for w in str(ln).split():
+                w = w.strip()
+                if w:
+                    counts[w] = counts.get(w, 0) + 1
+        top = sorted(counts.items(), key=lambda kv: -kv[1])[:20]
+        out.update({
+            "lines": len(lines),
+            "unique_tokens": len(counts),
+            "top_tokens": top,
+            "headline": "معلقة امرئ القيس — إحصاء تراثي موثّق",
+        })
+    else:
+        out = {"ok": False, "error": f"unknown_mode:{mode}", "task_id": task.get("task_id")}
+
+    out["elapsed_ms"] = round((time.time() - t0) * 1000, 2)
+    return out
+
+
 def execute_temporal_forecast(task: Dict[str, Any]) -> Dict[str, Any]:
     """تحليل تواريخ مستقبلية من ملاحظات صريحة؛ لا يجلب بيانات ولا يتنبأ بحدث بلا مدخلات."""
     try:
@@ -865,6 +945,8 @@ def dispatch_task(kind: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return execute_summarize_chunk(data)
     if kind == KIND_SEARCH:
         return execute_search_chunk(data)
+    if kind == KIND_CLASSIC_SHOWCASE:
+        return execute_classic_showcase(data)
     if kind == KIND_WEB_FETCH:
         return execute_web_fetch(data)
     if kind == KIND_PREDICT:
@@ -885,6 +967,7 @@ def result_kind_for(request_kind: str) -> str:
         KIND_SUMMARIZE: KIND_SUMMARIZE_RESULT,
         KIND_SEARCH: KIND_SEARCH_RESULT,
         KIND_WEB_FETCH: KIND_WEB_FETCH_RESULT,
+        KIND_CLASSIC_SHOWCASE: KIND_CLASSIC_SHOWCASE_RESULT,
         KIND_PREDICT: KIND_PREDICT_RESULT,
         KIND_TEMPORAL_FORECAST: KIND_TEMPORAL_FORECAST_RESULT,
         KIND_TASK_STATUS: KIND_TASK_STATUS_RESULT,
