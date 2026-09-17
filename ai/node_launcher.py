@@ -714,6 +714,8 @@ async def handle_join_info(request):
             "health": "GET /health",
             "task": "POST /v2/task",
             "tasks": "GET /v2/tasks",
+            "learn_status": "GET /v2/learn/status",
+            "learn_cycle": "POST /v2/learn/cycle",
             "ws": "GET /ws",
         },
         "first_task_example": {
@@ -957,6 +959,31 @@ async def handle_dispatch_task(request):
         "loop": "seed_requests · worker_executes · seed_verifies",
     })
 
+
+async def handle_learn_status(request):
+    """مهارات العقدة + مؤشر القوة + آخر معرفة مستخلصة."""
+    health = request.app.get("health")
+    if health is None or getattr(health, "learning", None) is None:
+        return web.json_response({"ok": False, "error": "learning_engine_unavailable"}, status=503)
+    snap = health.learning.skills_snapshot()
+    return web.json_response({
+        "ok": True,
+        "engine": "mesh_learning_v1",
+        "node_id": request.app["node"].node_id,
+        **snap,
+        "recent_knowledge": health.learning.recent_knowledge(12),
+    })
+
+
+async def handle_learn_cycle(request):
+    """يمر على سجل المهام ويعلّم الدروس الجديدة (تقوية ذاتية)."""
+    health = request.app.get("health")
+    if health is None or getattr(health, "learning", None) is None:
+        return web.json_response({"ok": False, "error": "learning_engine_unavailable"}, status=503)
+    log = health.recent_tasks(200)
+    out = health.learning.consolidate(log)
+    return web.json_response({"ok": True, "engine": "mesh_learning_v1", **out})
+
 async def handle_ws(request):
     """معالج WebSocket موحّد عبر مسار الرسائل الموقّعة في LivingMeshNode.
     أُزيل مسار التجميع المركزي القديم (gradient_buffer / All-Reduce المحلي).
@@ -1144,6 +1171,8 @@ async def main():
         web.post("/v2/accept-peer-key", handle_accept_peer_key),
         web.get("/v2/routes", handle_routes),
         web.get("/v2/tasks", handle_tasks),
+        web.get("/v2/learn/status", handle_learn_status),
+        web.post("/v2/learn/cycle", handle_learn_cycle),
         web.post("/v2/task", handle_submit_task),
         web.post("/v2/job", handle_submit_job),
         web.get("/v2/jobs", handle_list_jobs),

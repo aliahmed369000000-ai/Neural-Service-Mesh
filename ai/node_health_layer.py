@@ -28,6 +28,11 @@ class NodeHealthLayer:
         self.node = mesh_node
         self._route_cache: Dict[str, Dict[str, Any]] = {}
         self._task_log: List[Dict[str, Any]] = self._load_task_log()
+        try:
+            from ai.mesh_learning_engine import MeshLearningEngine
+            self.learning = MeshLearningEngine(node)
+        except Exception:
+            self.learning = None
 
     def _load_task_log(self) -> List[Dict[str, Any]]:
         """استعادة سجل المهام من حالة العقدة بعد إعادة التشغيل."""
@@ -78,6 +83,8 @@ class NodeHealthLayer:
             "identity_fp": snap.get("identity_pub_fingerprint"),
             "routes_cached": len(self._route_cache),
             "tasks_logged": len(self._task_log),
+            "learning_power": (self.learning.power_score() if self.learning else None),
+            "learning_lessons": ((self.learning.state.get("stats") or {}).get("lessons") if self.learning else 0),
             "ts": datetime.now(timezone.utc).isoformat(),
         }
         canonical = json.dumps(report, sort_keys=True, separators=(",", ":"))
@@ -234,6 +241,14 @@ class NodeHealthLayer:
                 "result": result,
             }
             self._log_task(entry)
+            # حلقة تعلّم: كل مهمة موثّقة ترفع مهارة الشبكة
+            if self.learning is not None:
+                try:
+                    entry["learning"] = self.learning.learn_from_task(
+                        kind, result, receipt, task_id
+                    )
+                except Exception as e:
+                    entry["learning"] = {"ok": False, "error": str(e)}
             return entry
 
         disp = await self.node.dispatch_mesh_task(host, int(port), kind, payload)

@@ -22,6 +22,8 @@
 | `POST /v2/dispatch-task` | البذرة تكلّف عاملاً وتتحقق من الإيصال |
 | `POST /v2/task` | مهمة قابلة للتحقق |
 | `GET /v2/tasks` | سجل مهام حديثة |
+| `GET /v2/learn/status` | مهارات العقدة ومؤشر القوة |
+| `POST /v2/learn/cycle` | استيعاب سجل المهام كدروس |
 | `GET /v2/routes` | مسارات الأقران |
 | `GET /ws` | WebSocket P2P موقّع |
 
