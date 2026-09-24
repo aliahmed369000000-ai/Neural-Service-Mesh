@@ -60,8 +60,10 @@ for i in $(seq 1 30); do
     sleep 1
 done
 
-echo "🌐 تشغيل Cloudflare Tunnel..."
-nohup cloudflared tunnel --url "http://localhost:$PORT" > "$TUNNEL_LOG" 2>&1 &
+echo "🌐 تشغيل Cloudflare Tunnel (--protocol http2)..."
+# --protocol http2 يفرض TCP:443 بدل QUIC/UDP الافتراضي — بعض شبكات الجوال
+# تُسقط UDP الصادر صامتاً فيعلّق النفق بلا رابط (نفس إصلاح run_mesh_seed_kaggle.py).
+nohup cloudflared tunnel --protocol http2 --url "http://localhost:$PORT" > "$TUNNEL_LOG" 2>&1 &
 TUNNEL_PID=$!
 
 echo "⏳ انتظار رابط النفق العام..."

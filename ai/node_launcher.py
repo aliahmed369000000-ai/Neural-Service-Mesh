@@ -1064,8 +1064,13 @@ async def _start_cloudflare_tunnel(port: int, timeout: float = 20.0):
         return None, None
 
     try:
+        # --protocol http2: يفرض النقل عبر TCP:443 بدل QUIC/UDP الافتراضي.
+        # شبكات الحاويات المقيّدة (Kaggle، Colab، وبعض شبكات الجوال) تُسقط UDP
+        # الصادر صامتاً، فيعلّق cloudflared بلا أي رابط ولا خطأ واضح لمهلات
+        # طويلة (راجع: cloudflare/cloudflared#758، وإصلاح run_mesh_seed_kaggle.py).
         proc = await asyncio.create_subprocess_exec(
-            binary, "tunnel", "--url", f"http://127.0.0.1:{port}", "--no-autoupdate",
+            binary, "tunnel", "--protocol", "http2",
+            "--url", f"http://127.0.0.1:{port}", "--no-autoupdate",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
