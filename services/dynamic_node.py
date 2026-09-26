@@ -9,9 +9,10 @@ class PassThroughNode(BaseNode):
     Passes data through unchanged — useful for testing topology or as a placeholder.
     """
 
-    def __init__(self, name: str, description: str = "", tags: list = None):
+    def __init__(self, name: str, description: str = "", tags: list = None,
+                 node_id: str = None):
         super().__init__(name=name, description=description or "API-created pass-through node",
-                         tags=tags or ["dynamic", "passthrough"])
+                         tags=tags or ["dynamic", "passthrough"], node_id=node_id)
 
     @property
     def input_schema(self) -> NodeSchema:

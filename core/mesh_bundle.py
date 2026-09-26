@@ -38,6 +38,7 @@ from core.node import BaseNode, NodeSchema, NodeState
 from core.registry import NodeRegistry
 from core.graph import ServiceGraph
 from core.node_channel import NodeChannel
+from services.dynamic_node import PassThroughNode
 from storage.file_storage import FileStorage
 from storage.db import SQLiteStorage
 
@@ -201,6 +202,7 @@ class MeshBundle:
         self.mcp_tool_node_ids: Dict[str, str] = {}
         self._root_node_id = self._register_roles()
         self._register_mcp_tools()
+        self._restore_dynamic_nodes()
         self._sync_nodes_to_exec_log()
         self._sync_nodes_to_graph()
 
@@ -272,6 +274,31 @@ class MeshBundle:
             for node_id in list(self.role_node_ids.values()) + list(self.mcp_tool_node_ids.values()):
                 if node_id != self._root_node_id and self.graph.has_node(node_id):
                     self.graph.add_edge(self._root_node_id, node_id, label="mesh_member")
+        # ── استعادة الروابط الديناميكية المحفوظة (self_evolved + نتائج سرب
+        # سابقة) من exec_log.list_connections() (storage/db.py) ────────────
+        # register_node() وrecord_swarm_result() كانا يستدعيان
+        # exec_log.upsert_connection() ويحفظانها فعلياً في SQLite، لكن
+        # ServiceGraph نفسها بُنيت هنا فقط من "mesh_member" (طوبولوجيا
+        # الكتالوج الثابتة) — list_connections() كانت مكتوبة بالكامل
+        # (storage/db.py) ومُستدعاة فقط لعدّ الروابط في stats()، بلا أي
+        # مكان يعيد بناء الرسم البياني منها فعلياً. النتيجة العملية: بعد
+        # أي إعادة تشغيل للعملية (كما يحدث فعلياً على Streamlit Cloud)،
+        # كل رابط self_evolved أو رابط نتيجة سرب حقيقية يختفي من
+        # ServiceGraph فوراً — GapDetectionEngine وAIGovernanceLayer
+        # يفحصان طوبولوجيا أفقر من الواقع المحفوظ فعلياً، وأي بث
+        # channel.broadcast يعتمد على graph.get_neighbors() يفوّت جيراناً
+        # حقيقيين اكتسبتهم العقدة قبل إعادة التشغيل مباشرة.
+        try:
+            for conn in self.exec_log.list_connections():
+                src, tgt = conn.get("source_id"), conn.get("target_id")
+                if src and tgt and self.graph.has_node(src) and self.graph.has_node(tgt):
+                    self.graph.add_edge(
+                        src, tgt,
+                        weight=conn.get("weight", 1.0),
+                        label=conn.get("label", ""),
+                    )
+        except Exception as e:
+            logger.warning("MeshBundle: تعذّرت استعادة روابط الرسم البياني من exec_log: %s", e)
 
     # ── واجهة التسجيل التي يتوقّعها EvolutionEngine (mesh.register_node) ────
     # EvolutionEngine._mesh.register_node(node, connect_to=...) هي نقطة
@@ -359,6 +386,43 @@ class MeshBundle:
                 node.restore_state(persisted)
             node_id = self.registry.register(node)
             self.mcp_tool_node_ids[tool_name] = node_id
+
+    # ── إحياء عُقد ديناميكية (self_evolved) بعد إعادة تشغيل العملية ─────────
+    def _restore_dynamic_nodes(self) -> None:
+        """يعيد بناء كائن Python حيّ لكل عقدة محفوظة في التخزين لكن ليست
+        جزءاً من الكتالوج الثابت (أدوار/أدوات MCP يُعاد بناؤها أعلاه بنوعها
+        الصحيح دائماً). قبل هذه الدالة كانت عُقد self_evolved (التي يُنشئها
+        ServiceGeneratorEngine أثناء دورة تطوّر ذاتي حقيقية عبر
+        register_node()) 'أشباحاً' بعد أي إعادة تشغيل: موجودة في
+        registry.list_metadata()/exec_log لكن غائبة تماماً عن
+        registry.list_all()/get_by_state()، فتصبح غير مرئية لـ
+        GapDetectionEngine وServiceGraph، وأي محاولة حجر/رفع حجر بالسمعة
+        عليها (self.registry.get(node_id)) ترجع None بصمت.
+
+        لا نعرف النوع الأصلي الدقيق لعقدة self_evolved من meta فقط (كل ما
+        نعرفه من BaseNode.to_dict() هو الاسم/الوصف/الوسوم/الحالة، ليس
+        الكود الفعلي)، فنُحييها كـ PassThroughNode عام — أفضل بكثير من
+        شبح غائب تماماً، وrestore_state() يستعيد حالتها/تاريخها الحقيقي
+        (state, pause_reason, execution_count) بنفس node_id تماماً."""
+        for meta in self.registry.orphaned_metadata():
+            node_id = meta.get("node_id")
+            if not node_id:
+                continue
+            shell = PassThroughNode(
+                name=meta.get("name", node_id[:8]),
+                description=meta.get("description", ""),
+                tags=meta.get("tags") or ["dynamic", "passthrough", "restored"],
+                node_id=node_id,
+            )
+            shell.restore_state(meta)
+            try:
+                self.registry.register(shell)
+                logger.info(
+                    "MeshBundle: أُحييت عقدة ديناميكية بعد إعادة التشغيل: %s [%s]",
+                    shell.name, node_id[:8],
+                )
+            except ValueError:
+                pass  # سبقتنا خطوة أخرى لتسجيلها بنفس node_id — لا مشكلة
 
     # ── تغذية نتيجة تنفيذ سرب حقيقية إلى Scoring + Memory + Reputation ──────
     def record_swarm_result(self, swarm_result) -> None:

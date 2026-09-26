@@ -78,6 +78,21 @@ class NodeRegistry:
     def list_metadata(self) -> List[dict]:
         return list(self._meta_cache.values())
 
+    def orphaned_metadata(self) -> List[dict]:
+        """سجلّات meta_cache المحفوظة (من تشغيلات سابقة) التي لا يقابلها
+        كائن عقدة حيّ حالياً في self._nodes — أي عقدة كانت مسجَّلة فعلاً
+        (self.register() نجح واستدعى self._save()) لكن لم يُعِد أي كود
+        بناءها كـ Python object بعد إعادة تشغيل العملية الحالية.
+
+        _load() يملأ meta_cache فقط (بيانات وصفية)، لا self._nodes (كائنات
+        حيّة)؛ فقط الأدوار/أدوات MCP من الكتالوج الثابت تُعاد بناؤها فعلياً
+        عند الإقلاع (MeshBundle._register_roles/_register_mcp_tools). أي
+        عقدة أخرى — كعُقد self_evolved التي يُنشئها EvolutionEngine أثناء
+        دورة تطوّر ذاتي — تبقى 'شبح': موجودة في التخزين، غائبة تماماً عن
+        list_all()/get_by_state()/الرسم البياني/الحجر بالسمعة، حتى تُستعاد
+        صراحة. راجع MeshBundle._restore_dynamic_nodes() للاستخدام."""
+        return [m for nid, m in self._meta_cache.items() if nid not in self._nodes]
+
     def count(self) -> int:
         return len(self._nodes)
 
