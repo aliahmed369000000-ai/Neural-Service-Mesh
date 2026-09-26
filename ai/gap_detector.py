@@ -64,6 +64,24 @@ class DetectedGap:
             "resolved": self.resolved,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "DetectedGap":
+        """يعيد بناء DetectedGap من سجل محفوظ سابقاً (knowledge_store.read_custom)
+        بنفس gap_id/detected_at/resolved الأصليين — بعكس __init__ العادي الذي
+        يولّد gap_id/detected_at جديدين دائماً من الوقت الحالي، ما كان سيُنتج
+        هوية مختلفة لنفس الفجوة عند كل إعادة تحميل."""
+        self = cls.__new__(cls)
+        self.gap_id = data.get("gap_id", "")
+        self.gap_type = data.get("gap_type", "")
+        self.missing_service = data.get("missing_service", "")
+        self.confidence = data.get("confidence", 0.0)
+        self.source_node = data.get("source_node", {})
+        self.target_node = data.get("target_node", {})
+        self.evidence = data.get("evidence", [])
+        self.detected_at = data.get("detected_at", "")
+        self.resolved = bool(data.get("resolved", False))
+        return self
+
 
 class GapDetectionEngine:
     """
@@ -100,6 +118,15 @@ class GapDetectionEngine:
         self._scoring = scoring_engine
         self._detected_gaps: List[DetectedGap] = []
         self._scan_count = 0
+        # قبل هذا: self._detected_gaps كانت تبدأ فارغة دائماً حتى لو مُرِّر
+        # knowledge_store يحمل فجوات محفوظة فعلياً من _persist_gaps() في
+        # تشغيل سابق (وكانت الفجوات فعلياً لا تُحفَظ إطلاقاً في الإنتاج، لأن
+        # MeshBundle لم يكن يمرّر knowledge_store على الإطلاق — انظر
+        # core/mesh_bundle.py). النتيجة: كل إعادة تشغيل تُعيد اكتشاف نفس
+        # الفجوات من الصفر بمعرّفات جديدة، وأي gap تم وضع علامة "محلولة"
+        # عليها عبر mark_resolved() (في الذاكرة فقط، بلا مزامنة للتخزين)
+        # يعود يظهر "نشطاً" من جديد فوراً بعد أي إعادة تشغيل.
+        self._load_persisted_gaps()
         logger.info("GapDetectionEngine initialised (Phase 5)")
 
     def set_graph(self, g):
@@ -113,6 +140,29 @@ class GapDetectionEngine:
 
     def set_knowledge_store(self, ks):
         self._knowledge = ks
+        self._load_persisted_gaps()
+
+    def _load_persisted_gaps(self) -> None:
+        """يستعيد الفجوات المحفوظة سابقاً (إن وُجدت) في self._detected_gaps
+        — بلا هذا، scan() يعيد اكتشاف نفس الفجوات من الصفر بعد كل إعادة
+        تشغيل لأن existing_keys في scan() يُبنى من self._detected_gaps فقط.
+        آمنة للاستدعاء أكثر من مرة (تتخطّى gap_id موجود بالفعل بالذاكرة)."""
+        if not self._knowledge:
+            return
+        try:
+            saved = self._knowledge.read_custom("detected_gaps") or {}
+        except Exception:
+            return
+        known_ids = {g.gap_id for g in self._detected_gaps}
+        for gap_id, gap_dict in saved.items():
+            if gap_id in known_ids:
+                continue
+            try:
+                self._detected_gaps.append(DetectedGap.from_dict(gap_dict))
+            except Exception as e:
+                logger.warning(f"تعذّرت استعادة فجوة محفوظة '{gap_id}': {e}")
+        if saved:
+            logger.info(f"GapDetectionEngine: استُعيدت {len(saved)} فجوة محفوظة من knowledge_store")
 
     def set_scoring_engine(self, se):
         self._scoring = se
@@ -350,6 +400,13 @@ class GapDetectionEngine:
         for gap in self._detected_gaps:
             if gap.gap_id == gap_id:
                 gap.resolved = True
+                # قبل هذا: التغيير يبقى في الذاكرة فقط — بعد إعادة التشغيل
+                # القادمة، _load_persisted_gaps() كانت (لو استُدعيت) ستُعيد
+                # الفجوة بحالتها القديمة resolved=False من التخزين. نعيد
+                # كتابتها الآن فعلياً عبر نفس مسار _persist_gaps المستخدَم
+                # لحفظ الفجوات الجديدة (يكتب بنفس gap_id فيُحدّث السجل
+                # الموجود بدل تكراره).
+                self._persist_gaps([gap])
                 return True
         return False
 

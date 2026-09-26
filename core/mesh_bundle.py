@@ -54,6 +54,7 @@ from ai.governor import AIGovernanceLayer
 from ai.capability_marketplace import CapabilityMarketplace
 from ai.evolution_engine import EvolutionEngine
 from ai.decision import AIDecisionLayer
+from knowledge.knowledge_store import KnowledgeStore
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +157,21 @@ class MeshBundle:
         self.reputation_engine = NodeReputationEngine(memory_engine=self.memory_engine)
         self.dna = SystemDNA()
 
+        # ai/*_engine.py (discovery/memory/optimization/routing/gap_detector...)
+        # كلها مكتوبة بالكامل ومصمَّمة صراحة لتُحقَن بـKnowledgeStore واحد
+        # مشترك (set_knowledge_store()/knowledge_store=... — التعليق نفسه
+        # "Phase 3 knowledge layer" مكرَّر في كل واحدة)، لكن KnowledgeStore
+        # لم تكن تُبنى (instantiate) في أي مكان بالمشروع كله (تحقّقت بالبحث
+        # عن "KnowledgeStore(" في كل الملفات: صفر نتائج خارج تعريف الكلاس
+        # نفسه ومثال docstring). النتيجة العملية على الأقل لـGapDetectionEngine:
+        # self._knowledge=None دائماً فيصبح _persist_gaps() لا-عملية (no-op)
+        # تماماً — أي فجوة تُكتشف تختفي فوراً عند إعادة التشغيل، وmark_resolved()
+        # لا معنى له عملياً لأنه لا يوجد شيء محفوظ يُعاد تحميله أصلاً. هذا
+        # السلك هنا مقصور على GapDetectionEngine (أوضح استهلاك جاهز) —
+        # بقية المحركات (discovery/memory/optimization/routing) لا تزال
+        # تنتظر نفس السلك في مهمة لاحقة.
+        self.knowledge_store = KnowledgeStore(knowledge_dir=str(Path(storage_dir) / "knowledge"))
+
         # storage/db.py::SQLiteStorage كان مكتوباً بالكامل (جداول nodes/
         # connections/execution_logs) لكن لم يُبنَ (instantiate) في أي مكان
         # بالمشروع — يُستخدم هنا كسجلّ تدقيق (audit log) حقيقي لتنفيذات
@@ -217,7 +233,7 @@ class MeshBundle:
         )
         self.gap_detector = GapDetectionEngine(
             graph=self.graph, memory_engine=self.memory_engine,
-            scoring_engine=self.scoring_engine,
+            scoring_engine=self.scoring_engine, knowledge_store=self.knowledge_store,
         )
         self.service_generator = ServiceGeneratorEngine(governance=self.governance)
         self.marketplace = CapabilityMarketplace()
