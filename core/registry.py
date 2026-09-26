@@ -44,6 +44,24 @@ class NodeRegistry:
     def get_by_tag(self, tag: str) -> List[BaseNode]:
         return [n for n in self._nodes.values() if tag in n.tags]
 
+    def get_by_state(self, state: str) -> List[BaseNode]:
+        """إرجاع كل العُقد الحيّة التي حالتها الحالية تطابق state
+        (مثل NodeState.ACTIVE / PAUSED / FAILED / CREATED)."""
+        return [n for n in self._nodes.values() if n.state == state]
+
+    def refresh_meta(self, node_id: str, persist: bool = True) -> Optional[dict]:
+        """إعادة مزامنة meta_cache من حالة العقدة الحيّة (state، execution_count،
+        last_executed...) بعد أي تنفيذ، لأن الكاش كان يُحفظ فقط لحظة register()
+        ولا يتحدّث تلقائياً بعد ذلك. تُستدعى من ExecutionEngine بعد كل خطوة."""
+        node = self._nodes.get(node_id)
+        if not node:
+            return None
+        snapshot = node.to_dict()
+        self._meta_cache[node_id] = snapshot
+        if persist:
+            self._save()
+        return snapshot
+
     def list_all(self) -> List[BaseNode]:
         return list(self._nodes.values())
 

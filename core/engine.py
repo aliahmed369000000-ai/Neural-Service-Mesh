@@ -113,11 +113,13 @@ class ExecutionEngine:
                 step.duration_ms = round((time.time() - t0) * 1000, 2)
                 step.finished_at = datetime.utcnow().isoformat()
                 current = output
+                self._registry.refresh_meta(node.node_id)
             except Exception as e:
                 step.status = "error"
                 step.error = str(e)
                 step.duration_ms = round((time.time() - t0) * 1000, 2)
                 step.finished_at = datetime.utcnow().isoformat()
+                self._registry.refresh_meta(node.node_id)
                 result.status = "failed"
                 result.finished_at = datetime.utcnow().isoformat()
                 result.total_duration_ms = round((time.time() - t_start) * 1000, 2)
