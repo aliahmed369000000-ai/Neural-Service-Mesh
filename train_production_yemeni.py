@@ -7,7 +7,11 @@ bitsandbytes (كمّية 4-bit).
 
 ⚠️ متطلبات إلزامية — هذا السكربت لن يعمل على Streamlit Community Cloud أو
 أي بيئة CPU فقط:
-  - GPU واحد على الأقل بذاكرة ≥24GB (A100 40/80GB أو H100 موصى به لـ7B/8B).
+  - GPU واحد بذاكرة ≥16GB مع تكميم 4-bit (--quantization 4bit، الافتراضي) —
+    T4 (Colab/Kaggle المجاني) أو أفضل. الدقة (bf16/fp16) تُكتشف تلقائياً
+    حسب دعم البطاقة؛ A100/H100 (bf16، دفعات أكبر) أسرع لكن ليست إلزامية.
+    ⚠️ لم يُختبر فعلياً على T4/P100 حتى الآن (فقط تحقق منطقي من الكود) —
+    راقب استهلاك VRAM عند أول تشغيل حقيقي.
   - pip install torch transformers accelerate peft bitsandbytes trl datasets
 
 منفصل تماماً عن train_yemeni.py (YemeniDecoder ~1B عشوائي القديم) —
@@ -73,8 +77,8 @@ if _MISSING:
 
 if not torch.cuda.is_available():
     logger.error(
-        "لا يوجد GPU (CUDA) متاح. هذا السكربت مصمَّم للتدريب على GPU سحابي "
-        "(A100/H100) فقط — لن يعمل على CPU/Streamlit Community Cloud."
+        "لا يوجد GPU (CUDA) متاح. هذا السكربت يحتاج GPU حقيقي (T4 16GB فما "
+        "فوق مع --quantization 4bit) — لن يعمل على CPU/Streamlit Community Cloud."
     )
     sys.exit(1)
 
@@ -182,14 +186,18 @@ def main() -> None:
         task_type="CAUSAL_LM",
     )
 
-    # 4) إعدادات التدريب — مهيّأة لـ A100/H100 (bf16, gradient checkpointing)
+    # 4) إعدادات التدريب — bf16 على Ampere+ (A100/H100)، fp16 تلقائياً على
+    # بطاقات أقدم (T4/P100/V100) لا تدعم bf16 بالعتاد
+    use_bf16 = torch.cuda.is_bf16_supported()
+    logger.info(f"[precision] {'bf16' if use_bf16 else 'fp16 (بديل — بف16 غير مدعوم على هذه البطاقة)'}")
     sft_config = SFTConfig(
         output_dir=args.output_dir,
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
         gradient_accumulation_steps=args.grad_accum,
         learning_rate=args.lr,
-        bf16=True,
+        bf16=use_bf16,
+        fp16=not use_bf16,
         gradient_checkpointing=True,
         optim="paged_adamw_8bit",
         logging_steps=args.logging_steps,

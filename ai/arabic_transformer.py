@@ -1412,8 +1412,9 @@ def get_production_base_model(
 ):
     """
     يُحمِّل نموذج أساس صناعي (Qwen2.5-7B-Instruct افتراضياً) بكمّية 4-bit أو
-    8-bit عبر bitsandbytes لتقليل بصمة VRAM أثناء التدريب/الاستدلال على GPU
-    سحابي (A100/H100 مثلاً).
+    8-bit عبر bitsandbytes لتقليل بصمة VRAM أثناء التدريب/الاستدلال — يعمل
+    على GPU ≥16GB (T4 المجاني على Kaggle/Colab فما فوق)، مع اكتشاف تلقائي
+    لدعم bf16 والتراجع لـfp16 على البطاقات الأقدم.
 
     ⚠️ هذه الدالة تتطلب GPU فعلياً (CUDA) ومكتبات transformers/bitsandbytes/
     accelerate مثبَّتة. لا تُستدعى على Streamlit Community Cloud أو أي بيئة
@@ -1443,16 +1444,27 @@ def get_production_base_model(
     if not torch.cuda.is_available():
         raise RuntimeError(
             "get_production_base_model يتطلب GPU (CUDA) فعلياً. "
-            "شغّله على جهاز سحابي (A100/H100) وليس CPU/Streamlit Cloud."
+            "شغّله على جهاز فيه GPU حقيقي (T4 16GB فما فوق) وليس CPU/Streamlit Cloud."
         )
 
+    # bf16 يتطلب Ampere+ (SM 8.0+، مثل A100/H100/RTX30xx+). البطاقات المجانية
+    # الشائعة (Kaggle/Colab: T4=SM7.5, P100=SM6.0) لا تدعمه بالعتاد — استخدامه
+    # هناك إما يفشل أو يعمل ببطء شديد عبر محاكاة برمجية. نكتشف الدعم تلقائياً
+    # بدل افتراض A100/H100 دائماً، ونستخدم fp16 كبديل متوافق مع كل البطاقات
+    # الحديثة نسبياً (T4 فما فوق تدعم fp16 عبر Tensor Cores بشكل طبيعي).
+    compute_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    torch_dtype = compute_dtype
+    logger.info(
+        f"[production-7b] GPU dtype: {compute_dtype} "
+        f"({'bf16 مدعوم بالعتاد' if compute_dtype is torch.bfloat16 else 'bf16 غير مدعوم — استُخدم fp16 بديلاً'})"
+    )
+
     bnb_config = None
-    torch_dtype = torch.bfloat16
     if quantization == "4bit":
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_compute_dtype=compute_dtype,
             bnb_4bit_use_double_quant=True,
         )
     elif quantization == "8bit":
