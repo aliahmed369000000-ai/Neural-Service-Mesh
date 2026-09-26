@@ -5,7 +5,7 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from core.node import BaseNode
+from core.node import BaseNode, NodeState
 from core.registry import NodeRegistry
 from core.graph import ServiceGraph
 from connectors.data_transformer import DataTransformer
@@ -95,6 +95,38 @@ class ExecutionEngine:
                             step.node_id = fb_id
                             step.node_name = node.name
                 if not node:
+                    result.status = "failed"
+                    result.finished_at = datetime.utcnow().isoformat()
+                    self._persist(result)
+                    return result
+
+            # عقدة موجودة لكنها محجورة (NodeState.PAUSED — عادة عبر
+            # MeshBundle._apply_reputation_feedback بسبب سمعة منخفضة).
+            # node.execute() كانت سترفع RuntimeError مباشرة، فيلتقطها
+            # except العام أدناه كخطأ تنفيذ عادي ويُسقِط المسار بالكامل
+            # فوراً — رغم أن نفس هذا المحرك يملك بالفعل مسار fallback
+            # حقيقياً (self._ai.should_fallback) لعقدة غير موجودة تماماً
+            # في السطور أعلاه؛ عقدة محجورة مؤقتاً أولى بمحاولة بديل من
+            # الفشل الصامت الكامل. لا نعيد تشغيل should_fallback على
+            # البديل نفسه (مستوى واحد فقط) تفادياً لأي تسلسل غير منتهٍ.
+            if node.state == NodeState.PAUSED:
+                step.status = "error"
+                step.error = (
+                    f"Node '{node.name}' [{node.node_id[:8]}] is paused "
+                    f"(quarantined) and cannot execute"
+                )
+                fb_node = None
+                if use_fallback and self._ai:
+                    fb_id = self._ai.should_fallback(node.node_id, step.error)
+                    if fb_id:
+                        candidate = self._registry.get(fb_id)
+                        if candidate and candidate.state != NodeState.PAUSED:
+                            fb_node = candidate
+                if fb_node:
+                    step.is_fallback = True
+                    step.node_id = fb_node.node_id
+                    node = fb_node
+                else:
                     result.status = "failed"
                     result.finished_at = datetime.utcnow().isoformat()
                     self._persist(result)
