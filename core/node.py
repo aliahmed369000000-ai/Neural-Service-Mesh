@@ -10,6 +10,16 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
+class NodeState:
+    """حالات دورة حياة العقدة (BaseNode)."""
+    CREATED = "created"
+    ACTIVE = "active"
+    PAUSED = "paused"
+    FAILED = "failed"
+
+    ALL = (CREATED, ACTIVE, PAUSED, FAILED)
+
+
 @dataclass
 class NodeSchema:
     fields: Dict[str, str]
@@ -54,6 +64,8 @@ class BaseNode(ABC):
         self.created_at = datetime.utcnow().isoformat()
         self._execution_count = 0
         self._last_executed: Optional[str] = None
+        self.state: str = NodeState.CREATED
+        self._last_error: Optional[str] = None
 
     @property
     @abstractmethod
@@ -67,13 +79,40 @@ class BaseNode(ABC):
     def process(self, data: Dict[str, Any]) -> Dict[str, Any]: ...
 
     def execute(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        self.input_schema.validate(data)
-        result = self.process(data)
-        self.output_schema.validate(result)
+        if self.state == NodeState.PAUSED:
+            raise RuntimeError(
+                f"Node '{self.name}' [{self.node_id[:8]}] is paused and cannot execute"
+            )
+        try:
+            self.input_schema.validate(data)
+            result = self.process(data)
+            self.output_schema.validate(result)
+        except Exception as e:
+            self.mark_failed(str(e))
+            raise
         self._execution_count += 1
         self._last_executed = datetime.utcnow().isoformat()
+        self.state = NodeState.ACTIVE
+        self._last_error = None
         logger.info(f"[{self.name}] executed #{self._execution_count}")
         return result
+
+    def pause(self) -> None:
+        """إيقاف العقدة مؤقتاً؛ يمنع execute() حتى يتم استئنافها."""
+        self.state = NodeState.PAUSED
+        logger.info(f"[{self.name}] paused")
+
+    def resume(self) -> None:
+        """استئناف عقدة متوقفة مؤقتاً أو فاشلة وإعادتها لحالة نشطة."""
+        self.state = NodeState.ACTIVE
+        self._last_error = None
+        logger.info(f"[{self.name}] resumed")
+
+    def mark_failed(self, error: str) -> None:
+        """تسجيل فشل العقدة يدوياً أو تلقائياً عند استثناء أثناء execute()."""
+        self.state = NodeState.FAILED
+        self._last_error = error
+        logger.warning(f"[{self.name}] failed: {error}")
 
     @property
     def metadata(self) -> NodeMetadata:
@@ -98,7 +137,12 @@ class BaseNode(ABC):
             },
             "execution_count": self._execution_count,
             "last_executed": self._last_executed,
+            "state": self.state,
+            "last_error": self._last_error,
         }
 
     def __repr__(self):
-        return f"<{self.__class__.__name__} name='{self.name}' id='{self.node_id[:8]}'>"
+        return (
+            f"<{self.__class__.__name__} name='{self.name}' "
+            f"id='{self.node_id[:8]}' state='{self.state}'>"
+        )
