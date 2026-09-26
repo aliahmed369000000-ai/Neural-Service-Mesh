@@ -27,6 +27,7 @@ FileStorage الذي تستخدمه NodeRegistry، بحيث:
 from __future__ import annotations
 
 import logging
+import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -45,12 +46,25 @@ def _now() -> str:
 
 
 class NodeChannel:
-    """صندوق بريد دائم ومشترك بين كل عُقد الـmesh المسجّلة."""
+    """صندوق بريد دائم ومشترك بين كل عُقد الـmesh المسجّلة.
+
+    تزامن الخيوط: SwarmCoordinator.execute ينفّذ المهام الفرعية فعلياً
+    عبر ThreadPoolExecutor (ai/swarm_coordinator.py)، وMeshBundle يحمي
+    استدعاءاته لهذه القناة بقفل RLock خاص به — لكن NodeChannel نفسها
+    كانت بلا أي حماية تزامن داخلية، رغم أنها مصمَّمة كقناة عامة يمكن أن
+    "ترسل" منها أي عقدة مسجّلة (وليس فقط عبر MeshBundle). بلا قفل هنا،
+    استدعاءان متزامنان من خيطين مختلفين لنفس صندوق بريد (send/broadcast)
+    قد يتسابقان على self._inboxes/self._log (قراءة-تعديل-كتابة غير ذرّية)
+    فتُفقَد إحدى الرسالتين. self._lock يجعل القناة آمنة بذاتها بغض النظر
+    عن انضباط الطرف المستدعي، بنفس نمط القفل المستخدم فعلياً في بقية
+    مكوّنات الحالة المشتركة بالمشروع (SwarmCoordinator، TaskManager،
+    CollectiveMemory، AgentCollaboration، ...)."""
 
     def __init__(self, storage: FileStorage):
         self._storage = storage
         self._inboxes: Dict[str, List[dict]] = {}
         self._log: List[dict] = []
+        self._lock = threading.RLock()
         self._load()
         logger.info("NodeChannel initialised")
 
@@ -62,25 +76,41 @@ class NodeChannel:
         to_id: str,
         topic: str,
         payload: Optional[dict] = None,
+        reply_to: Optional[str] = None,
     ) -> dict:
-        """يرسل رسالة موجّهة من عقدة إلى عقدة أخرى محدّدة بهويّتها الحقيقية."""
+        """يرسل رسالة موجّهة من عقدة إلى عقدة أخرى محدّدة بهويّتها الحقيقية.
+
+        reply_to اختياري: message_id لرسالة سابقة يُربَط بها هذا الرد —
+        يسمح لطبقة تعتمد على نمط طلب/استجابة حقيقي (وليس بثاً بلا سياق
+        فقط) أن تُطابق الرد بالطلب الأصلي عبر القناة نفسها.
+
+        يرفض إرسال رسالة بلا from_id/to_id حقيقيين (بدل حفظها بصمت في
+        صندوق بريد بمفتاح فارغ لا تقرأه أي عقدة أبداً) — خطأ إعداد يجب
+        أن يظهر فوراً للمُرسِل بدل أن يختفي في القناة."""
+        if not from_id or not to_id:
+            raise ValueError(
+                f"NodeChannel.send: from_id و to_id يجب أن يكونا هويتي عقدة "
+                f"حقيقيتين (from_id={from_id!r}, to_id={to_id!r})"
+            )
         message = {
             "message_id": str(uuid.uuid4()),
             "from_id": from_id,
             "to_id": to_id,
             "topic": topic,
             "payload": payload or {},
+            "reply_to": reply_to,
             "sent_at": _now(),
             "read": False,
         }
-        inbox = self._inboxes.setdefault(to_id, [])
-        inbox.append(message)
-        if len(inbox) > MAX_INBOX_PER_NODE:
-            self._inboxes[to_id] = inbox[-MAX_INBOX_PER_NODE:]
-        self._log.append(message)
-        if len(self._log) > MAX_LOG:
-            self._log = self._log[-MAX_LOG:]
-        self._save()
+        with self._lock:
+            inbox = self._inboxes.setdefault(to_id, [])
+            inbox.append(message)
+            if len(inbox) > MAX_INBOX_PER_NODE:
+                self._inboxes[to_id] = inbox[-MAX_INBOX_PER_NODE:]
+            self._log.append(message)
+            if len(self._log) > MAX_LOG:
+                self._log = self._log[-MAX_LOG:]
+            self._save()
         return message
 
     def broadcast(
@@ -89,47 +119,62 @@ class NodeChannel:
         to_ids: List[str],
         topic: str,
         payload: Optional[dict] = None,
+        reply_to: Optional[str] = None,
     ) -> List[dict]:
-        """يرسل نفس الرسالة لعدّة عُقد دفعة واحدة (مثلاً: كل جيران عقدة في الرسم البياني)."""
+        """يرسل نفس الرسالة لعدّة عُقد دفعة واحدة (مثلاً: كل جيران عقدة في الرسم البياني).
+
+        كل عملية إرسال ضمن هذا البث تجري تحت self._lock (عبر send())،
+        لكن البث كاملاً هنا ليس ذرّياً عبر كل المستقبِلين معاً — وهذا
+        مقصود: مستقبِل واحد بهوية غير صالحة لا يجب أن يُسقِط بقية البث
+        الفعلي الصالح لبقية الجيران (لذلك نتخطّاه بصمت بدل رفع
+        ValueError من send)."""
         sent = []
         for to_id in to_ids:
             if to_id and to_id != from_id:
-                sent.append(self.send(from_id, to_id, topic, payload))
+                sent.append(self.send(from_id, to_id, topic, payload, reply_to=reply_to))
         return sent
 
     # ── قراءة ──────────────────────────────────────────────────────────────
 
     def inbox(self, node_id: str, unread_only: bool = False, limit: int = 50) -> List[dict]:
-        messages = self._inboxes.get(node_id, [])
+        with self._lock:
+            messages = list(self._inboxes.get(node_id, []))
         if unread_only:
             messages = [m for m in messages if not m["read"]]
         return messages[-limit:]
 
     def mark_read(self, node_id: str, message_id: str) -> bool:
-        for m in self._inboxes.get(node_id, []):
-            if m["message_id"] == message_id:
-                m["read"] = True
-                self._save()
-                return True
+        with self._lock:
+            for m in self._inboxes.get(node_id, []):
+                if m["message_id"] == message_id:
+                    m["read"] = True
+                    self._save()
+                    return True
         return False
 
     def unread_count(self, node_id: str) -> int:
-        return sum(1 for m in self._inboxes.get(node_id, []) if not m["read"])
+        with self._lock:
+            return sum(1 for m in self._inboxes.get(node_id, []) if not m["read"])
 
     def recent(self, limit: int = 50) -> List[dict]:
         """آخر الرسائل عبر كل القناة (للمراقبة/لوحة التحكم)."""
-        return self._log[-limit:]
+        with self._lock:
+            return list(self._log[-limit:])
 
     def stats(self) -> dict:
-        return {
-            "total_messages": len(self._log),
-            "nodes_with_inbox": len(self._inboxes),
-            "unread_total": sum(
-                1 for msgs in self._inboxes.values() for m in msgs if not m["read"]
-            ),
-        }
+        with self._lock:
+            return {
+                "total_messages": len(self._log),
+                "nodes_with_inbox": len(self._inboxes),
+                "unread_total": sum(
+                    1 for msgs in self._inboxes.values() for m in msgs if not m["read"]
+                ),
+            }
 
     # ── تخزين ──────────────────────────────────────────────────────────────
+    # ملاحظة: _save()/_load() تُستدعيان دائماً من داخل self._lock بالفعل
+    # (من send/mark_read أعلاه أو من __init__)، فلا تُقفِلان هنا بأنفسهما
+    # لتفادي إعادة دخول لا حاجة له.
 
     def _save(self):
         self._storage.save(CHANNEL_FILE, {
