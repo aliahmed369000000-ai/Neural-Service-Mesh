@@ -176,6 +176,7 @@ class CollectiveMemory:
                     lid, q, hits, fails, seen = row
                     if success:
                         new_hits = hits + 1
+                        new_fails = fails
                         new_q = min(1.0, q + 0.15)
                     else:
                         new_hits = hits
