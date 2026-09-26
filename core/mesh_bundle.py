@@ -58,6 +58,10 @@ logger = logging.getLogger(__name__)
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+# كل كم نتيجة سرب حقيقية (record_swarm_result) تُشغَّل دورة تطوّر ذاتي كاملة
+# تلقائياً (انظر التعليق داخل record_swarm_result أدناه).
+EVOLUTION_CYCLE_INTERVAL = 5
+
 
 def datetime_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -168,7 +172,15 @@ class MeshBundle:
         self.channel = NodeChannel(self.storage)
         self.graph = ServiceGraph()
 
-        self._lock = threading.Lock()
+        # RLock وليس Lock عادياً: record_swarm_result يستدعي الآن
+        # _apply_reputation_feedback/_apply_reputation_recovery مباشرة (بعد أن
+        # كانتا تُستدعيان فقط من run_evolution_cycle — انظر التعليق هناك)، وكل
+        # عدة نتائج سرب حقيقية تستدعي run_evolution_cycle نفسها أيضاً، وهي
+        # تُعيد طلب self._lock من جديد. Lock عادي كان سيتعطّل (deadlock) على
+        # أول استدعاء متداخل من نفس الخيط؛ RLock يسمح بإعادة الدخول من نفس
+        # الخيط بأمان دون تغيير أي سلوك تزامن فعلي بين خيوط مختلفة.
+        self._lock = threading.RLock()
+        self._swarm_results_since_evolution = 0
         self.role_node_ids: Dict[str, str] = {}
         self.mcp_tool_node_ids: Dict[str, str] = {}
         self._root_node_id = self._register_roles()
@@ -468,7 +480,38 @@ class MeshBundle:
             except Exception as e:
                 logger.warning("MeshBundle: DNA snapshot failed: %s", e)
 
-    # ── دورة تطوّر ذاتي حقيقية (تُستدعى يدوياً أو من مجدوَل خلفي) ────────────
+            # ── ربط فعلي: هذه النتيجة الحقيقية تُحدِّث سمعة/حالة العُقد الآن،
+            # لا فقط عند اكتمال دورة تطوّر ذاتي. قبل هذا التعديل كانت
+            # _apply_reputation_feedback/_apply_reputation_recovery (حجر
+            # العقدة ضعيفة السمعة ورفع الحجر عن المتعافية — آخر كوميتين)
+            # قابلتين للاستدعاء فقط من run_evolution_cycle()، ولم يكن أي
+            # مكان في المشروع كله يستدعي run_evolution_cycle() فعلياً (تحقّقت
+            # بالبحث عبر الكود) — أي أن الحجر/رفع الحجر لم يكونا يعملان في
+            # التشغيل الفعلي إطلاقاً رغم أنهما مكتوبان ومختبَران. الآن كل
+            # نتيجة سرب حقيقية (وليس فقط دورة تطوّر يدوية) تُشغّلهما مباشرة.
+            try:
+                self._apply_reputation_feedback()
+                self._apply_reputation_recovery()
+            except Exception as e:
+                logger.warning("MeshBundle: reputation feedback/recovery after swarm result failed: %s", e)
+
+            # ── تشغيل دوري فعلي لدورة التطوّر الذاتي الكاملة (اكتشاف فجوات +
+            # توليد/اعتماد عُقد جديدة) كل EVOLUTION_CYCLE_INTERVAL نتيجة سرب
+            # حقيقية — كانت run_evolution_cycle() نفسها معرَّفة بالكامل
+            # ومختبَرة لكن بلا أي نقطة تشغيل تلقائية في كامل المشروع (لا UI،
+            # لا مجدوَل خلفي)، فتبقى "cycles_run" في summary() صفراً للأبد.
+            # لا تكلفة LLM هنا (GapDetector/ServiceGenerator/Governance كلها
+            # فحص رسم بياني وقواعد محلية) فالتشغيل الدوري آمن التكلفة.
+            self._swarm_results_since_evolution += 1
+            if self._swarm_results_since_evolution >= EVOLUTION_CYCLE_INTERVAL:
+                self._swarm_results_since_evolution = 0
+                try:
+                    self.run_evolution_cycle()
+                except Exception as e:
+                    logger.warning("MeshBundle: periodic run_evolution_cycle after swarm result failed: %s", e)
+
+    # ── دورة تطوّر ذاتي حقيقية (تُستدعى يدوياً، أو تلقائياً كل
+    # EVOLUTION_CYCLE_INTERVAL نتيجة سرب من record_swarm_result أعلاه) ──────
     # تشغّل EvolutionEngine.run_cycle() الحقيقي: يفحص الرسم البياني الفعلي
     # (self.graph) بحثاً عن فجوات، يولّد عقداً جديدة، يمرّرها على
     # AIGovernanceLayer (حدود صارمة: لا حلقات، حد أقصى للتوليد، سمعة دنيا)،
