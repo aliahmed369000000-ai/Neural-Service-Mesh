@@ -154,13 +154,27 @@ async def health():
 
 @app.post("/process")
 async def process(payload: dict, request: Request):
-    """معالجة النص عبر شبكة الخدمات.
+    """معالجة عبر شبكة العُقد الحقيقية المشتركة (core.mesh_bundle.get_mesh_bundle) —
+    نفس registry/graph التي تستخدمها واجهة السرب في streamlit_app.py.
     محمي بمفتاح NSM_API_KEY (هيدر X-API-Key) — fail-closed: لو المفتاح
     غير مضبوط بالبيئة، الـendpoint يبقى معطّلاً بالكامل (403) بدل ما
-    يُترك مفتوحاً بلا مصادقة افتراضياً. هذا endpoint حالياً غير فعّال
-    عملياً (Engine() تحتاج registry/graph/storage غير مُمرَّرة هنا)،
-    لكن الحماية أُضيفت استباقياً حتى لا يصير باباً مفتوحاً بلا مصادقة
-    بمجرد ما يُكمَّل ربطه مستقبلاً."""
+    يُترك مفتوحاً بلا مصادقة افتراضياً.
+
+    كان هذا الـendpoint معطّلاً بالكامل عملياً بخطأين متتاليين، لا خطأ واحد
+    كما ذكر التعليق القديم: (1) `Engine()` بلا وسائط كانت سترفع TypeError
+    فوراً لأن `registry`/`graph`/`storage` وسائط إلزامية بلا قيمة افتراضية
+    في `ExecutionEngine.__init__`، و(2) حتى لو نجح ذلك، `ExecutionEngine`
+    لا تملك أصلاً دالة اسمها `process()` (تحقّقت بالبحث في core/engine.py) —
+    فقط `run_path`/`run_between`/`run_full_graph`. أي طلب حقيقي كان سيفشل
+    دائماً بـ500 مهما كان المفتاح صحيحاً.
+
+    شكل الطلب (JSON body):
+      - {"path": [node_id, ...], "data": {...}}           → run_path
+      - {"start_id": id, "end_id": id, "data": {...}}      → run_between
+      - {"full_graph": true, "data": {...}}                → run_full_graph
+    `data` يجب أن تطابق input_schema للعقدة الأولى في المسار (مثلاً
+    {"kwargs": {...}} لعقدة أداة MCP، أو {"task": "..."} لعقدة دور وكيل) —
+    DataTransformer الحالي تمرير مباشر بلا أي تحويل أنواع."""
     if not _matches_env_secrets(_header_api_key(request), "NSM_API_KEY", "NSM_ADMIN_KEY"):
         return JSONResponse(status_code=403, content={"error": "X-API-Key غير مطابق أو NSM_API_KEY/NSM_ADMIN_KEY غير مضبوط"})
 
@@ -170,9 +184,23 @@ async def process(payload: dict, request: Request):
             content={"error": "Core engine not available", "detail": _CORE_ERR},
         )
     try:
-        engine = Engine()
-        result = engine.process(payload)
-        return {"status": "ok", "result": result}
+        from core.mesh_bundle import get_mesh_bundle
+        bundle = get_mesh_bundle()
+        engine = Engine(bundle.registry, bundle.graph, bundle.storage, db=bundle.exec_log)
+
+        data = payload.get("data") or {}
+        if isinstance(payload.get("path"), list) and payload["path"]:
+            result = engine.run_path(payload["path"], data)
+        elif payload.get("start_id") and payload.get("end_id"):
+            result = engine.run_between(payload["start_id"], payload["end_id"], data)
+        elif payload.get("full_graph"):
+            result = engine.run_full_graph(data)
+        else:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "يلزم أحد: 'path' (قائمة node_id)، أو 'start_id'+'end_id'، أو 'full_graph': true"},
+            )
+        return {"status": "ok", "result": result.to_dict()}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
