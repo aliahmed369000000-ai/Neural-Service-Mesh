@@ -119,6 +119,21 @@ class BaseNode(ABC):
         self._last_error = error
         logger.warning(f"[{self.name}] failed: {error}")
 
+    def record_execution(self, success: bool, error: Optional[str] = None) -> None:
+        """تسجيل نتيجة تنفيذ حقيقي جرى خارج process()/execute() — مثل عقدة
+        دور وكيل (AgentRoleNode) ينفّذ عملها الفعلي عبر AgentFactory.run_task
+        وليس عبر process() نفسها. execute() لا يناسب هذه الحالة (سيعيد
+        استدعاء process() فارغة)، فهذه الدالة تحدّث دورة حياة العقدة
+        (execution_count/state/last_error) مباشرة من نتيجة معروفة سلفاً."""
+        if success:
+            self._execution_count += 1
+            self._last_executed = datetime.utcnow().isoformat()
+            self.state = NodeState.ACTIVE
+            self._last_error = None
+            logger.info(f"[{self.name}] execution recorded #{self._execution_count} (external)")
+        else:
+            self.mark_failed(error or "فشل تنفيذ خارجي بدون تفاصيل")
+
     def restore_state(self, snapshot: Dict[str, Any]) -> None:
         """استرجاع تاريخ العقدة (state/execution_count/last_executed/last_error)
         من snapshot محفوظ سابقاً (عادة من NodeRegistry.get_meta_by_name بعد

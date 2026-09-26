@@ -34,7 +34,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from core.node import BaseNode, NodeSchema
+from core.node import BaseNode, NodeSchema, NodeState
 from core.registry import NodeRegistry
 from core.graph import ServiceGraph
 from core.node_channel import NodeChannel
@@ -359,6 +359,18 @@ class MeshBundle:
                     node_id, role, success, latency
                 )
 
+                # ── تحديث دورة حياة العقدة نفسها من نتيجة السرب الحقيقية ──────
+                # كانت execution_count/state تبقى مجمّدة على 'created' للأبد
+                # لأن تنفيذ السرب يمر عبر AgentFactory.run_task مباشرة وليس
+                # عبر node.execute() (process() في AgentRoleNode مجرد هوية
+                # فارغة). record_execution() تحدّث الحالة من النتيجة الحقيقية
+                # المعروفة سلفاً (success/task.error) بدل استدعاء process().
+                node = self.registry.get(node_id)
+                prev_state = node.state if node else None
+                if node:
+                    node.record_execution(success, error=None if success else task.error)
+                    self.registry.refresh_meta(node_id)
+
                 started = getattr(task, "started_at", None) or datetime_now_iso()
                 finished = getattr(task, "finished_at", None) or started
                 self.exec_log.upsert_connection(
@@ -366,6 +378,29 @@ class MeshBundle:
                 )
                 if self.graph.has_node(self._root_node_id) and self.graph.has_node(node_id):
                     self.graph.add_edge(self._root_node_id, node_id, label=role or "")
+
+                # ── تواصل: إشعار جيران العقدة في الرسم البياني عند انتقال
+                # حقيقي للحالة (فشل جديد، أو تعافٍ بعد فشل) — وليس عند كل
+                # نجاح روتيني حتى لا تُغرَق القناة برسائل بلا قيمة تشغيلية.
+                if node and node.state != prev_state:
+                    state_topic = None
+                    if node.state == NodeState.FAILED:
+                        state_topic = "node_failed"
+                    elif prev_state == NodeState.FAILED and node.state == NodeState.ACTIVE:
+                        state_topic = "node_recovered"
+                    if state_topic and self.graph.has_node(node_id):
+                        neighbors = self.graph.get_neighbors(node_id)
+                        self.channel.broadcast(
+                            from_id=node_id,
+                            to_ids=[n for n in neighbors if n and n != node_id],
+                            topic=state_topic,
+                            payload={
+                                "role": role,
+                                "previous_state": prev_state,
+                                "current_state": node.state,
+                                "error": task.error if not success else None,
+                            },
+                        )
                 # تواصل حقيقي مرتبط بالتنفيذ الفعلي: عقدة التنسيق الجذرية
                 # تُرسل للعقدة التي نفّذت المهمة فعلاً نتيجة تنفيذها — رسالة
                 # حقيقية محفوظة في صندوق بريد node_id، وليست سطراً في سجلّ عرض.
