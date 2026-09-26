@@ -71,6 +71,13 @@ class BaseNode(ABC):
         self._last_executed: Optional[str] = None
         self.state: str = NodeState.CREATED
         self._last_error: Optional[str] = None
+        # سبب آخر إيقاف مؤقت (PAUSED): "manual" (إيقاف بشري مباشر) أو
+        # "quarantine" (حجر تلقائي بسبب سمعة منخفضة عبر
+        # MeshBundle._apply_reputation_feedback). state=PAUSED وحده لا
+        # يكفي لطبقات أعلى مثل _apply_reputation_recovery لتقرر إن كان
+        # آمناً استدعاء resume() تلقائياً: بدون هذا التمييز، تعافي سمعة
+        # عقدة أوقفها إنسان يدوياً لسبب آخر كان سيُعيد تشغيلها رغماً عنه.
+        self.pause_reason: Optional[str] = None
 
     @property
     @abstractmethod
@@ -102,16 +109,37 @@ class BaseNode(ABC):
         logger.info(f"[{self.name}] executed #{self._execution_count}")
         return result
 
-    def pause(self) -> None:
-        """إيقاف العقدة مؤقتاً؛ يمنع execute() حتى يتم استئنافها."""
+    def pause(self, reason: str = "manual") -> None:
+        """إيقاف العقدة مؤقتاً؛ يمنع execute() حتى يتم استئنافها.
+        reason الافتراضي "manual" (إيقاف بشري/يدوي). MeshBundle._apply_reputation_feedback
+        يستدعيها بـ reason="quarantine" لتمييز الحجر التلقائي عن أي إيقاف
+        يدوي مستقبلي — راجع resume() لسبب أهمية هذا التمييز."""
         self.state = NodeState.PAUSED
-        logger.info(f"[{self.name}] paused")
+        self.pause_reason = reason
+        logger.info(f"[{self.name}] paused (reason={reason})")
 
-    def resume(self) -> None:
-        """استئناف عقدة متوقفة مؤقتاً أو فاشلة وإعادتها لحالة نشطة."""
+    def resume(self, expected_reason: Optional[str] = None) -> bool:
+        """استئناف عقدة متوقفة مؤقتاً أو فاشلة وإعادتها لحالة نشطة.
+
+        إن مُرِّر expected_reason وكانت العقدة محجورة (PAUSED) بسبب مختلف
+        فعلاً (مثلاً استدعاء تعافي السمعة التلقائي على عقدة أوقفها إنسان
+        يدوياً بسبب "manual" لا "quarantine")، لا يتم الاستئناف ويُرجَع
+        False — يمنع طبقة تلقائية (كـ MeshBundle._apply_reputation_recovery)
+        من إعادة تشغيل عقدة أوقفها متعمداً طرف آخر لسبب مختلف تماماً.
+        بدون expected_reason (الاستدعاء اليدوي المباشر) يُستأنف دائماً كما
+        كان سابقاً — لا تراجع بالسلوك القديم."""
+        if (expected_reason is not None and self.state == NodeState.PAUSED
+                and self.pause_reason not in (None, expected_reason)):
+            logger.warning(
+                f"[{self.name}] resume(expected_reason={expected_reason!r}) "
+                f"skipped: actually paused for reason={self.pause_reason!r}"
+            )
+            return False
         self.state = NodeState.ACTIVE
+        self.pause_reason = None
         self._last_error = None
         logger.info(f"[{self.name}] resumed")
+        return True
 
     def mark_failed(self, error: str) -> None:
         """تسجيل فشل العقدة يدوياً أو تلقائياً عند استثناء أثناء execute()."""
@@ -150,6 +178,7 @@ class BaseNode(ABC):
         self._last_executed = snapshot.get("last_executed")
         self.state = snapshot.get("state") or NodeState.CREATED
         self._last_error = snapshot.get("last_error")
+        self.pause_reason = snapshot.get("pause_reason") if self.state == NodeState.PAUSED else None
         logger.info(
             f"[{self.name}] state restored: {self.state} "
             f"(execution_count={self._execution_count})"
@@ -179,6 +208,7 @@ class BaseNode(ABC):
             "execution_count": self._execution_count,
             "last_executed": self._last_executed,
             "state": self.state,
+            "pause_reason": self.pause_reason,
             "last_error": self._last_error,
         }
 

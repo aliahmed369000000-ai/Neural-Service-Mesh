@@ -567,7 +567,7 @@ class MeshBundle:
             # عقدة محجورة دون أن يعرف.
             node = self.registry.get(node_id)
             if node:
-                node.pause()
+                node.pause(reason="quarantine")
                 self.registry.refresh_meta(node_id)
             if self.graph.has_node(node_id):
                 neighbors = self.graph.get_neighbors(node_id)
@@ -598,7 +598,17 @@ class MeshBundle:
             self.reputation_engine.unquarantine(node_id)
             node = self.registry.get(node_id)
             if node:
-                node.resume()
+                # expected_reason="quarantine": إن أوقف إنسان هذه العقدة
+                # يدوياً بسبب آخر بعد حجرها (node.pause_reason != "quarantine"
+                # الآن)، لا نستأنفها رغماً عنه فقط لأن سمعتها تعافت.
+                resumed = node.resume(expected_reason="quarantine")
+                if not resumed:
+                    logger.info(
+                        "MeshBundle: skipped auto-resume for %s — "
+                        "currently paused for a different reason (%s)",
+                        node_id[:8], node.pause_reason,
+                    )
+                    continue
                 self.registry.refresh_meta(node_id)
             updated = self.reputation_engine.get_reputation(node_id)
             score = updated.reputation_score if updated else None
