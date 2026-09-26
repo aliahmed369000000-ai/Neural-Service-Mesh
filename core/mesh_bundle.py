@@ -477,6 +477,7 @@ class MeshBundle:
         with self._lock:
             cycle = self.evolution.run_cycle(auto_register=True, verbose=False)
             self._apply_reputation_feedback()
+            self._apply_reputation_recovery()
             try:
                 self.dna.snapshot(
                     registry=self.registry,
@@ -501,6 +502,14 @@ class MeshBundle:
             if rep.get("total_runs", 0) < 5:
                 continue  # بيانات غير كافية بعد لاتخاذ قرار
             self.reputation_engine.quarantine(node_id)
+            # حجر فعلي على مستوى العقدة نفسها (BaseNode.state=paused) لا
+            # فقط في طبقة السمعة/التوجيه — بدون هذا كان أي استدعاء مباشر
+            # لـ node.execute() (خارج مسار التوجيه القائم على السمعة) ينفّذ
+            # عقدة محجورة دون أن يعرف.
+            node = self.registry.get(node_id)
+            if node:
+                node.pause()
+                self.registry.refresh_meta(node_id)
             if self.graph.has_node(node_id):
                 neighbors = self.graph.get_neighbors(node_id)
                 self.channel.broadcast(
@@ -510,6 +519,39 @@ class MeshBundle:
                     payload={"reason": "low_reputation", "score": rep.get("reputation_score")},
                 )
             logger.info("MeshBundle: quarantined low-reputation node %s", node_id[:8])
+
+    # ── رفع الحجر تلقائياً عن عقدة تعافت فعلياً + استئنافها الحقيقي ─────────
+    # quarantine() كان طريقاً باتجاه واحد: unquarantine() موجودة في
+    # NodeReputationEngine منذ البداية لكن لا شيء كان يستدعيها أبداً في كل
+    # المستودع — أي عقدة تُحجَر تبقى محجورة للأبد حتى لو تحسّن أداؤها
+    # الفعلي لاحقاً. هذه الدالة تفحص العُقد المحجورة، وتفكّ الحجر فعلياً
+    # (في السمعة وحالة العقدة معاً عبر node.resume()) عن أي عقدة راكمت
+    # تنفيذاً جديداً كافياً وتجاوزت درجتها الحقيقية (غير المُصفَّرة بسبب
+    # الحجر) عتبة التعافي، ثم تُبلغ جيرانها.
+    def _apply_reputation_recovery(self, recovery_threshold: float = 60.0,
+                                    min_new_runs: int = 5) -> None:
+        for rep in self.reputation_engine.release_eligible_nodes(
+            recovery_threshold=recovery_threshold, min_new_runs=min_new_runs
+        ):
+            node_id = rep.get("node_id")
+            if not node_id:
+                continue
+            self.reputation_engine.unquarantine(node_id)
+            node = self.registry.get(node_id)
+            if node:
+                node.resume()
+                self.registry.refresh_meta(node_id)
+            updated = self.reputation_engine.get_reputation(node_id)
+            score = updated.reputation_score if updated else None
+            if self.graph.has_node(node_id):
+                neighbors = self.graph.get_neighbors(node_id)
+                self.channel.broadcast(
+                    from_id=node_id,
+                    to_ids=[n for n in neighbors if n and n != node_id],
+                    topic="node_unquarantined",
+                    payload={"reason": "reputation_recovered", "score": score},
+                )
+            logger.info("MeshBundle: released quarantine for recovered node %s", node_id[:8])
 
     def summary(self) -> dict:
         _cm_summary = {}

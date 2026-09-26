@@ -43,6 +43,7 @@ class NodeReputation:
         self.total_latency_ms: float = 0.0
         self.manual_boost: float = 0.0      # Added by operator via API
         self.is_quarantined: bool = False    # Quarantined nodes skipped in routing
+        self.runs_at_quarantine: Optional[int] = None  # total_runs snapshot when quarantined
         self.first_seen: str = datetime.now(timezone.utc).isoformat()
         self.last_active: str = self.first_seen
 
@@ -59,15 +60,27 @@ class NodeReputation:
     @property
     def reputation_score(self) -> float:
         """
-        Composite reputation score [0, 100].
+        Composite reputation score [0, 100]. Pinned to 0 while quarantined
+        (routing must see quarantined nodes as untrusted). Use
+        raw_reputation_score() to read the underlying, unpinned score —
+        e.g. to decide whether a quarantined node has actually recovered.
+        """
+        if self.is_quarantined:
+            return 0.0
+        return self.raw_reputation_score()
+
+    def raw_reputation_score(self) -> float:
+        """
+        Same composite formula as reputation_score, but never pinned to 0
+        by is_quarantined:
           60% — success rate
           20% — latency penalty (lower is better)
           10% — usage (more usage = more data = more reliable score)
           10% — manual boost/penalty
+        Quarantine doesn't stop record()/record_execution() from updating
+        total_runs/successful_runs, so this reflects real recent behaviour
+        even for a currently-quarantined node.
         """
-        if self.is_quarantined:
-            return 0.0
-
         # Success component (0-60)
         sr_component = self.success_rate * 60.0
 
@@ -117,6 +130,7 @@ class NodeReputation:
             "success_rate": round(self.success_rate, 4),
             "avg_latency_ms": round(self.avg_latency_ms, 2),
             "is_quarantined": self.is_quarantined,
+            "runs_at_quarantine": self.runs_at_quarantine,
             "manual_boost": self.manual_boost,
             "first_seen": self.first_seen,
             "last_active": self.last_active,
@@ -131,6 +145,7 @@ class NodeReputation:
         r.total_latency_ms = data.get("avg_latency_ms", 0.0) * r.total_runs
         r.manual_boost = data.get("manual_boost", 0.0)
         r.is_quarantined = data.get("is_quarantined", False)
+        r.runs_at_quarantine = data.get("runs_at_quarantine")
         r.first_seen = data.get("first_seen", r.first_seen)
         r.last_active = data.get("last_active", r.last_active)
         return r
@@ -215,11 +230,13 @@ class NodeReputationEngine:
         """Quarantine a node — it will be excluded from routing."""
         rep = self.ensure_node(node_id)
         rep.is_quarantined = True
+        rep.runs_at_quarantine = rep.total_runs
         logger.warning(f"NodeReputationEngine: node {node_id[:8]} quarantined")
 
     def unquarantine(self, node_id: str):
         rep = self.ensure_node(node_id)
         rep.is_quarantined = False
+        rep.runs_at_quarantine = None
 
     def boost(self, node_id: str, amount: float = 10.0):
         """Manually boost a node's reputation (max +10)."""
@@ -246,6 +263,25 @@ class NodeReputationEngine:
 
     def quarantined_nodes(self) -> List[dict]:
         return [r.to_dict() for r in self._reputations.values() if r.is_quarantined]
+
+    def release_eligible_nodes(self, recovery_threshold: float = 60.0,
+                                min_new_runs: int = 5) -> List[dict]:
+        """Quarantined nodes that have actually recovered: at least
+        min_new_runs fresh executions since being quarantined, and a raw
+        (unpinned) score at or above recovery_threshold. The threshold is
+        kept well above the quarantine threshold on purpose, so a node
+        hovering right around the cutoff doesn't flap in and out of
+        quarantine every cycle."""
+        eligible = []
+        for rep in self._reputations.values():
+            if not rep.is_quarantined:
+                continue
+            base_runs = rep.runs_at_quarantine if rep.runs_at_quarantine is not None else rep.total_runs
+            if rep.total_runs - base_runs < min_new_runs:
+                continue
+            if rep.raw_reputation_score() >= recovery_threshold:
+                eligible.append(rep.to_dict())
+        return eligible
 
     def low_reputation_nodes(self, threshold: float = 30.0) -> List[dict]:
         return [
