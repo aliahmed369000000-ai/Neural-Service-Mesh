@@ -69,6 +69,26 @@ class SwarmHistoryStore:
                 "CREATE INDEX IF NOT EXISTS idx_swarm_history_swarm_id "
                 "ON swarm_history(swarm_id)"
             )
+            # 🆕 جدول منفصل لنقاط تفتيش (checkpoints) السرب أثناء التنفيذ —
+            # منفصل عمداً عن swarm_history (الذي يُسجَّل فيه فقط عند
+            # اكتمال السرب). لو انهارت العملية (توقف مفاجئ: إعادة تشغيل
+            # الحاوية على Streamlit Cloud، نفاد الذاكرة...) في منتصف
+            # execute()، swarm_history لا يحتوي أي أثر لهذا التشغيل إطلاقاً
+            # (self._persist_result لا تُستدعى إلا في النهاية). هذا الجدول
+            # يُحدَّث دورياً أثناء التنفيذ (swarm_id هو المفتاح الأساسي،
+            # فالتحديث المتكرر لنفس swarm_id يستبدل السجل بدل تكديسه) حتى
+            # يقدر SwarmCoordinator.resume() يقرأ آخر حالة معروفة ويكمل من
+            # المهام غير المكتملة فقط، بدل إعادة السرب كاملاً من الصفر.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS swarm_progress (
+                    swarm_id     TEXT PRIMARY KEY,
+                    goal         TEXT    NOT NULL,
+                    status       TEXT    NOT NULL,
+                    started_at   TEXT    NOT NULL,
+                    updated_at   TEXT    NOT NULL,
+                    full_result  TEXT    NOT NULL
+                )
+            """)
             conn.commit()
 
     def log_result(self, result_dict: Dict[str, Any]) -> int:
@@ -100,6 +120,94 @@ class SwarmHistoryStore:
         except Exception as e:
             logger.warning(f"SwarmHistoryStore.log_result: فشل تسجيل النتيجة: {e}")
             return -1
+
+    # ── نقاط تفتيش السرب أثناء التنفيذ (للاستئناف بعد توقف مفاجئ) ───────────
+
+    def save_progress(self, result_dict: Dict[str, Any]) -> bool:
+        """يحفظ/يحدّث آخر حالة معروفة لسرب لا يزال قيد التنفيذ. يُستدعى
+        عدة مرات خلال نفس التشغيل (بعد كل مهمة فرعية تكتمل) — INSERT OR
+        REPLACE على swarm_id يضمن سجلاً واحداً محدَّثاً بدل التكديس.
+        لا يرفع استثناء عند الفشل (التدقيق لا يجب أن يُعطّل تنفيذ السرب)."""
+        swarm_id = result_dict.get("swarm_id", "")
+        if not swarm_id:
+            return False
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                conn.execute("""
+                    INSERT INTO swarm_progress
+                        (swarm_id, goal, status, started_at, updated_at, full_result)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(swarm_id) DO UPDATE SET
+                        status=excluded.status,
+                        updated_at=excluded.updated_at,
+                        full_result=excluded.full_result
+                """, (
+                    swarm_id,
+                    result_dict.get("goal", ""),
+                    result_dict.get("status", "running"),
+                    result_dict.get("started_at", _now()),
+                    _now(),
+                    json.dumps(result_dict, ensure_ascii=False),
+                ))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.warning(f"SwarmHistoryStore.save_progress: فشل حفظ نقطة التفتيش: {e}")
+            return False
+
+    def get_progress(self, swarm_id: str) -> Optional[dict]:
+        """يرجع آخر نقطة تفتيش محفوظة لهذا swarm_id، أو None إن لم توجد."""
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute(
+                    "SELECT full_result FROM swarm_progress WHERE swarm_id=?",
+                    (swarm_id,),
+                ).fetchone()
+        except Exception as e:
+            logger.warning(f"SwarmHistoryStore.get_progress: {e}")
+            return None
+        if not row:
+            return None
+        try:
+            return json.loads(row["full_result"])
+        except Exception:
+            return None
+
+    def clear_progress(self, swarm_id: str) -> bool:
+        """يحذف نقطة تفتيش سرب بعد اكتماله فعلياً (نجاحاً أو فشلاً) — النتيجة
+        النهائية مسجّلة أصلاً في swarm_history، فلا داعي لإبقاء نسخة مؤقتة."""
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                conn.execute("DELETE FROM swarm_progress WHERE swarm_id=?", (swarm_id,))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.warning(f"SwarmHistoryStore.clear_progress: {e}")
+            return False
+
+    def list_incomplete(self, limit: int = 20) -> List[dict]:
+        """يرجع أسرِبة توقفت في منتصف التنفيذ (status='running') — إما لا
+        تزال تعمل فعلاً في عملية حيّة، أو انهارت العملية قبل أن تُكمل.
+        الأحدث تحديثاً أولاً."""
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute("""
+                    SELECT full_result FROM swarm_progress
+                    WHERE status = 'running'
+                    ORDER BY updated_at DESC LIMIT ?
+                """, (limit,)).fetchall()
+        except Exception as e:
+            logger.warning(f"SwarmHistoryStore.list_incomplete: {e}")
+            return []
+        result = []
+        for row in rows:
+            try:
+                result.append(json.loads(row["full_result"]))
+            except Exception:
+                continue
+        return result
 
     def get_recent(self, limit: int = 20) -> List[dict]:
         """يرجع آخر نتائج تنفيذ السرب كاملة (الأحدث أولاً)."""

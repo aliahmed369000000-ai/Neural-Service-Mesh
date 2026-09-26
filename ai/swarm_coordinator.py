@@ -59,6 +59,7 @@ class SwarmTask:
             "task_id": self.task_id,
             "sub_goal": self.sub_goal,
             "required_capability": self.required_capability,
+            "data": self.data,
             "priority": self.priority,
             "assigned_agent_id": self.assigned_agent_id,
             "status": self.status,
@@ -68,6 +69,28 @@ class SwarmTask:
             "finished_at": self.finished_at,
             "duration_ms": self.duration_ms,
         }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "SwarmTask":
+        """يعيد بناء SwarmTask من to_dict() محفوظ (نقطة تفتيش أو تاريخ) —
+        يُستخدم عند استئناف سرب توقف قبل اكتماله (انظر
+        SwarmCoordinator.resume) لإعادة بناء نفس المهام بنفس المعرّفات
+        بدل تفكيك الهدف من جديد."""
+        task = cls(
+            task_id=d.get("task_id") or str(uuid.uuid4()),
+            sub_goal=d.get("sub_goal", ""),
+            required_capability=d.get("required_capability", ""),
+            data=d.get("data") or {},
+            priority=d.get("priority", 5),
+        )
+        task.assigned_agent_id = d.get("assigned_agent_id")
+        task.status = d.get("status", "pending")
+        task.result = d.get("result")
+        task.error = d.get("error")
+        task.started_at = d.get("started_at")
+        task.finished_at = d.get("finished_at")
+        task.duration_ms = d.get("duration_ms")
+        return task
 
 
 class SwarmResult:
@@ -110,6 +133,17 @@ class SwarmResult:
             "tasks": [t.to_dict() for t in self.tasks],
             "debates": self.debates,
         }
+
+    @classmethod
+    def from_checkpoint(cls, d: dict) -> "SwarmResult":
+        """يعيد بناء SwarmResult من نقطة تفتيش محفوظة (SwarmHistoryStore.
+        get_progress) — يحافظ على نفس swarm_id وstarted_at وقائمة المهام
+        بحالتها الأخيرة المعروفة، تمهيداً لاستئناف التنفيذ من حيث توقف."""
+        result = cls(d.get("swarm_id", ""), d.get("goal", ""))
+        result.started_at = d.get("started_at") or result.started_at
+        result.tasks = [SwarmTask.from_dict(t) for t in d.get("tasks", [])]
+        result.debates = d.get("debates", [])
+        return result
 
 
 class SwarmCoordinator:
@@ -245,49 +279,143 @@ class SwarmCoordinator:
         # 2. Sort by priority
         tasks.sort(key=lambda t: t.priority)
 
-        # 3. Execute in parallel (bounded by max_agents)
-        workers = min(len(tasks), self._max_agents)
-        task_outputs: Dict[str, dict] = {}
+        return self._execute_tasks(
+            result, tasks, retry_failed=retry_failed,
+            synthesize=synthesize, debate=debate,
+        )
 
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            future_to_task: Dict[Future, SwarmTask] = {}
-            for task in tasks:
-                agent = self._factory.best_agent_for(task.required_capability)
-                if agent is None:
-                    # Auto-spawn an agent for this capability
-                    agent = self._auto_spawn_for_capability(task.required_capability)
-                if agent:
-                    task.assigned_agent_id = agent.agent_id
-                    fut = pool.submit(self._run_task, task, agent)
-                    future_to_task[fut] = task
-                else:
-                    task.status = "failed"
-                    task.error = f"No agent available for capability '{task.required_capability}'"
+    def resume(
+        self,
+        swarm_id: str,
+        retry_failed: bool = True,
+        synthesize: bool = False,
+        debate: bool = False,
+    ) -> Optional[SwarmResult]:
+        """
+        🆕 يستأنف سرباً توقف قبل اكتماله (انهيار العملية، إعادة تشغيل
+        الحاوية...) — يقرأ آخر نقطة تفتيش محفوظة (swarm_progress) بنفس
+        swarm_id، يُبقي على المهام المكتملة فعلاً بنتائجها كما هي (لا
+        يعيد تنفيذها)، ويُعيد تنفيذ فقط المهام التي لم تكتمل
+        (pending/running/failed) عبر وكلاء جدد.
 
-            for fut in as_completed(future_to_task):
-                task = future_to_task[fut]
-                try:
-                    output = fut.result()
-                    task.result = output
-                    # 🆕 الحالة تُبنى على success الفعلي من agent.execute()،
-                    # وليس فقط على عدم وجود استثناء (لأن فشل التنفيذ —
-                    # مثل غياب مفتاح API — يعود كنتيجة عادية بدون استثناء).
-                    if output.get("success", True):
-                        task.status = "done"
+        يُرجع None إن لم توجد نقطة تفتيش لهذا swarm_id، أو إن كان تخزين
+        التاريخ الدائم معطّلاً (self._store is None).
+        """
+        if not self._store:
+            logger.warning("SwarmCoordinator.resume: تخزين تاريخ السرب غير مفعّل")
+            return None
+
+        checkpoint = self._store.get_progress(swarm_id)
+        if not checkpoint:
+            logger.warning(f"SwarmCoordinator.resume: لا نقطة تفتيش لـ {swarm_id}")
+            return None
+
+        result = SwarmResult.from_checkpoint(checkpoint)
+        tasks = result.tasks
+        already_done = sum(1 for t in tasks if t.status == "done")
+        logger.info(
+            f"Swarm {swarm_id} resumed: {already_done}/{len(tasks)} "
+            f"مهام مكتملة مسبقاً، الباقي سيُعاد تنفيذه"
+        )
+        return self._execute_tasks(
+            result, tasks, retry_failed=retry_failed,
+            synthesize=synthesize, debate=debate,
+        )
+
+    def list_resumable(self, limit: int = 20) -> List[dict]:
+        """🆕 يرجع ملخصات أسرِبة توقفت في منتصف التنفيذ (swarm_id، الهدف،
+        عدد المهام المكتملة/الكلي) حتى تعرضها الواجهة كخيار استئناف بدل
+        أن تضيع بصمت. لا يُرجع شيئاً إن كان التخزين الدائم معطّلاً."""
+        if not self._store:
+            return []
+        out = []
+        for cp in self._store.list_incomplete(limit=limit):
+            tasks = cp.get("tasks", [])
+            out.append({
+                "swarm_id": cp.get("swarm_id"),
+                "goal": cp.get("goal"),
+                "started_at": cp.get("started_at"),
+                "total_tasks": len(tasks),
+                "done_tasks": sum(1 for t in tasks if t.get("status") == "done"),
+            })
+        return out
+
+    # ── Internals ─────────────────────────────────────────────────────────
+
+    def _execute_tasks(
+        self,
+        result: SwarmResult,
+        tasks: List[SwarmTask],
+        retry_failed: bool = True,
+        synthesize: bool = False,
+        debate: bool = False,
+    ) -> SwarmResult:
+        """ينفّذ (أو يكمل تنفيذ) قائمة مهام سرب فعلية، مع حفظ نقطة تفتيش
+        دورية على swarm_progress بعد كل مهمة تكتمل — حتى لو انهارت العملية
+        في المنتصف، resume() يقدر يقرأ آخر نقطة تفتيش ويكمل من المهام غير
+        المكتملة فقط. يُشترَك بين execute() (تشغيل جديد) وresume()
+        (استئناف تشغيل سابق) لتفادي ازدواج نفس منطق التنفيذ/التوليف."""
+        swarm_id, goal = result.swarm_id, result.goal
+        task_outputs: Dict[str, dict] = {
+            t.task_id: t.result for t in tasks if t.status == "done" and t.result
+        }
+
+        # نقطة تفتيش أولى قبل بدء التنفيذ الفعلي — تضمن وجود أثر للسرب
+        # حتى لو انهارت العملية قبل اكتمال أي مهمة فرعية واحدة.
+        self._save_progress(result)
+
+        # نفّذ فقط المهام التي لم تنجح بعد (pending/running/failed من
+        # نقطة تفتيش سابقة، أو pending عادية في تشغيل جديد).
+        pending_tasks = [t for t in tasks if t.status != "done"]
+        workers = min(len(pending_tasks), self._max_agents) if pending_tasks else 0
+
+        if pending_tasks:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                future_to_task: Dict[Future, SwarmTask] = {}
+                for task in pending_tasks:
+                    agent = self._factory.best_agent_for(task.required_capability)
+                    if agent is None:
+                        # Auto-spawn an agent for this capability
+                        agent = self._auto_spawn_for_capability(task.required_capability)
+                    if agent:
+                        task.assigned_agent_id = agent.agent_id
+                        fut = pool.submit(self._run_task, task, agent)
+                        future_to_task[fut] = task
                     else:
                         task.status = "failed"
-                        task.error = output.get("result_text") or "فشل تنفيذ المهمة"
-                    task_outputs[task.task_id] = output
-                except Exception as exc:
-                    task.status = "failed"
-                    task.error = str(exc)
-                    logger.error(f"Task {task.task_id} failed: {exc}")
+                        task.error = f"No agent available for capability '{task.required_capability}'"
+
+                for fut in as_completed(future_to_task):
+                    task = future_to_task[fut]
+                    try:
+                        output = fut.result()
+                        task.result = output
+                        # 🆕 الحالة تُبنى على success الفعلي من agent.execute()،
+                        # وليس فقط على عدم وجود استثناء (لأن فشل التنفيذ —
+                        # مثل غياب مفتاح API — يعود كنتيجة عادية بدون استثناء).
+                        if output.get("success", True):
+                            task.status = "done"
+                        else:
+                            task.status = "failed"
+                            task.error = output.get("result_text") or "فشل تنفيذ المهمة"
+                        task_outputs[task.task_id] = output
+                    except Exception as exc:
+                        task.status = "failed"
+                        task.error = str(exc)
+                        logger.error(f"Task {task.task_id} failed: {exc}")
+                    finally:
+                        # 🆕 نقطة تفتيش بعد كل مهمة فرعية تكتمل (نجاحاً أو
+                        # فشلاً) — لو انهارت العملية بعد هذه النقطة وقبل
+                        # اكتمال باقي المهام، resume() يعرف بالضبط أي المهام
+                        # ما زالت تحتاج إعادة تنفيذ.
+                        self._save_progress(result)
 
         # 4. 🆕 إعادة محاولة المهام الفاشلة مرة واحدة عبر وكيل جديد لنفس
         #    القدرة، قبل التوليف والإنهاء (فشل عابر لا يعني أن المهمة غير
         #    قابلة للتنفيذ إطلاقاً).
         if retry_failed:
             self._retry_failed_tasks(tasks, task_outputs)
+            self._save_progress(result)
 
         # 5. Merge results (بعد إعادة المحاولة، حتى تعكس الحالة النهائية)
         merged = self._merge_results(goal, tasks, task_outputs)
@@ -311,6 +439,9 @@ class SwarmCoordinator:
         with self._lock:
             self._history.append(result)
         self._persist_result(result)
+        # 🆕 السرب اكتمل فعلياً (نجاحاً أو جزئياً) — النتيجة النهائية
+        # مسجّلة أصلاً في swarm_history، فنحذف نقطة التفتيش المؤقتة.
+        self._clear_progress(swarm_id)
 
         logger.info(
             f"Swarm {swarm_id} finished: "
@@ -318,7 +449,23 @@ class SwarmCoordinator:
         )
         return result
 
-    # ── Internals ─────────────────────────────────────────────────────────
+    def _save_progress(self, result: SwarmResult) -> None:
+        """يحفظ نقطة تفتيش (best-effort، لا يرفع استثناء أبداً — تسجيل
+        الاستئناف لا يجب أن يُعطّل تنفيذ السرب الفعلي)."""
+        if not self._store:
+            return
+        try:
+            self._store.save_progress(result.to_dict())
+        except Exception as exc:
+            logger.warning(f"تعذّر حفظ نقطة تفتيش السرب {result.swarm_id}: {exc}")
+
+    def _clear_progress(self, swarm_id: str) -> None:
+        if not self._store:
+            return
+        try:
+            self._store.clear_progress(swarm_id)
+        except Exception as exc:
+            logger.warning(f"تعذّر حذف نقطة تفتيش السرب {swarm_id}: {exc}")
 
     def _decompose(
         self,

@@ -96,33 +96,76 @@ def render_swarm_studio():
         key="swarm_debate",
     )
 
-    if st.button("🚀 نفّذ عبر السرب", type="primary", key="swarm_run") and goal.strip():
+    # 🆕 أسرِبة توقفت في منتصف التنفيذ (انهيار العملية، إعادة تشغيل الحاوية...)
+    # قبل هذا، أي توقف مفاجئ كان يُفقد كل تقدّم السرب بلا أثر — الآن كل مهمة
+    # فرعية تكتمل تُحفظ كنقطة تفتيش (core.registry مثيل مماثل لـ core.node)،
+    # وهذا القسم يعرضها ويسمح باستئنافها من حيث توقفت بدل إعادة السرب كاملاً.
+    _resume_clicked_id = None
+    try:
+        _resumable = coordinator.list_resumable()
+    except Exception:
+        _resumable = []
+    if _resumable:
+        with st.expander(f"⏸️ أسرِبة متوقفة قابلة للاستئناف ({len(_resumable)})", expanded=True):
+            st.caption("توقفت هذه الأسرِبة قبل اكتمالها — الاستئناف يعيد تنفيذ المهام غير المكتملة فقط.")
+            for _ri, _r in enumerate(_resumable):
+                _rc1, _rc2 = st.columns([4, 1])
+                with _rc1:
+                    st.markdown(
+                        f"**{_r['goal']}**  \n"
+                        f"`{_r['swarm_id']}` — {_r['done_tasks']}/{_r['total_tasks']} مهمة مكتملة "
+                        f"— بدأ {_r['started_at']}"
+                    )
+                with _rc2:
+                    if st.button("▶️ استئناف", key=f"swarm_resume_{_ri}_{_r['swarm_id']}"):
+                        _resume_clicked_id = _r["swarm_id"]
+
+    if (st.button("🚀 نفّذ عبر السرب", type="primary", key="swarm_run") and goal.strip()) or _resume_clicked_id:
         data = {"content": extra_context.strip()} if extra_context.strip() else {}
         _swarm_skeleton_ph = st.empty()
         with _swarm_skeleton_ph.container():
-            st.caption("⟳ السرب يعمل — تفكيك الهدف وتنفيذ المهام الفرعية...")
+            st.caption(
+                "⟳ السرب يستأنف من حيث توقف..." if _resume_clicked_id
+                else "⟳ السرب يعمل — تفكيك الهدف وتنفيذ المهام الفرعية..."
+            )
             _skeleton(kind="cards")
             _skeleton(lines=4)
-        if remote_swarm:
-            try:
-                from ai.nsm_api_client import run_remote_task
-                _remote_data = run_remote_task(goal.strip())
-                _remote_text = str(_remote_data.get("result") or _remote_data.get("message") or _remote_data)
-                st.success("تم تنفيذ الهدف عبر NSM API المنشورة.")
-                st.markdown(_remote_text)
-                _copy_button(_remote_text, key="swarm_remote_result")
-                return
-            except Exception as _remote_error:
-                st.warning(f"تعذر التنفيذ البعيد، تم استخدام السرب المحلي: {_remote_error}")
-        result = coordinator.execute(
-            goal.strip(),
-            data=data,
-            use_planner=use_planner,
-            retry_failed=retry_failed,
-            synthesize=synthesize,
-            debate=debate,
-        )
-        _swarm_skeleton_ph.empty()
+        if _resume_clicked_id:
+            # الاستئناف محلي دائماً (نقطة التفتيش مبنية على SwarmCoordinator
+            # نفسه) — لا معنى لتوجيهه عبر NSM API البعيدة.
+            result = coordinator.resume(
+                _resume_clicked_id,
+                retry_failed=retry_failed,
+                synthesize=synthesize,
+                debate=debate,
+            )
+            _swarm_skeleton_ph.empty()
+            if result is None:
+                st.error("تعذّر استئناف هذا السرب — لم توجد نقطة تفتيش صالحة له (قد يكون اكتمل بالفعل).")
+                st.stop()
+            if not goal.strip():
+                goal = result.goal  # 🆕 لعرض عنوان "الإجابة الموحّدة" أدناه بشكل صحيح حتى لو حقل الهدف فارغاً
+        else:
+            if remote_swarm:
+                try:
+                    from ai.nsm_api_client import run_remote_task
+                    _remote_data = run_remote_task(goal.strip())
+                    _remote_text = str(_remote_data.get("result") or _remote_data.get("message") or _remote_data)
+                    st.success("تم تنفيذ الهدف عبر NSM API المنشورة.")
+                    st.markdown(_remote_text)
+                    _copy_button(_remote_text, key="swarm_remote_result")
+                    return
+                except Exception as _remote_error:
+                    st.warning(f"تعذر التنفيذ البعيد، تم استخدام السرب المحلي: {_remote_error}")
+            result = coordinator.execute(
+                goal.strip(),
+                data=data,
+                use_planner=use_planner,
+                retry_failed=retry_failed,
+                synthesize=synthesize,
+                debate=debate,
+            )
+            _swarm_skeleton_ph.empty()
 
         # 🆕 تغذية النتيجة الحقيقية إلى ScoringEngine + MemoryEngine +
         # NodeReputationEngine + SystemDNA (كانت هذه المحركات موجودة
