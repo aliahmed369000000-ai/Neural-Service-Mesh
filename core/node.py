@@ -56,8 +56,13 @@ class NodeMetadata:
 
 
 class BaseNode(ABC):
-    def __init__(self, name: str, description: str = "", tags: list = None):
-        self.node_id = str(uuid.uuid4())
+    def __init__(self, name: str, description: str = "", tags: list = None,
+                 node_id: Optional[str] = None):
+        # node_id قابل للتمرير عمداً (بدل uuid4 عشوائي دائماً) حتى تقدر
+        # الطبقات الأعلى (مثل MeshBundle._register_roles) تعيد بناء نفس
+        # العقدة بنفس الهوية بعد إعادة تشغيل العملية، ثم تستدعي
+        # restore_state() لاسترجاع تاريخها بدل ما تبدأ من الصفر بمعرّف جديد.
+        self.node_id = node_id or str(uuid.uuid4())
         self.name = name
         self.description = description
         self.tags = tags or []
@@ -113,6 +118,27 @@ class BaseNode(ABC):
         self.state = NodeState.FAILED
         self._last_error = error
         logger.warning(f"[{self.name}] failed: {error}")
+
+    def restore_state(self, snapshot: Dict[str, Any]) -> None:
+        """استرجاع تاريخ العقدة (state/execution_count/last_executed/last_error)
+        من snapshot محفوظ سابقاً (عادة من NodeRegistry.get_meta_by_name بعد
+        إعادة تشغيل العملية). يُفترض أن snapshot جاء من to_dict() لنفس
+        node_id — إن اختلف يُسجَّل تحذير لكن الاسترجاع يكمل، لأن الأولوية
+        عدم إسقاط أي استثناء أثناء إقلاع الشبكة."""
+        snap_id = snapshot.get("node_id")
+        if snap_id and snap_id != self.node_id:
+            logger.warning(
+                f"[{self.name}] restore_state: node_id mismatch "
+                f"(self={self.node_id[:8]}, snapshot={snap_id[:8]})"
+            )
+        self._execution_count = snapshot.get("execution_count", 0) or 0
+        self._last_executed = snapshot.get("last_executed")
+        self.state = snapshot.get("state") or NodeState.CREATED
+        self._last_error = snapshot.get("last_error")
+        logger.info(
+            f"[{self.name}] state restored: {self.state} "
+            f"(execution_count={self._execution_count})"
+        )
 
     @property
     def metadata(self) -> NodeMetadata:

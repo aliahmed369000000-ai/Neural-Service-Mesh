@@ -41,6 +41,16 @@ class NodeRegistry:
     def get_by_name(self, name: str) -> Optional[BaseNode]:
         return next((n for n in self._nodes.values() if n.name == name), None)
 
+    def get_meta_by_name(self, name: str) -> Optional[dict]:
+        """بحث في meta_cache المحفوظ (وليس العُقد الحيّة فقط) عن آخر سجل
+        بنفس الاسم. يُستخدم عند إعادة بناء عقدة بعد إعادة تشغيل العملية
+        (get_by_name يرجع None لأن _nodes يبدأ فارغاً كل تشغيل) حتى تقدر
+        الطبقة الأعلى تسترجع نفس node_id والتاريخ بدل البدء من الصفر."""
+        return next(
+            (m for m in self._meta_cache.values() if m.get("name") == name),
+            None,
+        )
+
     def get_by_tag(self, tag: str) -> List[BaseNode]:
         return [n for n in self._nodes.values() if tag in n.tags]
 

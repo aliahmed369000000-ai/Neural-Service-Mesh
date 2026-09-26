@@ -70,11 +70,12 @@ class AgentRoleNode(BaseNode):
     و"شبكة العُقد" (core/registry) — كانا نظامين منفصلين تماماً قبل ذلك.
     """
 
-    def __init__(self, role: str, spec: dict):
+    def __init__(self, role: str, spec: dict, node_id: Optional[str] = None):
         super().__init__(
             name=role,
             description=spec.get("description", ""),
             tags=list(spec.get("tags", [])) + ["agent_role"],
+            node_id=node_id,
         )
         self._role = role
         self._capabilities = spec.get("capabilities", [])
@@ -110,11 +111,12 @@ class MCPToolNode(BaseNode):
     عميل MCP خارجي) — وليس محاكاة أو بيانات وهمية.
     """
 
-    def __init__(self, tool_name: str, fn, description: str):
+    def __init__(self, tool_name: str, fn, description: str, node_id: Optional[str] = None):
         super().__init__(
             name=tool_name,
             description=description.strip().splitlines()[0] if description else "",
             tags=["mcp_tool"],
+            node_id=node_id,
         )
         self._fn = fn
 
@@ -278,7 +280,13 @@ class MeshBundle:
             if existing:
                 self.role_node_ids[role] = existing.node_id
                 continue
-            node = AgentRoleNode(role, spec)
+            persisted = self.registry.get_meta_by_name(role)
+            node = AgentRoleNode(
+                role, spec,
+                node_id=persisted.get("node_id") if persisted else None,
+            )
+            if persisted:
+                node.restore_state(persisted)
             node_id = self.registry.register(node)
             self.role_node_ids[role] = node_id
             if root_id is None:
@@ -314,7 +322,13 @@ class MeshBundle:
             if existing:
                 self.mcp_tool_node_ids[tool_name] = existing.node_id
                 continue
-            node = MCPToolNode(tool_name, fn, fn.__doc__ or "")
+            persisted = self.registry.get_meta_by_name(tool_name)
+            node = MCPToolNode(
+                tool_name, fn, fn.__doc__ or "",
+                node_id=persisted.get("node_id") if persisted else None,
+            )
+            if persisted:
+                node.restore_state(persisted)
             node_id = self.registry.register(node)
             self.mcp_tool_node_ids[tool_name] = node_id
 
