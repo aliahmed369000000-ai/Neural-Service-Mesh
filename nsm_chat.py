@@ -87,6 +87,28 @@ except Exception as _dg_err:
     print(f"⚠ تثبيت المعرفة العامة غير متاح: {_dg_err}")
 
 # ══════════════════════════════════════════════════════════════════
+# Self-Feed Grounding — تثبيت المعرفة المكتسَبة ذاتياً (ai/self_feed_learner.py)
+# ══════════════════════════════════════════════════════════════════
+# self_feed_learner كان يخزّن المعرفة المجلوبة من الويب بمعزل تام: تُستدعى
+# فقط عبر أمر محادثة صريح ("تعلّم ...")، ولا تفيد أي سؤال لاحق مختلف الصياغة
+# (كان الاسترجاع الوحيد بمحرك المحادثة كاش تطابق حرفي كامل فقط — عمداً، تفادياً
+# لثقة زائفة، راجع ui_pages/chat.py). هذه الكتلة تسدّ الفجوة ببحث دلالي حقيقي
+# (ai/unified_semantic_memory.py، محلي TF عربي دائماً + Qdrant إن توفر) على
+# كل ما عُلِّم ذاتياً سابقاً — يُرفق فقط عند تجاوز عتبة تشابه معقولة، فلا خطر
+# إرجاع معرفة غير ذات صلة بثقة زائفة.
+# ══════════════════════════════════════════════════════════════════
+try:
+    from ai.unified_semantic_memory import get_unified_memory as _get_unified_memory
+    _HAS_SELF_FEED_GROUNDING = True
+    print("✓ تثبيت المعرفة المكتسَبة ذاتياً (Self-Feed Grounding) مُفعَّل")
+except Exception as _sfg_err:
+    _HAS_SELF_FEED_GROUNDING = False
+    _get_unified_memory = None
+    print(f"⚠ تثبيت المعرفة المكتسَبة ذاتياً غير متاح: {_sfg_err}")
+
+_SELF_FEED_SCORE_MIN = 0.12  # عتبة تشابه دنيا (راجع _local_score في unified_semantic_memory.py)
+
+# ══════════════════════════════════════════════════════════════════
 # Reasoning Pipeline — تسجيل حلقات تدريب حقيقية (Experience Learning)
 # ══════════════════════════════════════════════════════════════════
 # كانت ReasoningPipeline (Question → CKG → NeuralCore → Decision) غير
@@ -465,6 +487,26 @@ class NSMChat:
                 _context_blocks.append(
                     "[معلومات مرجعية دقيقة من قاعدة معرفة NSM التعليمية — "
                     "استخدمها إن كانت ذات صلة]\n" + _refs
+                )
+
+        # ── تثبيت المعرفة المكتسَبة ذاتياً: بحث دلالي (محلي دائماً + Qdrant
+        # إن توفر) في كل ما تعلّمه self_feed_learner من الويب سابقاً — عبر أي
+        # جلسة أو مستخدم (المخزن مشترك). يُرفق فقط عند تجاوز عتبة تشابه.
+        if _HAS_SELF_FEED_GROUNDING and _get_unified_memory is not None:
+            try:
+                _sf_hits = _get_unified_memory().search(t, limit=5)
+            except Exception:
+                _sf_hits = []
+            _sf_matches = [
+                (sc, pl) for sc, pl in _sf_hits
+                if pl.get("agent_id") == "self_feed" and sc >= _SELF_FEED_SCORE_MIN
+            ][:3]
+            if _sf_matches:
+                _sf_refs = "\n".join(f"- {pl['text'][:400]}" for _sc, pl in _sf_matches)
+                _context_blocks.append(
+                    "[معرفة تعلّمتها ذاتياً من الويب سابقاً (self-feed) — "
+                    "استخدمها إن كانت ذات صلة، واذكر أنها معرفة مكتسَبة وليست "
+                    "من مصدر إسلامي موثوق إن كان السياق دينياً]\n" + _sf_refs
                 )
 
         t_for_llm = t

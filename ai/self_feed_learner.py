@@ -72,12 +72,32 @@ def ingest_text(
         orch_ok = True
     except Exception:
         pass
+    # 🆕 تغذية الذاكرة الدلالية الموحدة (ai/unified_semantic_memory.py) — هذا
+    # ما يجعل المعرفة قابلة للاسترجاع لأي سؤال جديد ذي صلة لاحقاً (بحث دلالي
+    # حقيقي، لا تطابق حرفي فقط كما في LearningOrchestrator.recall أعلاه).
+    # يُستدعى من nsm_chat.py (كتلة "تثبيت المعرفة المكتسَبة ذاتياً") لكل سؤال
+    # جديد قبل توليد الإجابة. عزل كامل: فشل هذه الطبقة لا يوقف حفظ المعرفة
+    # في self_feed_knowledge.jsonl أعلاه (نجح بالفعل قبل هذه النقطة).
+    semantic_ok = False
+    try:
+        from ai.unified_semantic_memory import get_unified_memory
+        semantic_ok = get_unified_memory().add_finding(
+            agent_id="self_feed",
+            kind="finding",
+            text=f"{topic}: {content[:1800]}",
+            tool="self_feed_learner",
+            source=(sources or [""])[0] if sources else "",
+            payload={"topic": topic, "sources": sources or [], "tags": tags or [], "origin": origin},
+        )
+    except Exception:
+        pass
     return {
         "ok": True,
         "topic": topic,
         "chars": len(entry["content"]),
         "sources_count": len(entry["sources"]),
         "orchestrator": orch_ok,
+        "semantic_memory": semantic_ok,
         "store": str(_STORE.relative_to(ROOT)),
     }
 
