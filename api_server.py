@@ -186,7 +186,14 @@ async def process(payload: dict, request: Request):
     try:
         from core.mesh_bundle import get_mesh_bundle
         bundle = get_mesh_bundle()
-        engine = Engine(bundle.registry, bundle.graph, bundle.storage, db=bundle.exec_log)
+        # ai=bundle.ai_decision: قبل هذا التعديل كان self._ai يبقى None هنا
+        # دائماً (AIDecisionLayer لم تكن تُبنى في أي مكان بالمشروع)، فمنطق
+        # fallback في run_path (عقدة غير موجودة/محجورة) وrun_between (اختيار
+        # مسار مُقيَّم بدل BFS البسيط) لم يكونا يعملان أبداً في أي طلب حقيقي.
+        engine = Engine(
+            bundle.registry, bundle.graph, bundle.storage,
+            db=bundle.exec_log, ai=bundle.ai_decision,
+        )
 
         data = payload.get("data") or {}
         if isinstance(payload.get("path"), list) and payload["path"]:

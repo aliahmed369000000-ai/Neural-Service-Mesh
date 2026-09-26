@@ -52,6 +52,7 @@ from ai.service_generator import ServiceGeneratorEngine
 from ai.governor import AIGovernanceLayer
 from ai.capability_marketplace import CapabilityMarketplace
 from ai.evolution_engine import EvolutionEngine
+from ai.decision import AIDecisionLayer
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +172,21 @@ class MeshBundle:
         # موجوداً ومكتوباً بالكامل لكن بلا رسم بياني حيّ يُغذّيه.
         self.channel = NodeChannel(self.storage)
         self.graph = ServiceGraph()
+
+        # ── طبقة القرار الذكي (ai/decision.py::AIDecisionLayer) ─────────────
+        # كانت مكتوبة بالكامل (اختيار مسار بالتقييم، ترتيب مسارات بديلة،
+        # اقتراح بديل عند فشل/حجر عقدة، تعلّم بسيط من تاريخ التنفيذ) لكن لا
+        # يوجد أي مكان في المشروع يبنيها فعلياً (تحقّقت بالبحث عن
+        # "AIDecisionLayer(" في كل الملفات) — api_server.py كان يبني
+        # core.engine.ExecutionEngine بلا `ai=` إطلاقاً، فيبقى self._ai=None
+        # هناك دائماً. النتيجة العملية: كل منطق fallback في
+        # ExecutionEngine.run_path (لعقدة غير موجودة، ولعقدة محجورة بعد آخر
+        # تعديل) لم يكن يعمل أبداً في أي طلب حقيقي عبر /process، وrun_between
+        # كان يستخدم BFS البسيط دائماً بدل اختيار مسار مُقيَّم. نسخة واحدة
+        # هنا على مستوى MeshBundle (singleton للعملية) تُشارَك بين كل طلبات
+        # /process المتتالية حتى تتراكم إحصاءات learn_from_run فعلياً بدل
+        # إعادة بناء طبقة فارغة الذاكرة في كل طلب.
+        self.ai_decision = AIDecisionLayer(graph=self.graph, db=self.exec_log)
 
         # RLock وليس Lock عادياً: record_swarm_result يستدعي الآن
         # _apply_reputation_feedback/_apply_reputation_recovery مباشرة (بعد أن
