@@ -233,3 +233,75 @@ def render_dev_console():
                         st.markdown(f"**{_who}{_badge}:** {_m['content']}")
     except Exception as _hist_err:
         st.error(f"❌ تعذّر تحميل سجل المحادثات: {_hist_err}")
+
+    # ── قناة التواصل بين العُقد (core/node_channel.py) ───────────────────
+    st.markdown("---")
+    st.markdown("#### 📡 قناة التواصل بين العُقد")
+    st.caption(
+        "صندوق بريد حقيقي ودائم لكل عقدة مسجّلة في core/registry.py، عبر "
+        "core/node_channel.py — رسائل send/broadcast فعلية (حجر/رفع حجر، "
+        "فشل/تعافي، نتائج مهام السرب)، وليست سجلّ عرض مؤقت."
+    )
+    try:
+        from core.mesh_bundle import get_mesh_bundle
+        _bundle = get_mesh_bundle()
+        _ch_stats = _bundle.channel.stats()
+
+        _cc1, _cc2, _cc3 = st.columns(3)
+        with _cc1:
+            metric_card(_ch_stats["total_messages"], "إجمالي الرسائل")
+        with _cc2:
+            metric_card(_ch_stats["nodes_with_inbox"], "عُقد لها صندوق بريد")
+        with _cc3:
+            metric_card(_ch_stats["unread_total"], "غير مقروءة")
+
+        _dc_nodes = _bundle.registry.list_all()
+        if not _dc_nodes:
+            st.info("لا عُقد مسجّلة بعد.")
+        else:
+            _dc_node_options = {
+                f"{n.name} · {n.state} · ({n.node_id[:8]}…)": n.node_id
+                for n in _dc_nodes
+            }
+            _dc_sel_label = st.selectbox(
+                "اختر عقدة لعرض صندوق بريدها",
+                list(_dc_node_options.keys()),
+                key="dc_channel_node_select",
+            )
+            _dc_sel_id = _dc_node_options[_dc_sel_label]
+            _dc_col_a, _dc_col_b = st.columns(2)
+            with _dc_col_a:
+                _dc_unread_only = st.checkbox("غير المقروءة فقط", key="dc_channel_unread_only")
+            with _dc_col_b:
+                _dc_limit = st.slider("عدد الرسائل", 5, 100, 20, 5, key="dc_channel_limit")
+
+            _dc_msgs = _bundle.channel.inbox(_dc_sel_id, unread_only=_dc_unread_only, limit=_dc_limit)
+            if not _dc_msgs:
+                st.info("لا رسائل في صندوق بريد هذه العقدة.")
+            else:
+                for _m in reversed(_dc_msgs):
+                    _dc_icon = "🔵" if not _m["read"] else "⚪"
+                    _dc_reply = f" · ↩️ رد على `{_m['reply_to'][:8]}…`" if _m.get("reply_to") else ""
+                    _dc_title = (
+                        f"{_dc_icon} **{_m['topic']}** — من `{_m['from_id'][:8]}…` — "
+                        f"{_m['sent_at'][:19].replace('T', ' ')}{_dc_reply}"
+                    )
+                    with st.expander(_dc_title):
+                        st.json(_m["payload"])
+                        if not _m["read"]:
+                            if st.button("✅ وضع كمقروءة", key=f"dc_channel_read_{_m['message_id']}"):
+                                _bundle.channel.mark_read(_dc_sel_id, _m["message_id"])
+                                st.rerun()
+
+        with st.expander("📜 آخر الرسائل عبر كل القناة (كل العُقد)"):
+            _dc_recent = _bundle.channel.recent(limit=30)
+            if not _dc_recent:
+                st.caption("لا رسائل بعد.")
+            else:
+                for _m in reversed(_dc_recent):
+                    st.markdown(
+                        f"- `{_m['sent_at'][:19].replace('T', ' ')}` "
+                        f"**{_m['topic']}** — `{_m['from_id'][:8]}…` ← `{_m['to_id'][:8]}…`"
+                    )
+    except Exception as _ch_err:
+        st.error(f"❌ تعذّر تحميل قناة التواصل: {_ch_err}")
