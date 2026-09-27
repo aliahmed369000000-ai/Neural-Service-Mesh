@@ -447,16 +447,23 @@ class MeshBundle:
         GapDetectionEngine وServiceGraph، وأي محاولة حجر/رفع حجر بالسمعة
         عليها (self.registry.get(node_id)) ترجع None بصمت.
 
-        لا نعرف النوع الأصلي الدقيق لعقدة self_evolved من meta فقط (كل ما
-        نعرفه من BaseNode.to_dict() هو الاسم/الوصف/الوسوم/الحالة، ليس
-        الكود الفعلي)، فنُحييها كـ PassThroughNode عام — أفضل بكثير من
-        شبح غائب تماماً، وrestore_state() يستعيد حالتها/تاريخها الحقيقي
-        (state, pause_reason, execution_count) بنفس node_id تماماً."""
+        منذ إضافة services/generated_service_nodes.py، عُقد self_evolved
+        الحديثة (النوع الحقيقي — NormalizerNode/ValidatorNode/...، وليس
+        PassThroughNode دائماً) تحمل نوعها الفعلي في
+        meta["node_type"] = BaseNode.metadata.node_type = self.__class__.__name__،
+        محفوظ فعلياً في meta_cache منذ لحظة تسجيلها لا مُخمَّناً هنا. نستخدم
+        NODE_CLASS_BY_NAME لإعادة بنائها بنفس صنفها الحقيقي — لا نُنزلها إلى
+        PassThroughNode عام إلا لعقدة قديمة/غير معروفة النوع (سجلّ من قبل
+        هذه الخريطة، أو PassThroughNode أصلاً)، وrestore_state() يستعيد
+        حالتها/تاريخها الحقيقي (state, pause_reason, execution_count) بنفس
+        node_id تماماً في الحالتين."""
+        from services.generated_service_nodes import NODE_CLASS_BY_NAME
         for meta in self.registry.orphaned_metadata():
             node_id = meta.get("node_id")
             if not node_id:
                 continue
-            shell = PassThroughNode(
+            shell_cls = NODE_CLASS_BY_NAME.get(meta.get("node_type"), PassThroughNode)
+            shell = shell_cls(
                 name=meta.get("name", node_id[:8]),
                 description=meta.get("description", ""),
                 tags=meta.get("tags") or ["dynamic", "passthrough", "restored"],

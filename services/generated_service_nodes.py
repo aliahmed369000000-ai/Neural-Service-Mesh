@@ -54,9 +54,10 @@ class NormalizerNode(BaseNode):
     """تطبيع بيانات خام حقيقي: تشذيب نصوص، توحيد مفاتيح، إسقاط قيم فارغة،
     وتحقّق اختياري من مطابقة schema (قائمة مفاتيح مطلوبة)."""
 
-    def __init__(self, name: str, description: str = "", tags: list = None):
+    def __init__(self, name: str, description: str = "", tags: list = None,
+                 node_id: str = None):
         super().__init__(name=name, description=description or "Auto-generated data normalizer",
-                          tags=tags or ["generated", "normalizer"])
+                          tags=tags or ["generated", "normalizer"], node_id=node_id)
 
     @property
     def input_schema(self) -> NodeSchema:
@@ -92,9 +93,10 @@ class NormalizerNode(BaseNode):
 class ValidatorNode(BaseNode):
     """تحقّق حقيقي من `data` وفق قواعد `rules`: required/types/min/max/pattern."""
 
-    def __init__(self, name: str, description: str = "", tags: list = None):
+    def __init__(self, name: str, description: str = "", tags: list = None,
+                 node_id: str = None):
         super().__init__(name=name, description=description or "Auto-generated data validator",
-                          tags=tags or ["generated", "validator"])
+                          tags=tags or ["generated", "validator"], node_id=node_id)
 
     @property
     def input_schema(self) -> NodeSchema:
@@ -152,9 +154,10 @@ class ValidatorNode(BaseNode):
 class AggregatorNode(BaseNode):
     """تجميع حقيقي لقائمة `items` وفق `strategy`: sum/avg/concat/merge/unique/count."""
 
-    def __init__(self, name: str, description: str = "", tags: list = None):
+    def __init__(self, name: str, description: str = "", tags: list = None,
+                 node_id: str = None):
         super().__init__(name=name, description=description or "Auto-generated data aggregator",
-                          tags=tags or ["generated", "aggregator"])
+                          tags=tags or ["generated", "aggregator"], node_id=node_id)
 
     @property
     def input_schema(self) -> NodeSchema:
@@ -221,9 +224,10 @@ class FilterNode(BaseNode):
     """تصفية حقيقية لقائمة `items` وفق `criteria` (مطابقة مباشرة أو
     مشغّلات $gt/$gte/$lt/$lte/$ne/$in)."""
 
-    def __init__(self, name: str, description: str = "", tags: list = None):
+    def __init__(self, name: str, description: str = "", tags: list = None,
+                 node_id: str = None):
         super().__init__(name=name, description=description or "Auto-generated item filter",
-                          tags=tags or ["generated", "filter"])
+                          tags=tags or ["generated", "filter"], node_id=node_id)
 
     @property
     def input_schema(self) -> NodeSchema:
@@ -244,9 +248,10 @@ class EnricherNode(BaseNode):
     """إثراء حقيقي: يدمج `context` داخل `data` بدون الكتابة فوق حقول
     موجودة مسبقاً، ويُرجع فعلياً أسماء الحقول المُضافة."""
 
-    def __init__(self, name: str, description: str = "", tags: list = None):
+    def __init__(self, name: str, description: str = "", tags: list = None,
+                 node_id: str = None):
         super().__init__(name=name, description=description or "Auto-generated data enricher",
-                          tags=tags or ["generated", "enricher"])
+                          tags=tags or ["generated", "enricher"], node_id=node_id)
 
     @property
     def input_schema(self) -> NodeSchema:
@@ -275,9 +280,10 @@ class RouterNode(BaseNode):
     """توجيه حقيقي: يحدّد وجهة `data` بناءً على قيمة `routing_key` فعلياً
     الموجودة داخل البيانات — وليس قيمة ثابتة."""
 
-    def __init__(self, name: str, description: str = "", tags: list = None):
+    def __init__(self, name: str, description: str = "", tags: list = None,
+                 node_id: str = None):
         super().__init__(name=name, description=description or "Auto-generated data router",
-                          tags=tags or ["generated", "router"])
+                          tags=tags or ["generated", "router"], node_id=node_id)
 
     @property
     def input_schema(self) -> NodeSchema:
@@ -305,9 +311,10 @@ class AnalyzerNode(BaseNode):
     """تحليل حقيقي لـ `content` (نص/قائمة/قاموس/رقم) بإحصاءات فعلية
     محسوبة من المحتوى نفسه، وليست قيماً وهمية ثابتة."""
 
-    def __init__(self, name: str, description: str = "", tags: list = None):
+    def __init__(self, name: str, description: str = "", tags: list = None,
+                 node_id: str = None):
         super().__init__(name=name, description=description or "Auto-generated content analyzer",
-                          tags=tags or ["generated", "analyzer"])
+                          tags=tags or ["generated", "analyzer"], node_id=node_id)
 
     @property
     def input_schema(self) -> NodeSchema:
@@ -363,9 +370,10 @@ class TransformerNode(BaseNode):
     """تحويل حقيقي لـ `data` إلى الصيغة المطلوبة في `format`
     (json/str/list/dict) — تحويل فعلي وليس تمريراً بلا تغيير."""
 
-    def __init__(self, name: str, description: str = "", tags: list = None):
+    def __init__(self, name: str, description: str = "", tags: list = None,
+                 node_id: str = None):
         super().__init__(name=name, description=description or "Auto-generated data transformer",
-                          tags=tags or ["generated", "transformer"])
+                          tags=tags or ["generated", "transformer"], node_id=node_id)
 
     @property
     def input_schema(self) -> NodeSchema:
@@ -415,3 +423,12 @@ NODE_CLASS_BY_SERVICE_TYPE = {
     "analyzer": AnalyzerNode,
     "transformer": TransformerNode,
 }
+
+# خريطة اسم الصنف (BaseNode.metadata.node_type = self.__class__.__name__،
+# محفوظ فعلياً في meta_cache/node.to_dict() منذ إنشاء العقدة) → الصنف
+# نفسه. تُستخدم في MeshBundle._restore_dynamic_nodes بعد إعادة تشغيل
+# العملية لإحياء عقدة self_evolved بنوعها الحقيقي (NormalizerNode مثلاً)
+# بدل تنزيلها جميعاً إلى PassThroughNode عام — كان هذا مقبولاً قبل هذا
+# الملف لأن كل عقدة self_evolved كانت PassThroughNode أصلاً، لكن أصبح
+# سيفقد المنطق الحقيقي بعد كل إعادة تشغيل لولا هذه الخريطة.
+NODE_CLASS_BY_NAME = {cls.__name__: cls for cls in NODE_CLASS_BY_SERVICE_TYPE.values()}
