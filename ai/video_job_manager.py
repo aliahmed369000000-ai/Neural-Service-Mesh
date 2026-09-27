@@ -19,21 +19,83 @@ ai/content_job_manager.py.
 يكبر بلا حد أعلى على عملية Streamlit Cloud طويلة العمر. يُقلَّم الآن
 إلى MAX_JOBS بعد كل مهمة جديدة، بحذف المهام المنتهية (done/failed)
 الأقدم أولاً فقط — لا تُحذف أي مهمة running.
+
+🆕 استمرارية عبر توقف مفاجئ (الفجوة الموثّقة في كوميت 74826ee لدى
+ai/content_job_manager.py، متروكة هنا عمداً وقتها): كانت `_jobs` بالكامل
+في الذاكرة، ولا يمكن ببساطة تسلسل (serialize) `fn` عشوائية إلى القرص
+لإعادة بنائها بعد إعادة تشغيل العملية — هذا بالضبط ما منع تطبيق نفس حل
+ContentJobManager مباشرة. الحل هنا: بدل تخزين fn نفسها، تُخزَّن نقطة
+تفتيش (job_id, op_name, kwargs) في memory/video_jobs.db فور start()،
+حيث op_name اسم قابل لإعادة الاستيراد (getattr) فقط إذا كانت fn دالة
+معروفة من ai/video_editor.py (الوحدة الموثوقة الوحيدة هنا — انظر
+_resolve_op_name). resume_interrupted() تستأنف فقط المهام ذات op_name
+معروف بإعادة استيراد نفس الدالة من ai.video_editor وتنفيذها بنفس
+kwargs المحفوظة؛ أي مهمة أخرى (كدوال الاختبار المحلية closures، أو fn
+من وحدة غير موثوقة) تبقى غير قابلة للاستئناف فعلياً — تُغلق كفاشلة صراحة
+بدل أن تبقى 'running' على القرص للأبد بلا أي شيء ينفّذها (نفس المنطق
+الذي صحّح خللاً مشابهاً في content_job_manager: مهمة 'running' منسية
+تُضلِّل أي عرض لاحق للحالة).
 """
 from __future__ import annotations
 
+import importlib
 import itertools
+import json
 import logging
+import sqlite3
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger("VideoJobManager")
 
-_JOB_ID_COUNTER = itertools.count(1)
-
 MAX_JOBS = 300  # سقف الاحتفاظ لمنع نمو الذاكرة بلا حدود على عملية طويلة العمر
+_DB_PATH = Path("memory/video_jobs.db")
+_RESUMABLE_MODULE = "ai.video_editor"  # الوحدة الوحيدة التي يُثَق بإعادة استيراد دوالها بالاسم
+
+
+def _safe_json(value: Any) -> Optional[str]:
+    """json.dumps آمن: kwargs عادةً بسيطة (مسارات/أرقام/نصوص) لكن قد
+    تحوي Path (غير قابلة للتسلسل افتراضياً) أو نتيجة غير متوقعة. default=str
+    يحوّل Path لنص تلقائياً؛ لو فشل حتى هذا، يُخزَّن str(value) كبديل آمن
+    بدل تعطيل الحفظ بالكامل (نفس _safe_json في content_job_manager.py)."""
+    if value is None:
+        return None
+    try:
+        return json.dumps(value, default=str, ensure_ascii=False)
+    except (TypeError, ValueError):
+        try:
+            return json.dumps(str(value), ensure_ascii=False)
+        except Exception:
+            return None
+
+
+def _resolve_op_name(fn: Callable[..., Any]) -> Optional[str]:
+    """اسم قابل لإعادة البناء بأمان لـfn بعد إعادة تشغيل العملية، أو None
+    إن لم يكن ذلك ممكناً. مقصورة عمداً على دوال top-level من ai/video_editor.py
+    (الوحدة الوحيدة الموثوقة هنا): دالة اختبار محلية (closure) أو fn من
+    وحدة أخرى غير معروفة السلامة لا تُخزَّن كاسم — لا طريقة آمنة لإعادة
+    استيرادها لاحقاً بمجرد اسمها."""
+    if getattr(fn, "__module__", None) != _RESUMABLE_MODULE:
+        return None
+    name = getattr(fn, "__qualname__", None)
+    if not name or "." in name or name.startswith("_"):
+        return None
+    return name
+
+
+def _resolve_op(op_name: str) -> Callable[..., Any]:
+    """يعكس _resolve_op_name: يستورد _RESUMABLE_MODULE (ديناميكياً عبر
+    importlib بدل استيراد ثابت) ويرجع الدالة المطابقة بالاسم. الاستيراد
+    الديناميكي هنا (وليس `import ai.video_editor as ve` مباشرة) يسمح
+    للاختبارات بمحاكاة الآلية كاملة عبر تبديل _RESUMABLE_MODULE لوحدة
+    اختبار بدل ai/video_editor.py الحقيقية (بدون شبكة/ffmpeg فعلي). يرفع
+    AttributeError/ImportError إن لم تعد الدالة أو الوحدة موجودة (نادر:
+    إعادة تسمية بين إصدارين) — يُلتقط في resume_interrupted."""
+    module = importlib.import_module(_RESUMABLE_MODULE)
+    return getattr(module, op_name)
 
 
 @dataclass
@@ -45,6 +107,8 @@ class VideoJob:
     error: Optional[str] = None
     started_at: float = field(default_factory=time.time)
     finished_at: Optional[float] = None
+    op_name: Optional[str] = None     # اسم الدالة القابل لإعادة البناء، أو None إن لم تكن fn معروفة
+    kwargs: Dict[str, Any] = field(default_factory=dict)
 
 
 class VideoJobManager:
@@ -55,9 +119,16 @@ class VideoJobManager:
     _instance: Optional["VideoJobManager"] = None
     _instance_lock = threading.Lock()
 
-    def __init__(self):
+    def __init__(self, db_path: Path = _DB_PATH):
         self._lock = threading.Lock()
         self._jobs: Dict[int, VideoJob] = {}
+        self._db_path = Path(db_path).resolve()
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+        # عدّاد job_id يبدأ بعد آخر معرّف محفوظ على القرص من عمليات سابقة،
+        # وليس من 1 دائماً — وإلا تصطدم مهمة جديدة بمعرّف مهمة قديمة محفوظة
+        # (نفس منطق ContentJobManager).
+        self._job_id_counter = itertools.count(self._max_persisted_job_id() + 1)
 
     @classmethod
     def instance(cls) -> "VideoJobManager":
@@ -66,15 +137,96 @@ class VideoJobManager:
                 cls._instance = cls()
             return cls._instance
 
+    # ── تخزين دائم (SQLite) ──────────────────────────────────────────────
+
+    def _init_db(self) -> None:
+        try:
+            with sqlite3.connect(str(self._db_path)) as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS video_jobs (
+                        job_id       INTEGER PRIMARY KEY,
+                        label        TEXT NOT NULL,
+                        status       TEXT NOT NULL,
+                        op_name      TEXT,
+                        kwargs       TEXT NOT NULL,
+                        result       TEXT,
+                        error        TEXT,
+                        started_at   REAL NOT NULL,
+                        finished_at  REAL
+                    )
+                """)
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"VideoJobManager: تعذّر تهيئة قاعدة بيانات المهام: {e}")
+
+    def _max_persisted_job_id(self) -> int:
+        try:
+            with sqlite3.connect(str(self._db_path)) as conn:
+                row = conn.execute("SELECT MAX(job_id) FROM video_jobs").fetchone()
+                return row[0] or 0
+        except Exception:
+            return 0
+
+    def _persist_job_locked(self, job: VideoJob) -> None:
+        """يُستدعى تحت self._lock فقط. يُدرج أو يحدّث نفس السجل (بنفس
+        job_id). لا يرفع استثناء أبداً — التخزين الدائم لا يجب أن يُعطّل
+        تنفيذ المهمة الفعلي."""
+        try:
+            with sqlite3.connect(str(self._db_path)) as conn:
+                conn.execute("""
+                    INSERT INTO video_jobs
+                        (job_id, label, status, op_name, kwargs, result, error, started_at, finished_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(job_id) DO UPDATE SET
+                        status=excluded.status, result=excluded.result,
+                        error=excluded.error, finished_at=excluded.finished_at
+                """, (
+                    job.job_id, job.label, job.status, job.op_name,
+                    _safe_json(job.kwargs) or "{}",
+                    _safe_json(job.result),
+                    job.error, job.started_at, job.finished_at,
+                ))
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"VideoJobManager: تعذّر حفظ المهمة #{job.job_id}: {e}")
+
+    def _prune_db_locked(self) -> None:
+        """نفس منطق _prune_locked لكن على القرص — يحذف أقدم المهام
+        المنتهية فقط، ولا يلمس أي مهمة running."""
+        try:
+            with sqlite3.connect(str(self._db_path)) as conn:
+                total = conn.execute("SELECT COUNT(*) FROM video_jobs").fetchone()[0]
+                overflow = total - MAX_JOBS
+                if overflow <= 0:
+                    return
+                ids = conn.execute("""
+                    SELECT job_id FROM video_jobs WHERE status != 'running'
+                    ORDER BY job_id ASC LIMIT ?
+                """, (overflow,)).fetchall()
+                conn.executemany("DELETE FROM video_jobs WHERE job_id = ?", ids)
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"VideoJobManager: تعذّر تقليم قاعدة بيانات المهام: {e}")
+
     def start(self, fn: Callable[..., Any], label: str, **kwargs: Any) -> int:
         """يبدأ تنفيذ fn(**kwargs) في خيط خلفية ويعيد job_id فوراً دون
-        انتظار الانتهاء."""
-        job_id = next(_JOB_ID_COUNTER)
-        job = VideoJob(job_id=job_id, label=label)
+        انتظار الانتهاء. لو كانت fn دالة معروفة من ai/video_editor.py،
+        تُحفظ لقطة أولية (job_id/op_name/kwargs) على القرص فور البدء —
+        أساس resume_interrupted() لو انهارت العملية أثناء التنفيذ. دوال
+        أخرى (اختبارات، إغلاقات محلية) تُسجَّل بلا op_name: تظهر بحالتها
+        الحقيقية لكن لا تُستأنف تلقائياً."""
+        job_id = next(self._job_id_counter)
+        op_name = _resolve_op_name(fn)
+        job = VideoJob(job_id=job_id, label=label, op_name=op_name, kwargs=kwargs)
         with self._lock:
             self._jobs[job_id] = job
             self._prune_locked()
+            self._persist_job_locked(job)
+            self._prune_db_locked()
+        self._launch(job, fn, kwargs)
+        return job_id
 
+    def _launch(self, job: VideoJob, fn: Callable[..., Any], kwargs: Dict[str, Any]) -> None:
         def _run() -> None:
             try:
                 result = fn(**kwargs)
@@ -82,16 +234,85 @@ class VideoJobManager:
                     job.result = result
                     job.status = "done"
                     job.finished_at = time.time()
+                    self._persist_job_locked(job)
             except Exception as e:  # noqa: BLE001
-                logger.exception("فشلت مهمة الفيديو #%s (%s)", job_id, label)
+                logger.exception("فشلت مهمة الفيديو #%s (%s)", job.job_id, job.label)
                 with self._lock:
                     job.error = str(e)
                     job.status = "failed"
                     job.finished_at = time.time()
+                    self._persist_job_locked(job)
 
         threading.Thread(target=_run, daemon=True,
-                          name=f"video-job-{job_id}").start()
-        return job_id
+                          name=f"video-job-{job.job_id}").start()
+
+    def resume_interrupted(self) -> List[int]:
+        """يفحص قاعدة البيانات بحثاً عن مهام فيديو بقيت 'running' من عملية
+        سابقة توقفت فجأة. تُستأنف فقط المهام ذات op_name معروف (دالة من
+        ai/video_editor.py أُعيد استيرادها بالاسم بنجاح) بنفس kwargs
+        المحفوظة ونفس job_id. أي مهمة أخرى — op_name غائب (fn لم تكن من
+        الوحدة الموثوقة أصلاً) أو الدالة لم تعد موجودة (إعادة تسمية) —
+        تُغلق صراحةً كفاشلة بدل أن تبقى 'running' على القرص للأبد بلا أي
+        شيء ينفّذها فعلياً بعد كل إعادة تشغيل. يرجع قائمة معرّفات المهام
+        المُستأنفة فعلياً (المُغلَقة كفاشلة غير مُدرَجة)."""
+        resumed: List[int] = []
+        try:
+            with sqlite3.connect(str(self._db_path)) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    "SELECT * FROM video_jobs WHERE status = 'running'"
+                ).fetchall()
+        except Exception as e:
+            logger.warning(f"VideoJobManager: تعذّر فحص مهام الفيديو المتوقفة: {e}")
+            return resumed
+
+        for row in rows:
+            try:
+                kwargs = json.loads(row["kwargs"]) if row["kwargs"] else {}
+            except Exception:
+                kwargs = {}
+            op_name = row["op_name"]
+            job = VideoJob(
+                job_id=row["job_id"], label=row["label"] or "مهمة فيديو",
+                status="running", started_at=row["started_at"] or time.time(),
+                op_name=op_name, kwargs=kwargs,
+            )
+            with self._lock:
+                self._jobs[job.job_id] = job
+
+            if not op_name:
+                with self._lock:
+                    job.status = "failed"
+                    job.error = "تعذّر الاستئناف: العملية الأصلية لم تُسجَّل باسم قابل لإعادة البناء"
+                    job.finished_at = time.time()
+                    self._persist_job_locked(job)
+                logger.warning(
+                    "VideoJobManager: مهمة #%s غير قابلة للاستئناف (fn غير معروفة) — أُغلقت كفاشلة",
+                    job.job_id,
+                )
+                continue
+
+            try:
+                fn = _resolve_op(op_name)
+            except Exception as e:
+                with self._lock:
+                    job.status = "failed"
+                    job.error = f"تعذّر إيجاد العملية '{op_name}' بعد إعادة التشغيل: {e}"
+                    job.finished_at = time.time()
+                    self._persist_job_locked(job)
+                logger.warning(
+                    "VideoJobManager: مهمة #%s: العملية '%s' لم تعد موجودة — أُغلقت كفاشلة",
+                    job.job_id, op_name,
+                )
+                continue
+
+            self._launch(job, fn, kwargs)
+            resumed.append(job.job_id)
+            logger.info(
+                "VideoJobManager: استُؤنفت مهمة فيديو متوقفة #%s (%s)",
+                job.job_id, op_name,
+            )
+        return resumed
 
     def _prune_locked(self) -> None:
         """يُستدعى تحت self._lock فقط. يحذف أقدم المهام المنتهية

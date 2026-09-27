@@ -299,6 +299,25 @@ class MeshBundle:
         except Exception as exc:
             logger.warning("MeshBundle: تعذّر فحص مهام المحتوى المتوقفة: %s", exc)
 
+        # ── استئناف تلقائي لمهام محرر الفيديو الخلفية المتوقفة قسراً ──────────
+        # ai/video_job_manager.py: كانت هذه بالضبط الفجوة المتروكة عمداً في
+        # كوميت 74826ee (نفس علّة ContentJobManager، لكن fn هناك عشوائية —
+        # أي دالة من ai/video_editor.py، غير قابلة للتسلسل مباشرة). الحل الذي
+        # طُبِّق لاحقاً في video_job_manager.py: تخزين (op_name, kwargs) بدل
+        # fn نفسها، حيث op_name اسم قابل لإعادة الاستيراد فقط لدوال
+        # ai/video_editor.py المعروفة. هنا فقط الربط عند الإقلاع — بنفس نمط
+        # استئناف مهام المحتوى أعلاه بالضبط. مهام برفع دقة/تحسين ذكي طويلة
+        # توقفت وسط ffmpeg تُستأنف من جديد بنفس kwargs (نفس مسار الملف
+        # المؤقت)؛ لو لم يعد الملف موجوداً (حاوية أُعيد بناؤها بالكامل)،
+        # تفشل المهمة بخطأ واضح بدل تجميد أي شيء — best-effort دائماً.
+        try:
+            from ai.video_job_manager import get_video_job_manager
+            resumed_video_jobs = get_video_job_manager().resume_interrupted()
+            for jid in resumed_video_jobs:
+                logger.info("MeshBundle: استُؤنفت مهمة فيديو متوقفة #%s", jid)
+        except Exception as exc:
+            logger.warning("MeshBundle: تعذّر فحص مهام الفيديو المتوقفة: %s", exc)
+
         # ── التطوّر الذاتي الحقيقي (Phase 5/7): GapDetector → ServiceGenerator
         # → AIGovernanceLayer → تسجيل عقدة جديدة فعلياً في الـregistry نفسه ──
         # كانت هذه المحركات الأربعة مكتوبة بالكامل (ai/gap_detector.py،
