@@ -49,6 +49,8 @@ KIND_TEMPORAL_FORECAST = "temporal_forecast"
 KIND_TEMPORAL_FORECAST_RESULT = "temporal_forecast_result"
 KIND_CLASSIC_SHOWCASE = "classic_showcase"
 KIND_CLASSIC_SHOWCASE_RESULT = "classic_showcase_result"
+KIND_SELF_FEED_LEARN = "self_feed_learn"
+KIND_SELF_FEED_LEARN_RESULT = "self_feed_learn_result"
 
 # إدارة دورة حياة المهمة (v1.1+)
 KIND_TASK_ACK = "task_ack"
@@ -69,6 +71,7 @@ ALL_TASK_KINDS = {
     KIND_PREDICT, KIND_PREDICT_RESULT,
     KIND_TEMPORAL_FORECAST, KIND_TEMPORAL_FORECAST_RESULT,
     KIND_CLASSIC_SHOWCASE, KIND_CLASSIC_SHOWCASE_RESULT,
+    KIND_SELF_FEED_LEARN, KIND_SELF_FEED_LEARN_RESULT,
     KIND_TASK_ACK, KIND_TASK_CANCEL,
     KIND_TASK_STATUS, KIND_TASK_STATUS_RESULT,
 }
@@ -926,6 +929,50 @@ def execute_temporal_forecast(task: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": str(exc), "task_id": task.get("task_id")}
 
 
+def execute_self_feed_learn(task: Dict[str, Any]) -> Dict[str, Any]:
+    """تعلّم ذاتي حقيقي موزَّع: العقدة تبحث بالويب عن `topic` وتبتلع النتائج
+    (ai/self_feed_learner.py)، أو تبتلع `content` جاهزاً إن أُرفق مباشرة
+    (مثلاً ناتج web_fetch سابق). كل ابتلاع ناجح يغذّي ai/unified_semantic_memory.py
+    تلقائياً — فتفيد أي سؤال لاحق بمحادثة أي عقدة بالشبكة (راجع commit ربط
+    self_feed_learner)، لا موضوع هذه المهمة وحده.
+    هذا ما يسمح لمنسّق خارجي (scripts/mesh_learning_orchestrator.py) بتوزيع
+    موضوع/مصدر مختلف على كل عقدة من العقد الحية، فتتعلّم كل عقدة شيئاً
+    مختلفاً بدل تكرار نفس المعرفة على الجميع.
+    """
+    t0 = time.time()
+    topic = (task.get("topic") or "").strip()
+    if not topic:
+        return {"ok": False, "error": "topic_required", "task_id": task.get("task_id")}
+    try:
+        from ai.self_feed_learner import learn_from_web, ingest_text
+    except Exception as e:
+        return {"ok": False, "error": f"self_feed_unavailable: {e}", "task_id": task.get("task_id")}
+
+    content = task.get("content")
+    if content:
+        ingested = ingest_text(
+            topic=topic,
+            content=str(content)[:20000],
+            sources=task.get("urls") or [],
+            tags=list(task.get("tags") or []) + ["mesh_task"],
+            origin="mesh_self_feed_learn",
+        )
+        out = {"ok": bool(ingested.get("ok")), "mode": "direct_ingest", "topic": topic, "ingest": ingested}
+    else:
+        try:
+            out = learn_from_web(
+                topic,
+                deep=bool(task.get("deep", False)),
+                max_results=int(task.get("max_results") or 6),
+            )
+        except Exception as e:
+            out = {"ok": False, "error": f"{type(e).__name__}: {e}", "topic": topic}
+
+    out["task_id"] = task.get("task_id")
+    out["elapsed_ms"] = round((time.time() - t0) * 1000, 2)
+    return out
+
+
 def dispatch_task(kind: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """موجّه مركزي لتنفيذ مهمة حسب النوع."""
     data = data or {}
@@ -953,6 +1000,8 @@ def dispatch_task(kind: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return execute_predict(data)
     if kind == KIND_TEMPORAL_FORECAST:
         return execute_temporal_forecast(data)
+    if kind == KIND_SELF_FEED_LEARN:
+        return execute_self_feed_learn(data)
     return None
 
 
@@ -970,5 +1019,6 @@ def result_kind_for(request_kind: str) -> str:
         KIND_CLASSIC_SHOWCASE: KIND_CLASSIC_SHOWCASE_RESULT,
         KIND_PREDICT: KIND_PREDICT_RESULT,
         KIND_TEMPORAL_FORECAST: KIND_TEMPORAL_FORECAST_RESULT,
+        KIND_SELF_FEED_LEARN: KIND_SELF_FEED_LEARN_RESULT,
         KIND_TASK_STATUS: KIND_TASK_STATUS_RESULT,
     }.get(request_kind, request_kind + "_result")
