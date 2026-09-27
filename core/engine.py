@@ -72,6 +72,27 @@ class ExecutionEngine:
         self._history: List[ExecutionResult] = []
         logger.info("ExecutionEngine initialized (Phase 2)")
 
+    def _finalize(self, result: ExecutionResult, status: str, t_start: float) -> ExecutionResult:
+        """يُنهي أي مسار خروج (نجاح أو فشل) بنفس الخطوات دائماً: يضبط
+        الحالة/الزمن، يحفظ، ثم يُغذّي self._ai.learn_from_run بالنتيجة —
+        بما فيها نتائج الفشل. قبل هذا التعديل كانت 3 من أصل 4 مخارج فشل
+        في run_path (عقدة غير موجودة بلا بديل، عقدة محجورة بلا بديل، فشل
+        تنفيذ حقيقي بلا بديل) تُرجِع النتيجة مباشرة دون استدعاء
+        learn_from_run إطلاقاً — يستدعيها فقط مسار النجاح النهائي. الأثر:
+        AIDecisionLayer._path_stats لم يكن يُحتسِب أي فشل قط، فـ
+        success_rate في get_insights() كانت تظهر 100% دائماً لأي مسار جرّب
+        الفشل ولو مرات كثيرة، لأن العدّاد runs نفسه لا يزيد إلا عند
+        النجاح — يُفسِد كامل الغرض من health='critical' عند تدهور الأداء.
+        اثنان من مخارج الفشل الثلاثة أيضاً كانا لا يضبطان
+        result.total_duration_ms إطلاقاً (يبقى None)."""
+        result.status = status
+        result.finished_at = datetime.utcnow().isoformat()
+        result.total_duration_ms = round((time.time() - t_start) * 1000, 2)
+        self._persist(result)
+        if self._ai:
+            self._ai.learn_from_run(result.to_dict())
+        return result
+
     def run_path(self, path: List[str], initial_data: Dict[str, Any], use_fallback: bool = True) -> ExecutionResult:
         run_id = str(uuid.uuid4())
         result = ExecutionResult(run_id, path)
@@ -95,10 +116,7 @@ class ExecutionEngine:
                             step.node_id = fb_id
                             step.node_name = node.name
                 if not node:
-                    result.status = "failed"
-                    result.finished_at = datetime.utcnow().isoformat()
-                    self._persist(result)
-                    return result
+                    return self._finalize(result, "failed", t_start)
 
             # عقدة موجودة لكنها محجورة (NodeState.PAUSED — عادة عبر
             # MeshBundle._apply_reputation_feedback بسبب سمعة منخفضة).
@@ -127,10 +145,7 @@ class ExecutionEngine:
                     step.node_id = fb_node.node_id
                     node = fb_node
                 else:
-                    result.status = "failed"
-                    result.finished_at = datetime.utcnow().isoformat()
-                    self._persist(result)
-                    return result
+                    return self._finalize(result, "failed", t_start)
 
             # ── تنفيذ فعلي — بمحاولة واحدة إضافية عبر بديل عند فشل حقيقي ──
             # كان فشل حقيقي أثناء process() (استثناء من منطق العقدة نفسها،
@@ -178,20 +193,10 @@ class ExecutionEngine:
                         attempt_node = fb_node
                         continue  # محاولة ثانية وأخيرة عبر البديل
 
-                    result.status = "failed"
-                    result.finished_at = datetime.utcnow().isoformat()
-                    result.total_duration_ms = round((time.time() - t_start) * 1000, 2)
-                    self._persist(result)
-                    return result
+                    return self._finalize(result, "failed", t_start)
 
         result.final_output = current
-        result.status = "success"
-        result.finished_at = datetime.utcnow().isoformat()
-        result.total_duration_ms = round((time.time() - t_start) * 1000, 2)
-        self._persist(result)
-        if self._ai:
-            self._ai.learn_from_run(result.to_dict())
-        return result
+        return self._finalize(result, "success", t_start)
 
     def run_between(self, start_id: str, end_id: str, data: Dict[str, Any], use_ai: bool = True) -> ExecutionResult:
         path = None
