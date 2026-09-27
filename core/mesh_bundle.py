@@ -783,6 +783,83 @@ class MeshBundle:
                 except Exception as e:
                     logger.warning("MeshBundle: periodic run_evolution_cycle after swarm result failed: %s", e)
 
+    def snapshot_node_states(self) -> Dict[str, str]:
+        """لقطة {node_id: state} لكل عُقدة مسجَّلة حالياً — يستدعيها المتصل
+        (api_server.py::/process) قبل تنفيذ فعلي عبر core.engine.ExecutionEngine
+        مباشرة، ليمرّرها لاحقاً إلى record_direct_execution أدناه لكشف انتقال
+        حالة حقيقي (لا فقط: هل الخطوة فشلت الآن) — بدون هذه اللقطة، عقدة
+        محجورة/فاشلة مسبقاً تعيد الفشل مرة أخرى ستُبَث كـ"node_failed" في
+        كل مرة (تُغرِق القناة)، لأن الحالة النهائية بعد execute() تكون مطابقة
+        لما قبله (FAILED→FAILED) وليست انتقالاً جديداً فعلياً."""
+        return {n.node_id: n.state for n in self.registry.list_all()}
+
+    def record_direct_execution(self, result, prev_states: Optional[Dict[str, str]] = None) -> None:
+        """يأخذ core.engine.ExecutionResult حقيقياً من مسار /process المباشر
+        (run_path/run_between/run_full_graph عبر ExecutionEngine) ويغذّي كل
+        خطوة تنفيذ فعلية فيه إلى NodeReputationEngine + NodeChannel، تماماً
+        كما تفعل record_swarm_result أعلاه لكل مهمة سرب.
+
+        المشكلة التي يحلّها: بعد إصلاح /process (ربطها بـregistry/graph
+        الحقيقية) ثم ربط AIDecisionLayer، صار /process ينفّذ عُقداً حقيقية
+        فعلاً — node.execute() نفسها تُحدِّث BaseNode.state (مباشرة، لا عبر
+        هذه الدالة). لكن reputation_engine (وبالتالي كل نظام الحجر/رفع
+        الحجر التلقائي في _apply_reputation_feedback/_apply_reputation_recovery،
+        وبثّ node_failed/node_recovered للجيران) لا يعرف عن أي طلب /process
+        شيئاً على الإطلاق، لأن التغذية الوحيدة الموجودة (أعلاه في
+        record_swarm_result) مصدرها حصرياً AgentFactory.run_task عبر مسار
+        السرب — مسار منفصل تماماً عن core.engine.ExecutionEngine المستخدَم
+        هنا. عملياً: عقدة تُستدعى مباشرة عبر /process وتفشل مئات المرات لن
+        تُحجَر أبداً، وعقدة تتعافى بعد حجر لن يُرفَع عنها الحجر تلقائياً إن
+        كان تعافيها ظاهراً فقط عبر /process لا عبر السرب.
+
+        prev_states: لقطة من snapshot_node_states() قبل التنفيذ — لتمييز
+        انتقال حالة حقيقي عن تكرار نفس الحالة (راجع توثيق تلك الدالة)."""
+        prev_states = prev_states or {}
+        with self._lock:
+            for step in getattr(result, "steps", []):
+                node_id = getattr(step, "node_id", None)
+                status = getattr(step, "status", None)
+                if not node_id or status not in ("success", "error"):
+                    continue
+                node = self.registry.get(node_id)
+                if not node:
+                    continue  # عقدة غير موجودة أصلاً — لا سمعة لها لتُسجَّل
+
+                success = status == "success"
+                name = getattr(step, "node_name", None) or node.name
+                latency = float(getattr(step, "duration_ms", None) or 0.0)
+
+                self.reputation_engine.record_execution(node_id, name, success, latency)
+
+                prev_state = prev_states.get(node_id)
+                if prev_state is not None and node.state != prev_state:
+                    state_topic = None
+                    if node.state == NodeState.FAILED:
+                        state_topic = "node_failed"
+                    elif prev_state == NodeState.FAILED and node.state == NodeState.ACTIVE:
+                        state_topic = "node_recovered"
+                    if state_topic and self.graph.has_node(node_id):
+                        neighbors = self.graph.get_neighbors(node_id)
+                        self.channel.broadcast(
+                            from_id=node_id,
+                            to_ids=[n for n in neighbors if n and n != node_id],
+                            topic=state_topic,
+                            payload={
+                                "role": name,
+                                "previous_state": prev_state,
+                                "current_state": node.state,
+                                "error": getattr(step, "error", None) if not success else None,
+                            },
+                        )
+
+            try:
+                self._apply_reputation_feedback()
+                self._apply_reputation_recovery()
+            except Exception as e:
+                logger.warning(
+                    "MeshBundle: reputation feedback/recovery after direct execution failed: %s", e
+                )
+
     # ── دورة تطوّر ذاتي حقيقية (تُستدعى يدوياً، أو تلقائياً كل
     # EVOLUTION_CYCLE_INTERVAL نتيجة سرب من record_swarm_result أعلاه) ──────
     # تشغّل EvolutionEngine.run_cycle() الحقيقي: يفحص الرسم البياني الفعلي
