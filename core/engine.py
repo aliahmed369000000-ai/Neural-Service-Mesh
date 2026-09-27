@@ -166,6 +166,13 @@ class ExecutionEngine:
                 t0 = time.time()
                 try:
                     transformed = self._transformer.transform(current, attempt_node.input_schema)
+                    # نقطة تفتيش قبل process() الفعلية: لو انهارت العملية
+                    # هنا بالضبط (kill -9 أثناء المعالجة)، ستبقى 'running' +
+                    # pending_input محفوظة على القرص فعلاً (وليس فقط في
+                    # الذاكرة)، فيقدر resume_interrupted() يكتشفها ويكمل
+                    # من نفس المدخلات بدل فقدان الخطوة والبدء من جديد.
+                    attempt_node.begin_execution(transformed)
+                    self._registry.refresh_meta(attempt_node.node_id)
                     output = attempt_node.execute(transformed)
                     step.output_data = dict(output)
                     step.status = "success"
@@ -197,6 +204,29 @@ class ExecutionEngine:
 
         result.final_output = current
         return self._finalize(result, "success", t_start)
+
+    def resume_interrupted(self) -> List["ExecutionResult"]:
+        """يبحث عن أي عقدة توقفت قسراً وسط process() في جلسة سابقة (state
+        محفوظ='running' + pending_input) ولها الآن كائن حيّ فعلي في
+        الـregistry (أُعيد بناؤه وربطه بنفس node_id، مثلما تفعل
+        MeshBundle._register_roles عبر restore_state)، ويعيد تنفيذها بنفس
+        المدخلات المعلَّقة بدل فقدان العمل والبدء من الصفر بعد كل إعادة
+        تشغيل. عقدة توقفت قسراً لكن لم يُعِد أحد بناء كائنها الحيّ بعد لا
+        يمكن تخمين نوعها (class) من البيانات الوصفية وحدها، فتُترك دون
+        استئناف قسري — تُستدعى هذه الدالة عادة عند إقلاع التطبيق بعد أن
+        تنتهي كل مسارات إعادة تسجيل العُقد الحيّة."""
+        results: List[ExecutionResult] = []
+        for meta in self._registry.get_interrupted():
+            node_id = meta.get("node_id")
+            node = self._registry.get(node_id)
+            if not node or not node.has_pending_work():
+                continue
+            logger.info(
+                f"Resuming interrupted node '{meta.get('name')}' "
+                f"[{node_id[:8]}] from checkpoint"
+            )
+            results.append(self.run_path([node_id], node._pending_input))
+        return results
 
     def run_between(self, start_id: str, end_id: str, data: Dict[str, Any], use_ai: bool = True) -> ExecutionResult:
         # t_start يُلتقط هنا (قبل اختيار المسار) — نفس نمط run_path، حتى

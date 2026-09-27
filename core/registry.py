@@ -3,7 +3,7 @@ import logging
 from typing import Dict, List, Optional
 from datetime import datetime
 
-from core.node import BaseNode
+from core.node import BaseNode, NodeState
 from storage.file_storage import FileStorage
 
 logger = logging.getLogger(__name__)
@@ -71,6 +71,13 @@ class NodeRegistry:
         if persist:
             self._save()
         return snapshot
+
+    def get_interrupted(self) -> List[dict]:
+        """سجلات meta محفوظة بحالة 'running' — أي عُقد كانت وسط process()
+        لحظة توقف العملية فجأة (انهيار/kill) في جلسة سابقة، ولم تصل لا
+        لنجاح ولا لفشل معروف. تُستخدم عند الإقلاع لمعرفة أي عمل معلَّق
+        يستحق إعادة المحاولة (انظر ExecutionEngine.resume_interrupted)."""
+        return [m for m in self._meta_cache.values() if m.get("state") == NodeState.RUNNING]
 
     def list_all(self) -> List[BaseNode]:
         return list(self._nodes.values())

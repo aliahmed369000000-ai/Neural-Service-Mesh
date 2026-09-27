@@ -16,8 +16,9 @@ class NodeState:
     ACTIVE = "active"
     PAUSED = "paused"
     FAILED = "failed"
+    RUNNING = "running"
 
-    ALL = (CREATED, ACTIVE, PAUSED, FAILED)
+    ALL = (CREATED, ACTIVE, PAUSED, FAILED, RUNNING)
 
 
 @dataclass
@@ -78,6 +79,7 @@ class BaseNode(ABC):
         # آمناً استدعاء resume() تلقائياً: بدون هذا التمييز، تعافي سمعة
         # عقدة أوقفها إنسان يدوياً لسبب آخر كان سيُعيد تشغيلها رغماً عنه.
         self.pause_reason: Optional[str] = None
+        self._pending_input: Optional[Dict[str, Any]] = None
 
     @property
     @abstractmethod
@@ -90,11 +92,23 @@ class BaseNode(ABC):
     @abstractmethod
     def process(self, data: Dict[str, Any]) -> Dict[str, Any]: ...
 
+    def begin_execution(self, data: Dict[str, Any]) -> None:
+        """نقطة تفتيش: تُسجَّل قبل استدعاء process() فعلياً (وليس بعده).
+        الفرق عن الفشل العادي: لو انهارت العملية (kill -9 / تعطّل مفاجئ)
+        أثناء process() نفسها، ستبقى الحالة المحفوظة على القرص 'running'
+        مع pending_input كما هو — إشارة واضحة عند الإقلاع التالي أن هذه
+        العقدة توقفت قسراً في المنتصف ولم تصل لنتيجة (نجاح أو فشل معروف)،
+        فتصلح لإعادة المحاولة تلقائياً بنفس المدخلات (انظر
+        NodeRegistry.get_interrupted / ExecutionEngine.resume_interrupted)."""
+        self.state = NodeState.RUNNING
+        self._pending_input = data
+
     def execute(self, data: Dict[str, Any]) -> Dict[str, Any]:
         if self.state == NodeState.PAUSED:
             raise RuntimeError(
                 f"Node '{self.name}' [{self.node_id[:8]}] is paused and cannot execute"
             )
+        self.begin_execution(data)
         try:
             self.input_schema.validate(data)
             result = self.process(data)
@@ -106,6 +120,7 @@ class BaseNode(ABC):
         self._last_executed = datetime.utcnow().isoformat()
         self.state = NodeState.ACTIVE
         self._last_error = None
+        self._pending_input = None
         logger.info(f"[{self.name}] executed #{self._execution_count}")
         return result
 
@@ -142,9 +157,14 @@ class BaseNode(ABC):
         return True
 
     def mark_failed(self, error: str) -> None:
-        """تسجيل فشل العقدة يدوياً أو تلقائياً عند استثناء أثناء execute()."""
+        """تسجيل فشل العقدة يدوياً أو تلقائياً عند استثناء أثناء execute().
+        هذا فشل معروف السبب (وليس انهياراً غامضاً) لذلك تُمسَح pending_input
+        كي لا يُعاد تكرار نفس المدخلات الفاشلة تلقائياً إلى الأبد عبر
+        resume_interrupted — فقط توقف حقيقي بلا نتيجة معروفة (RUNNING) هو
+        ما يستحق إعادة المحاولة التلقائية."""
         self.state = NodeState.FAILED
         self._last_error = error
+        self._pending_input = None
         logger.warning(f"[{self.name}] failed: {error}")
 
     def record_execution(self, success: bool, error: Optional[str] = None) -> None:
@@ -161,6 +181,11 @@ class BaseNode(ABC):
             logger.info(f"[{self.name}] execution recorded #{self._execution_count} (external)")
         else:
             self.mark_failed(error or "فشل تنفيذ خارجي بدون تفاصيل")
+
+    def has_pending_work(self) -> bool:
+        """True إذا كانت العقدة توقفت قسراً وسط process() (state=running)
+        ولديها نقطة تفتيش صالحة لاستئنافها بدل فقدان العمل والبدء من الصفر."""
+        return self.state == NodeState.RUNNING and self._pending_input is not None
 
     def restore_state(self, snapshot: Dict[str, Any]) -> None:
         """استرجاع تاريخ العقدة (state/execution_count/last_executed/last_error)
@@ -179,6 +204,7 @@ class BaseNode(ABC):
         self.state = snapshot.get("state") or NodeState.CREATED
         self._last_error = snapshot.get("last_error")
         self.pause_reason = snapshot.get("pause_reason") if self.state == NodeState.PAUSED else None
+        self._pending_input = snapshot.get("pending_input")
         logger.info(
             f"[{self.name}] state restored: {self.state} "
             f"(execution_count={self._execution_count})"
@@ -210,6 +236,7 @@ class BaseNode(ABC):
             "state": self.state,
             "pause_reason": self.pause_reason,
             "last_error": self._last_error,
+            "pending_input": self._pending_input,
         }
 
     def __repr__(self):
