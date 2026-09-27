@@ -68,21 +68,23 @@ def test_unquarantine_clears_runs_at_quarantine():
 
 # ── 2) اختبار تكاملي خفيف على MeshBundle (بدون تركيب MeshBundle كاملة) ──
 
-def _make_mesh_stub(tmp_dir):
+def _make_mesh_stub(tmp_dir, storage=None):
     """يبني كائناً بنفس الخصائص التي تستخدمها _apply_reputation_feedback/
     _apply_reputation_recovery فقط (registry, graph, channel,
     reputation_engine) بدل تركيب MeshBundle الكاملة (تحتاج AgentFactory،
-    EvolutionEngine، DB... غير ضرورية لهذا الاختبار)."""
+    EvolutionEngine، DB... غير ضرورية لهذا الاختبار). storage قابل
+    للتمرير من الخارج (نفس الكائن) لمحاكاة 'إعادة تشغيل' حقيقية تشارك
+    نفس التخزين الدائم بين مثيلَي MeshStub متتاليين."""
 
     class MeshStub:
         pass
 
-    storage = FileStorage(tmp_dir)
+    storage = storage if storage is not None else FileStorage(tmp_dir)
     mesh = MeshStub()
     mesh.registry = NodeRegistry(storage)
     mesh.graph = ServiceGraph()
     mesh.channel = NodeChannel(storage)
-    mesh.reputation_engine = NodeReputationEngine()
+    mesh.reputation_engine = NodeReputationEngine(storage=storage)
     return mesh
 
 
@@ -122,3 +124,77 @@ def test_recovery_is_noop_when_no_node_quarantined():
         # لا عُقد محجورة إطلاقاً -> يجب ألا يفشل شيء ولا يتغيّر شيء
         MeshBundle._apply_reputation_recovery(mesh)
         assert mesh.reputation_engine.quarantined_nodes() == []
+
+
+# ── 3) استمرارية الحجر عبر إعادة التشغيل (توقف مفاجئ) ────────────────────
+# قبل هذا: NodeReputationEngine._reputations كان قاموساً في الذاكرة فقط —
+# لا شيء يحفظه أو يستعيده. BaseNode.state يُستعاد PAUSED فعلاً بعد إعادة
+# التشغيل (core/registry.py)، لكن NodeReputationEngine يبدأ بذاكرة فارغة
+# (is_quarantined=False افتراضياً)، فـ_apply_reputation_recovery لا يرى
+# العقدة محجورة إطلاقاً ولا يستطيع أبداً استئنافها — عقدة عالقة في PAUSED
+# للأبد رغم تحسّن أدائها الفعلي لاحقاً. هذا الاختبار يحاكي التوقف المفاجئ
+# فعلياً: يبني NodeReputationEngine جديداً (كأنه بعد إعادة تشغيل العملية)
+# بنفس storage، ويتحقق أن الحجر يُستعاد صحيحاً فيمكن رفعه بعد ذلك.
+
+def test_quarantine_survives_simulated_restart():
+    with tempfile.TemporaryDirectory() as tmp:
+        storage = FileStorage(tmp)
+        eng1 = NodeReputationEngine(storage=storage)
+        for _ in range(10):
+            eng1.record_execution("n1", "Worker", success=False, latency_ms=10.0)
+        eng1.quarantine("n1")
+        assert eng1.get_reputation("n1").is_quarantined is True
+
+        # 🆕 محاكاة توقف مفاجئ وإعادة تشغيل: محرك جديد تماماً بنفس storage
+        eng2 = NodeReputationEngine(storage=storage)
+        rep2 = eng2.get_reputation("n1")
+        assert rep2 is not None, "الحجر يجب أن يُستعاد من التخزين الدائم بعد إعادة التشغيل"
+        assert rep2.is_quarantined is True
+        assert rep2.runs_at_quarantine == 10
+        assert rep2.total_runs == 10
+
+        # والتعافي يعمل طبيعياً بعد الاستعادة (لم يعد عالقاً للأبد)
+        for _ in range(20):
+            eng2.record_execution("n1", "Worker", success=True, latency_ms=5.0)
+        eligible = eng2.release_eligible_nodes(recovery_threshold=60.0, min_new_runs=5)
+        assert len(eligible) == 1 and eligible[0]["node_id"] == "n1"
+
+
+def test_quarantine_persists_across_mesh_bundle_restart():
+    """اختبار تكاملي: pause فعلي على BaseNode + حجر في NodeReputationEngine
+    كلاهما يُستعاد بشكل متسق بعد 'إعادة تشغيل' (registry/reputation_engine
+    جديدان بنفس storage) — لا عقدة عالقة PAUSED بلا مسار رجوع."""
+    with tempfile.TemporaryDirectory() as tmp:
+        storage = FileStorage(tmp)
+        mesh1 = _make_mesh_stub(tmp, storage=storage)
+        node = AgentRoleNode("ResearchAgent", {"description": "", "tags": [], "capabilities": []})
+        node_id = mesh1.registry.register(node)
+        mesh1.graph.add_node(node_id, node.to_dict())
+        for _ in range(10):
+            mesh1.reputation_engine.record_execution(node_id, node.name, success=False, latency_ms=10.0)
+        MeshBundle._apply_reputation_feedback(mesh1)
+        assert mesh1.registry.get(node_id).state == NodeState.PAUSED
+
+        # "إعادة تشغيل": registry وreputation_engine جديدان تماماً، نفس storage
+        mesh2 = _make_mesh_stub(tmp, storage=storage)
+        persisted = mesh2.registry.get_meta_by_name("ResearchAgent")
+        assert persisted is not None
+        # نفس النمط الحقيقي في MeshBundle._register_roles: تمرير node_id
+        # المحفوظ صراحة عند البناء، وليس تركه يولّد معرّفاً عشوائياً جديداً
+        restored_node = AgentRoleNode(
+            "ResearchAgent", {"description": "", "tags": [], "capabilities": []},
+            node_id=persisted.get("node_id"),
+        )
+        restored_node.restore_state(persisted)
+        restored_id = mesh2.registry.register(restored_node, overwrite=True)
+        mesh2.graph.add_node(restored_id, restored_node.to_dict())
+        assert restored_node.state == NodeState.PAUSED  # كما كان قبل الاختبار الأصلي
+
+        rep = mesh2.reputation_engine.get_reputation(node_id)
+        assert rep is not None and rep.is_quarantined is True  # 🆕 الحجر استُعيد أيضاً
+
+        for _ in range(20):
+            mesh2.reputation_engine.record_execution(node_id, node.name, success=True, latency_ms=5.0)
+        MeshBundle._apply_reputation_recovery(mesh2)
+        assert mesh2.reputation_engine.get_reputation(node_id).is_quarantined is False
+        assert mesh2.registry.get(restored_id).state == NodeState.ACTIVE

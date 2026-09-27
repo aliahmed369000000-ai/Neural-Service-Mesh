@@ -161,10 +161,26 @@ class NodeReputationEngine:
       - OptimizationEngine: flags low-reputation nodes for review
     """
 
-    def __init__(self, knowledge_store=None, memory_engine=None):
+    REPUTATION_FILE = "reputation.json"
+
+    def __init__(self, knowledge_store=None, memory_engine=None, storage=None):
         self._reputations: Dict[str, NodeReputation] = {}
         self._knowledge = knowledge_store
         self._memory = memory_engine
+        # 🆕 storage اختياري (FileStorage، نفس الكائن المشترك الذي يستخدمه
+        # NodeRegistry) — بدونه (كما في كل الاختبارات القديمة والاستدعاءات
+        # التي لا تمرّره) يعمل المحرك كما كان تماماً: في الذاكرة فقط، بلا
+        # تغيير سلوك. بوجوده: is_quarantined/runs_at_quarantine (وبقية
+        # الإحصاءات) تُحفظ فعلياً وتُستعاد بعد إعادة التشغيل — قبل هذا،
+        # BaseNode.state كان يُستعاد إلى PAUSED (عبر core/registry) لكن
+        # NodeReputationEngine كان يبدأ بذاكرة فارغة (is_quarantined=False
+        # افتراضياً لأي NodeReputation جديدة)، فـ_apply_reputation_recovery
+        # لا يرى العقدة محجورة إطلاقاً ولا يستطيع أبداً استئنافها لاحقاً —
+        # عقدة عالقة في PAUSED للأبد بعد أي توقف مفاجئ، رغم أن أداءها قد
+        # يكون تحسّن فعلياً.
+        self._storage = storage
+        if self._storage is not None:
+            self._load()
         logger.info("NodeReputationEngine initialised (Phase 4)")
 
     def set_components(self, knowledge=None, memory=None):
@@ -172,6 +188,38 @@ class NodeReputationEngine:
             self._knowledge = knowledge
         if memory:
             self._memory = memory
+
+    # ── Persistence ──────────────────────────────────────────────────────
+
+    def _save(self) -> None:
+        """best-effort — لا يجب أن يُعطّل تسجيل تنفيذ حقيقي بفشل تخزين."""
+        if self._storage is None:
+            return
+        try:
+            self._storage.save(self.REPUTATION_FILE, {
+                "saved_at": datetime.now(timezone.utc).isoformat(),
+                "reputations": [r.to_dict() for r in self._reputations.values()],
+            })
+        except Exception as e:
+            logger.warning(f"NodeReputationEngine._save: {e}")
+
+    def _load(self) -> None:
+        try:
+            data = self._storage.load(self.REPUTATION_FILE)
+        except Exception as e:
+            logger.warning(f"NodeReputationEngine._load: {e}")
+            return
+        if not data:
+            return
+        for rd in data.get("reputations", []):
+            nid = rd.get("node_id")
+            if nid:
+                self._reputations[nid] = NodeReputation.from_dict(rd)
+        if self._reputations:
+            logger.info(
+                f"NodeReputationEngine: استُعيدت سمعة {len(self._reputations)} "
+                f"عقدة من التخزين الدائم"
+            )
 
     # ── Core operations ───────────────────────────────────────────────────
 
@@ -194,6 +242,7 @@ class NodeReputationEngine:
         """Record a single execution result for a node."""
         rep = self.ensure_node(node_id, name)
         rep.record(success, latency_ms)
+        self._save()
         logger.debug(f"NodeReputation: {name} [{node_id[:8]}] score={rep.reputation_score}")
 
     def update_from_memory(self):
@@ -231,22 +280,26 @@ class NodeReputationEngine:
         rep = self.ensure_node(node_id)
         rep.is_quarantined = True
         rep.runs_at_quarantine = rep.total_runs
+        self._save()
         logger.warning(f"NodeReputationEngine: node {node_id[:8]} quarantined")
 
     def unquarantine(self, node_id: str):
         rep = self.ensure_node(node_id)
         rep.is_quarantined = False
         rep.runs_at_quarantine = None
+        self._save()
 
     def boost(self, node_id: str, amount: float = 10.0):
         """Manually boost a node's reputation (max +10)."""
         rep = self.ensure_node(node_id)
         rep.manual_boost = min(10.0, rep.manual_boost + amount)
+        self._save()
 
     def penalise(self, node_id: str, amount: float = 10.0):
         """Manually penalise a node's reputation (max -10)."""
         rep = self.ensure_node(node_id)
         rep.manual_boost = max(-10.0, rep.manual_boost - amount)
+        self._save()
 
     # ── Query ─────────────────────────────────────────────────────────────
 

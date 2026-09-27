@@ -154,7 +154,9 @@ class MeshBundle:
 
         self.memory_engine = MemoryEngine(db_path=db_path)
         self.scoring_engine = ScoringEngine(db_path=db_path)
-        self.reputation_engine = NodeReputationEngine(memory_engine=self.memory_engine)
+        self.reputation_engine = NodeReputationEngine(
+            memory_engine=self.memory_engine, storage=self.storage
+        )
         self.dna = SystemDNA()
 
         # ai/*_engine.py (discovery/memory/optimization/routing/gap_detector...)
