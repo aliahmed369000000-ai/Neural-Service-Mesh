@@ -54,6 +54,7 @@ from ai.service_generator import ServiceGeneratorEngine
 from ai.governor import AIGovernanceLayer
 from ai.capability_marketplace import CapabilityMarketplace
 from ai.evolution_engine import EvolutionEngine
+from ai.multi_goal_planner import MultiGoalPlanner
 from ai.decision import AIDecisionLayer
 from knowledge.knowledge_store import KnowledgeStore
 
@@ -332,13 +333,57 @@ class MeshBundle:
             scoring_engine=self.scoring_engine, knowledge_store=self.knowledge_store,
         )
         self.service_generator = ServiceGeneratorEngine(governance=self.governance)
-        self.marketplace = CapabilityMarketplace()
+
+        # ── ai/capability_marketplace.py::CapabilityMarketplace كانت تُبنى
+        # بلا knowledge_store إطلاقاً (_persist() تصبح no-op دائماً رغم أنها
+        # مكتوبة)، ولم يكن أي شيء يستدعي restore() المقابلة (أضيفت الآن) —
+        # فيبدأ المتجر فارغاً بعد كل إعادة تشغيل. والأهم: advertise_from_node()
+        # كانت تُستدعى فقط من ai/evolution_engine.py عند اعتماد عقدة
+        # self_evolved جديدة، فتبقى الأدوار السبعة الثابتة (AGENT_CATALOGUE)
+        # وأدوات MCP السبعة (_register_mcp_tools أعلاه) — أي كل ما هو موجود
+        # فعلياً منذ إقلاع أول للمشروع — بلا أي إعلان قدرات في المتجر أبداً،
+        # فيبقى find_providers()/best_provider() يرجعان فارغَين لأي طلب
+        # حقيقي حتى تتطور أول عقدة ذاتياً. هنا: knowledge_store حقيقي،
+        # استعادة أي إعلانات محفوظة من جلسة سابقة (تحافظ على درجات الجودة
+        # المتراكمة)، ثم إعلان أي عقدة مسجَّلة حالياً لم تُعلَن بعد (تخطّي
+        # ما استُعيد فعلاً كي لا تُصفَّر درجاته بإعادة advertise() افتراضية).
+        self.marketplace = CapabilityMarketplace(knowledge_store=self.knowledge_store)
+        try:
+            self.marketplace.restore()
+        except Exception as e:
+            logger.warning("MeshBundle: تعذّرت استعادة CapabilityMarketplace: %s", e)
+        for _node in self.registry.list_all():
+            try:
+                if not self.marketplace.capabilities_for_node(_node.node_id):
+                    self.marketplace.advertise_from_node(_node)
+            except Exception as e:
+                logger.warning(
+                    "MeshBundle: تعذّر إعلان قدرات العقدة %s في المتجر: %s",
+                    getattr(_node, "node_id", "?")[:8], e,
+                )
+
         self.evolution = EvolutionEngine(
             mesh=self,
             gap_detector=self.gap_detector,
             service_generator=self.service_generator,
             governance=self.governance,
             capability_marketplace=self.marketplace,
+        )
+
+        # ── ai/multi_goal_planner.py::MultiGoalPlanner كانت مكتوبة بالكامل
+        # (تفكيك هدف مركّب إلى أهداف فرعية مرتَّبة، حلّ كل هدف فرعي إلى عقدة
+        # فعلية عبر CapabilityMarketplace بدل اسم عقدة ثابت، ثم تنفيذ المسار
+        # المركَّب بالكامل عبر ExecutionEngine) لكن لا يوجد أي مكان في
+        # المشروع كله يبنيها فعلياً (تحقّقت بالبحث عن "MultiGoalPlanner(":
+        # صفر نتائج خارج تعريف الكلاس نفسه) — أي أن المهام متعددة الخطوات
+        # (تنظيف→ترجمة→تحليل مشاعر→تقرير، إلخ) لم يكن لها أي مسار تنفيذ
+        # حقيقي إطلاقاً رغم اكتمال الكود. مثيل واحد هنا على مستوى الحزمة،
+        # مربوط بنفس CapabilityMarketplace المشترك أعلاه، مع plan_and_execute_goal()
+        # كنقطة استخدام فعلية (انظر أسفل).
+        self.multi_goal_planner = MultiGoalPlanner(
+            capability_marketplace=self.marketplace,
+            memory_engine=self.memory_engine,
+            knowledge_store=self.knowledge_store,
         )
 
         logger.info(
@@ -805,6 +850,61 @@ class MeshBundle:
                 )
             logger.info("MeshBundle: released quarantine for recovered node %s", node_id[:8])
 
+    # ── تخطيط وتنفيذ هدف مركّب متعدد الخطوات عبر MultiGoalPlanner (Phase 5) ──
+    # نقطة الاستخدام الفعلية الوحيدة لـself.multi_goal_planner أعلاه: تفكّك
+    # الهدف إلى أهداف فرعية، تحلّ كل واحد إلى عقدة فعلية عبر المتجر، ثم
+    # تنفّذ المسار المركَّب بالكامل عبر ExecutionEngine حقيقي (نفس registry/
+    # graph/exec_log/ai_decision المشتركة). كل خطوة نُفِّذت فعلياً تُغذّي
+    # نتيجتها (نجاح/فشل + الكمون الحقيقي) مرة أخرى إلى
+    # CapabilityMarketplace.record_execution — بذلك تتحسن قرارات
+    # best_provider() المستقبلية فعلياً من تجربة حقيقية، لا أن تبقى ثابتة
+    # عند القيمة الابتدائية 0.8 للأبد.
+    def plan_and_execute_goal(self, goal: str, data: Optional[Dict[str, Any]] = None) -> dict:
+        with self._lock:
+            plan = self.multi_goal_planner.plan(goal)
+            if not plan.resolved_path:
+                return {
+                    "status": "failed",
+                    "error": "لا توجد عقدة تفي بأي من القدرات المطلوبة لهذا الهدف",
+                    "plan": plan.to_dict(),
+                }
+
+            engine = ExecutionEngine(
+                self.registry, self.graph, self.storage,
+                db=self.exec_log, ai=self.ai_decision,
+            )
+
+            if len(plan.resolved_path) >= 2:
+                result_dict = self.multi_goal_planner.execute_plan(plan, engine, data or {})
+            else:
+                # execute_plan() ترفض مسار عقدة واحدة فقط (تتطلب >=2)، لكن
+                # هدف بسيط يُحلّ إلى عقدة وحيدة يظل قابلاً للتنفيذ الحقيقي.
+                exec_result = engine.run_path(plan.resolved_path, data or {})
+                result_dict = exec_result.to_dict()
+                plan.status = result_dict.get("status", "completed")
+                plan.result = result_dict
+                result_dict["multi_goal_plan"] = plan.to_dict()
+
+            sg_capability_by_node = {
+                sg.resolved_node_id: sg.capability
+                for sg in plan.sub_goals if sg.resolved_node_id
+            }
+            for step in result_dict.get("steps", []):
+                capability = sg_capability_by_node.get(step.get("node_id"))
+                if not capability:
+                    continue
+                try:
+                    self.marketplace.record_execution(
+                        node_id=step["node_id"],
+                        capability=capability,
+                        success=(step.get("status") == "success"),
+                        latency_ms=step.get("duration_ms") or 0.0,
+                    )
+                except Exception as e:
+                    logger.warning("MeshBundle: تعذّر تحديث المتجر بعد التنفيذ: %s", e)
+
+            return result_dict
+
     def summary(self) -> dict:
         _cm_summary = {}
         try:
@@ -827,6 +927,8 @@ class MeshBundle:
                 "generated": self.service_generator.summary(),
                 "governance": self.governance.summary(),
             },
+            "marketplace": self.marketplace.summary(),
+            "multi_goal_planner": self.multi_goal_planner.summary(),
         }
 
 

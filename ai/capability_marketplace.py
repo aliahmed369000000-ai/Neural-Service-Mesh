@@ -300,6 +300,65 @@ class CapabilityMarketplace:
 
     # ── Persistence ────────────────────────────────────────────────────────
 
+    def restore(self) -> int:
+        """أعِد بناء الفهرس من آخر نسخة محفوظة عبر KnowledgeStore.write_custom
+        (الدالة أعلاه) بعد إعادة تشغيل العملية. قبل هذا التعديل لم يكن أي
+        كائن في المشروع يستدعي read_custom("capability_marketplace") أبداً
+        رغم أن _persist() تكتب snapshot كامل فعلياً على القرص عند كل
+        advertise() — فيبدأ المتجر فارغاً من جديد بعد كل إعادة تشغيل،
+        وتُفقَد كل درجات الجودة/الكمون المتراكمة من record_execution() ولو
+        تراكمت آلاف التنفيذات الحقيقية. يُعيد عدد الإعلانات المُستعادة
+        فعلياً (0 لو لا يوجد ملف محفوظ بعد، أو لا KnowledgeStore أصلاً)."""
+        if not self._knowledge:
+            return 0
+        try:
+            snapshot = self._knowledge.read_custom("capability_marketplace")
+        except KeyError:
+            return 0
+        except Exception as e:
+            logger.warning(f"Marketplace restore error: {e}")
+            return 0
+        if not isinstance(snapshot, dict):
+            return 0
+
+        restored = 0
+        for cap_key, ads in snapshot.items():
+            if not isinstance(ads, list):
+                continue
+            rebuilt: List[CapabilityAdvertisement] = []
+            for ad_dict in ads:
+                try:
+                    ad = CapabilityAdvertisement(
+                        node_id=ad_dict["node_id"],
+                        node_name=ad_dict.get("node_name", ""),
+                        capability=ad_dict.get("capability", cap_key),
+                        quality_score=ad_dict.get("quality_score", 0.8),
+                        avg_latency_ms=ad_dict.get("avg_latency_ms", 100.0),
+                        tags=ad_dict.get("tags"),
+                        metadata=ad_dict.get("metadata"),
+                    )
+                    # الحقول المتراكمة عبر الزمن (لا تُعاد بقيمة ابتدائية)
+                    ad.execution_count = ad_dict.get("execution_count", 0)
+                    ad.is_active = ad_dict.get("is_active", True)
+                    ad.advertised_at = ad_dict.get("advertised_at", ad.advertised_at)
+                    ad.last_updated = ad_dict.get("last_updated", ad.last_updated)
+                except (KeyError, TypeError):
+                    continue
+                rebuilt.append(ad)
+                node_caps = self._node_capabilities.setdefault(ad.node_id, [])
+                if ad.capability not in node_caps:
+                    node_caps.append(ad.capability)
+                restored += 1
+            if rebuilt:
+                self._index[cap_key] = rebuilt
+
+        if restored:
+            logger.info(
+                f"CapabilityMarketplace: restored {restored} capability "
+                f"advertisement(s) across {len(self._index)} capability keys"
+            )
+        return restored
+
     def _persist(self):
         """Persist marketplace index to knowledge store."""
         if not self._knowledge:
