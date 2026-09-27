@@ -222,6 +222,36 @@ class MeshBundle:
         self._sync_nodes_to_exec_log()
         self._sync_nodes_to_graph()
 
+        # ── استئناف تلقائي للأسرِبة المتوقفة عند إعادة تشغيل العملية ────────
+        # ai/swarm_coordinator.py::resume()/list_resumable() كانا يتطلّبان
+        # نداءً يدوياً من المستخدم (زر في swarm_studio.py). هنا يُستأنف كل
+        # سرب متوقف تلقائياً فور إقلاع MeshBundle (بلا انتظار زيارة المستخدم
+        # للواجهة)، وتُغذّى نتيجته إلى دورة حياة العقد (record_swarm_result)
+        # تماماً كأي تنفيذ طبيعي — بذلك تنعكس execution_count/state/السمعة
+        # على العمل الذي اكتمل فعلاً بعد التوقف، لا أن تبقى مجمّدة. لا يجوز
+        # لهذا أن يُعطّل إقلاع الحزمة أبداً مهما حدث.
+        try:
+            for cp in self.coordinator.list_resumable():
+                swarm_id = cp.get("swarm_id")
+                if not swarm_id:
+                    continue
+                try:
+                    resumed = self.coordinator.resume(swarm_id)
+                    if resumed:
+                        self.record_swarm_result(resumed)
+                        logger.info(
+                            "MeshBundle: استؤنف تلقائياً سرب متوقف %s "
+                            "(%d/%d مهمة ناجحة)",
+                            swarm_id, resumed.success_count, len(resumed.tasks),
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "MeshBundle: تعذّر استئناف السرب %s تلقائياً: %s",
+                        swarm_id, exc,
+                    )
+        except Exception as exc:
+            logger.warning("MeshBundle: تعذّر فحص الأسرِبة المتوقفة: %s", exc)
+
         # ── التطوّر الذاتي الحقيقي (Phase 5/7): GapDetector → ServiceGenerator
         # → AIGovernanceLayer → تسجيل عقدة جديدة فعلياً في الـregistry نفسه ──
         # كانت هذه المحركات الأربعة مكتوبة بالكامل (ai/gap_detector.py،
