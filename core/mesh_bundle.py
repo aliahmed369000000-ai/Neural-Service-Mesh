@@ -283,6 +283,22 @@ class MeshBundle:
         except Exception as exc:
             logger.warning("MeshBundle: تعذّر فحص العُقد المتوقفة قسراً: %s", exc)
 
+        # ── استئناف تلقائي لمهام صناعة المحتوى الخلفية المتوقفة قسراً ─────────
+        # ai/content_job_manager.py: ContentJobManager كانت بالكامل في
+        # الذاكرة فقط (self._jobs) — أي توقف مفاجئ للعملية (crash/redeploy/
+        # OOM) أثناء تنفيذ run_content_pipeline() في خيط خلفية كان يفقد
+        # المهمة بالكامل بلا أي أثر، فضلاً عن استئنافها. الآن (بعد ربط
+        # SQLite في content_job_manager.py) تُستأنف أي مهمة بقيت 'running'
+        # من عملية سابقة بنفس kwargs المحفوظة ونفس job_id، فور إقلاع
+        # MeshBundle، بنفس نمط استئناف الأسرِبة/عُقد ExecutionEngine أعلاه.
+        try:
+            from ai.content_job_manager import get_content_job_manager
+            resumed_jobs = get_content_job_manager().resume_interrupted()
+            for jid in resumed_jobs:
+                logger.info("MeshBundle: استُؤنفت مهمة محتوى متوقفة #%s", jid)
+        except Exception as exc:
+            logger.warning("MeshBundle: تعذّر فحص مهام المحتوى المتوقفة: %s", exc)
+
         # ── التطوّر الذاتي الحقيقي (Phase 5/7): GapDetector → ServiceGenerator
         # → AIGovernanceLayer → تسجيل عقدة جديدة فعلياً في الـregistry نفسه ──
         # كانت هذه المحركات الأربعة مكتوبة بالكامل (ai/gap_detector.py،

@@ -58,6 +58,7 @@ memory/fable.db
 memory/nsm_context.db
 memory/chat_history.db
 memory/swarm_history.db
+memory/content_jobs.db
 data/mesh.db
 data/artifacts.db
 .pytest_cache/
