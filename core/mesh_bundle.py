@@ -38,6 +38,7 @@ from core.node import BaseNode, NodeSchema, NodeState
 from core.registry import NodeRegistry
 from core.graph import ServiceGraph
 from core.node_channel import NodeChannel
+from core.engine import ExecutionEngine
 from services.dynamic_node import PassThroughNode
 from storage.file_storage import FileStorage
 from storage.db import SQLiteStorage
@@ -253,6 +254,34 @@ class MeshBundle:
                     )
         except Exception as exc:
             logger.warning("MeshBundle: تعذّر فحص الأسرِبة المتوقفة: %s", exc)
+
+        # ── استئناف تلقائي لعُقد مسار ExecutionEngine (Phase 2) المتوقفة قسراً ──
+        # ExecutionEngine.resume_interrupted() (core/engine.py) كانت مكتوبة
+        # ومُختبَرة بالكامل، لكن ExecutionEngine نفسها تُبنى فقط داخل
+        # api_server.py::/process لكل طلب على حدة، ولا يوجد أي مكان يستدعي
+        # resume_interrupted() إطلاقاً — بالضبط نفس نمط 'مكتوب لكن غير
+        # مُسلَّك' في التعليقات أعلاه (KnowledgeStore، AIDecisionLayer،
+        # SQLiteStorage، list_resumable). الأثر العملي: عقدة توقفت قسراً
+        # وسط process() عبر /process (state='running' محفوظة فعلياً على
+        # القرص بفضل begin_execution) تبقى معلَّقة للأبد فعلياً، لأن لا شيء
+        # يفحص get_interrupted() سوى استدعاء يدوي غير موجود لا في الواجهة
+        # ولا في الخادم. هنا: محرك مؤقت بنفس registry/graph/storage
+        # المشتركة (self.registry فيه بالفعل كل عُقد الأدوار/الأدوات بعد
+        # _register_roles/_register_mcp_tools أعلاه، بنفس node_id المستعاد)
+        # يفحص وجود أي توقف قسري سابق ويستأنفه فوراً عند كل إقلاع.
+        try:
+            engine = ExecutionEngine(
+                self.registry, self.graph, self.storage,
+                db=self.exec_log, ai=self.ai_decision,
+            )
+            resumed_results = engine.resume_interrupted()
+            for r in resumed_results:
+                logger.info(
+                    "MeshBundle: استؤنفت عقدة توقفت قسراً — run_id=%s status=%s",
+                    r.run_id, r.status,
+                )
+        except Exception as exc:
+            logger.warning("MeshBundle: تعذّر فحص العُقد المتوقفة قسراً: %s", exc)
 
         # ── التطوّر الذاتي الحقيقي (Phase 5/7): GapDetector → ServiceGenerator
         # → AIGovernanceLayer → تسجيل عقدة جديدة فعلياً في الـregistry نفسه ──
