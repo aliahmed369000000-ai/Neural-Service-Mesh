@@ -39,6 +39,7 @@ class GeneratedServiceSpec:
         tags: List[str],
         confidence: float = 0.0,
         gap_context: Optional[dict] = None,
+        svc_type: str = "transformer",
     ):
         self.spec_id = str(uuid.uuid4())
         self.name = name
@@ -52,6 +53,10 @@ class GeneratedServiceSpec:
         self.gap_context = gap_context or {}
         self.created_at = datetime.now(timezone.utc).isoformat()
         self.status = "proposed"  # proposed / approved / rejected / active
+        # نوع الخدمة كما حسبه _infer_service_type وقت التوليد — يُستخدم في
+        # instantiate_spec لاختيار صنف العقدة الحقيقي (وليس تخمين النوع
+        # لاحقاً من الاسم/الوسوم، وهو ما كان سيفشل لأي اسم غير قياسي).
+        self.svc_type = svc_type
 
     def to_dict(self) -> dict:
         return {
@@ -63,6 +68,7 @@ class GeneratedServiceSpec:
             "output_fields": self.output_fields,
             "required_inputs": self.required_inputs,
             "tags": self.tags,
+            "svc_type": self.svc_type,
             "confidence": round(self.confidence, 4),
             "gap_context": self.gap_context,
             "created_at": self.created_at,
@@ -189,6 +195,7 @@ class ServiceGeneratorEngine:
             required_inputs=list(template["required_inputs"]),
             tags=list(template["tags"]) + ["ai-generated", "phase5"],
             confidence=gap.get("confidence", 0.7),
+            svc_type=svc_type,
             gap_context={
                 "source_name": source.get("name", ""),
                 "target_name": target.get("name", ""),
@@ -278,19 +285,31 @@ class ServiceGeneratorEngine:
 
     def instantiate_spec(self, spec: GeneratedServiceSpec):
         """
-        Create a live PassThroughNode from a GeneratedServiceSpec.
-        The node inherits the AI-generated semantic profile.
+        Create a live node from a GeneratedServiceSpec, running the real
+        processing logic for its service type (normalizer/validator/
+        aggregator/filter/enricher/router/analyzer/transformer) — not a
+        generic PassThroughNode. Before this fix every generated node
+        (regardless of type) was a PassThroughNode that just echoed its
+        input back unchanged, despite output schemas implying real work
+        (e.g. `validation_report`, `errors`, `score`). Falls back to
+        PassThroughNode only for an unrecognised svc_type (defensive; the
+        template dict always sets a known one today).
         Returns the live node object.
         """
+        from services.generated_service_nodes import NODE_CLASS_BY_SERVICE_TYPE
         from services.dynamic_node import PassThroughNode
 
-        node = PassThroughNode(
+        node_cls = NODE_CLASS_BY_SERVICE_TYPE.get(spec.svc_type, PassThroughNode)
+        node = node_cls(
             name=spec.name,
             description=spec.description,
             tags=spec.tags,
         )
         spec.status = "active"
-        logger.info(f"Instantiated AI-generated node: '{spec.name}' [{node.node_id[:8]}]")
+        logger.info(
+            f"Instantiated AI-generated node: '{spec.name}' "
+            f"[{node.node_id[:8]}] type={spec.svc_type} class={node_cls.__name__}"
+        )
         return node
 
     # ── Status & listing ───────────────────────────────────────────────────
