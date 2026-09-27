@@ -199,6 +199,12 @@ class ExecutionEngine:
         return self._finalize(result, "success", t_start)
 
     def run_between(self, start_id: str, end_id: str, data: Dict[str, Any], use_ai: bool = True) -> ExecutionResult:
+        # t_start يُلتقط هنا (قبل اختيار المسار) — نفس نمط run_path، حتى
+        # مخرج "لا يوجد مسار" يمر عبر _finalize بدل بناء ExecutionResult
+        # يدوياً وProxy جزئي لمنطقها (كان يفوّت self._ai.learn_from_run
+        # وresult.total_duration_ms يبقى None — نفس علّة c56be5c، مقصورة
+        # هنا على المخرج الوحيد في هذه الدالة بدل التكرار عبر run_path).
+        t_start = time.time()
         path = None
         if use_ai and self._ai:
             path = self._ai.choose_path(start_id, end_id)
@@ -206,23 +212,20 @@ class ExecutionEngine:
             path = self._graph.find_path_bfs(start_id, end_id)
         if not path:
             r = ExecutionResult(str(uuid.uuid4()), [])
-            r.status = "failed"
-            r.finished_at = datetime.utcnow().isoformat()
-            self._persist(r)
-            return r
+            return self._finalize(r, "failed", t_start)
         result = self.run_path(path, data)
         if use_ai and self._ai:
             result.ai_suggested = True
         return result
 
     def run_full_graph(self, data: Dict[str, Any]) -> ExecutionResult:
+        # نفس السبب أعلاه بالضبط لمخرج "لا يوجد ترتيب طوبولوجي" (رسم بياني
+        # فيه دورة/فارغ) — t_start يُلتقط قبل topological_sort().
+        t_start = time.time()
         order = self._graph.topological_sort()
         if not order:
             r = ExecutionResult(str(uuid.uuid4()), [])
-            r.status = "failed"
-            r.finished_at = datetime.utcnow().isoformat()
-            self._persist(r)
-            return r
+            return self._finalize(r, "failed", t_start)
         return self.run_path(order, data)
 
     def get_history(self, limit: int = 50) -> List[dict]:
