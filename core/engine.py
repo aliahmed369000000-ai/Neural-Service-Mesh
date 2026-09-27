@@ -132,31 +132,57 @@ class ExecutionEngine:
                     self._persist(result)
                     return result
 
-            step.node_name = node.name
-            step.started_at = datetime.utcnow().isoformat()
-            step.input_data = dict(current)
-            step.status = "running"
-            t0 = time.time()
-            try:
-                transformed = self._transformer.transform(current, node.input_schema)
-                output = node.execute(transformed)
-                step.output_data = dict(output)
-                step.status = "success"
-                step.duration_ms = round((time.time() - t0) * 1000, 2)
-                step.finished_at = datetime.utcnow().isoformat()
-                current = output
-                self._registry.refresh_meta(node.node_id)
-            except Exception as e:
-                step.status = "error"
-                step.error = str(e)
-                step.duration_ms = round((time.time() - t0) * 1000, 2)
-                step.finished_at = datetime.utcnow().isoformat()
-                self._registry.refresh_meta(node.node_id)
-                result.status = "failed"
-                result.finished_at = datetime.utcnow().isoformat()
-                result.total_duration_ms = round((time.time() - t_start) * 1000, 2)
-                self._persist(result)
-                return result
+            # ── تنفيذ فعلي — بمحاولة واحدة إضافية عبر بديل عند فشل حقيقي ──
+            # كان فشل حقيقي أثناء process() (استثناء من منطق العقدة نفسها،
+            # أو رفض NodeSchema.validate() لبيانات غير مطابقة) يُسقِط
+            # المسار بالكامل مباشرة، دون أي محاولة بديل — رغم أن should_fallback
+            # أعلاه مصمَّمة أصلاً لهذه الحالة بالضبط (اسمها الوسيطة الأولى
+            # "failed_node_id"، ومعناها العام "عقدة فشلت"، وليس فقط "غير
+            # موجودة" أو "محجورة"). مستوى واحد فقط من الاستبدال (كما في
+            # الحالتين أعلاه): لا نحاول بديلاً لبديل فشل هو الآخر.
+            already_fell_back = step.is_fallback
+            attempt_node = node
+            for attempt in range(2):
+                step.node_name = attempt_node.name
+                step.node_id = attempt_node.node_id
+                step.started_at = datetime.utcnow().isoformat()
+                step.input_data = dict(current)
+                step.status = "running"
+                t0 = time.time()
+                try:
+                    transformed = self._transformer.transform(current, attempt_node.input_schema)
+                    output = attempt_node.execute(transformed)
+                    step.output_data = dict(output)
+                    step.status = "success"
+                    step.duration_ms = round((time.time() - t0) * 1000, 2)
+                    step.finished_at = datetime.utcnow().isoformat()
+                    current = output
+                    self._registry.refresh_meta(attempt_node.node_id)
+                    break
+                except Exception as e:
+                    step.status = "error"
+                    step.error = str(e)
+                    step.duration_ms = round((time.time() - t0) * 1000, 2)
+                    step.finished_at = datetime.utcnow().isoformat()
+                    self._registry.refresh_meta(attempt_node.node_id)
+
+                    fb_node = None
+                    if attempt == 0 and not already_fell_back and use_fallback and self._ai:
+                        fb_id = self._ai.should_fallback(attempt_node.node_id, step.error)
+                        if fb_id:
+                            candidate = self._registry.get(fb_id)
+                            if candidate and candidate.state != NodeState.PAUSED:
+                                fb_node = candidate
+                    if fb_node:
+                        step.is_fallback = True
+                        attempt_node = fb_node
+                        continue  # محاولة ثانية وأخيرة عبر البديل
+
+                    result.status = "failed"
+                    result.finished_at = datetime.utcnow().isoformat()
+                    result.total_duration_ms = round((time.time() - t_start) * 1000, 2)
+                    self._persist(result)
+                    return result
 
         result.final_output = current
         result.status = "success"
