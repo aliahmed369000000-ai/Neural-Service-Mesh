@@ -703,7 +703,14 @@ class MeshBundle:
                 try:
                     from ai.collective_memory import get_collective_memory
                     get_collective_memory().record_task_result(
-                        task=(task.result or {}).get("task") if task.result else "",
+                        # 🆕 إصلاح: "task" لم يكن مفتاحاً موجوداً إطلاقاً في
+                        # قاموس task.result (مفاتيحه الحقيقية: sub_goal/
+                        # result_text/... — انظر SwarmCoordinator._run_task)،
+                        # فكان .get("task") يُرجع None دائماً في المسار
+                        # الشائع (أي مهمة نُفّذت فعلاً ولها نتيجة)، فتنكسر
+                        # _extract_domain(None).lower() صامتاً في كل مرة.
+                        # sub_goal الحقيقي متاح مباشرة على task نفسه.
+                        task=getattr(task, "sub_goal", "") or "",
                         success=success,
                         duration_ms=latency,
                         agent_id=agent_id or "",
