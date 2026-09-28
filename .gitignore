@@ -131,3 +131,7 @@ experiments/**/checkpoints/
 artifacts/living_mesh/nodes/
 artifacts/living_mesh/network_state.json
 node_activity.log
+
+# نسخ احتياطية/تالفة يولّدها storage/file_storage.py وقت التشغيل
+*.json.bak
+*.json.corrupt-*

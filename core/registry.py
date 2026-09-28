@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+import threading
 from typing import Dict, List, Optional
 from datetime import datetime
 
@@ -15,25 +16,31 @@ class NodeRegistry:
         self._storage = storage
         self._nodes: Dict[str, BaseNode] = {}
         self._meta_cache: Dict[str, dict] = {}
+        # RLock: register/unregister/refresh_meta/_save تُستدعى من خيوط
+        # متعددة (تنفيذ السرب المتوازي)؛ بدونه list(self._meta_cache.values())
+        # داخل _save قد ترفع 'dictionary changed size during iteration'.
+        self._lock = threading.RLock()
         self._load()
         logger.info("NodeRegistry initialized")
 
     def register(self, node: BaseNode, overwrite: bool = False) -> str:
-        if node.node_id in self._nodes and not overwrite:
-            raise ValueError(f"Node '{node.node_id}' already registered")
-        self._nodes[node.node_id] = node
-        self._meta_cache[node.node_id] = node.to_dict()
-        self._save()
+        with self._lock:
+            if node.node_id in self._nodes and not overwrite:
+                raise ValueError(f"Node '{node.node_id}' already registered")
+            self._nodes[node.node_id] = node
+            self._meta_cache[node.node_id] = node.to_dict()
+            self._save()
         logger.info(f"Registered: {node.name} [{node.node_id[:8]}]")
         return node.node_id
 
     def unregister(self, node_id: str) -> bool:
-        if node_id not in self._nodes:
-            return False
-        del self._nodes[node_id]
-        self._meta_cache.pop(node_id, None)
-        self._save()
-        return True
+        with self._lock:
+            if node_id not in self._nodes:
+                return False
+            del self._nodes[node_id]
+            self._meta_cache.pop(node_id, None)
+            self._save()
+            return True
 
     def get(self, node_id: str) -> Optional[BaseNode]:
         return self._nodes.get(node_id)
@@ -63,14 +70,15 @@ class NodeRegistry:
         """إعادة مزامنة meta_cache من حالة العقدة الحيّة (state، execution_count،
         last_executed...) بعد أي تنفيذ، لأن الكاش كان يُحفظ فقط لحظة register()
         ولا يتحدّث تلقائياً بعد ذلك. تُستدعى من ExecutionEngine بعد كل خطوة."""
-        node = self._nodes.get(node_id)
-        if not node:
-            return None
-        snapshot = node.to_dict()
-        self._meta_cache[node_id] = snapshot
-        if persist:
-            self._save()
-        return snapshot
+        with self._lock:
+            node = self._nodes.get(node_id)
+            if not node:
+                return None
+            snapshot = node.to_dict()
+            self._meta_cache[node_id] = snapshot
+            if persist:
+                self._save()
+            return snapshot
 
     def get_interrupted(self) -> List[dict]:
         """سجلات meta محفوظة بحالة 'running' — أي عُقد كانت وسط process()
@@ -107,11 +115,12 @@ class NodeRegistry:
         return node_id in self._nodes
 
     def _save(self):
-        self._storage.save(REGISTRY_FILE, {
-            "saved_at": datetime.utcnow().isoformat(),
-            "count": len(self._meta_cache),
-            "nodes": list(self._meta_cache.values()),
-        })
+        with self._lock:
+            self._storage.save(REGISTRY_FILE, {
+                "saved_at": datetime.utcnow().isoformat(),
+                "count": len(self._meta_cache),
+                "nodes": list(self._meta_cache.values()),
+            })
 
     def _load(self):
         data = self._storage.load(REGISTRY_FILE)
