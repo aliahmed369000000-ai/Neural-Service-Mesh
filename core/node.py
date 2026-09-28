@@ -118,7 +118,8 @@ class BaseNode(ABC):
             raise
         self._execution_count += 1
         self._last_executed = datetime.utcnow().isoformat()
-        self.state = NodeState.ACTIVE
+        if self.state != NodeState.PAUSED:  # pause() أثناء process() يبقى نافذاً
+            self.state = NodeState.ACTIVE
         self._last_error = None
         self._pending_input = None
         logger.info(f"[{self.name}] executed #{self._execution_count}")
@@ -162,7 +163,12 @@ class BaseNode(ABC):
         كي لا يُعاد تكرار نفس المدخلات الفاشلة تلقائياً إلى الأبد عبر
         resume_interrupted — فقط توقف حقيقي بلا نتيجة معروفة (RUNNING) هو
         ما يستحق إعادة المحاولة التلقائية."""
-        self.state = NodeState.FAILED
+        # عقدة PAUSED (حجر تلقائي أو إيقاف يدوي) تحتفظ بحالتها: مهمة كانت
+        # قيد التنفيذ لحظة الإيقاف وانتهت بفشل لا يجوز أن تحوّل PAUSED إلى
+        # FAILED (كان يُضيّع pause_reason ويجعل _apply_reputation_recovery
+        # لا يرى العقدة محجورة). الخطأ يُسجَّل دائماً.
+        if self.state != NodeState.PAUSED:
+            self.state = NodeState.FAILED
         self._last_error = error
         self._pending_input = None
         logger.warning(f"[{self.name}] failed: {error}")
@@ -176,7 +182,12 @@ class BaseNode(ABC):
         if success:
             self._execution_count += 1
             self._last_executed = datetime.utcnow().isoformat()
-            self.state = NodeState.ACTIVE
+            # مهمة بدأت قبل الحجر وانتهت بعده: تُحتسب في العدّاد لكنها لا
+            # ترفع الإيقاف — رفع الحجر مسؤولية unquarantine/resume الصريحة
+            # فقط، وإلا يبقى reputation_engine يرى العقدة محجورة بينما
+            # state=ACTIVE وpause_reason قديم عالق.
+            if self.state != NodeState.PAUSED:
+                self.state = NodeState.ACTIVE
             self._last_error = None
             logger.info(f"[{self.name}] execution recorded #{self._execution_count} (external)")
         else:
