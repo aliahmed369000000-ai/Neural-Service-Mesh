@@ -204,10 +204,21 @@ class SwarmCoordinator:
         factory: AgentFactory,
         max_agents: int = 20,
         knowledge_store=None,
+        is_role_quarantined: Optional[Callable[[str], bool]] = None,
     ):
         self._factory = factory
         self._max_agents = max_agents
         self._knowledge = knowledge_store
+        # 🆕 دالة فحص اختيارية (عادة MeshBundle._is_role_quarantined) تُرجع
+        # True لو كان الدور محجوراً حالياً بسبب سمعة منخفضة. بدونها (كل
+        # الاستدعاءات القديمة/الاختبارات التي لا تمرّرها) لا تغيير في
+        # السلوك إطلاقاً. بوجودها: _pick_agent() يستبعد الأدوار المحجورة
+        # فعلياً — قبل هذا كان الحجر (BaseNode.state=paused في الـregistry
+        # + NodeReputation.is_quarantined) يوقف عقدة رمزية منفصلة تماماً
+        # بينما best_agent_for()/_auto_spawn_for_capability() يستمران في
+        # توجيه مهام حقيقية جديدة لنفس الدور المحجور دون أي علم بذلك —
+        # الحجر لم يكن يمنع تنفيذاً واحداً فعلياً.
+        self._is_role_quarantined = is_role_quarantined
         self._history: List[SwarmResult] = []
         self._lock = threading.Lock()
         # 🆕 تخزين دائم لنتائج السرب (SQLite) — self._history وحدها كانت
@@ -373,10 +384,7 @@ class SwarmCoordinator:
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 future_to_task: Dict[Future, SwarmTask] = {}
                 for task in pending_tasks:
-                    agent = self._factory.best_agent_for(task.required_capability)
-                    if agent is None:
-                        # Auto-spawn an agent for this capability
-                        agent = self._auto_spawn_for_capability(task.required_capability)
+                    agent = self._pick_agent(task.required_capability)
                     if agent:
                         task.assigned_agent_id = agent.agent_id
                         fut = pool.submit(self._run_task, task, agent)
@@ -637,17 +645,47 @@ class SwarmCoordinator:
                     parts.append(f"{key}: {val}")
         return "\n".join(str(p) for p in parts)
 
+    def _role_quarantined(self, role: Optional[str]) -> bool:
+        """best-effort — عطل في دالة الفحص نفسها لا يجب أن يمنع أي تنفيذ."""
+        if not role or self._is_role_quarantined is None:
+            return False
+        try:
+            return bool(self._is_role_quarantined(role))
+        except Exception as exc:
+            logger.warning(f"is_role_quarantined فشلت لـ '{role}': {exc}")
+            return False
+
+    def _pick_agent(self, capability: str) -> Optional[AgentInstance]:
+        """نقطة الاختيار المركزية الوحيدة لوكيل مهمة — كل استدعاء توزيع في
+        هذا الملف يمر من هنا (بدل استدعاء best_agent_for/_auto_spawn_for_capability
+        مباشرة) حتى يُطبَّق فحص الحجر باستمرار وفي كل مسار، وليس في نقطة
+        واحدة يسهل نسيان تكرارها لاحقاً."""
+        candidates = [
+            a for a in self._factory.list_by_capability(capability)
+            if not self._role_quarantined(a.role)
+        ]
+        if candidates:
+            return max(candidates, key=lambda a: a.performance_score)
+        return self._auto_spawn_for_capability(capability)
+
     def _auto_spawn_for_capability(self, capability: str) -> Optional[AgentInstance]:
-        """Find a role that has the required capability and spawn an agent."""
+        """Find a role that has the required capability and spawn an agent —
+        يتجاوز أي دور محجور حالياً (انظر _role_quarantined) ويجرّب دوراً
+        آخر يملك نفس القدرة إن وُجد، بدل تفريخ وكيل جديد من دور محجور
+        فعلياً بلا داعٍ."""
         from ai.agent_factory import AGENT_CATALOGUE
         for role, spec in AGENT_CATALOGUE.items():
-            if capability in spec.get("capabilities", []):
-                try:
-                    agent = self._factory.spawn(role)
-                    logger.info(f"Auto-spawned {role} for capability '{capability}'")
-                    return agent
-                except Exception:
-                    pass
+            if capability not in spec.get("capabilities", []):
+                continue
+            if self._role_quarantined(role):
+                logger.info(f"تخطّي دور محجور '{role}' عند البحث عن قدرة '{capability}'")
+                continue
+            try:
+                agent = self._factory.spawn(role)
+                logger.info(f"Auto-spawned {role} for capability '{capability}'")
+                return agent
+            except Exception:
+                pass
         return None
 
     def _retry_failed_tasks(self, tasks: List[SwarmTask], task_outputs: Dict[str, dict]) -> None:

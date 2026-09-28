@@ -184,7 +184,10 @@ class MeshBundle:
         self.exec_log = SQLiteStorage(db_path=db_path)
 
         self.agent_factory = AgentFactory()
-        self.coordinator = SwarmCoordinator(self.agent_factory, max_agents=20)
+        self.coordinator = SwarmCoordinator(
+            self.agent_factory, max_agents=20,
+            is_role_quarantined=self._is_role_quarantined,
+        )
 
         # ── التواصل الحقيقي بين العُقد + رسم بياني حيّ للطوبولوجيا ──────────
         # (core/node_channel.py) قناة رسائل دائمة بين node_id حقيقية، و
@@ -485,6 +488,19 @@ class MeshBundle:
         return node_id
 
     # ── تسجيل كل الأدوار الموجودة في الكتالوج كعُقد حقيقية داخل الـregistry ──
+    def _is_role_quarantined(self, role) -> bool:
+        """هل الدور محجور حالياً بسبب سمعة منخفضة؟ تُمرَّر لـSwarmCoordinator
+        كدالة فحص حتى لا تُوجَّه مهام جديدة لدور محجور. تقرأ role_node_ids
+        وreputation_engine وقت الاستدعاء (لا وقت البناء)، فترتيب التهيئة
+        داخل __init__ لا يهم."""
+        if not role:
+            return False
+        node_id = getattr(self, "role_node_ids", {}).get(role)
+        if not node_id:
+            return False
+        rep = self.reputation_engine.get_reputation(node_id)
+        return bool(rep and rep.is_quarantined)
+
     def _register_roles(self) -> str:
         root_id = None
         for role, spec in AGENT_CATALOGUE.items():
