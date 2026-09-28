@@ -221,6 +221,12 @@ class SwarmCoordinator:
         self._is_role_quarantined = is_role_quarantined
         self._history: List[SwarmResult] = []
         self._lock = threading.Lock()
+        # معرّفات الأسرِبة التي تعمل الآن داخل هذه العملية. سرب يعمل فعلاً
+        # يبقى في swarm_progress بحالة 'running' (كأي سرب انهارت عمليته)،
+        # فبدونها كان list_resumable()/resume() يعرضانه ويستأنفانه مرة
+        # ثانية — تنفيذ مزدوج لنفس المهام (جلسة Streamlit ثانية تضغط زر
+        # الاستئناف، أو إعادة بناء الحزمة أثناء سرب حي).
+        self._active_swarm_ids: set = set()
         # 🆕 تخزين دائم لنتائج السرب (SQLite) — self._history وحدها كانت
         # في الذاكرة فقط وتُمسح بإعادة تشغيل الحاوية. انظر ai/swarm_history_store.py
         try:
@@ -321,6 +327,11 @@ class SwarmCoordinator:
             logger.warning(f"SwarmCoordinator.resume: لا نقطة تفتيش لـ {swarm_id}")
             return None
 
+        with self._lock:
+            if swarm_id in self._active_swarm_ids:
+                logger.warning(f"SwarmCoordinator.resume: {swarm_id} يعمل الآن — لا استئناف مزدوج")
+                return None
+
         result = SwarmResult.from_checkpoint(checkpoint)
         tasks = result.tasks
         already_done = sum(1 for t in tasks if t.status == "done")
@@ -340,7 +351,11 @@ class SwarmCoordinator:
         if not self._store:
             return []
         out = []
+        with self._lock:
+            active = set(self._active_swarm_ids)
         for cp in self._store.list_incomplete(limit=limit):
+            if cp.get("swarm_id") in active:
+                continue  # يعمل الآن في هذه العملية — ليس متوقفاً
             tasks = cp.get("tasks", [])
             out.append({
                 "swarm_id": cp.get("swarm_id"),
@@ -354,6 +369,30 @@ class SwarmCoordinator:
     # ── Internals ─────────────────────────────────────────────────────────
 
     def _execute_tasks(
+        self,
+        result: SwarmResult,
+        tasks: List[SwarmTask],
+        retry_failed: bool = True,
+        synthesize: bool = False,
+        debate: bool = False,
+    ) -> Optional[SwarmResult]:
+        """يحجز swarm_id كنشط ذرّياً (يرجع None إن كان محجوزاً لتنفيذ آخر
+        حي) ثم ينفّذ عبر _execute_tasks_inner ويحرّره دائماً في finally."""
+        with self._lock:
+            if result.swarm_id in self._active_swarm_ids:
+                logger.warning(f"Swarm {result.swarm_id} يعمل بالفعل — تجاهل التنفيذ المكرر")
+                return None
+            self._active_swarm_ids.add(result.swarm_id)
+        try:
+            return self._execute_tasks_inner(
+                result, tasks, retry_failed=retry_failed,
+                synthesize=synthesize, debate=debate,
+            )
+        finally:
+            with self._lock:
+                self._active_swarm_ids.discard(result.swarm_id)
+
+    def _execute_tasks_inner(
         self,
         result: SwarmResult,
         tasks: List[SwarmTask],

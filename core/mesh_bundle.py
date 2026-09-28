@@ -237,27 +237,13 @@ class MeshBundle:
         # تماماً كأي تنفيذ طبيعي — بذلك تنعكس execution_count/state/السمعة
         # على العمل الذي اكتمل فعلاً بعد التوقف، لا أن تبقى مجمّدة. لا يجوز
         # لهذا أن يُعطّل إقلاع الحزمة أبداً مهما حدث.
-        try:
-            for cp in self.coordinator.list_resumable():
-                swarm_id = cp.get("swarm_id")
-                if not swarm_id:
-                    continue
-                try:
-                    resumed = self.coordinator.resume(swarm_id)
-                    if resumed:
-                        self.record_swarm_result(resumed)
-                        logger.info(
-                            "MeshBundle: استؤنف تلقائياً سرب متوقف %s "
-                            "(%d/%d مهمة ناجحة)",
-                            swarm_id, resumed.success_count, len(resumed.tasks),
-                        )
-                except Exception as exc:
-                    logger.warning(
-                        "MeshBundle: تعذّر استئناف السرب %s تلقائياً: %s",
-                        swarm_id, exc,
-                    )
-        except Exception as exc:
-            logger.warning("MeshBundle: تعذّر فحص الأسرِبة المتوقفة: %s", exc)
+        # في خيط خلفي daemon: resume() ينفّذ مهام LLM فعلية قد تستغرق دقائق
+        # لكل سرب، وتشغيلها هنا كان يحجز إقلاع الحزمة (وأول تحميل للواجهة)
+        # حتى ينتهي كل سرب متوقف. الخيط daemon فلا يمنع إغلاق العملية.
+        threading.Thread(
+            target=self._auto_resume_swarms, name="nsm-swarm-auto-resume",
+            daemon=True,
+        ).start()
 
         # ── استئناف تلقائي لعُقد مسار ExecutionEngine (Phase 2) المتوقفة قسراً ──
         # ExecutionEngine.resume_interrupted() (core/engine.py) كانت مكتوبة
@@ -488,6 +474,31 @@ class MeshBundle:
         return node_id
 
     # ── تسجيل كل الأدوار الموجودة في الكتالوج كعُقد حقيقية داخل الـregistry ──
+    def _auto_resume_swarms(self) -> None:
+        """يستأنف الأسرِبة المتوقفة (يُشغَّل في خيط خلفي عند الإقلاع). لا يرفع
+        استثناءً أبداً؛ list_resumable/resume يتجاوزان أي سرب حي حالياً."""
+        try:
+            for cp in self.coordinator.list_resumable():
+                swarm_id = cp.get("swarm_id")
+                if not swarm_id:
+                    continue
+                try:
+                    resumed = self.coordinator.resume(swarm_id)
+                    if resumed:
+                        self.record_swarm_result(resumed)
+                        logger.info(
+                            "MeshBundle: استؤنف تلقائياً سرب متوقف %s "
+                            "(%d/%d مهمة ناجحة)",
+                            swarm_id, resumed.success_count, len(resumed.tasks),
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "MeshBundle: تعذّر استئناف السرب %s تلقائياً: %s",
+                        swarm_id, exc,
+                    )
+        except Exception as exc:
+            logger.warning("MeshBundle: تعذّر فحص الأسرِبة المتوقفة: %s", exc)
+
     def _is_role_quarantined(self, role) -> bool:
         """هل الدور محجور حالياً بسبب سمعة منخفضة؟ تُمرَّر لـSwarmCoordinator
         كدالة فحص حتى لا تُوجَّه مهام جديدة لدور محجور. تقرأ role_node_ids
