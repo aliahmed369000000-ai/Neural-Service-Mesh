@@ -105,6 +105,9 @@ class SwarmResult:
         self.merged_output: Optional[dict] = None
         self.debates: List[dict] = []
         self.status = "running"
+        # عدد مرات استئناف هذا السرب بعد توقف (يُحفظ مع نقطة التفتيش) — يمنع
+        # حلقة انهيار: سرب يقتل العملية كل مرة يُستأنف عند الإقلاع.
+        self.resume_attempts = 0
 
     @property
     def success_count(self):
@@ -132,6 +135,7 @@ class SwarmResult:
             "merged_output": self.merged_output,
             "tasks": [t.to_dict() for t in self.tasks],
             "debates": self.debates,
+            "resume_attempts": self.resume_attempts,
         }
 
     @classmethod
@@ -143,6 +147,7 @@ class SwarmResult:
         result.started_at = d.get("started_at") or result.started_at
         result.tasks = [SwarmTask.from_dict(t) for t in d.get("tasks", [])]
         result.debates = d.get("debates", [])
+        result.resume_attempts = int(d.get("resume_attempts") or 0)
         return result
 
 
@@ -198,6 +203,9 @@ class SwarmCoordinator:
         "optimize":  ["optimize", "حسّن", "حسن", "تحسين", "سرّع", "تسريع"],
         "monitor":   ["monitor", "راقب", "مراقبة", "رصد", "تتبع", "تتبّع"],
     }
+
+    # أقصى عدد استئنافات لنفس السرب قبل التخلي عنه (status='abandoned').
+    MAX_RESUME_ATTEMPTS = 3
 
     def __init__(
         self,
@@ -333,6 +341,20 @@ class SwarmCoordinator:
                 return None
 
         result = SwarmResult.from_checkpoint(checkpoint)
+        if result.resume_attempts >= self.MAX_RESUME_ATTEMPTS:
+            # سرب استُؤنف مراراً ولم يصل للنهاية (غالباً يقتل العملية) — نتخلى
+            # عنه بدل حلقة انهيار عند كل إقلاع. يبقى في swarm_progress
+            # بحالة 'abandoned' للفحص اليدوي، ولا يظهر في list_resumable.
+            checkpoint["status"] = "abandoned"
+            self._store.save_progress(checkpoint)
+            logger.error(
+                f"Swarm {swarm_id} تُخلّي عنه بعد {result.resume_attempts} "
+                f"محاولات استئناف فاشلة"
+            )
+            return None
+        # يُحفظ العدّاد المرفوع في أول نقطة تفتيش داخل _execute_tasks_inner
+        # قبل تنفيذ أي مهمة، فيبقى حتى لو مات الإجراء أثناء هذا الاستئناف.
+        result.resume_attempts += 1
         tasks = result.tasks
         already_done = sum(1 for t in tasks if t.status == "done")
         logger.info(
