@@ -84,6 +84,62 @@ class CognitiveGrowthEngine:
         logger.info(f"✨ Evolutionary Step Recorded: {proposal['type']}")
         return step
 
+    def analyze_experiences(self) -> Dict[str, Any]:
+        """يحلّل الخبرات المسجّلة (سجلات لها task_type/success) ويستخرج
+        معدل النجاح وأكثر أنواع المهام فشلاً والدروس المتكررة. تُتجاهل
+        سجلات التطور (event=evolution) وأي سجل بلا task_type."""
+        tasks = [
+            e for e in self.knowledge_base
+            if isinstance(e, dict) and "task_type" in e and "success" in e
+        ]
+        total = len(tasks)
+        successes = sum(1 for e in tasks if e.get("success"))
+        top_failures: Dict[str, int] = {}
+        failure_lessons: Dict[str, List[str]] = {}
+        for e in tasks:
+            if not e.get("success"):
+                t = str(e.get("task_type"))
+                top_failures[t] = top_failures.get(t, 0) + 1
+                lesson = e.get("lesson")
+                if lesson and lesson not in failure_lessons.setdefault(t, []):
+                    failure_lessons[t].append(str(lesson))
+        top_failures = dict(
+            sorted(top_failures.items(), key=lambda kv: kv[1], reverse=True)
+        )
+        self.last_analysis_time = time.time()
+        return {
+            "total_tasks": total,
+            "success_rate": (successes / total) if total else 0.0,
+            "top_failures": top_failures,
+            "failure_lessons": failure_lessons,
+        }
+
+    def evolve_strategies(self) -> Dict[str, Any]:
+        """يشتق استراتيجيات من تحليل الخبرات: memory_safety (عند تكرار
+        أخطاء الذاكرة/OOM في الدروس) وtask_routing (تنبيه لكل نوع مهمة
+        يفشل). يُخزَّن الناتج في self.strategies ويُرجَع."""
+        analysis = self.analyze_experiences()
+        memory_markers = ("oom", "out of memory", "memory", "batch size", "ذاكرة")
+        memory_hits = sum(
+            1
+            for lessons in analysis["failure_lessons"].values()
+            for lesson in lessons
+            if any(m in lesson.lower() for m in memory_markers)
+        )
+        strategies: Dict[str, Any] = {
+            "memory_safety": {
+                "enabled": memory_hits > 0,
+                "action": "reduce_batch_size_and_checkpoint" if memory_hits else "none",
+                "evidence_count": memory_hits,
+            },
+            "task_routing": {
+                t: {"failures": n, "action": "verify_resources_before_run"}
+                for t, n in analysis["top_failures"].items()
+            },
+        }
+        self.strategies = strategies
+        return strategies
+
     def get_growth_report(self) -> str:
         """تقرير شامل عن حالة النمو المعرفي والتطور الذاتي."""
         analysis = {
@@ -95,8 +151,12 @@ class CognitiveGrowthEngine:
         report = f"--- 🧠 تقرير النمو المعرفي السيادي (Kaggle) ---\n"
         report += f"مؤشر الذكاء الحالي: {analysis['intelligence_index']:.2f}\n"
         report += f"خطوات التطور المنفذة: {analysis['evolution_steps']}\n"
-        report += f"إجمالي الخبرات المكتسبة: {analysis['total_experiences']}\n"
+        report += f"إجمالي الخبرات: {analysis['total_experiences']}\n"
         
+        if not self.strategies:
+            self.evolve_strategies()
+        report += "الاستراتيجيات المشتقة: " + ", ".join(self.strategies) + "\n"
+
         if self.evolution_steps:
             report += "أحدث قفزات التطور:\n"
             for step in self.evolution_steps[-3:]:
