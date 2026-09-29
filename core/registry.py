@@ -2,7 +2,7 @@ from __future__ import annotations
 import logging
 import threading
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from core.node import BaseNode, NodeState
 from storage.file_storage import FileStorage
@@ -117,7 +117,7 @@ class NodeRegistry:
     def _save(self):
         with self._lock:
             self._storage.save(REGISTRY_FILE, {
-                "saved_at": datetime.utcnow().isoformat(),
+                "saved_at": datetime.now(timezone.utc).isoformat(),
                 "count": len(self._meta_cache),
                 "nodes": list(self._meta_cache.values()),
             })

@@ -5,7 +5,7 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ class BaseNode(ABC):
         self.name = name
         self.description = description
         self.tags = tags or []
-        self.created_at = datetime.utcnow().isoformat()
+        self.created_at = datetime.now(timezone.utc).isoformat()
         self._execution_count = 0
         self._last_executed: Optional[str] = None
         self.state: str = NodeState.CREATED
@@ -117,7 +117,7 @@ class BaseNode(ABC):
             self.mark_failed(str(e))
             raise
         self._execution_count += 1
-        self._last_executed = datetime.utcnow().isoformat()
+        self._last_executed = datetime.now(timezone.utc).isoformat()
         if self.state != NodeState.PAUSED:  # pause() أثناء process() يبقى نافذاً
             self.state = NodeState.ACTIVE
         self._last_error = None
@@ -181,7 +181,7 @@ class BaseNode(ABC):
         (execution_count/state/last_error) مباشرة من نتيجة معروفة سلفاً."""
         if success:
             self._execution_count += 1
-            self._last_executed = datetime.utcnow().isoformat()
+            self._last_executed = datetime.now(timezone.utc).isoformat()
             # مهمة بدأت قبل الحجر وانتهت بعده: تُحتسب في العدّاد لكنها لا
             # ترفع الإيقاف — رفع الحجر مسؤولية unquarantine/resume الصريحة
             # فقط، وإلا يبقى reputation_engine يرى العقدة محجورة بينما

@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 import threading
 from pathlib import Path
 from typing import Any, List, Optional
@@ -89,7 +89,7 @@ class FileStorage:
             logger.error(f"load failed '{filename}': {e}")
         with self._lock:
             try:
-                stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%S%f")
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
                 p.replace(p.with_name(f"{p.name}.corrupt-{stamp}"))
             except Exception as e2:
                 logger.error(f"تعذّر حفظ الملف التالف '{filename}': {e2}")
