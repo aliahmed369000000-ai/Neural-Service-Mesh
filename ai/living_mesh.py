@@ -73,6 +73,7 @@ ALLOWED_TASK_CAPABILITIES = {
     "web_fetch": {"text", "CPU", "web", "tf_engine"},
     "predict": {"text", "CPU", "tf_engine"},
     "self_feed_learn": {"text", "CPU", "web", "tf_engine"},
+    "mesh_health_report": {"CPU", "GPU_LOW", "GPU_HIGH", "tf_engine"},
 }
 
 class LivingMeshNode:
@@ -1888,7 +1889,11 @@ class LivingMeshNode:
             return
 
         try:
-            result = mesh_tasks.dispatch_task(kind, exp_data or {})
+            if kind == mesh_tasks.KIND_HEALTH_REPORT:
+                result = self.network_health_snapshot()
+                result.update({"ok": True, "task_id": task_id, "report_kind": kind})
+            else:
+                result = mesh_tasks.dispatch_task(kind, exp_data or {})
         except Exception as e:
             err = f"{type(e).__name__}: {e}"
             logger.error(f"❌ Mesh task execution error kind={kind} id={task_id}: {err}")

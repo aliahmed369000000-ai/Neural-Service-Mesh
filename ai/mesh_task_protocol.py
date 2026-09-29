@@ -51,6 +51,8 @@ KIND_CLASSIC_SHOWCASE = "classic_showcase"
 KIND_CLASSIC_SHOWCASE_RESULT = "classic_showcase_result"
 KIND_SELF_FEED_LEARN = "self_feed_learn"
 KIND_SELF_FEED_LEARN_RESULT = "self_feed_learn_result"
+KIND_HEALTH_REPORT = "mesh_health_report"
+KIND_HEALTH_REPORT_RESULT = "mesh_health_report_result"
 
 # إدارة دورة حياة المهمة (v1.1+)
 KIND_TASK_ACK = "task_ack"
@@ -72,6 +74,7 @@ ALL_TASK_KINDS = {
     KIND_TEMPORAL_FORECAST, KIND_TEMPORAL_FORECAST_RESULT,
     KIND_CLASSIC_SHOWCASE, KIND_CLASSIC_SHOWCASE_RESULT,
     KIND_SELF_FEED_LEARN, KIND_SELF_FEED_LEARN_RESULT,
+    KIND_HEALTH_REPORT, KIND_HEALTH_REPORT_RESULT,
     KIND_TASK_ACK, KIND_TASK_CANCEL,
     KIND_TASK_STATUS, KIND_TASK_STATUS_RESULT,
 }
@@ -1002,6 +1005,8 @@ def dispatch_task(kind: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return execute_temporal_forecast(data)
     if kind == KIND_SELF_FEED_LEARN:
         return execute_self_feed_learn(data)
+    if kind == KIND_HEALTH_REPORT:
+        return {"ok": True, "task_id": data.get("task_id"), "report_kind": KIND_HEALTH_REPORT}
     return None
 
 
@@ -1020,5 +1025,6 @@ def result_kind_for(request_kind: str) -> str:
         KIND_PREDICT: KIND_PREDICT_RESULT,
         KIND_TEMPORAL_FORECAST: KIND_TEMPORAL_FORECAST_RESULT,
         KIND_SELF_FEED_LEARN: KIND_SELF_FEED_LEARN_RESULT,
+        KIND_HEALTH_REPORT: KIND_HEALTH_REPORT_RESULT,
         KIND_TASK_STATUS: KIND_TASK_STATUS_RESULT,
     }.get(request_kind, request_kind + "_result")

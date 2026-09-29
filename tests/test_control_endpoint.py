@@ -10,16 +10,10 @@ class FakeNode:
     node_id = "coordinator"
 
     def _load_state(self):
-        return {
-            "nodes": {
-                "mesh_node_05": {
-                    "host": "node-05.example",
-                    "port": 443,
-                    "status": "online",
-                    "public_key": "PUBLIC-KEY",
-                }
-            }
-        }
+        return {"nodes": {"mesh_node_05": {
+            "host": "node-05.example", "port": 443,
+            "status": "online", "public_key": "PUBLIC-KEY",
+        }}}
 
     def _public_key_for_id(self, node_id):
         return b"PUBLIC-KEY" if node_id == "mesh_node_05" else None
@@ -53,16 +47,43 @@ class ControlEndpointTests(unittest.TestCase):
 
     def test_dry_run_returns_safe_plan(self):
         status, body = self.call({
-            "task_id": "control-test-1",
-            "kind": "encrypted_rpc_roundtrip",
-            "targets": ["mesh_node_05"],
-            "parameters": {"text": "probe"},
+            "task_id": "control-test-1", "kind": "encrypted_rpc_roundtrip",
+            "targets": ["mesh_node_05"], "parameters": {"text": "probe"},
         })
         self.assertEqual(status, 200)
         self.assertTrue(body["ok"])
         self.assertEqual(body["mode"], "dry_run")
         self.assertTrue(body["plan"]["safety"]["allowlist"])
         self.assertEqual(body["plan"]["targets"][0]["id"], "mesh_node_05")
+
+    def test_health_and_forecast_dry_run_are_allowed(self):
+        status, body = self.call({
+            "kind": "mesh_health_report", "targets": ["mesh_node_05"], "dry_run": True,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(body["plan"]["kind"], "mesh_health_report")
+
+        status, body = self.call({
+            "kind": "forecast_consensus_benchmark", "targets": ["mesh_node_05"],
+            "parameters": {"series": [1, 2, 3, 4], "horizon": 2}, "dry_run": True,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(body["plan"]["kind"], "forecast_consensus_benchmark")
+
+    def test_forecast_parameters_are_bounded(self):
+        status, body = self.call({
+            "kind": "forecast_consensus_benchmark", "targets": ["mesh_node_05"],
+            "parameters": {"series": [1], "horizon": 2},
+        })
+        self.assertEqual(status, 400)
+        self.assertEqual(body["error"], "series_must_be_list_with_2_to_256_values")
+
+        status, body = self.call({
+            "kind": "forecast_consensus_benchmark", "targets": ["mesh_node_05"],
+            "parameters": {"series": [1, 2, 3], "horizon": 11},
+        })
+        self.assertEqual(status, 400)
+        self.assertEqual(body["error"], "horizon_must_be_between_1_and_10")
 
     def test_rejects_unknown_kind_and_unknown_target(self):
         status, body = self.call({"kind": "shell", "targets": ["mesh_node_05"]})
