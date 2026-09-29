@@ -149,9 +149,58 @@ class ServiceGeneratorEngine:
         self._generated: Dict[str, GeneratedServiceSpec] = {}
         self._generation_count = 0
         logger.info("ServiceGeneratorEngine initialised (Phase 5)")
+        # قبل هذا التعديل لم يكن أي شيء في المشروع يبني ServiceGeneratorEngine
+        # مع knowledge_store (core/mesh_bundle.py كانت تستدعي
+        # ServiceGeneratorEngine(governance=...) بلا knowledge_store إطلاقاً)،
+        # فكانت _persist_spec no-op دائماً (self._knowledge=None) رغم أنها
+        # مكتوبة بالكامل — كل مواصفة مولَّدة تختفي فوراً عند إعادة التشغيل.
+        # الآن، إن وُجد knowledge_store عند الإنشاء، نستعيد أيضاً كل مواصفة
+        # محفوظة من تشغيل سابق فوراً بدل البدء من صفر.
+        self._load_generated()
+
+    def _load_generated(self) -> None:
+        """يستعيد كل GeneratedServiceSpec محفوظة سابقاً عبر _persist_spec
+        (مفتاح 'generated_services' في knowledge_store) — بدون هذا، أي
+        إعادة تشغيل تُصفّر list_generated()/summary()/get_spec() تماماً
+        حتى لو كانت العُقد الحية نفسها مُستعادة فعلياً عبر
+        MeshBundle._restore_dynamic_nodes."""
+        if not self._knowledge:
+            return
+        try:
+            raw = self._knowledge.read_custom("generated_services")
+        except Exception:
+            return
+        if not isinstance(raw, dict):
+            return
+        restored = 0
+        for spec_id, d in raw.items():
+            try:
+                spec = GeneratedServiceSpec(
+                    name=d["name"],
+                    description=d.get("description", ""),
+                    capability=d.get("capability", ""),
+                    input_fields=d.get("input_fields", {}),
+                    output_fields=d.get("output_fields", {}),
+                    required_inputs=d.get("required_inputs", []),
+                    tags=d.get("tags", []),
+                    confidence=d.get("confidence", 0.0),
+                    gap_context=d.get("gap_context", {}),
+                    svc_type=d.get("svc_type", "transformer"),
+                )
+                spec.spec_id = d.get("spec_id", spec_id)
+                spec.created_at = d.get("created_at", spec.created_at)
+                spec.status = d.get("status", "proposed")
+                self._generated[spec.spec_id] = spec
+                restored += 1
+            except Exception as e:
+                logger.warning(f"ServiceGeneratorEngine: تعذّرت استعادة spec '{spec_id}': {e}")
+        if restored:
+            self._generation_count = max(self._generation_count, restored)
+            logger.info(f"ServiceGeneratorEngine: استُعيدت {restored} مواصفة مولَّدة من تشغيل سابق")
 
     def set_knowledge_store(self, ks):
         self._knowledge = ks
+        self._load_generated()
 
     def set_semantic_matcher(self, sm):
         self._semantic = sm

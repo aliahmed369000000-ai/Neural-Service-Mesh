@@ -272,7 +272,16 @@ class MeshBundle:
             graph=self.graph, memory_engine=self.memory_engine,
             scoring_engine=self.scoring_engine, knowledge_store=self.knowledge_store,
         )
-        self.service_generator = ServiceGeneratorEngine(governance=self.governance)
+        # ai/service_generator.py::ServiceGeneratorEngine كانت تُبنى بلا
+        # knowledge_store أيضاً (بحث منفصل عن الإصلاح أعلاه لـ
+        # CapabilityMarketplace) — _persist_spec() مكتوبة بالكامل لكنها كانت
+        # no-op دائماً، وبلا أي دالة استعادة مقابلة: كل GeneratedServiceSpec
+        # (بما فيها الحالة proposed/approved/rejected وسياق الفجوة) تختفي
+        # عند إعادة التشغيل رغم أن العُقد الحية نفسها تُستعاد فعلياً (إصلاح
+        # سابق). أضفت _load_generated() في service_generator.py نفسها.
+        self.service_generator = ServiceGeneratorEngine(
+            governance=self.governance, knowledge_store=self.knowledge_store,
+        )
 
         # ── ai/capability_marketplace.py::CapabilityMarketplace كانت تُبنى
         # بلا knowledge_store إطلاقاً (_persist() تصبح no-op دائماً رغم أنها
