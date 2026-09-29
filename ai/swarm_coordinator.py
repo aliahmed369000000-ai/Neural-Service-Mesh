@@ -388,6 +388,48 @@ class SwarmCoordinator:
             })
         return out
 
+    def list_abandoned(self, limit: int = 20) -> List[dict]:
+        """ملخصات أسرِبة تُخلّي عنها بعد محاولات استئناف فاشلة (انظر
+        MAX_RESUME_ATTEMPTS) — لتُعرض للمستخدم بدل أن تبقى مخفية للأبد."""
+        if not self._store:
+            return []
+        out = []
+        for cp in self._store.list_by_status("abandoned", limit=limit):
+            tasks = cp.get("tasks", [])
+            out.append({
+                "swarm_id": cp.get("swarm_id"),
+                "goal": cp.get("goal"),
+                "started_at": cp.get("started_at"),
+                "total_tasks": len(tasks),
+                "done_tasks": sum(1 for t in tasks if t.get("status") == "done"),
+                "resume_attempts": cp.get("resume_attempts", 0),
+            })
+        return out
+
+    def reactivate(self, swarm_id: str) -> bool:
+        """يعيد سرباً متخلّىً عنه إلى قائمة الاستئناف بعدّاد محاولات صفري
+        (قرار بشري صريح: مثلاً بعد إصلاح سبب الانهيار). لا يعمل إلا على
+        سرب بحالة 'abandoned'."""
+        if not self._store:
+            return False
+        cp = self._store.get_progress(swarm_id)
+        if not cp or cp.get("status") != "abandoned":
+            return False
+        cp["status"] = "running"
+        cp["resume_attempts"] = 0
+        return self._store.save_progress(cp)
+
+    def discard(self, swarm_id: str) -> bool:
+        """يحذف نقطة تفتيش سرب متخلّىً عنه نهائياً. لا يعمل إلا على سرب
+        بحالة 'abandoned' — لا يمكن بهذه الدالة حذف سرب متوقف قابل
+        للاستئناف أو يعمل الآن بالخطأ."""
+        if not self._store:
+            return False
+        cp = self._store.get_progress(swarm_id)
+        if not cp or cp.get("status") != "abandoned":
+            return False
+        return self._store.clear_progress(swarm_id)
+
     # ── Internals ─────────────────────────────────────────────────────────
 
     def _execute_tasks(

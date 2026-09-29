@@ -120,6 +120,32 @@ def render_swarm_studio():
                     if st.button("▶️ استئناف", key=f"swarm_resume_{_ri}_{_r['swarm_id']}"):
                         _resume_clicked_id = _r["swarm_id"]
 
+    # أسرِبة تُخلّي عنها بعد محاولات استئناف فاشلة متكررة — إعادة التفعيل أو
+    # الحذف قرار صريح من المستخدم فقط (لا شيء تلقائي).
+    try:
+        _abandoned = coordinator.list_abandoned()
+    except Exception:
+        _abandoned = []
+    if _abandoned:
+        with st.expander(f"🛑 أسرِبة متخلّى عنها ({len(_abandoned)})", expanded=False):
+            st.caption("فشل استئنافها عدة مرات (غالباً تُسبب انهيار العملية). أعد التفعيل فقط بعد معالجة السبب.")
+            for _ai, _a in enumerate(_abandoned):
+                _ac1, _ac2, _ac3 = st.columns([4, 1, 1])
+                with _ac1:
+                    st.markdown(
+                        f"**{_a['goal']}**  \n"
+                        f"`{_a['swarm_id']}` — {_a['done_tasks']}/{_a['total_tasks']} مهمة مكتملة "
+                        f"— {_a['resume_attempts']} محاولات استئناف"
+                    )
+                with _ac2:
+                    if st.button("🔁 إعادة تفعيل", key=f"swarm_react_{_ai}_{_a['swarm_id']}"):
+                        coordinator.reactivate(_a["swarm_id"])
+                        st.rerun()
+                with _ac3:
+                    if st.button("🗑️ حذف", key=f"swarm_discard_{_ai}_{_a['swarm_id']}"):
+                        coordinator.discard(_a["swarm_id"])
+                        st.rerun()
+
     if (st.button("🚀 نفّذ عبر السرب", type="primary", key="swarm_run") and goal.strip()) or _resume_clicked_id:
         data = {"content": extra_context.strip()} if extra_context.strip() else {}
         _swarm_skeleton_ph = st.empty()
