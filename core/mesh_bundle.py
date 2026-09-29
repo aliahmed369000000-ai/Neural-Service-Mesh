@@ -813,9 +813,31 @@ class MeshBundle:
         كان تعافيها ظاهراً فقط عبر /process لا عبر السرب.
 
         prev_states: لقطة من snapshot_node_states() قبل التنفيذ — لتمييز
-        انتقال حالة حقيقي عن تكرار نفس الحالة (راجع توثيق تلك الدالة)."""
+        انتقال حالة حقيقي عن تكرار نفس الحالة (راجع توثيق تلك الدالة).
+
+        نفس الملاحظة تنطبق أيضاً على ScoringEngine.record_run (يحدّث درجة
+        كل حافة src→tgt في المسار الفعلي) وMemoryEngine.learn_from_run
+        (ذاكرة مسار كامل + ذاكرة كل عقدة) — كلاهما مصمَّم أصلاً ليأخذ
+        run_result بنفس الشكل الذي يُنتجه ExecutionResult.to_dict() بالضبط
+        (نفس الحقول: path/steps/status/total_duration_ms)، وكانا يُستدعَيان
+        فقط من record_swarm_result (سطر run_result اليدوي المُصنَّع هناك)،
+        فلا يعرفان عن أي نتيجة /process شيئاً. لا أُقحِم هنا collective_memory
+        (تتوقّع نص "task" وagent_id لا معنى مباشراً لهما خارج AgentFactory)
+        ولا dna.snapshot (لقطة كاملة لكل الـregistry/scoring/memory — مكلفة
+        لتشغيلها على كل طلب /process بلا داعٍ حقيقي على هذا المستوى من
+        التفصيل) — كلاهما يستحق تقييماً منفصلاً إن لزم لاحقاً."""
         prev_states = prev_states or {}
         with self._lock:
+            run_dict = result.to_dict() if hasattr(result, "to_dict") else None
+            if run_dict:
+                try:
+                    self.scoring_engine.record_run(run_dict)
+                    self.memory_engine.learn_from_run(run_dict)
+                except Exception as e:
+                    logger.warning(
+                        "MeshBundle: scoring/memory learning after direct execution failed: %s", e
+                    )
+
             for step in getattr(result, "steps", []):
                 node_id = getattr(step, "node_id", None)
                 status = getattr(step, "status", None)
