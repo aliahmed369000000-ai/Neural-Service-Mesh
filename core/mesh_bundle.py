@@ -245,68 +245,19 @@ class MeshBundle:
             daemon=True,
         ).start()
 
-        # ── استئناف تلقائي لعُقد مسار ExecutionEngine (Phase 2) المتوقفة قسراً ──
-        # ExecutionEngine.resume_interrupted() (core/engine.py) كانت مكتوبة
-        # ومُختبَرة بالكامل، لكن ExecutionEngine نفسها تُبنى فقط داخل
-        # api_server.py::/process لكل طلب على حدة، ولا يوجد أي مكان يستدعي
-        # resume_interrupted() إطلاقاً — بالضبط نفس نمط 'مكتوب لكن غير
-        # مُسلَّك' في التعليقات أعلاه (KnowledgeStore، AIDecisionLayer،
-        # SQLiteStorage، list_resumable). الأثر العملي: عقدة توقفت قسراً
-        # وسط process() عبر /process (state='running' محفوظة فعلياً على
-        # القرص بفضل begin_execution) تبقى معلَّقة للأبد فعلياً، لأن لا شيء
-        # يفحص get_interrupted() سوى استدعاء يدوي غير موجود لا في الواجهة
-        # ولا في الخادم. هنا: محرك مؤقت بنفس registry/graph/storage
-        # المشتركة (self.registry فيه بالفعل كل عُقد الأدوار/الأدوات بعد
-        # _register_roles/_register_mcp_tools أعلاه، بنفس node_id المستعاد)
-        # يفحص وجود أي توقف قسري سابق ويستأنفه فوراً عند كل إقلاع.
-        try:
-            engine = ExecutionEngine(
-                self.registry, self.graph, self.storage,
-                db=self.exec_log, ai=self.ai_decision,
-            )
-            resumed_results = engine.resume_interrupted()
-            for r in resumed_results:
-                logger.info(
-                    "MeshBundle: استؤنفت عقدة توقفت قسراً — run_id=%s status=%s",
-                    r.run_id, r.status,
-                )
-        except Exception as exc:
-            logger.warning("MeshBundle: تعذّر فحص العُقد المتوقفة قسراً: %s", exc)
-
-        # ── استئناف تلقائي لمهام صناعة المحتوى الخلفية المتوقفة قسراً ─────────
-        # ai/content_job_manager.py: ContentJobManager كانت بالكامل في
-        # الذاكرة فقط (self._jobs) — أي توقف مفاجئ للعملية (crash/redeploy/
-        # OOM) أثناء تنفيذ run_content_pipeline() في خيط خلفية كان يفقد
-        # المهمة بالكامل بلا أي أثر، فضلاً عن استئنافها. الآن (بعد ربط
-        # SQLite في content_job_manager.py) تُستأنف أي مهمة بقيت 'running'
-        # من عملية سابقة بنفس kwargs المحفوظة ونفس job_id، فور إقلاع
-        # MeshBundle، بنفس نمط استئناف الأسرِبة/عُقد ExecutionEngine أعلاه.
-        try:
-            from ai.content_job_manager import get_content_job_manager
-            resumed_jobs = get_content_job_manager().resume_interrupted()
-            for jid in resumed_jobs:
-                logger.info("MeshBundle: استُؤنفت مهمة محتوى متوقفة #%s", jid)
-        except Exception as exc:
-            logger.warning("MeshBundle: تعذّر فحص مهام المحتوى المتوقفة: %s", exc)
-
-        # ── استئناف تلقائي لمهام محرر الفيديو الخلفية المتوقفة قسراً ──────────
-        # ai/video_job_manager.py: كانت هذه بالضبط الفجوة المتروكة عمداً في
-        # كوميت 74826ee (نفس علّة ContentJobManager، لكن fn هناك عشوائية —
-        # أي دالة من ai/video_editor.py، غير قابلة للتسلسل مباشرة). الحل الذي
-        # طُبِّق لاحقاً في video_job_manager.py: تخزين (op_name, kwargs) بدل
-        # fn نفسها، حيث op_name اسم قابل لإعادة الاستيراد فقط لدوال
-        # ai/video_editor.py المعروفة. هنا فقط الربط عند الإقلاع — بنفس نمط
-        # استئناف مهام المحتوى أعلاه بالضبط. مهام برفع دقة/تحسين ذكي طويلة
-        # توقفت وسط ffmpeg تُستأنف من جديد بنفس kwargs (نفس مسار الملف
-        # المؤقت)؛ لو لم يعد الملف موجوداً (حاوية أُعيد بناؤها بالكامل)،
-        # تفشل المهمة بخطأ واضح بدل تجميد أي شيء — best-effort دائماً.
-        try:
-            from ai.video_job_manager import get_video_job_manager
-            resumed_video_jobs = get_video_job_manager().resume_interrupted()
-            for jid in resumed_video_jobs:
-                logger.info("MeshBundle: استُؤنفت مهمة فيديو متوقفة #%s", jid)
-        except Exception as exc:
-            logger.warning("MeshBundle: تعذّر فحص مهام الفيديو المتوقفة: %s", exc)
+        # ── استئناف تلقائي لعُقد ExecutionEngine + مهام المحتوى/الفيديو المتوقفة
+        # قسراً — في نفس خيط _auto_resume_swarms الخلفي أدناه، وليس هنا في
+        # __init__ نفسه. قبل هذا كانت الثلاثة تُستدعى متزامنة هنا مباشرة:
+        # ExecutionEngine.resume_interrupted() ومهام محتوى/فيديو متوقفة قد
+        # تشمل استدعاءات LLM أو ffmpeg طويلة فعلياً (دقائق لكل عنصر) — نفس
+        # علّة "استئناف الأسرِبة يحجز إقلاع الحزمة" التي أُصلحت سابقاً
+        # بنقلها لخيط daemon، لكن هذه الثلاثة أُضيفت لاحقاً بنفس التعليق
+        # ("بنفس نمط استئناف الأسرِبة") دون أن تُنقَل فعلياً إلى الخيط —
+        # التعليق وصف النية، والتنفيذ بقي متزامناً في __init__.
+        threading.Thread(
+            target=self._auto_resume_engine_and_jobs, name="nsm-jobs-auto-resume",
+            daemon=True,
+        ).start()
 
         # ── التطوّر الذاتي الحقيقي (Phase 5/7): GapDetector → ServiceGenerator
         # → AIGovernanceLayer → تسجيل عقدة جديدة فعلياً في الـregistry نفسه ──
@@ -474,6 +425,41 @@ class MeshBundle:
         return node_id
 
     # ── تسجيل كل الأدوار الموجودة في الكتالوج كعُقد حقيقية داخل الـregistry ──
+    def _auto_resume_engine_and_jobs(self) -> None:
+        """يستأنف عُقد ExecutionEngine المتوقفة قسراً ومهام المحتوى/الفيديو
+        الخلفية — في خيط daemon (انظر التعليق في __init__)، بنفس منطق
+        الكتلة الأصلية حرفياً، فقط بلا حجب إقلاع الحزمة. لا يرفع استثناءً
+        أبداً؛ كل قسم معزول بـtry/except خاص كما كان."""
+        try:
+            engine = ExecutionEngine(
+                self.registry, self.graph, self.storage,
+                db=self.exec_log, ai=self.ai_decision,
+            )
+            resumed_results = engine.resume_interrupted()
+            for r in resumed_results:
+                logger.info(
+                    "MeshBundle: استؤنفت عقدة توقفت قسراً — run_id=%s status=%s",
+                    r.run_id, r.status,
+                )
+        except Exception as exc:
+            logger.warning("MeshBundle: تعذّر فحص العُقد المتوقفة قسراً: %s", exc)
+
+        try:
+            from ai.content_job_manager import get_content_job_manager
+            resumed_jobs = get_content_job_manager().resume_interrupted()
+            for jid in resumed_jobs:
+                logger.info("MeshBundle: استُؤنفت مهمة محتوى متوقفة #%s", jid)
+        except Exception as exc:
+            logger.warning("MeshBundle: تعذّر فحص مهام المحتوى المتوقفة: %s", exc)
+
+        try:
+            from ai.video_job_manager import get_video_job_manager
+            resumed_video_jobs = get_video_job_manager().resume_interrupted()
+            for jid in resumed_video_jobs:
+                logger.info("MeshBundle: استُؤنفت مهمة فيديو متوقفة #%s", jid)
+        except Exception as exc:
+            logger.warning("MeshBundle: تعذّر فحص مهام الفيديو المتوقفة: %s", exc)
+
     def _auto_resume_swarms(self) -> None:
         """يستأنف الأسرِبة المتوقفة (يُشغَّل في خيط خلفي عند الإقلاع). لا يرفع
         استثناءً أبداً؛ list_resumable/resume يتجاوزان أي سرب حي حالياً."""
