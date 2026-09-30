@@ -882,8 +882,13 @@ class MeshBundle:
                 exec_result = engine.run_path(plan.resolved_path, data or {})
                 result_dict = exec_result.to_dict()
                 plan.status = result_dict.get("status", "completed")
+                # نفس إصلاح المرجع الدائري في MultiGoalPlanner.execute_plan
+                # أعلاه بالضبط: التقط النسخة قبل تعيين plan.result كي لا
+                # تحتوي result_dict["multi_goal_plan"]["result"] على
+                # result_dict نفسه.
+                plan_snapshot = plan.to_dict()
                 plan.result = result_dict
-                result_dict["multi_goal_plan"] = plan.to_dict()
+                result_dict["multi_goal_plan"] = plan_snapshot
 
             sg_capability_by_node = {
                 sg.resolved_node_id: sg.capability

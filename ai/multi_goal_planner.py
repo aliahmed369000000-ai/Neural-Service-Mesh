@@ -336,8 +336,17 @@ class MultiGoalPlanner:
             result = engine.run_path(plan.resolved_path, data)
             result_dict = result.to_dict()
             plan.status = result_dict.get("status", "completed")
+            # snapshot ملتقَط قبل تعيين plan.result أدناه: to_dict() تُدرج
+            # self.result (سطر MultiGoalPlan.to_dict) — لو التُقط بعد
+            # التعيين، ستحتوي result_dict["multi_goal_plan"]["result"] على
+            # result_dict نفسه (مرجع دائري)، فأي تسلسل JSON حقيقي (مثل
+            # FastAPI jsonable_encoder) يدخل في RecursionError لا نهائي
+            # بدلاً من إرجاع استجابة. plan.result تظل تُضبَط بالقيمة الكاملة
+            # لأغراض أخرى (recent_plans/summary)، لكن النسخة المُضمَّنة هنا
+            # في نتيجة هذا التنفيذ بالذات تبقى بلا دائرية.
+            plan_snapshot = plan.to_dict()
             plan.result = result_dict
-            result_dict["multi_goal_plan"] = plan.to_dict()
+            result_dict["multi_goal_plan"] = plan_snapshot
             return result_dict
         except Exception as e:
             plan.status = "failed"
