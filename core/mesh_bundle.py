@@ -175,6 +175,20 @@ class MeshBundle:
         # بقية المحركات (discovery/memory/optimization/routing) لا تزال
         # تنتظر نفس السلك في مهمة لاحقة.
         self.knowledge_store = KnowledgeStore(knowledge_dir=str(Path(storage_dir) / "knowledge"))
+        # MemoryEngine نفسها لديها تخزينها الأساسي عبر SQLite (self._load()
+        # أعلاه) وتعمل صحيحة بدونه، لكن set_knowledge_store() هنا يُفعِّل
+        # تصديرها التكميلي الحقيقي (upsert_route/append_route_execution/
+        # update_node_execution_stats/promote_route/demote_route — كلها
+        # مكتوبة بالكامل في ai/memory_engine.py) إلى knowledge/route_memory.json
+        # وknowledge/node_profiles.json. بلا هذا السطر: self._knowledge=None
+        # في MemoryEngine (تحقّقت — لا مكان آخر يستدعي set_knowledge_store
+        # لها)، فتبقى هذه الملفات بمخططها الافتراضي الفارغ للأبد رغم أن
+        # ai/routing_engine.py مصمَّم صراحة ليقرأ منها فعلياً (بحسب
+        # docstring الملف: "Reads best routes from knowledge/route_memory.json
+        # via KnowledgeStore") — طبقة اكتشاف المسارات الجاهزة تبقى بلا أي
+        # بيانات حقيقية تقرأها رغم أن MemoryEngine تراكم مسارات فعلية طوال
+        # الوقت في SQLite.
+        self.memory_engine.set_knowledge_store(self.knowledge_store)
 
         # storage/db.py::SQLiteStorage كان مكتوباً بالكامل (جداول nodes/
         # connections/execution_logs) لكن لم يُبنَ (instantiate) في أي مكان
