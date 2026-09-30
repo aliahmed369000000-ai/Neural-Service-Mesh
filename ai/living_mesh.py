@@ -33,6 +33,7 @@ from ai.capability_attestation import collect_capabilities
 from typing import Any, Dict, List, Optional, Set
 from ai import mesh_task_protocol as mesh_tasks
 from ai.forecast_consensus import aggregate_forecasts, merge_forecast_memory
+from ai.e2e_crypto import encrypt_payload, decrypt_payload
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization
@@ -71,6 +72,8 @@ ALLOWED_TASK_CAPABILITIES = {
     "search_chunk": {"text", "CPU", "tf_engine"},
     "web_fetch": {"text", "CPU", "web", "tf_engine"},
     "predict": {"text", "CPU", "tf_engine"},
+    "self_feed_learn": {"text", "CPU", "web", "tf_engine"},
+    "mesh_health_report": {"CPU", "GPU_LOW", "GPU_HIGH", "tf_engine"},
 }
 
 class LivingMeshNode:
@@ -503,6 +506,38 @@ class LivingMeshNode:
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         ).decode()
 
+    def _peer_key_path(self, peer_id: str) -> Path:
+        return self.keys_dir / f"{peer_id}.pub"
+
+    def _public_key_for_endpoint(self, host: str, port: int):
+        state = self._load_state()
+        for peer_id, info in (state.get("nodes") or {}).items():
+            if info.get("host") == host and int(info.get("port") or -1) == int(port):
+                path = self._peer_key_path(peer_id)
+                if path.exists():
+                    return peer_id, path.read_bytes()
+                pem = info.get("public_key")
+                if pem:
+                    path.write_text(pem); return peer_id, pem.encode()
+        return None
+
+    def _public_key_for_id(self, peer_id: str):
+        if not peer_id: return None
+        path = self._peer_key_path(peer_id)
+        if path.exists(): return path.read_bytes()
+        info = (self._load_state().get("nodes") or {}).get(peer_id) or {}
+        pem = info.get("public_key")
+        if pem:
+            path.write_text(pem); return pem.encode()
+        return None
+
+    def _build_signed_response(self, kind: str, data: Dict[str, Any], recipient_id: str = None, encrypt: bool = True) -> str:
+        return self._build_signed_payload(kind, data, recipient_id=recipient_id, encrypt=encrypt, message_prefix="resp")
+
+    async def _send_signed_message(self, websocket, message: str) -> None:
+        if hasattr(websocket, "send_str"): await websocket.send_str(message)
+        else: await websocket.send(message)
+
     def sign_message(self, message: str) -> str:
         signature = self.private_key.sign(
             message.encode(),
@@ -703,6 +738,17 @@ class LivingMeshNode:
             
             kind = payload.get("kind")
             exp_data = payload.get("data")
+            bootstrap = kind in {"peer_discovery_request", "peer_discovery_response", "ping_request", "ping_response"}
+            if not bootstrap:
+                envelope = (exp_data or {}).get("e2e") if isinstance(exp_data, dict) else None
+                if not envelope:
+                    logger.warning("🚫 Non-bootstrap message without E2E envelope from %s", sender_id)
+                    return
+                try:
+                    exp_data = decrypt_payload(envelope, self.private_key)
+                except Exception as exc:
+                    logger.warning("🚫 E2E decryption failed from %s: %s", sender_id, exc)
+                    return
             hops = payload.get("p2p_hops", 0)
             
             if kind == "peer_discovery_request" and websocket is not None:
@@ -790,12 +836,8 @@ class LivingMeshNode:
                             "from": self.node_id,
                             "timestamp": datetime.now(timezone.utc).isoformat(),
                         }
-                        sig = self.sign_message(json.dumps(resp_payload, sort_keys=True))
-                        msg = json.dumps({"payload": resp_payload, "signature": sig})
-                        if hasattr(websocket, "send_str"):
-                            await websocket.send_str(msg)
-                        else:
-                            await websocket.send(msg)
+                        msg = self._build_signed_response("tool_result", tool_res, recipient_id=sender_id)
+                        await self._send_signed_message(websocket, msg)
                     except Exception as e:
                         logger.error(f"❌ Failed to send tool_result: {e}")
             elif kind == FORECAST_SHARE_KIND:
@@ -977,27 +1019,19 @@ class LivingMeshNode:
             return f"{scheme}://{host}/ws"
         return f"{scheme}://{host}:{port}/ws"
 
-    def _build_signed_payload(self, kind: str, data: Dict[str, Any], hops: int = 0) -> str:
-        """يبني حمولة موقّعة وفق بروتوكول v1.1 (request_id + nonce + version + timestamp).
-        يُرفق public_key داخل data إن لم يوجد حتى تتعرّف العقد الجديدة على المرسل.
-        """
+    def _build_signed_payload(self, kind: str, data: Dict[str, Any], hops: int = 0, recipient_id: str = None, recipient_public_key: bytes = None, encrypt: bool = True, message_prefix: str = "msg") -> str:
+        """Build a signed message; non-bootstrap payloads are encrypted end-to-end."""
         now = datetime.now(timezone.utc)
-        request_id = f"req_{uuid.uuid4().hex}"
-        nonce = uuid.uuid4().hex
         data = dict(data or {})
-        data.setdefault("public_key", self._pub_pem())
-        payload = {
-            "protocol_version": PROTOCOL_VERSION,
-            "id": f"msg_{uuid.uuid4().hex[:8]}",
-            "request_id": request_id,
-            "nonce": nonce,
-            "kind": kind,
-            "data": data,
-            "from": self.node_id,
-            "p2p_hops": hops,
-            "timestamp": now.isoformat(),
-            "ts_unix": int(now.timestamp()),
-        }
+        bootstrap = kind in {"peer_discovery_request", "peer_discovery_response", "ping_request", "ping_response"}
+        if not bootstrap and encrypt:
+            recipient_public_key = recipient_public_key or self._public_key_for_id(recipient_id)
+            if recipient_public_key is None:
+                raise ValueError(f"no exchanged public key for recipient {recipient_id or 'endpoint'}")
+            data = {"e2e": encrypt_payload(data, recipient_public_key)}
+        elif bootstrap:
+            data.setdefault("public_key", self._pub_pem())
+        payload = {"protocol_version": PROTOCOL_VERSION, "id": f"{message_prefix}_{uuid.uuid4().hex[:8]}", "request_id": f"req_{uuid.uuid4().hex}", "nonce": uuid.uuid4().hex, "kind": kind, "data": data, "from": self.node_id, "p2p_hops": hops, "timestamp": now.isoformat(), "ts_unix": int(now.timestamp())}
         sig = self.sign_message(json.dumps(payload, sort_keys=True))
         return json.dumps({"payload": payload, "signature": sig})
 
@@ -1068,7 +1102,11 @@ class LivingMeshNode:
         يُرجع True عند نجاح الإرسال، False عند الفشل (لا يُعتبر الفشل نجاحاً صامتاً).
         """
         url = self._peer_ws_url(host, port)
-        msg = self._build_signed_payload(kind, data, hops=hops)
+        peer = self._public_key_for_endpoint(host, port)
+        if kind not in {"peer_discovery_request", "peer_discovery_response", "ping_request", "ping_response"} and peer is None:
+            logger.error("❌ Cannot send encrypted message: peer key not exchanged for %s:%s", host, port)
+            return False
+        msg = self._build_signed_payload(kind, data, hops=hops, recipient_id=peer[0] if peer else None, recipient_public_key=peer[1] if peer else None)
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.ws_connect(url, timeout=10) as ws:
@@ -1101,7 +1139,10 @@ class LivingMeshNode:
             expect_result_kind = mesh_tasks.result_kind_for(kind)
 
         url = self._peer_ws_url(host, port)
-        msg = self._build_signed_payload(kind, data, hops=hops)
+        peer = self._public_key_for_endpoint(host, port)
+        if kind not in {"peer_discovery_request", "peer_discovery_response", "ping_request", "ping_response"} and peer is None:
+            return {"ok": False, "mode": "rpc", "task_id": task_id, "host": host, "port": port, "acked": False, "result": None, "error": "peer_key_not_exchanged"}
+        msg = self._build_signed_payload(kind, data, hops=hops, recipient_id=peer[0] if peer else None, recipient_public_key=peer[1] if peer else None)
         out: Dict[str, Any] = {
             "ok": False,
             "mode": "rpc",
@@ -1139,7 +1180,18 @@ class LivingMeshNode:
                             continue
                         payload = raw.get("payload") or raw
                         rkind = payload.get("kind")
+                        sender = payload.get("from")
+                        signature = raw.get("signature")
+                        sender_key = self._public_key_for_id(sender)
+                        if sender_key is None or not signature or not self.verify_signature(sender_key, json.dumps(payload, sort_keys=True), signature):
+                            continue
                         rdata = payload.get("data") or {}
+                        if rkind not in {"peer_discovery_request", "peer_discovery_response", "ping_request", "ping_response"}:
+                            try:
+                                rdata = decrypt_payload(rdata["e2e"], self.private_key)
+                                payload = dict(payload); payload["data"] = rdata
+                            except Exception:
+                                continue
                         r_task = rdata.get("task_id")
 
                         if rkind == mesh_tasks.KIND_TASK_ACK:
@@ -1655,6 +1707,7 @@ class LivingMeshNode:
         *,
         kind: str,
         task_id: str,
+        recipient_id: str = None,
         ok: bool,
         error: str = None,
         status: str = None,
@@ -1681,12 +1734,8 @@ class LivingMeshNode:
                 "from": self.node_id,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-            sig = self.sign_message(json.dumps(resp_payload, sort_keys=True))
-            msg = json.dumps({"payload": resp_payload, "signature": sig})
-            if hasattr(websocket, "send_str"):
-                await websocket.send_str(msg)
-            else:
-                await websocket.send(msg)
+            msg = self._build_signed_response(resp_payload["kind"], resp_payload["data"], recipient_id=recipient_id)
+            await self._send_signed_message(websocket, msg)
         except Exception as e:
             logger.warning(f"⚠️ _reply_task_outcome failed id={task_id}: {e}")
 
@@ -1770,6 +1819,7 @@ class LivingMeshNode:
                 websocket,
                 kind=kind,
                 task_id=task_id,
+                recipient_id=sender_id,
                 ok=False,
                 error="duplicate_rejected",
                 status=mesh_tasks.TASK_STATUS_DUPLICATE,
@@ -1782,6 +1832,7 @@ class LivingMeshNode:
                 websocket,
                 kind=kind,
                 task_id=task_id,
+                recipient_id=sender_id,
                 ok=False,
                 error="task_cancelled",
                 status=mesh_tasks.TASK_STATUS_CANCELLED,
@@ -1802,6 +1853,7 @@ class LivingMeshNode:
                     websocket,
                     kind=kind,
                     task_id=task_id,
+                    recipient_id=sender_id,
                     ok=False,
                     error="missing_capabilities",
                     status=mesh_tasks.TASK_STATUS_FAILED,
@@ -1825,12 +1877,8 @@ class LivingMeshNode:
                     "from": self.node_id,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
-                sig = self.sign_message(json.dumps(ack_payload, sort_keys=True))
-                ack_msg = json.dumps({"payload": ack_payload, "signature": sig})
-                if hasattr(websocket, "send_str"):
-                    await websocket.send_str(ack_msg)
-                else:
-                    await websocket.send(ack_msg)
+                ack_msg = self._build_signed_response(ack_payload["kind"], ack_payload["data"], recipient_id=sender_id)
+                await self._send_signed_message(websocket, ack_msg)
                 self._metrics["tasks_acked"] += 1
             except Exception as e:
                 logger.debug(f"task_ack send skipped: {e}")
@@ -1841,7 +1889,11 @@ class LivingMeshNode:
             return
 
         try:
-            result = mesh_tasks.dispatch_task(kind, exp_data or {})
+            if kind == mesh_tasks.KIND_HEALTH_REPORT:
+                result = self.network_health_snapshot()
+                result.update({"ok": True, "task_id": task_id, "report_kind": kind})
+            else:
+                result = mesh_tasks.dispatch_task(kind, exp_data or {})
         except Exception as e:
             err = f"{type(e).__name__}: {e}"
             logger.error(f"❌ Mesh task execution error kind={kind} id={task_id}: {err}")
@@ -1884,12 +1936,8 @@ class LivingMeshNode:
                     "from": self.node_id,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
-                sig = self.sign_message(json.dumps(resp_payload, sort_keys=True))
-                msg = json.dumps({"payload": resp_payload, "signature": sig})
-                if hasattr(websocket, "send_str"):
-                    await websocket.send_str(msg)
-                else:
-                    await websocket.send(msg)
+                msg = self._build_signed_response(resp_payload["kind"], resp_payload["data"], recipient_id=sender_id)
+                await self._send_signed_message(websocket, msg)
                 return
             except Exception as e:
                 logger.warning(f"⚠️ Could not reply on same WS: {e}")
@@ -2134,12 +2182,8 @@ class LivingMeshNode:
                     "from": self.node_id,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
-                sig = self.sign_message(json.dumps(resp_payload, sort_keys=True))
-                msg = json.dumps({"payload": resp_payload, "signature": sig})
-                if hasattr(websocket, "send_str"):
-                    await websocket.send_str(msg)
-                else:
-                    await websocket.send(msg)
+                msg = self._build_signed_response(resp_payload["kind"], resp_payload["data"], recipient_id=sender_id)
+                await self._send_signed_message(websocket, msg)
                 return
             except Exception as e:
                 logger.warning(f"⚠️ storage WS reply failed: {e}")

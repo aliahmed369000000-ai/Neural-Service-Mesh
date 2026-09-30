@@ -3,7 +3,8 @@ import json
 import logging
 import os
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
+import threading
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -14,6 +15,9 @@ class FileStorage:
     def __init__(self, storage_dir: str = "./data"):
         self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
+        # يُسلسل الكتابات على نفس الملف داخل العملية: كتابتان متزامنتان من
+        # خيطين كانتا تنتهيان بأن يفوز الأبطأ بلقطة أقدم (last-writer-wins).
+        self._lock = threading.RLock()
         logger.info(f"FileStorage: {self.storage_dir.resolve()}")
 
     def save(self, filename: str, data: Any) -> bool:
@@ -37,7 +41,9 @@ class FileStorage:
                 json.dump(data, f, ensure_ascii=False, indent=2, default=str)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(tmp_path, target)
+            with self._lock:
+                self._keep_backup(target)
+                os.replace(tmp_path, target)
             return True
         except Exception as e:
             logger.error(f"save failed '{filename}': {e}")
@@ -48,16 +54,54 @@ class FileStorage:
                     pass
             return False
 
+    @staticmethod
+    def _backup_path(target: Path) -> Path:
+        return target.with_name(target.name + ".bak")
+
+    def _keep_backup(self, target: Path) -> None:
+        """يحتفظ بآخر نسخة سليمة معروفة كـ <name>.bak عبر hard link (بلا نسخ
+        بيانات) قبل استبدال الملف — best-effort، فشله لا يمنع الحفظ."""
+        if not target.exists():
+            return
+        bak = self._backup_path(target)
+        try:
+            bak.unlink(missing_ok=True)
+            os.link(target, bak)
+        except Exception:
+            pass
+
+    def _read_json(self, p: Path) -> Any:
+        with open(p, "r", encoding="utf-8") as f:
+            return json.load(f)
+
     def load(self, filename: str) -> Optional[Any]:
+        """عند تلف الملف (JSON غير صالح) لا يُهمَل بصمت: يُنقل كما هو إلى
+        <name>.corrupt-<وقت> (حتى لا تكتب أول save لاحقة فوق الدليل وتضيع
+        بياناته للأبد)، ثم تُجرَّب آخر نسخة سليمة <name>.bak. قبل هذا كان
+        الفشل يرجع None فيبدأ NodeRegistry/reputation فارغاً ثم تمحو أول
+        save كل تاريخ العُقد المحفوظ."""
         p = self._path(filename)
         if not p.exists():
             return None
         try:
-            with open(p, "r", encoding="utf-8") as f:
-                return json.load(f)
+            return self._read_json(p)
         except Exception as e:
             logger.error(f"load failed '{filename}': {e}")
-            return None
+        with self._lock:
+            try:
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+                p.replace(p.with_name(f"{p.name}.corrupt-{stamp}"))
+            except Exception as e2:
+                logger.error(f"تعذّر حفظ الملف التالف '{filename}': {e2}")
+        bak = self._backup_path(p)
+        if bak.exists():
+            try:
+                data = self._read_json(bak)
+                logger.warning(f"'{filename}' استُعيد من النسخة الاحتياطية .bak")
+                return data
+            except Exception as e3:
+                logger.error(f"النسخة الاحتياطية '{filename}.bak' تالفة أيضاً: {e3}")
+        return None
 
     def delete(self, filename: str) -> bool:
         p = self._path(filename)

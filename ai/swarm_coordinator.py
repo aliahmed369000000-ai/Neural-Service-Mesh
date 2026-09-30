@@ -105,6 +105,9 @@ class SwarmResult:
         self.merged_output: Optional[dict] = None
         self.debates: List[dict] = []
         self.status = "running"
+        # عدد مرات استئناف هذا السرب بعد توقف (يُحفظ مع نقطة التفتيش) — يمنع
+        # حلقة انهيار: سرب يقتل العملية كل مرة يُستأنف عند الإقلاع.
+        self.resume_attempts = 0
 
     @property
     def success_count(self):
@@ -132,6 +135,7 @@ class SwarmResult:
             "merged_output": self.merged_output,
             "tasks": [t.to_dict() for t in self.tasks],
             "debates": self.debates,
+            "resume_attempts": self.resume_attempts,
         }
 
     @classmethod
@@ -143,6 +147,7 @@ class SwarmResult:
         result.started_at = d.get("started_at") or result.started_at
         result.tasks = [SwarmTask.from_dict(t) for t in d.get("tasks", [])]
         result.debates = d.get("debates", [])
+        result.resume_attempts = int(d.get("resume_attempts") or 0)
         return result
 
 
@@ -199,17 +204,37 @@ class SwarmCoordinator:
         "monitor":   ["monitor", "راقب", "مراقبة", "رصد", "تتبع", "تتبّع"],
     }
 
+    # أقصى عدد استئنافات لنفس السرب قبل التخلي عنه (status='abandoned').
+    MAX_RESUME_ATTEMPTS = 3
+
     def __init__(
         self,
         factory: AgentFactory,
         max_agents: int = 20,
         knowledge_store=None,
+        is_role_quarantined: Optional[Callable[[str], bool]] = None,
     ):
         self._factory = factory
         self._max_agents = max_agents
         self._knowledge = knowledge_store
+        # 🆕 دالة فحص اختيارية (عادة MeshBundle._is_role_quarantined) تُرجع
+        # True لو كان الدور محجوراً حالياً بسبب سمعة منخفضة. بدونها (كل
+        # الاستدعاءات القديمة/الاختبارات التي لا تمرّرها) لا تغيير في
+        # السلوك إطلاقاً. بوجودها: _pick_agent() يستبعد الأدوار المحجورة
+        # فعلياً — قبل هذا كان الحجر (BaseNode.state=paused في الـregistry
+        # + NodeReputation.is_quarantined) يوقف عقدة رمزية منفصلة تماماً
+        # بينما best_agent_for()/_auto_spawn_for_capability() يستمران في
+        # توجيه مهام حقيقية جديدة لنفس الدور المحجور دون أي علم بذلك —
+        # الحجر لم يكن يمنع تنفيذاً واحداً فعلياً.
+        self._is_role_quarantined = is_role_quarantined
         self._history: List[SwarmResult] = []
         self._lock = threading.Lock()
+        # معرّفات الأسرِبة التي تعمل الآن داخل هذه العملية. سرب يعمل فعلاً
+        # يبقى في swarm_progress بحالة 'running' (كأي سرب انهارت عمليته)،
+        # فبدونها كان list_resumable()/resume() يعرضانه ويستأنفانه مرة
+        # ثانية — تنفيذ مزدوج لنفس المهام (جلسة Streamlit ثانية تضغط زر
+        # الاستئناف، أو إعادة بناء الحزمة أثناء سرب حي).
+        self._active_swarm_ids: set = set()
         # 🆕 تخزين دائم لنتائج السرب (SQLite) — self._history وحدها كانت
         # في الذاكرة فقط وتُمسح بإعادة تشغيل الحاوية. انظر ai/swarm_history_store.py
         try:
@@ -310,7 +335,26 @@ class SwarmCoordinator:
             logger.warning(f"SwarmCoordinator.resume: لا نقطة تفتيش لـ {swarm_id}")
             return None
 
+        with self._lock:
+            if swarm_id in self._active_swarm_ids:
+                logger.warning(f"SwarmCoordinator.resume: {swarm_id} يعمل الآن — لا استئناف مزدوج")
+                return None
+
         result = SwarmResult.from_checkpoint(checkpoint)
+        if result.resume_attempts >= self.MAX_RESUME_ATTEMPTS:
+            # سرب استُؤنف مراراً ولم يصل للنهاية (غالباً يقتل العملية) — نتخلى
+            # عنه بدل حلقة انهيار عند كل إقلاع. يبقى في swarm_progress
+            # بحالة 'abandoned' للفحص اليدوي، ولا يظهر في list_resumable.
+            checkpoint["status"] = "abandoned"
+            self._store.save_progress(checkpoint)
+            logger.error(
+                f"Swarm {swarm_id} تُخلّي عنه بعد {result.resume_attempts} "
+                f"محاولات استئناف فاشلة"
+            )
+            return None
+        # يُحفظ العدّاد المرفوع في أول نقطة تفتيش داخل _execute_tasks_inner
+        # قبل تنفيذ أي مهمة، فيبقى حتى لو مات الإجراء أثناء هذا الاستئناف.
+        result.resume_attempts += 1
         tasks = result.tasks
         already_done = sum(1 for t in tasks if t.status == "done")
         logger.info(
@@ -329,7 +373,11 @@ class SwarmCoordinator:
         if not self._store:
             return []
         out = []
+        with self._lock:
+            active = set(self._active_swarm_ids)
         for cp in self._store.list_incomplete(limit=limit):
+            if cp.get("swarm_id") in active:
+                continue  # يعمل الآن في هذه العملية — ليس متوقفاً
             tasks = cp.get("tasks", [])
             out.append({
                 "swarm_id": cp.get("swarm_id"),
@@ -340,9 +388,75 @@ class SwarmCoordinator:
             })
         return out
 
+    def list_abandoned(self, limit: int = 20) -> List[dict]:
+        """ملخصات أسرِبة تُخلّي عنها بعد محاولات استئناف فاشلة (انظر
+        MAX_RESUME_ATTEMPTS) — لتُعرض للمستخدم بدل أن تبقى مخفية للأبد."""
+        if not self._store:
+            return []
+        out = []
+        for cp in self._store.list_by_status("abandoned", limit=limit):
+            tasks = cp.get("tasks", [])
+            out.append({
+                "swarm_id": cp.get("swarm_id"),
+                "goal": cp.get("goal"),
+                "started_at": cp.get("started_at"),
+                "total_tasks": len(tasks),
+                "done_tasks": sum(1 for t in tasks if t.get("status") == "done"),
+                "resume_attempts": cp.get("resume_attempts", 0),
+            })
+        return out
+
+    def reactivate(self, swarm_id: str) -> bool:
+        """يعيد سرباً متخلّىً عنه إلى قائمة الاستئناف بعدّاد محاولات صفري
+        (قرار بشري صريح: مثلاً بعد إصلاح سبب الانهيار). لا يعمل إلا على
+        سرب بحالة 'abandoned'."""
+        if not self._store:
+            return False
+        cp = self._store.get_progress(swarm_id)
+        if not cp or cp.get("status") != "abandoned":
+            return False
+        cp["status"] = "running"
+        cp["resume_attempts"] = 0
+        return self._store.save_progress(cp)
+
+    def discard(self, swarm_id: str) -> bool:
+        """يحذف نقطة تفتيش سرب متخلّىً عنه نهائياً. لا يعمل إلا على سرب
+        بحالة 'abandoned' — لا يمكن بهذه الدالة حذف سرب متوقف قابل
+        للاستئناف أو يعمل الآن بالخطأ."""
+        if not self._store:
+            return False
+        cp = self._store.get_progress(swarm_id)
+        if not cp or cp.get("status") != "abandoned":
+            return False
+        return self._store.clear_progress(swarm_id)
+
     # ── Internals ─────────────────────────────────────────────────────────
 
     def _execute_tasks(
+        self,
+        result: SwarmResult,
+        tasks: List[SwarmTask],
+        retry_failed: bool = True,
+        synthesize: bool = False,
+        debate: bool = False,
+    ) -> Optional[SwarmResult]:
+        """يحجز swarm_id كنشط ذرّياً (يرجع None إن كان محجوزاً لتنفيذ آخر
+        حي) ثم ينفّذ عبر _execute_tasks_inner ويحرّره دائماً في finally."""
+        with self._lock:
+            if result.swarm_id in self._active_swarm_ids:
+                logger.warning(f"Swarm {result.swarm_id} يعمل بالفعل — تجاهل التنفيذ المكرر")
+                return None
+            self._active_swarm_ids.add(result.swarm_id)
+        try:
+            return self._execute_tasks_inner(
+                result, tasks, retry_failed=retry_failed,
+                synthesize=synthesize, debate=debate,
+            )
+        finally:
+            with self._lock:
+                self._active_swarm_ids.discard(result.swarm_id)
+
+    def _execute_tasks_inner(
         self,
         result: SwarmResult,
         tasks: List[SwarmTask],
@@ -373,10 +487,7 @@ class SwarmCoordinator:
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 future_to_task: Dict[Future, SwarmTask] = {}
                 for task in pending_tasks:
-                    agent = self._factory.best_agent_for(task.required_capability)
-                    if agent is None:
-                        # Auto-spawn an agent for this capability
-                        agent = self._auto_spawn_for_capability(task.required_capability)
+                    agent = self._pick_agent(task.required_capability)
                     if agent:
                         task.assigned_agent_id = agent.agent_id
                         fut = pool.submit(self._run_task, task, agent)
@@ -637,17 +748,47 @@ class SwarmCoordinator:
                     parts.append(f"{key}: {val}")
         return "\n".join(str(p) for p in parts)
 
+    def _role_quarantined(self, role: Optional[str]) -> bool:
+        """best-effort — عطل في دالة الفحص نفسها لا يجب أن يمنع أي تنفيذ."""
+        if not role or self._is_role_quarantined is None:
+            return False
+        try:
+            return bool(self._is_role_quarantined(role))
+        except Exception as exc:
+            logger.warning(f"is_role_quarantined فشلت لـ '{role}': {exc}")
+            return False
+
+    def _pick_agent(self, capability: str) -> Optional[AgentInstance]:
+        """نقطة الاختيار المركزية الوحيدة لوكيل مهمة — كل استدعاء توزيع في
+        هذا الملف يمر من هنا (بدل استدعاء best_agent_for/_auto_spawn_for_capability
+        مباشرة) حتى يُطبَّق فحص الحجر باستمرار وفي كل مسار، وليس في نقطة
+        واحدة يسهل نسيان تكرارها لاحقاً."""
+        candidates = [
+            a for a in self._factory.list_by_capability(capability)
+            if not self._role_quarantined(a.role)
+        ]
+        if candidates:
+            return max(candidates, key=lambda a: a.performance_score)
+        return self._auto_spawn_for_capability(capability)
+
     def _auto_spawn_for_capability(self, capability: str) -> Optional[AgentInstance]:
-        """Find a role that has the required capability and spawn an agent."""
+        """Find a role that has the required capability and spawn an agent —
+        يتجاوز أي دور محجور حالياً (انظر _role_quarantined) ويجرّب دوراً
+        آخر يملك نفس القدرة إن وُجد، بدل تفريخ وكيل جديد من دور محجور
+        فعلياً بلا داعٍ."""
         from ai.agent_factory import AGENT_CATALOGUE
         for role, spec in AGENT_CATALOGUE.items():
-            if capability in spec.get("capabilities", []):
-                try:
-                    agent = self._factory.spawn(role)
-                    logger.info(f"Auto-spawned {role} for capability '{capability}'")
-                    return agent
-                except Exception:
-                    pass
+            if capability not in spec.get("capabilities", []):
+                continue
+            if self._role_quarantined(role):
+                logger.info(f"تخطّي دور محجور '{role}' عند البحث عن قدرة '{capability}'")
+                continue
+            try:
+                agent = self._factory.spawn(role)
+                logger.info(f"Auto-spawned {role} for capability '{capability}'")
+                return agent
+            except Exception:
+                pass
         return None
 
     def _retry_failed_tasks(self, tasks: List[SwarmTask], task_outputs: Dict[str, dict]) -> None:

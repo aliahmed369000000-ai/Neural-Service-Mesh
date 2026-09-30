@@ -269,8 +269,17 @@ class CapabilityMarketplace:
         success: bool,
         latency_ms: float,
     ):
-        """Update quality scores based on execution results."""
+        """Update quality scores based on execution results.
+
+        قبل هذا التعديل لم تكن تستدعي _persist() إطلاقاً — أي أن كل ما
+        توثّقه restore() أعلاه عن 'الحفاظ على درجات الجودة/الكمون
+        المتراكمة من record_execution()' لم يكن صحيحاً فعلياً: advertise()
+        وحدها كانت تكتب على القرص، فالتحديثات الحقيقية القادمة من
+        plan_and_execute_goal (أو أي مستدعٍ آخر لـrecord_execution) تبقى
+        في الذاكرة فقط وتُفقَد عند إعادة التشغيل التالية، حتى لو استُعيد
+        الفهرس نفسه بنجاح من نسخة advertise() الأصلية القديمة."""
         cap_key = capability.lower().replace(" ", "_")
+        changed = False
         for ad in self._index.get(cap_key, []):
             if ad.node_id == node_id:
                 ad.execution_count += 1
@@ -283,20 +292,31 @@ class CapabilityMarketplace:
                 else:
                     ad.quality_score = max(0.1, ad.quality_score - 0.05)
                 ad.last_updated = datetime.now(timezone.utc).isoformat()
+                changed = True
+        if changed:
+            self._persist()
 
     def deactivate_node(self, node_id: str):
         """Mark all advertisements for a node as inactive."""
+        changed = False
         for ads in self._index.values():
             for ad in ads:
                 if ad.node_id == node_id:
                     ad.is_active = False
+                    changed = True
+        if changed:
+            self._persist()
 
     def reactivate_node(self, node_id: str):
         """Reactivate all advertisements for a node."""
+        changed = False
         for ads in self._index.values():
             for ad in ads:
                 if ad.node_id == node_id:
                     ad.is_active = True
+                    changed = True
+        if changed:
+            self._persist()
 
     # ── Persistence ────────────────────────────────────────────────────────
 

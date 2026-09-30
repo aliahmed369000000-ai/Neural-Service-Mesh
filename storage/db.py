@@ -4,7 +4,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ class SQLiteStorage:
                     "description": node_data.get("description", ""),
                     "tags": json.dumps(node_data.get("tags", [])),
                     "version": node_data.get("version", "1.0.0"),
-                    "created_at": node_data.get("created_at", datetime.utcnow().isoformat()),
+                    "created_at": node_data.get("created_at", datetime.now(timezone.utc).isoformat()),
                     "meta_json": json.dumps(node_data),
                 })
             return True
@@ -120,7 +120,7 @@ class SQLiteStorage:
                     INSERT INTO connections (source_id, target_id, weight, label, created_at)
                     VALUES (?,?,?,?,?)
                     ON CONFLICT(source_id, target_id) DO UPDATE SET weight=excluded.weight, label=excluded.label
-                """, (source_id, target_id, weight, label, datetime.utcnow().isoformat()))
+                """, (source_id, target_id, weight, label, datetime.now(timezone.utc).isoformat()))
             return True
         except Exception as e:
             logger.error(f"upsert_connection failed: {e}")

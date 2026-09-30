@@ -5,7 +5,7 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ class BaseNode(ABC):
         self.name = name
         self.description = description
         self.tags = tags or []
-        self.created_at = datetime.utcnow().isoformat()
+        self.created_at = datetime.now(timezone.utc).isoformat()
         self._execution_count = 0
         self._last_executed: Optional[str] = None
         self.state: str = NodeState.CREATED
@@ -117,8 +117,9 @@ class BaseNode(ABC):
             self.mark_failed(str(e))
             raise
         self._execution_count += 1
-        self._last_executed = datetime.utcnow().isoformat()
-        self.state = NodeState.ACTIVE
+        self._last_executed = datetime.now(timezone.utc).isoformat()
+        if self.state != NodeState.PAUSED:  # pause() أثناء process() يبقى نافذاً
+            self.state = NodeState.ACTIVE
         self._last_error = None
         self._pending_input = None
         logger.info(f"[{self.name}] executed #{self._execution_count}")
@@ -162,7 +163,12 @@ class BaseNode(ABC):
         كي لا يُعاد تكرار نفس المدخلات الفاشلة تلقائياً إلى الأبد عبر
         resume_interrupted — فقط توقف حقيقي بلا نتيجة معروفة (RUNNING) هو
         ما يستحق إعادة المحاولة التلقائية."""
-        self.state = NodeState.FAILED
+        # عقدة PAUSED (حجر تلقائي أو إيقاف يدوي) تحتفظ بحالتها: مهمة كانت
+        # قيد التنفيذ لحظة الإيقاف وانتهت بفشل لا يجوز أن تحوّل PAUSED إلى
+        # FAILED (كان يُضيّع pause_reason ويجعل _apply_reputation_recovery
+        # لا يرى العقدة محجورة). الخطأ يُسجَّل دائماً.
+        if self.state != NodeState.PAUSED:
+            self.state = NodeState.FAILED
         self._last_error = error
         self._pending_input = None
         logger.warning(f"[{self.name}] failed: {error}")
@@ -175,8 +181,13 @@ class BaseNode(ABC):
         (execution_count/state/last_error) مباشرة من نتيجة معروفة سلفاً."""
         if success:
             self._execution_count += 1
-            self._last_executed = datetime.utcnow().isoformat()
-            self.state = NodeState.ACTIVE
+            self._last_executed = datetime.now(timezone.utc).isoformat()
+            # مهمة بدأت قبل الحجر وانتهت بعده: تُحتسب في العدّاد لكنها لا
+            # ترفع الإيقاف — رفع الحجر مسؤولية unquarantine/resume الصريحة
+            # فقط، وإلا يبقى reputation_engine يرى العقدة محجورة بينما
+            # state=ACTIVE وpause_reason قديم عالق.
+            if self.state != NodeState.PAUSED:
+                self.state = NodeState.ACTIVE
             self._last_error = None
             logger.info(f"[{self.name}] execution recorded #{self._execution_count} (external)")
         else:

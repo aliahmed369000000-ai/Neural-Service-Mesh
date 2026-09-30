@@ -846,6 +846,139 @@ async def handle_first_verified_task(request):
     return web.json_response(result)
 
 
+CONTROL_TASK_KINDS = {
+    "encrypted_rpc_roundtrip",
+    "latency_benchmark",
+    "capability_report",
+    "mesh_health_report",
+    "forecast_consensus_benchmark",
+}
+CONTROL_MAX_TARGETS = 28
+
+
+def _control_token_ok(request) -> bool:
+    """لا تفتح نقطة التحكم افتراضياً؛ يتطلبها متغير بيئة صريح."""
+    expected = os.getenv("NSM_CONTROL_TOKEN")
+    provided = request.headers.get("X-NSM-Control-Token", "")
+    return bool(expected and provided and __import__("hmac").compare_digest(provided, expected))
+
+
+def _control_targets(node, body):
+    targets = body.get("targets")
+    if targets is None and body.get("target_node_id"):
+        targets = [body["target_node_id"]]
+    if not isinstance(targets, list) or not targets or len(targets) > CONTROL_MAX_TARGETS:
+        return None, "targets_must_be_non_empty_list_max_28"
+    if len(set(targets)) != len(targets) or any(not isinstance(x, str) or not x.strip() for x in targets):
+        return None, "targets_must_be_unique_node_ids"
+    state = node._load_state()
+    resolved = []
+    for node_id in targets:
+        info = dict((state.get("nodes") or {}).get(node_id) or {})
+        if not info.get("host") or info.get("port") is None:
+            return None, f"target_not_resolvable:{node_id}"
+        resolved.append({"id": node_id, "host": info["host"], "port": int(info["port"]), "status": info.get("status"), "has_public_key": bool(info.get("public_key") or node._public_key_for_id(node_id))})
+    return resolved, None
+
+
+def _validate_control_parameters(kind, params):
+    if kind != "forecast_consensus_benchmark":
+        return None
+    series = params.get("series") or params.get("values")
+    if not isinstance(series, list) or not 2 <= len(series) <= 256:
+        return "series_must_be_list_with_2_to_256_values"
+    try:
+        [float(value) for value in series]
+    except (TypeError, ValueError):
+        return "series_values_must_be_numeric"
+    try:
+        horizon = int(params.get("horizon", 1))
+        timeout_s = float(params.get("timeout_s", 15))
+    except (TypeError, ValueError):
+        return "horizon_and_timeout_must_be_numeric"
+    if not 1 <= horizon <= 10:
+        return "horizon_must_be_between_1_and_10"
+    if not 1 <= timeout_s <= 60:
+        return "timeout_s_must_be_between_1_and_60"
+    return None
+
+
+async def handle_control_task(request):
+    """نقطة تكليف آمنة: مصادقة صريحة، allowlist، target IDs فقط، وdry_run افتراضي."""
+    if not _control_token_ok(request):
+        return web.json_response({"ok": False, "error": "control_auth_required"}, status=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "invalid_json"}, status=400)
+    if not isinstance(body, dict):
+        return web.json_response({"ok": False, "error": "json_object_required"}, status=400)
+    kind = body.get("kind")
+    if kind not in CONTROL_TASK_KINDS:
+        return web.json_response({"ok": False, "error": "unsupported_control_task", "allowed": sorted(CONTROL_TASK_KINDS)}, status=400)
+    node = request.app["node"]
+    targets, error = _control_targets(node, body)
+    if error:
+        return web.json_response({"ok": False, "error": error}, status=400)
+    task_id = body.get("task_id") or f"control_{__import__('uuid').uuid4().hex[:12]}"
+    params = body.get("parameters") or {}
+    if not isinstance(params, dict):
+        return web.json_response({"ok": False, "error": "parameters_must_be_object"}, status=400)
+    parameter_error = _validate_control_parameters(kind, params)
+    if parameter_error:
+        return web.json_response({"ok": False, "error": parameter_error}, status=400)
+    dry_run = body.get("dry_run", True) is True
+    if body.get("dry_run") not in (None, True, False):
+        return web.json_response({"ok": False, "error": "dry_run_must_be_boolean"}, status=400)
+    if kind in {"encrypted_rpc_roundtrip", "mesh_health_report", "forecast_consensus_benchmark"} and any(not t["has_public_key"] for t in targets):
+        return web.json_response({"ok": False, "error": "peer_public_key_required_for_encrypted_task"}, status=409)
+    plan = {
+        "task_id": task_id, "kind": kind, "dry_run": dry_run,
+        "targets": targets, "parameters": params,
+        "safety": {"allowlist": True, "arbitrary_code": False, "external_url_input": False},
+    }
+    if dry_run:
+        return web.json_response({"ok": True, "mode": "dry_run", "plan": plan})
+
+    async def run_one(target):
+        try:
+            timeout_s = float(params.get("timeout_s", 15))
+            if kind == "latency_benchmark":
+                result = await node.ping_peer(target["host"], target["port"], timeout=timeout_s)
+            elif kind == "capability_report":
+                result = {"ok": True, "node_id": target["id"], "capabilities": (node._load_state().get("nodes", {}).get(target["id"], {}).get("capabilities") or [])}
+            elif kind == "mesh_health_report":
+                from ai import mesh_task_protocol as mt
+                result = await node.dispatch_mesh_task(target["host"], target["port"], mt.KIND_HEALTH_REPORT, {"task_id": task_id}, target_id=target["id"], timeout=timeout_s)
+            elif kind == "forecast_consensus_benchmark":
+                from ai import mesh_task_protocol as mt
+                payload = {"task_id": task_id, "series": params.get("series") or params.get("values"), "horizon": int(params.get("horizon", 1))}
+                result = await node.dispatch_mesh_task(target["host"], target["port"], mt.KIND_PREDICT, payload, target_id=target["id"], timeout=timeout_s)
+            else:
+                payload = {"task_id": task_id, "text": str(params.get("text") or "NSM encrypted control probe"), "mode": "control_probe"}
+                result = await node.dispatch_mesh_task(target["host"], target["port"], "inference_request", payload, target_id=target["id"], timeout=timeout_s)
+            return {"target": target["id"], "result": result}
+        except Exception as exc:
+            return {"target": target["id"], "ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    results = await asyncio.gather(*(run_one(t) for t in targets))
+    response = {"ok": all(bool(r.get("result", r).get("ok")) for r in results), "mode": "executed", "plan": plan, "results": results}
+    if kind == "forecast_consensus_benchmark":
+        forecasts = []
+        for item in results:
+            rpc = item.get("result") or {}
+            forecast = rpc.get("result") if isinstance(rpc, dict) else None
+            predictions = forecast.get("predictions") if isinstance(forecast, dict) else None
+            if isinstance(predictions, list) and predictions:
+                forecasts.append([float(value) for value in predictions])
+        if forecasts:
+            width = min(len(row) for row in forecasts)
+            response["aggregate"] = {"method": "mean_by_horizon", "contributors": len(forecasts), "predictions": [round(sum(row[i] for row in forecasts) / len(forecasts), 6) for i in range(width)]}
+        else:
+            response["aggregate"] = {"method": "mean_by_horizon", "contributors": 0, "predictions": []}
+    return web.json_response(response)
+
+
 async def handle_dispatch_task(request):
     """
     البذرة تطلب · العامل ينفّذ · البذرة تتحقق.
@@ -1187,6 +1320,7 @@ async def main():
         web.post("/v2/predict", handle_predict_task),
         web.post("/v2/first-task", handle_first_verified_task),
         web.post("/v2/dispatch-task", handle_dispatch_task),
+        web.post("/v2/control/task", handle_control_task),
         web.get("/dashboard", handle_dashboard),
         web.get("/pricing", handle_pricing),
         web.get("/v2/product", handle_product_catalog),

@@ -2,7 +2,7 @@ from __future__ import annotations
 import uuid
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from core.node import BaseNode, NodeState
@@ -44,7 +44,7 @@ class ExecutionResult:
         self.run_id = run_id
         self.path = path
         self.steps: List[ExecutionStep] = []
-        self.started_at = datetime.utcnow().isoformat()
+        self.started_at = datetime.now(timezone.utc).isoformat()
         self.finished_at: Optional[str] = None
         self.total_duration_ms: Optional[float] = None
         self.final_output: Optional[dict] = None
@@ -86,7 +86,7 @@ class ExecutionEngine:
         اثنان من مخارج الفشل الثلاثة أيضاً كانا لا يضبطان
         result.total_duration_ms إطلاقاً (يبقى None)."""
         result.status = status
-        result.finished_at = datetime.utcnow().isoformat()
+        result.finished_at = datetime.now(timezone.utc).isoformat()
         result.total_duration_ms = round((time.time() - t_start) * 1000, 2)
         self._persist(result)
         if self._ai:
@@ -160,7 +160,7 @@ class ExecutionEngine:
             for attempt in range(2):
                 step.node_name = attempt_node.name
                 step.node_id = attempt_node.node_id
-                step.started_at = datetime.utcnow().isoformat()
+                step.started_at = datetime.now(timezone.utc).isoformat()
                 step.input_data = dict(current)
                 step.status = "running"
                 t0 = time.time()
@@ -177,7 +177,7 @@ class ExecutionEngine:
                     step.output_data = dict(output)
                     step.status = "success"
                     step.duration_ms = round((time.time() - t0) * 1000, 2)
-                    step.finished_at = datetime.utcnow().isoformat()
+                    step.finished_at = datetime.now(timezone.utc).isoformat()
                     current = output
                     self._registry.refresh_meta(attempt_node.node_id)
                     break
@@ -185,7 +185,7 @@ class ExecutionEngine:
                     step.status = "error"
                     step.error = str(e)
                     step.duration_ms = round((time.time() - t0) * 1000, 2)
-                    step.finished_at = datetime.utcnow().isoformat()
+                    step.finished_at = datetime.now(timezone.utc).isoformat()
                     self._registry.refresh_meta(attempt_node.node_id)
 
                     fb_node = None

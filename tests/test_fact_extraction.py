@@ -9,7 +9,10 @@ sys.path.append(str(ROOT))
 
 from ai.agent_hibernation import AgentState, hibernate_agent, wake_up_agent
 
-def test_fact_extraction():
+def test_fact_extraction(tmp_path, monkeypatch):
+    # عزل: ملفات السبات تُكتب في مجلد مؤقت لا في artifacts/ المتتبَّع
+    import ai.agent_hibernation as _hib
+    monkeypatch.setattr(_hib, "SLEEP_DIR", tmp_path)
     print("🚀 اختبار استخراج الحقائق الدقيقة (Fact Extraction Test)...")
     
     agent_id = "test_fact_agent"
@@ -40,11 +43,12 @@ def test_fact_extraction():
     # 2. اختبار الاستيقاظ والتحقق من الذاكرة الدلالية
     state = wake_up_agent(agent_id)
     
+    assert state, "فشل استعادة الحالة"
     if state:
-        print(f"✅ عدد الحقائق المستخرجة في الذاكرة الدلالية: {len(state.semantic_memory)}")
+        print(f"✅ عدد الحقائق المستخرجة في الذاكرة الدلالية: {len(state.memory_manager.ltm_semantic)}")
         
         # التحقق من وجود الكيانات الهامة
-        found_facts = [f["content"] for f in state.semantic_memory.values()]
+        found_facts = [f["content"] for f in state.memory_manager.ltm_semantic.values()]
         
         expected_patterns = ["قرار", "SHA", "كود برمجي", "ms"]
         for pattern in expected_patterns:
@@ -53,8 +57,9 @@ def test_fact_extraction():
                 print(f"✔️ تم العثور على حقيقة تحتوي على: {pattern}")
             else:
                 print(f"❌ لم يتم العثور على: {pattern}")
+            assert found, f"حقيقة مفقودة: {pattern}"
                 
-        if len(state.semantic_memory) >= 4:
+        if len(state.memory_manager.ltm_semantic) >= 4:
             print("✅ نجاح: تم استخراج كافة الحقائق الهامة بدقة.")
         else:
             print("❌ فشل: لم يتم استخراج كافة الحقائق.")

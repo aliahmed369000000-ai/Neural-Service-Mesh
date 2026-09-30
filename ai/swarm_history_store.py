@@ -186,20 +186,18 @@ class SwarmHistoryStore:
             logger.warning(f"SwarmHistoryStore.clear_progress: {e}")
             return False
 
-    def list_incomplete(self, limit: int = 20) -> List[dict]:
-        """يرجع أسرِبة توقفت في منتصف التنفيذ (status='running') — إما لا
-        تزال تعمل فعلاً في عملية حيّة، أو انهارت العملية قبل أن تُكمل.
-        الأحدث تحديثاً أولاً."""
+    def list_by_status(self, status: str, limit: int = 20) -> List[dict]:
+        """نقاط تفتيش بحالة معيّنة، الأحدث تحديثاً أولاً."""
         try:
             with sqlite3.connect(str(self.db_path)) as conn:
                 conn.row_factory = sqlite3.Row
                 rows = conn.execute("""
                     SELECT full_result FROM swarm_progress
-                    WHERE status = 'running'
+                    WHERE status = ?
                     ORDER BY updated_at DESC LIMIT ?
-                """, (limit,)).fetchall()
+                """, (status, limit)).fetchall()
         except Exception as e:
-            logger.warning(f"SwarmHistoryStore.list_incomplete: {e}")
+            logger.warning(f"SwarmHistoryStore.list_by_status({status}): {e}")
             return []
         result = []
         for row in rows:
@@ -208,6 +206,12 @@ class SwarmHistoryStore:
             except Exception:
                 continue
         return result
+
+    def list_incomplete(self, limit: int = 20) -> List[dict]:
+        """يرجع أسرِبة توقفت في منتصف التنفيذ (status='running') — إما لا
+        تزال تعمل فعلاً في عملية حيّة، أو انهارت العملية قبل أن تُكمل.
+        الأحدث تحديثاً أولاً."""
+        return self.list_by_status("running", limit)
 
     def get_recent(self, limit: int = 20) -> List[dict]:
         """يرجع آخر نتائج تنفيذ السرب كاملة (الأحدث أولاً)."""

@@ -7,7 +7,12 @@ sys.path.append(str(ROOT))
 
 from ai.learning_engine import learning_engine
 
-def test_knowledge_protection():
+def test_knowledge_protection(tmp_path, monkeypatch):
+    # عزل: قاعدة الخبرة ونقاط الثقة في مجلد مؤقت وحالة ذاكرة نظيفة
+    monkeypatch.setattr(learning_engine, "knowledge_base_file", tmp_path / "experience_db.json")
+    monkeypatch.setattr(learning_engine, "trust_scores_file", tmp_path / "trust_scores.json")
+    monkeypatch.setattr(learning_engine, "experience_db", [])
+    monkeypatch.setattr(learning_engine, "trust_scores", {})
     print("🛡️ بدء اختبار حارس المعرفة (Knowledge Guardian)...")
     
     # 1. اختبار حظر الأوامر الضارة
@@ -26,6 +31,7 @@ def test_knowledge_protection():
         print("✅ نجاح: تم حظر الدرس الضار.")
     else:
         print("❌ فشل: تم قبول الدرس الضار!")
+    assert "sudo rm -rf" not in lessons
 
     # 2. اختبار نقاط الثقة والرفض التلقائي
     print("\n📝 اختبار 2: نقاط الثقة والرفض التلقائي...")
@@ -34,7 +40,7 @@ def test_knowledge_protection():
     for i in range(5):
         learning_engine.record_experience("مهمة فاشلة", "خطأ", "درس غير مفيد", False, agent_id)
     
-    trust = learning_engine.trust_scores.get(agent_id, 0.5)
+    trust = learning_engine.trust_scores.get(agent_id, {"general": 0.5}).get("general", 0.5)
     print(f"📉 نقاط ثقة الوكيل الآن: {trust:.2f}")
     
     # محاولة إضافة درس جديد بعد انخفاض الثقة
@@ -45,6 +51,7 @@ def test_knowledge_protection():
         print("✅ نجاح: تم رفض الخبرة من وكيل غير موثوق.")
     else:
         print("❌ فشل: تم قبول خبرة من وكيل غير موثوق!")
+    assert "درس جيد بعد فوات الأوان" not in lessons
 
 if __name__ == "__main__":
     test_knowledge_protection()

@@ -9,6 +9,7 @@ from __future__ import annotations
 import hmac
 import ipaddress
 import json
+import logging
 import os
 import socket
 import sys
@@ -38,6 +39,8 @@ app = FastAPI(
     description="واجهة برمجية للنظام المعرفي العربي",
     version="1.0.0",
 )
+
+logger = logging.getLogger(__name__)
 
 # السماح بجميع الاتصالات (CORS)
 app.add_middleware(
@@ -196,6 +199,9 @@ async def process(payload: dict, request: Request):
         )
 
         data = payload.get("data") or {}
+        # snapshot قبل التنفيذ: لازم لـrecord_direct_execution أدناه كي تميّز
+        # انتقال حالة حقيقي (نجاح→فشل، فشل→تعافٍ) عن مجرد تكرار نفس الحالة.
+        prev_states = bundle.snapshot_node_states()
         if isinstance(payload.get("path"), list) and payload["path"]:
             result = engine.run_path(payload["path"], data)
         elif payload.get("start_id") and payload.get("end_id"):
@@ -207,6 +213,13 @@ async def process(payload: dict, request: Request):
                 status_code=400,
                 content={"error": "يلزم أحد: 'path' (قائمة node_id)، أو 'start_id'+'end_id'، أو 'full_graph': true"},
             )
+        # ربط /process فعلياً بنظام السمعة/الحجر — كان معزولاً بالكامل عنه
+        # (راجع MeshBundle.record_direct_execution لتفاصيل المشكلة). فشل هذا
+        # الربط نفسه لا يجب أن يُسقِط استجابة /process الناجحة فعلياً.
+        try:
+            bundle.record_direct_execution(result, prev_states)
+        except Exception as e:
+            logger.warning("api_server: record_direct_execution failed: %s", e)
         return {"status": "ok", "result": result.to_dict()}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})

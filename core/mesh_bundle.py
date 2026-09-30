@@ -184,7 +184,10 @@ class MeshBundle:
         self.exec_log = SQLiteStorage(db_path=db_path)
 
         self.agent_factory = AgentFactory()
-        self.coordinator = SwarmCoordinator(self.agent_factory, max_agents=20)
+        self.coordinator = SwarmCoordinator(
+            self.agent_factory, max_agents=20,
+            is_role_quarantined=self._is_role_quarantined,
+        )
 
         # ── التواصل الحقيقي بين العُقد + رسم بياني حيّ للطوبولوجيا ──────────
         # (core/node_channel.py) قناة رسائل دائمة بين node_id حقيقية، و
@@ -234,90 +237,27 @@ class MeshBundle:
         # تماماً كأي تنفيذ طبيعي — بذلك تنعكس execution_count/state/السمعة
         # على العمل الذي اكتمل فعلاً بعد التوقف، لا أن تبقى مجمّدة. لا يجوز
         # لهذا أن يُعطّل إقلاع الحزمة أبداً مهما حدث.
-        try:
-            for cp in self.coordinator.list_resumable():
-                swarm_id = cp.get("swarm_id")
-                if not swarm_id:
-                    continue
-                try:
-                    resumed = self.coordinator.resume(swarm_id)
-                    if resumed:
-                        self.record_swarm_result(resumed)
-                        logger.info(
-                            "MeshBundle: استؤنف تلقائياً سرب متوقف %s "
-                            "(%d/%d مهمة ناجحة)",
-                            swarm_id, resumed.success_count, len(resumed.tasks),
-                        )
-                except Exception as exc:
-                    logger.warning(
-                        "MeshBundle: تعذّر استئناف السرب %s تلقائياً: %s",
-                        swarm_id, exc,
-                    )
-        except Exception as exc:
-            logger.warning("MeshBundle: تعذّر فحص الأسرِبة المتوقفة: %s", exc)
+        # في خيط خلفي daemon: resume() ينفّذ مهام LLM فعلية قد تستغرق دقائق
+        # لكل سرب، وتشغيلها هنا كان يحجز إقلاع الحزمة (وأول تحميل للواجهة)
+        # حتى ينتهي كل سرب متوقف. الخيط daemon فلا يمنع إغلاق العملية.
+        threading.Thread(
+            target=self._auto_resume_swarms, name="nsm-swarm-auto-resume",
+            daemon=True,
+        ).start()
 
-        # ── استئناف تلقائي لعُقد مسار ExecutionEngine (Phase 2) المتوقفة قسراً ──
-        # ExecutionEngine.resume_interrupted() (core/engine.py) كانت مكتوبة
-        # ومُختبَرة بالكامل، لكن ExecutionEngine نفسها تُبنى فقط داخل
-        # api_server.py::/process لكل طلب على حدة، ولا يوجد أي مكان يستدعي
-        # resume_interrupted() إطلاقاً — بالضبط نفس نمط 'مكتوب لكن غير
-        # مُسلَّك' في التعليقات أعلاه (KnowledgeStore، AIDecisionLayer،
-        # SQLiteStorage، list_resumable). الأثر العملي: عقدة توقفت قسراً
-        # وسط process() عبر /process (state='running' محفوظة فعلياً على
-        # القرص بفضل begin_execution) تبقى معلَّقة للأبد فعلياً، لأن لا شيء
-        # يفحص get_interrupted() سوى استدعاء يدوي غير موجود لا في الواجهة
-        # ولا في الخادم. هنا: محرك مؤقت بنفس registry/graph/storage
-        # المشتركة (self.registry فيه بالفعل كل عُقد الأدوار/الأدوات بعد
-        # _register_roles/_register_mcp_tools أعلاه، بنفس node_id المستعاد)
-        # يفحص وجود أي توقف قسري سابق ويستأنفه فوراً عند كل إقلاع.
-        try:
-            engine = ExecutionEngine(
-                self.registry, self.graph, self.storage,
-                db=self.exec_log, ai=self.ai_decision,
-            )
-            resumed_results = engine.resume_interrupted()
-            for r in resumed_results:
-                logger.info(
-                    "MeshBundle: استؤنفت عقدة توقفت قسراً — run_id=%s status=%s",
-                    r.run_id, r.status,
-                )
-        except Exception as exc:
-            logger.warning("MeshBundle: تعذّر فحص العُقد المتوقفة قسراً: %s", exc)
-
-        # ── استئناف تلقائي لمهام صناعة المحتوى الخلفية المتوقفة قسراً ─────────
-        # ai/content_job_manager.py: ContentJobManager كانت بالكامل في
-        # الذاكرة فقط (self._jobs) — أي توقف مفاجئ للعملية (crash/redeploy/
-        # OOM) أثناء تنفيذ run_content_pipeline() في خيط خلفية كان يفقد
-        # المهمة بالكامل بلا أي أثر، فضلاً عن استئنافها. الآن (بعد ربط
-        # SQLite في content_job_manager.py) تُستأنف أي مهمة بقيت 'running'
-        # من عملية سابقة بنفس kwargs المحفوظة ونفس job_id، فور إقلاع
-        # MeshBundle، بنفس نمط استئناف الأسرِبة/عُقد ExecutionEngine أعلاه.
-        try:
-            from ai.content_job_manager import get_content_job_manager
-            resumed_jobs = get_content_job_manager().resume_interrupted()
-            for jid in resumed_jobs:
-                logger.info("MeshBundle: استُؤنفت مهمة محتوى متوقفة #%s", jid)
-        except Exception as exc:
-            logger.warning("MeshBundle: تعذّر فحص مهام المحتوى المتوقفة: %s", exc)
-
-        # ── استئناف تلقائي لمهام محرر الفيديو الخلفية المتوقفة قسراً ──────────
-        # ai/video_job_manager.py: كانت هذه بالضبط الفجوة المتروكة عمداً في
-        # كوميت 74826ee (نفس علّة ContentJobManager، لكن fn هناك عشوائية —
-        # أي دالة من ai/video_editor.py، غير قابلة للتسلسل مباشرة). الحل الذي
-        # طُبِّق لاحقاً في video_job_manager.py: تخزين (op_name, kwargs) بدل
-        # fn نفسها، حيث op_name اسم قابل لإعادة الاستيراد فقط لدوال
-        # ai/video_editor.py المعروفة. هنا فقط الربط عند الإقلاع — بنفس نمط
-        # استئناف مهام المحتوى أعلاه بالضبط. مهام برفع دقة/تحسين ذكي طويلة
-        # توقفت وسط ffmpeg تُستأنف من جديد بنفس kwargs (نفس مسار الملف
-        # المؤقت)؛ لو لم يعد الملف موجوداً (حاوية أُعيد بناؤها بالكامل)،
-        # تفشل المهمة بخطأ واضح بدل تجميد أي شيء — best-effort دائماً.
-        try:
-            from ai.video_job_manager import get_video_job_manager
-            resumed_video_jobs = get_video_job_manager().resume_interrupted()
-            for jid in resumed_video_jobs:
-                logger.info("MeshBundle: استُؤنفت مهمة فيديو متوقفة #%s", jid)
-        except Exception as exc:
-            logger.warning("MeshBundle: تعذّر فحص مهام الفيديو المتوقفة: %s", exc)
+        # ── استئناف تلقائي لعُقد ExecutionEngine + مهام المحتوى/الفيديو المتوقفة
+        # قسراً — في نفس خيط _auto_resume_swarms الخلفي أدناه، وليس هنا في
+        # __init__ نفسه. قبل هذا كانت الثلاثة تُستدعى متزامنة هنا مباشرة:
+        # ExecutionEngine.resume_interrupted() ومهام محتوى/فيديو متوقفة قد
+        # تشمل استدعاءات LLM أو ffmpeg طويلة فعلياً (دقائق لكل عنصر) — نفس
+        # علّة "استئناف الأسرِبة يحجز إقلاع الحزمة" التي أُصلحت سابقاً
+        # بنقلها لخيط daemon، لكن هذه الثلاثة أُضيفت لاحقاً بنفس التعليق
+        # ("بنفس نمط استئناف الأسرِبة") دون أن تُنقَل فعلياً إلى الخيط —
+        # التعليق وصف النية، والتنفيذ بقي متزامناً في __init__.
+        threading.Thread(
+            target=self._auto_resume_engine_and_jobs, name="nsm-jobs-auto-resume",
+            daemon=True,
+        ).start()
 
         # ── التطوّر الذاتي الحقيقي (Phase 5/7): GapDetector → ServiceGenerator
         # → AIGovernanceLayer → تسجيل عقدة جديدة فعلياً في الـregistry نفسه ──
@@ -332,7 +272,16 @@ class MeshBundle:
             graph=self.graph, memory_engine=self.memory_engine,
             scoring_engine=self.scoring_engine, knowledge_store=self.knowledge_store,
         )
-        self.service_generator = ServiceGeneratorEngine(governance=self.governance)
+        # ai/service_generator.py::ServiceGeneratorEngine كانت تُبنى بلا
+        # knowledge_store أيضاً (بحث منفصل عن الإصلاح أعلاه لـ
+        # CapabilityMarketplace) — _persist_spec() مكتوبة بالكامل لكنها كانت
+        # no-op دائماً، وبلا أي دالة استعادة مقابلة: كل GeneratedServiceSpec
+        # (بما فيها الحالة proposed/approved/rejected وسياق الفجوة) تختفي
+        # عند إعادة التشغيل رغم أن العُقد الحية نفسها تُستعاد فعلياً (إصلاح
+        # سابق). أضفت _load_generated() في service_generator.py نفسها.
+        self.service_generator = ServiceGeneratorEngine(
+            governance=self.governance, knowledge_store=self.knowledge_store,
+        )
 
         # ── ai/capability_marketplace.py::CapabilityMarketplace كانت تُبنى
         # بلا knowledge_store إطلاقاً (_persist() تصبح no-op دائماً رغم أنها
@@ -485,6 +434,79 @@ class MeshBundle:
         return node_id
 
     # ── تسجيل كل الأدوار الموجودة في الكتالوج كعُقد حقيقية داخل الـregistry ──
+    def _auto_resume_engine_and_jobs(self) -> None:
+        """يستأنف عُقد ExecutionEngine المتوقفة قسراً ومهام المحتوى/الفيديو
+        الخلفية — في خيط daemon (انظر التعليق في __init__)، بنفس منطق
+        الكتلة الأصلية حرفياً، فقط بلا حجب إقلاع الحزمة. لا يرفع استثناءً
+        أبداً؛ كل قسم معزول بـtry/except خاص كما كان."""
+        try:
+            engine = ExecutionEngine(
+                self.registry, self.graph, self.storage,
+                db=self.exec_log, ai=self.ai_decision,
+            )
+            resumed_results = engine.resume_interrupted()
+            for r in resumed_results:
+                logger.info(
+                    "MeshBundle: استؤنفت عقدة توقفت قسراً — run_id=%s status=%s",
+                    r.run_id, r.status,
+                )
+        except Exception as exc:
+            logger.warning("MeshBundle: تعذّر فحص العُقد المتوقفة قسراً: %s", exc)
+
+        try:
+            from ai.content_job_manager import get_content_job_manager
+            resumed_jobs = get_content_job_manager().resume_interrupted()
+            for jid in resumed_jobs:
+                logger.info("MeshBundle: استُؤنفت مهمة محتوى متوقفة #%s", jid)
+        except Exception as exc:
+            logger.warning("MeshBundle: تعذّر فحص مهام المحتوى المتوقفة: %s", exc)
+
+        try:
+            from ai.video_job_manager import get_video_job_manager
+            resumed_video_jobs = get_video_job_manager().resume_interrupted()
+            for jid in resumed_video_jobs:
+                logger.info("MeshBundle: استُؤنفت مهمة فيديو متوقفة #%s", jid)
+        except Exception as exc:
+            logger.warning("MeshBundle: تعذّر فحص مهام الفيديو المتوقفة: %s", exc)
+
+    def _auto_resume_swarms(self) -> None:
+        """يستأنف الأسرِبة المتوقفة (يُشغَّل في خيط خلفي عند الإقلاع). لا يرفع
+        استثناءً أبداً؛ list_resumable/resume يتجاوزان أي سرب حي حالياً."""
+        try:
+            for cp in self.coordinator.list_resumable():
+                swarm_id = cp.get("swarm_id")
+                if not swarm_id:
+                    continue
+                try:
+                    resumed = self.coordinator.resume(swarm_id)
+                    if resumed:
+                        self.record_swarm_result(resumed)
+                        logger.info(
+                            "MeshBundle: استؤنف تلقائياً سرب متوقف %s "
+                            "(%d/%d مهمة ناجحة)",
+                            swarm_id, resumed.success_count, len(resumed.tasks),
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "MeshBundle: تعذّر استئناف السرب %s تلقائياً: %s",
+                        swarm_id, exc,
+                    )
+        except Exception as exc:
+            logger.warning("MeshBundle: تعذّر فحص الأسرِبة المتوقفة: %s", exc)
+
+    def _is_role_quarantined(self, role) -> bool:
+        """هل الدور محجور حالياً بسبب سمعة منخفضة؟ تُمرَّر لـSwarmCoordinator
+        كدالة فحص حتى لا تُوجَّه مهام جديدة لدور محجور. تقرأ role_node_ids
+        وreputation_engine وقت الاستدعاء (لا وقت البناء)، فترتيب التهيئة
+        داخل __init__ لا يهم."""
+        if not role:
+            return False
+        node_id = getattr(self, "role_node_ids", {}).get(role)
+        if not node_id:
+            return False
+        rep = self.reputation_engine.get_reputation(node_id)
+        return bool(rep and rep.is_quarantined)
+
     def _register_roles(self) -> str:
         root_id = None
         for role, spec in AGENT_CATALOGUE.items():
@@ -703,7 +725,14 @@ class MeshBundle:
                 try:
                     from ai.collective_memory import get_collective_memory
                     get_collective_memory().record_task_result(
-                        task=(task.result or {}).get("task") if task.result else "",
+                        # 🆕 إصلاح: "task" لم يكن مفتاحاً موجوداً إطلاقاً في
+                        # قاموس task.result (مفاتيحه الحقيقية: sub_goal/
+                        # result_text/... — انظر SwarmCoordinator._run_task)،
+                        # فكان .get("task") يُرجع None دائماً في المسار
+                        # الشائع (أي مهمة نُفّذت فعلاً ولها نتيجة)، فتنكسر
+                        # _extract_domain(None).lower() صامتاً في كل مرة.
+                        # sub_goal الحقيقي متاح مباشرة على task نفسه.
+                        task=getattr(task, "sub_goal", "") or "",
                         success=success,
                         duration_ms=latency,
                         agent_id=agent_id or "",
@@ -753,6 +782,105 @@ class MeshBundle:
                     self.run_evolution_cycle()
                 except Exception as e:
                     logger.warning("MeshBundle: periodic run_evolution_cycle after swarm result failed: %s", e)
+
+    def snapshot_node_states(self) -> Dict[str, str]:
+        """لقطة {node_id: state} لكل عُقدة مسجَّلة حالياً — يستدعيها المتصل
+        (api_server.py::/process) قبل تنفيذ فعلي عبر core.engine.ExecutionEngine
+        مباشرة، ليمرّرها لاحقاً إلى record_direct_execution أدناه لكشف انتقال
+        حالة حقيقي (لا فقط: هل الخطوة فشلت الآن) — بدون هذه اللقطة، عقدة
+        محجورة/فاشلة مسبقاً تعيد الفشل مرة أخرى ستُبَث كـ"node_failed" في
+        كل مرة (تُغرِق القناة)، لأن الحالة النهائية بعد execute() تكون مطابقة
+        لما قبله (FAILED→FAILED) وليست انتقالاً جديداً فعلياً."""
+        return {n.node_id: n.state for n in self.registry.list_all()}
+
+    def record_direct_execution(self, result, prev_states: Optional[Dict[str, str]] = None) -> None:
+        """يأخذ core.engine.ExecutionResult حقيقياً من مسار /process المباشر
+        (run_path/run_between/run_full_graph عبر ExecutionEngine) ويغذّي كل
+        خطوة تنفيذ فعلية فيه إلى NodeReputationEngine + NodeChannel، تماماً
+        كما تفعل record_swarm_result أعلاه لكل مهمة سرب.
+
+        المشكلة التي يحلّها: بعد إصلاح /process (ربطها بـregistry/graph
+        الحقيقية) ثم ربط AIDecisionLayer، صار /process ينفّذ عُقداً حقيقية
+        فعلاً — node.execute() نفسها تُحدِّث BaseNode.state (مباشرة، لا عبر
+        هذه الدالة). لكن reputation_engine (وبالتالي كل نظام الحجر/رفع
+        الحجر التلقائي في _apply_reputation_feedback/_apply_reputation_recovery،
+        وبثّ node_failed/node_recovered للجيران) لا يعرف عن أي طلب /process
+        شيئاً على الإطلاق، لأن التغذية الوحيدة الموجودة (أعلاه في
+        record_swarm_result) مصدرها حصرياً AgentFactory.run_task عبر مسار
+        السرب — مسار منفصل تماماً عن core.engine.ExecutionEngine المستخدَم
+        هنا. عملياً: عقدة تُستدعى مباشرة عبر /process وتفشل مئات المرات لن
+        تُحجَر أبداً، وعقدة تتعافى بعد حجر لن يُرفَع عنها الحجر تلقائياً إن
+        كان تعافيها ظاهراً فقط عبر /process لا عبر السرب.
+
+        prev_states: لقطة من snapshot_node_states() قبل التنفيذ — لتمييز
+        انتقال حالة حقيقي عن تكرار نفس الحالة (راجع توثيق تلك الدالة).
+
+        نفس الملاحظة تنطبق أيضاً على ScoringEngine.record_run (يحدّث درجة
+        كل حافة src→tgt في المسار الفعلي) وMemoryEngine.learn_from_run
+        (ذاكرة مسار كامل + ذاكرة كل عقدة) — كلاهما مصمَّم أصلاً ليأخذ
+        run_result بنفس الشكل الذي يُنتجه ExecutionResult.to_dict() بالضبط
+        (نفس الحقول: path/steps/status/total_duration_ms)، وكانا يُستدعَيان
+        فقط من record_swarm_result (سطر run_result اليدوي المُصنَّع هناك)،
+        فلا يعرفان عن أي نتيجة /process شيئاً. لا أُقحِم هنا collective_memory
+        (تتوقّع نص "task" وagent_id لا معنى مباشراً لهما خارج AgentFactory)
+        ولا dna.snapshot (لقطة كاملة لكل الـregistry/scoring/memory — مكلفة
+        لتشغيلها على كل طلب /process بلا داعٍ حقيقي على هذا المستوى من
+        التفصيل) — كلاهما يستحق تقييماً منفصلاً إن لزم لاحقاً."""
+        prev_states = prev_states or {}
+        with self._lock:
+            run_dict = result.to_dict() if hasattr(result, "to_dict") else None
+            if run_dict:
+                try:
+                    self.scoring_engine.record_run(run_dict)
+                    self.memory_engine.learn_from_run(run_dict)
+                except Exception as e:
+                    logger.warning(
+                        "MeshBundle: scoring/memory learning after direct execution failed: %s", e
+                    )
+
+            for step in getattr(result, "steps", []):
+                node_id = getattr(step, "node_id", None)
+                status = getattr(step, "status", None)
+                if not node_id or status not in ("success", "error"):
+                    continue
+                node = self.registry.get(node_id)
+                if not node:
+                    continue  # عقدة غير موجودة أصلاً — لا سمعة لها لتُسجَّل
+
+                success = status == "success"
+                name = getattr(step, "node_name", None) or node.name
+                latency = float(getattr(step, "duration_ms", None) or 0.0)
+
+                self.reputation_engine.record_execution(node_id, name, success, latency)
+
+                prev_state = prev_states.get(node_id)
+                if prev_state is not None and node.state != prev_state:
+                    state_topic = None
+                    if node.state == NodeState.FAILED:
+                        state_topic = "node_failed"
+                    elif prev_state == NodeState.FAILED and node.state == NodeState.ACTIVE:
+                        state_topic = "node_recovered"
+                    if state_topic and self.graph.has_node(node_id):
+                        neighbors = self.graph.get_neighbors(node_id)
+                        self.channel.broadcast(
+                            from_id=node_id,
+                            to_ids=[n for n in neighbors if n and n != node_id],
+                            topic=state_topic,
+                            payload={
+                                "role": name,
+                                "previous_state": prev_state,
+                                "current_state": node.state,
+                                "error": getattr(step, "error", None) if not success else None,
+                            },
+                        )
+
+            try:
+                self._apply_reputation_feedback()
+                self._apply_reputation_recovery()
+            except Exception as e:
+                logger.warning(
+                    "MeshBundle: reputation feedback/recovery after direct execution failed: %s", e
+                )
 
     # ── دورة تطوّر ذاتي حقيقية (تُستدعى يدوياً، أو تلقائياً كل
     # EVOLUTION_CYCLE_INTERVAL نتيجة سرب من record_swarm_result أعلاه) ──────

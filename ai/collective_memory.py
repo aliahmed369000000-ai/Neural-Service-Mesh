@@ -71,7 +71,7 @@ def _extract_domain(task: str) -> str:
         "بيانات": ["بيانات", "تحليل", "إحصاء", "جدول", "exce", "بيانات"],
         "مساعدة": ["مساعدة", "سؤال", "استشارة", "اقتراح", "نصيحة"],
     }
-    task_lower = task.lower()
+    task_lower = (task or "").lower()
     for domain, markers in keywords.items():
         if any(m.lower() in task_lower for m in markers):
             return domain
@@ -163,6 +163,7 @@ class CollectiveMemory:
         يرفع quality تدريجيًا عند النجاح المتكرر، ويخفضها عند الفشل.
         """
         try:
+            task = task or ""
             domain = _extract_domain(task)
             hint = output_hint or task[:200]
             with self._lock, sqlite3.connect(str(self.db_path)) as conn:
