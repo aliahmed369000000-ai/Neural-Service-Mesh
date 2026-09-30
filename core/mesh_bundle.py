@@ -57,6 +57,7 @@ from ai.evolution_engine import EvolutionEngine
 from ai.multi_goal_planner import MultiGoalPlanner
 from ai.decision import AIDecisionLayer
 from knowledge.knowledge_store import KnowledgeStore
+from ai.discovery_engine import DiscoveryEngine
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +191,18 @@ class MeshBundle:
         # الوقت في SQLite.
         self.memory_engine.set_knowledge_store(self.knowledge_store)
 
+        # ai/discovery_engine.py::DiscoveryEngine كانت مكتوبة بالكامل (إعلان
+        # العُقد لنفسها بمخطط كامل + حفظ SQLite + كتابة profile دلالي إلى
+        # knowledge/node_profiles.json) لكنها لا تُبنى في أي مكان بالمشروع
+        # (تحقّقت بالبحث عن "DiscoveryEngine(": لا شيء خارج تعريفها). وهذا
+        # هو السبب الفعلي لأن KnowledgeStore.update_node_execution_stats()
+        # التي تستدعيها MemoryEngine بعد كل تنفيذ كانت no-op دائماً: تتطلب
+        # profile مسجَّلاً مسبقاً للعقدة (upsert_node_profile) ولا أحد كان
+        # يسجّله. هنا: نسخة واحدة مربوطة بنفس KnowledgeStore، وكل عقدة
+        # مسجَّلة تُعلَن (انظر _announce_registered_nodes وregister_node).
+        self.discovery_engine = DiscoveryEngine(db_path=db_path)
+        self.discovery_engine.set_knowledge_store(self.knowledge_store)
+
         # storage/db.py::SQLiteStorage كان مكتوباً بالكامل (جداول nodes/
         # connections/execution_logs) لكن لم يُبنَ (instantiate) في أي مكان
         # بالمشروع — يُستخدم هنا كسجلّ تدقيق (audit log) حقيقي لتنفيذات
@@ -242,6 +255,7 @@ class MeshBundle:
         self._restore_dynamic_nodes()
         self._sync_nodes_to_exec_log()
         self._sync_nodes_to_graph()
+        self._announce_registered_nodes()
 
         # ── استئناف تلقائي للأسرِبة المتوقفة عند إعادة تشغيل العملية ────────
         # ai/swarm_coordinator.py::resume()/list_resumable() كانا يتطلّبان
@@ -428,6 +442,7 @@ class MeshBundle:
         node_id = self.registry.register(node)
         self.graph.add_node(node_id, node.to_dict())
         self.exec_log.upsert_node(node.to_dict())
+        self._announce_node(node)
         source = connect_to if (connect_to and self.graph.has_node(connect_to)) else self._root_node_id
         if source and self.graph.has_node(source) and source != node_id:
             self.graph.add_edge(source, node_id, label="self_evolved")
@@ -446,6 +461,24 @@ class MeshBundle:
             },
         )
         return node_id
+
+    # ── إعلان العُقد في DiscoveryEngine (يملأ node_profiles.json) ───────────
+    def _announce_node(self, node: BaseNode) -> None:
+        try:
+            self.discovery_engine.announce(node)
+        except Exception as e:
+            logger.warning(
+                "MeshBundle: تعذّر إعلان العقدة %s في DiscoveryEngine: %s",
+                getattr(node, "node_id", "?")[:8], e,
+            )
+
+    def _announce_registered_nodes(self) -> None:
+        """يعلن كل عقدة مسجَّلة لم تُعلَن بعد (تخطّي المُعلَنة سابقاً يحفظ
+        announced_at الأصلي؛ إعادة مزامنتها إلى knowledge تتم أصلاً داخل
+        DiscoveryEngine.set_knowledge_store)."""
+        for node in self.registry.list_all():
+            if self.discovery_engine.get_announcement(node.node_id) is None:
+                self._announce_node(node)
 
     # ── تسجيل كل الأدوار الموجودة في الكتالوج كعُقد حقيقية داخل الـregistry ──
     def _auto_resume_engine_and_jobs(self) -> None:
