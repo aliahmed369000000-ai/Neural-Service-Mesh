@@ -201,15 +201,11 @@ class NSMAgent:
         تلقائي بين المزوّدين عند الفشل (انظر ai/llm_fallback.py).
 
         hands (core/node_hands.py::NodeHands, اختياري): «يد يسرى» حقيقية
-        (قراءة فقط — search_code/find_files/git_info/peers/...) تُعرَض
-        على النموذج كأدوات متاحة؛ يستخدمها «إن كان مناسباً» للمهمة، تماماً
-        كما يستعمل الإنسان يده عند الحاجة لا في كل خطوة. بلا hands أو بلا
-        أدوات يسرى مربوطة: سلوك مطابق تماماً لما كان قبل هذا المعامل —
-        استدعاء LLM واحد كما كان دائماً. بوجودها: استدعاءان كحد أقصى
-        (سؤال عن الحاجة لأداة ثم الإجابة النهائية)، أبداً أكثر — لا حلقة
-        أدوات متكررة. الأمان (الحجر/الإيقاف، allow-list، حد المعدّل،
-        التدقيق) كله مسؤولية NodeHands.use نفسها؛ هذه الدالة لا تكرره ولا
-        تتجاوزه."""
+        (قراءة فقط — peers/routes/capabilities/neighbors/mesh_health/
+        reputation_detail/graph_stats بالإضافة لـ search_code/find_files/...)
+        تُعرَض على النموذج كأدوات متاحة؛ يستخدمها «إن كان مناسباً» للمهمة.
+        بلا hands أو بلا أدوات يسرى: استدعاء LLM واحد كما كان. بوجودها:
+        استدعاءان كحد أقصى. الأمان كله مسؤولية NodeHands.use."""
         left_tools = []
         if hands is not None:
             try:
@@ -225,9 +221,20 @@ class NSMAgent:
             return self._mark_if_degraded(result)
 
         menu = "\n".join(f"- {t['name']}: {t['description']}" for t in left_tools)
+        mesh_hint = ""
+        mesh_names = {
+            "peers", "routes", "capabilities", "neighbors", "mesh_health",
+            "node_status", "reputation_detail", "graph_stats", "read_inbox",
+        }
+        if any(t.get("name") in mesh_names for t in left_tools):
+            mesh_hint = (
+                "أدوات الشبكة (peers/routes/capabilities/neighbors/mesh_health/...) "
+                "مفيدة لفهم حالة العُقد والجيران والسمعة قبل الإجابة.\n"
+            )
         augmented = (
             f"{task}\n\n"
             "--- أدوات اختيارية متاحة (استخدمها فقط إن كانت تفيد الإجابة فعلياً) ---\n"
+            f"{mesh_hint}"
             f"{menu}\n\n"
             "إن احتجت أداة قبل الإجابة، أجب بسطر واحد بالضبط بهذا الشكل "
             '(بلا أي نص آخر): TOOL: <اسم الأداة> ARGS: {"param": "value"}\n'
