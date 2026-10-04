@@ -137,6 +137,39 @@ def check_project_stats() -> Dict[str, Any]:
         return {"ok": False, "detail": str(e)}
 
 
+def check_mesh_nodes() -> Dict[str, Any]:
+    """ملخص تشخيص عُقد الشبكة من MeshBundle (إن كان محمّلاً)."""
+    try:
+        from core.mesh_bundle import get_mesh_bundle
+        mesh = get_mesh_bundle()
+        # تشغيل خفيف إن لم يوجد ملخص بعد
+        summary = mesh.get_nodes_diagnose_summary()
+        if not summary:
+            try:
+                mesh.run_nodes_diagnose_cycle()
+                summary = mesh.get_nodes_diagnose_summary()
+            except Exception as e:
+                return {"ok": False, "detail": f"diagnose failed: {e}"}
+        low = len(summary.get("low_reputation") or [])
+        high = len(summary.get("high_unread") or [])
+        scanned = int(summary.get("scanned") or 0)
+        ok = scanned > 0 and low == 0 and high == 0
+        detail = (
+            f"scanned={scanned}, low_rep={low}, high_unread={high}, "
+            f"errors={summary.get('errors', 0)}"
+        )
+        return {
+            "ok": ok,
+            "detail": detail,
+            "scanned": scanned,
+            "low_reputation": low,
+            "high_unread": high,
+            "ts": summary.get("ts"),
+        }
+    except Exception as e:
+        return {"ok": False, "detail": f"mesh unavailable: {e}"}
+
+
 def system_snapshot() -> Dict[str, Any]:
     """لقطة كاملة لحالة النظام."""
     paths = check_paths()
@@ -147,6 +180,7 @@ def system_snapshot() -> Dict[str, Any]:
         "growth": check_growth(),
         "bridge": check_bridge(),
         "project": check_project_stats(),
+        "mesh_nodes": check_mesh_nodes(),
     }
     path_ok = sum(1 for p in paths if p["ok"])
     flags = [
@@ -186,6 +220,7 @@ def format_system_report(snap: Optional[Dict[str, Any]] = None) -> str:
         f"- التدريب: {'✅' if _ok(sec['training']) else '⚠️'} {sec['training'].get('detail')}",
         f"- نمو الوكيل: {'✅' if _ok(sec['growth']) else '⚠️'} {sec['growth'].get('detail')}",
         f"- المشروع: {'✅' if _ok(sec['project']) else '❌'} {sec['project'].get('detail')}",
+        f"- عُقد الشبكة: {'✅' if _ok(sec.get('mesh_nodes') or {}) else '⚠️'} {(sec.get('mesh_nodes') or {}).get('detail', '')}",
         "",
         "### ملفات حرجة",
     ]
