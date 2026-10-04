@@ -38,7 +38,8 @@ def test_revived_evolved_node_has_working_hands(paths):
     assert "mesh_health" in left_names
     assert "routes" in left_names
     for extra in ("capabilities", "neighbors", "reputation_detail", "graph_stats",
-                  "terminal_policy", "terminal_run_safe", "terminal_history"):
+                  "terminal_policy", "terminal_run_safe", "terminal_history",
+                  "inbox_summary", "self_diagnose"):
         assert extra in left_names, extra
 
     # اليسرى تعمل فعلاً، واليمنى (send_message) تصل لعقدة حقيقية.
@@ -63,6 +64,12 @@ def test_revived_evolved_node_has_working_hands(paths):
     assert bad.ok and isinstance(bad.output, dict) and bad.output.get("ok") is False
     good = revived.use_hand(LEFT, "terminal_run_safe", cmd="git status")
     assert good.ok and isinstance(good.output, dict)
+    st2 = revived.use_hand(LEFT, "node_status")
+    assert st2.ok and "last_terminal_check" in (st2.output or {})
+    sd = revived.use_hand(LEFT, "self_diagnose")
+    assert sd.ok and isinstance(sd.output, dict) and sd.output.get("layer") == "node-self-diagnose-v1"
+    ib = revived.use_hand(LEFT, "inbox_summary")
+    assert ib.ok and "unread_total" in (ib.output or {})
     other = next(i for i in b2.role_node_ids.values())
     res = revived.use_hand(RIGHT, "send_message", to_id=other, topic="ping")
     assert res.ok or res.denied  # السياسة تقرّر؛ المهم ألا ترفع استثناءً
