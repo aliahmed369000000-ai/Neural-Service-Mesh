@@ -213,10 +213,17 @@ class SwarmCoordinator:
         max_agents: int = 20,
         knowledge_store=None,
         is_role_quarantined: Optional[Callable[[str], bool]] = None,
+        role_hands: Optional[Callable[[str], Optional[Any]]] = None,
     ):
         self._factory = factory
         self._max_agents = max_agents
         self._knowledge = knowledge_store
+        # 🆕 دالة اختيارية (عادة MeshBundle._hands_for_role) تُرجع «اليد
+        # اليسرى» الحقيقية (core/node_hands.py) لعقدة الدور في الـregistry،
+        # إن وُجدت — تُمرَّر للوكيل كي يستخدمها «إن كان مناسباً» للمهمة
+        # (نفس فكرة اليد البشرية: لا تُستخدم في كل مهمة، فقط حين تفيد).
+        # بدونها: سلوك مطابق تماماً لما كان قبل هذا المعامل.
+        self._role_hands = role_hands
         # 🆕 دالة فحص اختيارية (عادة MeshBundle._is_role_quarantined) تُرجع
         # True لو كان الدور محجوراً حالياً بسبب سمعة منخفضة. بدونها (كل
         # الاستدعاءات القديمة/الاختبارات التي لا تمرّرها) لا تغيير في
@@ -708,7 +715,13 @@ class SwarmCoordinator:
         try:
             # 🆕 تنفيذ حقيقي عبر محرك الوكيل (NSMAgent)، بدل المحاكاة القديمة.
             task_text = self._build_task_text(task)
-            exec_result = agent.execute(task_text)
+            hands = None
+            if self._role_hands is not None:
+                try:
+                    hands = self._role_hands(agent.role)
+                except Exception as exc:
+                    logger.warning(f"role_hands فشلت لـ '{agent.role}': {exc}")
+            exec_result = agent.execute(task_text, hands=hands)
             output = {
                 "task_id": task.task_id,
                 "sub_goal": task.sub_goal,

@@ -222,6 +222,7 @@ class MeshBundle:
         self.coordinator = SwarmCoordinator(
             self.agent_factory, max_agents=20,
             is_role_quarantined=self._is_role_quarantined,
+            role_hands=self._hands_for_role,
         )
 
         # ── التواصل الحقيقي بين العُقد + رسم بياني حيّ للطوبولوجيا ──────────
@@ -721,6 +722,22 @@ class MeshBundle:
                     )
         except Exception as exc:
             logger.warning("MeshBundle: تعذّر فحص الأسرِبة المتوقفة: %s", exc)
+
+    def _hands_for_role(self, role) -> Optional[NodeHands]:
+        """«اليد اليسرى» الحقيقية لعقدة هذا الدور في الـregistry، إن
+        وُجدت — تُمرَّر لـSwarmCoordinator._run_task فيستخدمها الوكيل عبر
+        NSMAgent.run(hands=...) «إن كان مناسباً» للمهمة بالفعل (قراءة
+        كود/ملفات/حالة أقران فقط؛ اليد اليمنى مخصّصة لبروتوكول pump_inboxes
+        بين العُقد ولا تُعرَض هنا). بدون عقدة مسجَّلة لهذا الدور، أو بدون
+        يدين مُرفَقتين بعد: None — فيتصرّف NSMAgent.run كأن hands لم
+        تُمرَّر أصلاً (سلوك ما قبل هذه الميزة تماماً)."""
+        if not role:
+            return None
+        node_id = getattr(self, "role_node_ids", {}).get(role)
+        if not node_id:
+            return None
+        node = self.registry.get(node_id)
+        return getattr(node, "hands", None) if node else None
 
     def _is_role_quarantined(self, role) -> bool:
         """هل الدور محجور حالياً بسبب سمعة منخفضة؟ تُمرَّر لـSwarmCoordinator

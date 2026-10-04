@@ -231,11 +231,16 @@ class AgentInstance:
             )
         return self._engine
 
-    def execute(self, task: str) -> Dict[str, Any]:
+    def execute(self, task: str, hands: Optional[Any] = None) -> Dict[str, Any]:
         """
         ينفذ مهمة فعلية عبر المحرك الحقيقي المرتبط بهذا الدور.
         يرفع NotImplementedError صراحة لو الدور غير قابل للتنفيذ فعلياً
         (بدل أن يعيد نجاحاً وهمياً).
+
+        hands (اختياري): core/node_hands.py::NodeHands الحقيقية لعقدة هذا
+        الدور في الـregistry — تُمرَّر كما هي لمحرك NSMAgent (انظر
+        ai/nsm_agent_core.py::NSMAgent.run) ليستخدمها «إن كان مناسباً»
+        للمهمة. بدونها: سلوك مطابق تماماً لما كان قبل هذا المعامل.
         """
         if not self.is_executable():
             raise NotImplementedError(
@@ -250,7 +255,7 @@ class AgentInstance:
         # العام (NSMAgent) أي شخصية/تخصص يتقمّص لهذا التنفيذ بالذات.
         full_task = f"{self._role_prompt}\n\nالمهمة المطلوبة: {task}" if self._role_prompt else task
         try:
-            result_text = engine.run(full_task)
+            result_text = engine.run(full_task, hands=hands) if hands is not None else engine.run(full_task)
         except Exception as e:
             self.record_task(success=False)
             return {"result": f"❌ خطأ في التنفيذ: {e}", "success": False}
@@ -326,7 +331,8 @@ class AgentFactory:
         return [self.spawn(r) for r in roles]
 
     # ── 🆕 Run task — تنفيذ فعلي مباشر عبر المحرك الحقيقي ──────────────────
-    def run_task(self, role: str, task: str, reuse: Optional[AgentInstance] = None) -> Dict[str, Any]:
+    def run_task(self, role: str, task: str, reuse: Optional[AgentInstance] = None,
+                 hands: Optional[Any] = None) -> Dict[str, Any]:
         """
         ينشئ وكيلاً (أو يعيد استخدام وكيل موجود) وينفذ مهمة فعلية عبر
         محركه الحقيقي. كل الأدوار في AGENT_CATALOGUE مربوطة الآن بمحرك
@@ -344,7 +350,7 @@ class AgentFactory:
             raise NotImplementedError(
                 f"الدور '{role}' بيانات وصفية فقط ولا محرك حقيقي مربوط به بعد."
             )
-        return agent.execute(task)
+        return agent.execute(task, hands=hands)
 
     # ── Retire ────────────────────────────────────────────────────────────
 

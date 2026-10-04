@@ -196,14 +196,82 @@ class NSMAgent:
             return f"⚠️ {text}"
         return text
 
-    def run(self, task: str) -> str:
+    def run(self, task: str, hands: Optional[Any] = None) -> str:
         """تنفيذ مهمة نصية دفعة واحدة عبر محرك LLM الحقيقي، مع تبديل
-        تلقائي بين المزوّدين عند الفشل (انظر ai/llm_fallback.py)."""
+        تلقائي بين المزوّدين عند الفشل (انظر ai/llm_fallback.py).
+
+        hands (core/node_hands.py::NodeHands, اختياري): «يد يسرى» حقيقية
+        (قراءة فقط — search_code/find_files/git_info/peers/...) تُعرَض
+        على النموذج كأدوات متاحة؛ يستخدمها «إن كان مناسباً» للمهمة، تماماً
+        كما يستعمل الإنسان يده عند الحاجة لا في كل خطوة. بلا hands أو بلا
+        أدوات يسرى مربوطة: سلوك مطابق تماماً لما كان قبل هذا المعامل —
+        استدعاء LLM واحد كما كان دائماً. بوجودها: استدعاءان كحد أقصى
+        (سؤال عن الحاجة لأداة ثم الإجابة النهائية)، أبداً أكثر — لا حلقة
+        أدوات متكررة. الأمان (الحجر/الإيقاف، allow-list، حد المعدّل،
+        التدقيق) كله مسؤولية NodeHands.use نفسها؛ هذه الدالة لا تكرره ولا
+        تتجاوزه."""
+        left_tools = []
+        if hands is not None:
+            try:
+                left_tools = hands.tools().get("left", [])
+            except Exception:
+                left_tools = []
+
+        if not left_tools:
+            try:
+                result = self.llm_fallback.generate(task)
+            except Exception as e:
+                return f"❌ خطأ في التنفيذ: {e}"
+            return self._mark_if_degraded(result)
+
+        menu = "\n".join(f"- {t['name']}: {t['description']}" for t in left_tools)
+        augmented = (
+            f"{task}\n\n"
+            "--- أدوات اختيارية متاحة (استخدمها فقط إن كانت تفيد الإجابة فعلياً) ---\n"
+            f"{menu}\n\n"
+            "إن احتجت أداة قبل الإجابة، أجب بسطر واحد بالضبط بهذا الشكل "
+            '(بلا أي نص آخر): TOOL: <اسم الأداة> ARGS: {"param": "value"}\n'
+            "غير ذلك، أجب على المهمة مباشرة كالمعتاد."
+        )
         try:
-            result = self.llm_fallback.generate(task)
+            first = self.llm_fallback.generate(augmented)
         except Exception as e:
             return f"❌ خطأ في التنفيذ: {e}"
-        return self._mark_if_degraded(result)
+
+        m = re.match(r"^\s*TOOL:\s*(\S+)\s*ARGS:\s*(\{.*\})\s*$", (first.text or "").strip(), re.DOTALL)
+        if not m:
+            return self._mark_if_degraded(first)
+
+        tool_name = m.group(1)
+        try:
+            args = json.loads(m.group(2))
+            if not isinstance(args, dict):
+                raise ValueError("ARGS يجب أن تكون كائن JSON")
+        except Exception:
+            # طلب أداة مشوَّه — تجاهله وأجب كأن لا طلب أداة حصل أصلاً، لا
+            # نرفع خطأ على المستخدم بسبب تنسيق داخلي فشل النموذج في اتّباعه.
+            return self._mark_if_degraded(first)
+
+        hand_result = hands.use("left", tool_name, **args)
+        if not hand_result.ok:
+            # رُفض/فشل استخدام الأداة (حجر، حد معدّل، اسم غير معروف...) —
+            # نجيب مباشرة بلا الأداة بدل حلقة إعادة محاولة أو فشل كامل.
+            try:
+                fallback = self.llm_fallback.generate(task)
+            except Exception as e:
+                return f"❌ خطأ في التنفيذ: {e}"
+            return self._mark_if_degraded(fallback)
+
+        followup = (
+            f"{task}\n\n"
+            f"نتيجة أداة '{tool_name}': {json.dumps(hand_result.output, ensure_ascii=False, default=str)[:2000]}\n\n"
+            "بناءً على هذه النتيجة، أجب على المهمة الآن بشكل نهائي ومباشر."
+        )
+        try:
+            final = self.llm_fallback.generate(followup)
+        except Exception as e:
+            return f"❌ خطأ في التنفيذ: {e}"
+        return self._mark_if_degraded(final)
 
     def run_stream(self, task: str) -> Generator[str, None, None]:
         """🆕 streaming حقيقي (SSE) عبر LLMFallback.generate_stream() حين
