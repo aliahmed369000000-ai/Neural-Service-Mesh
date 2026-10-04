@@ -13,6 +13,10 @@ def test_fact_extraction(tmp_path, monkeypatch):
     # عزل: ملفات السبات تُكتب في مجلد مؤقت لا في artifacts/ المتتبَّع
     import ai.agent_hibernation as _hib
     monkeypatch.setattr(_hib, "SLEEP_DIR", tmp_path)
+    # الحقائق المهمة (importance>=0.7) تُشارَك فوراً عبر shared_experience
+    # (ai/memory_manager.py::_consolidate_to_ltm) — عزل مسار تخزينها أيضاً
+    from ai.shared_experience import shared_experience as _se
+    monkeypatch.setattr(_se, "storage_path", tmp_path / "shared_knowledge.json")
     print("🚀 اختبار استخراج الحقائق الدقيقة (Fact Extraction Test)...")
     
     agent_id = "test_fact_agent"
