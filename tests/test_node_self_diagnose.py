@@ -39,7 +39,8 @@ def test_self_diagnose_bundle(bundle):
     d = n.use_hand(LEFT, "self_diagnose")
     assert d.ok
     out = d.output
-    assert out["layer"] == "node-self-diagnose-v1"
+    assert out["layer"] in ("node-self-diagnose-v1", "node-self-diagnose-v2")
+    assert "collective_health" in out
     assert "status" in out and "mesh_health" in out
     assert "neighbors" in out and "inbox" in out
 
