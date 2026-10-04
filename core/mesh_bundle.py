@@ -59,6 +59,7 @@ from ai.multi_goal_planner import MultiGoalPlanner
 from ai.decision import AIDecisionLayer
 from knowledge.knowledge_store import KnowledgeStore
 from ai.discovery_engine import DiscoveryEngine
+from ai.optimization_engine import OptimizationEngine
 
 logger = logging.getLogger(__name__)
 
@@ -230,6 +231,39 @@ class MeshBundle:
         # موجوداً ومكتوباً بالكامل لكن بلا رسم بياني حيّ يُغذّيه.
         self.channel = NodeChannel(self.storage)
         self.graph = ServiceGraph()
+
+        # ai/optimization_engine.py::OptimizationEngine كانت مكتوبة بالكامل
+        # (analyze(): يحلّل self.graph/self.scoring_engine/self.memory_engine
+        # الحقيقية فعلاً — يقترح حذف وصلات فاشلة باستمرار، ترقية وصلات
+        # ناجحة، عُقداً غير مُستخدَمة إطلاقاً، وتحديث أوزان الحواف حسب الأداء
+        # الفعلي؛ ثم يكتب المقاييس إلى knowledge/graph_metrics.json عبر
+        # KnowledgeStore.record_optimization_run/update_node_rankings/
+        # append_health_snapshot — كلها مكتوبة ومُختبَرة في
+        # knowledge/knowledge_store.py) لكنها، تماماً كـDiscoveryEngine أعلاه
+        # قبل إصلاحها، لم تُبنَ في أي مكان بالمشروع (تحقّقت بالبحث عن
+        # "OptimizationEngine(": صفر نتائج خارج تعريف الكلاس نفسه). النتيجة:
+        # knowledge/graph_metrics.json يبقى بمخططه الفارغ للأبد، ولا أحد
+        # يكتشف وصلة فاشلة باستمرار أو عقدة لم تُنفَّذ قط إلا يدوياً عبر
+        # dev_console. هنا: نسخة واحدة مربوطة بنفس self.graph/scoring_engine/
+        # memory_engine/knowledge_store المشتركة (بعد بناء self.graph مباشرة،
+        # لأن OptimizationEngine.__init__ يقبل graph=None لكن analyze()
+        # يحتاجه فعلياً لكل خطوة تحليل). semantic_matcher عمداً غير مربوط
+        # الآن (يبقى _suggest_new_connections لا-عملية بأمان بدونه) — نفس
+        # نمط "سلك واحد مقصود، والبقية تنتظر مهمة لاحقة" الموثّق أعلاه لبقية
+        # محركات discovery/memory/optimization/routing.
+        #
+        # 🆕 analyze() فقط تُستدعى تلقائياً أدناه (run_evolution_cycle) — لا
+        # apply_report(). التصميم نفسه في OptimizationEngine يقول صراحة:
+        # "Actions are generated but NOT auto-applied — the mesh or user
+        # decides"؛ احترمت هذا القصد عمداً بدل تفعيل حذف حواف/عُقد تلقائياً
+        # دون تقييم أثره على مسارات /process الحيّة. آخر تقرير متاح عبر
+        # self.optimization_engine.last_report() لأي طبقة لاحقة (dev_console
+        # أو تطبيق تلقائي مستقبلي) تقرّر استخدامه.
+        self.optimization_engine = OptimizationEngine(
+            graph=self.graph, scoring_engine=self.scoring_engine,
+            memory_engine=self.memory_engine,
+        )
+        self.optimization_engine.set_knowledge_store(self.knowledge_store)
 
         # ── طبقة القرار الذكي (ai/decision.py::AIDecisionLayer) ─────────────
         # كانت مكتوبة بالكامل (اختيار مسار بالتقييم، ترتيب مسارات بديلة،
@@ -1094,6 +1128,17 @@ class MeshBundle:
             self._apply_reputation_feedback()
             self._apply_reputation_recovery()
             self._apply_node_retirement()
+            try:
+                # تحليل فقط (analyze())، لا تطبيق (apply_report()) — انظر
+                # تعليق تسليك OptimizationEngine في __init__ أعلاه للسبب.
+                opt_report = self.optimization_engine.analyze()
+                if opt_report.actions:
+                    logger.info(
+                        "MeshBundle: OptimizationEngine اقترح %d إجراء (%s)",
+                        len(opt_report.actions), opt_report.summary.get("action_counts"),
+                    )
+            except Exception as e:
+                logger.warning("MeshBundle: تحليل OptimizationEngine فشل: %s", e)
             try:
                 self.dna.snapshot(
                     registry=self.registry,
