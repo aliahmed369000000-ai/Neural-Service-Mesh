@@ -225,11 +225,13 @@ class NSMAgent:
         mesh_names = {
             "peers", "routes", "capabilities", "neighbors", "mesh_health",
             "node_status", "reputation_detail", "graph_stats", "read_inbox",
+            "terminal_policy", "terminal_run_safe", "terminal_history",
         }
         if any(t.get("name") in mesh_names for t in left_tools):
             mesh_hint = (
-                "أدوات الشبكة (peers/routes/capabilities/neighbors/mesh_health/...) "
-                "مفيدة لفهم حالة العُقد والجيران والسمعة قبل الإجابة.\n"
+                "أدوات الشبكة والطرفية الآمنة (peers/routes/capabilities/"
+                "terminal_run_safe/terminal_policy/...) مفيدة لفهم حالة العُقد "
+                "أو فحص الكود بأوامر مسموحة فقط قبل الإجابة.\n"
             )
         augmented = (
             f"{task}\n\n"
