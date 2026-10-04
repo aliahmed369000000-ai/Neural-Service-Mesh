@@ -385,3 +385,30 @@ def render_swarm_studio():
         with st.expander("🕓 آخر 5 عمليات سرب"):
             for h in reversed(hist):
                 st.markdown(f"**{h['goal']}** — {h['status']} ({h['success_count']}/{h['total_tasks']})")
+
+    # 🆕 شفافية قرارات التوزيع: سمعة vs أداء من _pick_agent
+    try:
+        _picks = coordinator.get_pick_audit(limit=10)
+    except Exception:
+        _picks = []
+    if _picks:
+        with st.expander(f"🎯 آخر قرارات توزيع المهام حسب السمعة ({len(_picks)})", expanded=False):
+            st.caption(
+                "كل صف يُظهر الوكيل المختار ودرجة سمعته وأدائه مقارنةً بالمرشحين. "
+                "المصدر: SwarmCoordinator._last_pick_audit — بيانات حقيقية من آخر تشغيل."
+            )
+            for _pi, _pk in enumerate(_picks):
+                _rep_flag = "مع سمعة" if _pk.get("reputation_used") else "أداء فقط"
+                st.markdown(
+                    f"**{_pi+1}. [{_pk.get('capability','—')}]** → "
+                    f"`{_pk.get('chosen_role','—')}` "
+                    f"(rep={_pk.get('chosen_rep', 0):.3f}, perf={_pk.get('chosen_perf', 0):.3f}) "
+                    f"— {_rep_flag}"
+                )
+                _cands = _pk.get("candidates") or []
+                if len(_cands) > 1:
+                    _lines = [
+                        f"• {_c.get('role','?')}: rep={_c.get('rep',0):.3f} / perf={_c.get('perf',0):.3f}"
+                        for _c in _cands[:5]
+                    ]
+                    st.caption("مرشحون: " + " | ".join(_lines))
