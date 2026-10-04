@@ -193,6 +193,29 @@ def render_health():
             f"عُقد الأدوار المسجّلة: {len(_role_ids)} — "
             "التشخيص عبر اليد اليسرى (قراءة فقط)."
         )
+        # ملخص الدورة الدورية (خلفية أو بعد السرب)
+        try:
+            _cyc = _mesh.get_nodes_diagnose_summary() or {}
+            if not _cyc.get("scanned"):
+                try:
+                    _mesh.run_nodes_diagnose_cycle()
+                    _cyc = _mesh.get_nodes_diagnose_summary() or {}
+                except Exception:
+                    pass
+            if _cyc.get("scanned"):
+                _d1, _d2, _d3, _d4 = st.columns(4)
+                _d1.metric("ممسوحة", int(_cyc.get("scanned") or 0))
+                _d2.metric("سمعة منخفضة", len(_cyc.get("low_reputation") or []))
+                _d3.metric("وارد مرتفع", len(_cyc.get("high_unread") or []))
+                _d4.metric("أخطاء المسح", int(_cyc.get("errors") or 0))
+                st.caption(f"آخر دورة تشخيص: {_cyc.get('ts') or '—'}")
+                with st.expander("📊 ملخص دورة التشخيص (كل الأدوار)"):
+                    st.json({
+                        k: _cyc.get(k)
+                        for k in ("ts", "scanned", "errors", "low_reputation", "high_unread")
+                    })
+        except Exception as _cyc_err:
+            st.caption(f"ملخص الدورة: {_cyc_err}")
         if _role_ids:
             _sample = _mesh.registry.get(_role_ids[0])
             if _sample is not None and getattr(_sample, "hands", None) is not None:
