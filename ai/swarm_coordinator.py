@@ -214,6 +214,7 @@ class SwarmCoordinator:
         knowledge_store=None,
         is_role_quarantined: Optional[Callable[[str], bool]] = None,
         role_hands: Optional[Callable[[str], Optional[Any]]] = None,
+        role_reputation: Optional[Callable[[str], float]] = None,
     ):
         self._factory = factory
         self._max_agents = max_agents
@@ -224,6 +225,11 @@ class SwarmCoordinator:
         # (نفس فكرة اليد البشرية: لا تُستخدم في كل مهمة، فقط حين تفيد).
         # بدونها: سلوك مطابق تماماً لما كان قبل هذا المعامل.
         self._role_hands = role_hands
+        # 🆕 دالة اختيارية (عادة MeshBundle._role_reputation) تُرجع درجة
+        # سمعة الدور من registry/reputation_engine. تُستخدم في _pick_agent
+        # لتفضيل العُقد الأعلى سمعة عند تساوي القدرة — بدونها: السلوك
+        # السابق (performance_score فقط).
+        self._role_reputation = role_reputation
         # 🆕 دالة فحص اختيارية (عادة MeshBundle._is_role_quarantined) تُرجع
         # True لو كان الدور محجوراً حالياً بسبب سمعة منخفضة. بدونها (كل
         # الاستدعاءات القديمة/الاختبارات التي لا تمرّرها) لا تغيير في
@@ -775,13 +781,24 @@ class SwarmCoordinator:
         """نقطة الاختيار المركزية الوحيدة لوكيل مهمة — كل استدعاء توزيع في
         هذا الملف يمر من هنا (بدل استدعاء best_agent_for/_auto_spawn_for_capability
         مباشرة) حتى يُطبَّق فحص الحجر باستمرار وفي كل مسار، وليس في نقطة
-        واحدة يسهل نسيان تكرارها لاحقاً."""
+        واحدة يسهل نسيان تكرارها لاحقاً.
+
+        🆕 عند توفر role_reputation: يُفضَّل الوكيل الأعلى سمعةً ثم
+        performance_score (مركب حقيقي من صحة الشبكة، لا وهمي)."""
         candidates = [
             a for a in self._factory.list_by_capability(capability)
             if not self._role_quarantined(a.role)
         ]
         if candidates:
-            return max(candidates, key=lambda a: a.performance_score)
+            def _key(a):
+                rep = 0.0
+                if self._role_reputation is not None:
+                    try:
+                        rep = float(self._role_reputation(a.role) or 0.0)
+                    except Exception:
+                        rep = 0.0
+                return (rep, float(getattr(a, "performance_score", 0.0) or 0.0))
+            return max(candidates, key=_key)
         return self._auto_spawn_for_capability(capability)
 
     def _auto_spawn_for_capability(self, capability: str) -> Optional[AgentInstance]:
