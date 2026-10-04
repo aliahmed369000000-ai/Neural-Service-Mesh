@@ -36,6 +36,7 @@ def test_revived_evolved_node_has_working_hands(paths):
     assert "peers" in left_names
     assert "node_status" in left_names
     assert "mesh_health" in left_names
+    assert "routes" in left_names
 
     # اليسرى تعمل فعلاً، واليمنى (send_message) تصل لعقدة حقيقية.
     assert revived.use_hand(LEFT, "peers").ok
@@ -43,6 +44,8 @@ def test_revived_evolved_node_has_working_hands(paths):
     assert st.ok and isinstance(st.output, dict) and st.output.get("node_id") == node_id
     mh = revived.use_hand(LEFT, "mesh_health")
     assert mh.ok and isinstance(mh.output, dict) and mh.output.get("total_nodes", 0) >= 1
+    rt = revived.use_hand(LEFT, "routes")
+    assert rt.ok and isinstance(rt.output, dict) and "routes" in rt.output
     other = next(i for i in b2.role_node_ids.values())
     res = revived.use_hand(RIGHT, "send_message", to_id=other, topic="ping")
     assert res.ok or res.denied  # السياسة تقرّر؛ المهم ألا ترفع استثناءً
