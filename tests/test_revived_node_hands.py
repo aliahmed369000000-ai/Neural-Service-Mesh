@@ -31,7 +31,7 @@ def test_revived_evolved_node_has_working_hands(paths):
     assert isinstance(revived, NormalizerNode)
     assert revived.hands is not None
     tools = revived.hands.tools()
-    assert {t["name"] for t in tools[RIGHT]} == {"send_message", "request_evolution"}
+    assert {t["name"] for t in tools[RIGHT]} == {"send_message", "request_evolution", "request_peer_ping"}
     left_names = {t["name"] for t in tools[LEFT]}
     assert "peers" in left_names
     assert "node_status" in left_names
