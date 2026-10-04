@@ -994,7 +994,22 @@ class MeshBundle:
         NodeReputationEngine — وهذا هو الرابط الذي كان مفقوداً: نتائج
         السرب كانت تُعرض في الواجهة فقط ولا تصل أبداً لمحركات التقييم/
         الذاكرة/السمعة.
+
+        🆕 يلتقط أيضاً آخر قرارات _pick_audit ويربطها بنتيجة السرب
+        (شفافية توزيع المهام حسب السمعة) دون تغيير منطق السمعة نفسه.
         """
+        # لقطة قرارات التوزيع قبل القفل الطويل
+        pick_snapshot = []
+        try:
+            pick_snapshot = list(getattr(self.coordinator, "get_pick_audit", lambda **k: [])(limit=20) or [])
+        except Exception:
+            pick_snapshot = []
+        if pick_snapshot and not hasattr(swarm_result, "_pick_audit_snapshot"):
+            try:
+                setattr(swarm_result, "_pick_audit_snapshot", pick_snapshot)
+            except Exception:
+                pass
+
         with self._lock:
             for task in getattr(swarm_result, "tasks", []):
                 agent_id = getattr(task, "assigned_agent_id", None)
