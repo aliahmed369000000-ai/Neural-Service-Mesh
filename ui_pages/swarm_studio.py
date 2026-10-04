@@ -221,13 +221,22 @@ def render_swarm_studio():
                 _result_picks = []
         if _result_picks:
             with st.expander(f"🎯 قرارات التوزيع لهذا السرب ({len(_result_picks)})", expanded=False):
-                st.caption("سمعة vs أداء — من _pick_agent أثناء هذا التشغيل.")
+                st.caption(
+                    "سمعة vs أداء — من _pick_agent. "
+                    "يُعرض penalty_factor إن وُجد (×0.1/×0.5/×1.0)."
+                )
                 for _rpi, _rpk in enumerate(_result_picks[:15]):
+                    _cpf = _rpk.get("chosen_penalty_factor")
+                    _cpf_s = (
+                        f", penalty=×{float(_cpf):.1f}"
+                        if _cpf is not None else ""
+                    )
                     st.markdown(
                         f"**{_rpi+1}. [{_rpk.get('capability','—')}]** → "
                         f"`{_rpk.get('chosen_role','—')}` "
                         f"(rep={float(_rpk.get('chosen_rep') or 0):.3f}, "
-                        f"perf={float(_rpk.get('chosen_perf') or 0):.3f})"
+                        f"perf={float(_rpk.get('chosen_perf') or 0):.3f}"
+                        f"{_cpf_s})"
                     )
 
         for _ti, task in enumerate(result.tasks):
@@ -432,6 +441,32 @@ def render_swarm_studio():
                     f"(×{_pr.get('penalty_factor', 1)}) — {_pr.get('status')}"
                 )
 
+    # 🆕 أدوار تعافت في آخر دورة تشخيص
+    try:
+        _cyc_sw = _mesh.get_nodes_diagnose_summary() or {}
+        _rec_sw = _cyc_sw.get("recovered") or []
+    except Exception:
+        _rec_sw = []
+    if _rec_sw:
+        _rec_names = [
+            str(r.get("name") or r.get("node_id") or "")[:24]
+            for r in _rec_sw[:6]
+        ]
+        st.success(
+            "🟢 تعافت من عقوبة التوجيه: " + "، ".join(f"`{n}`" for n in _rec_names if n)
+        )
+        # إشعار لمرة واحدة لكل مجموعة ts
+        _rec_key = f"nsm_rec_toast_{_cyc_sw.get('ts', '')}"
+        if _rec_key and not st.session_state.get(_rec_key):
+            st.session_state[_rec_key] = True
+            try:
+                st.toast(
+                    f"تعافت {len(_rec_sw)} عقدة من عقوبة التوجيه",
+                    icon="🟢",
+                )
+            except Exception:
+                pass
+
     # 🆕 شفافية قرارات التوزيع: سمعة vs أداء من _pick_agent
     try:
         _picks = coordinator.get_pick_audit(limit=10)
@@ -450,11 +485,14 @@ def render_swarm_studio():
                 _rep_flag = "مع سمعة" if _pk.get("reputation_used") else "أداء فقط"
                 _chosen = _pk.get("chosen_role") or ""
                 _pen_mark = " ⚠️معاقَب" if _chosen in _pen_role_names else ""
+                _cpf = _pk.get("chosen_penalty_factor")
+                _cpf_s = f", ×{float(_cpf):.1f}" if _cpf is not None else ""
                 st.markdown(
                     f"**{_pi+1}. [{_pk.get('capability','—')}]** → "
                     f"`{_chosen}`{_pen_mark} "
                     f"(rep={float(_pk.get('chosen_rep') or 0):.3f}, "
-                    f"perf={float(_pk.get('chosen_perf') or 0):.3f}) "
+                    f"perf={float(_pk.get('chosen_perf') or 0):.3f}"
+                    f"{_cpf_s}) "
                     f"— {_rep_flag}"
                 )
                 _cands = _pk.get("candidates") or []
@@ -463,8 +501,10 @@ def render_swarm_studio():
                     for _c in _cands[:5]:
                         _cr = _c.get("role") or "?"
                         _pm = "⚠️" if _cr in _pen_role_names else "•"
+                        _pf = _c.get("penalty_factor")
+                        _pfs = f" ×{float(_pf):.1f}" if _pf is not None else ""
                         _lines.append(
                             f"{_pm} {_cr}: rep={float(_c.get('rep') or 0):.3f} / "
-                            f"perf={float(_c.get('perf') or 0):.3f}"
+                            f"perf={float(_c.get('perf') or 0):.3f}{_pfs}"
                         )
                     st.caption("مرشحون: " + " | ".join(_lines))
