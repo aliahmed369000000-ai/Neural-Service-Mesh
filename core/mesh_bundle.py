@@ -500,16 +500,37 @@ class MeshBundle:
         - يد محجوبة/محدودة المعدّل: تبقى الرسالة غير مقروءة وتُعاد المحاولة في
           الجولة التالية (لا فقدان صامت).
         - الرسائل غير ping (node_joined/node_failed...) تبقى كما هي لواجهة
-          المراقبة ولا تُستهلك هنا."""
-        stats = {"nodes": 0, "pings_answered": 0, "pings_dropped": 0, "deferred": 0}
-        for node in self.registry.list_all():
-            if getattr(node, "hands", None) is None:
-                continue
+          المراقبة ولا تُستهلك هنا.
+
+        🆕 ترتيب حقيقي حسب السمعة: العُقد الأعلى سمعة تُعالَج أولاً، وداخل
+        صندوق كل عقدة تُفضَّل رسائل المرسلين الأعلى سمعة — تحت حد المعدّل
+        لليد اليمنى هذا يقلّل تأجيل نبض العُقد الموثوقة."""
+        def _rep(nid: str) -> float:
+            try:
+                return float(self.reputation_engine.get_score(nid) or 0.0)
+            except Exception:
+                return 0.0
+
+        stats = {
+            "nodes": 0, "pings_answered": 0, "pings_dropped": 0, "deferred": 0,
+            "order": "reputation_desc",
+        }
+        nodes = [
+            n for n in self.registry.list_all()
+            if getattr(n, "hands", None) is not None
+        ]
+        nodes.sort(key=lambda n: -_rep(getattr(n, "node_id", "") or ""))
+
+        for node in nodes:
             r = node.use_hand(LEFT, "read_inbox", unread_only=True, topic="ping", limit=max_per_node)
             if not r.ok:
                 continue
             stats["nodes"] += 1
-            for m in r.output:
+            messages = list(r.output or [])
+            messages.sort(
+                key=lambda m: -_rep(str(m.get("from_id") or "")),
+            )
+            for m in messages:
                 sender = m.get("from_id")
                 if sender == node.node_id or not self.registry.exists(sender):
                     self.channel.mark_read(node.node_id, m["message_id"])
