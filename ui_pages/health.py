@@ -208,11 +208,31 @@ def render_health():
                 _d2.metric("سمعة منخفضة", len(_cyc.get("low_reputation") or []))
                 _d3.metric("وارد مرتفع", len(_cyc.get("high_unread") or []))
                 _d4.metric("أخطاء المسح", int(_cyc.get("errors") or 0))
-                st.caption(f"آخر دورة تشخيص: {_cyc.get('ts') or '—'}")
+                _e1, _e2, _e3 = st.columns(3)
+                _e1.metric(
+                    "متوسط السمعة",
+                    f"{float(_cyc.get('avg_reputation') or 0):.3f}",
+                )
+                _e2.metric(
+                    "عتبة ديناميكية",
+                    f"{float(_cyc.get('effective_low_rep_threshold') or 0):.3f}",
+                )
+                _e3.metric(
+                    "عتبة ثابتة",
+                    f"{float(_cyc.get('static_low_rep_threshold') or 0.15):.3f}",
+                )
+                st.caption(
+                    f"آخر دورة تشخيص: {_cyc.get('ts') or '—'} — "
+                    "العُقد ضمن السمعة المنخفضة تُخفَّض ×0.1 في توجيه السرب."
+                )
                 with st.expander("📊 ملخص دورة التشخيص (كل الأدوار)"):
                     st.json({
                         k: _cyc.get(k)
-                        for k in ("ts", "scanned", "errors", "low_reputation", "high_unread")
+                        for k in (
+                            "ts", "scanned", "errors", "avg_reputation",
+                            "effective_low_rep_threshold", "static_low_rep_threshold",
+                            "low_reputation", "high_unread",
+                        )
                     })
         except Exception as _cyc_err:
             st.caption(f"ملخص الدورة: {_cyc_err}")
@@ -235,6 +255,24 @@ def render_health():
                             f"آخر فحص طرفية: `{_ltc.get('cmd', '')}` "
                             f"({'✅' if _ltc.get('ok') else '⚠️'}) — {_ltc.get('at', '')}"
                         )
+                    _ch = _out.get("collective_health") or {}
+                    if _ch:
+                        st.markdown("**الصحة الجماعية (collective_health)**")
+                        _loc = _ch.get("from_cycle_local") or {}
+                        _peer = _ch.get("from_peer_broadcast") or {}
+                        st.caption(
+                            f"محلي: scanned={_loc.get('scanned', 0)}, "
+                            f"low_rep={_loc.get('low_reputation', 0)}, "
+                            f"high_unread={_loc.get('high_unread', 0)} | "
+                            f"بث أقران: {'نعم' if _ch.get('has_signal') else 'لا'}"
+                            + (
+                                f" (from={_peer.get('from_id', '')[:8]}… "
+                                f"scanned={_peer.get('scanned')})"
+                                if _peer else ""
+                            )
+                        )
+                        with st.expander("🌐 تفاصيل collective_health"):
+                            st.json(_ch)
                     with st.expander("📋 تفاصيل self_diagnose الكاملة"):
                         st.json(_out)
                 else:
