@@ -294,13 +294,15 @@ class MeshBundle:
         self.mcp_tool_node_ids: Dict[str, str] = {}
         self._root_node_id = self._register_roles()
         self._register_mcp_tools()
+        # قبل الإحياء: جاهزية حقول الأيدي حتى يستطيع _restore استدعاء _equip_hands
+        self._hand_evolution_last = 0.0
         self._restore_dynamic_nodes()
         self._sync_nodes_to_exec_log()
         self._sync_nodes_to_graph()
         self._announce_registered_nodes()
 
         # ── «اليدان»: كل عقدة حيّة تحصل على يد يسرى (قراءة) ويمنى (أفعال مقيَّدة) ──
-        self._hand_evolution_last = 0.0
+        # الدفاع الثاني: حتى لو فوّت _restore عقدة، هذه الحلقة تغطي كل registry
         for _n in self.registry.list_all():
             self._equip_hands(_n)
 
@@ -556,9 +558,62 @@ class MeshBundle:
                 msgs = [m for m in msgs if m.get("topic") == topic]
             return [dict(m) for m in msgs[:limit]]
 
+        def node_status():
+            """حالة هذه العقدة من السجل + السمعة (قراءة فقط)."""
+            meta = None
+            for m in self.registry.list_metadata():
+                if m.get("node_id") == node.node_id:
+                    meta = m
+                    break
+            score = 0.0
+            try:
+                score = float(self.reputation_engine.get_score(node.node_id) or 0.0)
+            except Exception:
+                pass
+            return {
+                "node_id": node.node_id,
+                "name": getattr(node, "name", None),
+                "state": str(getattr(node, "state", None)),
+                "execution_count": getattr(node, "execution_count", None),
+                "node_type": type(node).__name__,
+                "reputation_score": score,
+                "meta": {
+                    k: meta.get(k) for k in ("tags", "pause_reason", "description")
+                    if meta and k in meta
+                } if meta else {},
+            }
+
+        def mesh_health():
+            """ملخص صحة الشبكة من منظور MeshBundle (عدد العقد/الحالات/السمعة)."""
+            metas = self.registry.list_metadata()
+            by_state = {}
+            for m in metas:
+                st = str(m.get("state") or "unknown")
+                by_state[st] = by_state.get(st, 0) + 1
+            scores = []
+            for m in metas:
+                nid = m.get("node_id")
+                if not nid:
+                    continue
+                try:
+                    scores.append(float(self.reputation_engine.get_score(nid) or 0.0))
+                except Exception:
+                    pass
+            avg_rep = (sum(scores) / len(scores)) if scores else 0.0
+            return {
+                "layer": "mesh-bundle-health-v1",
+                "total_nodes": len(metas),
+                "by_state": by_state,
+                "avg_reputation": round(avg_rep, 4),
+                "roles": len(getattr(self, "role_node_ids", {}) or {}),
+                "viewer_node_id": node.node_id,
+            }
+
         tools = [
             ("read_inbox", read_inbox, "قراءة صندوق بريد هذه العقدة فقط (الأقدم أولاً)"),
             ("peers", peers, "قائمة العُقد المعروفة وحالاتها"),
+            ("node_status", node_status, "حالة هذه العقدة + سمعتها من السجل"),
+            ("mesh_health", mesh_health, "ملخص صحة الشبكة (عدد/حالات/سمعة متوسطة)"),
         ]
         try:
             from ai import agent_tools as at
@@ -860,9 +915,13 @@ class MeshBundle:
             shell.restore_state(meta)
             try:
                 self.registry.register(shell)
+                # 🆕 دفاع صريح: تجهيز اليدين فور الإحياء — لا نعتمد فقط على
+                # حلقة list_all اللاحقة في __init__ (قد تتغيّر ترتيباً أو تُتخطى).
+                self._equip_hands(shell)
                 logger.info(
-                    "MeshBundle: أُحييت عقدة ديناميكية بعد إعادة التشغيل: %s [%s]",
+                    "MeshBundle: أُحييت عقدة ديناميكية بعد إعادة التشغيل: %s [%s] (hands=%s)",
                     shell.name, node_id[:8],
+                    "yes" if getattr(shell, "hands", None) else "no",
                 )
             except ValueError:
                 pass  # سبقتنا خطوة أخرى لتسجيلها بنفس node_id — لا مشكلة
