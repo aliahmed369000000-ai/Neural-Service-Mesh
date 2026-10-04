@@ -764,15 +764,18 @@ class MeshBundle:
         def terminal_policy() -> dict:
             """ماذا يُسمح تلقائياً من أوامر الطرفية للعقدة."""
             try:
-                from ai.terminal_auto_policy import explain_policy
+                from ai.terminal_auto_policy import explain_policy, list_allowed_examples
                 policy_text = explain_policy()
+                examples = list_allowed_examples()
             except Exception as e:
                 policy_text = f"policy unavailable: {e}"
+                examples = []
             return {
                 "mode": "safe-allowlist",
                 "shell": False,
                 "operators_banned": [";", "&&", "||", "|", ">", ">>", "<"],
                 "policy": policy_text,
+                "examples": examples,
                 "node_id": node.node_id,
             }
 
