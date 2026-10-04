@@ -957,6 +957,14 @@ class SwarmCoordinator:
         except Exception as exc:
             logger.warning(f"تعذّر حفظ نتيجة السرب {result.swarm_id} بشكل دائم: {exc}")
 
+    def get_pick_audit(self, limit: int = 20) -> List[dict]:
+        """آخر قرارات _pick_agent (سمعة vs أداء) — للقراءة من الواجهة/التدقيق.
+        الأحدث أولاً. لا يُعدّل الحالة."""
+        with self._lock:
+            items = list(self._last_pick_audit)
+        items.reverse()
+        return items[: max(1, min(int(limit), 100))]
+
     def history(self, limit: int = 20) -> List[dict]:
         """يُفضّل التاريخ الدائم (SQLite) إن كان متاحاً — يشمل عمليات
         السرب من قبل إعادة تشغيل الحاوية الأخيرة، لا فقط الجلسة الحالية."""
