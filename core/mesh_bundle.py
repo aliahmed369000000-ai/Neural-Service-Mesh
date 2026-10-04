@@ -609,11 +609,36 @@ class MeshBundle:
                 "viewer_node_id": node.node_id,
             }
 
+        def routes():
+            """جدول مسارات مبسّط: أقران + حالة + سمعة (قراءة فقط، شبيه
+            NodeHealthLayer.routes_table لكن من منظور MeshBundle)."""
+            rows = []
+            for m in self.registry.list_metadata():
+                nid = m.get("node_id")
+                if not nid or nid == node.node_id:
+                    continue
+                score = 0.0
+                try:
+                    score = float(self.reputation_engine.get_score(nid) or 0.0)
+                except Exception:
+                    pass
+                rows.append({
+                    "peer_id": nid,
+                    "name": m.get("name"),
+                    "state": m.get("state"),
+                    "node_type": m.get("node_type"),
+                    "reputation": score,
+                    "reachable": str(m.get("state") or "").lower() not in ("paused", "failed", "offline"),
+                })
+            rows.sort(key=lambda r: (-float(r.get("reputation") or 0), str(r.get("name") or "")))
+            return {"routes": rows, "source": "mesh_bundle_registry", "viewer": node.node_id}
+
         tools = [
             ("read_inbox", read_inbox, "قراءة صندوق بريد هذه العقدة فقط (الأقدم أولاً)"),
             ("peers", peers, "قائمة العُقد المعروفة وحالاتها"),
             ("node_status", node_status, "حالة هذه العقدة + سمعتها من السجل"),
             ("mesh_health", mesh_health, "ملخص صحة الشبكة (عدد/حالات/سمعة متوسطة)"),
+            ("routes", routes, "جدول مسارات الأقران مع الحالة والسمعة"),
         ]
         try:
             from ai import agent_tools as at
@@ -789,6 +814,19 @@ class MeshBundle:
                     )
         except Exception as exc:
             logger.warning("MeshBundle: تعذّر فحص الأسرِبة المتوقفة: %s", exc)
+
+    def _role_reputation(self, role) -> float:
+        """درجة سمعة عقدة الدور في الـregistry — تُمرَّر لـSwarmCoordinator
+        لتفضيل الأدوار الأعلى سمعة عند توزيع المهام. 0.0 إن لم تُوجد عقدة."""
+        if not role:
+            return 0.0
+        node_id = (getattr(self, "role_node_ids", None) or {}).get(role)
+        if not node_id:
+            return 0.0
+        try:
+            return float(self.reputation_engine.get_score(node_id) or 0.0)
+        except Exception:
+            return 0.0
 
     def _hands_for_role(self, role) -> Optional[NodeHands]:
         """«اليد اليسرى» الحقيقية لعقدة هذا الدور في الـregistry، إن
