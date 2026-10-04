@@ -181,6 +181,48 @@ def render_health():
         st.caption(f"الفحص التشخيصي غير متاح: {_mh_err}")
 
     # ── نماذج Anthropic المتاحة (من That.md) ────────────────────────────
+    # ── تشخيص عُقد الشبكة (MeshBundle.self_diagnose) ─────────────────────
+    st.markdown("---")
+    st.markdown('<div class="section-header">🕸️ تشخيص عُقد الشبكة (self_diagnose)</div>', unsafe_allow_html=True)
+    try:
+        from core.mesh_bundle import get_mesh_bundle
+        from core.node_hands import LEFT
+        _mesh = get_mesh_bundle()
+        _role_ids = list(getattr(_mesh, "role_node_ids", {}) or {}.values())
+        st.caption(
+            f"عُقد الأدوار المسجّلة: {len(_role_ids)} — "
+            "التشخيص عبر اليد اليسرى (قراءة فقط)."
+        )
+        if _role_ids:
+            _sample = _mesh.registry.get(_role_ids[0])
+            if _sample is not None and getattr(_sample, "hands", None) is not None:
+                _diag = _sample.use_hand(LEFT, "self_diagnose")
+                if _diag.ok and isinstance(_diag.output, dict):
+                    _out = _diag.output
+                    _st = _out.get("status") or {}
+                    _c1, _c2, _c3, _c4 = st.columns(4)
+                    _c1.metric("عقدة عيّنة", str(_st.get("name") or _st.get("node_id") or "—")[:24])
+                    _c2.metric("الحالة", str(_st.get("state") or "—"))
+                    _c3.metric("السمعة", f"{float(_st.get('reputation_score') or 0):.3f}")
+                    _ib = _out.get("inbox") or {}
+                    _c4.metric("وارد غير مقروء", int(_ib.get("unread_total") or 0))
+                    _ltc = _st.get("last_terminal_check")
+                    if _ltc:
+                        st.caption(
+                            f"آخر فحص طرفية: `{_ltc.get('cmd', '')}` "
+                            f"({'✅' if _ltc.get('ok') else '⚠️'}) — {_ltc.get('at', '')}"
+                        )
+                    with st.expander("📋 تفاصيل self_diagnose الكاملة"):
+                        st.json(_out)
+                else:
+                    st.warning(f"تعذّر self_diagnose: {_diag.error if hasattr(_diag, 'error') else 'unknown'}")
+            else:
+                st.info("لا أيدٍ مربوطة على عقدة العيّنة بعد.")
+        else:
+            st.info("لا عُقد أدوار مسجّلة حالياً.")
+    except Exception as _mesh_diag_err:
+        st.caption(f"تشخيص الشبكة غير متاح: {_mesh_diag_err}")
+
     st.markdown("---")
     st.markdown('<div class="section-header">🤖 نماذج Anthropic المتاحة</div>', unsafe_allow_html=True)
     try:
