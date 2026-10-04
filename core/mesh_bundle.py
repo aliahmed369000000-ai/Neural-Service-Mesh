@@ -655,12 +655,109 @@ class MeshBundle:
             rows.sort(key=lambda r: (-float(r.get("reputation") or 0), str(r.get("name") or "")))
             return {"routes": rows, "source": "mesh_bundle_registry", "viewer": node.node_id}
 
+        def capabilities():
+            """قدرات هذه العقدة: النوع، الوسوم، مخطط الإدخال/الإخراج."""
+            try:
+                in_s = node.input_schema
+                out_s = node.output_schema
+                in_fields = getattr(in_s, "fields", {}) or {}
+                out_fields = getattr(out_s, "fields", {}) or {}
+                in_req = list(getattr(in_s, "required", None) or [])
+                out_req = list(getattr(out_s, "required", None) or [])
+            except Exception:
+                in_fields, out_fields, in_req, out_req = {}, {}, [], []
+            return {
+                "node_id": node.node_id,
+                "name": getattr(node, "name", None),
+                "node_type": type(node).__name__,
+                "tags": list(getattr(node, "tags", None) or []),
+                "description": (getattr(node, "description", None) or "")[:500],
+                "input_fields": list(in_fields.keys()) if isinstance(in_fields, dict) else [],
+                "input_required": in_req,
+                "output_fields": list(out_fields.keys()) if isinstance(out_fields, dict) else [],
+                "output_required": out_req,
+                "hands": {
+                    "left": [t["name"] for t in (node.hands.tools().get("left") or [])]
+                    if getattr(node, "hands", None) else [],
+                    "right": [t["name"] for t in (node.hands.tools().get("right") or [])]
+                    if getattr(node, "hands", None) else [],
+                },
+            }
+
+        def neighbors():
+            """جيران العقدة في الرسم البياني للخدمات (أسلاف + أخلاف)."""
+            nid = node.node_id
+            try:
+                succ = list(self.graph.get_neighbors(nid) or [])
+            except Exception:
+                succ = []
+            try:
+                pred = list(self.graph.get_predecessors(nid) or [])
+            except Exception:
+                pred = []
+            def _brief(i):
+                meta = None
+                for m in self.registry.list_metadata():
+                    if m.get("node_id") == i:
+                        meta = m
+                        break
+                return {
+                    "node_id": i,
+                    "name": (meta or {}).get("name"),
+                    "state": (meta or {}).get("state"),
+                    "node_type": (meta or {}).get("node_type"),
+                }
+            return {
+                "node_id": nid,
+                "successors": [_brief(i) for i in succ],
+                "predecessors": [_brief(i) for i in pred],
+                "degree_out": len(succ),
+                "degree_in": len(pred),
+            }
+
+        def reputation_detail():
+            """تفاصيل سمعة هذه العقدة من محرك السمعة (إن وُجدت)."""
+            try:
+                rep = self.reputation_engine.get_reputation(node.node_id)
+            except Exception as e:
+                return {"node_id": node.node_id, "error": str(e)}
+            if rep is None:
+                return {
+                    "node_id": node.node_id,
+                    "score": float(self.reputation_engine.get_score(node.node_id) or 0.0),
+                    "detail": None,
+                }
+            if hasattr(rep, "to_dict"):
+                data = rep.to_dict()
+            elif isinstance(rep, dict):
+                data = dict(rep)
+            else:
+                data = {
+                    "score": getattr(rep, "score", None),
+                    "successes": getattr(rep, "successes", None),
+                    "failures": getattr(rep, "failures", None),
+                    "is_quarantined": getattr(rep, "is_quarantined", None),
+                }
+            data["node_id"] = node.node_id
+            return data
+
+        def graph_stats():
+            """إحصاءات الرسم البياني للخدمات (قراءة فقط)."""
+            try:
+                return dict(self.graph.stats() or {})
+            except Exception as e:
+                return {"error": str(e)}
+
         tools = [
             ("read_inbox", read_inbox, "قراءة صندوق بريد هذه العقدة فقط (الأقدم أولاً)"),
             ("peers", peers, "قائمة العُقد المعروفة وحالاتها"),
             ("node_status", node_status, "حالة هذه العقدة + سمعتها من السجل"),
             ("mesh_health", mesh_health, "ملخص صحة الشبكة (عدد/حالات/سمعة متوسطة)"),
             ("routes", routes, "جدول مسارات الأقران مع الحالة والسمعة"),
+            ("capabilities", capabilities, "نوع العقدة والوسوم ومخطط الإدخال/الإخراج واليدين"),
+            ("neighbors", neighbors, "جيران العقدة في رسم الخدمات (أسلاف/أخلاف)"),
+            ("reputation_detail", reputation_detail, "تفاصيل سمعة هذه العقدة من المحرك"),
+            ("graph_stats", graph_stats, "إحصاءات الرسم البياني للخدمات"),
         ]
         try:
             from ai import agent_tools as at
