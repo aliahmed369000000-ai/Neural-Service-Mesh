@@ -37,7 +37,8 @@ def test_revived_evolved_node_has_working_hands(paths):
     assert "node_status" in left_names
     assert "mesh_health" in left_names
     assert "routes" in left_names
-    for extra in ("capabilities", "neighbors", "reputation_detail", "graph_stats"):
+    for extra in ("capabilities", "neighbors", "reputation_detail", "graph_stats",
+                  "terminal_policy", "terminal_run_safe", "terminal_history"):
         assert extra in left_names, extra
 
     # اليسرى تعمل فعلاً، واليمنى (send_message) تصل لعقدة حقيقية.
@@ -56,6 +57,12 @@ def test_revived_evolved_node_has_working_hands(paths):
     assert rd.ok and isinstance(rd.output, dict)
     gs = revived.use_hand(LEFT, "graph_stats")
     assert gs.ok and isinstance(gs.output, dict)
+    tp = revived.use_hand(LEFT, "terminal_policy")
+    assert tp.ok and isinstance(tp.output, dict) and tp.output.get("shell") is False
+    bad = revived.use_hand(LEFT, "terminal_run_safe", cmd="rm -rf /")
+    assert bad.ok and isinstance(bad.output, dict) and bad.output.get("ok") is False
+    good = revived.use_hand(LEFT, "terminal_run_safe", cmd="git status")
+    assert good.ok and isinstance(good.output, dict)
     other = next(i for i in b2.role_node_ids.values())
     res = revived.use_hand(RIGHT, "send_message", to_id=other, topic="ping")
     assert res.ok or res.denied  # السياسة تقرّر؛ المهم ألا ترفع استثناءً
