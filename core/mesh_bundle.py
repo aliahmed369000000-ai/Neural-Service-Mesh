@@ -71,6 +71,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 EVOLUTION_CYCLE_INTERVAL = 5
 DIAGNOSE_LOW_REP_THRESHOLD = 0.15
 DIAGNOSE_HIGH_UNREAD_THRESHOLD = 20
+DIAGNOSE_INTERVAL_S = 120  # ثانية بين دورات التشخيص الخلفية
 
 # اليد اليمنى للعقدة: أفعال مسموحة فقط (كل ما عداها مرفوض) + قيود صارمة.
 HAND_RIGHT_ALLOWED = ("send_message", "request_evolution", "request_peer_ping")
@@ -339,6 +340,14 @@ class MeshBundle:
         # التعليق وصف النية، والتنفيذ بقي متزامناً في __init__.
         threading.Thread(
             target=self._auto_resume_engine_and_jobs, name="nsm-jobs-auto-resume",
+            daemon=True,
+        ).start()
+
+        # ── تشخيص دوري مستقل عن نتائج السرب (كل DIAGNOSE_INTERVAL_S) ──────
+        self._diagnose_stop = threading.Event()
+        threading.Thread(
+            target=self._auto_nodes_diagnose_loop,
+            name="nsm-nodes-diagnose",
             daemon=True,
         ).start()
 
@@ -920,6 +929,47 @@ class MeshBundle:
                 "top_routes_by_reputation": top_routes,
             }
 
+        def mesh_diagnose_summary() -> dict:
+            """آخر ملخص دورة التشخيص الدورية لكل الأدوار (قراءة فقط)."""
+            return self.get_nodes_diagnose_summary() or {
+                "scanned": 0,
+                "note": "لم تُشغَّل دورة تشخيص بعد",
+            }
+
+        def peer_compare() -> dict:
+            """مقارنة سمعة هذه العقدة بمتوسط الأقران وترتيبها."""
+            try:
+                my = float(self.reputation_engine.get_score(node.node_id) or 0.0)
+            except Exception:
+                my = 0.0
+            peers = []
+            for m in self.registry.list_metadata():
+                nid = m.get("node_id")
+                if not nid or nid == node.node_id:
+                    continue
+                try:
+                    sc = float(self.reputation_engine.get_score(nid) or 0.0)
+                except Exception:
+                    sc = 0.0
+                peers.append({
+                    "node_id": nid,
+                    "name": m.get("name"),
+                    "state": m.get("state"),
+                    "reputation": sc,
+                })
+            peers.sort(key=lambda r: -float(r.get("reputation") or 0))
+            avg = (sum(p["reputation"] for p in peers) / len(peers)) if peers else 0.0
+            rank = 1 + sum(1 for p in peers if p["reputation"] > my)
+            return {
+                "node_id": node.node_id,
+                "my_reputation": round(my, 4),
+                "peer_avg_reputation": round(avg, 4),
+                "rank_among_peers": rank,
+                "peers_total": len(peers),
+                "delta_vs_avg": round(my - avg, 4),
+                "top_peers": peers[:5],
+            }
+
         tools.extend([
             ("terminal_policy", terminal_policy, "سياسة الطرفية الآمنة المسموحة للعقدة"),
             ("terminal_run_safe", terminal_run_safe,
@@ -928,6 +978,10 @@ class MeshBundle:
             ("inbox_summary", inbox_summary, "ملخص الرسائل غير المقروءة حسب الموضوع"),
             ("self_diagnose", self_diagnose,
              "تشخيص موحّد: حالة + صحة الشبكة + جيران + وارد + مسارات"),
+            ("mesh_diagnose_summary", mesh_diagnose_summary,
+             "ملخص آخر دورة تشخيص دورية لكل عُقد الأدوار"),
+            ("peer_compare", peer_compare,
+             "مقارنة سمعة هذه العقدة بمتوسط الأقران وترتيبها"),
         ])
 
         try:
@@ -1696,6 +1750,20 @@ class MeshBundle:
         """آخر ملخص تشخيص دوري للعُقد (إن وُجد)."""
         with self._lock:
             return dict(self._node_runtime_meta.get("__mesh_diagnose_summary__") or {})
+
+    def _auto_nodes_diagnose_loop(self) -> None:
+        """خيط daemon: تشخيص العُقد كل DIAGNOSE_INTERVAL_S بلا اعتماد على السرب."""
+        # تأخير أولي قصير حتى يكتمل الإقلاع
+        stop = getattr(self, "_diagnose_stop", None)
+        if stop is not None and stop.wait(15):
+            return
+        while True:
+            try:
+                self.run_nodes_diagnose_cycle()
+            except Exception as e:
+                logger.warning("MeshBundle: background nodes diagnose failed: %s", e)
+            if stop is not None and stop.wait(max(30, int(DIAGNOSE_INTERVAL_S))):
+                return
 
     def run_evolution_cycle(self) -> dict:
         with self._lock:
