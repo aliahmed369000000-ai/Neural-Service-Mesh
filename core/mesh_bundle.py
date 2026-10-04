@@ -39,6 +39,7 @@ from core.registry import NodeRegistry
 from core.graph import ServiceGraph
 from core.node_channel import NodeChannel
 from core.engine import ExecutionEngine
+from core.node_hands import NodeHands, LEFT, RIGHT
 from services.dynamic_node import PassThroughNode
 from storage.file_storage import FileStorage
 from storage.db import SQLiteStorage
@@ -57,6 +58,7 @@ from ai.evolution_engine import EvolutionEngine
 from ai.multi_goal_planner import MultiGoalPlanner
 from ai.decision import AIDecisionLayer
 from knowledge.knowledge_store import KnowledgeStore
+from ai.discovery_engine import DiscoveryEngine
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,12 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 # كل كم نتيجة سرب حقيقية (record_swarm_result) تُشغَّل دورة تطوّر ذاتي كاملة
 # تلقائياً (انظر التعليق داخل record_swarm_result أدناه).
 EVOLUTION_CYCLE_INTERVAL = 5
+
+# اليد اليمنى للعقدة: أفعال مسموحة فقط (كل ما عداها مرفوض) + قيود صارمة.
+HAND_RIGHT_ALLOWED = ("send_message", "request_evolution")
+HAND_EVOLUTION_COOLDOWN_S = 300.0   # أقل فاصل بين طلبَي تطوّر صادرَين من أي عُقد
+HAND_MESSAGE_MAX_CHARS = 4000
+HAND_TOPIC_MAX_CHARS = 64
 
 
 def datetime_now_iso() -> str:
@@ -175,6 +183,32 @@ class MeshBundle:
         # بقية المحركات (discovery/memory/optimization/routing) لا تزال
         # تنتظر نفس السلك في مهمة لاحقة.
         self.knowledge_store = KnowledgeStore(knowledge_dir=str(Path(storage_dir) / "knowledge"))
+        # MemoryEngine نفسها لديها تخزينها الأساسي عبر SQLite (self._load()
+        # أعلاه) وتعمل صحيحة بدونه، لكن set_knowledge_store() هنا يُفعِّل
+        # تصديرها التكميلي الحقيقي (upsert_route/append_route_execution/
+        # update_node_execution_stats/promote_route/demote_route — كلها
+        # مكتوبة بالكامل في ai/memory_engine.py) إلى knowledge/route_memory.json
+        # وknowledge/node_profiles.json. بلا هذا السطر: self._knowledge=None
+        # في MemoryEngine (تحقّقت — لا مكان آخر يستدعي set_knowledge_store
+        # لها)، فتبقى هذه الملفات بمخططها الافتراضي الفارغ للأبد رغم أن
+        # ai/routing_engine.py مصمَّم صراحة ليقرأ منها فعلياً (بحسب
+        # docstring الملف: "Reads best routes from knowledge/route_memory.json
+        # via KnowledgeStore") — طبقة اكتشاف المسارات الجاهزة تبقى بلا أي
+        # بيانات حقيقية تقرأها رغم أن MemoryEngine تراكم مسارات فعلية طوال
+        # الوقت في SQLite.
+        self.memory_engine.set_knowledge_store(self.knowledge_store)
+
+        # ai/discovery_engine.py::DiscoveryEngine كانت مكتوبة بالكامل (إعلان
+        # العُقد لنفسها بمخطط كامل + حفظ SQLite + كتابة profile دلالي إلى
+        # knowledge/node_profiles.json) لكنها لا تُبنى في أي مكان بالمشروع
+        # (تحقّقت بالبحث عن "DiscoveryEngine(": لا شيء خارج تعريفها). وهذا
+        # هو السبب الفعلي لأن KnowledgeStore.update_node_execution_stats()
+        # التي تستدعيها MemoryEngine بعد كل تنفيذ كانت no-op دائماً: تتطلب
+        # profile مسجَّلاً مسبقاً للعقدة (upsert_node_profile) ولا أحد كان
+        # يسجّله. هنا: نسخة واحدة مربوطة بنفس KnowledgeStore، وكل عقدة
+        # مسجَّلة تُعلَن (انظر _announce_registered_nodes وregister_node).
+        self.discovery_engine = DiscoveryEngine(db_path=db_path)
+        self.discovery_engine.set_knowledge_store(self.knowledge_store)
 
         # storage/db.py::SQLiteStorage كان مكتوباً بالكامل (جداول nodes/
         # connections/execution_logs) لكن لم يُبنَ (instantiate) في أي مكان
@@ -228,6 +262,12 @@ class MeshBundle:
         self._restore_dynamic_nodes()
         self._sync_nodes_to_exec_log()
         self._sync_nodes_to_graph()
+        self._announce_registered_nodes()
+
+        # ── «اليدان»: كل عقدة حيّة تحصل على يد يسرى (قراءة) ويمنى (أفعال مقيَّدة) ──
+        self._hand_evolution_last = 0.0
+        for _n in self.registry.list_all():
+            self._equip_hands(_n)
 
         # ── استئناف تلقائي للأسرِبة المتوقفة عند إعادة تشغيل العملية ────────
         # ai/swarm_coordinator.py::resume()/list_resumable() كانا يتطلّبان
@@ -410,10 +450,146 @@ class MeshBundle:
     # EvolutionEngine._mesh.register_node(node, connect_to=...) هي نقطة
     # الوصل الوحيدة التي كان ينقصها — بدونها EvolutionEngine._mesh=None دائماً
     # ولا تُسجَّل أي عقدة مُولَّدة ذاتياً في الـregistry الحقيقي.
+    # ── «اليدان» ────────────────────────────────────────────────────────────
+    # (core/node_hands.py) اليسرى: قراءة فقط. اليمنى: فعلان فقط
+    # (send_message / request_evolution) وتحت سياسة تمنعها عن أي عقدة
+    # موقوفة/محجورة/فاشلة. لا shell ولا git push ولا fetch_url ولا توكنات.
+    def pump_inboxes(self, max_per_node: int = 10) -> dict:
+        """تشغّل بروتوكول نبض بسيط بين العُقد باستخدام يديها فقط: كل عقدة تقرأ
+        رسائل "ping" في صندوقها (يد يسرى) وتردّ "pong" بـreply_to (يد يمنى).
+        - لا ردّ على pong أبداً (لا حلقات).
+        - مرسل غير مسجَّل أو ping من العقدة لنفسها: تُستهلك بلا ردّ.
+        - يد محجوبة/محدودة المعدّل: تبقى الرسالة غير مقروءة وتُعاد المحاولة في
+          الجولة التالية (لا فقدان صامت).
+        - الرسائل غير ping (node_joined/node_failed...) تبقى كما هي لواجهة
+          المراقبة ولا تُستهلك هنا."""
+        stats = {"nodes": 0, "pings_answered": 0, "pings_dropped": 0, "deferred": 0}
+        for node in self.registry.list_all():
+            if getattr(node, "hands", None) is None:
+                continue
+            r = node.use_hand(LEFT, "read_inbox", unread_only=True, topic="ping", limit=max_per_node)
+            if not r.ok:
+                continue
+            stats["nodes"] += 1
+            for m in r.output:
+                sender = m.get("from_id")
+                if sender == node.node_id or not self.registry.exists(sender):
+                    self.channel.mark_read(node.node_id, m["message_id"])
+                    stats["pings_dropped"] += 1
+                    continue
+                seq = (m.get("payload") or {}).get("seq")
+                payload = {"echo": seq} if isinstance(seq, (int, str)) and len(str(seq)) <= 64 else {}
+                rep = node.use_hand(RIGHT, "send_message", to_id=sender, topic="pong",
+                                    payload=payload, reply_to=m["message_id"])
+                if rep.ok:
+                    self.channel.mark_read(node.node_id, m["message_id"])
+                    stats["pings_answered"] += 1
+                else:
+                    stats["deferred"] += 1
+                    break
+        return stats
+
+    def _hands_policy(self, node: BaseNode, hand: str, tool: str, kwargs: dict):
+        if hand == LEFT:
+            return True, "read-only hand"
+        if tool not in HAND_RIGHT_ALLOWED:
+            return False, f"action {tool!r} is not in the right-hand allow-list"
+        if node.state in (NodeState.PAUSED, NodeState.FAILED):
+            return False, f"node state {node.state!r} cannot act; resume it first"
+        return True, "allow-listed action"
+
+    def _left_hand_tools(self, node: BaseNode):
+        """أدوات قراءة محلية فقط، مضيَّقة: امتدادات نصية محددة، وبلا git remote
+        (قد يكشف توكناً داخل الرابط)."""
+        from ai import agent_tools as at
+
+        def search_code(pattern: str, path: str = ".", glob: str = "*.py", max_matches: int = 20):
+            if glob not in ("*.py", "*.md"):
+                raise ValueError("glob must be '*.py' or '*.md'")
+            return at.search_code(pattern, path=path, glob=glob, max_matches=min(int(max_matches), 40))
+
+        def find_files(name_glob: str = "*.py", path: str = ".", limit: int = 50):
+            return at.find_files(name_glob, path=path, limit=min(int(limit), 80))
+
+        def git_info(what: str = "status"):
+            if what not in ("status", "log", "diff", "branch"):
+                raise ValueError("what must be one of: status, log, diff, branch")
+            return at.git_info(what)
+
+        def peers():
+            return [
+                {"node_id": m.get("node_id"), "name": m.get("name"), "state": m.get("state")}
+                for m in self.registry.list_metadata()
+            ]
+
+        def read_inbox(unread_only: bool = True, topic: Optional[str] = None, limit: int = 10):
+            """يقرأ صندوق بريد هذه العقدة فقط (لا معامل node_id عمداً)، الأقدم
+            أولاً، ويعيد نسخاً لا مراجع حيّة لرسائل القناة."""
+            limit = max(1, min(int(limit), 50))
+            msgs = self.channel.inbox(node.node_id, unread_only=bool(unread_only), limit=100)
+            if topic is not None:
+                msgs = [m for m in msgs if m.get("topic") == topic]
+            return [dict(m) for m in msgs[:limit]]
+
+        return [
+            ("read_inbox", read_inbox, "قراءة صندوق بريد هذه العقدة فقط (الأقدم أولاً)"),
+            ("search_code", search_code, "بحث نصي/regex في ملفات py/md للمشروع"),
+            ("find_files", find_files, "بحث عن ملفات بالاسم/الامتداد"),
+            ("git_info", git_info, "status/log/diff/branch (قراءة فقط)"),
+            ("py_compile_check", at.py_compile_check, "فحص بناء جملة ملف Python"),
+            ("system_info", at.system_info, "لمحة عن البيئة بلا أسرار"),
+            ("peers", peers, "قائمة العُقد المعروفة وحالاتها"),
+        ]
+
+    def _equip_hands(self, node: BaseNode) -> None:
+        if getattr(node, "hands", None) is not None:
+            return
+        hands = NodeHands(
+            node,
+            policy=self._hands_policy,
+            audit_path=Path(self.storage.storage_dir) / "node_hands_audit.jsonl",
+        )
+        try:
+            for name, fn, desc in self._left_hand_tools(node):
+                hands.bind(LEFT, name, fn, desc)
+        except Exception as e:
+            logger.warning("MeshBundle: تعذّر ربط أدوات اليد اليسرى لـ %s: %s", node.name, e)
+
+        def send_message(to_id: str, topic: str, payload: Optional[dict] = None,
+                         reply_to: Optional[str] = None):
+            if not isinstance(topic, str) or not topic or len(topic) > HAND_TOPIC_MAX_CHARS:
+                raise ValueError(f"topic must be a non-empty string up to {HAND_TOPIC_MAX_CHARS} chars")
+            if not self.registry.exists(to_id):
+                raise ValueError("recipient is not a registered node")
+            import json as _json
+            if len(_json.dumps(payload or {}, ensure_ascii=False, default=str)) > HAND_MESSAGE_MAX_CHARS:
+                raise ValueError(f"payload exceeds {HAND_MESSAGE_MAX_CHARS} chars")
+            if reply_to is not None and (not isinstance(reply_to, str) or len(reply_to) > HAND_TOPIC_MAX_CHARS):
+                raise ValueError("reply_to must be a message_id string")
+            msg = self.channel.send(node.node_id, to_id, topic, payload or {}, reply_to=reply_to)
+            return {"message_id": msg["message_id"], "to_id": to_id}
+
+        def request_evolution():
+            import time as _time
+            now = _time.time()
+            with self._lock:
+                wait = HAND_EVOLUTION_COOLDOWN_S - (now - self._hand_evolution_last)
+                if wait > 0:
+                    raise RuntimeError(f"evolution cooldown: retry in {int(wait)}s")
+                self._hand_evolution_last = now
+            return self.run_evolution_cycle()
+
+        hands.bind(RIGHT, "send_message", send_message, "إرسال رسالة لعقدة مسجَّلة أخرى")
+        hands.bind(RIGHT, "request_evolution", request_evolution,
+                   "طلب دورة تطوّر ذاتي (تمرّ بالحوكمة وتبريد 5 دقائق)")
+        node.attach_hands(hands)
+
     def register_node(self, node: BaseNode, connect_to: Optional[str] = None) -> str:
         node_id = self.registry.register(node)
         self.graph.add_node(node_id, node.to_dict())
         self.exec_log.upsert_node(node.to_dict())
+        self._announce_node(node)
+        self._equip_hands(node)
         source = connect_to if (connect_to and self.graph.has_node(connect_to)) else self._root_node_id
         if source and self.graph.has_node(source) and source != node_id:
             self.graph.add_edge(source, node_id, label="self_evolved")
@@ -432,6 +608,24 @@ class MeshBundle:
             },
         )
         return node_id
+
+    # ── إعلان العُقد في DiscoveryEngine (يملأ node_profiles.json) ───────────
+    def _announce_node(self, node: BaseNode) -> None:
+        try:
+            self.discovery_engine.announce(node)
+        except Exception as e:
+            logger.warning(
+                "MeshBundle: تعذّر إعلان العقدة %s في DiscoveryEngine: %s",
+                getattr(node, "node_id", "?")[:8], e,
+            )
+
+    def _announce_registered_nodes(self) -> None:
+        """يعلن كل عقدة مسجَّلة لم تُعلَن بعد (تخطّي المُعلَنة سابقاً يحفظ
+        announced_at الأصلي؛ إعادة مزامنتها إلى knowledge تتم أصلاً داخل
+        DiscoveryEngine.set_knowledge_store)."""
+        for node in self.registry.list_all():
+            if self.discovery_engine.get_announcement(node.node_id) is None:
+                self._announce_node(node)
 
     # ── تسجيل كل الأدوار الموجودة في الكتالوج كعُقد حقيقية داخل الـregistry ──
     def _auto_resume_engine_and_jobs(self) -> None:
@@ -780,6 +974,10 @@ class MeshBundle:
             if self._swarm_results_since_evolution >= EVOLUTION_CYCLE_INTERVAL:
                 self._swarm_results_since_evolution = 0
                 try:
+                    self.pump_inboxes()
+                except Exception as e:
+                    logger.warning("MeshBundle: periodic pump_inboxes failed: %s", e)
+                try:
                     self.run_evolution_cycle()
                 except Exception as e:
                     logger.warning("MeshBundle: periodic run_evolution_cycle after swarm result failed: %s", e)
@@ -1071,8 +1269,13 @@ class MeshBundle:
                 exec_result = engine.run_path(plan.resolved_path, data or {})
                 result_dict = exec_result.to_dict()
                 plan.status = result_dict.get("status", "completed")
+                # نفس إصلاح المرجع الدائري في MultiGoalPlanner.execute_plan
+                # أعلاه بالضبط: التقط النسخة قبل تعيين plan.result كي لا
+                # تحتوي result_dict["multi_goal_plan"]["result"] على
+                # result_dict نفسه.
+                plan_snapshot = plan.to_dict()
                 plan.result = result_dict
-                result_dict["multi_goal_plan"] = plan.to_dict()
+                result_dict["multi_goal_plan"] = plan_snapshot
 
             sg_capability_by_node = {
                 sg.resolved_node_id: sg.capability

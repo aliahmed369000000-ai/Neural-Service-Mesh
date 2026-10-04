@@ -62,6 +62,14 @@ def run_test():
         assert "steps" in result, "لا يوجد أي تنفيذ فعلي (result.steps مفقودة) — التخطيط وحده بلا تنفيذ"
         assert len(result["steps"]) >= 1, "لم يُنفَّذ أي مسار فعلياً"
 
+        # انحسار (regression): MultiGoalPlanner.execute_plan كانت تُنشئ مرجعاً
+        # دائرياً (plan.result = result_dict ثم result_dict["multi_goal_plan"]
+        # = plan.to_dict() التي تتضمّن نفس result_dict عبر self.result) —
+        # اكتُشف عملياً حين فشل json.dumps/FastAPI jsonable_encoder
+        # بـRecursionError لا نهائي عند تسلسل النتيجة عبر /plan في api_server.py.
+        # هذا الفحص يمنع رجوع نفس العلّة مستقبلاً.
+        json.dumps(result, ensure_ascii=False)
+
         # كل خطوة نُفِّذت فعلياً يجب أن تكون حدَّثت رقم الاستدعاءات في المتجر
         # (query_count يزيد مع كل best_provider() أثناء plan())
         assert bundle.marketplace.summary()["query_count"] > 0, (

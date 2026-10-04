@@ -49,6 +49,7 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger("ContentJobManager")
 
 MAX_JOBS = 300  # سقف الاحتفاظ لمنع نمو الذاكرة/القرص بلا حدود على عملية طويلة العمر
+MAX_RESUME_ATTEMPTS = 3  # مهمة تقتل العملية في كل استئناف تُخلّى عنها بدل حلقة انهيار لا تنتهي
 _DB_PATH = Path("memory/content_jobs.db")
 
 
@@ -79,6 +80,9 @@ class ContentJob:
     error: Optional[str] = None
     started_at: float = field(default_factory=time.time)
     finished_at: Optional[float] = None
+    # عدد مرات الاستئناف بعد توقف مفاجئ — يُحفظ مع المهمة (انظر
+    # MAX_RESUME_ATTEMPTS في resume_interrupted).
+    resume_attempts: int = 0
     kwargs: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -114,9 +118,19 @@ class ContentJobManager:
                         result       TEXT,
                         error        TEXT,
                         started_at   REAL NOT NULL,
-                        finished_at  REAL
+                        finished_at  REAL,
+                        resume_attempts INTEGER NOT NULL DEFAULT 0
                     )
                 """)
+                # ALTER TABLE لقاعدة موجودة من قبل هذا العمود (CREATE TABLE
+                # IF NOT EXISTS لا يضيف عموداً لجدول موجود أصلاً).
+                try:
+                    conn.execute(
+                        "ALTER TABLE content_jobs ADD COLUMN resume_attempts "
+                        "INTEGER NOT NULL DEFAULT 0"
+                    )
+                except sqlite3.OperationalError:
+                    pass  # العمود موجود أصلاً
                 conn.commit()
         except Exception as e:
             logger.warning(f"ContentJobManager: تعذّر تهيئة قاعدة بيانات المهام: {e}")
@@ -137,16 +151,17 @@ class ContentJobManager:
             with sqlite3.connect(str(self._db_path)) as conn:
                 conn.execute("""
                     INSERT INTO content_jobs
-                        (job_id, status, kwargs, result, error, started_at, finished_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                        (job_id, status, kwargs, result, error, started_at, finished_at, resume_attempts)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(job_id) DO UPDATE SET
                         status=excluded.status, result=excluded.result,
-                        error=excluded.error, finished_at=excluded.finished_at
+                        error=excluded.error, finished_at=excluded.finished_at,
+                        resume_attempts=excluded.resume_attempts
                 """, (
                     job.job_id, job.status,
                     _safe_json(job.kwargs) or "{}",
                     _safe_json(job.result),
-                    job.error, job.started_at, job.finished_at,
+                    job.error, job.started_at, job.finished_at, job.resume_attempts,
                 ))
                 conn.commit()
         except Exception as e:
@@ -238,15 +253,37 @@ class ContentJobManager:
                 kwargs = json.loads(row["kwargs"]) if row["kwargs"] else {}
             except Exception:
                 kwargs = {}
+            prev_attempts = row["resume_attempts"] if "resume_attempts" in row.keys() else 0
             job = ContentJob(
                 job_id=row["job_id"], status="running",
                 started_at=row["started_at"] or time.time(), kwargs=kwargs,
+                resume_attempts=(prev_attempts or 0) + 1,
             )
             with self._lock:
                 self._jobs[job.job_id] = job
+
+            if job.resume_attempts > MAX_RESUME_ATTEMPTS:
+                # مهمة تقتل العملية في كل مرة تُستأنف — تُخلّى عنها بدل
+                # حلقة انهيار لا تنتهي عند كل إقلاع. تبقى في القرص بحالة
+                # 'abandoned' للفحص اليدوي، ولا تُدرَج ضمن resumed.
+                with self._lock:
+                    job.status = "abandoned"
+                    job.finished_at = time.time()
+                    self._persist_job_locked(job)
+                logger.error(
+                    "ContentJobManager: المهمة #%s تُخلّي عنها بعد %s محاولات "
+                    "استئناف فاشلة", job.job_id, prev_attempts,
+                )
+                continue
+
+            # يُحفظ العدّاد المرفوع فوراً قبل أي عمل فعلي — يبقى حتى لو
+            # ماتت العملية أثناء هذا الاستئناف بالذات.
+            with self._lock:
+                self._persist_job_locked(job)
             self._launch(job, kwargs)
             resumed.append(job.job_id)
-            logger.info("ContentJobManager: استُؤنفت مهمة محتوى متوقفة #%s", job.job_id)
+            logger.info("ContentJobManager: استُؤنفت مهمة محتوى متوقفة #%s (محاولة %s)",
+                        job.job_id, job.resume_attempts)
         return resumed
 
     def _prune_locked(self) -> None:

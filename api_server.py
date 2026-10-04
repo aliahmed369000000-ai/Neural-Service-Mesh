@@ -225,6 +225,46 @@ async def process(payload: dict, request: Request):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+@app.post("/plan")
+async def plan(payload: dict, request: Request):
+    """تخطيط وتنفيذ هدف مركّب متعدد الخطوات عبر
+    core.mesh_bundle.MeshBundle.plan_and_execute_goal (ai/multi_goal_planner.py
+    + ai/capability_marketplace.py) — نفس الحماية والحزمة المشتركة اللتين
+    يستخدمهما /process أعلاه.
+
+    كانت MultiGoalPlanner مكتوبة بالكامل (تفكيك هدف مثل "تنظيف→ترجمة→
+    تحليل مشاعر→تقرير" إلى أهداف فرعية، حلّ كل واحد إلى عقدة فعلية عبر
+    CapabilityMarketplace بدل اسم عقدة ثابت، ثم تنفيذ المسار المركَّب)
+    لكن لا يوجد أي endpoint أو زر واجهة كان يستدعيها إطلاقاً — /process
+    يتطلّب من العميل معرفة node_id أو start_id/end_id مسبقاً، بينما /plan
+    هنا يقبل هدفاً بالعربية/الإنجليزية بصيغة حرة ويحلّه بنفسه.
+
+    شكل الطلب (JSON body):
+      {"goal": "process the data", "data": {...}}
+    `data` تُمرَّر كمدخل ابتدائي للعقدة الأولى في المسار المحلول، بنفس
+    قيود input_schema المذكورة في تعليق /process أعلاه بالضبط."""
+    if not _matches_env_secrets(_header_api_key(request), "NSM_API_KEY", "NSM_ADMIN_KEY"):
+        return JSONResponse(status_code=403, content={"error": "X-API-Key غير مطابق أو NSM_API_KEY/NSM_ADMIN_KEY غير مضبوط"})
+
+    if not _CORE_OK:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Core engine not available", "detail": _CORE_ERR},
+        )
+
+    goal = (payload.get("goal") or "").strip()
+    if not goal:
+        return JSONResponse(status_code=400, content={"error": "يلزم 'goal' (نص الهدف)"})
+
+    try:
+        from core.mesh_bundle import get_mesh_bundle
+        bundle = get_mesh_bundle()
+        result = bundle.plan_and_execute_goal(goal, data=payload.get("data") or {})
+        return {"status": "ok", "result": result}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 @app.post("/webhook/telegram/{secret}")
 async def telegram_webhook(secret: str, request: Request):
     """نقطة استقبال webhook تيليجرام (بديل عن getUpdates عند تفعيله عبر

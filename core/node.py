@@ -80,6 +80,14 @@ class BaseNode(ABC):
         # عقدة أوقفها إنسان يدوياً لسبب آخر كان سيُعيد تشغيلها رغماً عنه.
         self.pause_reason: Optional[str] = None
         self._pending_input: Optional[Dict[str, Any]] = None
+        # «يدان» (core/node_hands.py): None حتى يُرفِقها مُنسِّق أعلى (MeshBundle).
+        # لا تدخل في to_dict()/restore_state() — أدوات حيّة وليست حالة قابلة للحفظ.
+        self.hands: Optional[Any] = None
+        # عدد مرات استئناف هذه العقدة بعد توقف قسري (انظر
+        # ExecutionEngine.resume_interrupted/MAX_RESUME_ATTEMPTS) — نفس
+        # نمط resume_attempts في SwarmResult/ContentJob/VideoJob: يمنع
+        # عقدة تقتل العملية في كل استئناف من حلقة انهيار لا تنتهي.
+        self._resume_attempts = 0
 
     @property
     @abstractmethod
@@ -122,6 +130,7 @@ class BaseNode(ABC):
             self.state = NodeState.ACTIVE
         self._last_error = None
         self._pending_input = None
+        self._resume_attempts = 0
         logger.info(f"[{self.name}] executed #{self._execution_count}")
         return result
 
@@ -193,6 +202,19 @@ class BaseNode(ABC):
         else:
             self.mark_failed(error or "فشل تنفيذ خارجي بدون تفاصيل")
 
+    def attach_hands(self, hands: Any) -> None:
+        """إرفاق يدين (NodeHands) بالعقدة. يستبدل أي يدين سابقتين."""
+        self.hands = hands
+
+    def use_hand(self, hand: str, tool: str, **kwargs: Any):
+        """استخدام أداة عبر إحدى اليدين ("left" للقراءة، "right" للفعل).
+        تُرجع HandResult دائماً ولا ترفع استثناءً؛ بلا يدين مُرفَقتين تُرجَع
+        نتيجة مرفوضة صريحة بدل AttributeError."""
+        if self.hands is None:
+            from core.node_hands import HandResult
+            return HandResult(False, hand, tool, error="no hands attached to this node", denied=True)
+        return self.hands.use(hand, tool, **kwargs)
+
     def has_pending_work(self) -> bool:
         """True إذا كانت العقدة توقفت قسراً وسط process() (state=running)
         ولديها نقطة تفتيش صالحة لاستئنافها بدل فقدان العمل والبدء من الصفر."""
@@ -216,6 +238,7 @@ class BaseNode(ABC):
         self._last_error = snapshot.get("last_error")
         self.pause_reason = snapshot.get("pause_reason") if self.state == NodeState.PAUSED else None
         self._pending_input = snapshot.get("pending_input")
+        self._resume_attempts = snapshot.get("resume_attempts", 0) or 0
         logger.info(
             f"[{self.name}] state restored: {self.state} "
             f"(execution_count={self._execution_count})"
@@ -248,6 +271,7 @@ class BaseNode(ABC):
             "pause_reason": self.pause_reason,
             "last_error": self._last_error,
             "pending_input": self._pending_input,
+            "resume_attempts": self._resume_attempts,
         }
 
     def __repr__(self):
