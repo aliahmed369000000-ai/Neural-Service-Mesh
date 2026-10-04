@@ -52,6 +52,7 @@ from typing import Any, Callable, Dict, List, Optional
 logger = logging.getLogger("VideoJobManager")
 
 MAX_JOBS = 300  # سقف الاحتفاظ لمنع نمو الذاكرة بلا حدود على عملية طويلة العمر
+MAX_RESUME_ATTEMPTS = 3  # مهمة تقتل العملية في كل استئناف تُخلّى عنها بدل حلقة انهيار لا تنتهي
 _DB_PATH = Path("memory/video_jobs.db")
 _RESUMABLE_MODULE = "ai.video_editor"  # الوحدة الوحيدة التي يُثَق بإعادة استيراد دوالها بالاسم
 
@@ -107,6 +108,9 @@ class VideoJob:
     error: Optional[str] = None
     started_at: float = field(default_factory=time.time)
     finished_at: Optional[float] = None
+    # عدد مرات الاستئناف بعد توقف مفاجئ — يُحفظ مع المهمة (انظر
+    # MAX_RESUME_ATTEMPTS في resume_interrupted).
+    resume_attempts: int = 0
     op_name: Optional[str] = None     # اسم الدالة القابل لإعادة البناء، أو None إن لم تكن fn معروفة
     kwargs: Dict[str, Any] = field(default_factory=dict)
 
@@ -152,9 +156,17 @@ class VideoJobManager:
                         result       TEXT,
                         error        TEXT,
                         started_at   REAL NOT NULL,
-                        finished_at  REAL
+                        finished_at  REAL,
+                        resume_attempts INTEGER NOT NULL DEFAULT 0
                     )
                 """)
+                try:
+                    conn.execute(
+                        "ALTER TABLE video_jobs ADD COLUMN resume_attempts "
+                        "INTEGER NOT NULL DEFAULT 0"
+                    )
+                except sqlite3.OperationalError:
+                    pass  # العمود موجود أصلاً
                 conn.commit()
         except Exception as e:
             logger.warning(f"VideoJobManager: تعذّر تهيئة قاعدة بيانات المهام: {e}")
@@ -175,16 +187,17 @@ class VideoJobManager:
             with sqlite3.connect(str(self._db_path)) as conn:
                 conn.execute("""
                     INSERT INTO video_jobs
-                        (job_id, label, status, op_name, kwargs, result, error, started_at, finished_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (job_id, label, status, op_name, kwargs, result, error, started_at, finished_at, resume_attempts)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(job_id) DO UPDATE SET
                         status=excluded.status, result=excluded.result,
-                        error=excluded.error, finished_at=excluded.finished_at
+                        error=excluded.error, finished_at=excluded.finished_at,
+                        resume_attempts=excluded.resume_attempts
                 """, (
                     job.job_id, job.label, job.status, job.op_name,
                     _safe_json(job.kwargs) or "{}",
                     _safe_json(job.result),
-                    job.error, job.started_at, job.finished_at,
+                    job.error, job.started_at, job.finished_at, job.resume_attempts,
                 ))
                 conn.commit()
         except Exception as e:
@@ -272,13 +285,28 @@ class VideoJobManager:
             except Exception:
                 kwargs = {}
             op_name = row["op_name"]
+            prev_attempts = row["resume_attempts"] if "resume_attempts" in row.keys() else 0
             job = VideoJob(
                 job_id=row["job_id"], label=row["label"] or "مهمة فيديو",
                 status="running", started_at=row["started_at"] or time.time(),
                 op_name=op_name, kwargs=kwargs,
+                resume_attempts=(prev_attempts or 0) + 1,
             )
             with self._lock:
                 self._jobs[job.job_id] = job
+
+            if job.resume_attempts > MAX_RESUME_ATTEMPTS:
+                # مهمة تقتل العملية في كل مرة تُستأنف (غالباً ffmpeg على
+                # مُدخل تالف) — تُخلّى عنها بدل حلقة انهيار لا تنتهي.
+                with self._lock:
+                    job.status = "abandoned"
+                    job.finished_at = time.time()
+                    self._persist_job_locked(job)
+                logger.error(
+                    "VideoJobManager: المهمة #%s تُخلّي عنها بعد %s محاولات "
+                    "استئناف فاشلة", job.job_id, prev_attempts,
+                )
+                continue
 
             if not op_name:
                 with self._lock:
@@ -306,11 +334,13 @@ class VideoJobManager:
                 )
                 continue
 
+            with self._lock:
+                self._persist_job_locked(job)  # عدّاد المحاولات يُحفظ قبل أي عمل فعلي
             self._launch(job, fn, kwargs)
             resumed.append(job.job_id)
             logger.info(
-                "VideoJobManager: استُؤنفت مهمة فيديو متوقفة #%s (%s)",
-                job.job_id, op_name,
+                "VideoJobManager: استُؤنفت مهمة فيديو متوقفة #%s (%s، محاولة %s)",
+                job.job_id, op_name, job.resume_attempts,
             )
         return resumed
 

@@ -80,6 +80,11 @@ class BaseNode(ABC):
         # عقدة أوقفها إنسان يدوياً لسبب آخر كان سيُعيد تشغيلها رغماً عنه.
         self.pause_reason: Optional[str] = None
         self._pending_input: Optional[Dict[str, Any]] = None
+        # عدد مرات استئناف هذه العقدة بعد توقف قسري (انظر
+        # ExecutionEngine.resume_interrupted/MAX_RESUME_ATTEMPTS) — نفس
+        # نمط resume_attempts في SwarmResult/ContentJob/VideoJob: يمنع
+        # عقدة تقتل العملية في كل استئناف من حلقة انهيار لا تنتهي.
+        self._resume_attempts = 0
 
     @property
     @abstractmethod
@@ -122,6 +127,7 @@ class BaseNode(ABC):
             self.state = NodeState.ACTIVE
         self._last_error = None
         self._pending_input = None
+        self._resume_attempts = 0
         logger.info(f"[{self.name}] executed #{self._execution_count}")
         return result
 
@@ -216,6 +222,7 @@ class BaseNode(ABC):
         self._last_error = snapshot.get("last_error")
         self.pause_reason = snapshot.get("pause_reason") if self.state == NodeState.PAUSED else None
         self._pending_input = snapshot.get("pending_input")
+        self._resume_attempts = snapshot.get("resume_attempts", 0) or 0
         logger.info(
             f"[{self.name}] state restored: {self.state} "
             f"(execution_count={self._execution_count})"
@@ -248,6 +255,7 @@ class BaseNode(ABC):
             "pause_reason": self.pause_reason,
             "last_error": self._last_error,
             "pending_input": self._pending_input,
+            "resume_attempts": self._resume_attempts,
         }
 
     def __repr__(self):

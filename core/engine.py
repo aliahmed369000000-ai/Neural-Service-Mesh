@@ -11,6 +11,8 @@ from core.graph import ServiceGraph
 from connectors.data_transformer import DataTransformer
 from storage.file_storage import FileStorage
 
+MAX_RESUME_ATTEMPTS = 3  # عقدة تقتل العملية في كل استئناف تُترَك FAILED صراحة بدل حلقة انهيار
+
 logger = logging.getLogger(__name__)
 LOGS_FILE = "logs.json"
 
@@ -221,9 +223,31 @@ class ExecutionEngine:
             node = self._registry.get(node_id)
             if not node or not node.has_pending_work():
                 continue
+
+            if node._resume_attempts >= MAX_RESUME_ATTEMPTS:
+                # نفس نمط SwarmCoordinator.resume/ContentJobManager/
+                # VideoJobManager: عقدة تقتل العملية في كل استئناف تُترَك
+                # FAILED صراحة (تُمسَح pending_input فلا تُلتقَط مجدداً
+                # عبر get_interrupted) بدل حلقة انهيار لا تنتهي عند كل إقلاع.
+                logger.error(
+                    f"Node '{meta.get('name')}' [{node_id[:8]}] تُترَك "
+                    f"FAILED بعد {node._resume_attempts} محاولات استئناف فاشلة"
+                )
+                node.mark_failed(
+                    f"تخلٍّ بعد {node._resume_attempts} محاولات استئناف فاشلة متكررة"
+                )
+                self._registry.refresh_meta(node_id)
+                continue
+
+            # يُحفظ العدّاد المرفوع فوراً قبل أي عمل فعلي — يبقى حتى لو
+            # ماتت العملية أثناء هذا الاستئناف بالذات (نفس منطق
+            # SwarmResult.resume_attempts في ai/swarm_coordinator.py).
+            node._resume_attempts += 1
+            self._registry.refresh_meta(node_id)
+
             logger.info(
                 f"Resuming interrupted node '{meta.get('name')}' "
-                f"[{node_id[:8]}] from checkpoint"
+                f"[{node_id[:8]}] from checkpoint (attempt {node._resume_attempts})"
             )
             results.append(self.run_path([node_id], node._pending_input))
         return results
