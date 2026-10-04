@@ -21,6 +21,8 @@ import json
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
+from core.engine import ExecutionEngine
+
 logger = logging.getLogger(__name__)
 
 # ── Simulation scenarios ───────────────────────────────────────────────────
@@ -125,6 +127,19 @@ class SimulationEngine:
 
         # Setup nodes
         inp, proc, out = self.setup_simulation_nodes()
+        sim_path = [inp, proc, out]
+
+        # 🆕 MeshBundle لم تملك قط ميثود run(start, end, data, use_ai=...) —
+        # الاستدعاء الأصلي self._mesh.run(...) كان يرفع AttributeError في كل
+        # تنفيذ واحد، يلتقطه try/except أدناه صامتاً (result.failures تزيد
+        # بلا أي تنفيذ فعلي حدث إطلاقاً). الواجهة الحقيقية الوحيدة لتشغيل
+        # مسار هي ExecutionEngine.run_path(path, data) — نفس الطريقة التي
+        # تستخدمها MeshBundle نفسها داخلياً (انظر _auto_resume_engine_and_jobs
+        # أعلاه في core/mesh_bundle.py لنفس نمط البناء بالضبط).
+        engine = ExecutionEngine(
+            self._mesh.registry, self._mesh.graph, self._mesh.storage,
+            db=self._mesh.exec_log, ai=self._mesh.ai_decision,
+        )
 
         # Lock baseline before first execution
         if self._validator:
@@ -144,17 +159,17 @@ class SimulationEngine:
                 # But use real execution so the AI actually learns
                 t0 = time.perf_counter()
                 try:
-                    run_result = self._mesh.run(inp, out, payload, use_ai=True)
+                    run_result = engine.run_path(sim_path, payload)
                     latency_ms = (time.perf_counter() - t0) * 1000
                     all_latencies.append(latency_ms)
                     result.executions += 1
 
-                    status = run_result.get("status", "failed")
+                    status = run_result.status  # ExecutionResult كائن، وليس dict — لا .get()
                     if status == "success":
                         result.successes += 1
-                        path = run_result.get("path", [inp, proc, out])
-                        if path:
-                            path_key = "->".join(p[:8] for p in path)
+                        used_path = run_result.path or sim_path
+                        if used_path:
+                            path_key = "->".join(p[:8] for p in used_path)
                             if path_key not in result.routes_used:
                                 result.routes_used.append(path_key)
                     else:
@@ -183,16 +198,29 @@ class SimulationEngine:
                     pass
 
             # Update knowledge layer
+            # 🆕 الأسماء الثلاثة self._mesh.knowledge/.memory/.scoring لم تكن
+            # موجودة إطلاقاً على MeshBundle (الأسماء الحقيقية:
+            # knowledge_store/memory_engine/scoring_engine) — كل نداء هنا كان
+            # يرفع AttributeError يلتقطه except أدناه صامتاً عند أول سطر، فلا
+            # شيء من هذه الكتلة كان يُنفَّذ قط. كذلك ServiceGraph.stats() يرجع
+            # المفتاح "edge_count" لا "total_edges" — total_edges كان يُرسَل 0
+            # دائماً حتى لو أُصلحت الأسماء فقط.
             try:
-                self._mesh.knowledge.update_graph_statistics(
+                # update_graph_statistics(total_nodes, total_edges, avg_degree=,
+                # density=, connected_components=) — لا تقبل total_runs ولا
+                # success_rate إطلاقاً (ليسا من مقاييس طوبولوجيا الرسم
+                # البياني التي تهتم بها هذه الدالة تحديداً). تحقّقت فعلياً:
+                # التمريرة القديمة كانت ترفع
+                # "unexpected keyword argument 'total_runs'" في كل جولة،
+                # يلتقطه except أدناه صامتاً — فلا سطر واحد من هذه الكتلة
+                # كلها كان يصل فعلياً حتى بعد تصحيح الأسماء الثلاثة فقط.
+                self._mesh.knowledge_store.update_graph_statistics(
                     total_nodes=self._mesh.registry.count(),
-                    total_edges=self._mesh.graph.stats().get("total_edges", 0),
-                    total_runs=result.executions,
-                    success_rate=result.success_rate,
+                    total_edges=self._mesh.graph.stats().get("edge_count", 0),
                 )
-                self._mesh.knowledge.update_node_rankings(self._mesh.memory)
-                self._mesh.knowledge.update_route_rankings(self._mesh.memory)
-                self._mesh.knowledge.update_connection_scores(self._mesh.scoring)
+                self._mesh.knowledge_store.update_node_rankings(self._mesh.memory_engine)
+                self._mesh.knowledge_store.update_route_rankings(self._mesh.memory_engine)
+                self._mesh.knowledge_store.update_connection_scores(self._mesh.scoring_engine)
             except Exception as e:
                 logger.debug(f"Knowledge update error: {e}")
 
