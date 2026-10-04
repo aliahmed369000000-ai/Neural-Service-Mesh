@@ -223,6 +223,7 @@ class MeshBundle:
             self.agent_factory, max_agents=20,
             is_role_quarantined=self._is_role_quarantined,
             role_hands=self._hands_for_role,
+            role_reputation=self._role_reputation,
         )
 
         # ── التواصل الحقيقي بين العُقد + رسم بياني حيّ للطوبولوجيا ──────────
