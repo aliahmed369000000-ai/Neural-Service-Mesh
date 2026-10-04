@@ -30,6 +30,11 @@ from ai.unified_memory import UnifiedMemoryManager
 from ai.git_manager import GitManager
 from ai.toolbox import nsm_toolbox
 from ai.capability_attestation import collect_capabilities
+try:
+    from core.node_hands import NodeHands, LEFT
+except ImportError:
+    NodeHands = None
+    LEFT = "left"
 from typing import Any, Dict, List, Optional, Set
 from ai import mesh_task_protocol as mesh_tasks
 from ai.forecast_consensus import aggregate_forecasts, merge_forecast_memory
@@ -135,6 +140,22 @@ class LivingMeshNode:
         
         # هوية دائمة: تحميل مفتاح RSA المحفوظ لهذه العقدة
         self.private_key, self.public_key = self._load_or_create_identity()
+
+        # 🆕 يدان للعقدة اللامركزية الحية — اليد اليسرى للقراءة فقط (حالة، أقران، سمعة)
+        # نفس طبقة NodeHands المستخدمة في mesh_bundle والسرب، مع ضمانات الأمان.
+        self.hands = None
+        if NodeHands is not None:
+            try:
+                self.hands = NodeHands(
+                    self,
+                    audit_path=self.data_dir / "hands_audit.jsonl",
+                    max_calls_per_minute={LEFT: 40, "right": 3},
+                )
+                self._bind_living_hands()
+            except Exception as e:
+                logger.warning("NodeHands init failed for living mesh node: %s", e)
+                self.hands = None
+
         self._save_public_key()
         self._persist_identity_record()
         
@@ -346,9 +367,33 @@ class LivingMeshNode:
         """يشتق وصف مهمة التطوّر من سجلّ سمعة العقدة الذاتية (self.node_id)
         نفسها — لا من طلب خارجي. إن وُجدت أحداث سمعة سلبية حديثة
         (delta<0)، يُركَّز التطوّر على أكثر سبب تكراراً فيها؛ وإلا فهي
-        دورة تحسين عام دورية مبنية على نقاط التطوّر الحالية."""
-        own_rep = self.get_reputation(self.node_id)
-        events = own_rep.get("events") or []
+        دورة تحسين عام دورية مبنية على نقاط التطوّر الحالية.
+
+        🆕 يستخدم اليد اليسرى (إن وُجدت) لقراءة الحالة والأقران والسمعة
+        عبر NodeHands — نفس الضمانات (قراءة فقط، حد معدّل، تدقيق)."""
+        # قراءة عبر اليد اليسرى إن أمكن (بدون أثر جانبي)
+        status_info = None
+        peers_info = None
+        if getattr(self, "hands", None) is not None:
+            try:
+                r = self.hands.use(LEFT, "get_self_status")
+                if r.ok:
+                    status_info = r.output
+                r2 = self.hands.use(LEFT, "list_known_peers")
+                if r2.ok:
+                    peers_info = r2.output
+                r3 = self.hands.use(LEFT, "get_own_reputation")
+                if r3.ok and isinstance(r3.output, dict):
+                    own_rep = r3.output
+                else:
+                    own_rep = self.get_reputation(self.node_id)
+            except Exception as e:
+                logger.debug("hands read during evolution task failed: %s", e)
+                own_rep = self.get_reputation(self.node_id)
+        else:
+            own_rep = self.get_reputation(self.node_id)
+
+        events = (own_rep or {}).get("events") or []
         negative = [e for e in events if int(e.get("delta") or 0) < 0]
         if negative:
             reasons: Dict[str, int] = {}
@@ -357,7 +402,18 @@ class LivingMeshNode:
                 reasons[r] = reasons.get(r, 0) + 1
             top_reason = max(reasons, key=reasons.get)
             return f"معالجة ضعف سمعة متكرر: {top_reason}"
-        return f"تحسين دوري ذاتي (نقاط التطوّر الحالية: {self.local_evolution_score:.2f})"
+
+        score = float(self.local_evolution_score)
+        if status_info and isinstance(status_info, dict):
+            score = float(status_info.get("evolution_score", score))
+        peers_n = 0
+        if peers_info and isinstance(peers_info, list):
+            peers_n = len(peers_info)
+        elif status_info and isinstance(status_info, dict):
+            peers_n = int(status_info.get("peers_count") or 0)
+        if peers_n == 0:
+            return f"تحسين دوري ذاتي + اكتشاف أقران (نقاط: {score:.2f}, أقران: 0)"
+        return f"تحسين دوري ذاتي (نقاط التطوّر الحالية: {score:.2f}, أقران معروفون: {peers_n})"
 
     def maybe_self_evolve(self, force: bool = False) -> bool:
         """🆕 تطوّر ذاتي حقيقي: العقدة تقرّر بنفسها متى تنفّذ دورة تطوّر
@@ -380,7 +436,54 @@ class LivingMeshNode:
             logger.error(f"❌ فشل التطوّر الذاتي التلقائي لـ{self.node_id}: {exc}")
             return False
 
+
+    def _bind_living_hands(self) -> None:
+        """ربط أدوات اليد اليسرى فقط (قراءة بلا أثر جانبي) لعقدة LivingMesh."""
+        if self.hands is None:
+            return
+        # حالة الذات
+        def get_self_status() -> dict:
+            return {
+                "node_id": self.node_id,
+                "evolution_score": round(float(self.local_evolution_score), 4),
+                "peers_count": len(getattr(self, "peers", []) or []),
+                "behavioral_weights": dict(getattr(self, "behavioral_weights", {}) or {}),
+                "status": "online",
+                "data_dir": str(self.data_dir),
+            }
+        self.hands.bind(LEFT, "get_self_status", get_self_status,
+                        description="حالة العقدة المحلية: نقاط التطوّر، عدد الأقران، الأوزان السلوكية")
+        # قائمة الأقران المعروفة
+        def list_known_peers() -> list:
+            state = self._load_state()
+            nodes = state.get("nodes") or {}
+            out = []
+            for nid, info in nodes.items():
+                if nid == self.node_id:
+                    continue
+                out.append({
+                    "id": nid,
+                    "status": info.get("status"),
+                    "host": info.get("host"),
+                    "port": info.get("port"),
+                    "evolution_score": info.get("evolution_score"),
+                    "last_seen": info.get("last_seen"),
+                })
+            return out
+        self.hands.bind(LEFT, "list_known_peers", list_known_peers,
+                        description="قائمة الأقران المعروفين في الحالة المحلية للشبكة")
+        # سمعة الذات
+        def get_own_reputation() -> dict:
+            try:
+                return self.get_reputation(self.node_id)
+            except Exception as e:
+                return {"error": str(e)}
+        self.hands.bind(LEFT, "get_own_reputation", get_own_reputation,
+                        description="سجل سمعة العقدة الذاتية (أحداث delta)")
+        logger.info("🖐️ LivingMeshNode %s: left-hand tools bound (get_self_status, list_known_peers, get_own_reputation)", self.node_id[:8])
+
     def recover_collective_state(self):
+
         """استعادة آخر حالة وعي للشبكة عند التعافي."""
         state = self._load_state()
         recent_exps = state.get("global_experience", [])[-50:]
