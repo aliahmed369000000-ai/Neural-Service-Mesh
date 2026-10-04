@@ -1249,16 +1249,31 @@ class MeshBundle:
 
     def _role_reputation(self, role) -> float:
         """درجة سمعة عقدة الدور في الـregistry — تُمرَّر لـSwarmCoordinator
-        لتفضيل الأدوار الأعلى سمعة عند توزيع المهام. 0.0 إن لم تُوجد عقدة."""
+        لتفضيل الأدوار الأعلى سمعة عند توزيع المهام. 0.0 إن لم تُوجد عقدة.
+
+        🆕 إن ظهرت العقدة في آخر دورة تشخيص ضمن low_reputation تُخفَّض
+        الدرجة ×0.1 حتى يقل احتمال اختيارها في توجيه السرب."""
         if not role:
             return 0.0
         node_id = (getattr(self, "role_node_ids", None) or {}).get(role)
         if not node_id:
             return 0.0
         try:
-            return float(self.reputation_engine.get_score(node_id) or 0.0)
+            score = float(self.reputation_engine.get_score(node_id) or 0.0)
         except Exception:
-            return 0.0
+            score = 0.0
+        try:
+            diag = self.get_nodes_diagnose_summary() or {}
+            low_ids = {
+                x.get("node_id")
+                for x in (diag.get("low_reputation") or [])
+                if isinstance(x, dict)
+            }
+            if node_id in low_ids:
+                score *= 0.1
+        except Exception:
+            pass
+        return score
 
     def _hands_for_role(self, role) -> Optional[NodeHands]:
         """«اليد اليسرى» الحقيقية لعقدة هذا الدور في الـregistry، إن
