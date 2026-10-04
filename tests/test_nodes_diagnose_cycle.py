@@ -96,19 +96,38 @@ def test_diagnose_cycle_dynamic_threshold_and_collective(bundle):
 
 
 def test_role_reputation_penalizes_low_diagnose_nodes(bundle):
-    """عقد low_reputation في آخر دورة تُخفَّض سمعتها الفعالة لتوجيه السرب."""
-    # force a known low score by manipulating diagnose summary
+    """تحت العتبة → ×0.1؛ فوق 1.2× العتبة → تعافٍ كامل رغم القائمة."""
     role = list(bundle.role_node_ids.keys())[0]
     nid = bundle.role_node_ids[role]
-    base = bundle._role_reputation(role)
     with bundle._lock:
         bundle._node_runtime_meta["__mesh_diagnose_summary__"] = {
             "ts": "test",
             "scanned": 1,
+            "effective_low_rep_threshold": 0.15,
             "low_reputation": [{"node_id": nid, "name": role, "reputation": 0.01}],
             "high_unread": [],
             "nodes": [],
         }
-    penalized = bundle._role_reputation(role)
-    assert penalized <= base * 0.1 + 1e-9
-    assert penalized < base or base == 0.0
+    assert bundle._routing_penalty_factor(nid, 0.01) == 0.1
+    # إن كانت السمعة الخام عالية جداً يُرفع العامل تلقائياً (تعافٍ)
+    assert bundle._routing_penalty_factor(nid, 50.0) == 1.0
+
+
+def test_routing_penalty_gradual_recovery(bundle):
+    role = list(bundle.role_node_ids.keys())[0]
+    nid = bundle.role_node_ids[role]
+    thr = 0.15
+    with bundle._lock:
+        bundle._node_runtime_meta["__mesh_diagnose_summary__"] = {
+            "ts": "test",
+            "scanned": 1,
+            "effective_low_rep_threshold": thr,
+            "low_reputation": [{"node_id": nid, "name": role, "reputation": 0.01}],
+            "high_unread": [],
+            "nodes": [],
+        }
+    assert bundle._routing_penalty_factor(nid, 0.05) == 0.1  # still low
+    assert bundle._routing_penalty_factor(nid, thr) == 0.5  # recovering
+    assert bundle._routing_penalty_factor(nid, thr * 1.2) == 1.0  # recovered
+    info = bundle.get_routing_penalties()
+    assert "roles" in info and info["threshold"] == thr
