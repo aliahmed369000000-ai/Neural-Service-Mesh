@@ -7,6 +7,17 @@
 
 كل اختبار يستخدم قاعدة بيانات معزولة في tmp_path (وليس الملف الحقيقي
 memory/content_jobs.db) — لا يحتاج مفاتيح API حقيقية.
+
+ملاحظة مهمة عن unittest.mock.patch مع خيوط الخلفية: run_content_pipeline
+الحقيقية تُستورَد بشكل كسول (lazy import) داخل خيط الخلفية نفسه عند
+تنفيذه فعلياً، وليس عند استدعاء start() المتزامن. لذلك يجب أن يبقى
+`with patch(...)` فعّالاً طوال انتظار انتهاء الخيط (_wait_until_not_running)
+وليس فقط حول استدعاء start() — وإلا فقد ينتهي الـpatch (ويُستعاد
+run_content_pipeline الحقيقية) قبل أن يبدأ الخيط تنفيذه فعلياً، فتُستدعى
+الدالة الحقيقية (تحاول اتصالاً شبكياً حقيقياً) بدل المزيّفة، ويبقى الخيط
+يعمل ويكتب إلى قاعدة بيانات SQLite حتى بعد انتهاء الاختبار — ما يُفشل
+tearDown لاحقاً بخطأ 'Directory not empty' عند محاولة حذف tmp_path
+بينما الخيط لا يزال يكتب إليه.
 """
 from __future__ import annotations
 
@@ -24,13 +35,17 @@ class _FakeResult:
         self.tag = tag
 
 
-def _wait_until_not_running(mgr: ContentJobManager, job_id: int, timeout: float = 2.0) -> None:
+def _wait_until_not_running(mgr: ContentJobManager, job_id: int, timeout: float = 5.0) -> None:
+    """يجب استدعاؤها دائماً وplace patch لـrun_content_pipeline ما زال
+    فعّالاً (انظر ملاحظة الوحدة أعلاه) — وإلا فالانتظار قد ينتهي بمهلة
+    زمنية بينما الخيط لا يزال عالقاً على استدعاء شبكي حقيقي غير ممزّق."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         job = mgr.get(job_id)
         if job is not None and job.status != "running":
             return
         time.sleep(0.02)
+    raise AssertionError(f"job #{job_id} ظلّت 'running' بعد {timeout}s — الخيط لم ينتهِ")
 
 
 class TestContentJobPersistence(unittest.TestCase):
@@ -53,20 +68,22 @@ class TestContentJobPersistence(unittest.TestCase):
         with patch("ai.content_agent.run_content_pipeline", side_effect=_slow):
             job_id = mgr.start(topic="اختبار الاستمرارية")
 
-        import sqlite3
-        with sqlite3.connect(str(self.db_path)) as conn:
-            row = conn.execute(
-                "SELECT status, kwargs FROM content_jobs WHERE job_id = ?", (job_id,)
-            ).fetchone()
-        self.assertIsNotNone(row, "يجب أن تُحفظ لقطة أولية فور بدء المهمة")
-        self.assertEqual(row[0], "running")
-        self.assertIn("اختبار الاستمرارية", row[1])
+            import sqlite3
+            with sqlite3.connect(str(self.db_path)) as conn:
+                row = conn.execute(
+                    "SELECT status, kwargs FROM content_jobs WHERE job_id = ?", (job_id,)
+                ).fetchone()
+            self.assertIsNotNone(row, "يجب أن تُحفظ لقطة أولية فور بدء المهمة")
+            self.assertEqual(row[0], "running")
+            self.assertIn("اختبار الاستمرارية", row[1])
+
+            _wait_until_not_running(mgr, job_id)  # قبل انتهاء with — patch ما زال فعّالاً
 
     def test_job_persisted_as_done_after_completion(self):
         mgr = ContentJobManager(db_path=self.db_path)
         with patch("ai.content_agent.run_content_pipeline", return_value=_FakeResult("x")):
             job_id = mgr.start(topic="مهمة سريعة")
-        _wait_until_not_running(mgr, job_id)
+            _wait_until_not_running(mgr, job_id)
 
         import sqlite3
         with sqlite3.connect(str(self.db_path)) as conn:
@@ -81,13 +98,16 @@ class TestContentJobPersistence(unittest.TestCase):
         mgr1 = ContentJobManager(db_path=self.db_path)
         with patch("ai.content_agent.run_content_pipeline", return_value=_FakeResult()):
             first_id = mgr1.start(topic="أولى")
-        _wait_until_not_running(mgr1, first_id)
+            _wait_until_not_running(mgr1, first_id)
 
         # 🆕 "عملية جديدة" مبنية على نفس ملف القاعدة (بدل الذاكرة المشتركة
-        # لـmgr1) — تحاكي إعادة تشغيل الحاوية فعلياً.
+        # لـmgr1) — تحاكي إعادة تشغيل الحاوية فعلياً. لا حاجة لانتظار هنا
+        # لأن _max_persisted_job_id() تعتمد فقط على اللقطة الأولية
+        # (تُكتب مزامنةً داخل start() قبل أي عمل فعلي)، لا على اكتمال المهمة.
         mgr2 = ContentJobManager(db_path=self.db_path)
         with patch("ai.content_agent.run_content_pipeline", return_value=_FakeResult()):
             second_id = mgr2.start(topic="ثانية بعد إعادة التشغيل")
+            _wait_until_not_running(mgr2, second_id)
         self.assertGreater(second_id, first_id)
 
 
@@ -155,7 +175,7 @@ class TestContentJobResumeAfterCrash(unittest.TestCase):
         mgr = ContentJobManager(db_path=self.db_path)
         with patch("ai.content_agent.run_content_pipeline", return_value=_FakeResult()):
             done_id = mgr.start(topic="مهمة اكتملت طبيعياً")
-        _wait_until_not_running(mgr, done_id)
+            _wait_until_not_running(mgr, done_id)
 
         with patch("ai.content_agent.run_content_pipeline") as mocked:
             resumed = mgr.resume_interrupted()

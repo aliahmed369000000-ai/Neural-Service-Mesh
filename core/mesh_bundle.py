@@ -765,6 +765,7 @@ class MeshBundle:
             try:
                 self._apply_reputation_feedback()
                 self._apply_reputation_recovery()
+                self._apply_node_retirement()
             except Exception as e:
                 logger.warning("MeshBundle: reputation feedback/recovery after swarm result failed: %s", e)
 
@@ -877,6 +878,7 @@ class MeshBundle:
             try:
                 self._apply_reputation_feedback()
                 self._apply_reputation_recovery()
+                self._apply_node_retirement()
             except Exception as e:
                 logger.warning(
                     "MeshBundle: reputation feedback/recovery after direct execution failed: %s", e
@@ -893,6 +895,7 @@ class MeshBundle:
             cycle = self.evolution.run_cycle(auto_register=True, verbose=False)
             self._apply_reputation_feedback()
             self._apply_reputation_recovery()
+            self._apply_node_retirement()
             try:
                 self.dna.snapshot(
                     registry=self.registry,
@@ -977,6 +980,64 @@ class MeshBundle:
                     payload={"reason": "reputation_recovered", "score": score},
                 )
             logger.info("MeshBundle: released quarantine for recovered node %s", node_id[:8])
+
+    # ── تقاعد دائم لعُقد ذاتية التوليد فشلت بشكل مزمن ─────────────────────
+    # الحجر/رفع الحجر (أعلاه) يغطيان حالتين: عقدة سيئة مؤقتاً (تُحجَر ثم
+    # تتعافى) — لكن عقدة ai-generated (service_generator.py) قد تبقى
+    # محجورة للأبد دون أي تعافٍ حقيقي (خطأ بنيوي في القالب المولَّد، ليس
+    # عطلاً عابراً) وتبقى في الـregistry/الرسم البياني إلى ما لا نهاية،
+    # مجرّد بيانات ميتة لا تُنفَّذ أبداً (routing يستبعدها أصلاً بسبب
+    # الحجر). هذه الدالة تتقاعد فعلياً (unregister + إزالة من الرسم
+    # البياني + حذف من exec_log الدائم) أي عقدة محجورة منذ فترة طويلة
+    # (quarantine_checks) دون تعافٍ — بشرط أساسي وغير قابل للتنازل: لا
+    # تُتقاعَد أبداً عقدة لا تحمل وسم 'ai-generated' (أي عُقد الكتالوج
+    # الأساسية agent_role/mcp_tool تبقى مهما ساءت سمعتها، لأنها ستُعاد
+    # تسجيلها من AGENT_CATALOGUE عند إعادة التشغيل على أي حال، وتقاعدها
+    # يعني فقط تعطيلها المؤقت حتى إعادة تشغيل تالية بلا أي فائدة حقيقية).
+    def _apply_node_retirement(self, min_quarantine_checks: int = 15) -> None:
+        self.reputation_engine.tick_quarantine_checks()
+        for rep in self.reputation_engine.retirement_eligible_nodes(min_quarantine_checks):
+            node_id = rep.get("node_id")
+            if not node_id:
+                continue
+            node = self.registry.get(node_id)
+            if node is None:
+                continue
+            if "ai-generated" not in (node.tags or []):
+                # حماية: لا تُطبَّق آلية التقاعد إلا على عُقد ai-generated —
+                # عُقد الكتالوج الأساسية تبقى محجورة (لا تُنفَّذ) لكن لا تُحذف.
+                continue
+
+            predecessors = self.graph.get_predecessors(node_id) if self.graph.has_node(node_id) else []
+            neighbors = (
+                predecessors + self.graph.get_neighbors(node_id)
+                if self.graph.has_node(node_id) else []
+            )
+            self.channel.broadcast(
+                from_id=node_id,
+                to_ids=[n for n in set(neighbors) if n and n != node_id],
+                topic="node_retired",
+                payload={
+                    "reason": "chronic_quarantine",
+                    "quarantine_checks": rep.get("quarantine_checks"),
+                },
+            )
+
+            self.registry.unregister(node_id)
+            if self.graph.has_node(node_id):
+                self.graph.remove_node(node_id)
+            try:
+                self.exec_log.delete_node(node_id)
+                for pred in predecessors:
+                    self.exec_log.delete_connection(pred, node_id)
+            except Exception as e:
+                logger.warning("MeshBundle: تعذّر تنظيف exec_log بعد تقاعد العقدة %s: %s",
+                                node_id[:8], e)
+
+            logger.info(
+                "MeshBundle: تقاعد العقدة %s '%s' نهائياً بعد %s فحص سمعة محجورة دون تعافٍ",
+                node_id[:8], node.name, rep.get("quarantine_checks"),
+            )
 
     # ── تخطيط وتنفيذ هدف مركّب متعدد الخطوات عبر MultiGoalPlanner (Phase 5) ──
     # نقطة الاستخدام الفعلية الوحيدة لـself.multi_goal_planner أعلاه: تفكّك

@@ -37,6 +37,14 @@ class ServiceGraph:
         self._node_meta[node_id] = metadata
         logger.info(f"Graph: node added '{metadata.get('name', node_id[:8])}'")
 
+    def get_predecessors(self, node_id: str) -> List[str]:
+        """كل العُقد التي لها حافة تشير إلى node_id (عكس get_neighbors).
+        يلزم لتنظيف الروابط الدائمة (exec_log) قبل إزالة عقدة عبر
+        remove_node() — remove_node تنظّف _reverse لكن بعدها يضيع
+        المصدر (source_id) اللازم لحذف الرابط المحفوظ في SQLite."""
+        self._check(node_id)
+        return list(self._reverse[node_id])
+
     def remove_node(self, node_id: str) -> bool:
         if node_id not in self._adjacency:
             return False

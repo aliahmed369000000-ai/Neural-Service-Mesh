@@ -17,6 +17,7 @@ from core.graph import ServiceGraph
 from core.node_channel import NodeChannel
 from core.node import NodeState
 from storage.file_storage import FileStorage
+from storage.db import SQLiteStorage
 
 
 # ── 1) اختبارات وحدة على NodeReputationEngine مباشرة ─────────────────────
@@ -85,6 +86,7 @@ def _make_mesh_stub(tmp_dir, storage=None):
     mesh.graph = ServiceGraph()
     mesh.channel = NodeChannel(storage)
     mesh.reputation_engine = NodeReputationEngine(storage=storage)
+    mesh.exec_log = SQLiteStorage(db_path=str(tmp_dir) + "/exec_log_stub.db")
     return mesh
 
 
@@ -198,3 +200,116 @@ def test_quarantine_persists_across_mesh_bundle_restart():
         MeshBundle._apply_reputation_recovery(mesh2)
         assert mesh2.reputation_engine.get_reputation(node_id).is_quarantined is False
         assert mesh2.registry.get(restored_id).state == NodeState.ACTIVE
+
+
+# ── 4) تقاعد دائم لعُقد ai-generated محجورة بشكل مزمن ─────────────────────
+
+def test_tick_quarantine_checks_only_increments_quarantined_nodes():
+    eng = NodeReputationEngine()
+    eng.record_execution("n1", "Worker", success=False, latency_ms=10.0)
+    eng.record_execution("n2", "Worker", success=True, latency_ms=5.0)
+    eng.quarantine("n1")  # n2 يبقى غير محجور
+    eng.tick_quarantine_checks()
+    eng.tick_quarantine_checks()
+    assert eng.get_reputation("n1").quarantine_checks == 2
+    assert eng.get_reputation("n2").quarantine_checks == 0
+
+
+def test_retirement_eligible_requires_min_checks():
+    eng = NodeReputationEngine()
+    eng.record_execution("n1", "Worker", success=False, latency_ms=10.0)
+    eng.quarantine("n1")
+    for _ in range(4):
+        eng.tick_quarantine_checks()
+    assert eng.retirement_eligible_nodes(min_checks=15) == []
+    for _ in range(11):
+        eng.tick_quarantine_checks()
+    eligible = eng.retirement_eligible_nodes(min_checks=15)
+    assert len(eligible) == 1 and eligible[0]["node_id"] == "n1"
+
+
+def test_recovery_resets_quarantine_checks_preventing_retirement():
+    """عقدة تتعافى قبل بلوغ عتبة التقاعد يجب ألا تُتقاعد لاحقاً حتى لو
+    حُجرت واستمر العدّاد لاحقاً من الصفر مجدداً."""
+    eng = NodeReputationEngine()
+    eng.record_execution("n1", "Worker", success=False, latency_ms=10.0)
+    eng.quarantine("n1")
+    for _ in range(10):
+        eng.tick_quarantine_checks()
+    eng.unquarantine("n1")
+    assert eng.get_reputation("n1").quarantine_checks == 0
+
+
+def _make_ai_generated_node(name="GeneratedWorker"):
+    return AgentRoleNode(
+        name, {"description": "", "tags": ["ai-generated", "phase5"], "capabilities": []},
+    )
+
+
+def test_apply_node_retirement_removes_chronically_quarantined_generated_node():
+    with tempfile.TemporaryDirectory() as tmp:
+        mesh = _make_mesh_stub(tmp)
+        node = _make_ai_generated_node()
+        node_id = mesh.registry.register(node)
+        mesh.graph.add_node(node_id, node.to_dict())
+        root = AgentRoleNode("RootAgent", {"description": "", "tags": ["agent_role"], "capabilities": []})
+        root_id = mesh.registry.register(root)
+        mesh.graph.add_node(root_id, root.to_dict())
+        mesh.graph.add_edge(root_id, node_id, label="self_evolved")
+        mesh.exec_log.upsert_node(node.to_dict())
+        mesh.exec_log.upsert_connection(root_id, node_id, label="self_evolved")
+
+        for _ in range(10):
+            mesh.reputation_engine.record_execution(node_id, node.name, success=False, latency_ms=10.0)
+        MeshBundle._apply_reputation_feedback(mesh)
+        assert mesh.registry.get(node_id).state == NodeState.PAUSED
+
+        for _ in range(15):
+            MeshBundle._apply_node_retirement(mesh)
+
+        assert mesh.registry.get(node_id) is None, "يجب أن تُحذف العقدة نهائياً من الـregistry"
+        assert mesh.graph.has_node(node_id) is False, "ويجب أن تُحذف من الرسم البياني"
+        remaining = [c for c in mesh.exec_log.list_connections() if c["target_id"] == node_id]
+        assert remaining == [], "ويجب تنظيف الرابط المحفوظ في exec_log"
+        assert mesh.exec_log.get_node(node_id) is None, "وسجلّ العقدة نفسه في exec_log"
+        # الجذر نفسه لم يُمس
+        assert mesh.registry.get(root_id) is not None
+
+
+def test_apply_node_retirement_never_removes_non_generated_node():
+    """عقدة كتالوج أساسية (بلا وسم ai-generated) يجب أن تبقى محجورة (paused)
+    مهما طال أمد الحجر — لا تُحذف أبداً."""
+    with tempfile.TemporaryDirectory() as tmp:
+        mesh = _make_mesh_stub(tmp)
+        node = AgentRoleNode("ResearchAgent", {"description": "", "tags": [], "capabilities": []})
+        node_id = mesh.registry.register(node)
+        mesh.graph.add_node(node_id, node.to_dict())
+
+        for _ in range(10):
+            mesh.reputation_engine.record_execution(node_id, node.name, success=False, latency_ms=10.0)
+        MeshBundle._apply_reputation_feedback(mesh)
+
+        for _ in range(20):
+            MeshBundle._apply_node_retirement(mesh)
+
+        assert mesh.registry.get(node_id) is not None
+        assert mesh.registry.get(node_id).state == NodeState.PAUSED
+        assert mesh.graph.has_node(node_id) is True
+
+
+def test_apply_node_retirement_is_noop_before_threshold():
+    with tempfile.TemporaryDirectory() as tmp:
+        mesh = _make_mesh_stub(tmp)
+        node = _make_ai_generated_node()
+        node_id = mesh.registry.register(node)
+        mesh.graph.add_node(node_id, node.to_dict())
+
+        for _ in range(10):
+            mesh.reputation_engine.record_execution(node_id, node.name, success=False, latency_ms=10.0)
+        MeshBundle._apply_reputation_feedback(mesh)
+
+        for _ in range(5):  # أقل من العتبة الافتراضية (15)
+            MeshBundle._apply_node_retirement(mesh)
+
+        assert mesh.registry.get(node_id) is not None
+        assert mesh.graph.has_node(node_id) is True

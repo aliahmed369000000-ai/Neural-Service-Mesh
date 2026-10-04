@@ -44,6 +44,7 @@ class NodeReputation:
         self.manual_boost: float = 0.0      # Added by operator via API
         self.is_quarantined: bool = False    # Quarantined nodes skipped in routing
         self.runs_at_quarantine: Optional[int] = None  # total_runs snapshot when quarantined
+        self.quarantine_checks: int = 0      # عدد مرات فحص السمعة (tick) منذ آخر حجر دون تعافٍ
         self.first_seen: str = datetime.now(timezone.utc).isoformat()
         self.last_active: str = self.first_seen
 
@@ -131,6 +132,7 @@ class NodeReputation:
             "avg_latency_ms": round(self.avg_latency_ms, 2),
             "is_quarantined": self.is_quarantined,
             "runs_at_quarantine": self.runs_at_quarantine,
+            "quarantine_checks": self.quarantine_checks,
             "manual_boost": self.manual_boost,
             "first_seen": self.first_seen,
             "last_active": self.last_active,
@@ -146,6 +148,7 @@ class NodeReputation:
         r.manual_boost = data.get("manual_boost", 0.0)
         r.is_quarantined = data.get("is_quarantined", False)
         r.runs_at_quarantine = data.get("runs_at_quarantine")
+        r.quarantine_checks = data.get("quarantine_checks", 0)
         r.first_seen = data.get("first_seen", r.first_seen)
         r.last_active = data.get("last_active", r.last_active)
         return r
@@ -280,6 +283,7 @@ class NodeReputationEngine:
         rep = self.ensure_node(node_id)
         rep.is_quarantined = True
         rep.runs_at_quarantine = rep.total_runs
+        rep.quarantine_checks = 0
         self._save()
         logger.warning(f"NodeReputationEngine: node {node_id[:8]} quarantined")
 
@@ -287,7 +291,33 @@ class NodeReputationEngine:
         rep = self.ensure_node(node_id)
         rep.is_quarantined = False
         rep.runs_at_quarantine = None
+        rep.quarantine_checks = 0
         self._save()
+
+    def tick_quarantine_checks(self) -> None:
+        """تُستدعى مرة في كل فحص سمعة (بجانب _apply_reputation_feedback/
+        _apply_reputation_recovery) — تزيد quarantine_checks لكل عقدة ما
+        زالت محجورة. هذا هو المقياس الذي يعتمد عليه retirement_eligible_nodes()
+        لتمييز عقدة 'حُجرت لتوّها' عن عقدة 'محجورة منذ فترة طويلة بلا أي
+        تعافٍ رغم فحوصات متكررة' — عدّاد أحداث وليس وقتاً فعلياً، لأنه
+        يبقى دقيقاً حتى لو تفاوت معدّل استدعاء المهام بشدة."""
+        changed = False
+        for rep in self._reputations.values():
+            if rep.is_quarantined:
+                rep.quarantine_checks += 1
+                changed = True
+        if changed:
+            self._save()
+
+    def retirement_eligible_nodes(self, min_checks: int = 15) -> List[dict]:
+        """عُقد محجورة منذ زمن طويل (quarantine_checks >= min_checks) دون
+        أي تعافٍ حقيقي — مرشَّحة للتقاعد الدائم (وليس فقط الحجر المؤقت).
+        القرار النهائي بشأن أي عقدة يُتقاعَد فعلياً (عُقد ai-generated فقط،
+        أبداً عُقد الكتالوج الأساسية) من مسؤولية المستدعي (MeshBundle)."""
+        return [
+            r.to_dict() for r in self._reputations.values()
+            if r.is_quarantined and r.quarantine_checks >= min_checks
+        ]
 
     def boost(self, node_id: str, amount: float = 10.0):
         """Manually boost a node's reputation (max +10)."""
