@@ -208,7 +208,7 @@ def render_health():
                 _d2.metric("سمعة منخفضة", len(_cyc.get("low_reputation") or []))
                 _d3.metric("وارد مرتفع", len(_cyc.get("high_unread") or []))
                 _d4.metric("أخطاء المسح", int(_cyc.get("errors") or 0))
-                _e1, _e2, _e3 = st.columns(3)
+                _e1, _e2, _e3, _e4 = st.columns(4)
                 _e1.metric(
                     "متوسط السمعة",
                     f"{float(_cyc.get('avg_reputation') or 0):.3f}",
@@ -221,17 +221,28 @@ def render_health():
                     "عتبة ثابتة",
                     f"{float(_cyc.get('static_low_rep_threshold') or 0.15):.3f}",
                 )
+                _rec_list = _cyc.get("recovered") or []
+                _e4.metric("تعافوا (recovered)", len(_rec_list))
                 st.caption(
                     f"آخر دورة تشخيص: {_cyc.get('ts') or '—'} — "
-                    "العُقد ضمن السمعة المنخفضة تُخفَّض ×0.1 في توجيه السرب."
+                    "العُقد ضمن السمعة المنخفضة تُخفَّض في توجيه السرب؛ "
+                    "المعافون يُزالون من القائمة."
                 )
+                if _rec_list:
+                    st.success(
+                        "🟢 تعافت من العقوبة: "
+                        + ", ".join(
+                            f"`{r.get('name') or r.get('node_id', '')[:8]}`"
+                            for r in _rec_list[:8]
+                        )
+                    )
                 with st.expander("📊 ملخص دورة التشخيص (كل الأدوار)"):
                     st.json({
                         k: _cyc.get(k)
                         for k in (
                             "ts", "scanned", "errors", "avg_reputation",
                             "effective_low_rep_threshold", "static_low_rep_threshold",
-                            "low_reputation", "high_unread",
+                            "low_reputation", "recovered", "high_unread",
                         )
                     })
         except Exception as _cyc_err:
