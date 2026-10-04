@@ -123,7 +123,7 @@ class SwarmResult:
         self.status = "done" if self.failed_count == 0 else "partial"
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "swarm_id": self.swarm_id,
             "goal": self.goal,
             "status": self.status,
@@ -137,6 +137,11 @@ class SwarmResult:
             "debates": self.debates,
             "resume_attempts": self.resume_attempts,
         }
+        # لقطة قرارات التوزيع إن وُجدت (تُملأ قبل/أثناء الحفظ)
+        snap = getattr(self, "_pick_audit_snapshot", None)
+        if snap:
+            d["pick_audit"] = snap
+        return d
 
     @classmethod
     def from_checkpoint(cls, d: dict) -> "SwarmResult":
@@ -949,10 +954,17 @@ class SwarmCoordinator:
     def _persist_result(self, result: "SwarmResult") -> None:
         """يحفظ نتيجة swarm في SQLite (memory/swarm_history.db) كي تبقى
         بعد إعادة تشغيل الحاوية. لا يرفع استثناء أبداً — التخزين الدائم
-        لا يجب أن يُعطّل تنفيذ السرب."""
+        لا يجب أن يُعطّل تنفيذ السرب.
+
+        🆕 يضمّن آخر قرارات _pick_agent في full_result (pick_audit) للاستعلام التاريخي."""
         if self._store is None:
             return
         try:
+            if not getattr(result, "_pick_audit_snapshot", None):
+                try:
+                    result._pick_audit_snapshot = self.get_pick_audit(limit=20)
+                except Exception:
+                    pass
             self._store.log_result(result.to_dict())
         except Exception as exc:
             logger.warning(f"تعذّر حفظ نتيجة السرب {result.swarm_id} بشكل دائم: {exc}")
