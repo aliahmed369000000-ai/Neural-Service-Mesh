@@ -212,6 +212,24 @@ def render_swarm_studio():
             unsafe_allow_html=True,
         )
 
+        # 🆕 قرارات التوزيع لهذا السرب مباشرة تحت بطاقة النتيجة
+        _result_picks = getattr(result, "_pick_audit_snapshot", None) or []
+        if not _result_picks:
+            try:
+                _result_picks = coordinator.get_pick_audit(limit=min(10, max(1, len(result.tasks))))
+            except Exception:
+                _result_picks = []
+        if _result_picks:
+            with st.expander(f"🎯 قرارات التوزيع لهذا السرب ({len(_result_picks)})", expanded=False):
+                st.caption("سمعة vs أداء — من _pick_agent أثناء هذا التشغيل.")
+                for _rpi, _rpk in enumerate(_result_picks[:15]):
+                    st.markdown(
+                        f"**{_rpi+1}. [{_rpk.get('capability','—')}]** → "
+                        f"`{_rpk.get('chosen_role','—')}` "
+                        f"(rep={float(_rpk.get('chosen_rep') or 0):.3f}, "
+                        f"perf={float(_rpk.get('chosen_perf') or 0):.3f})"
+                    )
+
         for _ti, task in enumerate(result.tasks):
             icon = "✅" if task.status == "done" else ("❌" if task.status == "failed" else "⏳")
             _task_result_text = (task.result or {}).get("result_text", "")
