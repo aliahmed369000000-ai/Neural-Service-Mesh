@@ -69,6 +69,8 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 # كل كم نتيجة سرب حقيقية (record_swarm_result) تُشغَّل دورة تطوّر ذاتي كاملة
 # تلقائياً (انظر التعليق داخل record_swarm_result أدناه).
 EVOLUTION_CYCLE_INTERVAL = 5
+DIAGNOSE_LOW_REP_THRESHOLD = 0.15
+DIAGNOSE_HIGH_UNREAD_THRESHOLD = 20
 
 # اليد اليمنى للعقدة: أفعال مسموحة فقط (كل ما عداها مرفوض) + قيود صارمة.
 HAND_RIGHT_ALLOWED = ("send_message", "request_evolution", "request_peer_ping")
@@ -1487,6 +1489,10 @@ class MeshBundle:
                 except Exception as e:
                     logger.warning("MeshBundle: periodic pump_inboxes failed: %s", e)
                 try:
+                    self.run_nodes_diagnose_cycle()
+                except Exception as e:
+                    logger.warning("MeshBundle: periodic nodes diagnose cycle failed: %s", e)
+                try:
                     self.run_evolution_cycle()
                 except Exception as e:
                     logger.warning("MeshBundle: periodic run_evolution_cycle after swarm result failed: %s", e)
@@ -1597,6 +1603,100 @@ class MeshBundle:
     # (self.graph) بحثاً عن فجوات، يولّد عقداً جديدة، يمرّرها على
     # AIGovernanceLayer (حدود صارمة: لا حلقات، حد أقصى للتوليد، سمعة دنيا)،
     # ثم يسجّل المعتمَد منها فعلياً في self.registry عبر register_node أعلاه.
+    def run_nodes_diagnose_cycle(self) -> dict:
+        """تشخيص دوري خفيف لكل عُقد الأدوار: سمعة + وارد + حالة.
+        يخزّن الملخص في _node_runtime_meta ويُطلق تنبيهات عند العتبات.
+        لا يستدعي LLM — قراءة محلية فقط عبر اليد اليسرى."""
+        from core.node_hands import LEFT
+        from datetime import datetime, timezone as _tz
+
+        now = datetime.now(_tz.utc).isoformat()
+        nodes_out = []
+        low_rep = []
+        high_unread = []
+        errors = 0
+
+        role_ids = list((getattr(self, "role_node_ids", None) or {}).values())
+        for nid in role_ids:
+            node = self.registry.get(nid)
+            if node is None or getattr(node, "hands", None) is None:
+                continue
+            entry = {"node_id": nid, "name": getattr(node, "name", None)}
+            try:
+                st = node.use_hand(LEFT, "node_status")
+                if st.ok and isinstance(st.output, dict):
+                    entry["state"] = st.output.get("state")
+                    entry["reputation_score"] = float(st.output.get("reputation_score") or 0.0)
+                    entry["last_terminal_check"] = st.output.get("last_terminal_check")
+                else:
+                    entry["status_error"] = getattr(st, "error", "status failed")
+                    errors += 1
+            except Exception as e:
+                entry["status_error"] = str(e)
+                errors += 1
+            try:
+                ib = node.use_hand(LEFT, "inbox_summary")
+                if ib.ok and isinstance(ib.output, dict):
+                    entry["unread_total"] = int(ib.output.get("unread_total") or 0)
+                    entry["by_topic"] = ib.output.get("by_topic") or {}
+                else:
+                    entry["unread_total"] = 0
+            except Exception:
+                entry["unread_total"] = 0
+
+            rep = float(entry.get("reputation_score") or 0.0)
+            unread = int(entry.get("unread_total") or 0)
+            if rep < DIAGNOSE_LOW_REP_THRESHOLD:
+                low_rep.append({"node_id": nid, "name": entry.get("name"), "reputation": rep})
+            if unread >= DIAGNOSE_HIGH_UNREAD_THRESHOLD:
+                high_unread.append({"node_id": nid, "name": entry.get("name"), "unread": unread})
+            nodes_out.append(entry)
+
+        summary = {
+            "ts": now,
+            "layer": "mesh-nodes-diagnose-cycle-v1",
+            "scanned": len(nodes_out),
+            "errors": errors,
+            "low_reputation": low_rep,
+            "high_unread": high_unread,
+            "nodes": nodes_out,
+        }
+        with self._lock:
+            self._node_runtime_meta["__mesh_diagnose_summary__"] = summary
+
+        # تنبيهات (مع كبح داخل AlertManager)
+        try:
+            from ai.alert_manager import alert_manager
+            if low_rep:
+                alert_manager.send_alert(
+                    "WARNING",
+                    f"عُقد بسمعة منخفضة ({len(low_rep)})",
+                    details={"threshold": DIAGNOSE_LOW_REP_THRESHOLD, "nodes": low_rep[:10]},
+                    throttle_sec=300,
+                )
+            if high_unread:
+                alert_manager.send_alert(
+                    "WARNING",
+                    f"عُقد بوارد مرتفع غير مقروء ({len(high_unread)})",
+                    details={"threshold": DIAGNOSE_HIGH_UNREAD_THRESHOLD, "nodes": high_unread[:10]},
+                    throttle_sec=300,
+                )
+        except Exception as e:
+            logger.debug("diagnose alerts skipped: %s", e)
+
+        return {
+            "scanned": len(nodes_out),
+            "low_reputation": len(low_rep),
+            "high_unread": len(high_unread),
+            "errors": errors,
+            "ts": now,
+        }
+
+    def get_nodes_diagnose_summary(self) -> dict:
+        """آخر ملخص تشخيص دوري للعُقد (إن وُجد)."""
+        with self._lock:
+            return dict(self._node_runtime_meta.get("__mesh_diagnose_summary__") or {})
+
     def run_evolution_cycle(self) -> dict:
         with self._lock:
             cycle = self.evolution.run_cycle(auto_register=True, verbose=False)
@@ -1824,6 +1924,7 @@ class MeshBundle:
             _cm_summary = get_collective_memory().summary()
         except Exception:
             pass
+        diag = self.get_nodes_diagnose_summary()
         return {
             "nodes": self.registry.count(),
             "scoring": self.scoring_engine.summary(),
@@ -1841,6 +1942,13 @@ class MeshBundle:
             },
             "marketplace": self.marketplace.summary(),
             "multi_goal_planner": self.multi_goal_planner.summary(),
+            "nodes_diagnose": {
+                "ts": diag.get("ts"),
+                "scanned": diag.get("scanned", 0),
+                "low_reputation": len(diag.get("low_reputation") or []),
+                "high_unread": len(diag.get("high_unread") or []),
+                "errors": diag.get("errors", 0),
+            } if diag else {},
         }
 
 
