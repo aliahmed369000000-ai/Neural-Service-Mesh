@@ -118,6 +118,17 @@ class LivingMeshNode:
             5.0, float(os.getenv("NSM_CAPABILITY_WATCH_INTERVAL_SEC", "60"))
         )
         self._capability_attestation = None
+
+        # 🆕 التطوّر الذاتي المستقل: قبل هذا كانت العقدة تتطوّر فقط عند
+        # استقبال رسالة kind=='evolution_task' من قرين (انظر
+        # _process_secure_message) — أي تطوّر خارجي التحفيز بالكامل، لا
+        # تطوّر "ذاتي" حقيقي رغم الاسم. نفس نمط _capability_watch_*.
+        self._self_evolution_stop = threading.Event()
+        self._self_evolution_thread = None
+        self._self_evolution_interval = max(
+            60.0, float(os.getenv("NSM_SELF_EVOLUTION_INTERVAL_SEC", "1800"))
+        )
+        self._last_self_evolution_ts = 0.0
         
         # تهيئة الذاكرة الموحدة (ANN + Sharding)
         self.memory = UnifiedMemoryManager(base_dir=str(self.data_dir / "memory"))
@@ -218,6 +229,9 @@ class LivingMeshNode:
         self._save_state(state)
         
         self.start_capability_watch()
+        # 🆕 العقدة تبدأ تطوّرها الذاتي المستقل فور انضمامها للشبكة — لا
+        # تعود تنتظر 'evolution_task' من قرين لتتطوّر.
+        self.start_self_evolution_watch()
 
         if seed_nodes:
             for seed in seed_nodes:
@@ -291,6 +305,81 @@ class LivingMeshNode:
                 logger.warning("Capability watch failed: %s", exc)
             self._capability_watch_stop.wait(self._capability_watch_interval)
 
+    def start_self_evolution_watch(self, interval_seconds: float = None) -> bool:
+        """🆕 بدء مراقب daemon واحد يجعل العقدة تطوّر نفسها دورياً دون
+        انتظار 'evolution_task' من قرين خارجي — بنفس نمط
+        start_capability_watch (خيط daemon + threading.Event للإيقاف)."""
+        if self._self_evolution_thread and self._self_evolution_thread.is_alive():
+            return False
+        if interval_seconds is not None:
+            self._self_evolution_interval = max(60.0, float(interval_seconds))
+        self._self_evolution_stop.clear()
+        self._self_evolution_thread = threading.Thread(
+            target=self._self_evolution_watch_loop,
+            name=f"nsm-self-evolve-{self.node_id[:8]}",
+            daemon=True,
+        )
+        self._self_evolution_thread.start()
+        logger.info(
+            "🧬 Node %s: self-evolution watch started (every %.0fs)",
+            self.node_id, self._self_evolution_interval,
+        )
+        return True
+
+    def stop_self_evolution_watch(self, timeout: float = 2.0) -> None:
+        """إيقاف مراقب التطوّر الذاتي دون ترك خيط خلف العقدة."""
+        self._self_evolution_stop.set()
+        thread = self._self_evolution_thread
+        if thread and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=max(0.0, timeout))
+        self._self_evolution_thread = None
+
+    def _self_evolution_watch_loop(self) -> None:
+        while not self._self_evolution_stop.is_set():
+            try:
+                self.maybe_self_evolve()
+            except Exception as exc:
+                logger.warning("Self-evolution watch failed for %s: %s", self.node_id, exc)
+            self._self_evolution_stop.wait(self._self_evolution_interval)
+
+    def _generate_self_evolution_task(self) -> str:
+        """يشتق وصف مهمة التطوّر من سجلّ سمعة العقدة الذاتية (self.node_id)
+        نفسها — لا من طلب خارجي. إن وُجدت أحداث سمعة سلبية حديثة
+        (delta<0)، يُركَّز التطوّر على أكثر سبب تكراراً فيها؛ وإلا فهي
+        دورة تحسين عام دورية مبنية على نقاط التطوّر الحالية."""
+        own_rep = self.get_reputation(self.node_id)
+        events = own_rep.get("events") or []
+        negative = [e for e in events if int(e.get("delta") or 0) < 0]
+        if negative:
+            reasons: Dict[str, int] = {}
+            for e in negative[-10:]:
+                r = str(e.get("reason") or "خطأ غير محدد")
+                reasons[r] = reasons.get(r, 0) + 1
+            top_reason = max(reasons, key=reasons.get)
+            return f"معالجة ضعف سمعة متكرر: {top_reason}"
+        return f"تحسين دوري ذاتي (نقاط التطوّر الحالية: {self.local_evolution_score:.2f})"
+
+    def maybe_self_evolve(self, force: bool = False) -> bool:
+        """🆕 تطوّر ذاتي حقيقي: العقدة تقرّر بنفسها متى تنفّذ دورة تطوّر
+        جديدة بلا أي رسالة خارجية — بالاعتماد على فاصل زمني أدنى
+        (_self_evolution_interval) بدل انتظار 'evolution_task' من قرين
+        (المسار الوحيد الذي كان موجوداً، انظر _process_secure_message).
+        _execute_evolution نفسها ليس بها أي await فعلي، فتشغيلها عبر
+        asyncio.run() من خيط المراقب الخلفي آمن ولا يتعارض مع أي حلقة
+        أحداث أخرى في العملية. تُرجع True إن نُفّذت دورة تطوّر فعلية."""
+        now = time.time()
+        if not force and (now - self._last_self_evolution_ts) < self._self_evolution_interval:
+            return False
+        self._last_self_evolution_ts = now
+        task_desc = self._generate_self_evolution_task()
+        logger.info(f"🧬 Node {self.node_id} بدأ تطوّراً ذاتياً تلقائياً: {task_desc}")
+        try:
+            asyncio.run(self._execute_evolution({"task": task_desc, "source": "self"}))
+            return True
+        except Exception as exc:
+            logger.error(f"❌ فشل التطوّر الذاتي التلقائي لـ{self.node_id}: {exc}")
+            return False
+
     def recover_collective_state(self):
         """استعادة آخر حالة وعي للشبكة عند التعافي."""
         state = self._load_state()
@@ -303,6 +392,7 @@ class LivingMeshNode:
     def mark_offline(self) -> None:
         """يعلّم هذه العقدة offline في حالتها المحلية (عند الإيقاف الرشيق)."""
         self.stop_capability_watch()
+        self.stop_self_evolution_watch()
         try:
             state = self._load_state()
             if self.node_id in state.get("nodes", {}):
