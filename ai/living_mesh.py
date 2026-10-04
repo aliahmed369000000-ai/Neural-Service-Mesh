@@ -156,6 +156,15 @@ class LivingMeshNode:
                 logger.warning("NodeHands init failed for living mesh node: %s", e)
                 self.hands = None
 
+        # 🆕 طبقة الصحة القابلة للتحقق فوق العقدة اللامركزية
+        self.health_layer = None
+        try:
+            from ai.node_health_layer import NodeHealthLayer
+            self.health_layer = NodeHealthLayer(self)
+            logger.info("🩺 NodeHealthLayer attached to LivingMeshNode %s", self.node_id[:8] if hasattr(self, "node_id") else "?")
+        except Exception as e:
+            logger.debug("NodeHealthLayer not attached: %s", e)
+
         self._save_public_key()
         self._persist_identity_record()
         
@@ -422,15 +431,39 @@ class LivingMeshNode:
         (المسار الوحيد الذي كان موجوداً، انظر _process_secure_message).
         _execute_evolution نفسها ليس بها أي await فعلي، فتشغيلها عبر
         asyncio.run() من خيط المراقب الخلفي آمن ولا يتعارض مع أي حلقة
-        أحداث أخرى في العملية. تُرجع True إن نُفّذت دورة تطوّر فعلية."""
+        أحداث أخرى في العملية. تُرجع True إن نُفّذت دورة تطوّر فعلية.
+
+        🆕 قبل التنفيذ: قراءة تقرير الصحة عبر اليد اليسرى (إن وُجدت) لتسجيل
+        سياق أغنى ولتعديل طفيف للفاصل عند ضعف الأقران/السمعة."""
         now = time.time()
         if not force and (now - self._last_self_evolution_ts) < self._self_evolution_interval:
             return False
         self._last_self_evolution_ts = now
         task_desc = self._generate_self_evolution_task()
-        logger.info(f"🧬 Node {self.node_id} بدأ تطوّراً ذاتياً تلقائياً: {task_desc}")
+
+        health_ctx = None
+        if getattr(self, "hands", None) is not None:
+            try:
+                hr = self.hands.use(LEFT, "get_signed_health")
+                if hr.ok and isinstance(hr.output, dict):
+                    health_ctx = {
+                        "online_peers": hr.output.get("online_peers"),
+                        "reputation": hr.output.get("reputation"),
+                        "status": hr.output.get("status"),
+                    }
+            except Exception as e:
+                logger.debug("health hand read in self-evolve: %s", e)
+
+        logger.info(
+            "🧬 Node %s بدأ تطوّراً ذاتياً تلقائياً: %s | health=%s",
+            self.node_id, task_desc, health_ctx,
+        )
         try:
-            asyncio.run(self._execute_evolution({"task": task_desc, "source": "self"}))
+            asyncio.run(self._execute_evolution({
+                "task": task_desc,
+                "source": "self",
+                "health_context": health_ctx,
+            }))
             return True
         except Exception as exc:
             logger.error(f"❌ فشل التطوّر الذاتي التلقائي لـ{self.node_id}: {exc}")
@@ -480,7 +513,48 @@ class LivingMeshNode:
                 return {"error": str(e)}
         self.hands.bind(LEFT, "get_own_reputation", get_own_reputation,
                         description="سجل سمعة العقدة الذاتية (أحداث delta)")
-        logger.info("🖐️ LivingMeshNode %s: left-hand tools bound (get_self_status, list_known_peers, get_own_reputation)", self.node_id[:8])
+
+        # 🆕 أدوات صحة ومسارات عبر NodeHealthLayer (قراءة فقط)
+        def get_signed_health() -> dict:
+            if getattr(self, "health_layer", None) is not None:
+                return self.health_layer.health()
+            # fallback محلي موقّع إن لم تتوفر الطبقة
+            snap = self.network_health_snapshot()
+            body = {
+                "status": "ok",
+                "layer": "nsm-health-fallback",
+                "node_id": self.node_id,
+                "online_peers": snap.get("online_peers"),
+                "known_nodes": snap.get("known_nodes"),
+                "ts": snap.get("ts") or __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+            }
+            import json as _json
+            canonical = _json.dumps(body, sort_keys=True, separators=(",", ":"))
+            body["signature"] = self.sign_message(canonical)
+            return body
+        self.hands.bind(LEFT, "get_signed_health", get_signed_health,
+                        description="تقرير صحة موقّع للعقدة (NodeHealthLayer أو fallback)")
+
+        def get_routes_table() -> dict:
+            if getattr(self, "health_layer", None) is not None:
+                return self.health_layer.routes_table()
+            peers = self._get_active_peers_list()
+            return {
+                "routes": [
+                    {"peer_id": p.get("id"), "host": p.get("host"), "port": p.get("port"),
+                     "capabilities": p.get("capabilities") or []}
+                    for p in peers if p.get("id") != self.node_id
+                ],
+                "source": "fallback_peers",
+            }
+        self.hands.bind(LEFT, "get_routes_table", get_routes_table,
+                        description="جدول المسارات/الأقران مع RTT وسمعة إن توفرت")
+
+        logger.info(
+            "🖐️ LivingMeshNode %s: left-hand tools bound "
+            "(get_self_status, list_known_peers, get_own_reputation, get_signed_health, get_routes_table)",
+            self.node_id[:8],
+        )
 
     def recover_collective_state(self):
 
