@@ -41,3 +41,16 @@ def test_system_hub_check_mesh_nodes():
     # may use process singleton — just ensure structure
     r = check_mesh_nodes()
     assert "ok" in r and "detail" in r
+
+
+def test_peer_compare_and_mesh_diagnose_summary_tools(bundle):
+    from core.node_hands import LEFT
+    bundle.run_nodes_diagnose_cycle()
+    n = bundle.registry.get(list(bundle.role_node_ids.values())[0])
+    ms = n.use_hand(LEFT, "mesh_diagnose_summary")
+    assert ms.ok and ms.output.get("scanned", 0) >= 1
+    pc = n.use_hand(LEFT, "peer_compare")
+    assert pc.ok
+    assert "my_reputation" in pc.output
+    assert "rank_among_peers" in pc.output
+    assert "peer_avg_reputation" in pc.output
