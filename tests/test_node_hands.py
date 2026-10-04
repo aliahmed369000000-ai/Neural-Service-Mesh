@@ -147,7 +147,7 @@ def test_every_live_node_has_two_hands(bundle):
     for n in b.registry.list_all():
         assert n.hands is not None
         t = n.hands.tools()
-        assert {x["name"] for x in t[RIGHT]} == {"send_message", "request_evolution"}
+        assert {x["name"] for x in t[RIGHT]} == {"send_message", "request_evolution", "request_peer_ping"}
         assert "peers" in {x["name"] for x in t[LEFT]}
 
 
