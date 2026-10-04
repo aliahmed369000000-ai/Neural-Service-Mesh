@@ -227,6 +227,7 @@ class MeshBundle:
             is_role_quarantined=self._is_role_quarantined,
             role_hands=self._hands_for_role,
             role_reputation=self._role_reputation,
+            role_penalty_factor=self._role_penalty_factor_for_role,
         )
 
         # ── التواصل الحقيقي بين العُقد + رسم بياني حيّ للطوبولوجيا ──────────
@@ -1333,6 +1334,19 @@ class MeshBundle:
             pass
         return score
 
+    def _role_penalty_factor_for_role(self, role) -> float:
+        """عامل العقوبة لدور (1.0 / 0.5 / 0.1) — لتدقيق _pick_agent."""
+        if not role:
+            return 1.0
+        node_id = (getattr(self, "role_node_ids", None) or {}).get(role)
+        if not node_id:
+            return 1.0
+        try:
+            raw = float(self.reputation_engine.get_score(node_id) or 0.0)
+        except Exception:
+            raw = 0.0
+        return float(self._routing_penalty_factor(node_id, raw))
+
     def _hands_for_role(self, role) -> Optional[NodeHands]:
         """«اليد اليسرى» الحقيقية لعقدة هذا الدور في الـregistry، إن
         وُجدت — تُمرَّر لـSwarmCoordinator._run_task فيستخدمها الوكيل عبر
@@ -1844,6 +1858,34 @@ class MeshBundle:
                     "unread": unread,
                 })
 
+        # إزالة المعافين: من كانوا في low_reputation السابق وتعافوا الآن
+        prev = {}
+        try:
+            with self._lock:
+                prev = dict(self._node_runtime_meta.get("__mesh_diagnose_summary__") or {})
+        except Exception:
+            prev = {}
+        prev_low = {
+            x.get("node_id")
+            for x in (prev.get("low_reputation") or [])
+            if isinstance(x, dict) and x.get("node_id")
+        }
+        current_low_ids = {x.get("node_id") for x in low_rep if x.get("node_id")}
+        recovered = []
+        for entry in nodes_out:
+            nid = entry.get("node_id")
+            if not nid or nid not in prev_low or nid in current_low_ids:
+                continue
+            rep = float(entry.get("reputation_score") or 0.0)
+            recovered.append({
+                "node_id": nid,
+                "name": entry.get("name"),
+                "reputation": rep,
+                "threshold": round(effective_thr, 4),
+                "status": "recovered",
+            })
+        # low_reputation الحالية لا تتضمن المعافين (أُعيد بناؤها من الصفر أعلاه)
+
         summary = {
             "ts": now,
             "layer": "mesh-nodes-diagnose-cycle-v2",
@@ -1853,6 +1895,7 @@ class MeshBundle:
             "effective_low_rep_threshold": round(effective_thr, 4),
             "static_low_rep_threshold": DIAGNOSE_LOW_REP_THRESHOLD,
             "low_reputation": low_rep,
+            "recovered": recovered,
             "high_unread": high_unread,
             "nodes": nodes_out,
         }
