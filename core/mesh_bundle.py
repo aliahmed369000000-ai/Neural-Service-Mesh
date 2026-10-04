@@ -39,6 +39,7 @@ from core.registry import NodeRegistry
 from core.graph import ServiceGraph
 from core.node_channel import NodeChannel
 from core.engine import ExecutionEngine
+from core.node_hands import NodeHands, LEFT, RIGHT
 from services.dynamic_node import PassThroughNode
 from storage.file_storage import FileStorage
 from storage.db import SQLiteStorage
@@ -67,6 +68,12 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 # كل كم نتيجة سرب حقيقية (record_swarm_result) تُشغَّل دورة تطوّر ذاتي كاملة
 # تلقائياً (انظر التعليق داخل record_swarm_result أدناه).
 EVOLUTION_CYCLE_INTERVAL = 5
+
+# اليد اليمنى للعقدة: أفعال مسموحة فقط (كل ما عداها مرفوض) + قيود صارمة.
+HAND_RIGHT_ALLOWED = ("send_message", "request_evolution")
+HAND_EVOLUTION_COOLDOWN_S = 300.0   # أقل فاصل بين طلبَي تطوّر صادرَين من أي عُقد
+HAND_MESSAGE_MAX_CHARS = 4000
+HAND_TOPIC_MAX_CHARS = 64
 
 
 def datetime_now_iso() -> str:
@@ -257,6 +264,11 @@ class MeshBundle:
         self._sync_nodes_to_graph()
         self._announce_registered_nodes()
 
+        # ── «اليدان»: كل عقدة حيّة تحصل على يد يسرى (قراءة) ويمنى (أفعال مقيَّدة) ──
+        self._hand_evolution_last = 0.0
+        for _n in self.registry.list_all():
+            self._equip_hands(_n)
+
         # ── استئناف تلقائي للأسرِبة المتوقفة عند إعادة تشغيل العملية ────────
         # ai/swarm_coordinator.py::resume()/list_resumable() كانا يتطلّبان
         # نداءً يدوياً من المستخدم (زر في swarm_studio.py). هنا يُستأنف كل
@@ -438,11 +450,98 @@ class MeshBundle:
     # EvolutionEngine._mesh.register_node(node, connect_to=...) هي نقطة
     # الوصل الوحيدة التي كان ينقصها — بدونها EvolutionEngine._mesh=None دائماً
     # ولا تُسجَّل أي عقدة مُولَّدة ذاتياً في الـregistry الحقيقي.
+    # ── «اليدان» ────────────────────────────────────────────────────────────
+    # (core/node_hands.py) اليسرى: قراءة فقط. اليمنى: فعلان فقط
+    # (send_message / request_evolution) وتحت سياسة تمنعها عن أي عقدة
+    # موقوفة/محجورة/فاشلة. لا shell ولا git push ولا fetch_url ولا توكنات.
+    def _hands_policy(self, node: BaseNode, hand: str, tool: str, kwargs: dict):
+        if hand == LEFT:
+            return True, "read-only hand"
+        if tool not in HAND_RIGHT_ALLOWED:
+            return False, f"action {tool!r} is not in the right-hand allow-list"
+        if node.state in (NodeState.PAUSED, NodeState.FAILED):
+            return False, f"node state {node.state!r} cannot act; resume it first"
+        return True, "allow-listed action"
+
+    def _left_hand_tools(self):
+        """أدوات قراءة محلية فقط، مضيَّقة: امتدادات نصية محددة، وبلا git remote
+        (قد يكشف توكناً داخل الرابط)."""
+        from ai import agent_tools as at
+
+        def search_code(pattern: str, path: str = ".", glob: str = "*.py", max_matches: int = 20):
+            if glob not in ("*.py", "*.md"):
+                raise ValueError("glob must be '*.py' or '*.md'")
+            return at.search_code(pattern, path=path, glob=glob, max_matches=min(int(max_matches), 40))
+
+        def find_files(name_glob: str = "*.py", path: str = ".", limit: int = 50):
+            return at.find_files(name_glob, path=path, limit=min(int(limit), 80))
+
+        def git_info(what: str = "status"):
+            if what not in ("status", "log", "diff", "branch"):
+                raise ValueError("what must be one of: status, log, diff, branch")
+            return at.git_info(what)
+
+        def peers():
+            return [
+                {"node_id": m.get("node_id"), "name": m.get("name"), "state": m.get("state")}
+                for m in self.registry.list_metadata()
+            ]
+
+        return [
+            ("search_code", search_code, "بحث نصي/regex في ملفات py/md للمشروع"),
+            ("find_files", find_files, "بحث عن ملفات بالاسم/الامتداد"),
+            ("git_info", git_info, "status/log/diff/branch (قراءة فقط)"),
+            ("py_compile_check", at.py_compile_check, "فحص بناء جملة ملف Python"),
+            ("system_info", at.system_info, "لمحة عن البيئة بلا أسرار"),
+            ("peers", peers, "قائمة العُقد المعروفة وحالاتها"),
+        ]
+
+    def _equip_hands(self, node: BaseNode) -> None:
+        if getattr(node, "hands", None) is not None:
+            return
+        hands = NodeHands(
+            node,
+            policy=self._hands_policy,
+            audit_path=Path(self.storage.storage_dir) / "node_hands_audit.jsonl",
+        )
+        try:
+            for name, fn, desc in self._left_hand_tools():
+                hands.bind(LEFT, name, fn, desc)
+        except Exception as e:
+            logger.warning("MeshBundle: تعذّر ربط أدوات اليد اليسرى لـ %s: %s", node.name, e)
+
+        def send_message(to_id: str, topic: str, payload: Optional[dict] = None):
+            if not isinstance(topic, str) or not topic or len(topic) > HAND_TOPIC_MAX_CHARS:
+                raise ValueError(f"topic must be a non-empty string up to {HAND_TOPIC_MAX_CHARS} chars")
+            if not self.registry.exists(to_id):
+                raise ValueError("recipient is not a registered node")
+            import json as _json
+            if len(_json.dumps(payload or {}, ensure_ascii=False, default=str)) > HAND_MESSAGE_MAX_CHARS:
+                raise ValueError(f"payload exceeds {HAND_MESSAGE_MAX_CHARS} chars")
+            msg = self.channel.send(node.node_id, to_id, topic, payload or {})
+            return {"message_id": msg["message_id"], "to_id": to_id}
+
+        def request_evolution():
+            import time as _time
+            now = _time.time()
+            with self._lock:
+                wait = HAND_EVOLUTION_COOLDOWN_S - (now - self._hand_evolution_last)
+                if wait > 0:
+                    raise RuntimeError(f"evolution cooldown: retry in {int(wait)}s")
+                self._hand_evolution_last = now
+            return self.run_evolution_cycle()
+
+        hands.bind(RIGHT, "send_message", send_message, "إرسال رسالة لعقدة مسجَّلة أخرى")
+        hands.bind(RIGHT, "request_evolution", request_evolution,
+                   "طلب دورة تطوّر ذاتي (تمرّ بالحوكمة وتبريد 5 دقائق)")
+        node.attach_hands(hands)
+
     def register_node(self, node: BaseNode, connect_to: Optional[str] = None) -> str:
         node_id = self.registry.register(node)
         self.graph.add_node(node_id, node.to_dict())
         self.exec_log.upsert_node(node.to_dict())
         self._announce_node(node)
+        self._equip_hands(node)
         source = connect_to if (connect_to and self.graph.has_node(connect_to)) else self._root_node_id
         if source and self.graph.has_node(source) and source != node_id:
             self.graph.add_edge(source, node_id, label="self_evolved")

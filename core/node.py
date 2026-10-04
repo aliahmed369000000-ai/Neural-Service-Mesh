@@ -80,6 +80,9 @@ class BaseNode(ABC):
         # عقدة أوقفها إنسان يدوياً لسبب آخر كان سيُعيد تشغيلها رغماً عنه.
         self.pause_reason: Optional[str] = None
         self._pending_input: Optional[Dict[str, Any]] = None
+        # «يدان» (core/node_hands.py): None حتى يُرفِقها مُنسِّق أعلى (MeshBundle).
+        # لا تدخل في to_dict()/restore_state() — أدوات حيّة وليست حالة قابلة للحفظ.
+        self.hands: Optional[Any] = None
         # عدد مرات استئناف هذه العقدة بعد توقف قسري (انظر
         # ExecutionEngine.resume_interrupted/MAX_RESUME_ATTEMPTS) — نفس
         # نمط resume_attempts في SwarmResult/ContentJob/VideoJob: يمنع
@@ -198,6 +201,19 @@ class BaseNode(ABC):
             logger.info(f"[{self.name}] execution recorded #{self._execution_count} (external)")
         else:
             self.mark_failed(error or "فشل تنفيذ خارجي بدون تفاصيل")
+
+    def attach_hands(self, hands: Any) -> None:
+        """إرفاق يدين (NodeHands) بالعقدة. يستبدل أي يدين سابقتين."""
+        self.hands = hands
+
+    def use_hand(self, hand: str, tool: str, **kwargs: Any):
+        """استخدام أداة عبر إحدى اليدين ("left" للقراءة، "right" للفعل).
+        تُرجع HandResult دائماً ولا ترفع استثناءً؛ بلا يدين مُرفَقتين تُرجَع
+        نتيجة مرفوضة صريحة بدل AttributeError."""
+        if self.hands is None:
+            from core.node_hands import HandResult
+            return HandResult(False, hand, tool, error="no hands attached to this node", denied=True)
+        return self.hands.use(hand, tool, **kwargs)
 
     def has_pending_work(self) -> bool:
         """True إذا كانت العقدة توقفت قسراً وسط process() (state=running)
