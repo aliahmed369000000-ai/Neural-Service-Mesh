@@ -759,6 +759,72 @@ class MeshBundle:
             ("reputation_detail", reputation_detail, "تفاصيل سمعة هذه العقدة من المحرك"),
             ("graph_stats", graph_stats, "إحصاءات الرسم البياني للخدمات"),
         ]
+
+        # ── طرفية آمنة (قراءة/فحوص فقط عبر allowlist) ──────────────────────
+        def terminal_policy() -> dict:
+            """ماذا يُسمح تلقائياً من أوامر الطرفية للعقدة."""
+            try:
+                from ai.terminal_auto_policy import explain_policy
+                policy_text = explain_policy()
+            except Exception as e:
+                policy_text = f"policy unavailable: {e}"
+            return {
+                "mode": "safe-allowlist",
+                "shell": False,
+                "operators_banned": [";", "&&", "||", "|", ">", ">>", "<"],
+                "policy": policy_text,
+                "node_id": node.node_id,
+            }
+
+        def terminal_run_safe(cmd: str, timeout: int = 30) -> dict:
+            """تشغيل أمر طرفية مسموح فقط (git status/diff، pytest، py_compile...).
+            بلا shell وبلا كتابة/حذف/شبكة. أي أمر خارج القائمة → مرفوض."""
+            if not isinstance(cmd, str) or not cmd.strip():
+                raise ValueError("cmd must be a non-empty string")
+            if len(cmd) > 500:
+                raise ValueError("cmd too long (max 500 chars)")
+            timeout = max(1, min(int(timeout), 60))
+            try:
+                from ai.agent_tools import run_safe_cmd
+                return run_safe_cmd(cmd.strip(), timeout=timeout)
+            except Exception:
+                from ai.terminal_auto_policy import decide, run_auto
+                from pathlib import Path as _P
+                decision = decide(cmd.strip())
+                if not decision.allowed:
+                    return {
+                        "ok": False,
+                        "cmd": cmd.strip(),
+                        "msg": decision.reason,
+                        "automatic": False,
+                        "requires_approval": True,
+                    }
+                root = _P(__file__).resolve().parent.parent
+                output = run_auto(cmd.strip(), cwd=str(root), timeout=timeout)
+                return {
+                    "ok": output.startswith("exit=0"),
+                    "cmd": list(decision.command) if decision.command else cmd.strip(),
+                    "output": output,
+                    "automatic": True,
+                }
+
+        def terminal_history(limit: int = 20) -> list:
+            """سجل أوامر طرفية هذا الوكيل/العقدة إن وُجدت (قراءة فقط)."""
+            limit = max(1, min(int(limit), 50))
+            key = getattr(node, "name", None) or node.node_id
+            try:
+                from ai.agent_terminals import get_agent_terminals
+                return get_agent_terminals().agent_history(str(key), limit=limit)
+            except Exception as e:
+                return [{"error": str(e), "node": key}]
+
+        tools.extend([
+            ("terminal_policy", terminal_policy, "سياسة الطرفية الآمنة المسموحة للعقدة"),
+            ("terminal_run_safe", terminal_run_safe,
+             "تشغيل أمر طرفية من القائمة الآمنة فقط (git status/pytest/py_compile...)"),
+            ("terminal_history", terminal_history, "سجل أوامر الطرفية لهذه العقدة (قراءة)"),
+        ])
+
         try:
             from ai import agent_tools as at
         except Exception as e:
