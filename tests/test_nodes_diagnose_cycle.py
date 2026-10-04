@@ -23,7 +23,7 @@ def test_run_nodes_diagnose_cycle_stores_summary(bundle):
     assert out["scanned"] >= 1
     assert "ts" in out
     summary = bundle.get_nodes_diagnose_summary()
-    assert summary.get("layer") == "mesh-nodes-diagnose-cycle-v1"
+    assert summary.get("layer") in ("mesh-nodes-diagnose-cycle-v1", "mesh-nodes-diagnose-cycle-v2")
     assert summary.get("scanned") == out["scanned"]
     assert isinstance(summary.get("nodes"), list)
     assert len(summary["nodes"]) >= 1
@@ -74,3 +74,22 @@ def test_diagnose_cycle_broadcasts_mesh_diagnose_topic(bundle):
             found += 1
             assert any(m.get("topic") == "mesh_diagnose" for m in ib.output)
     assert found >= 1
+
+
+def test_diagnose_cycle_dynamic_threshold_and_collective(bundle):
+    from core.node_hands import LEFT
+    out = bundle.run_nodes_diagnose_cycle()
+    assert out["scanned"] >= 1
+    summary = bundle.get_nodes_diagnose_summary()
+    assert summary.get("layer") == "mesh-nodes-diagnose-cycle-v2"
+    assert "effective_low_rep_threshold" in summary
+    assert "avg_reputation" in summary
+    assert summary["effective_low_rep_threshold"] >= 0.05
+    n = bundle.registry.get(list(bundle.role_node_ids.values())[0])
+    d = n.use_hand(LEFT, "self_diagnose")
+    assert d.ok
+    assert "collective_health" in d.output
+    ib = n.use_hand(LEFT, "inbox_summary")
+    assert ib.ok
+    assert "collective_diagnose" in ib.output
+    assert "mesh_diagnose_unread" in ib.output
