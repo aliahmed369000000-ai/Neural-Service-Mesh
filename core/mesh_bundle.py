@@ -1247,12 +1247,75 @@ class MeshBundle:
         except Exception as exc:
             logger.warning("MeshBundle: تعذّر فحص الأسرِبة المتوقفة: %s", exc)
 
+    def _routing_penalty_factor(self, node_id: str, raw_score: float, diag: Optional[dict] = None) -> float:
+        """عامل تخفيض توجيه السرب: 0.1 كامل / 0.5 تعافٍ / 1.0 بلا عقوبة.
+
+        يُرفع تدريجياً عندما تتجاوز السمعة الخام العتبة الديناميكية حتى لو
+        بقيت العقدة في قائمة low_reputation لدورة سابقة."""
+        if not node_id:
+            return 1.0
+        try:
+            diag = diag if diag is not None else (self.get_nodes_diagnose_summary() or {})
+            low_ids = {
+                x.get("node_id")
+                for x in (diag.get("low_reputation") or [])
+                if isinstance(x, dict)
+            }
+            if node_id not in low_ids:
+                return 1.0
+            thr = float(
+                diag.get("effective_low_rep_threshold")
+                or DIAGNOSE_LOW_REP_THRESHOLD
+            )
+            if raw_score >= thr * 1.2:
+                return 1.0  # تعافٍ كامل
+            if raw_score >= thr:
+                return 0.5  # تعافٍ جزئي
+            return 0.1  # عقوبة كاملة
+        except Exception:
+            return 1.0
+
+    def get_routing_penalties(self) -> dict:
+        """الأدوار المعاقَبة حالياً في توجيه السرب — للواجهة والتدقيق."""
+        diag = self.get_nodes_diagnose_summary() or {}
+        thr = float(diag.get("effective_low_rep_threshold") or DIAGNOSE_LOW_REP_THRESHOLD)
+        id_to_role = {v: k for k, v in (getattr(self, "role_node_ids", None) or {}).items()}
+        roles = []
+        for x in diag.get("low_reputation") or []:
+            if not isinstance(x, dict):
+                continue
+            nid = x.get("node_id")
+            if not nid:
+                continue
+            try:
+                raw = float(self.reputation_engine.get_score(nid) or 0.0)
+            except Exception:
+                raw = float(x.get("reputation") or 0.0)
+            factor = self._routing_penalty_factor(nid, raw, diag)
+            role = id_to_role.get(nid) or x.get("name")
+            roles.append({
+                "role": role,
+                "node_id": nid,
+                "raw_reputation": round(raw, 4),
+                "effective_reputation": round(raw * factor, 4),
+                "penalty_factor": factor,
+                "threshold": round(thr, 4),
+                "status": (
+                    "recovered" if factor >= 1.0
+                    else ("recovering" if factor >= 0.5 else "penalized")
+                ),
+            })
+        return {
+            "threshold": round(thr, 4),
+            "penalized_count": sum(1 for r in roles if r["penalty_factor"] < 1.0),
+            "roles": roles,
+        }
+
     def _role_reputation(self, role) -> float:
         """درجة سمعة عقدة الدور في الـregistry — تُمرَّر لـSwarmCoordinator
         لتفضيل الأدوار الأعلى سمعة عند توزيع المهام. 0.0 إن لم تُوجد عقدة.
 
-        🆕 إن ظهرت العقدة في آخر دورة تشخيص ضمن low_reputation تُخفَّض
-        الدرجة ×0.1 حتى يقل احتمال اختيارها في توجيه السرب."""
+        عقوبة تشخيص low_reputation مع رفع تدريجي بعد تجاوز العتبة الديناميكية."""
         if not role:
             return 0.0
         node_id = (getattr(self, "role_node_ids", None) or {}).get(role)
@@ -1264,13 +1327,8 @@ class MeshBundle:
             score = 0.0
         try:
             diag = self.get_nodes_diagnose_summary() or {}
-            low_ids = {
-                x.get("node_id")
-                for x in (diag.get("low_reputation") or [])
-                if isinstance(x, dict)
-            }
-            if node_id in low_ids:
-                score *= 0.1
+            factor = self._routing_penalty_factor(node_id, score, diag)
+            score *= factor
         except Exception:
             pass
         return score
