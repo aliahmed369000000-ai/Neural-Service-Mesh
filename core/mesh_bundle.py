@@ -297,6 +297,9 @@ class MeshBundle:
         self._register_mcp_tools()
         # قبل الإحياء: جاهزية حقول الأيدي حتى يستطيع _restore استدعاء _equip_hands
         self._hand_evolution_last = 0.0
+        # بيانات تشغيل حيّة لكل عقدة (آخر فحص طرفية، تشخيص...) — لا تُحفظ كحالة
+        # دائمة للعقدة؛ تُعرض عبر node_status/self_diagnose فقط.
+        self._node_runtime_meta: Dict[str, dict] = {}
         self._restore_dynamic_nodes()
         self._sync_nodes_to_exec_log()
         self._sync_nodes_to_graph()
@@ -581,7 +584,7 @@ class MeshBundle:
             return [dict(m) for m in msgs[:limit]]
 
         def node_status():
-            """حالة هذه العقدة من السجل + السمعة (قراءة فقط)."""
+            """حالة هذه العقدة من السجل + السمعة + آخر فحص طرفية (قراءة فقط)."""
             meta = None
             for m in self.registry.list_metadata():
                 if m.get("node_id") == node.node_id:
@@ -592,13 +595,23 @@ class MeshBundle:
                 score = float(self.reputation_engine.get_score(node.node_id) or 0.0)
             except Exception:
                 pass
+            runtime = {}
+            try:
+                runtime = dict(self._node_runtime_meta.get(node.node_id) or {})
+            except Exception:
+                runtime = {}
             return {
                 "node_id": node.node_id,
                 "name": getattr(node, "name", None),
                 "state": str(getattr(node, "state", None)),
                 "execution_count": getattr(node, "execution_count", None),
+                "last_executed": getattr(node, "last_executed", None) or (
+                    meta.get("last_executed") if meta else None
+                ),
                 "node_type": type(node).__name__,
                 "reputation_score": score,
+                "last_terminal_check": runtime.get("last_terminal_check"),
+                "hands_bound": getattr(node, "hands", None) is not None,
                 "meta": {
                     k: meta.get(k) for k in ("tags", "pause_reason", "description")
                     if meta and k in meta
@@ -781,7 +794,8 @@ class MeshBundle:
 
         def terminal_run_safe(cmd: str, timeout: int = 30) -> dict:
             """تشغيل أمر طرفية مسموح فقط (git status/diff، pytest، py_compile...).
-            بلا shell وبلا كتابة/حذف/شبكة. أي أمر خارج القائمة → مرفوض."""
+            بلا shell وبلا كتابة/حذف/شبكة. أي أمر خارج القائمة → مرفوض.
+            يحدّث last_terminal_check في بيانات تشغيل العقدة."""
             if not isinstance(cmd, str) or not cmd.strip():
                 raise ValueError("cmd must be a non-empty string")
             if len(cmd) > 500:
@@ -789,43 +803,129 @@ class MeshBundle:
             timeout = max(1, min(int(timeout), 60))
             try:
                 from ai.agent_tools import run_safe_cmd
-                return run_safe_cmd(cmd.strip(), timeout=timeout)
+                result = run_safe_cmd(cmd.strip(), timeout=timeout)
             except Exception:
                 from ai.terminal_auto_policy import decide, run_auto
                 from pathlib import Path as _P
                 decision = decide(cmd.strip())
                 if not decision.allowed:
-                    return {
+                    result = {
                         "ok": False,
                         "cmd": cmd.strip(),
                         "msg": decision.reason,
                         "automatic": False,
                         "requires_approval": True,
                     }
-                root = _P(__file__).resolve().parent.parent
-                output = run_auto(cmd.strip(), cwd=str(root), timeout=timeout)
-                return {
-                    "ok": output.startswith("exit=0"),
-                    "cmd": list(decision.command) if decision.command else cmd.strip(),
-                    "output": output,
-                    "automatic": True,
+                else:
+                    root = _P(__file__).resolve().parent.parent
+                    output = run_auto(cmd.strip(), cwd=str(root), timeout=timeout)
+                    result = {
+                        "ok": output.startswith("exit=0"),
+                        "cmd": list(decision.command) if decision.command else cmd.strip(),
+                        "output": output,
+                        "automatic": True,
+                    }
+            try:
+                from datetime import datetime, timezone as _tz
+                entry = {
+                    "at": datetime.now(_tz.utc).isoformat(),
+                    "cmd": cmd.strip()[:120],
+                    "ok": bool(result.get("ok")) if isinstance(result, dict) else False,
+                    "requires_approval": bool(
+                        (result or {}).get("requires_approval")
+                    ) if isinstance(result, dict) else False,
                 }
+                with self._lock:
+                    meta = dict(self._node_runtime_meta.get(node.node_id) or {})
+                    meta["last_terminal_check"] = entry
+                    hist = list(meta.get("terminal_checks") or [])
+                    hist.append(entry)
+                    meta["terminal_checks"] = hist[-20:]
+                    self._node_runtime_meta[node.node_id] = meta
+            except Exception:
+                pass
+            return result
 
         def terminal_history(limit: int = 20) -> list:
             """سجل أوامر طرفية هذا الوكيل/العقدة إن وُجدت (قراءة فقط)."""
             limit = max(1, min(int(limit), 50))
             key = getattr(node, "name", None) or node.node_id
+            # أولاً: سجل فحوص terminal_run_safe المحلية على هذه العقدة
+            local = []
+            try:
+                local = list(
+                    (self._node_runtime_meta.get(node.node_id) or {}).get("terminal_checks")
+                    or []
+                )
+            except Exception:
+                local = []
+            remote = []
             try:
                 from ai.agent_terminals import get_agent_terminals
-                return get_agent_terminals().agent_history(str(key), limit=limit)
+                remote = get_agent_terminals().agent_history(str(key), limit=limit)
             except Exception as e:
-                return [{"error": str(e), "node": key}]
+                remote = [{"error": str(e), "node": key}]
+            return {
+                "node_checks": list(reversed(local))[:limit],
+                "agent_terminal": remote[:limit] if isinstance(remote, list) else remote,
+            }
+
+        def inbox_summary() -> dict:
+            """ملخص صندوق البريد: عدد غير المقروء حسب الموضوع."""
+            try:
+                msgs = self.channel.inbox(node.node_id, unread_only=True, limit=100)
+            except Exception as e:
+                return {"error": str(e), "node_id": node.node_id}
+            by_topic: dict = {}
+            for m in msgs or []:
+                t = str(m.get("topic") or "unknown")
+                by_topic[t] = by_topic.get(t, 0) + 1
+            return {
+                "node_id": node.node_id,
+                "unread_total": len(msgs or []),
+                "by_topic": by_topic,
+            }
+
+        def self_diagnose() -> dict:
+            """تشخيص موحّد: حالة + صحة الشبكة + جيران + آخر طرفية + صندوق الوارد."""
+            st = node_status()
+            try:
+                mh = mesh_health()
+            except Exception as e:
+                mh = {"error": str(e)}
+            try:
+                nb = neighbors()
+            except Exception as e:
+                nb = {"error": str(e)}
+            try:
+                ib = inbox_summary()
+            except Exception as e:
+                ib = {"error": str(e)}
+            try:
+                rt = routes()
+                top_routes = (rt.get("routes") or [])[:5]
+            except Exception:
+                top_routes = []
+            return {
+                "layer": "node-self-diagnose-v1",
+                "status": st,
+                "mesh_health": {
+                    k: mh.get(k) for k in ("total_nodes", "by_state", "avg_reputation")
+                    if isinstance(mh, dict)
+                },
+                "neighbors": nb,
+                "inbox": ib,
+                "top_routes_by_reputation": top_routes,
+            }
 
         tools.extend([
             ("terminal_policy", terminal_policy, "سياسة الطرفية الآمنة المسموحة للعقدة"),
             ("terminal_run_safe", terminal_run_safe,
              "تشغيل أمر طرفية من القائمة الآمنة فقط (git status/pytest/py_compile...)"),
-            ("terminal_history", terminal_history, "سجل أوامر الطرفية لهذه العقدة (قراءة)"),
+            ("terminal_history", terminal_history, "سجل فحوص الطرفية المحلية + طرفية الوكيل"),
+            ("inbox_summary", inbox_summary, "ملخص الرسائل غير المقروءة حسب الموضوع"),
+            ("self_diagnose", self_diagnose,
+             "تشخيص موحّد: حالة + صحة الشبكة + جيران + وارد + مسارات"),
         ])
 
         try:
