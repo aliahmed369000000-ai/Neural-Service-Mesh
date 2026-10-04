@@ -241,6 +241,7 @@ class SwarmCoordinator:
         # الحجر لم يكن يمنع تنفيذاً واحداً فعلياً.
         self._is_role_quarantined = is_role_quarantined
         self._history: List[SwarmResult] = []
+        self._last_pick_audit: List[dict] = []  # آخر قرارات _pick_agent (حد أقصى لاحق)
         self._lock = threading.Lock()
         # معرّفات الأسرِبة التي تعمل الآن داخل هذه العملية. سرب يعمل فعلاً
         # يبقى في swarm_progress بحالة 'running' (كأي سرب انهارت عمليته)،
@@ -798,7 +799,39 @@ class SwarmCoordinator:
                     except Exception:
                         rep = 0.0
                 return (rep, float(getattr(a, "performance_score", 0.0) or 0.0))
-            return max(candidates, key=_key)
+            ranked = sorted(candidates, key=_key, reverse=True)
+            chosen = ranked[0]
+            # تسجيل شفاف لقرار الاختيار (سمعة vs أداء) — لا يغيّر السلوك
+            try:
+                audit = {
+                    "capability": capability,
+                    "chosen_id": chosen.agent_id,
+                    "chosen_role": chosen.role,
+                    "chosen_rep": _key(chosen)[0],
+                    "chosen_perf": _key(chosen)[1],
+                    "candidates": [
+                        {
+                            "id": a.agent_id,
+                            "role": a.role,
+                            "rep": _key(a)[0],
+                            "perf": _key(a)[1],
+                        }
+                        for a in ranked[:5]
+                    ],
+                    "reputation_used": self._role_reputation is not None,
+                }
+                with self._lock:
+                    self._last_pick_audit.append(audit)
+                    if len(self._last_pick_audit) > 100:
+                        del self._last_pick_audit[:-100]
+                logger.info(
+                    "pick_agent: cap=%s chose %s role=%s rep=%.3f perf=%.3f (from %d)",
+                    capability, chosen.agent_id, chosen.role,
+                    audit["chosen_rep"], audit["chosen_perf"], len(candidates),
+                )
+            except Exception as exc:
+                logger.debug("pick_agent audit failed: %s", exc)
+            return chosen
         return self._auto_spawn_for_capability(capability)
 
     def _auto_spawn_for_capability(self, capability: str) -> Optional[AgentInstance]:
