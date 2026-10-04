@@ -454,6 +454,41 @@ class MeshBundle:
     # (core/node_hands.py) اليسرى: قراءة فقط. اليمنى: فعلان فقط
     # (send_message / request_evolution) وتحت سياسة تمنعها عن أي عقدة
     # موقوفة/محجورة/فاشلة. لا shell ولا git push ولا fetch_url ولا توكنات.
+    def pump_inboxes(self, max_per_node: int = 10) -> dict:
+        """تشغّل بروتوكول نبض بسيط بين العُقد باستخدام يديها فقط: كل عقدة تقرأ
+        رسائل "ping" في صندوقها (يد يسرى) وتردّ "pong" بـreply_to (يد يمنى).
+        - لا ردّ على pong أبداً (لا حلقات).
+        - مرسل غير مسجَّل أو ping من العقدة لنفسها: تُستهلك بلا ردّ.
+        - يد محجوبة/محدودة المعدّل: تبقى الرسالة غير مقروءة وتُعاد المحاولة في
+          الجولة التالية (لا فقدان صامت).
+        - الرسائل غير ping (node_joined/node_failed...) تبقى كما هي لواجهة
+          المراقبة ولا تُستهلك هنا."""
+        stats = {"nodes": 0, "pings_answered": 0, "pings_dropped": 0, "deferred": 0}
+        for node in self.registry.list_all():
+            if getattr(node, "hands", None) is None:
+                continue
+            r = node.use_hand(LEFT, "read_inbox", unread_only=True, topic="ping", limit=max_per_node)
+            if not r.ok:
+                continue
+            stats["nodes"] += 1
+            for m in r.output:
+                sender = m.get("from_id")
+                if sender == node.node_id or not self.registry.exists(sender):
+                    self.channel.mark_read(node.node_id, m["message_id"])
+                    stats["pings_dropped"] += 1
+                    continue
+                seq = (m.get("payload") or {}).get("seq")
+                payload = {"echo": seq} if isinstance(seq, (int, str)) and len(str(seq)) <= 64 else {}
+                rep = node.use_hand(RIGHT, "send_message", to_id=sender, topic="pong",
+                                    payload=payload, reply_to=m["message_id"])
+                if rep.ok:
+                    self.channel.mark_read(node.node_id, m["message_id"])
+                    stats["pings_answered"] += 1
+                else:
+                    stats["deferred"] += 1
+                    break
+        return stats
+
     def _hands_policy(self, node: BaseNode, hand: str, tool: str, kwargs: dict):
         if hand == LEFT:
             return True, "read-only hand"
@@ -463,7 +498,7 @@ class MeshBundle:
             return False, f"node state {node.state!r} cannot act; resume it first"
         return True, "allow-listed action"
 
-    def _left_hand_tools(self):
+    def _left_hand_tools(self, node: BaseNode):
         """أدوات قراءة محلية فقط، مضيَّقة: امتدادات نصية محددة، وبلا git remote
         (قد يكشف توكناً داخل الرابط)."""
         from ai import agent_tools as at
@@ -487,7 +522,17 @@ class MeshBundle:
                 for m in self.registry.list_metadata()
             ]
 
+        def read_inbox(unread_only: bool = True, topic: Optional[str] = None, limit: int = 10):
+            """يقرأ صندوق بريد هذه العقدة فقط (لا معامل node_id عمداً)، الأقدم
+            أولاً، ويعيد نسخاً لا مراجع حيّة لرسائل القناة."""
+            limit = max(1, min(int(limit), 50))
+            msgs = self.channel.inbox(node.node_id, unread_only=bool(unread_only), limit=100)
+            if topic is not None:
+                msgs = [m for m in msgs if m.get("topic") == topic]
+            return [dict(m) for m in msgs[:limit]]
+
         return [
+            ("read_inbox", read_inbox, "قراءة صندوق بريد هذه العقدة فقط (الأقدم أولاً)"),
             ("search_code", search_code, "بحث نصي/regex في ملفات py/md للمشروع"),
             ("find_files", find_files, "بحث عن ملفات بالاسم/الامتداد"),
             ("git_info", git_info, "status/log/diff/branch (قراءة فقط)"),
@@ -505,12 +550,13 @@ class MeshBundle:
             audit_path=Path(self.storage.storage_dir) / "node_hands_audit.jsonl",
         )
         try:
-            for name, fn, desc in self._left_hand_tools():
+            for name, fn, desc in self._left_hand_tools(node):
                 hands.bind(LEFT, name, fn, desc)
         except Exception as e:
             logger.warning("MeshBundle: تعذّر ربط أدوات اليد اليسرى لـ %s: %s", node.name, e)
 
-        def send_message(to_id: str, topic: str, payload: Optional[dict] = None):
+        def send_message(to_id: str, topic: str, payload: Optional[dict] = None,
+                         reply_to: Optional[str] = None):
             if not isinstance(topic, str) or not topic or len(topic) > HAND_TOPIC_MAX_CHARS:
                 raise ValueError(f"topic must be a non-empty string up to {HAND_TOPIC_MAX_CHARS} chars")
             if not self.registry.exists(to_id):
@@ -518,7 +564,9 @@ class MeshBundle:
             import json as _json
             if len(_json.dumps(payload or {}, ensure_ascii=False, default=str)) > HAND_MESSAGE_MAX_CHARS:
                 raise ValueError(f"payload exceeds {HAND_MESSAGE_MAX_CHARS} chars")
-            msg = self.channel.send(node.node_id, to_id, topic, payload or {})
+            if reply_to is not None and (not isinstance(reply_to, str) or len(reply_to) > HAND_TOPIC_MAX_CHARS):
+                raise ValueError("reply_to must be a message_id string")
+            msg = self.channel.send(node.node_id, to_id, topic, payload or {}, reply_to=reply_to)
             return {"message_id": msg["message_id"], "to_id": to_id}
 
         def request_evolution():
@@ -924,6 +972,10 @@ class MeshBundle:
             self._swarm_results_since_evolution += 1
             if self._swarm_results_since_evolution >= EVOLUTION_CYCLE_INTERVAL:
                 self._swarm_results_since_evolution = 0
+                try:
+                    self.pump_inboxes()
+                except Exception as e:
+                    logger.warning("MeshBundle: periodic pump_inboxes failed: %s", e)
                 try:
                     self.run_evolution_cycle()
                 except Exception as e:

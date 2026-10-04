@@ -228,3 +228,113 @@ def test_self_evolved_node_registered_later_also_gets_hands(bundle):
     b.register_node(born)
     assert born.hands is not None
     assert born.use_hand(LEFT, "peers").ok
+
+
+# ── نبض ping/pong: العُقد تقرأ بريدها وتردّ بيديها ─────────────────────────
+def _ping(b, frm, to, seq=7):
+    r = frm.use_hand(RIGHT, "send_message", to_id=to.node_id, topic="ping", payload={"seq": seq})
+    assert r.ok, r.error
+    return r.output["message_id"]
+
+
+def test_ping_pong_round_trip_with_reply_to(bundle):
+    b, _ = bundle
+    a, other = _two_roles(b)
+    ping_id = _ping(b, a, other, seq=7)
+    stats = b.pump_inboxes()
+    assert stats["pings_answered"] == 1
+    pongs = a.use_hand(LEFT, "read_inbox", topic="pong").output
+    assert len(pongs) == 1
+    assert pongs[0]["reply_to"] == ping_id and pongs[0]["payload"] == {"echo": 7}
+    assert pongs[0]["from_id"] == other.node_id
+    assert b.channel.unread_count(other.node_id) == 0 or all(
+        m["topic"] != "ping" for m in b.channel.inbox(other.node_id, unread_only=True))
+
+
+def test_pong_is_never_answered_so_no_loops(bundle):
+    b, _ = bundle
+    a, other = _two_roles(b)
+    _ping(b, a, other)
+    b.pump_inboxes()
+    again = b.pump_inboxes()
+    assert again["pings_answered"] == 0
+    assert [m["topic"] for m in b.channel.inbox(a.node_id) if m["topic"] == "pong"] == ["pong"]
+
+
+def test_ping_from_unregistered_sender_or_self_is_dropped_without_reply(bundle):
+    b, _ = bundle
+    a, other = _two_roles(b)
+    b.channel.send("ghost", other.node_id, "ping", {})
+    b.channel.send(other.node_id, other.node_id, "ping", {})
+    stats = b.pump_inboxes()
+    assert stats["pings_dropped"] == 2 and stats["pings_answered"] == 0
+    assert not [m for m in b.channel.inbox(other.node_id, unread_only=True) if m["topic"] == "ping"]
+
+
+def test_paused_node_leaves_ping_unread_until_resumed(bundle):
+    b, _ = bundle
+    a, other = _two_roles(b)
+    _ping(b, a, other)
+    other.pause(reason="quarantine")
+    assert b.pump_inboxes()["pings_answered"] == 0
+    assert [m for m in b.channel.inbox(other.node_id, unread_only=True) if m["topic"] == "ping"]
+    other.resume()
+    assert b.pump_inboxes()["pings_answered"] == 1
+
+
+def test_right_hand_rate_limit_defers_extra_pings_without_losing_them(bundle):
+    b, _ = bundle
+    a, other = _two_roles(b)
+    for i in range(7):
+        b.channel.send(a.node_id, other.node_id, "ping", {"seq": i})
+    stats = b.pump_inboxes()
+    assert stats["pings_answered"] == 5 and stats["deferred"] == 1
+    left = [m for m in b.channel.inbox(other.node_id, unread_only=True) if m["topic"] == "ping"]
+    assert len(left) == 2
+
+
+def test_informational_messages_stay_unread_for_the_console(bundle):
+    b, _ = bundle
+    a, other = _two_roles(b)
+    b.channel.send(a.node_id, other.node_id, "node_failed", {"x": 1})
+    b.pump_inboxes()
+    assert [m["topic"] for m in b.channel.inbox(other.node_id, unread_only=True)
+            if m["topic"] == "node_failed"] == ["node_failed"]
+
+
+def test_read_inbox_returns_copies_and_only_own_inbox(bundle):
+    b, _ = bundle
+    a, other = _two_roles(b)
+    b.channel.send(a.node_id, other.node_id, "hello", {})
+    msgs = other.use_hand(LEFT, "read_inbox", topic="hello").output
+    msgs[0]["read"] = True
+    assert not [m for m in b.channel.inbox(other.node_id) if m["topic"] == "hello"][0]["read"]
+    res = other.use_hand(LEFT, "read_inbox", node_id=a.node_id)
+    assert not res.ok and "node_id" in res.error
+
+
+def test_periodic_hook_pumps_inboxes(bundle, monkeypatch):
+    from ai.agent_factory import AgentInstance
+    from ai.swarm_coordinator import SwarmTask
+    from core.mesh_bundle import EVOLUTION_CYCLE_INTERVAL
+
+    b, _ = bundle
+    calls = {"pump": 0}
+    monkeypatch.setattr(b, "pump_inboxes", lambda *a, **k: calls.__setitem__("pump", calls["pump"] + 1) or {})
+    monkeypatch.setattr(b, "run_evolution_cycle", lambda *a, **k: {})
+    role = next(iter(AGENT_CATALOGUE))
+    agent = AgentInstance(role, AGENT_CATALOGUE[role])
+    b.agent_factory._agents[agent.agent_id] = agent
+
+    class _R:
+        pass
+
+    for i in range(EVOLUTION_CYCLE_INTERVAL):
+        t = SwarmTask(f"t{i}", "g", "x", {})
+        t.assigned_agent_id = agent.agent_id
+        t.status = "done"
+        t.duration_ms = 1.0
+        r = _R()
+        r.tasks = [t]
+        b.record_swarm_result(r)
+    assert calls["pump"] == 1
