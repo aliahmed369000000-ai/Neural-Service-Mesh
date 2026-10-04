@@ -404,29 +404,67 @@ def render_swarm_studio():
             for h in reversed(hist):
                 st.markdown(f"**{h['goal']}** — {h['status']} ({h['success_count']}/{h['total_tasks']})")
 
+    # 🆕 أدوار معاقَبة في التوجيه (من دورة التشخيص)
+    try:
+        _pen = _mesh.get_routing_penalties()
+    except Exception:
+        _pen = {}
+    _pen_roles = (_pen or {}).get("roles") or []
+    if _pen_roles:
+        with st.expander(
+            f"⚠️ أدوار متأثرة بعقوبة التوجيه ({(_pen or {}).get('penalized_count', 0)})",
+            expanded=False,
+        ):
+            st.caption(
+                f"العتبة الديناميكية: {(_pen or {}).get('threshold', 0):.3f} — "
+                "penalized=×0.1، recovering=×0.5، recovered=×1.0"
+            )
+            for _pr in _pen_roles:
+                _badge = {
+                    "penalized": "🔴",
+                    "recovering": "🟡",
+                    "recovered": "🟢",
+                }.get(_pr.get("status"), "⚪")
+                st.markdown(
+                    f"{_badge} `{_pr.get('role')}` — "
+                    f"raw={_pr.get('raw_reputation', 0):.3f} → "
+                    f"effective={_pr.get('effective_reputation', 0):.3f} "
+                    f"(×{_pr.get('penalty_factor', 1)}) — {_pr.get('status')}"
+                )
+
     # 🆕 شفافية قرارات التوزيع: سمعة vs أداء من _pick_agent
     try:
         _picks = coordinator.get_pick_audit(limit=10)
     except Exception:
         _picks = []
     if _picks:
+        _pen_role_names = {
+            r.get("role") for r in _pen_roles if r.get("penalty_factor", 1) < 1.0
+        }
         with st.expander(f"🎯 آخر قرارات توزيع المهام حسب السمعة ({len(_picks)})", expanded=False):
             st.caption(
                 "كل صف يُظهر الوكيل المختار ودرجة سمعته وأدائه مقارنةً بالمرشحين. "
-                "المصدر: SwarmCoordinator._last_pick_audit — بيانات حقيقية من آخر تشغيل."
+                "⚠️ = دور تحت عقوبة توجيه من التشخيص."
             )
             for _pi, _pk in enumerate(_picks):
                 _rep_flag = "مع سمعة" if _pk.get("reputation_used") else "أداء فقط"
+                _chosen = _pk.get("chosen_role") or ""
+                _pen_mark = " ⚠️معاقَب" if _chosen in _pen_role_names else ""
                 st.markdown(
                     f"**{_pi+1}. [{_pk.get('capability','—')}]** → "
-                    f"`{_pk.get('chosen_role','—')}` "
-                    f"(rep={_pk.get('chosen_rep', 0):.3f}, perf={_pk.get('chosen_perf', 0):.3f}) "
+                    f"`{_chosen}`{_pen_mark} "
+                    f"(rep={float(_pk.get('chosen_rep') or 0):.3f}, "
+                    f"perf={float(_pk.get('chosen_perf') or 0):.3f}) "
                     f"— {_rep_flag}"
                 )
                 _cands = _pk.get("candidates") or []
                 if len(_cands) > 1:
-                    _lines = [
-                        f"• {_c.get('role','?')}: rep={_c.get('rep',0):.3f} / perf={_c.get('perf',0):.3f}"
-                        for _c in _cands[:5]
-                    ]
+                    _lines = []
+                    for _c in _cands[:5]:
+                        _cr = _c.get("role") or "?"
+                        _pm = "⚠️" if _cr in _pen_role_names else "•"
+                        _lines.append(
+                            f"{_pm} {_cr}: rep={float(_c.get('rep') or 0):.3f} / "
+                            f"perf={float(_c.get('perf') or 0):.3f}"
+                        )
                     st.caption("مرشحون: " + " | ".join(_lines))
