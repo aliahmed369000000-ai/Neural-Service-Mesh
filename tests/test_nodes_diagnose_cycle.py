@@ -54,3 +54,23 @@ def test_peer_compare_and_mesh_diagnose_summary_tools(bundle):
     assert "my_reputation" in pc.output
     assert "rank_among_peers" in pc.output
     assert "peer_avg_reputation" in pc.output
+
+
+def test_diagnose_cycle_broadcasts_mesh_diagnose_topic(bundle):
+    """بعد الدورة تُبث رسائل topic=mesh_diagnose لصناديق الأدوار."""
+    from core.node_hands import LEFT
+
+    bundle.run_nodes_diagnose_cycle()
+    role_ids = list(bundle.role_node_ids.values())
+    assert len(role_ids) >= 2
+    # مرسل = root أو أول دور — المستلمون الآخرون يجب أن يروا الموضوع
+    found = 0
+    for nid in role_ids:
+        node = bundle.registry.get(nid)
+        if node is None or node.hands is None:
+            continue
+        ib = node.use_hand(LEFT, "read_inbox", unread_only=False, topic="mesh_diagnose", limit=5)
+        if ib.ok and ib.output:
+            found += 1
+            assert any(m.get("topic") == "mesh_diagnose" for m in ib.output)
+    assert found >= 1
