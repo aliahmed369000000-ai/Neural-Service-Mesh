@@ -882,7 +882,7 @@ class MeshBundle:
             }
 
         def inbox_summary() -> dict:
-            """ملخص صندوق البريد: عدد غير المقروء حسب الموضوع."""
+            """ملخص صندوق البريد: عدد غير المقروء حسب الموضوع + إشارة mesh_diagnose."""
             try:
                 msgs = self.channel.inbox(node.node_id, unread_only=True, limit=100)
             except Exception as e:
@@ -891,14 +891,32 @@ class MeshBundle:
             for m in msgs or []:
                 t = str(m.get("topic") or "unknown")
                 by_topic[t] = by_topic.get(t, 0) + 1
+            # أحدث إشارات تشخيص جماعية (مقروءة أو لا) كمؤشر صحة الشبكة
+            collective = None
+            try:
+                all_diag = self.channel.inbox(
+                    node.node_id, unread_only=False, topic="mesh_diagnose", limit=5,
+                )
+                if all_diag:
+                    latest = all_diag[-1] if isinstance(all_diag, list) else None
+                    if latest and isinstance(latest.get("payload"), dict):
+                        collective = {
+                            "from_id": latest.get("from_id"),
+                            "message_id": latest.get("message_id"),
+                            "payload": latest.get("payload"),
+                        }
+            except Exception:
+                collective = None
             return {
                 "node_id": node.node_id,
                 "unread_total": len(msgs or []),
                 "by_topic": by_topic,
+                "mesh_diagnose_unread": int(by_topic.get("mesh_diagnose") or 0),
+                "collective_diagnose": collective,
             }
 
         def self_diagnose() -> dict:
-            """تشخيص موحّد: حالة + صحة الشبكة + جيران + آخر طرفية + صندوق الوارد."""
+            """تشخيص موحّد: حالة + صحة الشبكة + جيران + وارد + صحة جماعية."""
             st = node_status()
             try:
                 mh = mesh_health()
@@ -917,8 +935,31 @@ class MeshBundle:
                 top_routes = (rt.get("routes") or [])[:5]
             except Exception:
                 top_routes = []
+            try:
+                cycle = self.get_nodes_diagnose_summary() or {}
+            except Exception:
+                cycle = {}
+            collective = (ib or {}).get("collective_diagnose") if isinstance(ib, dict) else None
+            collective_health = {
+                "has_signal": collective is not None,
+                "from_cycle_local": {
+                    "scanned": cycle.get("scanned", 0),
+                    "low_reputation": len(cycle.get("low_reputation") or []),
+                    "high_unread": len(cycle.get("high_unread") or []),
+                    "ts": cycle.get("ts"),
+                },
+            }
+            if collective and isinstance(collective.get("payload"), dict):
+                pl = collective["payload"]
+                collective_health["from_peer_broadcast"] = {
+                    "ts": pl.get("ts"),
+                    "scanned": pl.get("scanned"),
+                    "low_reputation_count": pl.get("low_reputation_count"),
+                    "high_unread_count": pl.get("high_unread_count"),
+                    "from_id": collective.get("from_id"),
+                }
             return {
-                "layer": "node-self-diagnose-v1",
+                "layer": "node-self-diagnose-v2",
                 "status": st,
                 "mesh_health": {
                     k: mh.get(k) for k in ("total_nodes", "by_state", "avg_reputation")
@@ -927,6 +968,7 @@ class MeshBundle:
                 "neighbors": nb,
                 "inbox": ib,
                 "top_routes_by_reputation": top_routes,
+                "collective_health": collective_health,
             }
 
         def mesh_diagnose_summary() -> dict:
@@ -1700,17 +1742,43 @@ class MeshBundle:
 
             rep = float(entry.get("reputation_score") or 0.0)
             unread = int(entry.get("unread_total") or 0)
-            if rep < DIAGNOSE_LOW_REP_THRESHOLD:
-                low_rep.append({"node_id": nid, "name": entry.get("name"), "reputation": rep})
-            if unread >= DIAGNOSE_HIGH_UNREAD_THRESHOLD:
-                high_unread.append({"node_id": nid, "name": entry.get("name"), "unread": unread})
+            # عتبة ديناميكية تُحسب بعد جمع كل الدرجات — تُطبَّق في ممر ثانٍ
             nodes_out.append(entry)
+
+        scores = [float(e.get("reputation_score") or 0.0) for e in nodes_out]
+        avg_rep = (sum(scores) / len(scores)) if scores else 0.0
+        # نصف متوسط الأقران، بين 0.05 و 2× العتبة الثابتة
+        dynamic_thr = avg_rep * 0.5 if scores else DIAGNOSE_LOW_REP_THRESHOLD
+        effective_thr = max(0.05, min(DIAGNOSE_LOW_REP_THRESHOLD * 2.0, dynamic_thr))
+        if not scores or avg_rep <= 0:
+            effective_thr = DIAGNOSE_LOW_REP_THRESHOLD
+
+        for entry in nodes_out:
+            rep = float(entry.get("reputation_score") or 0.0)
+            unread = int(entry.get("unread_total") or 0)
+            entry["effective_rep_threshold"] = round(effective_thr, 4)
+            if rep < effective_thr:
+                low_rep.append({
+                    "node_id": entry.get("node_id"),
+                    "name": entry.get("name"),
+                    "reputation": rep,
+                    "threshold": round(effective_thr, 4),
+                })
+            if unread >= DIAGNOSE_HIGH_UNREAD_THRESHOLD:
+                high_unread.append({
+                    "node_id": entry.get("node_id"),
+                    "name": entry.get("name"),
+                    "unread": unread,
+                })
 
         summary = {
             "ts": now,
-            "layer": "mesh-nodes-diagnose-cycle-v1",
+            "layer": "mesh-nodes-diagnose-cycle-v2",
             "scanned": len(nodes_out),
             "errors": errors,
+            "avg_reputation": round(avg_rep, 4),
+            "effective_low_rep_threshold": round(effective_thr, 4),
+            "static_low_rep_threshold": DIAGNOSE_LOW_REP_THRESHOLD,
             "low_reputation": low_rep,
             "high_unread": high_unread,
             "nodes": nodes_out,
