@@ -131,3 +131,57 @@ def test_routing_penalty_gradual_recovery(bundle):
     assert bundle._routing_penalty_factor(nid, thr * 1.2) == 1.0  # recovered
     info = bundle.get_routing_penalties()
     assert "roles" in info and info["threshold"] == thr
+
+
+def test_diagnose_cycle_tracks_recovered_nodes(bundle):
+    """المعافون يُزالون من low_reputation ويُدرجون في recovered."""
+    role = list(bundle.role_node_ids.keys())[0]
+    nid = bundle.role_node_ids[role]
+    # دورة 1: أجبر القائمة على اعتبار العقدة منخفضة (ملخص يدوي)
+    with bundle._lock:
+        bundle._node_runtime_meta["__mesh_diagnose_summary__"] = {
+            "ts": "prev",
+            "scanned": 1,
+            "effective_low_rep_threshold": 0.15,
+            "low_reputation": [{"node_id": nid, "name": role, "reputation": 0.01}],
+            "high_unread": [],
+            "nodes": [],
+        }
+    # دورة حقيقية: السمعة الافتراضية غالباً أعلى من العتبة → recovered
+    out = bundle.run_nodes_diagnose_cycle()
+    summary = bundle.get_nodes_diagnose_summary()
+    assert "recovered" in summary
+    # إما تعافت (في recovered وليست في low) أو ما زالت منخفضة
+    low_ids = {x.get("node_id") for x in summary.get("low_reputation") or []}
+    rec_ids = {x.get("node_id") for x in summary.get("recovered") or []}
+    assert nid not in low_ids or nid not in rec_ids  # لا تتعارض
+    if nid not in low_ids:
+        assert nid in rec_ids
+
+
+def test_pick_audit_includes_penalty_factor(bundle):
+    from ai.swarm_coordinator import SwarmCoordinator
+
+    class _A:
+        def __init__(self, agent_id, role, performance_score):
+            self.agent_id = agent_id
+            self.role = role
+            self.performance_score = performance_score
+
+    class _F:
+        def list_by_capability(self, capability):
+            return [_A("a1", "RoleA", 0.5), _A("b1", "RoleB", 0.8)]
+        def spawn(self, role):
+            raise RuntimeError("no")
+
+    coord = SwarmCoordinator(
+        _F(),
+        role_reputation=lambda r: 0.9 if r == "RoleB" else 0.2,
+        role_penalty_factor=lambda r: 0.1 if r == "RoleA" else 1.0,
+    )
+    coord._pick_agent("x")
+    audit = coord.get_pick_audit(limit=1)[0]
+    assert audit.get("chosen_penalty_factor") == 1.0
+    by_role = {c["role"]: c for c in audit["candidates"]}
+    assert by_role["RoleA"]["penalty_factor"] == 0.1
+    assert by_role["RoleB"]["penalty_factor"] == 1.0
