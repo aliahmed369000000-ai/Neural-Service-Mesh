@@ -220,6 +220,7 @@ class SwarmCoordinator:
         is_role_quarantined: Optional[Callable[[str], bool]] = None,
         role_hands: Optional[Callable[[str], Optional[Any]]] = None,
         role_reputation: Optional[Callable[[str], float]] = None,
+        role_penalty_factor: Optional[Callable[[str], float]] = None,
     ):
         self._factory = factory
         self._max_agents = max_agents
@@ -235,6 +236,8 @@ class SwarmCoordinator:
         # لتفضيل العُقد الأعلى سمعة عند تساوي القدرة — بدونها: السلوك
         # السابق (performance_score فقط).
         self._role_reputation = role_reputation
+        # 🆕 عامل عقوبة التوجيه (1.0/0.5/0.1) من MeshBundle — يُسجَّل في _pick_audit
+        self._role_penalty_factor = role_penalty_factor
         # 🆕 دالة فحص اختيارية (عادة MeshBundle._is_role_quarantined) تُرجع
         # True لو كان الدور محجوراً حالياً بسبب سمعة منخفضة. بدونها (كل
         # الاستدعاءات القديمة/الاختبارات التي لا تمرّرها) لا تغيير في
@@ -808,18 +811,28 @@ class SwarmCoordinator:
             chosen = ranked[0]
             # تسجيل شفاف لقرار الاختيار (سمعة vs أداء) — لا يغيّر السلوك
             try:
+                def _pf(role: str) -> float:
+                    if self._role_penalty_factor is None:
+                        return 1.0
+                    try:
+                        return float(self._role_penalty_factor(role) or 1.0)
+                    except Exception:
+                        return 1.0
+
                 audit = {
                     "capability": capability,
                     "chosen_id": chosen.agent_id,
                     "chosen_role": chosen.role,
                     "chosen_rep": _key(chosen)[0],
                     "chosen_perf": _key(chosen)[1],
+                    "chosen_penalty_factor": _pf(chosen.role),
                     "candidates": [
                         {
                             "id": a.agent_id,
                             "role": a.role,
                             "rep": _key(a)[0],
                             "perf": _key(a)[1],
+                            "penalty_factor": _pf(a.role),
                         }
                         for a in ranked[:5]
                     ],
