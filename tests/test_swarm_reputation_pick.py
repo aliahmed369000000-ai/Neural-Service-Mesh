@@ -63,3 +63,34 @@ def test_pick_agent_skips_quarantined_even_if_high_rep():
     picked = coord._pick_agent("any")
     assert picked is not None
     assert picked.agent_id == "a1"
+
+
+def test_get_pick_audit_returns_newest_first():
+    from ai.swarm_coordinator import SwarmCoordinator
+
+    class _A:
+        def __init__(self, agent_id, role, performance_score):
+            self.agent_id = agent_id
+            self.role = role
+            self.performance_score = performance_score
+
+    class _F:
+        def __init__(self, agents):
+            self._agents = agents
+        def list_by_capability(self, capability):
+            return list(self._agents)
+        def spawn(self, role):
+            raise RuntimeError("no spawn")
+
+    factory = _F([_A("a1", "RoleA", 0.5), _A("b1", "RoleB", 0.8)])
+    coord = SwarmCoordinator(
+        factory,
+        role_reputation=lambda role: 0.2 if role == "RoleA" else 0.9,
+    )
+    coord._pick_agent("cap1")
+    coord._pick_agent("cap2")
+    audit = coord.get_pick_audit(limit=5)
+    assert len(audit) >= 2
+    assert audit[0]["capability"] == "cap2"  # newest first
+    assert audit[0]["chosen_role"] == "RoleB"
+    assert audit[0]["reputation_used"] is True
