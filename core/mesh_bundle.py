@@ -535,22 +535,12 @@ class MeshBundle:
 
     def _left_hand_tools(self, node: BaseNode):
         """أدوات قراءة محلية فقط، مضيَّقة: امتدادات نصية محددة، وبلا git remote
-        (قد يكشف توكناً داخل الرابط)."""
-        from ai import agent_tools as at
+        (قد يكشف توكناً داخل الرابط).
 
-        def search_code(pattern: str, path: str = ".", glob: str = "*.py", max_matches: int = 20):
-            if glob not in ("*.py", "*.md"):
-                raise ValueError("glob must be '*.py' or '*.md'")
-            return at.search_code(pattern, path=path, glob=glob, max_matches=min(int(max_matches), 40))
-
-        def find_files(name_glob: str = "*.py", path: str = ".", limit: int = 50):
-            return at.find_files(name_glob, path=path, limit=min(int(limit), 80))
-
-        def git_info(what: str = "status"):
-            if what not in ("status", "log", "diff", "branch"):
-                raise ValueError("what must be one of: status, log, diff, branch")
-            return at.git_info(what)
-
+        🆕 الأداوت الأساسية (peers + read_inbox) تُربَط دائماً حتى لو فشل
+        استيراد ai.agent_tools — سابقاً كان استثناء الاستيراد يُسقط *كل*
+        أدوات اليد اليسرى بما فيها peers/read_inbox (المستخدمتان في
+        pump_inboxes والتواصل بين العقد)."""
         def peers():
             return [
                 {"node_id": m.get("node_id"), "name": m.get("name"), "state": m.get("state")}
@@ -566,15 +556,37 @@ class MeshBundle:
                 msgs = [m for m in msgs if m.get("topic") == topic]
             return [dict(m) for m in msgs[:limit]]
 
-        return [
+        tools = [
             ("read_inbox", read_inbox, "قراءة صندوق بريد هذه العقدة فقط (الأقدم أولاً)"),
+            ("peers", peers, "قائمة العُقد المعروفة وحالاتها"),
+        ]
+        try:
+            from ai import agent_tools as at
+        except Exception as e:
+            logger.warning("MeshBundle: ai.agent_tools غير متاح — أدوات القراءة الإضافية معطّلة: %s", e)
+            return tools
+
+        def search_code(pattern: str, path: str = ".", glob: str = "*.py", max_matches: int = 20):
+            if glob not in ("*.py", "*.md"):
+                raise ValueError("glob must be '*.py' or '*.md'")
+            return at.search_code(pattern, path=path, glob=glob, max_matches=min(int(max_matches), 40))
+
+        def find_files(name_glob: str = "*.py", path: str = ".", limit: int = 50):
+            return at.find_files(name_glob, path=path, limit=min(int(limit), 80))
+
+        def git_info(what: str = "status"):
+            if what not in ("status", "log", "diff", "branch"):
+                raise ValueError("what must be one of: status, log, diff, branch")
+            return at.git_info(what)
+
+        tools.extend([
             ("search_code", search_code, "بحث نصي/regex في ملفات py/md للمشروع"),
             ("find_files", find_files, "بحث عن ملفات بالاسم/الامتداد"),
             ("git_info", git_info, "status/log/diff/branch (قراءة فقط)"),
             ("py_compile_check", at.py_compile_check, "فحص بناء جملة ملف Python"),
             ("system_info", at.system_info, "لمحة عن البيئة بلا أسرار"),
-            ("peers", peers, "قائمة العُقد المعروفة وحالاتها"),
-        ]
+        ])
+        return tools
 
     def _equip_hands(self, node: BaseNode) -> None:
         if getattr(node, "hands", None) is not None:
