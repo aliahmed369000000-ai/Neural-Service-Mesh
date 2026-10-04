@@ -38,13 +38,18 @@ def fake_slow_op(path: str) -> str:
     return f"/tmp/out_{path}"
 
 
-def _wait_until_not_running(mgr: VideoJobManager, job_id: int, timeout: float = 2.0) -> None:
+def _wait_until_not_running(mgr: VideoJobManager, job_id: int, timeout: float = 5.0) -> None:
+    """يجب استدعاؤها قبل انتهاء كل اختبار يبدأ مهمة فعلية عبر start() —
+    وإلا يبقى الخيط الخلفي يعمل (ويكتب إلى tmp_path) بعد أن يحذفه tearDown،
+    فيفشل الحذف بـ'Directory not empty' (سباق لوحظ فعلياً تحت حِمل تشغيل
+    المستودع كاملاً، وليس افتراضياً فقط)."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         job = mgr.get(job_id)
         if job is not None and job.status != "running":
             return
         time.sleep(0.02)
+    raise AssertionError(f"job #{job_id} ظلّت 'running' بعد {timeout}s — الخيط لم ينتهِ")
 
 
 class TestVideoJobPersistence(unittest.TestCase):
@@ -74,6 +79,12 @@ class TestVideoJobPersistence(unittest.TestCase):
         self.assertEqual(row[0], "running")
         self.assertEqual(row[1], "fake_trim")
         self.assertIn("in.mp4", row[2])
+        # 🆕 لا بد من انتظار اكتمال الخيط الفعلي قبل tearDown: fake_trim
+        # شبه فورية، وتحت حِمل تشغيل كامل (كل اختبارات المستودع معاً) قد
+        # يتأخر جدولة الخيط بما يكفي ليبقى يكتب إلى قاعدة البيانات داخل
+        # tmp_path بعد أن يبدأ tearDown حذف المجلد — فيفشل الحذف بخطأ
+        # 'Directory not empty' (سباق كلاسيكي بين خيط خلفي وحذف tmp_path).
+        _wait_until_not_running(mgr, job_id)
 
     def test_unknown_fn_persisted_without_op_name(self):
         """دالة محلية (closure) لا تحمل __module__ الموثوقة → تُحفظ بلا
@@ -91,6 +102,7 @@ class TestVideoJobPersistence(unittest.TestCase):
                 "SELECT op_name FROM video_jobs WHERE job_id = ?", (job_id,)
             ).fetchone()
         self.assertIsNone(row[0])
+        _wait_until_not_running(mgr, job_id)  # انظر ملاحظة _wait_until_not_running
 
     def test_job_persisted_as_done_after_completion(self):
         mgr = VideoJobManager(db_path=self.db_path)
@@ -113,6 +125,7 @@ class TestVideoJobPersistence(unittest.TestCase):
         # "عملية جديدة" مبنية على نفس ملف القاعدة — تحاكي إعادة تشغيل الحاوية.
         mgr2 = VideoJobManager(db_path=self.db_path)
         second_id = mgr2.start(fake_trim, "قص", path="b.mp4")
+        _wait_until_not_running(mgr2, second_id)  # نفس سبب الانتظار أعلاه
         self.assertGreater(second_id, first_id)
 
 
