@@ -71,7 +71,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 EVOLUTION_CYCLE_INTERVAL = 5
 
 # اليد اليمنى للعقدة: أفعال مسموحة فقط (كل ما عداها مرفوض) + قيود صارمة.
-HAND_RIGHT_ALLOWED = ("send_message", "request_evolution")
+HAND_RIGHT_ALLOWED = ("send_message", "request_evolution", "request_peer_ping")
 HAND_EVOLUTION_COOLDOWN_S = 300.0   # أقل فاصل بين طلبَي تطوّر صادرَين من أي عُقد
 HAND_MESSAGE_MAX_CHARS = 4000
 HAND_TOPIC_MAX_CHARS = 64
@@ -825,9 +825,55 @@ class MeshBundle:
                 self._hand_evolution_last = now
             return self.run_evolution_cycle()
 
+        def request_peer_ping(to_id: Optional[str] = None, seq: Optional[str] = None):
+            """نبض ping موجّه: إن حُدّد to_id يُستخدم (إن كان مسجّلاً وليس الذات)،
+            وإلا يُختار أعلى الأقران سمعةً من غير الذات. لا حلقات — topic=ping فقط."""
+            target = to_id
+            if target is not None:
+                if not isinstance(target, str) or not target:
+                    raise ValueError("to_id must be a non-empty string")
+                if target == node.node_id:
+                    raise ValueError("cannot ping self")
+                if not self.registry.exists(target):
+                    raise ValueError("recipient is not a registered node")
+            else:
+                best_id, best_score = None, float("-inf")
+                for m in self.registry.list_metadata():
+                    nid = m.get("node_id")
+                    if not nid or nid == node.node_id:
+                        continue
+                    st = str(m.get("state") or "").lower()
+                    if st in ("paused", "failed", "offline"):
+                        continue
+                    try:
+                        sc = float(self.reputation_engine.get_score(nid) or 0.0)
+                    except Exception:
+                        sc = 0.0
+                    if sc > best_score:
+                        best_score, best_id = sc, nid
+                if not best_id:
+                    raise RuntimeError("no reachable peer to ping")
+                target = best_id
+            if seq is None:
+                import uuid as _uuid
+                seq = _uuid.uuid4().hex[:8]
+            elif not isinstance(seq, (str, int)) or len(str(seq)) > 64:
+                raise ValueError("seq must be str/int up to 64 chars")
+            msg = self.channel.send(
+                node.node_id, target, "ping", {"seq": str(seq)}, reply_to=None,
+            )
+            return {
+                "message_id": msg["message_id"],
+                "to_id": target,
+                "topic": "ping",
+                "seq": str(seq),
+            }
+
         hands.bind(RIGHT, "send_message", send_message, "إرسال رسالة لعقدة مسجَّلة أخرى")
         hands.bind(RIGHT, "request_evolution", request_evolution,
                    "طلب دورة تطوّر ذاتي (تمرّ بالحوكمة وتبريد 5 دقائق)")
+        hands.bind(RIGHT, "request_peer_ping", request_peer_ping,
+                   "إرسال نبض ping لأعلى الأقران سمعة (أو to_id محدد)")
         node.attach_hands(hands)
 
     def register_node(self, node: BaseNode, connect_to: Optional[str] = None) -> str:
