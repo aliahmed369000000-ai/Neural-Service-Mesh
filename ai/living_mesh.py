@@ -381,21 +381,33 @@ class LivingMeshNode:
         🆕 يستخدم اليد اليسرى (إن وُجدت) لقراءة الحالة والأقران والسمعة
         عبر NodeHands — نفس الضمانات (قراءة فقط، حد معدّل، تدقيق)."""
         # قراءة عبر اليد اليسرى إن أمكن (بدون أثر جانبي)
+        # 🆕 يفضّل self_diagnose الموحّد إن وُجد، مع الإبقاء على الأدوات القديمة كاحتياط
         status_info = None
         peers_info = None
+        diagnose = None
         if getattr(self, "hands", None) is not None:
             try:
-                r = self.hands.use(LEFT, "get_self_status")
-                if r.ok:
-                    status_info = r.output
-                r2 = self.hands.use(LEFT, "list_known_peers")
-                if r2.ok:
-                    peers_info = r2.output
-                r3 = self.hands.use(LEFT, "get_own_reputation")
-                if r3.ok and isinstance(r3.output, dict):
-                    own_rep = r3.output
+                rd = self.hands.use(LEFT, "self_diagnose")
+                if rd.ok and isinstance(rd.output, dict):
+                    diagnose = rd.output
+                    status_info = diagnose.get("status") or diagnose.get("self_status")
+                    peers_info = diagnose.get("peers") or diagnose.get("neighbors")
+                    if isinstance(diagnose.get("reputation"), dict):
+                        own_rep = diagnose["reputation"]
+                    else:
+                        own_rep = self.get_reputation(self.node_id)
                 else:
-                    own_rep = self.get_reputation(self.node_id)
+                    r = self.hands.use(LEFT, "get_self_status")
+                    if r.ok:
+                        status_info = r.output
+                    r2 = self.hands.use(LEFT, "list_known_peers")
+                    if r2.ok:
+                        peers_info = r2.output
+                    r3 = self.hands.use(LEFT, "get_own_reputation")
+                    if r3.ok and isinstance(r3.output, dict):
+                        own_rep = r3.output
+                    else:
+                        own_rep = self.get_reputation(self.node_id)
             except Exception as e:
                 logger.debug("hands read during evolution task failed: %s", e)
                 own_rep = self.get_reputation(self.node_id)
@@ -420,9 +432,18 @@ class LivingMeshNode:
             peers_n = len(peers_info)
         elif status_info and isinstance(status_info, dict):
             peers_n = int(status_info.get("peers_count") or 0)
+        unread = 0
+        if diagnose and isinstance(diagnose.get("inbox"), dict):
+            unread = int(diagnose["inbox"].get("unread_total") or 0)
         if peers_n == 0:
-            return f"تحسين دوري ذاتي + اكتشاف أقران (نقاط: {score:.2f}, أقران: 0)"
-        return f"تحسين دوري ذاتي (نقاط التطوّر الحالية: {score:.2f}, أقران معروفون: {peers_n})"
+            base = f"تحسين دوري ذاتي + اكتشاف أقران (نقاط: {score:.2f}, أقران: 0)"
+        else:
+            base = f"تحسين دوري ذاتي (نقاط التطوّر الحالية: {score:.2f}, أقران معروفون: {peers_n})"
+        if unread > 0:
+            base += f", رسائل غير مقروءة: {unread}"
+        if diagnose and diagnose.get("layer"):
+            base += " [via self_diagnose]"
+        return base
 
     def maybe_self_evolve(self, force: bool = False) -> bool:
         """🆕 تطوّر ذاتي حقيقي: العقدة تقرّر بنفسها متى تنفّذ دورة تطوّر
@@ -550,9 +571,41 @@ class LivingMeshNode:
         self.hands.bind(LEFT, "get_routes_table", get_routes_table,
                         description="جدول المسارات/الأقران مع RTT وسمعة إن توفرت")
 
+        def self_diagnose() -> dict:
+            """تشخيص موحّد للعقدة الحيّة — نفس فكرة MeshBundle.self_diagnose."""
+            st = get_self_status()
+            try:
+                peers = list_known_peers()
+            except Exception as e:
+                peers = [{"error": str(e)}]
+            try:
+                rep = get_own_reputation()
+            except Exception as e:
+                rep = {"error": str(e)}
+            try:
+                health = get_signed_health()
+            except Exception as e:
+                health = {"error": str(e)}
+            try:
+                routes = get_routes_table()
+            except Exception as e:
+                routes = {"error": str(e)}
+            return {
+                "layer": "living-self-diagnose-v1",
+                "status": st,
+                "self_status": st,
+                "peers": peers,
+                "reputation": rep,
+                "health": health,
+                "routes": routes,
+            }
+        self.hands.bind(LEFT, "self_diagnose", self_diagnose,
+                        description="تشخيص موحّد: حالة + أقران + سمعة + صحة + مسارات")
+
         logger.info(
             "🖐️ LivingMeshNode %s: left-hand tools bound "
-            "(get_self_status, list_known_peers, get_own_reputation, get_signed_health, get_routes_table)",
+            "(get_self_status, list_known_peers, get_own_reputation, "
+            "get_signed_health, get_routes_table, self_diagnose)",
             self.node_id[:8],
         )
 
