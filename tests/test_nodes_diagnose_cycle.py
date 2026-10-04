@@ -93,3 +93,22 @@ def test_diagnose_cycle_dynamic_threshold_and_collective(bundle):
     assert ib.ok
     assert "collective_diagnose" in ib.output
     assert "mesh_diagnose_unread" in ib.output
+
+
+def test_role_reputation_penalizes_low_diagnose_nodes(bundle):
+    """عقد low_reputation في آخر دورة تُخفَّض سمعتها الفعالة لتوجيه السرب."""
+    # force a known low score by manipulating diagnose summary
+    role = list(bundle.role_node_ids.keys())[0]
+    nid = bundle.role_node_ids[role]
+    base = bundle._role_reputation(role)
+    with bundle._lock:
+        bundle._node_runtime_meta["__mesh_diagnose_summary__"] = {
+            "ts": "test",
+            "scanned": 1,
+            "low_reputation": [{"node_id": nid, "name": role, "reputation": 0.01}],
+            "high_unread": [],
+            "nodes": [],
+        }
+    penalized = bundle._role_reputation(role)
+    assert penalized <= base * 0.1 + 1e-9
+    assert penalized < base or base == 0.0
