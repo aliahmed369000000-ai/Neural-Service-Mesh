@@ -718,13 +718,33 @@ class LivingMeshNode:
         state["global_experience"].append(exp_entry)
         self._save_state(state)
         
-        active_peers = [info for nid, info in state["nodes"].items() 
+        active_peers = [info for nid, info in state["nodes"].items()
                         if info["status"] == "online" and nid != self.node_id and info.get("host")]
-        
+
         if active_peers:
+            # 🆕 تفضيل الأقران الأعلى سمعة (peer_compare / get_reputation)
+            # مع كسر التعادل عشوائياً لتجنب تركيز كل الـgossip على نفس العقدة.
             import random
-            sample_size = min(len(active_peers), 3)
-            targets = random.sample(active_peers, sample_size)
+
+            def _peer_rep(info: dict) -> float:
+                nid = info.get("id") or info.get("node_id")
+                try:
+                    rep = self.get_reputation(nid) if nid else {}
+                    if isinstance(rep, dict):
+                        return float(rep.get("score") or rep.get("reputation") or 0.0)
+                except Exception:
+                    pass
+                return float(info.get("reputation") or info.get("score") or 0.0)
+
+            ranked = sorted(
+                active_peers,
+                key=lambda p: (_peer_rep(p), random.random()),
+                reverse=True,
+            )
+            sample_size = min(len(ranked), 3)
+            # خذ من أعلى النصف سمعةً ثم عيّنة صغيرة للتنويع
+            top_pool = ranked[: max(sample_size, len(ranked) // 2 or 1)]
+            targets = top_pool[:sample_size] if len(top_pool) <= sample_size else random.sample(top_pool, sample_size)
             for target in targets:
                 t_host = target.get("host")
                 t_port = target.get("port")
@@ -1329,7 +1349,17 @@ class LivingMeshNode:
                 peer_record = info.copy()
                 if "id" not in peer_record:
                     peer_record["id"] = nid
+                try:
+                    rep = self.get_reputation(nid)
+                    if isinstance(rep, dict):
+                        peer_record["reputation"] = float(
+                            rep.get("score") or rep.get("reputation") or 0.0
+                        )
+                except Exception:
+                    peer_record.setdefault("reputation", 0.0)
                 active_peers.append(peer_record)
+        # الأعلى سمعة أولاً — يفيد اختيار نظير للمزامنة/المسارات
+        active_peers.sort(key=lambda p: -float(p.get("reputation") or 0.0))
         return active_peers
 
     def _peer_ws_url(self, host: str, port: int) -> str:
