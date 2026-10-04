@@ -1718,6 +1718,33 @@ class MeshBundle:
         with self._lock:
             self._node_runtime_meta["__mesh_diagnose_summary__"] = summary
 
+        # 🆕 بث ملخص التشخيص للأقران عبر القناة (topic=mesh_diagnose)
+        try:
+            payload = {
+                "ts": now,
+                "scanned": len(nodes_out),
+                "low_reputation_count": len(low_rep),
+                "high_unread_count": len(high_unread),
+                "errors": errors,
+                "low_reputation": low_rep[:5],
+                "high_unread": high_unread[:5],
+            }
+            to_ids = []
+            for nid in role_ids:
+                if self.registry.exists(nid):
+                    to_ids.append(nid)
+            # من جذر الشبكة أو أول عقدة دور كمرسل منطقي
+            from_id = getattr(self, "_root_node_id", None) or (to_ids[0] if to_ids else None)
+            if from_id and to_ids:
+                self.channel.broadcast(
+                    from_id=from_id,
+                    to_ids=[i for i in to_ids if i != from_id],
+                    topic="mesh_diagnose",
+                    payload=payload,
+                )
+        except Exception as e:
+            logger.debug("mesh_diagnose broadcast skipped: %s", e)
+
         # تنبيهات (مع كبح داخل AlertManager)
         try:
             from ai.alert_manager import alert_manager
