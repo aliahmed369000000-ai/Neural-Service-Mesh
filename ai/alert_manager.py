@@ -114,23 +114,139 @@ class AlertManager:
         except Exception as e:
             logger.error(f"Email alert failed: {e}")
 
-# Instance for global use
+
+    def _history_db_path(self) -> Path:
+        return CONFIG_DIR / "alert_history.db"
+
+    def _init_history_db(self) -> None:
+        try:
+            import sqlite3
+            path = self._history_db_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with sqlite3.connect(str(path)) as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS alerts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ts TEXT NOT NULL,
+                        level TEXT NOT NULL,
+                        message TEXT NOT NULL,
+                        details TEXT,
+                        logged_at REAL NOT NULL
+                    )
+                    """
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_alerts_ts ON alerts(ts)"
+                )
+                conn.commit()
+        except Exception as e:
+            logger.debug("alert history db init failed: %s", e)
+
+    def _persist_alert(self, entry: dict) -> None:
+        try:
+            import sqlite3
+            path = self._history_db_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._init_history_db()
+            with sqlite3.connect(str(path)) as conn:
+                conn.execute(
+                    "INSERT INTO alerts (ts, level, message, details, logged_at) VALUES (?, ?, ?, ?, ?)",
+                    (
+                        entry.get("ts"),
+                        entry.get("level"),
+                        entry.get("message"),
+                        json.dumps(entry.get("details") or {}, ensure_ascii=False),
+                        time.time(),
+                    ),
+                )
+                # احتفظ بآخر 2000
+                conn.execute(
+                    """
+                    DELETE FROM alerts WHERE id NOT IN (
+                        SELECT id FROM alerts ORDER BY id DESC LIMIT 2000
+                    )
+                    """
+                )
+                conn.commit()
+        except Exception as e:
+            logger.debug("alert persist failed: %s", e)
+
     def get_recent_alerts(self, limit: int = 20, level: Optional[str] = None) -> list:
-        """آخر التنبيهات المرسلة في هذه العملية (للواجهة)."""
+        """آخر التنبيهات — من الذاكرة ثم SQLite إن لزم."""
+        limit = max(1, min(int(limit), 100))
         items = list(self._alert_history)
         if level:
             items = [a for a in items if a.get("level") == level]
-        return items[-max(1, min(int(limit), 100)):]
+        if len(items) >= limit:
+            return items[-limit:]
+        # أكمل من SQLite
+        try:
+            import sqlite3
+            path = self._history_db_path()
+            if path.exists():
+                with sqlite3.connect(str(path)) as conn:
+                    conn.row_factory = sqlite3.Row
+                    if level:
+                        rows = conn.execute(
+                            "SELECT ts, level, message, details FROM alerts WHERE level=? ORDER BY id DESC LIMIT ?",
+                            (level, limit),
+                        ).fetchall()
+                    else:
+                        rows = conn.execute(
+                            "SELECT ts, level, message, details FROM alerts ORDER BY id DESC LIMIT ?",
+                            (limit,),
+                        ).fetchall()
+                db_items = []
+                for r in rows:
+                    try:
+                        det = json.loads(r["details"] or "{}")
+                    except Exception:
+                        det = {}
+                    db_items.append({
+                        "ts": r["ts"],
+                        "level": r["level"],
+                        "message": r["message"],
+                        "details": det,
+                    })
+                # دمج بدون تكرار تقريبي على (ts, message)
+                seen = {(a.get("ts"), a.get("message")) for a in items}
+                for a in reversed(db_items):
+                    key = (a.get("ts"), a.get("message"))
+                    if key not in seen:
+                        items.insert(0, a)
+                        seen.add(key)
+        except Exception as e:
+            logger.debug("alert sqlite read failed: %s", e)
+        return items[-limit:]
 
     def get_diagnose_related_alerts(self, limit: int = 15) -> list:
         """تنبيهات مرتبطة بتشخيص العُقد / low_rep / ملخص أسبوعي."""
         keys = ("low_rep", "تشخيص", "diagnose", "عقوبة", "recovered", "ملخص تشخيص")
+        # اقرأ من الذاكرة + SQLite
+        pool = self.get_recent_alerts(limit=100)
         out = []
-        for a in self._alert_history:
+        for a in pool:
             msg = str(a.get("message") or "")
             if any(k.lower() in msg.lower() for k in keys):
                 out.append(a)
         return out[-max(1, min(int(limit), 50)):]
 
 
+# صِل الـpersist عند إرسال التنبيه: نُرقّع send_alert عبر التفاف بسيط بعد التعريف
+_orig_send = AlertManager.send_alert
+
+
+def _send_alert_with_persist(self, level: str, message: str, details: Optional[Dict[str, Any]] = None, throttle_sec: int = 60):
+    before = len(getattr(self, "_alert_history", []) or [])
+    _orig_send(self, level, message, details=details, throttle_sec=throttle_sec)
+    after = getattr(self, "_alert_history", []) or []
+    if len(after) > before:
+        self._persist_alert(after[-1])
+
+
+AlertManager.send_alert = _send_alert_with_persist
+
+# Instance for global use
 alert_manager = AlertManager()
+alert_manager._init_history_db()
