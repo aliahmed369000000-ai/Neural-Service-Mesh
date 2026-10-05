@@ -1902,6 +1902,14 @@ class MeshBundle:
         with self._lock:
             self._node_runtime_meta["__mesh_diagnose_summary__"] = summary
 
+        # 🆕 سجل تاريخي SQLite (penalized / recovered عبر الزمن)
+        try:
+            from ai.nodes_diagnose_store import NodesDiagnoseStore
+            db = Path(self.storage.storage_dir) / "nodes_diagnose_history.db"
+            NodesDiagnoseStore(db_path=db).log_cycle(summary)
+        except Exception as e:
+            logger.debug("nodes diagnose history log skipped: %s", e)
+
         # 🆕 بث ملخص التشخيص للأقران عبر القناة (topic=mesh_diagnose)
         try:
             payload = {
@@ -1961,6 +1969,20 @@ class MeshBundle:
         """آخر ملخص تشخيص دوري للعُقد (إن وُجد)."""
         with self._lock:
             return dict(self._node_runtime_meta.get("__mesh_diagnose_summary__") or {})
+
+    def get_nodes_diagnose_history(self, limit: int = 30) -> dict:
+        """اتجاه تاريخي لعدد المعاقَبين/المعافين من SQLite."""
+        try:
+            from ai.nodes_diagnose_store import NodesDiagnoseStore
+            db = Path(self.storage.storage_dir) / "nodes_diagnose_history.db"
+            store = NodesDiagnoseStore(db_path=db)
+            return {
+                "trend": store.trend(limit=limit),
+                "summary": store.summary(),
+                "recent": store.get_recent(limit=min(limit, 20)),
+            }
+        except Exception as e:
+            return {"trend": {"points": 0}, "summary": {}, "recent": [], "error": str(e)}
 
     def _auto_nodes_diagnose_loop(self) -> None:
         """خيط daemon: تشخيص العُقد كل DIAGNOSE_INTERVAL_S بلا اعتماد على السرب."""
