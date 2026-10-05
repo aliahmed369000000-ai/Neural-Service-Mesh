@@ -72,6 +72,7 @@ EVOLUTION_CYCLE_INTERVAL = 5
 DIAGNOSE_LOW_REP_THRESHOLD = 0.15
 DIAGNOSE_HIGH_UNREAD_THRESHOLD = 20
 DIAGNOSE_INTERVAL_S = 120  # ثانية بين دورات التشخيص الخلفية
+DIAGNOSE_HISTORY_KEEP_LAST = 500  # أقصى دورات تُبقى في SQLite (قابل للضبط عبر NSM_DIAGNOSE_HISTORY_KEEP)
 
 # اليد اليمنى للعقدة: أفعال مسموحة فقط (كل ما عداها مرفوض) + قيود صارمة.
 HAND_RIGHT_ALLOWED = ("send_message", "request_evolution", "request_peer_ping")
@@ -1909,7 +1910,7 @@ class MeshBundle:
             store = NodesDiagnoseStore(db_path=db)
             store.log_cycle(summary)
             try:
-                store.prune_old(keep_last=500)
+                store.prune_old(keep_last=self._diagnose_history_keep_last())
             except Exception:
                 pass
             # تنبيه إن ارتفع low_rep فوق المتوسط التاريخي
@@ -1992,6 +1993,28 @@ class MeshBundle:
         with self._lock:
             return dict(self._node_runtime_meta.get("__mesh_diagnose_summary__") or {})
 
+    def _diagnose_history_keep_last(self) -> int:
+        """عدد الدورات المحتفظ بها — من البيئة أو الثابت الافتراضي."""
+        import os
+        raw = os.environ.get("NSM_DIAGNOSE_HISTORY_KEEP") or os.environ.get(
+            "DIAGNOSE_HISTORY_KEEP_LAST"
+        )
+        if raw:
+            try:
+                return max(10, int(raw))
+            except ValueError:
+                pass
+        return max(10, int(DIAGNOSE_HISTORY_KEEP_LAST))
+
+    def get_nodes_diagnose_weekly_report(self, days: int = 7) -> dict:
+        """ملخص تشخيص للفترة الأخيرة (للواجهة والتنبيه)."""
+        try:
+            from ai.nodes_diagnose_store import NodesDiagnoseStore
+            db = Path(self.storage.storage_dir) / "nodes_diagnose_history.db"
+            return NodesDiagnoseStore(db_path=db).weekly_report(days=days)
+        except Exception as e:
+            return {"period_days": days, "cycles": 0, "error": str(e)}
+
     def get_nodes_diagnose_history(self, limit: int = 30) -> dict:
         """اتجاه تاريخي لعدد المعاقَبين/المعافين من SQLite."""
         try:
@@ -2003,6 +2026,8 @@ class MeshBundle:
                 "summary": store.summary(),
                 "recent": store.get_recent(limit=min(limit, 20)),
                 "csv": store.export_csv(limit=max(limit, 50)),
+                "keep_last": self._diagnose_history_keep_last(),
+                "weekly": store.weekly_report(days=7),
             }
         except Exception as e:
             return {"trend": {"points": 0}, "summary": {}, "recent": [], "csv": "", "error": str(e)}
