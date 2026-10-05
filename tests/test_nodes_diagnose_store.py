@@ -118,3 +118,28 @@ def test_diagnose_history_keep_last_env(monkeypatch, tmp_path):
     hist = b.get_nodes_diagnose_history(limit=5)
     assert hist.get("keep_last") == 25
     assert "weekly" in hist
+
+
+def test_set_diagnose_history_keep_last_persists(tmp_path):
+    b = MeshBundle(storage_dir=str(tmp_path), db_path=str(tmp_path / "m.db"))
+    assert b.set_diagnose_history_keep_last(77) == 77
+    assert b._diagnose_history_keep_last() == 77
+    # ملف الإعدادات يتفوّق على البيئة
+    import os
+    os.environ["NSM_DIAGNOSE_HISTORY_KEEP"] = "25"
+    try:
+        assert b._diagnose_history_keep_last() == 77
+    finally:
+        os.environ.pop("NSM_DIAGNOSE_HISTORY_KEEP", None)
+
+
+def test_alert_manager_diagnose_related():
+    from ai.alert_manager import AlertManager
+    am = AlertManager()
+    am.send_alert("WARNING", "ارتفاع low_rep_count=5 فوق المتوسط", details={}, throttle_sec=0)
+    am.send_alert("INFO", "ملخص تشخيص أسبوعي: cycles=3", details={}, throttle_sec=0)
+    am.send_alert("INFO", "رسالة عادية غير مرتبطة", details={}, throttle_sec=0)
+    related = am.get_diagnose_related_alerts(limit=10)
+    assert len(related) >= 2
+    msgs = " ".join(a["message"] for a in related)
+    assert "low_rep" in msgs or "تشخيص" in msgs
