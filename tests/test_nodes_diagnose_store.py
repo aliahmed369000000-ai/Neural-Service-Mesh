@@ -47,3 +47,27 @@ def test_mesh_bundle_persists_diagnose_history():
         assert db.exists()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_export_csv_and_spike(tmp_path):
+    store = NodesDiagnoseStore(db_path=tmp_path / "d.db")
+    for i in range(5):
+        store.log_cycle({
+            "ts": f"t{i}",
+            "scanned": 5,
+            "errors": 0,
+            "avg_reputation": 0.4,
+            "effective_low_rep_threshold": 0.15,
+            "low_reputation": [{"node_id": "a"}] * 1,  # low count baseline
+            "recovered": [],
+            "high_unread": [],
+        })
+    csv = store.export_csv(10)
+    assert "low_rep_count" in csv
+    assert csv.count("\n") >= 6
+    # spike when current is high vs avg ~1
+    sp = store.spike_vs_average(5, lookback=10)
+    assert sp["spike"] is True
+    assert sp["current"] == 5
+    sp2 = store.spike_vs_average(1, lookback=10)
+    assert sp2["spike"] is False
