@@ -109,3 +109,12 @@ def test_weekly_report_shape(tmp_path):
     assert "avg_low_rep" in rep
     assert "total_recovered" in rep
     assert "approx_spike_events" in rep
+
+
+def test_diagnose_history_keep_last_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("NSM_DIAGNOSE_HISTORY_KEEP", "25")
+    b = MeshBundle(storage_dir=str(tmp_path), db_path=str(tmp_path / "m.db"))
+    assert b._diagnose_history_keep_last() == 25
+    hist = b.get_nodes_diagnose_history(limit=5)
+    assert hist.get("keep_last") == 25
+    assert "weekly" in hist
