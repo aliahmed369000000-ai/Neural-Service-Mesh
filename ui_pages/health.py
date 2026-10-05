@@ -281,9 +281,29 @@ def render_health():
                                 mime="text/csv",
                                 key="nsm_diagnose_csv_dl",
                             )
+                        _cur_keep = int((_hist or {}).get("keep_last") or 500)
+                        _k1, _k2 = st.columns([3, 1])
+                        with _k1:
+                            _new_keep = st.number_input(
+                                "عدد الدورات المحتفظ بها في SQLite (keep_last)",
+                                min_value=10,
+                                max_value=50000,
+                                value=_cur_keep,
+                                step=50,
+                                key="nsm_diagnose_keep_last",
+                            )
+                        with _k2:
+                            st.write("")
+                            st.write("")
+                            if st.button("حفظ", key="nsm_diagnose_keep_save"):
+                                try:
+                                    _saved = _mesh.set_diagnose_history_keep_last(int(_new_keep))
+                                    st.success(f"تم الحفظ: keep_last={_saved}")
+                                except Exception as _ke:
+                                    st.error(str(_ke))
                         st.caption(
-                            f"الاحتفاظ في SQLite: آخر {(_hist or {}).get('keep_last', 500)} دورة "
-                            "(ضبط عبر `NSM_DIAGNOSE_HISTORY_KEEP`)."
+                            "الأولوية: إعداد الواجهة المحفوظ → "
+                            "`NSM_DIAGNOSE_HISTORY_KEEP` → الافتراضي 500."
                         )
                         _spike = (_cyc or {}).get("low_rep_spike") or {}
                         if _spike.get("spike"):
@@ -312,6 +332,21 @@ def render_health():
                             )
                             with st.expander("تفاصيل الملخص الأسبوعي"):
                                 st.json(_wk)
+                        # تنبيهات التشخيص من AlertManager
+                        try:
+                            from ai.alert_manager import alert_manager as _am
+                            _diag_alerts = _am.get_diagnose_related_alerts(limit=12)
+                        except Exception:
+                            _diag_alerts = []
+                        if _diag_alerts:
+                            st.markdown("**🔔 تنبيهات التشخيص الأخيرة**")
+                            for _da in reversed(_diag_alerts):
+                                st.caption(
+                                    f"[{_da.get('level')}] {_da.get('ts', '')[:19]} — "
+                                    f"{_da.get('message', '')[:120]}"
+                                )
+                            with st.expander("تفاصيل تنبيهات التشخيص"):
+                                st.json(_diag_alerts)
                 except Exception as _hist_err:
                     st.caption(f"السجل التاريخي: {_hist_err}")
         except Exception as _cyc_err:
