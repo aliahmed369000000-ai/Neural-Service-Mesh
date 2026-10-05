@@ -1906,7 +1906,25 @@ class MeshBundle:
         try:
             from ai.nodes_diagnose_store import NodesDiagnoseStore
             db = Path(self.storage.storage_dir) / "nodes_diagnose_history.db"
-            NodesDiagnoseStore(db_path=db).log_cycle(summary)
+            store = NodesDiagnoseStore(db_path=db)
+            store.log_cycle(summary)
+            # تنبيه إن ارتفع low_rep فوق المتوسط التاريخي
+            try:
+                low_n = len(summary.get("low_reputation") or [])
+                spike = store.spike_vs_average(low_n, lookback=20)
+                summary["low_rep_spike"] = spike
+                with self._lock:
+                    self._node_runtime_meta["__mesh_diagnose_summary__"] = summary
+                if spike.get("spike"):
+                    from ai.alert_manager import alert_manager
+                    alert_manager.send_alert(
+                        "WARNING",
+                        f"ارتفاع low_rep_count={spike.get('current')} فوق المتوسط {spike.get('avg')}",
+                        details=spike,
+                        throttle_sec=600,
+                    )
+            except Exception as e:
+                logger.debug("low_rep spike check skipped: %s", e)
         except Exception as e:
             logger.debug("nodes diagnose history log skipped: %s", e)
 
@@ -1980,9 +1998,10 @@ class MeshBundle:
                 "trend": store.trend(limit=limit),
                 "summary": store.summary(),
                 "recent": store.get_recent(limit=min(limit, 20)),
+                "csv": store.export_csv(limit=max(limit, 50)),
             }
         except Exception as e:
-            return {"trend": {"points": 0}, "summary": {}, "recent": [], "error": str(e)}
+            return {"trend": {"points": 0}, "summary": {}, "recent": [], "csv": "", "error": str(e)}
 
     def _auto_nodes_diagnose_loop(self) -> None:
         """خيط daemon: تشخيص العُقد كل DIAGNOSE_INTERVAL_S بلا اعتماد على السرب."""
