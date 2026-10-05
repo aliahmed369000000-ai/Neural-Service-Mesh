@@ -143,3 +143,21 @@ def test_alert_manager_diagnose_related():
     assert len(related) >= 2
     msgs = " ".join(a["message"] for a in related)
     assert "low_rep" in msgs or "تشخيص" in msgs
+
+
+def test_alert_history_sqlite_persists(tmp_path, monkeypatch):
+    monkeypatch.setenv("NSM_ALERT_CONFIG_DIR", str(tmp_path))
+    import importlib
+    import ai.alert_manager as am
+    importlib.reload(am)
+    am.alert_manager.send_alert("WARNING", "ارتفاع low_rep_count=3 فوق المتوسط", throttle_sec=0)
+    am.alert_manager.send_alert("INFO", "ملخص تشخيص أسبوعي: cycles=1", throttle_sec=0)
+    assert (tmp_path / "alert_history.db").exists()
+    # محاكاة إعادة تشغيل
+    am2 = am.AlertManager()
+    am2._init_history_db()
+    am2._alert_history = []
+    recent = am2.get_recent_alerts(limit=10)
+    assert len(recent) >= 2
+    related = am2.get_diagnose_related_alerts(limit=10)
+    assert len(related) >= 2
