@@ -120,6 +120,45 @@ class NodesDiagnoseStore:
             "effective_thr": [float(r.get("effective_thr") or 0) for r in rows],
         }
 
+    def export_csv(self, limit: int = 200) -> str:
+        """تصدير آخر الدورات كـ CSV (نص)."""
+        rows = list(reversed(self.get_recent(limit=limit)))
+        headers = [
+            "id", "ts", "scanned", "errors", "avg_reputation", "effective_thr",
+            "low_rep_count", "high_unread_count", "recovered_count", "logged_at",
+        ]
+        lines = [",".join(headers)]
+        for r in rows:
+            lines.append(",".join(
+                str(r.get(h, "")).replace(",", ";") for h in headers
+            ))
+        return "\n".join(lines) + "\n"
+
+    def spike_vs_average(self, current_low: int, lookback: int = 20) -> Dict[str, Any]:
+        """هل low_rep_count الحالي أعلى بوضوح من المتوسط التاريخي؟"""
+        recent = self.get_recent(limit=lookback)
+        # استبعد أحدث نقطة إن طابقت current (نحسب على السابق)
+        vals = [int(r.get("low_rep_count") or 0) for r in recent]
+        if len(vals) < 3:
+            return {
+                "spike": False,
+                "reason": "insufficient_history",
+                "current": current_low,
+                "avg": None,
+            }
+        # المتوسط على كل النقاط السابقة في النافذة (بدون فرضية ترتيب معقد)
+        avg = sum(vals) / len(vals)
+        # عتبة: أعلى من المتوسط بـ +1 على الأقل وبنسبة 50%
+        threshold = max(avg * 1.5, avg + 1.0)
+        spike = current_low > threshold and current_low > avg
+        return {
+            "spike": bool(spike),
+            "current": int(current_low),
+            "avg": round(avg, 3),
+            "threshold": round(threshold, 3),
+            "lookback": len(vals),
+        }
+
     def summary(self) -> Dict[str, Any]:
         try:
             with sqlite3.connect(str(self.db_path)) as conn:
