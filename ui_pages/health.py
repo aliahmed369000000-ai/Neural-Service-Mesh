@@ -245,6 +245,35 @@ def render_health():
                             "low_reputation", "recovered", "high_unread",
                         )
                     })
+                # اتجاه تاريخي penalized / recovered
+                try:
+                    _hist = _mesh.get_nodes_diagnose_history(limit=30)
+                    _tr = (_hist or {}).get("trend") or {}
+                    if int(_tr.get("points") or 0) >= 1:
+                        st.markdown("**📈 اتجاه العقوبات والتعافي**")
+                        try:
+                            import pandas as _pd
+                            _df = _pd.DataFrame({
+                                "low_rep": _tr.get("low_rep_count") or [],
+                                "recovered": _tr.get("recovered_count") or [],
+                            })
+                            st.line_chart(_df)
+                        except Exception:
+                            st.caption(
+                                "آخر النقاط: low_rep="
+                                + str((_tr.get("low_rep_count") or [])[-5:])
+                                + " recovered="
+                                + str((_tr.get("recovered_count") or [])[-5:])
+                            )
+                        _hs = (_hist or {}).get("summary") or {}
+                        if _hs.get("cycles"):
+                            st.caption(
+                                f"دورات مسجّلة: {_hs.get('cycles')} — "
+                                f"متوسط low_rep={_hs.get('avg_low_rep')} — "
+                                f"متوسط recovered={_hs.get('avg_recovered')}"
+                            )
+                except Exception as _hist_err:
+                    st.caption(f"السجل التاريخي: {_hist_err}")
         except Exception as _cyc_err:
             st.caption(f"ملخص الدورة: {_cyc_err}")
         if _role_ids:
