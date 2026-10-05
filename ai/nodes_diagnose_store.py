@@ -183,6 +183,96 @@ class NodesDiagnoseStore:
             return {"cycles": 0, "error": str(e)}
 
 
+
+    def prune_old(self, keep_last: int = 500) -> int:
+        """يحذف الدورات الأقدم من keep_last. يُرجع عدد الصفوف المحذوفة."""
+        keep_last = max(10, int(keep_last))
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                row = conn.execute("SELECT COUNT(*) FROM diagnose_cycles").fetchone()
+                total = int(row[0] or 0) if row else 0
+                if total <= keep_last:
+                    return 0
+                cur = conn.execute(
+                    """
+                    DELETE FROM diagnose_cycles
+                    WHERE id NOT IN (
+                        SELECT id FROM diagnose_cycles
+                        ORDER BY id DESC
+                        LIMIT ?
+                    )
+                    """,
+                    (keep_last,),
+                )
+                conn.commit()
+                deleted = int(cur.rowcount or 0)
+                if deleted:
+                    logger.info(
+                        "NodesDiagnoseStore: pruned %d old cycles (keep=%d)",
+                        deleted, keep_last,
+                    )
+                return deleted
+        except Exception as e:
+            logger.warning("NodesDiagnoseStore.prune_old failed: %s", e)
+            return 0
+
+    def weekly_report(self, days: int = 7) -> Dict[str, Any]:
+        """ملخص الفترة الأخيرة (افتراضياً 7 أيام) للتنبيه الدوري."""
+        days = max(1, int(days))
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    """
+                    SELECT ts, low_rep_count, recovered_count, avg_reputation,
+                           scanned, errors, logged_at
+                    FROM diagnose_cycles
+                    ORDER BY id DESC
+                    LIMIT 500
+                    """
+                ).fetchall()
+            data = list(reversed([dict(r) for r in rows]))
+            if not data:
+                return {"period_days": days, "cycles": 0}
+            # صفِّ حسب logged_at تقريباً — إن فشل نستخدم الكل
+            from datetime import datetime, timezone, timedelta
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+            filtered = []
+            for r in data:
+                ts = r.get("logged_at") or r.get("ts") or ""
+                try:
+                    dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    if dt >= cutoff:
+                        filtered.append(r)
+                except Exception:
+                    filtered.append(r)
+            if not filtered:
+                filtered = data[-min(50, len(data)):]
+            lows = [int(r.get("low_rep_count") or 0) for r in filtered]
+            recs = [int(r.get("recovered_count") or 0) for r in filtered]
+            spikes = 0
+            for i in range(1, len(lows)):
+                if lows[i] > lows[i - 1] * 1.5 and lows[i] > lows[i - 1] + 1:
+                    spikes += 1
+            return {
+                "period_days": days,
+                "cycles": len(filtered),
+                "avg_low_rep": round(sum(lows) / len(lows), 3) if lows else 0,
+                "max_low_rep": max(lows) if lows else 0,
+                "min_low_rep": min(lows) if lows else 0,
+                "total_recovered": sum(recs),
+                "avg_recovered": round(sum(recs) / len(recs), 3) if recs else 0,
+                "approx_spike_events": spikes,
+                "first_ts": filtered[0].get("ts") if filtered else None,
+                "last_ts": filtered[-1].get("ts") if filtered else None,
+            }
+        except Exception as e:
+            return {"period_days": days, "cycles": 0, "error": str(e)}
+
+
+
 _STORE: Optional[NodesDiagnoseStore] = None
 
 
