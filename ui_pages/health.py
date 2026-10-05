@@ -369,11 +369,44 @@ def render_health():
 
                         try:
                             from ai.alert_manager import alert_manager as _am
-                            _diag_alerts = _am.get_diagnose_related_alerts(limit=12)
+                            st.markdown("**🔔 تنبيهات التشخيص الأخيرة**")
+                            _lvl = st.selectbox(
+                                "تصفية حسب المستوى",
+                                options=["الكل", "INFO", "WARNING", "CRITICAL", "SECURITY"],
+                                index=0,
+                                key="nsm_alert_level_filter",
+                            )
+                            _level_arg = None if _lvl == "الكل" else _lvl
+                            _diag_alerts = _am.get_diagnose_related_alerts(
+                                limit=20, level=_level_arg
+                            )
+                            _csv_alerts = _am.export_alerts_csv(
+                                limit=200, level=_level_arg, diagnose_only=True
+                            )
+                            if _csv_alerts.strip() and _csv_alerts.count("\n") > 1:
+                                st.download_button(
+                                    label="⬇️ تصدير تنبيهات التشخيص CSV",
+                                    data=_csv_alerts,
+                                    file_name="nsm_diagnose_alerts.csv",
+                                    mime="text/csv",
+                                    key="nsm_diagnose_alerts_csv",
+                                )
+                            # تصدير كل التنبيهات (ليس التشخيص فقط)
+                            _csv_all = _am.export_alerts_csv(
+                                limit=200, level=_level_arg, diagnose_only=False
+                            )
+                            if _csv_all.strip() and _csv_all.count("\n") > 1:
+                                st.download_button(
+                                    label="⬇️ تصدير كل التنبيهات CSV",
+                                    data=_csv_all,
+                                    file_name="nsm_all_alerts.csv",
+                                    mime="text/csv",
+                                    key="nsm_all_alerts_csv",
+                                )
                         except Exception:
                             _diag_alerts = []
+                            _am = None
                         if _diag_alerts:
-                            st.markdown("**🔔 تنبيهات التشخيص الأخيرة**")
                             for _da in reversed(_diag_alerts):
                                 st.caption(
                                     f"[{_da.get('level')}] {_da.get('ts', '')[:19]} — "
@@ -381,6 +414,8 @@ def render_health():
                                 )
                             with st.expander("تفاصيل تنبيهات التشخيص"):
                                 st.json(_diag_alerts)
+                        elif _am is not None:
+                            st.caption("لا تنبيهات تشخيص مطابقة للتصفية الحالية.")
                 except Exception as _hist_err:
                     st.caption(f"السجل التاريخي: {_hist_err}")
         except Exception as _cyc_err:
