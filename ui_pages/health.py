@@ -281,6 +281,10 @@ def render_health():
                                 mime="text/csv",
                                 key="nsm_diagnose_csv_dl",
                             )
+                        st.caption(
+                            f"الاحتفاظ في SQLite: آخر {(_hist or {}).get('keep_last', 500)} دورة "
+                            "(ضبط عبر `NSM_DIAGNOSE_HISTORY_KEEP`)."
+                        )
                         _spike = (_cyc or {}).get("low_rep_spike") or {}
                         if _spike.get("spike"):
                             st.warning(
@@ -288,6 +292,26 @@ def render_health():
                                 f"فوق المتوسط التاريخي {_spike.get('avg')} "
                                 f"(عتبة التنبيه {_spike.get('threshold')})"
                             )
+                        # ملخص أسبوعي
+                        _wk = (_hist or {}).get("weekly") or {}
+                        if not _wk.get("cycles"):
+                            try:
+                                _wk = _mesh.get_nodes_diagnose_weekly_report(days=7) or {}
+                            except Exception:
+                                _wk = {}
+                        if _wk.get("cycles"):
+                            st.markdown("**📅 ملخص تشخيص أسبوعي**")
+                            _w1, _w2, _w3, _w4 = st.columns(4)
+                            _w1.metric("دورات", int(_wk.get("cycles") or 0))
+                            _w2.metric("متوسط low_rep", f"{float(_wk.get('avg_low_rep') or 0):.2f}")
+                            _w3.metric("أقصى low_rep", int(_wk.get("max_low_rep") or 0))
+                            _w4.metric("تعافٍ إجمالي", int(_wk.get("total_recovered") or 0))
+                            st.caption(
+                                f"spikes≈{_wk.get('approx_spike_events', 0)} — "
+                                f"من {_wk.get('first_ts') or '—'} إلى {_wk.get('last_ts') or '—'}"
+                            )
+                            with st.expander("تفاصيل الملخص الأسبوعي"):
+                                st.json(_wk)
                 except Exception as _hist_err:
                     st.caption(f"السجل التاريخي: {_hist_err}")
         except Exception as _cyc_err:
