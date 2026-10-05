@@ -312,6 +312,20 @@ def render_health():
                                 f"فوق المتوسط التاريخي {_spike.get('avg')} "
                                 f"(عتبة التنبيه {_spike.get('threshold')})"
                             )
+                            _spk_tok = f"spike|{_cyc.get('ts')}|{_spike.get('current')}"
+                            _spk_key = "nsm_spike_toasts"
+                            if _spk_key not in st.session_state:
+                                st.session_state[_spk_key] = set()
+                            if _spk_tok not in st.session_state[_spk_key]:
+                                st.session_state[_spk_key].add(_spk_tok)
+                                try:
+                                    st.toast(
+                                        f"⚠️ spike: low_rep={_spike.get('current')} "
+                                        f"(avg={_spike.get('avg')})",
+                                        icon="⚠️",
+                                    )
+                                except Exception:
+                                    pass
                         # ملخص أسبوعي
                         _wk = (_hist or {}).get("weekly") or {}
                         if not _wk.get("cycles"):
@@ -427,9 +441,27 @@ def render_health():
                                         st.error(f"CRITICAL: {_msg_da[:120]}")
                                 _c_msg, _c_btn = st.columns([5, 1])
                                 with _c_msg:
-                                    st.caption(
-                                        f"[{_lvl_da}] {_ts_da[:19]} — {_msg_da[:120]}"
-                                    )
+                                    if _lvl_da == "CRITICAL":
+                                        st.markdown(
+                                            f"<div style='background:#3d0a0a;border-left:4px solid #ff4444;"
+                                            f"padding:6px 10px;border-radius:4px;margin:2px 0'>"
+                                            f"<b style='color:#ff8888'>[{_lvl_da}]</b> "
+                                            f"<span style='color:#ffcccc'>{_ts_da[:19]}</span> — "
+                                            f"<span style='color:#fff'>{_msg_da[:120]}</span></div>",
+                                            unsafe_allow_html=True,
+                                        )
+                                    elif _lvl_da == "WARNING":
+                                        st.markdown(
+                                            f"<div style='background:#3d300a;border-left:4px solid #ffaa00;"
+                                            f"padding:6px 10px;border-radius:4px;margin:2px 0'>"
+                                            f"<b style='color:#ffcc66'>[{_lvl_da}]</b> "
+                                            f"{_ts_da[:19]} — {_msg_da[:120]}</div>",
+                                            unsafe_allow_html=True,
+                                        )
+                                    else:
+                                        st.caption(
+                                            f"[{_lvl_da}] {_ts_da[:19]} — {_msg_da[:120]}"
+                                        )
                                 with _c_btn:
                                     _btn_key = f"nsm_diag_from_alert_{hash(_tok) & 0xFFFFFFFF}"
                                     if st.button("تشخيص", key=_btn_key, help="تشغيل دورة تشخيص الآن"):
