@@ -1908,6 +1908,10 @@ class MeshBundle:
             db = Path(self.storage.storage_dir) / "nodes_diagnose_history.db"
             store = NodesDiagnoseStore(db_path=db)
             store.log_cycle(summary)
+            try:
+                store.prune_old(keep_last=500)
+            except Exception:
+                pass
             # تنبيه إن ارتفع low_rep فوق المتوسط التاريخي
             try:
                 low_n = len(summary.get("low_reputation") or [])
@@ -2014,8 +2018,48 @@ class MeshBundle:
                 self.run_nodes_diagnose_cycle()
             except Exception as e:
                 logger.warning("MeshBundle: background nodes diagnose failed: %s", e)
+            try:
+                self._maybe_send_diagnose_weekly_summary()
+            except Exception as e:
+                logger.debug("weekly diagnose summary skipped: %s", e)
             if stop is not None and stop.wait(max(30, int(DIAGNOSE_INTERVAL_S))):
                 return
+
+    def _maybe_send_diagnose_weekly_summary(self) -> None:
+        """يرسل ملخصاً أسبوعياً عبر alert_manager مرة كل ~7 أيام."""
+        import time as _time
+        key = "__diagnose_weekly_last_ts__"
+        now = _time.time()
+        with self._lock:
+            last = float(self._node_runtime_meta.get(key) or 0.0)
+            if now - last < 7 * 24 * 3600:
+                return
+            self._node_runtime_meta[key] = now
+        try:
+            from ai.nodes_diagnose_store import NodesDiagnoseStore
+            db = Path(self.storage.storage_dir) / "nodes_diagnose_history.db"
+            report = NodesDiagnoseStore(db_path=db).weekly_report(days=7)
+        except Exception as e:
+            logger.debug("weekly_report failed: %s", e)
+            return
+        if not report.get("cycles"):
+            return
+        try:
+            from ai.alert_manager import alert_manager
+            alert_manager.send_alert(
+                "INFO",
+                (
+                    f"ملخص تشخيص أسبوعي: cycles={report.get('cycles')} "
+                    f"avg_low_rep={report.get('avg_low_rep')} "
+                    f"max_low_rep={report.get('max_low_rep')} "
+                    f"recovered={report.get('total_recovered')} "
+                    f"spikes≈{report.get('approx_spike_events')}"
+                ),
+                details=report,
+                throttle_sec=6 * 24 * 3600,
+            )
+        except Exception as e:
+            logger.debug("weekly alert failed: %s", e)
 
     def run_evolution_cycle(self) -> dict:
         with self._lock:
