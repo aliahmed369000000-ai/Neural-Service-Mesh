@@ -407,11 +407,41 @@ def render_health():
                             _diag_alerts = []
                             _am = None
                         if _diag_alerts:
+                            # toast مرة واحدة لكل تنبيه CRITICAL جديد في هذه الجلسة
+                            _seen_key = "nsm_critical_alert_toasts"
+                            if _seen_key not in st.session_state:
+                                st.session_state[_seen_key] = set()
                             for _da in reversed(_diag_alerts):
-                                st.caption(
-                                    f"[{_da.get('level')}] {_da.get('ts', '')[:19]} — "
-                                    f"{_da.get('message', '')[:120]}"
-                                )
+                                _lvl_da = str(_da.get("level") or "")
+                                _ts_da = str(_da.get("ts") or "")
+                                _msg_da = str(_da.get("message") or "")
+                                _tok = f"{_ts_da}|{_msg_da}"
+                                if _lvl_da == "CRITICAL" and _tok not in st.session_state[_seen_key]:
+                                    st.session_state[_seen_key].add(_tok)
+                                    try:
+                                        st.toast(
+                                            f"🚨 CRITICAL: {_msg_da[:80]}",
+                                            icon="🚨",
+                                        )
+                                    except Exception:
+                                        st.error(f"CRITICAL: {_msg_da[:120]}")
+                                _c_msg, _c_btn = st.columns([5, 1])
+                                with _c_msg:
+                                    st.caption(
+                                        f"[{_lvl_da}] {_ts_da[:19]} — {_msg_da[:120]}"
+                                    )
+                                with _c_btn:
+                                    _btn_key = f"nsm_diag_from_alert_{hash(_tok) & 0xFFFFFFFF}"
+                                    if st.button("تشخيص", key=_btn_key, help="تشغيل دورة تشخيص الآن"):
+                                        try:
+                                            _out_row = _mesh.run_nodes_diagnose_cycle()
+                                            st.success(
+                                                f"دورة من التنبيه: scanned={_out_row.get('scanned')} "
+                                                f"low_rep={_out_row.get('low_reputation')}"
+                                            )
+                                            st.rerun()
+                                        except Exception as _row_e:
+                                            st.error(str(_row_e))
                             with st.expander("تفاصيل تنبيهات التشخيص"):
                                 st.json(_diag_alerts)
                         elif _am is not None:
