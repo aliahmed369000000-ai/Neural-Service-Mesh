@@ -27,6 +27,7 @@ class AlertManager:
     def __init__(self):
         self.config = self._load_config()
         self._last_alerts = {}  # لتخزين وقت آخر تنبيه من كل نوع لمنع الإغراق
+        self._alert_history = []  # آخر التنبيهات المرسلة (حد أقصى لاحق)
 
     def _load_config(self) -> Dict[str, Any]:
         if CONFIG_PATH.exists():
@@ -57,6 +58,18 @@ class AlertManager:
 
         self._last_alerts[alert_key] = now
         timestamp = datetime.now(timezone.utc).isoformat()
+        try:
+            entry = {
+                "ts": timestamp,
+                "level": level,
+                "message": message,
+                "details": details or {},
+            }
+            self._alert_history.append(entry)
+            if len(self._alert_history) > 100:
+                del self._alert_history[:-100]
+        except Exception:
+            pass
         full_message = f"🚨 NSM Alert [{level}]\nTime: {timestamp}\nMessage: {message}"
         if details:
             full_message += f"\nDetails: {json.dumps(details, indent=2)}"
@@ -102,4 +115,22 @@ class AlertManager:
             logger.error(f"Email alert failed: {e}")
 
 # Instance for global use
+    def get_recent_alerts(self, limit: int = 20, level: Optional[str] = None) -> list:
+        """آخر التنبيهات المرسلة في هذه العملية (للواجهة)."""
+        items = list(self._alert_history)
+        if level:
+            items = [a for a in items if a.get("level") == level]
+        return items[-max(1, min(int(limit), 100)):]
+
+    def get_diagnose_related_alerts(self, limit: int = 15) -> list:
+        """تنبيهات مرتبطة بتشخيص العُقد / low_rep / ملخص أسبوعي."""
+        keys = ("low_rep", "تشخيص", "diagnose", "عقوبة", "recovered", "ملخص تشخيص")
+        out = []
+        for a in self._alert_history:
+            msg = str(a.get("message") or "")
+            if any(k.lower() in msg.lower() for k in keys):
+                out.append(a)
+        return out[-max(1, min(int(limit), 50)):]
+
+
 alert_manager = AlertManager()
