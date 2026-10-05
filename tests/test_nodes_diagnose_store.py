@@ -71,3 +71,41 @@ def test_export_csv_and_spike(tmp_path):
     assert sp["current"] == 5
     sp2 = store.spike_vs_average(1, lookback=10)
     assert sp2["spike"] is False
+
+
+def test_prune_old_keeps_last_n(tmp_path):
+    store = NodesDiagnoseStore(db_path=tmp_path / "p.db")
+    for i in range(20):
+        store.log_cycle({
+            "ts": f"t{i}",
+            "scanned": 1,
+            "errors": 0,
+            "avg_reputation": 0.2,
+            "effective_low_rep_threshold": 0.15,
+            "low_reputation": [],
+            "recovered": [],
+            "high_unread": [],
+        })
+    deleted = store.prune_old(keep_last=10)
+    assert deleted == 10
+    assert len(store.get_recent(50)) == 10
+
+
+def test_weekly_report_shape(tmp_path):
+    store = NodesDiagnoseStore(db_path=tmp_path / "w.db")
+    for i in range(4):
+        store.log_cycle({
+            "ts": f"t{i}",
+            "scanned": 3,
+            "errors": 0,
+            "avg_reputation": 0.3,
+            "effective_low_rep_threshold": 0.15,
+            "low_reputation": [{"node_id": "x"}] * (i % 3),
+            "recovered": [{"node_id": "y"}] if i else [],
+            "high_unread": [],
+        })
+    rep = store.weekly_report(days=7)
+    assert rep["cycles"] >= 1
+    assert "avg_low_rep" in rep
+    assert "total_recovered" in rep
+    assert "approx_spike_events" in rep
