@@ -27,6 +27,7 @@ ai/reputation_engine.py و ai/scoring_engine.py موجودة ومكتوبة لك
 """
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from datetime import datetime, timezone
@@ -1993,9 +1994,35 @@ class MeshBundle:
         with self._lock:
             return dict(self._node_runtime_meta.get("__mesh_diagnose_summary__") or {})
 
+    def _diagnose_settings_path(self) -> Path:
+        return Path(self.storage.storage_dir) / "diagnose_settings.json"
+
+    def set_diagnose_history_keep_last(self, keep_last: int) -> int:
+        """يحفظ keep_last في ملف إعدادات التخزين (لضبطه من الواجهة)."""
+        keep_last = max(10, min(int(keep_last), 50000))
+        path = self._diagnose_settings_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = {}
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8")) or {}
+            except Exception:
+                data = {}
+        data["history_keep_last"] = keep_last
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        return keep_last
+
     def _diagnose_history_keep_last(self) -> int:
-        """عدد الدورات المحتفظ بها — من البيئة أو الثابت الافتراضي."""
+        """أولوية: ملف الإعدادات → البيئة → الثابت الافتراضي."""
         import os
+        path = self._diagnose_settings_path()
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8")) or {}
+                if data.get("history_keep_last") is not None:
+                    return max(10, int(data["history_keep_last"]))
+            except Exception:
+                pass
         raw = os.environ.get("NSM_DIAGNOSE_HISTORY_KEEP") or os.environ.get(
             "DIAGNOSE_HISTORY_KEEP_LAST"
         )
