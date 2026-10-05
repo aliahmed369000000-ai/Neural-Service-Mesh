@@ -332,7 +332,41 @@ def render_health():
                             )
                             with st.expander("تفاصيل الملخص الأسبوعي"):
                                 st.json(_wk)
-                        # تنبيهات التشخيص من AlertManager
+                        # إجراءات سريعة + تنبيهات التشخيص
+                        st.markdown("**⚡ إجراءات سريعة للتشخيص**")
+                        _a1, _a2, _a3 = st.columns(3)
+                        with _a1:
+                            if st.button("🔄 تشغيل دورة تشخيص الآن", key="nsm_run_diagnose_now"):
+                                try:
+                                    _out_c = _mesh.run_nodes_diagnose_cycle()
+                                    st.success(
+                                        f"تمت الدورة: scanned={_out_c.get('scanned')} "
+                                        f"low_rep={_out_c.get('low_reputation')} "
+                                        f"recovered غير مضمّن في الموجز القصير"
+                                    )
+                                    st.rerun()
+                                except Exception as _re:
+                                    st.error(str(_re))
+                        with _a2:
+                            if st.button("📅 تحديث الملخص الأسبوعي", key="nsm_refresh_weekly"):
+                                try:
+                                    _wr = _mesh.get_nodes_diagnose_weekly_report(days=7)
+                                    st.json(_wr)
+                                except Exception as _we:
+                                    st.error(str(_we))
+                        with _a3:
+                            if st.button("🧹 تنظيف السجل الآن", key="nsm_prune_diagnose"):
+                                try:
+                                    from ai.nodes_diagnose_store import NodesDiagnoseStore
+                                    from pathlib import Path as _P
+                                    _db = _P(_mesh.storage.storage_dir) / "nodes_diagnose_history.db"
+                                    _n = NodesDiagnoseStore(db_path=_db).prune_old(
+                                        keep_last=_mesh._diagnose_history_keep_last()
+                                    )
+                                    st.info(f"حُذف {_n} سجل قديم")
+                                except Exception as _pe:
+                                    st.error(str(_pe))
+
                         try:
                             from ai.alert_manager import alert_manager as _am
                             _diag_alerts = _am.get_diagnose_related_alerts(limit=12)
