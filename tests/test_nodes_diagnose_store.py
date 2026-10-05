@@ -161,3 +161,19 @@ def test_alert_history_sqlite_persists(tmp_path, monkeypatch):
     assert len(recent) >= 2
     related = am2.get_diagnose_related_alerts(limit=10)
     assert len(related) >= 2
+
+
+def test_export_alerts_csv_and_level_filter(tmp_path, monkeypatch):
+    monkeypatch.setenv("NSM_ALERT_CONFIG_DIR", str(tmp_path))
+    import importlib
+    import ai.alert_manager as am
+    importlib.reload(am)
+    am.alert_manager.send_alert("WARNING", "ارتفاع low_rep_count=2 فوق المتوسط", throttle_sec=0)
+    am.alert_manager.send_alert("INFO", "ملخص تشخيص أسبوعي: cycles=1", throttle_sec=0)
+    am.alert_manager.send_alert("INFO", "رسالة غير مرتبطة", throttle_sec=0)
+    csv = am.alert_manager.export_alerts_csv(limit=50, diagnose_only=True)
+    assert "ts,level,message,details" in csv
+    assert "low_rep" in csv or "تشخيص" in csv
+    w = am.alert_manager.get_diagnose_related_alerts(level="WARNING")
+    assert len(w) >= 1
+    assert all(a["level"] == "WARNING" for a in w)
