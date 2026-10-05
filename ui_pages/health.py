@@ -272,6 +272,22 @@ def render_health():
                                 f"متوسط low_rep={_hs.get('avg_low_rep')} — "
                                 f"متوسط recovered={_hs.get('avg_recovered')}"
                             )
+                        _csv = (_hist or {}).get("csv") or ""
+                        if _csv.strip():
+                            st.download_button(
+                                label="⬇️ تصدير سجل التشخيص CSV",
+                                data=_csv,
+                                file_name="nodes_diagnose_history.csv",
+                                mime="text/csv",
+                                key="nsm_diagnose_csv_dl",
+                            )
+                        _spike = (_cyc or {}).get("low_rep_spike") or {}
+                        if _spike.get("spike"):
+                            st.warning(
+                                f"⚠️ low_rep_count={_spike.get('current')} "
+                                f"فوق المتوسط التاريخي {_spike.get('avg')} "
+                                f"(عتبة التنبيه {_spike.get('threshold')})"
+                            )
                 except Exception as _hist_err:
                     st.caption(f"السجل التاريخي: {_hist_err}")
         except Exception as _cyc_err:
