@@ -220,17 +220,37 @@ class AlertManager:
             logger.debug("alert sqlite read failed: %s", e)
         return items[-limit:]
 
-    def get_diagnose_related_alerts(self, limit: int = 15) -> list:
+    def get_diagnose_related_alerts(self, limit: int = 15, level: Optional[str] = None) -> list:
         """تنبيهات مرتبطة بتشخيص العُقد / low_rep / ملخص أسبوعي."""
         keys = ("low_rep", "تشخيص", "diagnose", "عقوبة", "recovered", "ملخص تشخيص")
-        # اقرأ من الذاكرة + SQLite
-        pool = self.get_recent_alerts(limit=100)
+        pool = self.get_recent_alerts(limit=100, level=level)
         out = []
         for a in pool:
             msg = str(a.get("message") or "")
             if any(k.lower() in msg.lower() for k in keys):
                 out.append(a)
         return out[-max(1, min(int(limit), 50)):]
+
+    def export_alerts_csv(self, limit: int = 200, level: Optional[str] = None, diagnose_only: bool = False) -> str:
+        """تصدير سجل التنبيهات كـ CSV."""
+        if diagnose_only:
+            items = self.get_diagnose_related_alerts(limit=limit, level=level)
+        else:
+            items = self.get_recent_alerts(limit=limit, level=level)
+        headers = ["ts", "level", "message", "details"]
+        lines = [",".join(headers)]
+        for a in items:
+            det = a.get("details") or {}
+            if not isinstance(det, str):
+                det = json.dumps(det, ensure_ascii=False)
+            row = [
+                str(a.get("ts") or "").replace(",", ";"),
+                str(a.get("level") or "").replace(",", ";"),
+                str(a.get("message") or "").replace(",", ";").replace("\n", " "),
+                det.replace(",", ";").replace("\n", " "),
+            ]
+            lines.append(",".join(row))
+        return "\n".join(lines) + "\n"
 
 
 # صِل الـpersist عند إرسال التنبيه: نُرقّع send_alert عبر التفاف بسيط بعد التعريف
