@@ -29,9 +29,16 @@ class AIDecisionLayer:
       - Learn from execution history (simple frequency-based)
     """
 
-    def __init__(self, graph=None, db=None):
+    def __init__(self, graph=None, db=None, routing_engine=None):
         self._graph = graph
         self._db = db        # SQLiteStorage for history-based learning
+        # routing_engine اختياري (ai/routing_engine.py::RoutingEngine): يجمع
+        # مسارات مرشّحة من ذاكرة المسارات المحفوظة (SQLite) + BFS + DFS +
+        # knowledge JSON ويقيّمها بدرجات الاتصال التاريخية — بعكس
+        # self._path_stats أدناه التي تبدأ فارغة عند كل إعادة تشغيل. إن
+        # وُجد يُجرَّب أولاً في choose_path() ثم يُرجَع للمنطق الأصلي عند
+        # غياب نتيجة أو أي استثناء، فلا يمكن أن يجعل الاختيار أسوأ من قبل.
+        self._routing = routing_engine
         self._path_stats: Dict[str, Dict] = {}   # path_key -> {runs, successes, avg_ms}
         logger.info("AIDecisionLayer initialized (rules + heuristics mode)")
 
@@ -45,6 +52,14 @@ class AIDecisionLayer:
 
     def choose_path(self, start_id: str, end_id: str) -> Optional[List[str]]:
         """Return the best path from start to end using heuristics."""
+        if self._routing is not None:
+            try:
+                routed = self._routing.choose_route(start_id, end_id)
+                if routed:
+                    logger.info(f"AI: RoutingEngine chose path len={len(routed)}")
+                    return routed
+            except Exception as e:
+                logger.warning(f"AI: RoutingEngine failed, falling back to heuristics: {e}")
         candidates = self._find_all_paths(start_id, end_id, max_paths=5)
         if not candidates:
             logger.warning(f"AI: no paths found from {start_id[:8]} to {end_id[:8]}")

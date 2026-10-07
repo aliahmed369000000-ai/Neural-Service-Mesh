@@ -124,7 +124,19 @@ class RoutingEngine:
     _DEEP_NETWORK_DIR = "models/classifiers"
 
     def __init__(self, graph=None, semantic_matcher=None,
-                 scoring_engine=None, memory_engine=None):
+                 scoring_engine=None, memory_engine=None,
+                 models_dir: Optional[str] = None):
+        # models_dir اختياري: يحوّل مسارات ملفات الأوزان الثلاثة (تُحفَظ
+        # دورياً أثناء التدريب المتصل بعد كل مسار مُقيَّم) من مسار نسبي
+        # لمجلد العمل الحالي إلى مجلد مخصّص — يمنع اختباراً أو نسخة
+        # ثانية من كتابة/قراءة أوزان نسخة الإنتاج نفسها. الافتراضي None
+        # يُبقي السلوك القديم حرفياً (nsm_router_bridge لا يتأثر).
+        if models_dir:
+            import os
+            base = os.path.join(models_dir, "classifiers")
+            self._WEIGHTS_PATH = os.path.join(base, "routing_weights.npy")
+            self._DYNAMIC_WEIGHTS_PATH = os.path.join(base, "dynamic_weights.npy")
+            self._DEEP_NETWORK_DIR = base
         self._graph    = graph
         self._semantic = semantic_matcher
         self._scoring  = scoring_engine
@@ -134,8 +146,21 @@ class RoutingEngine:
         # ── Phase 8: Initialise neural weight layer ──────────────────────
         self._neural_layer: Optional["NeuralWeightLayer"] = None
         if _NEURAL_WEIGHTS_AVAILABLE:
-            self._neural_layer = get_default_layer(self._WEIGHTS_PATH)
-            self._sync_weights_from_layer()
+            # ai/models/initial_weights.npy مُتجاهَل عمداً في .gitignore
+            # (أصل خاص 784×784)، فلا يوجد في أي نسخة مستنسَخة أو على
+            # Streamlit Cloud، وget_default_layer ترفع FileNotFoundError
+            # حينها — كان هذا يُسقط بناء RoutingEngine بالكامل مع أن
+            # docstring الكلاس يَعِد بالرجوع إلى الأوزان الثابتة عند غياب
+            # الأوزان العصبية، لكن الرجوع كان يعمل فقط لحالة ImportError.
+            try:
+                self._neural_layer = get_default_layer(self._WEIGHTS_PATH)
+                self._sync_weights_from_layer()
+            except Exception as e:
+                self._neural_layer = None
+                logger.warning(
+                    f"RoutingEngine: NeuralWeightLayer unavailable ({e}) — static weights"
+                )
+        if self._neural_layer is not None:
             logger.info(
                 f"RoutingEngine (Phase 8): NeuralWeightLayer active — "
                 f"W_SEMANTIC={self.W_SEMANTIC:.4f}  W_SCORE={self.W_SCORE:.4f}  "
@@ -153,7 +178,12 @@ class RoutingEngine:
         # ── Phase 9 Axis-2: Dynamic Self-Growing Weight Layer ─────────────
         self._dynamic_layer: Optional["DynamicWeightLayer"] = None
         if _DYNAMIC_LAYER_AVAILABLE:
-            self._dynamic_layer = get_default_dynamic_layer(self._DYNAMIC_WEIGHTS_PATH)
+            try:
+                self._dynamic_layer = get_default_dynamic_layer(self._DYNAMIC_WEIGHTS_PATH)
+            except Exception as e:
+                self._dynamic_layer = None
+                logger.warning(f"RoutingEngine: DynamicWeightLayer unavailable ({e})")
+        if self._dynamic_layer is not None:
             logger.info(
                 f"RoutingEngine (Phase 9 Axis-2): DynamicWeightLayer active — "
                 f"shape=({self._dynamic_layer._rows}×{self._dynamic_layer._cols})"
@@ -162,9 +192,14 @@ class RoutingEngine:
         # ── Phase 9 Axis-3: Deep Multi-Layer Network ──────────────────────
         self._deep_network: Optional["DeepRoutingNetwork"] = None
         if _DEEP_NETWORK_AVAILABLE:
-            self._deep_network = get_default_deep_network(self._DEEP_NETWORK_DIR)
-            # Use deep network weights as primary routing scalars
-            self._sync_weights_from_deep_network()
+            try:
+                self._deep_network = get_default_deep_network(self._DEEP_NETWORK_DIR)
+                # Use deep network weights as primary routing scalars
+                self._sync_weights_from_deep_network()
+            except Exception as e:
+                self._deep_network = None
+                logger.warning(f"RoutingEngine: DeepRoutingNetwork unavailable ({e})")
+        if self._deep_network is not None:
             logger.info(
                 f"RoutingEngine (Phase 9 Axis-3): DeepRoutingNetwork active — "
                 f"{self._deep_network}"

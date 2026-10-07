@@ -61,6 +61,7 @@ from ai.decision import AIDecisionLayer
 from knowledge.knowledge_store import KnowledgeStore
 from ai.discovery_engine import DiscoveryEngine
 from ai.optimization_engine import OptimizationEngine
+from ai.routing_engine import RoutingEngine
 
 logger = logging.getLogger(__name__)
 
@@ -315,7 +316,28 @@ class MeshBundle:
         # هنا على مستوى MeshBundle (singleton للعملية) تُشارَك بين كل طلبات
         # /process المتتالية حتى تتراكم إحصاءات learn_from_run فعلياً بدل
         # إعادة بناء طبقة فارغة الذاكرة في كل طلب.
-        self.ai_decision = AIDecisionLayer(graph=self.graph, db=self.exec_log)
+        # ai/routing_engine.py::RoutingEngine كانت تُبنى فقط داخل
+        # nsm_router_bridge (لاختيار مزوّد LLM، بمحركات ذاكرة/تقييم منفصلة
+        # ومسارات أوزان نسبية)، بينما كل طلب /process عبر شبكة العُقد يختار
+        # مساره بـAIDecisionLayer الذي لا يقرأ ذاكرة المسارات المحفوظة
+        # إطلاقاً (إحصاءاته في الذاكرة فقط). هنا نسخة مربوطة بنفس
+        # graph/scoring/memory/knowledge الحقيقية للحزمة، وأوزانها تحت
+        # storage_dir/models لعزلها عن نسخة الجسر.
+        # محرك اختياري: أي فشل في بنائه لا يجوز أن يُسقط إقلاع الحزمة كلها؛
+        # AIDecisionLayer يعمل بمنطقه الأصلي بدونه (routing_engine=None).
+        try:
+            self.routing_engine = RoutingEngine(
+                graph=self.graph, scoring_engine=self.scoring_engine,
+                memory_engine=self.memory_engine,
+                models_dir=str(Path(storage_dir) / "models"),
+            )
+            self.routing_engine.set_knowledge_store(self.knowledge_store)
+        except Exception as e:
+            self.routing_engine = None
+            logger.warning("MeshBundle: تعذّر بناء RoutingEngine — يُستخدم الاختيار الأصلي: %s", e)
+        self.ai_decision = AIDecisionLayer(
+            graph=self.graph, db=self.exec_log, routing_engine=self.routing_engine,
+        )
 
         # RLock وليس Lock عادياً: record_swarm_result يستدعي الآن
         # _apply_reputation_feedback/_apply_reputation_recovery مباشرة (بعد أن
