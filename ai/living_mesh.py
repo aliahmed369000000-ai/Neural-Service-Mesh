@@ -1558,17 +1558,13 @@ class LivingMeshNode:
                             and (not r_task or r_task == task_id)
                         ):
                             sender = payload.get("from")
-                            sig = raw.get("signature")
-                            if sender and sig:
-                                key_path = self.keys_dir / f"{sender}.pub"
-                                if key_path.exists():
-                                    if not self.verify_signature(
-                                        key_path.read_bytes(),
-                                        json.dumps(payload, sort_keys=True),
-                                        sig,
-                                    ):
-                                        logger.warning(f"🚫 RPC result bad signature from {sender}")
-                                        continue
+                            # التوقيع تُحقِّق منه أعلاه على الحمولة الأصلية (قبل فك
+                            # التشفير الطرفي). كانت هنا مراجعة ثانية قديمة تعيد
+                            # التحقق بعد أن استُبدل payload["data"] بالنص المفكوك،
+                            # فيختلف json.dumps عن المُوقَّع فتفشل دائماً ويُسقَط كل
+                            # ناتج RPC حقيقي بـ"bad signature" — وجدتها بتشغيل
+                            # عقدة عاملة وعميل فعليَّين: العامل ينفّذ ويردّ ok=True
+                            # والعميل يرمي النتيجة ويُبلَّغ timeout.
 
                             state = self._task_inbox()
                             state["task_inbox"][task_id] = {
