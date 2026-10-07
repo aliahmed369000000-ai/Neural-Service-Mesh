@@ -170,10 +170,17 @@ def py_compile_check(path: str) -> Dict[str, Any]:
     }
 
 
-def kaggle_status(slug: str = "") -> Dict[str, Any]:
+def kaggle_status(slug: str = "", fetch_output: bool = True) -> Dict[str, Any]:
     """حالة كيرنل Kaggle (وlogs عند الحاجة) عبر Kaggle CLI — نفس منهجية
     المراقبة الدورية. slug بصيغة username/kernel-slug. إن عُرِّف slug
-    فارغاً تُستخدم آخر كيرنل معروف (SurahChain xlarge قيد التدريب)."""
+    فارغاً تُستخدم آخر كيرنل معروف (SurahChain xlarge قيد التدريب).
+
+    fetch_output=False يتخطّى جلب مخرجات الكيرنل (حتى 600 ثانية في حالة
+    انتهائه) ويكتفي بسطر الحالة فقط (≤60 ثانية) — لازمة لأي سياق له مهلة
+    قصيرة وثابتة لا يمكن تمديدها لكل أداة على حدة، مثل core/node_hands.py
+    (مهلة واحدة لكل الأدوات المربوطة، 15 ثانية افتراضياً)؛ وإلا فأي
+    استدعاء لكيرنل منتهٍ فعلاً (COMPLETE/ERROR/FAILED) سيُقطَع دائماً
+    بمهلة اليد العامة قبل أن يصل أصلاً لنتيجة الحالة نفسها."""
     import shutil
     if not shutil.which("kaggle"):
         return {"ok": False, "msg": "أمر kaggle غير مثبت في البيئة"}
@@ -199,7 +206,7 @@ def kaggle_status(slug: str = "") -> Dict[str, Any]:
             result["status"] = st
             break
     # إن كانت حالة نهائية، نجلب مخرجات kernel لإظهار آخر مؤشرات التقدم/الخطأ
-    if result["status"] in ("COMPLETE", "ERROR", "FAILED"):
+    if fetch_output and result["status"] in ("COMPLETE", "ERROR", "FAILED"):
         import tempfile
         tmp = tempfile.mkdtemp(prefix="nsm_kout_")
         c2, out2 = _run(["kaggle", "kernels", "output", "-k", slug, "-p", tmp], timeout=600)

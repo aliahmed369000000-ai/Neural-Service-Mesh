@@ -65,9 +65,13 @@ class TestVideoJobPersistence(unittest.TestCase):
 
     def test_job_persisted_to_disk_immediately_with_op_name(self):
         """لقطة أولية تُكتب فور start() — بما فيها op_name القابل لإعادة
-        البناء، لأن fake_trim دالة top-level من الوحدة 'الموثوقة' هنا."""
+        البناء. تتعمّد استخدام fake_slow_op (تنام 0.3 ثانية) لا fake_trim:
+        fake_trim شبه فورية، فقد يكتمل الخيط الخلفي (ويكتب status='done')
+        قبل أن تصل القراءة المتزامنة أدناه أصلاً — سباق حقيقي رُصد فعلياً
+        (الاختبار يفشل أحياناً بـ'done' != 'running' حتى معزولاً عن بقية
+        الملف، لا علاقة له بحِمل تشغيل المستودع كاملاً كما تبيّن لاحقاً)."""
         mgr = VideoJobManager(db_path=self.db_path)
-        job_id = mgr.start(fake_trim, "قص", path="in.mp4", start=0.0, end=5.0)
+        job_id = mgr.start(fake_slow_op, "عملية بطيئة", path="in.mp4")
 
         import sqlite3
         with sqlite3.connect(str(self.db_path)) as conn:
@@ -77,13 +81,13 @@ class TestVideoJobPersistence(unittest.TestCase):
             ).fetchone()
         self.assertIsNotNone(row, "يجب أن تُحفظ لقطة أولية فور بدء المهمة")
         self.assertEqual(row[0], "running")
-        self.assertEqual(row[1], "fake_trim")
+        self.assertEqual(row[1], "fake_slow_op")
         self.assertIn("in.mp4", row[2])
-        # 🆕 لا بد من انتظار اكتمال الخيط الفعلي قبل tearDown: fake_trim
-        # شبه فورية، وتحت حِمل تشغيل كامل (كل اختبارات المستودع معاً) قد
-        # يتأخر جدولة الخيط بما يكفي ليبقى يكتب إلى قاعدة البيانات داخل
-        # tmp_path بعد أن يبدأ tearDown حذف المجلد — فيفشل الحذف بخطأ
-        # 'Directory not empty' (سباق كلاسيكي بين خيط خلفي وحذف tmp_path).
+        # 🆕 لا بد من انتظار اكتمال الخيط الفعلي قبل tearDown: تحت حِمل
+        # تشغيل كامل (كل اختبارات المستودع معاً) قد يتأخر جدولة الخيط بما
+        # يكفي ليبقى يكتب إلى قاعدة البيانات داخل tmp_path بعد أن يبدأ
+        # tearDown حذف المجلد — فيفشل الحذف بخطأ 'Directory not empty'
+        # (سباق كلاسيكي بين خيط خلفي وحذف tmp_path).
         _wait_until_not_running(mgr, job_id)
 
     def test_unknown_fn_persisted_without_op_name(self):

@@ -1077,12 +1077,24 @@ class MeshBundle:
                 raise ValueError("what must be one of: status, log, diff, branch")
             return at.git_info(what)
 
+        def kaggle_status_quick(slug: str = ""):
+            """نسخة سريعة من at.kaggle_status بلا جلب مخرجات (قد يأخذ حتى
+            600 ثانية لكيرنل منتهٍ) — مهلة اليد الواحدة لكل الأدوات (15
+            ثانية افتراضياً) ستقطع أي استدعاء أبطأ من ذلك قبل أن يصل
+            لنتيجة فعلية. مفيدة للعقد كي تطّلع على حالة تدريب حقيقي جارٍ
+            على Kaggle (نفس منهجية المراقبة الدورية) دون أن تُقطَع بمهلة
+            اليد لمجرد أن الكيرنل انتهى فعلياً (الحالة النهائية تُفعِّل في
+            at.kaggle_status الأصلية فرع جلب مخرجات بطيء جداً لهذا السياق)."""
+            return at.kaggle_status(slug, fetch_output=False)
+
         tools.extend([
             ("search_code", search_code, "بحث نصي/regex في ملفات py/md للمشروع"),
             ("find_files", find_files, "بحث عن ملفات بالاسم/الامتداد"),
             ("git_info", git_info, "status/log/diff/branch (قراءة فقط)"),
             ("py_compile_check", at.py_compile_check, "فحص بناء جملة ملف Python"),
             ("system_info", at.system_info, "لمحة عن البيئة بلا أسرار"),
+            ("kaggle_status", kaggle_status_quick,
+             "حالة سطر كيرنل تدريب Kaggle (قراءة فقط، بلا جلب مخرجات)"),
         ])
         return tools
 
