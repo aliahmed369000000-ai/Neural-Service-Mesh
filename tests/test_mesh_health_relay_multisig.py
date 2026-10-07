@@ -57,11 +57,17 @@ def test_health_api_empty_peers():
         lm = _isolate(tmp, "n1")
         node = lm.LivingMeshNode(node_id="n1", host="127.0.0.1", port=0)
         node.join_network()
-        async def run():
-            results = await node.measure_peers_health()
-            assert isinstance(results, list)
-            print("✅ measure_peers_health empty OK", results)
-        asyncio.run(run())
+        try:
+            async def run():
+                results = await node.measure_peers_health()
+                assert isinstance(results, list)
+                print("✅ measure_peers_health empty OK", results)
+            asyncio.run(run())
+        finally:
+            # join_network() يبدأ خيطَي daemon (مراقب القدرات + التطوّر الذاتي)
+            # يكتبان في data_dir؛ بدون إيقافهما يتسابق تنظيف TemporaryDirectory
+            # مع كتابتهما فيفشل بـ OSError: Directory not empty.
+            node.mark_offline()
 
 
 def test_relay_api_no_peers():
@@ -69,13 +75,16 @@ def test_relay_api_no_peers():
         lm = _isolate(tmp, "n1")
         node = lm.LivingMeshNode(node_id="n1", host="127.0.0.1", port=0)
         node.join_network()
-        async def run():
-            # سيفشل المباشر والـrelay لعدم وجود أقران — يجب أن يُرجع ok=False بوضوح
-            r = await node.send_to_peer_with_relay("127.0.0.1", 59999, "sovereign_gossip", {"x": 1})
-            assert r["ok"] is False
-            assert r["mode"] == "failed"
-            print("✅ relay failure explicit OK", r)
-        asyncio.run(run())
+        try:
+            async def run():
+                # سيفشل المباشر والـrelay لعدم وجود أقران — يجب أن يُرجع ok=False بوضوح
+                r = await node.send_to_peer_with_relay("127.0.0.1", 59999, "sovereign_gossip", {"x": 1})
+                assert r["ok"] is False
+                assert r["mode"] == "failed"
+                print("✅ relay failure explicit OK", r)
+            asyncio.run(run())
+        finally:
+            node.mark_offline()
 
 
 if __name__ == "__main__":

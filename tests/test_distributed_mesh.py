@@ -31,7 +31,7 @@ async def _serve(node, port):
     return runner
 
 
-async def test_distributed_simulation():
+async def _simulate_distributed():
     """محاكاة تواصل بين عقدتين بعناوين IP مختلفة (افتراضية)، بمجلدي بيانات معزولين."""
     with tempfile.TemporaryDirectory(prefix="nsm_dist_test_") as tmp:
         alpha = LivingMeshNode(node_id="mesh_alpha_dist", host="127.0.0.1", port=9001,
@@ -39,12 +39,33 @@ async def test_distributed_simulation():
         zeta = LivingMeshNode(node_id="mesh_zeta_dist", host="127.0.0.1", port=9002,
                                data_dir=str(Path(tmp) / "zeta"))
 
+        runners = []
+        try:
+            return await _simulate_with(alpha, zeta, runners)
+        finally:
+            # join_network() يبدأ خيطَي daemon (قدرات + تطوّر ذاتي) يكتبان في
+            # data_dir؛ إيقافهما قبل خروج TemporaryDirectory يمنع سباق
+            # التنظيف (OSError: Directory not empty). وrunners تُنظَّف حتى لو
+            # فشل أي تأكيد قبل cleanup الأصلي.
+            for r in runners:
+                try:
+                    await r.cleanup()
+                except Exception:
+                    pass
+            alpha.mark_offline()
+            zeta.mark_offline()
+
+
+async def _simulate_with(alpha, zeta, runners):
+    if True:
         alpha.join_network()
         runner_alpha = await _serve(alpha, 9001)
+        runners.append(runner_alpha)
 
         seed = {"id": "mesh_alpha_dist", "host": "127.0.0.1", "port": 9001}
         zeta.join_network(seed_nodes=[seed])
         runner_zeta = await _serve(zeta, 9002)
+        runners.append(runner_zeta)
 
         # انضمام zeta فعلياً عبر الشبكة (لا محاكاة)
         ok = await zeta.request_peers(seed["host"], seed["port"])
@@ -64,14 +85,18 @@ async def test_distributed_simulation():
                     if e.get("kind") == "distributed_test"]
         print(f"send_to_peer ok={sent}, zeta received distributed_test: {bool(received)}")
 
-        await runner_alpha.cleanup()
-        await runner_zeta.cleanup()
-
         assert discovered, "Zeta should discover Alpha in the distributed simulation"
         assert sent, "alpha.send_to_peer to zeta should succeed"
         assert received, "Zeta should have received the distributed_test experience"
         print("🏆 test_distributed_mesh passed")
 
 
+def test_distributed_simulation():
+    # الاختبار coroutine يُشغَّل هنا عبر asyncio.run بدل الاعتماد على
+    # pytest-asyncio (غير موجود في requirements) — بدون هذا يرفضه pytest
+    # بـ "async def functions are not natively supported".
+    asyncio.run(_simulate_distributed())
+
+
 if __name__ == "__main__":
-    asyncio.run(test_distributed_simulation())
+    asyncio.run(_simulate_distributed())
