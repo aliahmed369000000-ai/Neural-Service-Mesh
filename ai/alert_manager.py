@@ -76,6 +76,19 @@ class AlertManager:
 
         logger.info(f"Sending alert: {message}")
 
+        # 🆕 إنفاذ فعلي لـ "alert_levels": كان هذا الحقل موجوداً في الإعدادات
+        # الافتراضية (["CRITICAL", "SECURITY"]) منذ البداية لكن لم يُستخدَم
+        # إطلاقاً هنا — أي تنبيه (INFO/WARNING/CRITICAL/SECURITY) كان يُرسَل عبر
+        # Telegram/Email طالما القناة مفعّلة، بصرف النظر عن هذا الحقل. النتيجة:
+        # كل تنبيه WARNING من دورة التشخيص الدورية (كل 120 ثانية تقريباً) كان
+        # يُرسَل فعلياً كرسالة Telegram/بريد لمن فعّل القناة. التسجيل المحلي
+        # (الذاكرة + SQLite) وعرض الواجهة يبقيان كما هما لكل المستويات دائماً؛
+        # هذا الفلتر يقتصر على قنوات الإشعار الخارجية فقط.
+        allowed_levels = self.config.get("alert_levels") or ["CRITICAL", "SECURITY"]
+        if level not in allowed_levels:
+            logger.debug(f"Alert level '{level}' not in alert_levels={allowed_levels}; skipping external notify")
+            return
+
         if self.config["telegram"]["enabled"]:
             self._send_telegram(full_message)
         

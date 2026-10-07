@@ -75,6 +75,35 @@ DIAGNOSE_HIGH_UNREAD_THRESHOLD = 20
 DIAGNOSE_INTERVAL_S = 120  # ثانية بين دورات التشخيص الخلفية
 DIAGNOSE_HISTORY_KEEP_LAST = 500  # أقصى دورات تُبقى في SQLite (قابل للضبط عبر NSM_DIAGNOSE_HISTORY_KEEP)
 
+# 🆕 عتبات تصعيد WARNING → CRITICAL لتنبيهات دورة التشخيص (run_nodes_diagnose_cycle).
+# قبل هذا التصعيد كانت كل تنبيهات الدورة (low_rep / high_unread / spike) تُرسَل
+# دائماً بمستوى "WARNING" مهما بلغت خطورتها — ما يعني أن مسار الواجهة المبني
+# حديثاً لعرض تنبيهات CRITICAL بشكل مميّز (toast أحمر + صف ملوّن، انظر
+# ui_pages/health.py) لم يكن يُفعَّل فعلياً أبداً من هذه الدورة. هذه العتبات
+# تصعّد فقط الحالات الواضحة الخطورة (نصف العُقد فأكثر متأثرة، أو ارتفاع حاد
+# جداً فوق المتوسط التاريخي) حتى لا تتحوّل كل دورة فيها عقدة واحدة متعثرة إلى
+# إنذار حرج مزعج.
+DIAGNOSE_CRITICAL_RATIO = 0.5       # نسبة العُقد المتأثرة من الممسوحة لاعتبار الحالة حرجة
+DIAGNOSE_CRITICAL_MIN_SCANNED = 3   # لا تصعيد بالنسبة المئوية إن كانت العُقد الممسوحة أقل من هذا (شبكة صغيرة/تطوير)
+DIAGNOSE_CRITICAL_ABS_COUNT = 5     # أو تصعيد بغض النظر عن النسبة إن تجاوز العدد المطلق هذا الحد
+DIAGNOSE_CRITICAL_SPIKE_MULTIPLIER = 2.0  # تصعيد الارتفاع المفاجئ إن تجاوز current ضعف عتبة التنبيه العادية
+
+
+def _diagnose_alert_level(affected_count: int, scanned_count: int) -> str:
+    """يقرر مستوى تنبيه دورة التشخيص: "CRITICAL" إن كانت نسبة العُقد المتأثرة
+    من الممسوحة كبيرة (وعدد العُقد الممسوحة كافٍ ليكون للنسبة معنى)، أو إن
+    تجاوز العدد المطلق حداً واضحاً بصرف النظر عن النسبة (شبكة كبيرة ولو
+    نسبتها المتأثرة صغيرة). غير ذلك "WARNING" كالسلوك السابق."""
+    if affected_count <= 0:
+        return "WARNING"
+    if affected_count >= DIAGNOSE_CRITICAL_ABS_COUNT:
+        return "CRITICAL"
+    if scanned_count >= DIAGNOSE_CRITICAL_MIN_SCANNED:
+        ratio = affected_count / scanned_count
+        if ratio >= DIAGNOSE_CRITICAL_RATIO:
+            return "CRITICAL"
+    return "WARNING"
+
 # اليد اليمنى للعقدة: أفعال مسموحة فقط (كل ما عداها مرفوض) + قيود صارمة.
 HAND_RIGHT_ALLOWED = ("send_message", "request_evolution", "request_peer_ping")
 HAND_EVOLUTION_COOLDOWN_S = 300.0   # أقل فاصل بين طلبَي تطوّر صادرَين من أي عُقد
@@ -1923,8 +1952,16 @@ class MeshBundle:
                     self._node_runtime_meta["__mesh_diagnose_summary__"] = summary
                 if spike.get("spike"):
                     from ai.alert_manager import alert_manager
+                    # تصعيد لـCRITICAL فقط إن كان الارتفاع حاداً جداً (ضعف عتبة
+                    # التنبيه العادية فأكثر) — ارتفاع "بالكاد فوق المتوسط" يبقى WARNING.
+                    _spike_thr = float(spike.get("threshold") or 0.0)
+                    _spike_level = (
+                        "CRITICAL"
+                        if _spike_thr > 0 and float(spike.get("current") or 0) >= _spike_thr * DIAGNOSE_CRITICAL_SPIKE_MULTIPLIER
+                        else "WARNING"
+                    )
                     alert_manager.send_alert(
-                        "WARNING",
+                        _spike_level,
                         f"ارتفاع low_rep_count={spike.get('current')} فوق المتوسط {spike.get('avg')}",
                         details=spike,
                         throttle_sec=600,
@@ -1965,15 +2002,17 @@ class MeshBundle:
         try:
             from ai.alert_manager import alert_manager
             if low_rep:
+                _low_level = _diagnose_alert_level(len(low_rep), len(nodes_out))
                 alert_manager.send_alert(
-                    "WARNING",
+                    _low_level,
                     f"عُقد بسمعة منخفضة ({len(low_rep)})",
                     details={"threshold": DIAGNOSE_LOW_REP_THRESHOLD, "nodes": low_rep[:10]},
                     throttle_sec=300,
                 )
             if high_unread:
+                _unread_level = _diagnose_alert_level(len(high_unread), len(nodes_out))
                 alert_manager.send_alert(
-                    "WARNING",
+                    _unread_level,
                     f"عُقد بوارد مرتفع غير مقروء ({len(high_unread)})",
                     details={"threshold": DIAGNOSE_HIGH_UNREAD_THRESHOLD, "nodes": high_unread[:10]},
                     throttle_sec=300,
