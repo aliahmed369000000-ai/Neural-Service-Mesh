@@ -40,15 +40,25 @@ def test_receipt_and_reputation():
         lm = _isolate(tmp, "rnode")
         n = lm.LivingMeshNode(node_id="rnode", host="127.0.0.1", port=0)
         n.join_network()
-        result = {"ok": True, "value": 42}
-        receipt = n.issue_execution_receipt("t1", "demo", result)
-        assert receipt.get("signature")
-        assert n.verify_signature(n._pub_pem().encode(), 
-            __import__("json").dumps({k: receipt[k] for k in receipt if k != "signature"}, sort_keys=True),
-            receipt["signature"])
-        rep = n.get_reputation("rnode")
-        assert rep["score"] >= 1
-        print("✅ receipt + reputation", rep["score"])
+        try:
+            result = {"ok": True, "value": 42}
+            receipt = n.issue_execution_receipt("t1", "demo", result)
+            assert receipt.get("signature")
+            assert n.verify_signature(n._pub_pem().encode(), 
+                __import__("json").dumps({k: receipt[k] for k in receipt if k != "signature"}, sort_keys=True),
+                receipt["signature"])
+            rep = n.get_reputation("rnode")
+            assert rep["score"] >= 1
+            print("✅ receipt + reputation", rep["score"])
+        finally:
+            # join_network() تبدأ خيطَي daemon دائمَين (capability_watch،
+            # self_evolution_watch) — بلا إيقافهما يستمران بالكتابة داخل tmp
+            # بعد خروج الدالة، فيتسابقان مع tempfile.TemporaryDirectory().cleanup()
+            # (rmtree) وتفشل أحياناً بـ"Directory not empty". الدالتان جاهزتان
+            # أصلاً في LivingMeshNode (راجع ai/living_mesh.py) لكن لم تكونا
+            # تُستدعيان هنا إطلاقاً.
+            n.stop_capability_watch()
+            n.stop_self_evolution_watch()
 
 
 def test_federated_quorum_local():
@@ -56,12 +66,16 @@ def test_federated_quorum_local():
         lm = _isolate(tmp, "flnode")
         n = lm.LivingMeshNode(node_id="flnode", host="127.0.0.1", port=0)
         n.join_network()
-        out = asyncio.run(
-            n.federated_round(worker_peers=[], steps=2, quorum=1)
-        )
-        assert out["ok"] is True
-        assert out["merged"]["layers_count"] >= 1
-        print("✅ federated local quorum", out["round_id"])
+        try:
+            out = asyncio.run(
+                n.federated_round(worker_peers=[], steps=2, quorum=1)
+            )
+            assert out["ok"] is True
+            assert out["merged"]["layers_count"] >= 1
+            print("✅ federated local quorum", out["round_id"])
+        finally:
+            n.stop_capability_watch()
+            n.stop_self_evolution_watch()
 
 
 def test_health_snapshot():
@@ -69,10 +83,14 @@ def test_health_snapshot():
         lm = _isolate(tmp, "hnode")
         n = lm.LivingMeshNode(node_id="hnode", host="127.0.0.1", port=9100)
         n.join_network()
-        snap = n.network_health_snapshot()
-        assert snap["node_id"] == "hnode"
-        assert "identity_pub_fingerprint" in snap
-        print("✅ health snapshot", snap["identity_pub_fingerprint"])
+        try:
+            snap = n.network_health_snapshot()
+            assert snap["node_id"] == "hnode"
+            assert "identity_pub_fingerprint" in snap
+            print("✅ health snapshot", snap["identity_pub_fingerprint"])
+        finally:
+            n.stop_capability_watch()
+            n.stop_self_evolution_watch()
 
 
 def test_unified_task_envelope():
