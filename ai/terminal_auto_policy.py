@@ -7,6 +7,9 @@
 """
 from __future__ import annotations
 
+import fnmatch
+import os
+import posixpath
 import re
 import shlex
 import subprocess
@@ -130,6 +133,8 @@ def decide(command: str | Sequence[str]) -> TerminalDecision:
                     return TerminalDecision(False, "معاملات pytest غير مسموحة")
                 if mod in ("py_compile", "compileall") and not _path_args_ok(parts[3:]):
                     return TerminalDecision(False, "مسارات غير آمنة")
+                if mod == "unittest" and not _unittest_args_ok(parts[3:]):
+                    return TerminalDecision(False, "معاملات unittest غير مسموحة")
                 return TerminalDecision(True, f"python -m {mod} مسموح", parts)
         # سكربت نسبي بسيط: python path/to/test_x.py
         if len(parts) == 2 and re.match(r"^[\w./-]+\.py$", parts[1]) and ".." not in parts[1]:
@@ -160,8 +165,33 @@ def decide(command: str | Sequence[str]) -> TerminalDecision:
     return TerminalDecision(False, "الأمر خارج القائمة المسموحة؛ يلزم طلب موافقة", parts)
 
 
+# ── مسارات آمنة: لا خروج من المشروع ولا ملفات أسرار ────────────────────────
+_SECRET_SEGMENT_PATTERNS = (
+    ".env*", ".git", ".gitmodules", ".gitconfig", ".git-credentials", ".streamlit",
+    ".ssh", ".aws", ".netrc", ".npmrc", ".pypirc", "*.pem", "*.key", "*.p12", "*.pfx",
+    "id_rsa*", "id_ed25519*", "*secret*", "*credential*", "*token*", "*password*", "*.kdbx",
+)
+
+
+def _path_is_safe(arg: str) -> bool:
+    """مسار نسبي داخل المشروع فقط، بلا '..' ولا مسار مطلق ولا '~'، وبلا أي
+    جزء يطابق ملفات الأسرار (.env، .git/config فيه توكن الـremote، .streamlit...)."""
+    if not arg or "\x00" in arg or "\\" in arg:
+        return False
+    if arg.startswith(("/", "~")):
+        return False
+    segs = [s for s in posixpath.normpath(arg).split("/") if s not in ("", ".")]
+    if ".." in segs:
+        return False
+    for seg in segs:
+        low = seg.lower()
+        if any(fnmatch.fnmatch(low, pat) for pat in _SECRET_SEGMENT_PATTERNS):
+            return False
+    return True
+
+
 def _pytest_args_ok(args: tuple[str, ...]) -> bool:
-    """يسمح بمسارات tests/ وعلامات pytest الشائعة فقط."""
+    """يسمح بمسارات tests/ وملفات test_*.py وعلامات pytest الشائعة فقط."""
     for a in args:
         if a.startswith("-"):
             if a in ("-q", "-v", "-vv", "--tb=line", "--tb=short", "--tb=no",
@@ -170,77 +200,118 @@ def _pytest_args_ok(args: tuple[str, ...]) -> bool:
             if a.startswith("--tb=") or a.startswith("--maxfail="):
                 continue
             return False
-        # مسار
-        if ".." in a or a.startswith("/") or a.startswith("~"):
-            return False
-        if not (a.startswith("tests/") or a.startswith("./tests/") or a.endswith(".py") or a == "tests"):
-            # يسمح بتعبير -k expression ككلمة تالية — إن كانت بعد -k تُقبل في الحلقة السابقة
-            if re.match(r"^[\w\[\]-]+$", a):
+        node = a.split("::", 1)[0]
+        is_tests_path = node == "tests" or node.startswith(("tests/", "./tests/"))
+        is_test_file = node.endswith(".py") and posixpath.basename(node).startswith("test_")
+        if is_tests_path or is_test_file:
+            if _path_is_safe(node):
                 continue
             return False
+        # كلمة بسيطة (قيمة -k)
+        if re.match(r"^[\w\[\]-]+$", a):
+            continue
+        return False
     return True
+
+
+def _unittest_args_ok(args: tuple[str, ...]) -> bool:
+    """unittest بلا discover/-s/-t/-p (كانت تسمح بتشغيل اكتشاف في أي مسار):
+    أسماء وحدات tests.* أو ملفات test_*.py آمنة فقط."""
+    for a in args:
+        if a in ("-v", "-q"):
+            continue
+        if re.match(r"^tests(\.\w+){0,3}$", a):
+            continue
+        if a.endswith(".py") and posixpath.basename(a).startswith("test_") and _path_is_safe(a):
+            continue
+        return False
+    return True
+
+
+_GIT_REF_RE = re.compile(r"^(HEAD(~\d{1,2})?|[0-9a-f]{7,40})$")
+
+
+def _git_pos_ok(a: str) -> bool:
+    """معامل git موضعي: مرجع آمن أو مسار آمن. ':' ممنوعة (HEAD:.env يقرأ blob)."""
+    if ":" in a or ".." in a:
+        return False
+    return bool(_GIT_REF_RE.match(a)) or _path_is_safe(a)
 
 
 def _git_args_ok(sub: str, args: tuple[str, ...]) -> bool:
     if sub == "log":
         for a in args:
-            if a.startswith("-") and a in ("--oneline", "--stat", "--graph", "-5", "-10", "-20", "-n"):
+            if a in ("--oneline", "--stat", "--graph", "-5", "-10", "-20", "-n"):
                 continue
             if a.startswith("-n") and a[2:].isdigit():
                 continue
             if a.isdigit() and int(a) <= 50:
                 continue
-            if a in ("HEAD", "HEAD~1", "HEAD~5"):
-                continue
-            if a.startswith("--"):
+            if a.startswith("-"):
                 return False
-            if ".." in a or a.startswith("-"):
+            if not _git_pos_ok(a):
                 return False
         return True
     if sub == "show":
         for a in args:
-            if a in ("--stat", "--name-only", "--oneline", "HEAD", "HEAD~1"):
+            if a in ("--stat", "--name-only", "--oneline"):
                 continue
-            if re.match(r"^[0-9a-f]{7,40}$", a):
-                continue
-            if a.startswith("-"):
+            if a.startswith("-") or not _git_pos_ok(a):
                 return False
         return len(args) <= 3
     if sub == "diff":
         for a in args:
-            if a in ("--check", "--stat", "--name-only", "HEAD", "--cached"):
+            if a in ("--check", "--stat", "--name-only", "--cached", "--shortstat", "-U1", "-U3"):
                 continue
-            if a.startswith("-") and a in ("-U1", "-U3", "--shortstat"):
-                continue
-            if ".." in a or (a.startswith("-") and a not in ("--check", "--stat", "--name-only", "--cached", "--shortstat")):
+            if a.startswith("-") or not _git_pos_ok(a):
                 return False
         return True
-    if sub in ("status", "branch", "ls-files", "rev-parse"):
-        for a in args:
-            if a.startswith("-") and len(a) < 20:
-                continue
-            if a in ("HEAD", "--abbrev-ref", "--short", "--show-current"):
-                continue
-            if ".." in a:
-                return False
-        return True
-    return False
+    if sub == "branch":
+        # عرض فقط — بلا أسماء ولا -D/-d/-m/-f/--set-upstream-to (كانت تكتب/تحذف فروعاً)
+        return all(a in ("-v", "-vv", "-a", "-r", "--all", "--remotes", "--show-current") for a in args)
+    flags = {
+        "status": ("-s", "-sb", "-b", "--short", "--branch", "--porcelain", "-uno"),
+        "ls-files": ("--cached", "--others", "--modified", "-c", "-o", "-m", "--exclude-standard"),
+        "rev-parse": ("--abbrev-ref", "--short", "--show-toplevel", "--is-inside-work-tree"),
+    }.get(sub)
+    if flags is None:
+        return False
+    for a in args:
+        if a in flags:
+            continue
+        if a.startswith("-") or not _git_pos_ok(a):
+            return False
+    return True
 
 
 def _path_args_ok(args: tuple[str, ...]) -> bool:
     for a in args:
         if a.startswith("-"):
             # أعلام بسيطة فقط
-            if a in ("-l", "-la", "-1", "-n", "-20", "-5", "-10", "-l", "--lines"):
-                continue
-            if re.match(r"^-\d+$", a):
+            if a in ("-l", "-la", "-1", "-n", "--lines") or re.match(r"^-\d+$", a):
                 continue
             return False
-        if ".." in a or a.startswith("~") or (a.startswith("/") and not a.startswith("/home/workdir")):
-            # نمنع مسارات مطلقة خارج بيئة العمل الشائعة
-            if a.startswith("/"):
-                return False
-        if any(ch in a for ch in (";", "|", "&", ">", "<", "`", "$")):
+        if not _path_is_safe(a):
+            return False
+    return True
+
+
+_PATH_CHECKED_HEADS = {"ls", "head", "tail", "wc", "python", "python3", "pytest", "py.test"}
+
+
+def _paths_stay_inside(cwd: str, parts: Sequence[str]) -> bool:
+    """بعد حلّ الروابط الرمزية: كل معامل غير-علَم يجب أن يبقى داخل cwd وألا يصير
+    ملف أسرار (رابط رمزي مثل notes.txt → .env). فحص realpath يحتاج cwd فيجري هنا."""
+    if not parts or parts[0] not in _PATH_CHECKED_HEADS:
+        return True
+    root = os.path.realpath(cwd)
+    for a in parts[1:]:
+        if a.startswith("-") or "=" in a:
+            continue
+        real = os.path.realpath(os.path.join(root, a.split("::", 1)[0]))
+        if real != root and not real.startswith(root + os.sep):
+            return False
+        if real != root and not _path_is_safe(os.path.relpath(real, root)):
             return False
     return True
 
@@ -249,6 +320,8 @@ def run_auto(command: str | Sequence[str], *, cwd: str, timeout: int = 60) -> st
     decision = decide(command)
     if not decision.allowed:
         return f"مرفوض تلقائياً: {decision.reason}"
+    if not _paths_stay_inside(cwd, decision.command):
+        return "مرفوض تلقائياً: مسار يخرج من المشروع أو يشير (رابط رمزي) إلى ملف أسرار"
     try:
         result = subprocess.run(
             list(decision.command),
