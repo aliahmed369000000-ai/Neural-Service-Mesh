@@ -67,7 +67,10 @@ def test_revived_evolved_node_has_working_hands(paths):
     st2 = revived.use_hand(LEFT, "node_status")
     assert st2.ok and "last_terminal_check" in (st2.output or {})
     sd = revived.use_hand(LEFT, "self_diagnose")
-    assert sd.ok and isinstance(sd.output, dict) and sd.output.get("layer") == "node-self-diagnose-v1"
+    # القيمة ترقّت إلى v2 (تشخيص أغنى: أقران/صندوق وارد/سمعة) في كوميت لاحق
+    # دون تحديث هذا الاختبار — التحقّق هنا من بادئة الطبقة لا رقم إصدارها.
+    assert sd.ok and isinstance(sd.output, dict)
+    assert str(sd.output.get("layer", "")).startswith("node-self-diagnose-v")
     ib = revived.use_hand(LEFT, "inbox_summary")
     assert ib.ok and "unread_total" in (ib.output or {})
     other = next(i for i in b2.role_node_ids.values())
