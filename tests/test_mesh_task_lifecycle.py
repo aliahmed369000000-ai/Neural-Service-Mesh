@@ -122,6 +122,17 @@ def test_duplicate_sends_explicit_error_reply():
     with tempfile.TemporaryDirectory() as td:
         node = _isolated_node(Path(td), "life-dup")
         node.node_info = {"id": node.node_id, "capabilities": ["text", "tf_engine", "CPU"]}
+        # التشفير الطرفي مفعّل افتراضياً (fail-closed): لا رد لنظير بلا مفتاح مُتبادَل.
+        # نزوّد النظير «c» بمفتاح حقيقي ونحتفظ بخاصّه لفكّ الرد.
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        peer_private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        node._peer_key_path("c").write_bytes(
+            peer_private.public_key().public_bytes(
+                serialization.Encoding.PEM,
+                serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+        )
         tid = f"task_{uuid.uuid4().hex[:8]}"
         # أول تنفيذ
         loop = asyncio.new_event_loop()
@@ -147,11 +158,39 @@ def test_duplicate_sends_explicit_error_reply():
         assert sent, "expected explicit reply on duplicate"
         import json
         payload = json.loads(sent[-1]).get("payload") or {}
-        data = payload.get("data") or {}
+        envelope = (payload.get("data") or {}).get("e2e")
+        assert envelope, "الرد يجب أن يكون مشفّراً طرفياً لا نصاً صريحاً"
+        from ai.e2e_crypto import decrypt_payload
+        data = decrypt_payload(envelope, peer_private)
         assert data.get("ok") is False
         assert data.get("error") == "duplicate_rejected"
         assert data.get("task_id") == tid
         print("✅ explicit duplicate_rejected reply")
+
+def test_reply_to_peer_without_exchanged_key_fails_closed_never_plaintext():
+    """بلا مفتاح مُتبادَل لا يُرسَل أي رد (لا تسريب نصّي): السلوك المقصود للتشفير الطرفي."""
+    with tempfile.TemporaryDirectory() as td:
+        node = _isolated_node(Path(td), "life-nokey")
+        node.node_info = {"id": node.node_id, "capabilities": ["text", "tf_engine", "CPU"]}
+        tid = f"task_{uuid.uuid4().hex[:8]}"
+        sent = []
+
+        class FakeWS:
+            async def send_str(self, m):
+                sent.append(m)
+
+            async def send(self, m):
+                sent.append(m)
+
+        loop = asyncio.new_event_loop()
+        args = {"task_id": tid, "prompt": "a", "max_tokens": 8}
+        loop.run_until_complete(node._handle_mesh_task(mt.KIND_INFERENCE, args, sender_id="nokey"))
+        loop.run_until_complete(
+            node._handle_mesh_task(mt.KIND_INFERENCE, args, sender_id="nokey", websocket=FakeWS())
+        )
+        loop.close()
+        assert sent == []
+
 
 if __name__ == "__main__":
     test_register_and_status()
