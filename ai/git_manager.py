@@ -3,6 +3,7 @@ import subprocess
 import shutil
 import logging
 import tempfile
+import uuid
 from typing import Optional, List
 
 logger = logging.getLogger("NSM-GitManager")
@@ -58,12 +59,19 @@ class GitManager:
 
     def clone(self, target_name: str = "clone_temp") -> str:
         """استنساخ المستودع إلى مجلد مؤقت."""
-        target_path = os.path.join(self.base_dir, target_name)
-        if os.path.exists(target_path):
-            shutil.rmtree(target_path)
+        # لاحقة فريدة لكل استدعاء: كان المسار ثابتاً (base_dir/target_name) فعدة
+        # عقد تعمل على جهاز واحد (scripts/run_local_mesh.py: بذرة + عاملان) كانت
+        # تستنسخ إلى نفس المجلد معاً — كل واحدة تحذف مجلد الأخرى أثناء الاستنساخ
+        # فتفشل الثلاث بـ"File exists" و"unable to write pack file" ولا يُدفع شيء
+        # (وُجدت بتشغيل 3 عقد فعلياً ومعها GITHUB_TOKEN). المسار المُعاد يُمرَّر
+        # لـcommit_and_push/cleanup، فلا أحد يعتمد على الاسم الثابت.
+        target_path = os.path.join(self.base_dir, f"{target_name}_{os.getpid()}_{uuid.uuid4().hex[:6]}")
             
         logger.info(f"🚀 Cloning repository to {target_path}...")
-        cmd = ["git", "clone", self._get_auth_url(), target_path]
+        # --depth 1: كل استخدامات clone() هنا تعدّل ملفات وتدفع فقط ولا تحتاج التاريخ؛
+        # الاستنساخ الكامل لثلاث عقد معاً كان يتجاوز مهلة 60ث (≈50ث للواحدة)
+        # فلا يُدفع شيء. الدفع من نسخة سطحية يعمل عادياً.
+        cmd = ["git", "clone", "--depth", "1", self._get_auth_url(), target_path]
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=self.timeout_seconds)
         except subprocess.TimeoutExpired as e:

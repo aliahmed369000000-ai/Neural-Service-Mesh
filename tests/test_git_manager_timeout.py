@@ -66,3 +66,27 @@ def test_default_timeout_is_a_finite_positive_number():
     """تثبيت عدم الرجوع لسلوك 'بلا مهلة إطلاقاً' مستقبلاً بالخطأ."""
     gm = GitManager()
     assert 0 < gm.timeout_seconds < 600
+
+
+def test_clone_uses_unique_dir_per_call_and_shallow(monkeypatch):
+    """عدة عقد على جهاز واحد كانت تستنسخ إلى نفس المجلد الثابت فتحذف كل واحدة
+    مجلد الأخرى (File exists / unable to write pack)، والاستنساخ الكامل لثلاث
+    عقد معاً كان يتجاوز المهلة — وُجد بتشغيل 3 عقد فعلياً مع GITHUB_TOKEN."""
+    import subprocess as sp
+    calls = []
+
+    class _R:
+        returncode = 0
+        stderr = ""
+        stdout = ""
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        return _R()
+
+    monkeypatch.setattr(sp, "run", fake_run)
+    gm = GitManager(token=None, timeout_seconds=5)
+    p1 = gm.clone("same_name")
+    p2 = gm.clone("same_name")
+    assert p1 != p2
+    assert all("--depth" in c and "1" in c for c in calls)
