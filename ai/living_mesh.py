@@ -356,7 +356,7 @@ class LivingMeshNode:
         )
         return True
 
-    def stop_self_evolution_watch(self, timeout: float = 2.0) -> None:
+    def stop_self_evolution_watch(self, timeout: float = 5.0) -> None:
         """إيقاف مراقب التطوّر الذاتي دون ترك خيط خلف العقدة."""
         self._self_evolution_stop.set()
         thread = self._self_evolution_thread
