@@ -30,8 +30,20 @@ class NodeHealthLayer:
         self._task_log: List[Dict[str, Any]] = self._load_task_log()
         try:
             from ai.mesh_learning_engine import MeshLearningEngine
-            self.learning = MeshLearningEngine(node)
-        except Exception:
+            # 🆕 كانت MeshLearningEngine(node) — اسم المتغيّر node غير معرَّف
+            # إطلاقاً في __init__ (المعامل الحقيقي اسمه mesh_node)؛ كل إنشاء
+            # NodeHealthLayer كان يرفع NameError هنا فوراً، يلتقطه except
+            # العام أدناه صامتاً، فـself.learning كانت None دائماً على كل
+            # عقدة شُغِّلت على الإطلاق — تحقّقت بتشغيل عقدة حقيقية فعلاً
+            # وطباعة الاستثناء المكتوم: NameError: name 'node' is not
+            # defined. النتيجة العملية: /v2/learn/status و/v2/learn/cycle
+            # كانا يرجعان 503 learning_engine_unavailable دائماً، ولا مهمة
+            # واحدة كانت تُغذّي MeshLearningEngine.learn_from_task عبر
+            # record_task_result أدناه (self.learning is not None يفشل
+            # دائماً) — التعلّم من نتائج المهام كان معطَّلاً بالكامل.
+            self.learning = MeshLearningEngine(mesh_node)
+        except Exception as e:
+            logger.warning(f"NodeHealthLayer: تعذّر تفعيل MeshLearningEngine: {e}")
             self.learning = None
 
     def _load_task_log(self) -> List[Dict[str, Any]]:
