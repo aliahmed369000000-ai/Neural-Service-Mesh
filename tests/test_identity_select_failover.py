@@ -40,26 +40,31 @@ def test_rank_workers_by_latency_reputation():
         lm = isolate(tmp, "rk")
         n = lm.LivingMeshNode(node_id="ranker", host="127.0.0.1", port=0)
         n.join_network()
-        from ai.node_health_layer import NodeHealthLayer
-        h = NodeHealthLayer(n)
-        # seed route cache
-        h._route_cache = {
-            "slow": {"ok": True, "rtt_ms": 80.0, "path": "direct"},
-            "fast": {"ok": True, "rtt_ms": 5.0, "path": "direct"},
-            "down": {"ok": False, "rtt_ms": None, "path": "down"},
-        }
-        state = n._load_state()
-        state["nodes"] = {
-            "slow": {"id": "slow", "host": "1.1.1.1", "port": 1, "status": "online", "capabilities": ["GPU_HIGH"]},
-            "fast": {"id": "fast", "host": "1.1.1.2", "port": 2, "status": "online", "capabilities": ["GPU_HIGH"]},
-            "down": {"id": "down", "host": "1.1.1.3", "port": 3, "status": "online", "capabilities": ["GPU_HIGH"]},
-            "ranker": n.node_info if hasattr(n, "node_info") else {"id": "ranker", "status": "online"},
-        }
-        n._save_state(state)
-        n.update_reputation("fast", delta=10, reason="test")
-        ranked = h.rank_workers(require_capabilities=["GPU_HIGH"])
-        assert ranked[0]["peer_id"] == "fast", ranked
-        print("✅ #6 rank_workers prefers fast+reputable", [r["peer_id"] for r in ranked])
+        try:
+            from ai.node_health_layer import NodeHealthLayer
+            h = NodeHealthLayer(n)
+            # seed route cache
+            h._route_cache = {
+                "slow": {"ok": True, "rtt_ms": 80.0, "path": "direct"},
+                "fast": {"ok": True, "rtt_ms": 5.0, "path": "direct"},
+                "down": {"ok": False, "rtt_ms": None, "path": "down"},
+            }
+            state = n._load_state()
+            state["nodes"] = {
+                "slow": {"id": "slow", "host": "1.1.1.1", "port": 1, "status": "online", "capabilities": ["GPU_HIGH"]},
+                "fast": {"id": "fast", "host": "1.1.1.2", "port": 2, "status": "online", "capabilities": ["GPU_HIGH"]},
+                "down": {"id": "down", "host": "1.1.1.3", "port": 3, "status": "online", "capabilities": ["GPU_HIGH"]},
+                "ranker": n.node_info if hasattr(n, "node_info") else {"id": "ranker", "status": "online"},
+            }
+            n._save_state(state)
+            n.update_reputation("fast", delta=10, reason="test")
+            ranked = h.rank_workers(require_capabilities=["GPU_HIGH"])
+            assert ranked[0]["peer_id"] == "fast", ranked
+            print("✅ #6 rank_workers prefers fast+reputable", [r["peer_id"] for r in ranked])
+        finally:
+            # join_network() يبدأ خيطَي daemon يكتبان في data_dir؛ إيقافهما
+            # يمنع سباق تنظيف TemporaryDirectory (OSError: Directory not empty).
+            n.mark_offline()
 
 
 def test_failover_local_fallback():
@@ -67,22 +72,27 @@ def test_failover_local_fallback():
         lm = isolate(tmp, "fo")
         n = lm.LivingMeshNode(node_id="fo_node", host="127.0.0.1", port=0)
         n.join_network()
-        from ai.node_health_layer import NodeHealthLayer
-        from ai import mesh_task_protocol as mt
-        h = NodeHealthLayer(n)
-        # no workers reachable -> local fallback
-        out = asyncio.run(h.submit_with_failover(
-            mt.KIND_MAP,
-            {"lines": ["failover a", "failover b"], "op": "wordcount"},
-            max_attempts=2,
-            prefer_local_fallback=True,
-        ))
-        assert out["ok"] is True
-        assert out["mode"] == "failover_local"
-        assert out.get("receipt")
-        ver = h.verify_receipt(out["receipt"], out["result"])
-        assert ver["ok"] is True
-        print("✅ #7 failover local fallback + verifiable receipt")
+        try:
+            from ai.node_health_layer import NodeHealthLayer
+            from ai import mesh_task_protocol as mt
+            h = NodeHealthLayer(n)
+            # no workers reachable -> local fallback
+            out = asyncio.run(h.submit_with_failover(
+                mt.KIND_MAP,
+                {"lines": ["failover a", "failover b"], "op": "wordcount"},
+                max_attempts=2,
+                prefer_local_fallback=True,
+            ))
+            assert out["ok"] is True
+            assert out["mode"] == "failover_local"
+            assert out.get("receipt")
+            ver = h.verify_receipt(out["receipt"], out["result"])
+            assert ver["ok"] is True
+            print("✅ #7 failover local fallback + verifiable receipt")
+        finally:
+            # join_network() يبدأ خيطَي daemon يكتبان في data_dir؛ إيقافهما
+            # يمنع سباق تنظيف TemporaryDirectory (OSError: Directory not empty).
+            n.mark_offline()
 
 
 if __name__ == "__main__":
