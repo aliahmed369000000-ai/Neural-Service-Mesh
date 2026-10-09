@@ -226,12 +226,24 @@ def execute_inference(task: Dict[str, Any]) -> Dict[str, Any]:
         text_out = json.dumps(output, ensure_ascii=False)
         used_llm = False
     else:
+        # 🧠 الشبكة العصبية المفتوحة أولاً تلقائياً (Falcon-Arabic-7B عبر HF) —
+        # بلا مفتاح HF أو عند أي فشل → None فيكمل المسار القديم كما هو تماماً.
+        neural = None
         try:
-            from ai.llm_fallback import LLMFallback
-            fb = LLMFallback(max_tokens=max_tokens)
-            result = fb.generate(prompt)
-            text_out = (result.text or "").strip()
-            used_llm = fb.provider.value != "ckg_synthesis"
+            from ai.node_think import neural_first_generate
+            neural = neural_first_generate(prompt, max_tokens=max_tokens)
+        except Exception:
+            neural = None
+        try:
+            if neural is not None:
+                text_out = neural["text"]
+                used_llm = True
+            else:
+                from ai.llm_fallback import LLMFallback
+                fb = LLMFallback(max_tokens=max_tokens)
+                result = fb.generate(prompt)
+                text_out = (result.text or "").strip()
+                used_llm = fb.provider.value != "ckg_synthesis"
             if not text_out:
                 raise ValueError("رد فارغ من LLMFallback")
         except Exception as exc:
@@ -254,6 +266,7 @@ def execute_inference(task: Dict[str, Any]) -> Dict[str, Any]:
         "prompt_preview": prompt[:120],
         "output": text_out,
         "used_real_llm": used_llm,
+        "used_neural_open_source": (not modality.startswith("image")) and neural is not None,
         "elapsed_ms": round((time.time() - t0) * 1000, 2),
         "task_id": task.get("task_id"),
     }

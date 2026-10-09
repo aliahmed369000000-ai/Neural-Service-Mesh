@@ -135,3 +135,29 @@ def neural_refine_evolution_task(
         except Exception:
             pass
         return None
+
+
+def neural_first_generate(prompt: str, max_tokens: int = 128) -> Optional[Dict[str, Any]]:
+    """مسار «الشبكة العصبية أولاً» لمهام الاستدلال التي تستقبلها العقدة من
+    الشبكة (ai/mesh_task_protocol.py::execute_inference): Falcon-Arabic-7B
+    المفتوح المصدر حصراً (provider_override='hf').
+
+    يُرجع None — بلا استثناء — إن: معطَّل (NSM_NODE_NEURAL_AUTO=0)، لا مفتاح HF،
+    فشل الاستدعاء، أو لم يصدر الناتج من النموذج المفتوح؛ فيكمل المستدعي بمساره
+    القديم بلا أي تغيير. بخلاف neural_refine_evolution_task لا حدّ معدّل هنا:
+    كل مهمة استدلال حقيقية تستحق نموذجاً حقيقياً، ومزوّد HF نفسه يفرض حدوده
+    (cooldown داخل LLMFallback عند الفشل)."""
+    try:
+        if not (auto_enabled() and neural_available()):
+            return None
+        prompt = (prompt or "").strip()
+        if not prompt:
+            return None
+        res = neural_think(prompt[:MAX_PROMPT_CHARS], max_tokens=max_tokens)
+        text = (res.get("text") or "").strip()
+        if not res.get("used_open_source_model") or not text or text.startswith(("❌", "⚠️")):
+            return None
+        return {"text": text, "model": res.get("model"), "provider": res.get("provider")}
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("neural_first_generate failed: %s", exc)
+        return None
