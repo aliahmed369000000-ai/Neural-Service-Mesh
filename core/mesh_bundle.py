@@ -1099,6 +1099,38 @@ class MeshBundle:
                 raise ValueError("what must be one of: status, log, diff, branch")
             return at.git_info(what)
 
+        def think(prompt: str, max_tokens: int = 200):
+            """العقدة تستخدم شبكة عصبية حقيقية — وليس فقط قواعد/قوالب
+            مكتوبة سلفاً — للصياغة أو التلخيص أو الاستدلال اللغوي القصير.
+            النموذج: Falcon-Arabic-7B-Instruct (مبني على Falcon3-7B من
+            TII، مفتوح المصدر بالكامل، عبر Hugging Face Inference API
+            المجانية) — نفس النموذج اللغوي العام المُعتمَد فعلياً لهذا
+            المشروع (ai/llm_fallback.py). provider_override='hf' يضمن أن
+            هذه الأداة تحديداً لا تستخدم أبداً أي مزوّد آخر (ولو كان مدفوعاً
+            ومُهيَّأً في البيئة) — العقدة لا تملك ولا تستطيع أن تُنفق مالاً
+            حقيقياً عبر يدها، بصرف النظر عن أي إعداد عام للتطبيق."""
+            prompt = (prompt or "").strip()
+            if not prompt:
+                raise ValueError("prompt فارغ")
+            if len(prompt) > 2000:
+                raise ValueError("prompt أطول من 2000 حرف — اختصره قبل الاستدعاء")
+            max_tokens = min(max(int(max_tokens), 1), 400)
+
+            from ai.llm_fallback import LLMFallback
+            # timeout=11 (لا 14 كالمعتاد في بقية التطبيق): مهلة اليد
+            # الواحدة لكل أدواتها 15 ثانية إجمالاً (core/node_hands.py)،
+            # فيلزم هامش حقيقي لبناء الـprompt واستدعاء الخيط نفسه، لا أن
+            # يُستهلَك كل الوقت المتاح على طلب HTTP واحد فقط.
+            llm = LLMFallback(max_tokens=max_tokens, timeout=11, provider_override="hf")
+            result = llm.generate(prompt)
+            return {
+                "text": result.text,
+                "provider": result.provider.value,
+                "model": result.model,
+                "latency_ms": result.latency_ms,
+                "used_open_source_model": result.provider.value == "huggingface",
+            }
+
         def kaggle_status_quick(slug: str = ""):
             """نسخة سريعة من at.kaggle_status بلا جلب مخرجات (قد يأخذ حتى
             600 ثانية لكيرنل منتهٍ) — مهلة اليد الواحدة لكل الأدوات (15
@@ -1117,6 +1149,8 @@ class MeshBundle:
             ("system_info", at.system_info, "لمحة عن البيئة بلا أسرار"),
             ("kaggle_status", kaggle_status_quick,
              "حالة سطر كيرنل تدريب Kaggle (قراءة فقط، بلا جلب مخرجات)"),
+            ("think", think,
+             "استدعاء شبكة عصبية حقيقية (Falcon-Arabic-7B-Instruct، مفتوحة المصدر) للصياغة/الاستدلال القصير"),
         ])
         return tools
 

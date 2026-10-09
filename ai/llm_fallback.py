@@ -561,11 +561,23 @@ class LLMFallback:
         temperature: float = 0.4,
         timeout:     int   = 14,
         model_key:   Optional[str] = None,
+        provider_override: Optional[str] = None,
     ):
         self.ckg         = ckg
         self.max_tokens  = max_tokens
         self.temperature = temperature
         self.timeout     = timeout
+        # provider_override اختياري: يفرض مزوّداً واحداً فقط على *هذه*
+        # النسخة تحديداً، بصرف النظر عن NSM_LLM_PROVIDER_PREF (متغيّر بيئة
+        # عام يؤثر على كل نسخ LLMFallback في التطبيق). لازم لاستخدامات
+        # تحتاج ضماناً صارماً بعدم استخدام أي مزوّد غير المذكور مهما تغيّر
+        # إعداد التطبيق العام — مثال: core/node_hands.py (think) يجب أن
+        # تستخدم حصراً المزوّد المفتوح المصدر 'hf' ولا تتسرّب أبداً لمزوّد
+        # مدفوع حتى لو كانت مفاتيحه مُعدَّة في البيئة. None = السلوك
+        # الافتراضي القديم (NSM_LLM_PROVIDER_PREF أو auto) بلا أي تغيير.
+        self._provider_pref_override = (
+            provider_override.strip().lower() if provider_override else None
+        )
         # model_key اختياري: يسمح باختيار نموذج محدد من ANTHROPIC_MODELS
         # (مثال: model_key="fable" لاستخدام claude-fable-5 في محرك السرد
         # الإبداعي ai/fable_engine.py) أو من OPENROUTER_MODELS (مثال:
@@ -605,7 +617,11 @@ class LLMFallback:
         NSM_LLM_PROVIDER_PREF يفرض مزوّداً واحداً إن حُدِّد صراحة.
         """
         chain: List[Tuple[Provider, str, str]] = []
-        pref = os.getenv("NSM_LLM_PROVIDER_PREF", "auto").strip().lower() or "auto"
+        pref = (
+            self._provider_pref_override
+            or os.getenv("NSM_LLM_PROVIDER_PREF", "auto").strip().lower()
+            or "auto"
+        )
         if pref not in (
             "auto", "groq", "cerebras", "cf", "cloudflare", "gemini",
             "openrouter", "anthropic", "openai", "together",
