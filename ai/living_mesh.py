@@ -1337,7 +1337,10 @@ class LivingMeshNode:
             logger.info(f"🛠️ Starting Self-Evolution for task: {task_desc}")
             
             # تنفيذ التطور عبر GitManager
-            self.git_manager.apply_evolution(task_desc)
+            if self.git_manager.apply_evolution(task_desc) is False:
+                # لا توكن GitHub: لا دفع، فلا نرفع النقاط ولا نعلن "completed"
+                logger.info("⏭️ %s: دورة التطوّر مُتخطّاة بلا دفع (لا GITHUB_TOKEN)", self.node_id)
+                return
             
             # تحديث نتيجة التطور محلياً ومشاركتها مع السرب
             self.local_evolution_score += 0.1

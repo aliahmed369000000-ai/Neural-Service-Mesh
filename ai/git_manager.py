@@ -38,7 +38,11 @@ class GitManager:
     
     def __init__(self, token: Optional[str] = None, repo_url: str = "github.com/aliahmed369000000-ai/Neural-Service-Mesh.git",
                  timeout_seconds: float = _GIT_TIMEOUT_SECONDS):
-        self.token = token or os.getenv("HF_TOKEN") or os.getenv("GITHUB_TOKEN")
+        # GITHUB_TOKEN فقط: HF_TOKEN توكن Hugging Face لا يصلح لمصادقة GitHub،
+        # وكان يُلصَق في رابط https://<token>@github.com (فيُسرَّب في وسائط
+        # العملية/السجلات ويفشل الدفع) — وصار HF_TOKEN الآن مفتاح الشبكة
+        # العصبية للعقد (ai/node_think.py) فلا يجوز أن يلمس مسار git إطلاقاً.
+        self.token = token or os.getenv("GITHUB_TOKEN")
         self.repo_url = repo_url
         self.timeout_seconds = timeout_seconds
         # 🆕 tempfile.gettempdir() بدل "/tmp" الثابت: يحترم TMPDIR/TEMP/TMP
@@ -50,6 +54,12 @@ class GitManager:
         
         if not os.path.exists(self.base_dir):
             os.makedirs(self.base_dir)
+
+    @property
+    def can_push(self) -> bool:
+        """True فقط إن وُجد توكن GitHub — بدونه الاستنساخ ممكن (مستودع عام)
+        لكن الدفع مضمون الفشل، فلا فائدة من محاولته."""
+        return bool(self.token)
 
     def _get_auth_url(self) -> str:
         """بناء رابط الاستنساخ مع التوكن للمصادقة."""
@@ -130,7 +140,7 @@ class GitManager:
                 # معطوبة)، فلا داعٍ لتخصيص try/except منفصل لكل أمر.
                 raise GitOperationTimeout(
                     f"❌ Git command timed out after {self.timeout_seconds}s "
-                    f"({' '.join(e.cmd)}) — تحقّق من GITHUB_TOKEN/HF_TOKEN أو من الشبكة"
+                    f"({' '.join(e.cmd)}) — تحقّق من GITHUB_TOKEN أو من الشبكة"
                 ) from e
 
             if push_result.returncode != 0:
@@ -153,6 +163,11 @@ class GitManager:
         دالة تجريبية: تسمح للوكيل بتعديل نفسه بناءً على وصف المهمة.
         (سيتم ربطها بـ LLM في المراحل المتقدمة).
         """
+        if not self.can_push:
+            # كانت كل دورة تطوّر بلا توكن تستنسخ المستودع ثم تفشل بـ"could not
+            # read Username" (استنساخ + شبكة مهدورة + ERROR مزعج كل دورة).
+            logger.info("⏭️ تطوّر ذاتي مُتخطّى: لا GITHUB_TOKEN — لا دفع ممكن (%s)", task_description)
+            return False
         repo_path = self.clone("self_evolution_task")
         # هنا يتم تنفيذ منطق التعديل البرمجي
         # كمثال: إضافة تعليق في ملف README
@@ -161,3 +176,4 @@ class GitManager:
             f.write(f"\n\n### 🧬 Evolution Log: {task_description}\n")
         
         self.commit_and_push(repo_path, f"🧬 NSM Evolution: {task_description}")
+        return True
