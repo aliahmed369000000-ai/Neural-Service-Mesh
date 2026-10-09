@@ -344,6 +344,14 @@ class LivingMeshNode:
         if interval_seconds is not None:
             self._self_evolution_interval = max(60.0, float(interval_seconds))
         self._self_evolution_stop.clear()
+        # تبعثر البداية: كل العقد كانت تنفّذ أول دورة تطوّر فور الإقلاع في نفس
+        # اللحظة (_last_self_evolution_ts=0) — مع GITHUB_TOKEN تعني ~N دفعة
+        # متزامنة إلى main (تعارضات non-fast-forward + ضجيج README + إعادة نشر
+        # متكررة). الآن أول دورة بعد تأخير عشوائي في [30ث، الفاصل]، فتتوزّع.
+        if self._last_self_evolution_ts == 0.0:
+            import random
+            jitter = random.uniform(30.0, max(60.0, self._self_evolution_interval))
+            self._last_self_evolution_ts = time.time() - self._self_evolution_interval + jitter
         self._self_evolution_thread = threading.Thread(
             target=self._self_evolution_watch_loop,
             name=f"nsm-self-evolve-{self.node_id[:8]}",
@@ -370,7 +378,9 @@ class LivingMeshNode:
                 self.maybe_self_evolve()
             except Exception as exc:
                 logger.warning("Self-evolution watch failed for %s: %s", self.node_id, exc)
-            self._self_evolution_stop.wait(self._self_evolution_interval)
+            # maybe_self_evolve نفسها تفرض الفاصل الأدنى، فالاستطلاع كل ≤30ث آمن
+            # ويسمح بتنفيذ الدورة الأولى المبعثرة في موعدها لا بعد فاصل كامل.
+            self._self_evolution_stop.wait(min(self._self_evolution_interval, 30.0))
 
     def _generate_self_evolution_task(self) -> str:
         """يشتق وصف مهمة التطوّر من سجلّ سمعة العقدة الذاتية (self.node_id)
