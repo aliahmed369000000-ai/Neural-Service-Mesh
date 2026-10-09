@@ -385,11 +385,13 @@ class LivingMeshNode:
         status_info = None
         peers_info = None
         diagnose = None
+        self._last_diagnose = None
         if getattr(self, "hands", None) is not None:
             try:
                 rd = self.hands.use(LEFT, "self_diagnose")
                 if rd.ok and isinstance(rd.output, dict):
                     diagnose = rd.output
+                    self._last_diagnose = diagnose
                     status_info = diagnose.get("status") or diagnose.get("self_status")
                     peers_info = diagnose.get("peers") or diagnose.get("neighbors")
                     if isinstance(diagnose.get("reputation"), dict):
@@ -475,15 +477,28 @@ class LivingMeshNode:
             except Exception as e:
                 logger.debug("health hand read in self-evolve: %s", e)
 
+        # 🧠 استخدام تلقائي للشبكة العصبية (Falcon-Arabic-7B عبر HF، مفتوح
+        # المصدر فقط): تقترح العقدة تركيزاً للتحسين. اختياري بالكامل — بلا
+        # مفتاح HF / معطَّل / فشل → None بلا أي أثر على دورة التطوّر.
+        neural_insight = None
+        try:
+            from ai.node_think import neural_refine_evolution_task
+            neural_insight = neural_refine_evolution_task(
+                self.node_id, task_desc, getattr(self, "_last_diagnose", None),
+            )
+        except Exception as e:
+            logger.debug("neural insight skipped in self-evolve: %s", e)
+
         logger.info(
-            "🧬 Node %s بدأ تطوّراً ذاتياً تلقائياً: %s | health=%s",
-            self.node_id, task_desc, health_ctx,
+            "🧬 Node %s بدأ تطوّراً ذاتياً تلقائياً: %s | health=%s | neural=%s",
+            self.node_id, task_desc, health_ctx, neural_insight,
         )
         try:
             asyncio.run(self._execute_evolution({
                 "task": task_desc,
                 "source": "self",
                 "health_context": health_ctx,
+                "neural_insight": neural_insight,
             }))
             return True
         except Exception as exc:
@@ -601,6 +616,12 @@ class LivingMeshNode:
             }
         self.hands.bind(LEFT, "self_diagnose", self_diagnose,
                         description="تشخيص موحّد: حالة + أقران + سمعة + صحة + مسارات")
+
+        def think(prompt: str, max_tokens: int = 200) -> dict:
+            from ai.node_think import neural_think
+            return neural_think(prompt, max_tokens=max_tokens)
+        self.hands.bind(LEFT, "think", think,
+                        description="استدعاء شبكة عصبية حقيقية (Falcon-Arabic-7B-Instruct، مفتوحة المصدر) للصياغة/الاستدلال القصير")
 
         logger.info(
             "🖐️ LivingMeshNode %s: left-hand tools bound "
@@ -1324,7 +1345,8 @@ class LivingMeshNode:
                 "node": self.node_id,
                 "task": task_desc,
                 "score": self.local_evolution_score,
-                "status": "completed"
+                "status": "completed",
+                "neural_insight": task_data.get("neural_insight"),
             })
             logger.info(f"✅ Self-Evolution Completed. New Score: {self.local_evolution_score}")
         except Exception as e:
