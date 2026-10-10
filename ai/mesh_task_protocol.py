@@ -210,6 +210,7 @@ def execute_inference(task: Dict[str, Any]) -> Dict[str, Any]:
     modality = (task.get("modality") or "text").lower()
     neural = None       # تُملأ في فرع النص فقط؛ تُعرَّف هنا لمسار الصور
     code_model = None
+    bridge_used = False
     model_hint = (task.get("model_hint") or "local").lower()
     max_tokens = max(16, min(int(task.get("max_tokens") or 128), 512))
 
@@ -232,10 +233,20 @@ def execute_inference(task: Dict[str, Any]) -> Dict[str, Any]:
         # بلا مفتاح HF أو عند أي فشل → None فيكمل المسار القديم كما هو تماماً.
         neural = None
         code_model = None
+        # 🌉 الجسر اليدوي (NSM_CLAUDE_BRIDGE=1): جواب جاهز من Claude لنفس السؤال؟
+        # وإلا يُسجَّل السؤال معلّقاً ويكمل المسار المعتاد فوراً (غير حاجب).
+        try:
+            from ai.claude_bridge import bridge_lookup_or_enqueue
+            b_ans = bridge_lookup_or_enqueue(prompt, node_id=str(task.get("node_id") or ""))
+            if b_ans:
+                neural = {"text": b_ans, "model": "claude-bridge", "provider": "claude_bridge"}
+                bridge_used = True
+        except Exception:
+            neural = None
         try:
             # أسئلة البرمجة → نموذج برمجة قوي أولاً (ai/code_think.py)، ثم العام
             from ai.code_think import code_first_generate
-            cres = code_first_generate(prompt, max_tokens=max_tokens)
+            cres = None if neural is not None else code_first_generate(prompt, max_tokens=max_tokens)
             if cres is not None:
                 neural = {"text": cres["text"], "model": cres["model"],
                           "provider": cres["provider"]}
@@ -280,8 +291,9 @@ def execute_inference(task: Dict[str, Any]) -> Dict[str, Any]:
         "prompt_preview": prompt[:120],
         "output": text_out,
         "used_real_llm": used_llm,
-        "used_neural_open_source": (not modality.startswith("image")) and neural is not None,
+        "used_neural_open_source": (not modality.startswith("image")) and neural is not None and not bridge_used,
         "used_code_model": code_model,
+        "used_claude_bridge": bridge_used,
         "elapsed_ms": round((time.time() - t0) * 1000, 2),
         "task_id": task.get("task_id"),
     }
