@@ -2272,7 +2272,43 @@ class MeshBundle:
                 )
             except Exception as e:
                 logger.warning("MeshBundle: DNA snapshot after evolution failed: %s", e)
-            return cycle.to_dict() if hasattr(cycle, "to_dict") else cycle.summary
+
+            result = cycle.to_dict() if hasattr(cycle, "to_dict") else cycle.summary
+            # 🆕 استخدام تلقائي للشبكة العصبية المفتوحة المصدر (Groq/HF —
+            # نفس ai/node_think.py المُفعَّل فعلياً في LivingMeshNode
+            # المستقلة ai/living_mesh.py، لكن لم يكن مُسلَّكاً هنا رغم أن
+            # هذه الحزمة بالذات هي ما يستخدمه تطبيق Streamlit الفعلي):
+            # تقترح الشبكة تركيزاً عملياً واحداً للدورة التالية بناءً على
+            # ما اكتشفته/فعلته هذه الدورة فعلياً. اختيارية بالكامل تماماً
+            # كما في living_mesh — بلا مفتاح مزوّد مفتوح، أو معطَّلة
+            # (NSM_NODE_NEURAL_AUTO=0)، أو عند أي فشل → None بلا أي أثر
+            # على نتيجة الدورة نفسها.
+            try:
+                from ai.node_think import neural_refine_evolution_task
+                summary = result.get("summary") if isinstance(result, dict) else None
+                summary = summary or (cycle.summary if hasattr(cycle, "summary") else {})
+                diag = {
+                    "status": {"evolution_score": summary.get("services_approved", 0)},
+                    "peers": [],
+                    "reputation": {"events": []},
+                    "inbox": {"unread_total": 0},
+                    "cycle_summary": summary,
+                }
+                neural_insight = neural_refine_evolution_task(
+                    node_id="mesh_bundle_evolution",
+                    base_task=(
+                        f"دورة تطوّر رقم {cycle.cycle_number}: "
+                        f"{summary.get('gaps_found', 0)} فجوة مكتشَفة، "
+                        f"{summary.get('services_approved', 0)} خدمة مُعتمَدة"
+                    ),
+                    diagnose=diag,
+                )
+                if neural_insight and isinstance(result, dict):
+                    result["neural_insight"] = neural_insight
+            except Exception as e:
+                logger.debug("MeshBundle: neural insight skipped for evolution cycle: %s", e)
+
+            return result
 
     # ── تغذية السمعة إلى قرارات حيّة (حجر/رفع حجر) + إبلاغ الجيران ──────────
     # جزء من "التطوّر الذاتي": عقدة سمعتها منخفضة باستمرار تُحجَر (quarantine)
