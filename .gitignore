@@ -130,6 +130,13 @@ experiments/**/checkpoints/
 # per-node mesh state & keys
 artifacts/living_mesh/nodes/
 artifacts/living_mesh/network_state.json
+# ai/node_secrets.py: أسرار عقدة واحدة مشفَّرة بمفتاح هويتها (RSA) — تبقى
+# محلية دائماً. nodes/ أدناه مُستثناة أصلاً لكل عقدة متعدِّدة
+# (artifacts/living_mesh/nodes/<id>/secrets.enc.json)؛ هذا السطر يغطي
+# الحالة الافتراضية (عقدة واحدة بلا --data-dir صريح) حيث data_dir هو
+# artifacts/living_mesh/ نفسه مباشرة.
+artifacts/living_mesh/secrets.enc.json
+**/secrets.enc.json
 node_activity.log
 
 # نسخ احتياطية/تالفة يولّدها storage/file_storage.py وقت التشغيل

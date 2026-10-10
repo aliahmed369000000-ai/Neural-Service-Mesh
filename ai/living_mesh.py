@@ -141,6 +141,18 @@ class LivingMeshNode:
         # هوية دائمة: تحميل مفتاح RSA المحفوظ لهذه العقدة
         self.private_key, self.public_key = self._load_or_create_identity()
 
+        # 🆕 استمرارية الأسرار (GITHUB_TOKEN/HF_TOKEN/مفاتيح LLM) عبر إعادة
+        # التشغيل — لا حاجة لتمريرها كمتغيّرات env في كل تشغيل بعد أول مرة.
+        # يجب أن يأتي بعد _load_or_create_identity() مباشرة: التشفير يحتاج
+        # مفتاحَي RSA الخاص بهذه العقدة تحديداً. انظر ai/node_secrets.py
+        # للتفاصيل (لماذا GitManager/LLMFallback أدناه كانا يفقدان أي توكن
+        # أُعطي مرة واحدة فقط عند أول إعادة تشغيل).
+        try:
+            from ai.node_secrets import load_and_persist_secrets
+            load_and_persist_secrets(self.data_dir, self.private_key, self._pub_pem())
+        except Exception as e:
+            logger.warning(f"NodeSecrets: تعذّر تحميل/حفظ الأسرار المستمرة: {e}")
+
         # 🆕 يدان للعقدة اللامركزية الحية — اليد اليسرى للقراءة فقط (حالة، أقران، سمعة)
         # نفس طبقة NodeHands المستخدمة في mesh_bundle والسرب، مع ضمانات الأمان.
         self.hands = None
