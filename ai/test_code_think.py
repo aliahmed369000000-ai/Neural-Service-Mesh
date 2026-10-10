@@ -11,7 +11,7 @@ from ai import code_think as ct
 @pytest.fixture(autouse=True)
 def _env(monkeypatch):
     for k in ("HUGGINGFACE_API_KEY", "HF_TOKEN", "NSM_CODE_MODELS", "NSM_NODE_NEURAL_AUTO",
-              "ANTHROPIC_API_KEY", "NSM_HF_CHAT_MODEL"):
+              "ANTHROPIC_API_KEY", "NSM_HF_CHAT_MODEL", "GROQ_API_KEY", "NSM_GROQ_CODE_MODELS"):
         monkeypatch.delenv(k, raising=False)
     ct._reset_state()
     yield
@@ -29,7 +29,7 @@ def _err(code):
 def test_no_key_no_call_no_raise():
     with patch("ai.llm_fallback._post_json", side_effect=AssertionError("لا استدعاء")):
         r = ct.code_think("اكتب دالة")
-    assert r["ok"] is False and r["reason"] == "no_hf_key"
+    assert r["ok"] is False and r["reason"] == "no_api_key"
 
 
 def test_success_uses_strongest_model_first(monkeypatch):

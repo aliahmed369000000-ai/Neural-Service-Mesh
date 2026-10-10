@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """ai/node_think.py — استخدام العقدة للشبكة العصبية المفتوحة المصدر.
 
-Falcon-Arabic-7B-Instruct عبر Hugging Face Inference API (provider='hf' حصراً —
-لا تسريب أبداً لمزوّد مدفوع حتى لو كانت مفاتيحه مُعدَّة في البيئة).
+نماذج مفتوحة الأوزان فقط: Groq (gpt-oss-120b) ثم Hugging Face (Falcon-Arabic-7B)،
+كل محاولة مقيّدة بمزوّد واحد — لا تسريب أبداً لمزوّد مدفوع حتى لو كانت مفاتيحه
+مُعدَّة في البيئة.
 
 مشترك بين:
   • أداة think على اليد اليسرى (core/mesh_bundle.py و ai/living_mesh.py)
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 MAX_PROMPT_CHARS = 2000
 MAX_TOKENS_CAP = 400
 THINK_TIMEOUT = 11  # أقل من مهلة اليد (15ث) بهامش حقيقي
+THINK_DEADLINE = 13.0  # مهلة إجمالية عند تعدّد المزوّدين
 
 # حدّ أدنى بين استدعاءين تلقائيين لنفس العقدة + تراجع أسّي عند الفشل
 AUTO_MIN_INTERVAL = 600.0
@@ -33,21 +35,32 @@ _auto_lock = threading.Lock()
 _auto_state: Dict[str, Dict[str, float]] = {}
 
 
+def _groq_key() -> str:
+    return os.getenv("GROQ_API_KEY", "").strip()
+
+
+def _hf_key() -> str:
+    return os.getenv("HUGGINGFACE_API_KEY", "").strip() or os.getenv("HF_TOKEN", "").strip()
+
+
 def neural_available() -> bool:
-    """True فقط إن وُجد مفتاح HF فعلي (وإلا فـthink ستسقط لـCKG Synthesis
-    وهو ليس شبكة عصبية — فلا فائدة من الاستدعاء التلقائي)."""
-    return bool(
-        os.getenv("HUGGINGFACE_API_KEY", "").strip()
-        or os.getenv("HF_TOKEN", "").strip()
-    )
+    """True فقط إن وُجد مفتاح مزوّد مفتوح الأوزان فعلي: Groq (gpt-oss-120b) أو
+    Hugging Face (وإلا فـthink ستسقط لـCKG Synthesis وهو ليس شبكة عصبية)."""
+    return bool(_groq_key() or _hf_key())
 
 
 def auto_enabled() -> bool:
     return os.getenv("NSM_NODE_NEURAL_AUTO", "1").strip().lower() not in ("0", "false", "no", "off")
 
 
+_OPEN_PROVIDERS = ("groq", "huggingface")
+
+
 def neural_think(prompt: str, max_tokens: int = 200) -> Dict[str, Any]:
-    """نفس سلوك أداة think الأصلية بالضبط (تحقق إدخال + provider_override='hf')."""
+    """نفس سلوك أداة think الأصلية (تحقق إدخال + مزوّد مفتوح الأوزان حصراً).
+    الترتيب: Groq (gpt-oss-120b، مجاني وسريع) إن وُجد GROQ_API_KEY، ثم Hugging Face.
+    provider_override يقيّد كل محاولة بمزوّد واحد — لا تسريب لمزوّد مدفوع أبداً.
+    بلا أي مفتاح: السلوك القديم (محاولة HF ثم CKG) كما هو."""
     prompt = (prompt or "").strip()
     if not prompt:
         raise ValueError("prompt فارغ")
@@ -56,14 +69,29 @@ def neural_think(prompt: str, max_tokens: int = 200) -> Dict[str, Any]:
     max_tokens = min(max(int(max_tokens), 1), MAX_TOKENS_CAP)
 
     from ai.llm_fallback import LLMFallback
-    llm = LLMFallback(max_tokens=max_tokens, timeout=THINK_TIMEOUT, provider_override="hf")
-    result = llm.generate(prompt)
+    order = []
+    if _groq_key():
+        order.append("groq")
+    if _hf_key() or not order:
+        order.append("hf")
+
+    t0 = time.time()
+    result = None
+    for i, prov in enumerate(order):
+        remaining = THINK_DEADLINE - (time.time() - t0)
+        if i > 0 and remaining < 3.0:
+            break
+        timeout = THINK_TIMEOUT if i == 0 else int(max(3.0, min(THINK_TIMEOUT, remaining)))
+        llm = LLMFallback(max_tokens=max_tokens, timeout=timeout, provider_override=prov)
+        result = llm.generate(prompt)
+        if result.provider.value in _OPEN_PROVIDERS:
+            break
     return {
         "text": result.text,
         "provider": result.provider.value,
         "model": result.model,
         "latency_ms": result.latency_ms,
-        "used_open_source_model": result.provider.value == "huggingface",
+        "used_open_source_model": result.provider.value in _OPEN_PROVIDERS,
     }
 
 

@@ -11,7 +11,7 @@ from ai.mesh_task_protocol import execute_inference
 
 @pytest.fixture(autouse=True)
 def _env(monkeypatch, tmp_path):
-    for k in ("HUGGINGFACE_API_KEY", "HF_TOKEN", "NSM_CLAUDE_BRIDGE"):
+    for k in ("HUGGINGFACE_API_KEY", "HF_TOKEN", "NSM_CLAUDE_BRIDGE", "GROQ_API_KEY"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("NSM_BRIDGE_DIR", str(tmp_path / "bridge"))
     yield

@@ -9,7 +9,7 @@ from ai.mesh_task_protocol import execute_inference
 
 @pytest.fixture(autouse=True)
 def _env(monkeypatch):
-    for k in ("HUGGINGFACE_API_KEY", "HF_TOKEN", "ANTHROPIC_API_KEY", "NSM_NODE_NEURAL_AUTO",
+    for k in ("HUGGINGFACE_API_KEY", "HF_TOKEN", "ANTHROPIC_API_KEY", "NSM_NODE_NEURAL_AUTO", "GROQ_API_KEY",
               "NSM_LLM_PROVIDER_PREF"):
         monkeypatch.delenv(k, raising=False)
 

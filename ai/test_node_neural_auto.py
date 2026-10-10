@@ -16,7 +16,7 @@ from ai.node_think import neural_refine_evolution_task
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
     node_think._auto_state.clear()
-    for k in ("HUGGINGFACE_API_KEY", "HF_TOKEN", "ANTHROPIC_API_KEY", "NSM_NODE_NEURAL_AUTO"):
+    for k in ("HUGGINGFACE_API_KEY", "HF_TOKEN", "ANTHROPIC_API_KEY", "NSM_NODE_NEURAL_AUTO", "GROQ_API_KEY"):
         monkeypatch.delenv(k, raising=False)
     yield
     node_think._auto_state.clear()

@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""ai/code_think.py — نموذج برمجة مفتوح الأوزان للعقد عبر توكن Hugging Face نفسه.
+"""ai/code_think.py — نموذج برمجة مفتوح الأوزان للعقد: Groq أولاً ثم Hugging Face.
 
-يستدعي موجّه Inference Providers (https://router.huggingface.co/v1، متوافق مع
-OpenAI) بتوكن HUGGINGFACE_API_KEY/HF_TOKEN الموجود أصلاً — لا مفتاح إضافي.
+المزوّدان (الأول بالأولوية): Groq (GROQ_API_KEY — gpt-oss-120b ثم llama-3.3-70b،
+مجاني وسريع وحصته أكبر بكثير) ثم موجّه Hugging Face (HUGGINGFACE_API_KEY/HF_TOKEN).
+كلاهما OpenAI-compatible. يُستخدم ما له مفتاح فقط.
 
 القائمة مرتّبة من الأقوى إلى الأرخص (قابلة للتغيير: NSM_CODE_MODELS مفصولة
 بفواصل، لأن الترتيب يتغيّر كل شهر). تحتاج «تعمل بلا مشاكل» فكل ما يلي لا يرفع
@@ -31,6 +32,10 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 ROUTER_URL = "https://router.huggingface.co/v1/chat/completions"
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+# Groq: أقوى نموذج مفتوح مجاني أولاً (gpt-oss-120b) ثم احتياطي (معرّفات من llm_fallback).
+DEFAULT_GROQ_CODE_MODELS: List[str] = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile"]
 
 # أقوى → أرخص. أول نموذج موثَّق كمتاح عبر موجّه HF؛ الباقي يُتخطّى تلقائياً
 # إن لم يكن مخدوماً (400/404) فلا ضرر من خطأ في المعرّف.
@@ -53,8 +58,8 @@ _COOL_RATE_LIMIT = 300.0
 _COOL_OTHER = 120.0
 
 _lock = threading.Lock()
-_model_blocked_until: Dict[str, float] = {}
-_global_blocked_until: float = 0.0
+_model_blocked_until: Dict[str, float] = {}       # مفتاحه "provider:model"
+_provider_blocked_until: Dict[str, float] = {}    # "groq" | "hf" — نفاد رصيد/توكن خاطئ
 
 _SYSTEM = (
     "You are an expert software engineer. Answer concisely and correctly. "
@@ -91,13 +96,37 @@ def _hf_key() -> str:
     return os.getenv("HUGGINGFACE_API_KEY", "").strip() or os.getenv("HF_TOKEN", "").strip()
 
 
+def _groq_key() -> str:
+    return os.getenv("GROQ_API_KEY", "").strip()
+
+
+def groq_code_models() -> List[str]:
+    env = os.getenv("NSM_GROQ_CODE_MODELS", "").strip()
+    if env:
+        models = [m.strip() for m in env.split(",") if m.strip()]
+        if models:
+            return models
+    return list(DEFAULT_GROQ_CODE_MODELS)
+
+
 def _auto_enabled() -> bool:
     return os.getenv("NSM_NODE_NEURAL_AUTO", "1").strip().lower() not in ("0", "false", "no", "off")
 
 
+def _providers():
+    """[(اسم، رابط، مفتاح، نماذج)] بالأولوية، للمزوّدين الذين لهم مفتاح فقط."""
+    out = []
+    if _groq_key():
+        out.append(("groq", GROQ_URL, _groq_key(), groq_code_models()))
+    if _hf_key():
+        out.append(("hf", ROUTER_URL, _hf_key(), code_models()))
+    return out
+
+
 def code_available() -> bool:
-    """مفتاح HF موجود ولا حظر عام نشط (نفاد رصيد/توكن خاطئ)."""
-    return bool(_hf_key()) and time.time() >= _global_blocked_until
+    """يوجد مزوّد له مفتاح وغير محظور (نفاد رصيد/توكن خاطئ)."""
+    now = time.time()
+    return any(_provider_blocked_until.get(name, 0.0) <= now for name, _u, _k, _m in _providers())
 
 
 def is_code_prompt(text: str) -> bool:
@@ -105,10 +134,9 @@ def is_code_prompt(text: str) -> bool:
 
 
 def _reset_state() -> None:  # للاختبارات
-    global _global_blocked_until
     with _lock:
         _model_blocked_until.clear()
-        _global_blocked_until = 0.0
+        _provider_blocked_until.clear()
 
 
 def _classify(exc: Exception):
@@ -122,14 +150,17 @@ def _classify(exc: Exception):
         if c in (400, 404, 422):
             return False, _BLOCK_BAD_MODEL
         if c == 429:
-            return False, _COOL_RATE_LIMIT
+            try:
+                ra = float((getattr(exc, "headers", None) or {}).get("retry-after") or 0)
+            except Exception:
+                ra = 0.0
+            return False, min(max(ra, 10.0), _COOL_RATE_LIMIT) if ra else _COOL_RATE_LIMIT
     return False, _COOL_OTHER
 
 
 def code_think(prompt: str, max_tokens: int = 600) -> Dict[str, Any]:
     """يرجع دائماً dict: {ok, text, model, provider, used_open_source_model, reason?}.
     لا يرفع استثناءً أبداً (التحقق من المدخلات فقط يرفع ValueError ليرفضه المستدعي)."""
-    global _global_blocked_until
     prompt = (prompt or "").strip()
     if not prompt:
         raise ValueError("prompt فارغ")
@@ -138,64 +169,72 @@ def code_think(prompt: str, max_tokens: int = 600) -> Dict[str, Any]:
     max_tokens = min(max(int(max_tokens), 1), MAX_TOKENS_CAP)
 
     def _fail(reason: str) -> Dict[str, Any]:
-        return {"ok": False, "text": "", "model": None, "provider": "huggingface-router",
+        return {"ok": False, "text": "", "model": None, "provider": None,
                 "used_open_source_model": False, "reason": reason}
 
-    key = _hf_key()
-    if not key:
-        return _fail("no_hf_key")
+    providers = _providers()
+    if not providers:
+        return _fail("no_api_key")
     now = time.time()
-    if now < _global_blocked_until:
-        return _fail("blocked_until_%d" % int(_global_blocked_until - now))
+    if all(_provider_blocked_until.get(n, 0.0) > now for n, _u, _k, _m in providers):
+        soonest = min(_provider_blocked_until.get(n, 0.0) for n, _u, _k, _m in providers)
+        return _fail("blocked_until_%d" % int(soonest - now))
 
     from ai import llm_fallback as _lf  # _post_json قابلة للاستبدال في الاختبارات
 
     t0 = time.time()
     last_reason = "no_model_available"
-    for model in code_models():
-        remaining = TOTAL_DEADLINE - (time.time() - t0)
-        if remaining < 2.0:
-            last_reason = "deadline"
-            break
-        with _lock:
-            if _model_blocked_until.get(model, 0.0) > time.time():
-                continue
-        try:
-            data = _lf._post_json(
-                ROUTER_URL,
-                {
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": _SYSTEM},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "max_tokens": max_tokens,
-                    "temperature": 0.2,
-                },
-                {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                int(min(PER_CALL_TIMEOUT, remaining)),
-            )
-            text = ""
-            if isinstance(data, dict) and data.get("choices"):
-                text = ((data["choices"][0] or {}).get("message") or {}).get("content") or ""
-            text = text.strip()
-            if not text:
-                raise ValueError("رد فارغ")
-            return {"ok": True, "text": text, "model": model, "provider": "huggingface-router",
-                    "used_open_source_model": True,
-                    "latency_ms": round((time.time() - t0) * 1000, 1)}
-        except Exception as exc:  # noqa: BLE001
-            is_global, secs = _classify(exc)
+    for name, url, key, models in providers:
+        for model in models:
+            remaining = TOTAL_DEADLINE - (time.time() - t0)
+            if remaining < 2.0:
+                return _fail("deadline" if last_reason == "no_model_available" else last_reason)
             with _lock:
+                if _provider_blocked_until.get(name, 0.0) > time.time():
+                    break  # المزوّد كله محظور: انتقل للمزوّد التالي
+                if _model_blocked_until.get(f"{name}:{model}", 0.0) > time.time():
+                    continue
+            payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": _SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                "max_tokens": max_tokens,
+                "temperature": 0.2,
+            }
+            if model.startswith("openai/gpt-oss"):
+                # نماذج الاستدلال تستهلك جزءاً من max_tokens في «التفكير» فيخرج
+                # المحتوى فارغاً/مبتوراً؛ جهد منخفض يحفظ الميزانية للجواب.
+                payload["reasoning_effort"] = "low"
+            try:
+                data = _lf._post_json(
+                    url, payload,
+                    {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                    int(min(PER_CALL_TIMEOUT, remaining)),
+                )
+                text = ""
+                if isinstance(data, dict) and data.get("choices"):
+                    text = ((data["choices"][0] or {}).get("message") or {}).get("content") or ""
+                text = text.strip()
+                if not text:
+                    raise ValueError("رد فارغ")
+                return {"ok": True, "text": text, "model": model,
+                        "provider": "groq" if name == "groq" else "huggingface-router",
+                        "used_open_source_model": True,
+                        "latency_ms": round((time.time() - t0) * 1000, 1)}
+            except Exception as exc:  # noqa: BLE001
+                is_global, secs = _classify(exc)
+                with _lock:
+                    if is_global:
+                        _provider_blocked_until[name] = time.time() + secs
+                    else:
+                        _model_blocked_until[f"{name}:{model}"] = time.time() + secs
+                last_reason = f"{name}:{type(exc).__name__}:{getattr(exc, 'code', '')}"
+                logger.info("code_think: %s/%s فشل (%s) — حظر %.0fث%s", name, model,
+                            last_reason, secs, " (للمزوّد كله)" if is_global else "")
                 if is_global:
-                    _global_blocked_until = time.time() + secs
-                else:
-                    _model_blocked_until[model] = time.time() + secs
-            last_reason = f"{type(exc).__name__}:{getattr(exc, 'code', '')}"
-            logger.info("code_think: %s فشل (%s) — حظر %.0fث%s", model, last_reason, secs,
-                        " (عام)" if is_global else "")
-            if is_global:
-                break
+                    break
     return _fail(last_reason)
 
 
