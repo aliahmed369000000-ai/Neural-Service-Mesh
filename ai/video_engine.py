@@ -141,18 +141,22 @@ def _fetch_cinematic_clip(narration: str, visual_notes: str, tmp_dir: str, seg_i
 
         client = HiggsfieldClient(api_key)
         prompt = _build_cinematic_prompt(narration, visual_notes)
-        job_id = client.submit_job(prompt)
-        result = client.poll_job(job_id, max_wait=_HF_SHORT_MAX_WAIT)
-
-        if result.video_status != "completed" or not result.video_url:
+        # HiggsfieldClient أُعيدت كتابته ليطابق docs.higgsfield.ai (كوميت
+        # 64bb484) فحُذفت submit_job/poll_job؛ كان هذا الاستدعاء يرفع
+        # AttributeError يبتلعه except أدناه، فتُستخدم الخلفية المتدرّجة
+        # دائماً بصمت ولا يعمل Higgsfield إطلاقاً. الواجهة الحالية:
+        # generate_video_from_prompt (نص → صورة → فيديو) تعيد رابط الفيديو
+        # أو ترفع استثناءً واضحاً (محدود بمهلة كل مرحلة داخل العميل).
+        video_url = client.generate_video_from_prompt(prompt, aspect_ratio="9:16")
+        if not video_url:
             logger.info(
-                "خلفية Higgsfield للمشهد %d غير جاهزة (%s) — استخدام الخلفية "
-                "المتدرّجة كبديل لهذا المشهد فقط.", seg_index, result.video_status,
+                "خلفية Higgsfield للمشهد %d غير جاهزة — استخدام الخلفية "
+                "المتدرّجة كبديل لهذا المشهد فقط.", seg_index,
             )
             return None
 
         clip_path = os.path.join(tmp_dir, f"hf_bg_{seg_index}.mp4")
-        req = urllib.request.Request(result.video_url, headers={"User-Agent": "NSM-VideoEngine/1.0"})
+        req = urllib.request.Request(video_url, headers={"User-Agent": "NSM-VideoEngine/1.0"})
         with urllib.request.urlopen(req, timeout=60) as resp, open(clip_path, "wb") as f:
             f.write(resp.read())
         return clip_path

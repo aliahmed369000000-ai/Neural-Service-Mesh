@@ -1,54 +1,62 @@
 # -*- coding: utf-8 -*-
-import sys
-import os
-import time
-import asyncio
+"""
+أداء الذاكرة الموحدة (ANN + Sharding) عبر LivingMeshNode.memory.
 
-# إضافة المسار الرئيسي للمشروع
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+الاختبار القديم كان 'async def' (لا يعمل بلا pytest-asyncio) ويستدعي
+_generate_simulated_embedding وsemantic_query — حُذفتا عمداً من living_mesh
+(كوميت b0f6cc4: حذف قدرات وهمية). أُعيدت كتابته على الواجهة الفعلية:
+UnifiedMemoryManager.store_experience/semantic_search/get_memory_stats،
+بمتجهات حتمية يولّدها الاختبار نفسه، وبتأكيدات حقيقية (بما فيها أن
+الاستعلام بمتجه خبرة محفوظة يجدها).
+"""
+import shutil
+import tempfile
+import time
+
+import numpy as np
 
 from ai.living_mesh import LivingMeshNode
 
-async def test_performance():
-    print("🚀 بدء اختبار أداء الذاكرة الموحدة (ANN + Sharding)...")
-    
-    # إنشاء عقدة اختبار
-    node = LivingMeshNode(node_id="perf_tester")
-    
-    # 1. اختبار سرعة الحفظ
-    start_time = time.time()
-    num_exps = 50
-    print(f"📥 حفظ {num_exps} خبرة في الذاكرة الموحدة...")
-    for i in range(num_exps):
-        exp = {
-            "kind": "perf_test",
-            "data": {"value": i, "content": f"خبرة تجريبية رقم {i} للتحقق من سرعة التخزين المجزأ"},
-            "timestamp": time.time()
-        }
-        emb = node._generate_simulated_embedding(exp["kind"], exp["data"])
-        node.memory.store_experience(exp, embedding=emb)
-    
-    save_duration = time.time() - start_time
-    print(f"✅ تم الحفظ في {save_duration:.4f} ثانية ({save_duration/num_exps:.6f} ثانية لكل خبرة).")
-    
-    # 2. اختبار سرعة البحث الدلالي (ANN)
-    print("🔍 إجراء بحث دلالي (ANN Search)...")
-    start_time = time.time()
-    results = node.semantic_query("سرعة التخزين المجزأ", top_k=3)
-    search_duration = time.time() - start_time
-    
-    print(f"✅ تم البحث في {search_duration:.4f} ثانية.")
-    print(f"📊 عدد النتائج: {len(results)}")
-    
-    # 3. إحصائيات الذاكرة
-    stats = node.memory.get_memory_stats()
-    print("\n📊 إحصائيات الذاكرة الموحدة:")
-    print(f"- إجمالي الخبرات: {stats['total_experiences']}")
-    print(f"- المتجهات المفهرسة: {stats['indexed_vectors']}")
-    print(f"- عدد الأجزاء (Shards): {stats['num_shards']}")
-    
-    assert stats['total_experiences'] >= num_exps
-    print("\n✨ انتهى اختبار الأداء بنجاح!")
+DIM = 1536
+NUM_EXPS = 50
 
-if __name__ == "__main__":
-    asyncio.run(test_performance())
+
+def _embedding(seed: int) -> list:
+    rng = np.random.default_rng(seed)
+    v = rng.standard_normal(DIM)
+    return (v / np.linalg.norm(v)).tolist()
+
+
+def test_performance():
+    d = tempfile.mkdtemp(prefix="nsm_unified_mem_")
+    try:
+        node = LivingMeshNode(node_id="perf_tester", data_dir=d)
+
+        start = time.time()
+        for i in range(NUM_EXPS):
+            exp = {
+                "kind": "perf_test",
+                "data": {"value": i, "content": f"خبرة تجريبية رقم {i} للتحقق من سرعة التخزين المجزأ"},
+                "timestamp": time.time(),
+            }
+            node.memory.store_experience(exp, embedding=_embedding(i))
+        save_duration = time.time() - start
+
+        start = time.time()
+        results = node.memory.semantic_search(_embedding(7), top_k=3)
+        search_duration = time.time() - start
+
+        stats = node.memory.get_memory_stats()
+        assert stats["total_experiences"] >= NUM_EXPS
+        assert stats["indexed_vectors"] >= 1
+        assert results, "البحث الدلالي لم يُرجع نتائج"
+        assert len(results) <= 3
+        # متجه الاستعلام هو نفسه متجه الخبرة رقم 7 → يجب أن تكون ضمن النتائج
+        assert any(
+            (r.get("data") or r.get("experience", {}).get("data") or {}).get("value") == 7
+            for r in results
+        ), f"الخبرة المطابقة لم تُسترجَع: {results[:1]}"
+        # حدود أداء واسعة جداً (تكشف الانهيار لا التذبذب)
+        assert save_duration < 30 and search_duration < 5
+    finally:
+        shutil.rmtree(d, ignore_errors=True)

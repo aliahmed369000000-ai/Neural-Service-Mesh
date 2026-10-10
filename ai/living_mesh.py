@@ -800,6 +800,14 @@ class LivingMeshNode:
                 if t_host:
                     asyncio.create_task(self.send_to_peer(t_host, t_port, kind, experience_data, hops + 1))
 
+    def get_evolutionary_updates(self) -> List[Dict[str, Any]]:
+        """تحديثات التطور (evolution_sync) المستلمة من العقد الأخرى.
+        حُذفت بإعادة كتابة كبيرة سابقة (كوميت e46e43b) بينما
+        ai/arabic_transformer_tf.py::evolve_live ما زال يستدعيها."""
+        state = self._load_state()
+        return [exp for exp in state.get("global_experience", [])
+                if exp.get("kind") == "evolution_sync"]
+
     def _load_state(self) -> Dict[str, Any]:
         path = getattr(self, "network_state_path", None) or NETWORK_STATE
         if not Path(path).exists():
