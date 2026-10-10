@@ -134,7 +134,23 @@ class LivingMeshNode:
             60.0, float(os.getenv("NSM_SELF_EVOLUTION_INTERVAL_SEC", "1800"))
         )
         self._last_self_evolution_ts = 0.0
-        
+
+        # 🆕 مزامنة أقران دورية (anti-entropy gossip): بدون هذه، الاكتشاف
+        # يحدث مرة واحدة فقط عند الانضمام (request_peers يُستدعى مرة واحدة
+        # تجاه البذرة في join_network) ولا تُعاد مطلقاً — فتبقى أي عقدة
+        # بمعرفة جزئية دائمة حسب ترتيب الانضمام وحده. مثبَت واقعياً: شبكة
+        # من 5 عقد (بذرة واحدة + سلسلة انضمام متفرّعة) لم تتجاوز معرفة أي
+        # عقدة 3-4 من أصل 4 أقران آخرين حتى بعد 25 ثانية — لأن العقد
+        # الأقدم لا تُخطَر أبداً بالعقد الأحدث التي انضمت عبر عقدة أخرى.
+        # الحل القياسي: كل عقدة تطلب دورياً قائمة أقران قرين معروف عشوائي
+        # (لا البذرة الأصلية فقط) — يتقارب التعرّف الكامل عبر عدة جولات
+        # تدريجياً كأي بروتوكول gossip anti-entropy حقيقي.
+        self._peer_sync_stop = threading.Event()
+        self._peer_sync_thread = None
+        self._peer_sync_interval = max(
+            5.0, float(os.getenv("NSM_PEER_SYNC_INTERVAL_SEC", "20"))
+        )
+
         # تهيئة الذاكرة الموحدة (ANN + Sharding)
         self.memory = UnifiedMemoryManager(base_dir=str(self.data_dir / "memory"))
         
@@ -274,6 +290,9 @@ class LivingMeshNode:
         # 🆕 العقدة تبدأ تطوّرها الذاتي المستقل فور انضمامها للشبكة — لا
         # تعود تنتظر 'evolution_task' من قرين لتتطوّر.
         self.start_self_evolution_watch()
+        # 🆕 إعادة اكتشاف دورية عبر أقران معروفين عشوائيين — لا تجاه
+        # البذرة الأصلية فقط التي تُستشار مرة واحدة أدناه.
+        self.start_peer_sync_watch()
 
         if seed_nodes:
             for seed in seed_nodes:
@@ -527,6 +546,77 @@ class LivingMeshNode:
             logger.error(f"❌ فشل التطوّر الذاتي التلقائي لـ{self.node_id}: {exc}")
             return False
 
+    def start_peer_sync_watch(self, interval_seconds: float = None) -> bool:
+        """🆕 بدء مراقب daemon يعيد اكتشاف الأقران دورياً عبر قرين معروف
+        عشوائي (anti-entropy gossip) — لا تجاه البذرة الأصلية فقط التي
+        رُويَ عنها مرة واحدة في join_network. بنفس نمط
+        start_capability_watch/start_self_evolution_watch."""
+        if self._peer_sync_thread and self._peer_sync_thread.is_alive():
+            return False
+        if interval_seconds is not None:
+            self._peer_sync_interval = max(5.0, float(interval_seconds))
+        self._peer_sync_stop.clear()
+        self._peer_sync_thread = threading.Thread(
+            target=self._peer_sync_watch_loop,
+            name=f"nsm-peer-sync-{self.node_id[:8]}",
+            daemon=True,
+        )
+        self._peer_sync_thread.start()
+        logger.info(
+            "🔁 Node %s: peer-sync (anti-entropy gossip) watch started (every %.0fs)",
+            self.node_id, self._peer_sync_interval,
+        )
+        return True
+
+    def stop_peer_sync_watch(self, timeout: float = 2.0) -> None:
+        """إيقاف مراقب مزامنة الأقران دون ترك خيط خلف العقدة."""
+        self._peer_sync_stop.set()
+        thread = self._peer_sync_thread
+        if thread and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=max(0.0, timeout))
+        self._peer_sync_thread = None
+
+    def _peer_sync_watch_loop(self) -> None:
+        while not self._peer_sync_stop.is_set():
+            # أول جولة تنتظر فترة قصيرة (نصف الفاصل) حتى تستقر أول رسالة
+            # انضمام عبر join_network قبل أول إعادة-اكتشاف، لا فوراً.
+            self._peer_sync_stop.wait(min(5.0, self._peer_sync_interval / 2))
+            if self._peer_sync_stop.is_set():
+                break
+            try:
+                self.resync_peers()
+            except Exception as exc:
+                logger.warning("Peer-sync watch failed for %s: %s", self.node_id, exc)
+            self._peer_sync_stop.wait(self._peer_sync_interval)
+
+    def resync_peers(self, sample_size: int = 2) -> int:
+        """🆕 جولة gossip anti-entropy واحدة: تطلب قائمة الأقران من عدد
+        عشوائي (sample_size) من الأقران المعروفين فعلياً حالياً (لا من
+        البذرة الأصلية وحدها) — بهذا تتقارب معرفة كل الشبكة تدريجياً
+        حتى في طوبولوجيا انضمام متفرّعة (عقدة تنضم عبر عقدة ثانوية لا
+        تعرفها بقية الشبكة بعد). تُرجع عدد محاولات المزامنة الناجحة."""
+        import random
+        peers = self._get_active_peers_list()
+        candidates = [
+            p for p in peers
+            if p.get("id") != self.node_id and p.get("host") and p.get("port") is not None
+        ]
+        if not candidates:
+            return 0
+        sample = random.sample(candidates, k=min(sample_size, len(candidates)))
+        ok_count = 0
+        for p in sample:
+            try:
+                ok = asyncio.run(
+                    self.request_peers(p["host"], int(p["port"]), retries=1)
+                )
+                if ok:
+                    ok_count += 1
+            except Exception as exc:
+                logger.debug(
+                    "resync_peers: فشل التزامن مع %s: %s", p.get("id", "?"), exc
+                )
+        return ok_count
 
     def _bind_living_hands(self) -> None:
         """ربط أدوات اليد اليسرى فقط (قراءة بلا أثر جانبي) لعقدة LivingMesh."""
@@ -672,6 +762,7 @@ class LivingMeshNode:
         """يعلّم هذه العقدة offline في حالتها المحلية (عند الإيقاف الرشيق)."""
         self.stop_capability_watch()
         self.stop_self_evolution_watch()
+        self.stop_peer_sync_watch()
         try:
             state = self._load_state()
             if self.node_id in state.get("nodes", {}):
