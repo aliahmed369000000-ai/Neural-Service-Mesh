@@ -1,0 +1,38 @@
+# تشغيل دائم لعقد الشبكة (28 افتراضياً) مع إعادة تشغيل تلقائية على مستويين:
+#   • داخل الحاوية: ai/mesh_supervisor.py يعيد تشغيل أي عقدة تنهار/تتجمّد.
+#   • خارجها: restart: always + healthcheck يعيدان الحاوية كلها بعد انهيار/إعادة الجهاز.
+#
+# الاستخدام:
+#   cp config/mesh.env.example .env.mesh   # ثم ضع مفاتيحك فيه (لا يُرفع: .gitignore)
+#   docker compose -f docker-compose.mesh.yml up -d --build
+#
+# الأسرار تُقرأ من .env.mesh فقط ولا تُكتب في هذا الملف.
+services:
+  nsm-mesh:
+    build: .
+    container_name: nsm-mesh
+    command: python scripts/run_local_mesh.py
+    restart: always
+    env_file:
+      - path: .env.mesh
+        required: false
+    environment:
+      - NSM_NODE_COUNT=${NSM_NODE_COUNT:-28}
+      - PORT=7860
+      - NSM_SUPERVISE=1
+      - NSM_BRIDGE_DIR=/bridge
+    ports:
+      - "7860-7887:7860-7887"
+    volumes:
+      - nsm_mesh_data:/app/artifacts
+      - nsm_mesh_bridge:/bridge
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7860/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+
+volumes:
+  nsm_mesh_data:
+  nsm_mesh_bridge:
