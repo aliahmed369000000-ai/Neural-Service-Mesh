@@ -171,7 +171,11 @@ _CEREBRAS_URL         = "https://api.cerebras.ai/v1/chat/completions"
 # Falcon-Arabic-7B-Instruct — نموذج لغوي عربي عام (وليس متخصصاً دينياً فقط)
 # مبني على Falcon3-7B من TII، مجاني بالكامل عبر HF Inference API.
 _HF_MODEL             = "tiiuae/Falcon-Arabic-7B-Instruct"
+# 🆕 api-inference.huggingface.co (Serverless Inference API القديمة) أُوقفت —
+# حلّ محلها موجّه Inference Providers المتوافق مع OpenAI. نبقي الثابت القديم
+# للتوافق فقط؛ المسار الفعلي صار _HF_ROUTER_URL (chat/completions).
 _HF_INFERENCE_URL     = f"https://api-inference.huggingface.co/models/{_HF_MODEL}"
+_HF_ROUTER_URL        = "https://router.huggingface.co/v1/chat/completions"
 _FAILURE_COOLDOWN_SEC = 300   # 5 دقائق قبل إعادة تجربة مزوّد فاشل
 
 # ── النموذج المحلي (Ollama) — للنشر داخل شبكة الجهة المغلقة ──────────────
@@ -1527,23 +1531,22 @@ class LLMFallback:
         الـ Inference API القديمة (serverless) تستخدم "text-generation"
         وليس "chat/completions".
         """
-        # بناء prompt نصي واحد يضمّ التعليمات + آخر جولات المحادثة + السؤال
-        parts = [system_prompt.strip()]
+        # 🆕 Chat Completions عبر موجّه HF (OpenAI-compatible): النموذج في الـpayload.
+        # النموذج الافتراضي Falcon-Arabic؛ يمكن تغييره بـNSM_HF_CHAT_MODEL.
+        model = os.getenv("NSM_HF_CHAT_MODEL", "").strip() or self._model or _HF_MODEL
+        messages = [{"role": "system", "content": system_prompt.strip()}]
         for u, a in history[-4:]:
-            parts.append(f"المستخدم: {u}\nالمساعد: {a}")
-        parts.append(f"المستخدم: {query}\nالمساعد:")
-        prompt = "\n\n".join(parts)
+            messages.append({"role": "user", "content": u})
+            messages.append({"role": "assistant", "content": a})
+        messages.append({"role": "user", "content": query})
 
         data = _post_json(
-            _HF_INFERENCE_URL,
+            _HF_ROUTER_URL,
             {
-                "inputs": prompt,
-                "parameters": {
-                    "max_new_tokens": self.max_tokens,
-                    "temperature":    max(self.temperature, 0.01),
-                    "return_full_text": False,
-                },
-                "options": {"wait_for_model": True},
+                "model":       model,
+                "messages":    messages,
+                "max_tokens":  self.max_tokens,
+                "temperature": max(self.temperature, 0.01),
             },
             {
                 "Authorization": f"Bearer {self._api_key}",
@@ -1552,8 +1555,12 @@ class LLMFallback:
             self.timeout,
         )
 
-        # صيغة الاستجابة المعتادة: [{"generated_text": "..."}]
-        if isinstance(data, list) and data and "generated_text" in data[0]:
+        text = ""
+        if isinstance(data, dict) and data.get("choices"):
+            msg = (data["choices"][0] or {}).get("message") or {}
+            text = (msg.get("content") or "").strip()
+        # توافق خلفي مع الصيغة القديمة [{"generated_text": ...}]
+        elif isinstance(data, list) and data and "generated_text" in data[0]:
             text = data[0]["generated_text"].strip()
         elif isinstance(data, dict) and "generated_text" in data:
             text = data["generated_text"].strip()
@@ -1564,7 +1571,7 @@ class LLMFallback:
             raise Exception("HF أعاد نصاً فارغاً")
 
         return FallbackResult(
-            text=text, provider=Provider.HUGGINGFACE, model=self._model,
+            text=text, provider=Provider.HUGGINGFACE, model=model,
         )
 
     # ── نموذج محلي عبر Ollama (نشر مغلق بدون إنترنت) ────────────────────

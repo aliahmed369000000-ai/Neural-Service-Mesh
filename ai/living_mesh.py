@@ -633,6 +633,12 @@ class LivingMeshNode:
         self.hands.bind(LEFT, "think", think,
                         description="استدعاء شبكة عصبية حقيقية (Falcon-Arabic-7B-Instruct، مفتوحة المصدر) للصياغة/الاستدلال القصير")
 
+        def think_code(prompt: str, max_tokens: int = 600) -> dict:
+            from ai.code_think import code_think
+            return code_think(prompt, max_tokens=max_tokens)
+        self.hands.bind(LEFT, "think_code", think_code,
+                        description="نموذج برمجة مفتوح الأوزان (Qwen3-Coder...) عبر توكن HF لكتابة/مراجعة الكود")
+
         logger.info(
             "🖐️ LivingMeshNode %s: left-hand tools bound "
             "(get_self_status, list_known_peers, get_own_reputation, "

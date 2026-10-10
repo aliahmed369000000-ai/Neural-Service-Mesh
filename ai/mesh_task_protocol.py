@@ -208,6 +208,8 @@ def execute_inference(task: Dict[str, Any]) -> Dict[str, Any]:
     t0 = time.time()
     prompt = (task.get("prompt") or "").strip()
     modality = (task.get("modality") or "text").lower()
+    neural = None       # تُملأ في فرع النص فقط؛ تُعرَّف هنا لمسار الصور
+    code_model = None
     model_hint = (task.get("model_hint") or "local").lower()
     max_tokens = max(16, min(int(task.get("max_tokens") or 128), 512))
 
@@ -229,9 +231,21 @@ def execute_inference(task: Dict[str, Any]) -> Dict[str, Any]:
         # 🧠 الشبكة العصبية المفتوحة أولاً تلقائياً (Falcon-Arabic-7B عبر HF) —
         # بلا مفتاح HF أو عند أي فشل → None فيكمل المسار القديم كما هو تماماً.
         neural = None
+        code_model = None
         try:
-            from ai.node_think import neural_first_generate
-            neural = neural_first_generate(prompt, max_tokens=max_tokens)
+            # أسئلة البرمجة → نموذج برمجة قوي أولاً (ai/code_think.py)، ثم العام
+            from ai.code_think import code_first_generate
+            cres = code_first_generate(prompt, max_tokens=max_tokens)
+            if cres is not None:
+                neural = {"text": cres["text"], "model": cres["model"],
+                          "provider": cres["provider"]}
+                code_model = cres["model"]
+        except Exception:
+            neural = None
+        try:
+            if neural is None:
+                from ai.node_think import neural_first_generate
+                neural = neural_first_generate(prompt, max_tokens=max_tokens)
         except Exception:
             neural = None
         try:
@@ -267,6 +281,7 @@ def execute_inference(task: Dict[str, Any]) -> Dict[str, Any]:
         "output": text_out,
         "used_real_llm": used_llm,
         "used_neural_open_source": (not modality.startswith("image")) and neural is not None,
+        "used_code_model": code_model,
         "elapsed_ms": round((time.time() - t0) * 1000, 2),
         "task_id": task.get("task_id"),
     }

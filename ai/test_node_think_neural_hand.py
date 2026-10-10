@@ -109,7 +109,7 @@ def test_think_uses_real_open_source_model_end_to_end(bundle, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     def fake_post_json(url, payload, headers, timeout=15):
-        assert "inputs" in payload
+        assert "messages" in payload and payload["model"]
         return [{"generated_text": "جواب حقيقي من فالكون"}]
 
     a = _a_node(bundle)

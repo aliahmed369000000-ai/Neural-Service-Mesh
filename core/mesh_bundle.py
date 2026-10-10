@@ -1112,6 +1112,13 @@ class MeshBundle:
             from ai.node_think import neural_think
             return neural_think(prompt, max_tokens=max_tokens)
 
+        def think_code(prompt: str, max_tokens: int = 600):
+            """نموذج برمجة مفتوح الأوزان (Qwen3-Coder وغيره) عبر توكن HF نفسه —
+            لأسئلة/كتابة/مراجعة الكود. بلا مفتاح أو عند نفاد الرصيد المجاني:
+            {ok: False, reason} بلا استثناء (انظر ai/code_think.py)."""
+            from ai.code_think import code_think
+            return code_think(prompt, max_tokens=max_tokens)
+
         def kaggle_status_quick(slug: str = ""):
             """نسخة سريعة من at.kaggle_status بلا جلب مخرجات (قد يأخذ حتى
             600 ثانية لكيرنل منتهٍ) — مهلة اليد الواحدة لكل الأدوات (15
@@ -1132,6 +1139,8 @@ class MeshBundle:
              "حالة سطر كيرنل تدريب Kaggle (قراءة فقط، بلا جلب مخرجات)"),
             ("think", think,
              "استدعاء شبكة عصبية حقيقية (Falcon-Arabic-7B-Instruct، مفتوحة المصدر) للصياغة/الاستدلال القصير"),
+            ("think_code", think_code,
+             "نموذج برمجة مفتوح الأوزان (Qwen3-Coder...) عبر توكن HF لكتابة/مراجعة الكود"),
         ])
         return tools
 
