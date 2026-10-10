@@ -58,6 +58,7 @@ from ai.capability_marketplace import CapabilityMarketplace
 from ai.evolution_engine import EvolutionEngine
 from ai.multi_goal_planner import MultiGoalPlanner
 from ai.decision import AIDecisionLayer
+from ai.node_neural_advisor import NodeNeuralAdvisor
 from knowledge.knowledge_store import KnowledgeStore
 from ai.discovery_engine import DiscoveryEngine
 from ai.optimization_engine import OptimizationEngine
@@ -335,8 +336,21 @@ class MeshBundle:
         except Exception as e:
             self.routing_engine = None
             logger.warning("MeshBundle: تعذّر بناء RoutingEngine — يُستخدم الاختيار الأصلي: %s", e)
+        # الشبكة العصبية داخل قرارات العُقد (ai/node_neural_advisor.py): تتدرّب آلياً من
+        # نتائج التنفيذ الفعلية (محرك المسارات + السرب)، وتختار البديل عند الفشل.
+        self.neural_advisor = NodeNeuralAdvisor(Path(storage_dir) / "node_neural_advisor.json")
+
+        def _state_of(nid: str):
+            n = self.registry.get(nid)
+            return n.state if n else None
+
+        def _reputation_of(nid: str):
+            return self.reputation_engine.get_score(nid) / 100.0
+
         self.ai_decision = AIDecisionLayer(
             graph=self.graph, db=self.exec_log, routing_engine=self.routing_engine,
+            advisor=self.neural_advisor,
+            state_lookup=_state_of, reputation_lookup=_reputation_of,
         )
 
         # RLock وليس Lock عادياً: record_swarm_result يستدعي الآن
@@ -633,6 +647,18 @@ class MeshBundle:
         استيراد ai.agent_tools — سابقاً كان استثناء الاستيراد يُسقط *كل*
         أدوات اليد اليسرى بما فيها peers/read_inbox (المستخدمتان في
         pump_inboxes والتواصل بين العقد)."""
+        def neural_advice(node_id: Optional[str] = None):
+            """توقّع الشبكة العصبية لنجاح التنفيذ التالي لعقدة مسجَّلة (افتراضياً: هذه العقدة)."""
+            target = node_id or node.node_id
+            if not self.registry.exists(target):
+                raise ValueError("node is not registered")
+            return {
+                "node_id": target,
+                "p_success": round(self.ai_decision._neural_p(target) or 0.0, 4),
+                **{k: v for k, v in self.neural_advisor.summary().items()
+                   if k in ("trained", "observations")},
+            }
+
         def peers():
             return [
                 {"node_id": m.get("node_id"), "name": m.get("name"), "state": m.get("state")}
@@ -829,6 +855,7 @@ class MeshBundle:
         tools = [
             ("read_inbox", read_inbox, "قراءة صندوق بريد هذه العقدة فقط (الأقدم أولاً)"),
             ("peers", peers, "قائمة العُقد المعروفة وحالاتها"),
+            ("neural_advice", neural_advice, "توقّع الشبكة العصبية لنجاح عقدة مسجَّلة (افتراضياً هذه العقدة)"),
             ("node_status", node_status, "حالة هذه العقدة + سمعتها من السجل"),
             ("mesh_health", mesh_health, "ملخص صحة الشبكة (عدد/حالات/سمعة متوسطة)"),
             ("routes", routes, "جدول مسارات الأقران مع الحالة والسمعة"),
@@ -1610,8 +1637,16 @@ class MeshBundle:
                 success = task.status == "done"
                 latency = float(task.duration_ms or 0.0)
 
+                # قيم «ما قبل النتيجة» للتدريب العصبي (بلا تسريب التسمية للشبكة)
+                _n0 = self.registry.get(node_id)
+                _state_before = _n0.state if _n0 else None
+                _rep_before = self.reputation_engine.get_score(node_id) / 100.0
+
                 self.reputation_engine.record_execution(
                     node_id, role, success, latency
+                )
+                self.ai_decision.observe_outcome(
+                    node_id, success, latency, _state_before, _rep_before
                 )
 
                 # ── تحديث دورة حياة العقدة نفسها من نتيجة السرب الحقيقية ──────
@@ -1760,6 +1795,7 @@ class MeshBundle:
                     self.pump_inboxes()
                 except Exception as e:
                     logger.warning("MeshBundle: periodic pump_inboxes failed: %s", e)
+                self.neural_advisor.save()
                 try:
                     self.run_nodes_diagnose_cycle()
                 except Exception as e:
@@ -2455,6 +2491,7 @@ class MeshBundle:
             },
             "marketplace": self.marketplace.summary(),
             "multi_goal_planner": self.multi_goal_planner.summary(),
+            "neural_advisor": self.neural_advisor.summary(),
             "nodes_diagnose": {
                 "ts": diag.get("ts"),
                 "scanned": diag.get("scanned", 0),

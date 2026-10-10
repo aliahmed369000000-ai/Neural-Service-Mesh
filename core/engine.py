@@ -30,6 +30,8 @@ class ExecutionStep:
         self.status: str = "pending"
         self.error: Optional[str] = None
         self.is_fallback: bool = False
+        # حالة العقدة قبل بدء هذه الخطوة (لتدريب عصبي بلا تسريب للتسمية)
+        self.state_before: Optional[str] = None
 
     def to_dict(self):
         return {
@@ -38,6 +40,7 @@ class ExecutionStep:
             "duration_ms": self.duration_ms, "input_data": self.input_data,
             "output_data": self.output_data, "status": self.status,
             "error": self.error, "is_fallback": self.is_fallback,
+            "state_before": self.state_before,
         }
 
 
@@ -173,6 +176,7 @@ class ExecutionEngine:
                     # pending_input محفوظة على القرص فعلاً (وليس فقط في
                     # الذاكرة)، فيقدر resume_interrupted() يكتشفها ويكمل
                     # من نفس المدخلات بدل فقدان الخطوة والبدء من جديد.
+                    step.state_before = attempt_node.state
                     attempt_node.begin_execution(transformed)
                     self._registry.refresh_meta(attempt_node.node_id)
                     output = attempt_node.execute(transformed)

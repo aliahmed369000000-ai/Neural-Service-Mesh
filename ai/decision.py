@@ -29,7 +29,8 @@ class AIDecisionLayer:
       - Learn from execution history (simple frequency-based)
     """
 
-    def __init__(self, graph=None, db=None, routing_engine=None):
+    def __init__(self, graph=None, db=None, routing_engine=None, advisor=None,
+                 state_lookup=None, reputation_lookup=None):
         self._graph = graph
         self._db = db        # SQLiteStorage for history-based learning
         # routing_engine اختياري (ai/routing_engine.py::RoutingEngine): يجمع
@@ -40,7 +41,59 @@ class AIDecisionLayer:
         # غياب نتيجة أو أي استثناء، فلا يمكن أن يجعل الاختيار أسوأ من قبل.
         self._routing = routing_engine
         self._path_stats: Dict[str, Dict] = {}   # path_key -> {runs, successes, avg_ms}
+        # الشبكة العصبية (ai/node_neural_advisor.py): اختيارية — بدونها يبقى السلوك
+        # قواعد/heuristics كما كان بالضبط. state_lookup(node_id)->str|None وreputation_lookup
+        # (node_id)->0..1|None يقدّمهما المنسِّق (MeshBundle) من السجل/محرك السمعة.
+        self._advisor = advisor
+        self._state_lookup = state_lookup
+        self._reputation_lookup = reputation_lookup
         logger.info("AIDecisionLayer initialized (rules + heuristics mode)")
+
+    def set_advisor(self, advisor, state_lookup=None, reputation_lookup=None):
+        self._advisor = advisor
+        if state_lookup is not None:
+            self._state_lookup = state_lookup
+        if reputation_lookup is not None:
+            self._reputation_lookup = reputation_lookup
+
+    # ── الشبكة العصبية: أدوات داخلية آمنة (لا ترفع أبداً) ──────────────────
+    def _state_of(self, node_id: str) -> Optional[str]:
+        try:
+            return self._state_lookup(node_id) if self._state_lookup else None
+        except Exception:
+            return None
+
+    def _reputation_of(self, node_id: str) -> Optional[float]:
+        try:
+            return self._reputation_lookup(node_id) if self._reputation_lookup else None
+        except Exception:
+            return None
+
+    def _neural_p(self, node_id: str) -> Optional[float]:
+        """احتمال نجاح عقدة، أو None إن لم تتوفر شبكة."""
+        if self._advisor is None:
+            return None
+        try:
+            return self._advisor.predict(node_id, self._state_of(node_id),
+                                         self._reputation_of(node_id))
+        except Exception as e:
+            logger.warning("neural advisor predict failed: %s", e)
+            return None
+
+    def observe_outcome(self, node_id: str, success: bool, latency_ms=None,
+                        state_before: Optional[str] = None, reputation_before=None) -> None:
+        """تدريب آلي على نتيجة تنفيذ فعلية. state_before/reputation_before هما
+        قيمتا ما قبل النتيجة (تفادياً لتسريب التسمية للشبكة)."""
+        if self._advisor is None:
+            return
+        try:
+            self._advisor.observe(
+                node_id, success, latency_ms,
+                state_before if state_before is not None else self._state_of(node_id),
+                reputation_before if reputation_before is not None else self._reputation_of(node_id),
+            )
+        except Exception as e:
+            logger.warning("neural advisor observe failed: %s", e)
 
     def set_graph(self, graph):
         self._graph = graph
@@ -113,6 +166,16 @@ class AIDecisionLayer:
         try:
             # Look for nodes that point to the same targets the failed node points to
             neighbors = self._graph.get_neighbors(failed_node_id)
+            if neighbors and self._advisor is not None:
+                # الشبكة العصبية تختار الجار الأرجح نجاحاً، وتتخطى المحجور (PAUSED) —
+                # الترتيب الأصلي يكسر التعادل فيبقى السلوك القديم لعُقد بلا تاريخ.
+                eligible = [n for n in neighbors
+                            if n != failed_node_id and self._state_of(n) != "paused"]
+                if not eligible:
+                    return None
+                ranked = self._advisor.rank(eligible, self._state_lookup, self._reputation_lookup)
+                logger.info("AI fallback (neural): %s p=%.3f", ranked[0][0][:8], ranked[0][1])
+                return ranked[0][0]
             if neighbors:
                 logger.info(f"AI fallback: suggesting first available neighbor of failed node")
                 return neighbors[0]
@@ -122,6 +185,11 @@ class AIDecisionLayer:
 
     def learn_from_run(self, run_result: dict):
         """Update internal stats from a completed run (simple heuristic learning)."""
+        # تدريب عصبي آلي من كل خطوة فعلية (نجاح/خطأ) — يعمل حتى لو لم يكن هناك path
+        for st in (run_result.get("steps") or []):
+            if st.get("status") in ("success", "error") and st.get("node_id"):
+                self.observe_outcome(st["node_id"], st["status"] == "success",
+                                     st.get("duration_ms"), st.get("state_before"))
         path = run_result.get("path", [])
         if not path:
             return
@@ -137,8 +205,12 @@ class AIDecisionLayer:
 
     def get_insights(self) -> dict:
         """Return AI-derived insights about the mesh performance."""
+        neural = self._advisor.summary() if self._advisor is not None else None
         if not self._path_stats:
-            return {"message": "No execution data yet. Run some pipelines first."}
+            out = {"message": "No execution data yet. Run some pipelines first."}
+            if neural:
+                out["neural"] = neural
+            return out
 
         insights = []
         for key, s in self._path_stats.items():
@@ -157,6 +229,7 @@ class AIDecisionLayer:
             "total_paths_tracked": len(insights),
             "paths": insights,
             "recommendation": self._overall_recommendation(insights),
+            **({"neural": neural} if neural else {}),
         }
 
     # ── Internal Heuristics ────────────────────────────────────────────────
@@ -235,6 +308,15 @@ class AIDecisionLayer:
             if total_weight > 0:
                 reasons.append(f"weight={total_weight:.1f}")
 
+        # الشبكة العصبية (بعد اكتمال تدريبها فقط): المتوسط الهندسي لاحتمالات نجاح عُقد المسار
+        if self._advisor is not None and self._advisor.is_trained():
+            ps = [self._neural_p(n) for n in path]
+            ps = [p for p in ps if p is not None]
+            if ps:
+                gm = math.exp(sum(math.log(max(p, 1e-6)) for p in ps) / len(ps))
+                score += 40.0 * (gm - 0.5)
+                reasons.append(f"nn={gm:.2f}")
+
         return PathScore(path, max(0.0, score), ", ".join(reasons))
 
     def _score_single_node(self, node_id: str, context: dict) -> float:
@@ -256,6 +338,12 @@ class AIDecisionLayer:
                 score -= out_degree * 2.0
             except Exception:
                 pass
+
+        # الشبكة العصبية (بعد اكتمال تدريبها فقط): ±20 نقطة حسب احتمال النجاح
+        if self._advisor is not None and self._advisor.is_trained():
+            p = self._neural_p(node_id)
+            if p is not None:
+                score += 40.0 * (p - 0.5)
 
         return score
 
