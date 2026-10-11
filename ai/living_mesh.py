@@ -240,10 +240,31 @@ class LivingMeshNode:
             from huggingface_hub import hf_hub_download
             repo_id = "AliAhmedMo/surah-chain-d128-pretrain"
             logger.info(f"🧠 Integrating Surah Pretrain Awareness from {repo_id}...")
-            
-            # تحميل ملف الإعدادات والقاموس
-            config_path = hf_hub_download(repo_id=repo_id, filename="config.json")
-            vocab_path = hf_hub_download(repo_id=repo_id, filename="tokenizer_vocab_pretrain_d128_s1p0.json")
+
+            # 🆕 hf_hub_download متزامنة بذاتها (بلا await)، ومعها retry داخلي
+            # بتأخير تصاعدي (حتى ~31 ثانية لكل نداء عند تعذّر الشبكة أو DNS).
+            # استدعاؤها مباشرة هنا كان يُجمِّد حلقة asyncio الوحيدة للعقدة
+            # بالكامل طوال تلك المدة — لا HTTP، لا WebSocket، لا معالجة أي
+            # رسالة قرين — رغم أن هذه المهمة التمهيدية await self._load_
+            # surah_pretrain() نفسها عبر loop.create_task (مجدولة كمهمة
+            # خلفية بالاسم)، لأن الحظر الفعلي يحدث *داخل* المهمة لا حولها.
+            # تحقّقت من هذا فعلياً: شغّلت عقدة حقيقية مرتين منفصلتين وظلت
+            # /status غير مستجيبة تماماً لأكثر من 15 ثانية في كل مرة (شبكة
+            # الحاوية لا تصل huggingface.co فتتكرر كل محاولات الإعادة). نفس
+            # فئة الخلل التي أُصلحت سابقاً في ai/git_manager.py (subprocess
+            # بلا timeout يُجمِّد خيط التطوّر الذاتي)، لكن الأثر هنا أوسع:
+            # عقدة بأكملها لا خيط واحد، لأن حلقة asyncio مشتركة وواحدة فقط.
+            # run_in_executor ينقل النداءين الحاجزين لخيط مستقل فلا يُجمَّد
+            # الحدث الرئيسي أبداً، بينما العقدة تستمر بخدمة كل الطلبات.
+            loop = asyncio.get_running_loop()
+            config_path = await loop.run_in_executor(
+                None, lambda: hf_hub_download(repo_id=repo_id, filename="config.json")
+            )
+            vocab_path = await loop.run_in_executor(
+                None, lambda: hf_hub_download(
+                    repo_id=repo_id, filename="tokenizer_vocab_pretrain_d128_s1p0.json"
+                )
+            )
             
             with open(config_path, 'r') as f:
                 self.surah_config = json.load(f)
