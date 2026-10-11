@@ -1129,12 +1129,12 @@ class MeshBundle:
         def think(prompt: str, max_tokens: int = 200):
             """العقدة تستخدم شبكة عصبية حقيقية — وليس فقط قواعد/قوالب
             مكتوبة سلفاً — للصياغة أو التلخيص أو الاستدلال اللغوي القصير.
-            النموذج: Falcon-Arabic-7B-Instruct (مبني على Falcon3-7B من
-            TII، مفتوح المصدر بالكامل، عبر Hugging Face Inference API
-            المجانية) — نفس النموذج اللغوي العام المُعتمَد فعلياً لهذا
-            المشروع (ai/llm_fallback.py). provider_override='hf' يضمن أن
-            هذه الأداة تحديداً لا تستخدم أبداً أي مزوّد آخر (ولو كان مدفوعاً
-            ومُهيَّأً في البيئة) — العقدة لا تملك ولا تستطيع أن تُنفق مالاً
+            الترتيب (ai/node_think.py): نموذج محلي على جهازك إن وُجد
+            (NSM_LOCAL_LLM_URL، لا تغادر البيانات الجهاز)، ثم Groq
+            (gpt-oss-120b، مجاني وسريع)، ثم Hugging Face (Falcon-Arabic-
+            7B-Instruct). كل محاولة مقيَّدة بمزوّد واحد مفتوح الأوزان حصراً
+            (provider_override) — لا تسريب أبداً لمزوّد مدفوع (ولو كان
+            مُهيَّأً في البيئة) — العقدة لا تملك ولا تستطيع أن تُنفق مالاً
             حقيقياً عبر يدها، بصرف النظر عن أي إعداد عام للتطبيق."""
             from ai.node_think import neural_think
             return neural_think(prompt, max_tokens=max_tokens)
@@ -1165,7 +1165,7 @@ class MeshBundle:
             ("kaggle_status", kaggle_status_quick,
              "حالة سطر كيرنل تدريب Kaggle (قراءة فقط، بلا جلب مخرجات)"),
             ("think", think,
-             "استدعاء شبكة عصبية حقيقية (Falcon-Arabic-7B-Instruct، مفتوحة المصدر) للصياغة/الاستدلال القصير"),
+             "استدعاء شبكة عصبية حقيقية مفتوحة الأوزان (محلي → Groq → HF Falcon) للصياغة/الاستدلال القصير"),
             ("think_code", think_code,
              "نموذج برمجة مفتوح الأوزان (Qwen3-Coder...) عبر توكن HF لكتابة/مراجعة الكود"),
         ])
