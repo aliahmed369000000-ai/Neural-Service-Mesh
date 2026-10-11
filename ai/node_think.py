@@ -43,24 +43,40 @@ def _hf_key() -> str:
     return os.getenv("HUGGINGFACE_API_KEY", "").strip() or os.getenv("HF_TOKEN", "").strip()
 
 
+def _local_url() -> str:
+    return os.getenv("NSM_LOCAL_LLM_URL", "").strip()
+
+
+def local_timeout_sec() -> float:
+    try:
+        return max(5.0, float(os.getenv("NSM_LOCAL_TIMEOUT_SEC", "60")))
+    except ValueError:
+        return 60.0
+
+
 def neural_available() -> bool:
-    """True فقط إن وُجد مفتاح مزوّد مفتوح الأوزان فعلي: Groq (gpt-oss-120b) أو
-    Hugging Face (وإلا فـthink ستسقط لـCKG Synthesis وهو ليس شبكة عصبية)."""
-    return bool(_groq_key() or _hf_key())
+    """True فقط إن وُجد مصدر نموذج مفتوح الأوزان فعلي: خادم محلي (NSM_LOCAL_LLM_URL)
+    أو Groq (gpt-oss-120b) أو Hugging Face (وإلا فـthink ستسقط لـCKG Synthesis
+    وهو ليس شبكة عصبية)."""
+    return bool(_local_url() or _groq_key() or _hf_key())
 
 
 def auto_enabled() -> bool:
     return os.getenv("NSM_NODE_NEURAL_AUTO", "1").strip().lower() not in ("0", "false", "no", "off")
 
 
-_OPEN_PROVIDERS = ("groq", "huggingface")
+_OPEN_PROVIDERS = ("local", "groq", "huggingface")
 
 
-def neural_think(prompt: str, max_tokens: int = 200) -> Dict[str, Any]:
-    """نفس سلوك أداة think الأصلية (تحقق إدخال + مزوّد مفتوح الأوزان حصراً).
-    الترتيب: Groq (gpt-oss-120b، مجاني وسريع) إن وُجد GROQ_API_KEY، ثم Hugging Face.
-    provider_override يقيّد كل محاولة بمزوّد واحد — لا تسريب لمزوّد مدفوع أبداً.
-    بلا أي مفتاح: السلوك القديم (محاولة HF ثم CKG) كما هو."""
+def neural_think(prompt: str, max_tokens: int = 200,
+                 local_timeout: Optional[float] = None) -> Dict[str, Any]:
+    """نفس سلوك أداة think الأصلية (تحقق إدخال + نماذج مفتوحة الأوزان حصراً).
+    الترتيب: نموذج محلي على جهازك (NSM_LOCAL_LLM_URL: Ollama أو خادم OpenAI-compatible
+    مثل llama.cpp/vLLM — لا تغادر البيانات الجهاز ولا حصص ولا تكلفة)، ثم Groq
+    (gpt-oss-120b)، ثم Hugging Face. كل محاولة مقيّدة provider_override بمزوّد واحد
+    — لا تسريب لمزوّد مدفوع أبداً. بلا أي مصدر: السلوك القديم (HF ثم CKG).
+    local_timeout: مهلة المحلي؛ None = ضمن المهلة الإجمالية (13ث) المناسبة لمهلة
+    اليد، وإلا تُضاف للمهلة الإجمالية (للمسارات غير المحدودة بيد، مثل الاستدلال)."""
     prompt = (prompt or "").strip()
     if not prompt:
         raise ValueError("prompt فارغ")
@@ -70,18 +86,24 @@ def neural_think(prompt: str, max_tokens: int = 200) -> Dict[str, Any]:
 
     from ai.llm_fallback import LLMFallback
     order = []
+    if _local_url():
+        order.append("local")
     if _groq_key():
         order.append("groq")
     if _hf_key() or not order:
         order.append("hf")
 
+    deadline = THINK_DEADLINE + (local_timeout if (local_timeout and "local" in order) else 0.0)
     t0 = time.time()
     result = None
     for i, prov in enumerate(order):
-        remaining = THINK_DEADLINE - (time.time() - t0)
+        remaining = deadline - (time.time() - t0)
         if i > 0 and remaining < 3.0:
             break
-        timeout = THINK_TIMEOUT if i == 0 else int(max(3.0, min(THINK_TIMEOUT, remaining)))
+        if prov == "local":
+            timeout = int(max(3.0, min(local_timeout or THINK_TIMEOUT, remaining)))
+        else:
+            timeout = THINK_TIMEOUT if i == 0 else int(max(3.0, min(THINK_TIMEOUT, remaining)))
         llm = LLMFallback(max_tokens=max_tokens, timeout=timeout, provider_override=prov)
         result = llm.generate(prompt)
         if result.provider.value in _OPEN_PROVIDERS:
@@ -149,7 +171,7 @@ def neural_refine_evolution_task(
             f"تشخيصك: {_compact_diagnosis(diagnose)}\n"
             "اقترح تركيزاً عملياً واحداً للتحسين في سطر عربي واحد قصير فقط، بلا شرح."
         )
-        res = neural_think(prompt, max_tokens=80)
+        res = neural_think(prompt, max_tokens=80, local_timeout=local_timeout_sec())
         text = _clean_one_line(res.get("text", ""))
         ok = bool(res.get("used_open_source_model")) and bool(text) and not text.startswith(("❌", "⚠️"))
         with _auto_lock:
@@ -181,7 +203,8 @@ def neural_first_generate(prompt: str, max_tokens: int = 128) -> Optional[Dict[s
         prompt = (prompt or "").strip()
         if not prompt:
             return None
-        res = neural_think(prompt[:MAX_PROMPT_CHARS], max_tokens=max_tokens)
+        res = neural_think(prompt[:MAX_PROMPT_CHARS], max_tokens=max_tokens,
+                           local_timeout=local_timeout_sec())
         text = (res.get("text") or "").strip()
         if not res.get("used_open_source_model") or not text or text.startswith(("❌", "⚠️")):
             return None

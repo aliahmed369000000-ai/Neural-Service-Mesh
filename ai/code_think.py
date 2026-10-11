@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
-"""ai/code_think.py — نموذج برمجة مفتوح الأوزان للعقد: Groq أولاً ثم Hugging Face.
+"""ai/code_think.py — نموذج برمجة مفتوح الأوزان للعقد: محلي أولاً، ثم Groq، ثم Hugging Face.
 
-المزوّدان (الأول بالأولوية): Groq (GROQ_API_KEY — gpt-oss-120b ثم llama-3.3-70b،
+المصادر (بالأولوية): خادم محلي على جهازك (NSM_LOCAL_LLM_URL: Ollama أو OpenAI-compatible
+مثل llama.cpp/vLLM؛ النموذج NSM_LOCAL_CODE_MODEL ثم NSM_LOCAL_MODEL — البيانات لا تغادر
+الجهاز)، ثم Groq (GROQ_API_KEY — gpt-oss-120b ثم llama-3.3-70b،
 مجاني وسريع وحصته أكبر بكثير) ثم موجّه Hugging Face (HUGGINGFACE_API_KEY/HF_TOKEN).
 كلاهما OpenAI-compatible. يُستخدم ما له مفتاح فقط.
 
@@ -113,9 +115,27 @@ def _auto_enabled() -> bool:
     return os.getenv("NSM_NODE_NEURAL_AUTO", "1").strip().lower() not in ("0", "false", "no", "off")
 
 
+def _local_url() -> str:
+    return os.getenv("NSM_LOCAL_LLM_URL", "").strip().rstrip("/")
+
+
+def _local_model() -> str:
+    m = os.getenv("NSM_LOCAL_CODE_MODEL", "").strip() or os.getenv("NSM_LOCAL_MODEL", "").strip()
+    return m or "qwen2.5:7b-instruct-q4_K_M"
+
+
+def local_timeout_sec() -> float:
+    try:
+        return max(5.0, float(os.getenv("NSM_LOCAL_TIMEOUT_SEC", "60")))
+    except ValueError:
+        return 60.0
+
+
 def _providers():
     """[(اسم، رابط، مفتاح، نماذج)] بالأولوية، للمزوّدين الذين لهم مفتاح فقط."""
     out = []
+    if _local_url():
+        out.append(("local", _local_url(), "", [_local_model()]))
     if _groq_key():
         out.append(("groq", GROQ_URL, _groq_key(), groq_code_models()))
     if _hf_key():
@@ -124,7 +144,7 @@ def _providers():
 
 
 def code_available() -> bool:
-    """يوجد مزوّد له مفتاح وغير محظور (نفاد رصيد/توكن خاطئ)."""
+    """يوجد مصدر متاح (محلي/مفتاح) وغير محظور (نفاد رصيد/توكن خاطئ)."""
     now = time.time()
     return any(_provider_blocked_until.get(name, 0.0) <= now for name, _u, _k, _m in _providers())
 
@@ -158,7 +178,36 @@ def _classify(exc: Exception):
     return False, _COOL_OTHER
 
 
-def code_think(prompt: str, max_tokens: int = 600) -> Dict[str, Any]:
+def _build_request(name: str, base: str, key: str, model: str, system: str,
+                   prompt: str, max_tokens: int):
+    """(رابط، payload، headers، دالة استخلاص النص) حسب المزوّد."""
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+    if name == "local" and not base.endswith("/v1"):
+        # Ollama الأصلي
+        return (
+            f"{base}/api/chat",
+            {"model": model, "messages": messages, "stream": False,
+             "options": {"temperature": 0.2, "num_predict": max_tokens}},
+            {"Content-Type": "application/json"},
+            lambda d: ((d or {}).get("message") or {}).get("content") or "",
+        )
+    url = f"{base}/chat/completions" if name == "local" else base
+    payload = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": 0.2}
+    if model.startswith("openai/gpt-oss"):
+        # نماذج الاستدلال تستهلك جزءاً من max_tokens في «التفكير» فيخرج
+        # المحتوى فارغاً/مبتوراً؛ جهد منخفض يحفظ الميزانية للجواب.
+        payload["reasoning_effort"] = "low"
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    return (
+        url, payload, headers,
+        lambda d: (((d or {}).get("choices") or [{}])[0] or {}).get("message", {}).get("content") or "",
+    )
+
+
+def code_think(prompt: str, max_tokens: int = 600,
+               deadline: Optional[float] = None) -> Dict[str, Any]:
     """يرجع دائماً dict: {ok, text, model, provider, used_open_source_model, reason?}.
     لا يرفع استثناءً أبداً (التحقق من المدخلات فقط يرفع ValueError ليرفضه المستدعي)."""
     prompt = (prompt or "").strip()
@@ -182,11 +231,12 @@ def code_think(prompt: str, max_tokens: int = 600) -> Dict[str, Any]:
 
     from ai import llm_fallback as _lf  # _post_json قابلة للاستبدال في الاختبارات
 
+    total = deadline if deadline else TOTAL_DEADLINE
     t0 = time.time()
     last_reason = "no_model_available"
     for name, url, key, models in providers:
         for model in models:
-            remaining = TOTAL_DEADLINE - (time.time() - t0)
+            remaining = total - (time.time() - t0)
             if remaining < 2.0:
                 return _fail("deadline" if last_reason == "no_model_available" else last_reason)
             with _lock:
@@ -194,37 +244,23 @@ def code_think(prompt: str, max_tokens: int = 600) -> Dict[str, Any]:
                     break  # المزوّد كله محظور: انتقل للمزوّد التالي
                 if _model_blocked_until.get(f"{name}:{model}", 0.0) > time.time():
                     continue
-            payload = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": _SYSTEM},
-                    {"role": "user", "content": prompt},
-                ],
-                "max_tokens": max_tokens,
-                "temperature": 0.2,
-            }
-            if model.startswith("openai/gpt-oss"):
-                # نماذج الاستدلال تستهلك جزءاً من max_tokens في «التفكير» فيخرج
-                # المحتوى فارغاً/مبتوراً؛ جهد منخفض يحفظ الميزانية للجواب.
-                payload["reasoning_effort"] = "low"
+            req_url, payload, headers, extract = _build_request(
+                name, url, key, model, _SYSTEM, prompt, max_tokens)
+            per_call = local_timeout_sec() if name == "local" else PER_CALL_TIMEOUT
             try:
-                data = _lf._post_json(
-                    url, payload,
-                    {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                    int(min(PER_CALL_TIMEOUT, remaining)),
-                )
-                text = ""
-                if isinstance(data, dict) and data.get("choices"):
-                    text = ((data["choices"][0] or {}).get("message") or {}).get("content") or ""
+                data = _lf._post_json(req_url, payload, headers, int(min(per_call, remaining)))
+                text = extract(data)
                 text = text.strip()
                 if not text:
                     raise ValueError("رد فارغ")
                 return {"ok": True, "text": text, "model": model,
-                        "provider": "groq" if name == "groq" else "huggingface-router",
+                        "provider": {"groq": "groq", "local": "local"}.get(name, "huggingface-router"),
                         "used_open_source_model": True,
                         "latency_ms": round((time.time() - t0) * 1000, 1)}
             except Exception as exc:  # noqa: BLE001
                 is_global, secs = _classify(exc)
+                if name == "local" and not is_global:
+                    secs = min(secs, 30.0)  # الخادم المحلي قد يكون يُقلع: أعد التجربة سريعاً
                 with _lock:
                     if is_global:
                         _provider_blocked_until[name] = time.time() + secs
@@ -243,7 +279,9 @@ def code_first_generate(prompt: str, max_tokens: int = 400) -> Optional[Dict[str
     try:
         if not (_auto_enabled() and code_available() and is_code_prompt(prompt)):
             return None
-        res = code_think(prompt[:MAX_PROMPT_CHARS], max_tokens=max_tokens)
+        # مع خادم محلي (CPU بطيء) تُضاف مهلته للمهلة الإجمالية؛ هذا المسار غير مقيّد بمهلة يد.
+        deadline = TOTAL_DEADLINE + (local_timeout_sec() if _local_url() else 0.0)
+        res = code_think(prompt[:MAX_PROMPT_CHARS], max_tokens=max_tokens, deadline=deadline)
         return res if res.get("ok") else None
     except Exception as exc:  # noqa: BLE001
         logger.debug("code_first_generate failed: %s", exc)

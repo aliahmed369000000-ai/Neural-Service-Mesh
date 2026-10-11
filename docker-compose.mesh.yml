@@ -33,6 +33,49 @@ services:
       retries: 3
       start_period: 120s
 
+  # ── نموذج مفتوح الأوزان محلي (اختياري): docker compose --profile local-llm up -d ──
+  # ثم ضع في .env.mesh:  NSM_LOCAL_LLM_URL=http://ollama:11434
+  # (والنموذج بـNSM_LOCAL_MODEL، ولكود البرمجة NSM_LOCAL_CODE_MODEL). عندها تجيب
+  # العقد من النموذج المحلي أولاً (البيانات لا تغادر جهازك)، وGroq/HF احتياط.
+  # تنبيه: خادم واحد مشترك بين العقد؛ على CPU النموذج 7B بطيء (جرّب qwen2.5:3b)،
+  # وعلى GPU أسرع بكثير (أضف deploy.resources.reservations.devices لخدمة ollama).
+  ollama:
+    image: ollama/ollama
+    container_name: nsm-ollama
+    profiles: ["local-llm"]
+    restart: always
+    volumes:
+      - nsm_ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  ollama-init:
+    image: ollama/ollama
+    container_name: nsm-ollama-init
+    profiles: ["local-llm"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+    env_file:
+      - path: .env.mesh
+        required: false
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        ollama pull "$${NSM_LOCAL_MODEL:-qwen2.5:7b-instruct-q4_K_M}"
+        if [ -n "$${NSM_LOCAL_CODE_MODEL:-}" ] && [ "$${NSM_LOCAL_CODE_MODEL}" != "$${NSM_LOCAL_MODEL:-qwen2.5:7b-instruct-q4_K_M}" ]; then
+          ollama pull "$${NSM_LOCAL_CODE_MODEL}"
+        fi
+
 volumes:
   nsm_mesh_data:
   nsm_mesh_bridge:
+  nsm_ollama:

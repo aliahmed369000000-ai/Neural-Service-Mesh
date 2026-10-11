@@ -629,7 +629,7 @@ class LLMFallback:
         if pref not in (
             "auto", "groq", "cerebras", "cf", "cloudflare", "gemini",
             "openrouter", "anthropic", "openai", "together",
-            "huggingface", "hf", "openai_compat", "compat",
+            "huggingface", "hf", "openai_compat", "compat", "local",
         ):
             logger.warning(
                 "[LLMFallback] قيمة NSM_LLM_PROVIDER_PREF غير معروفة "
@@ -1595,23 +1595,44 @@ class LLMFallback:
             ]
         messages.append({"role": "user", "content": query})
 
-        timeout = max(self.timeout, _LOCAL_TIMEOUT_SEC)
-        data = _post_json(
-            f"{base_url}/api/chat",
-            {
-                "model":    self._model,
-                "messages": messages,
-                "stream":   False,
-                "options": {
-                    "temperature": self.temperature,
-                    "num_predict": self.max_tokens,
+        # مهلة صريحة (provider_override="local") تُحترم كما هي — كانت تُرفع دائماً إلى 90ث
+        # فتتجاوز مهلة اليد think (15ث). بدون override يبقى السلوك القديم.
+        if self._provider_pref_override == "local":
+            timeout = self.timeout
+        else:
+            timeout = max(self.timeout, _LOCAL_TIMEOUT_SEC)
+        if base_url.endswith("/v1"):
+            # خادم متوافق مع OpenAI (llama.cpp server / vLLM / LM Studio)
+            data = _post_json(
+                f"{base_url}/chat/completions",
+                {
+                    "model":       self._model,
+                    "messages":    messages,
+                    "max_tokens":  self.max_tokens,
+                    "temperature": max(self.temperature, 0.01),
                 },
-            },
-            {"Content-Type": "application/json"},
-            timeout,
-        )
-
-        text = (data.get("message") or {}).get("content", "").strip()
+                {"Content-Type": "application/json"},
+                timeout,
+            )
+            choices = data.get("choices") if isinstance(data, dict) else None
+            text = (((choices or [{}])[0] or {}).get("message") or {}).get("content", "") or ""
+            text = text.strip()
+        else:
+            data = _post_json(
+                f"{base_url}/api/chat",
+                {
+                    "model":    self._model,
+                    "messages": messages,
+                    "stream":   False,
+                    "options": {
+                        "temperature": self.temperature,
+                        "num_predict": self.max_tokens,
+                    },
+                },
+                {"Content-Type": "application/json"},
+                timeout,
+            )
+            text = (data.get("message") or {}).get("content", "").strip()
         if not text:
             raise Exception(f"النموذج المحلي أعاد استجابة فارغة/غير متوقعة: {str(data)[:150]}")
 
