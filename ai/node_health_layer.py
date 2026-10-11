@@ -9,6 +9,7 @@ NSM Node Health & Verifiable Task Layer
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -239,7 +240,7 @@ class NodeHealthLayer:
         t0 = time.time()
 
         if local or host is None:
-            result = mt.dispatch_task(kind, payload)
+            result = await asyncio.to_thread(mt.dispatch_task, kind, payload)
             if result is None:
                 return {"ok": False, "error": f"unknown_kind:{kind}", "task_id": task_id}
             receipt = self.node.issue_execution_receipt(task_id, kind, result)
@@ -412,7 +413,7 @@ class NodeHealthLayer:
 
         # كل العمال فشلوا — تنفيذ محلي كاستمرارية
         if prefer_local_fallback:
-            result = mt.dispatch_task(kind, payload)
+            result = await asyncio.to_thread(mt.dispatch_task, kind, payload)
             if result is not None:
                 receipt = self.node.issue_execution_receipt(task_id, kind, result)
                 journal["status"] = "completed_local_fallback"

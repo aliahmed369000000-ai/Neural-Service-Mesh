@@ -2443,7 +2443,9 @@ class LivingMeshNode:
                 result = self.network_health_snapshot()
                 result.update({"ok": True, "task_id": task_id, "report_kind": kind})
             else:
-                result = mesh_tasks.dispatch_task(kind, exp_data or {})
+                # خيط منفصل: استدلال طويل (نموذج محلي) كان يجمّد حلقة الأحداث كلها
+                # فيتوقف /status وكل الاتصالات (والمشرف يقتل العقدة كمتجمّدة).
+                result = await asyncio.to_thread(mesh_tasks.dispatch_task, kind, exp_data or {})
         except Exception as e:
             err = f"{type(e).__name__}: {e}"
             logger.error(f"❌ Mesh task execution error kind={kind} id={task_id}: {err}")
@@ -2514,7 +2516,7 @@ class LivingMeshNode:
         target_id: str = None,
         use_relay: bool = True,
         wait_result: bool = True,
-        timeout: float = 15.0,
+        timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         يرسل مهمة موزّعة إلى عقدة هدف.
@@ -2524,6 +2526,9 @@ class LivingMeshNode:
         data = dict(data or {})
         data.setdefault("task_id", f"task_{uuid.uuid4().hex[:10]}")
         task_id = data["task_id"]
+        if timeout is None:
+            from ai.task_timeouts import remote_task_timeout
+            timeout = remote_task_timeout(kind, 15.0)
 
         if wait_result:
             rpc = await self.request_from_peer(

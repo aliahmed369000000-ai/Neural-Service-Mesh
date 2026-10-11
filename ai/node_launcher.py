@@ -432,6 +432,7 @@ async def handle_submit_job(request):
         body = await request.json()
     except Exception:
         return web.json_response({"error": "invalid_json"}, status=400)
+    from ai.task_timeouts import remote_task_timeout
     kind = body.get("kind")
     if not kind:
         return web.json_response({"error": "kind_required"}, status=400)
@@ -442,7 +443,7 @@ async def handle_submit_job(request):
         n_workers=int(body.get("n_workers") or 3),
         strategy=body.get("strategy") or "majority",
         require_capabilities=body.get("require_capabilities"),
-        timeout_per_task=float(body.get("timeout_per_task") or 12.0),
+        timeout_per_task=float(body.get("timeout_per_task") or remote_task_timeout(kind, 12.0)),
         retry_failed=int(body.get("retry_failed") or 1),
         quorum=int(body.get("quorum") or 2),
     )

@@ -47,11 +47,7 @@ def _local_url() -> str:
     return os.getenv("NSM_LOCAL_LLM_URL", "").strip()
 
 
-def local_timeout_sec() -> float:
-    try:
-        return max(5.0, float(os.getenv("NSM_LOCAL_TIMEOUT_SEC", "60")))
-    except ValueError:
-        return 60.0
+from ai.task_timeouts import local_timeout_sec  # noqa: E402  (مصدر واحد للمهلة)
 
 
 def neural_available() -> bool:

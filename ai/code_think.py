@@ -124,11 +124,7 @@ def _local_model() -> str:
     return m or "qwen2.5:7b-instruct-q4_K_M"
 
 
-def local_timeout_sec() -> float:
-    try:
-        return max(5.0, float(os.getenv("NSM_LOCAL_TIMEOUT_SEC", "60")))
-    except ValueError:
-        return 60.0
+from ai.task_timeouts import local_timeout_sec  # noqa: E402  (مصدر واحد للمهلة)
 
 
 def _providers():

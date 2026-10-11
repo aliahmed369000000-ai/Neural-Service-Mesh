@@ -1600,7 +1600,8 @@ class LLMFallback:
         if self._provider_pref_override == "local":
             timeout = self.timeout
         else:
-            timeout = max(self.timeout, _LOCAL_TIMEOUT_SEC)
+            from ai.task_timeouts import local_timeout_sec
+            timeout = max(self.timeout, _LOCAL_TIMEOUT_SEC, local_timeout_sec())
         if base_url.endswith("/v1"):
             # خادم متوافق مع OpenAI (llama.cpp server / vLLM / LM Studio)
             data = _post_json(
