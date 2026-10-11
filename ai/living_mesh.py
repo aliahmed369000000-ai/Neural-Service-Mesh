@@ -797,6 +797,44 @@ class LivingMeshNode:
             return True
         return False
 
+    async def probe_stale_peers(
+        self, stale_after: float, max_probes: int = 10, timeout: float = 3.0,
+    ) -> Dict[str, int]:
+        """فحص نشط للأقران المشتبه بهم قبل إعلانهم موتى (على طريقة SWIM).
+
+        سبب إنذارات «DEAD» الكاذبة التي رُصدت بتشغيل 28 عقدة حيّة: عتبة الخمول
+        (NSM_PEER_STALE_SEC=45ث) أقصر من دورة تحديث last_seen الكاملة
+        (measure_peers_health كل 4 نبضات×15ث=60ث)، فكانت كل العقد تُعلَن ميتة
+        ثم تعود (~95 إعلاناً لكل عقدة خلال 4 دقائق + آلاف تنبيهات CRITICAL).
+        الآن كل قرين تجاوز stale_after يُفحَص فعلياً (ping_peer يحدّث last_seen
+        عند النجاح) فلا يُعلَن ميتاً إلا إن فشل الفحص. الأقدم أولاً وبحدّ أقصى
+        max_probes لكل نبضة كي لا يزدحم الجهاز."""
+        state = self._load_state()
+        now = datetime.now(timezone.utc)
+        suspects = []
+        for nid, info in (state.get("nodes") or {}).items():
+            if nid == self.node_id or info.get("status") == "offline":
+                continue
+            host, port = info.get("host"), info.get("port")
+            if not host or port is None:
+                continue
+            try:
+                age = (now - datetime.fromisoformat(info["last_seen"])).total_seconds()
+            except Exception:
+                age = float("inf")
+            if age > stale_after:
+                suspects.append((age, nid, host, int(port)))
+        suspects.sort(key=lambda t: t[0], reverse=True)
+        batch = suspects[: max(0, int(max_probes))]
+        if not batch:
+            return {"suspects": 0, "probed": 0, "alive": 0}
+        results = await asyncio.gather(
+            *(self.ping_peer(h, p, timeout=timeout) for _a, _n, h, p in batch),
+            return_exceptions=True,
+        )
+        alive = sum(1 for r in results if isinstance(r, dict) and r.get("ok"))
+        return {"suspects": len(suspects), "probed": len(batch), "alive": alive}
+
     def check_network_health(self, timeout_seconds: int = 30) -> List[str]:
         """فحص صحة الشبكة ورصد العقد المتعطلة مع تفعيل الاستعادة الذاتية."""
         state = self._load_state()

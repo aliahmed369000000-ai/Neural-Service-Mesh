@@ -1359,8 +1359,18 @@ async def main():
         while not stop_event.is_set():
             try:
                 node.send_heartbeat()
+                stale_sec = int(os.getenv("NSM_PEER_STALE_SEC", "45"))
+                # فحص نشط للمشتبه بهم أولاً (انظر probe_stale_peers): بدونه كانت
+                # العقد الحيّة تُعلَن ميتة خطأً كل دورة لأن عتبة الخمول < دورة التحديث.
+                try:
+                    await node.probe_stale_peers(
+                        stale_after=stale_sec * 0.8,
+                        max_probes=int(os.getenv("NSM_STALE_PROBES_PER_TICK", "10")),
+                    )
+                except Exception as e:
+                    logger.debug(f"probe_stale_peers skipped: {e}")
                 # علّم العقد المتوقفة stale/offline عبر last_seen
-                dead = node.check_network_health(timeout_seconds=int(os.getenv("NSM_PEER_STALE_SEC", "45")))
+                dead = node.check_network_health(timeout_seconds=stale_sec)
                 if dead:
                     logger.info(f"📴 Marked stale/offline: {dead}")
                 tick += 1
