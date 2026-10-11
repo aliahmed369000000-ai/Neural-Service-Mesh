@@ -294,11 +294,25 @@ class LivingMeshNode:
         # البذرة الأصلية فقط التي تُستشار مرة واحدة أدناه.
         self.start_peer_sync_watch()
 
-        if seed_nodes:
-            for seed in seed_nodes:
-                if seed["id"] != self.node_id:
-                    asyncio.create_task(self.request_peers(seed["host"], seed["port"]))
-        
+        # ملاحظة لمن يستدعي join_network(seed_nodes=...): هذه الدالة لا
+        # تطلب الأقران من البذور بنفسها (كانت تفعل ذلك سابقاً عبر
+        # asyncio.create_task(request_peers(...)) غير مُنتظَرة ولا
+        # مُسجَّلة ولا معالَجة الأخطاء فيها) — وُجد بتشغيل شبكة محلية
+        # حقيقية من 3 عقد فعلياً أن هذا يسبب عطلين حقيقيين معاً:
+        # (1) استدعاءً مكرراً فعلياً لنفس البذرة من كل عقدة عاملة —
+        #     node_launcher.py كان يستدعي request_peers() صراحةً بعد
+        #     join_network() أصلاً، فيحصل اتصال WebSocket مزدوج فعلي لكل
+        #     بذرة عند كل إقلاع (هدر شبكة/وقت بلا أي فائدة).
+        # (2) join_network() دالة sync عادية؛ asyncio.create_task()
+        #     يتطلب حلقة أحداث نشطة بالفعل وقت الاستدعاء — أي استدعاء من
+        #     سياق sync (كما يحدث فعلياً في ai/gradient_mesh.py، وفي أي
+        #     اختبار يستدعيها مباشرة) يرفع RuntimeError: no running
+        #     event loop فوراً.
+        # المستدعي مسؤول عن طلب الأقران من البذور صراحةً بنفسه إن احتاج
+        # ذلك فوراً (انظر ai/node_launcher.py: await request_peers(...)
+        # بعد join_network() مباشرة) — capability_watch/gossip الدوريان
+        # يكتشفان بذوراً فائتة لاحقاً على كل حال.
+
         if is_rejoining:
             logger.info(f"♻️ Node {self.node_id} RECOVERED and rejoined the living mesh.")
             self.recover_collective_state()

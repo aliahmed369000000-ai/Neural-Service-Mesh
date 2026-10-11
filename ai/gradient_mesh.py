@@ -89,6 +89,26 @@ class GradientExchangeProtocol:
                             "port": seed["port"],
                         })
                     self.mesh_node.join_network(seed_nodes=seed_nodes or None)
+                    # 🆕 join_network() لم تعد تطلب الأقران من البذور بنفسها
+                    # (انظر التعليق في ai/living_mesh.py::join_network —
+                    # كانت تفعل ذلك عبر asyncio.create_task() غير مُنتظَرة،
+                    # ما يرفع RuntimeError: no running event loop فوراً من
+                    # هذا الـ__init__ العادي (sync)، فيُلتقَط بصمت أدناه
+                    # ويُعطَّل p2p كلياً (self.mesh_node = None) بلا أي سبب
+                    # واضح في السجلّ). هنا: نطلب الأقران صراحةً فقط إن
+                    # وُجدت حلقة أحداث نشطة فعلاً؛ وإلا نتجاوز بهدوء —
+                    # capability_watch/gossip الدوريان يكتشفان البذرة لاحقاً.
+                    for seed in seed_nodes:
+                        try:
+                            loop = asyncio.get_running_loop()
+                            loop.create_task(
+                                self.mesh_node.request_peers(seed["host"], seed["port"])
+                            )
+                        except RuntimeError:
+                            logger.info(
+                                "⏳ لا حلقة أحداث نشطة الآن — سيُكتشف "
+                                f"{seed['host']}:{seed['port']} لاحقاً عبر gossip"
+                            )
                     self.p2p_ready = True
                 except Exception as e:
                     logger.warning(f"⚠️ LivingMesh init soft-fail: {e}")
