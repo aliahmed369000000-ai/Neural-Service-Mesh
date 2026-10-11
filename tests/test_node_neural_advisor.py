@@ -102,6 +102,18 @@ def test_thread_safety_counts_every_observation():
     assert not errors and adv.summary()["observations"] == 360
 
 
+def test_tracked_nodes_are_bounded_and_evict_least_recently_observed(tmp_path):
+    adv = NodeNeuralAdvisor(tmp_path / "a.json", max_nodes=3, save_every=0)
+    for n in ("n1", "n2", "n3"):
+        adv.observe(n, True)
+    adv.observe("n1", True)          # n1 صار الأحدث؛ n2 هو الأقدم الآن
+    adv.observe("n4", True)
+    assert set(adv._stats) == {"n1", "n3", "n4"} and adv.summary()["nodes_tracked"] == 3
+    adv.save()
+    # الترتيب المحفوظ [n3, n1, n4]؛ إعادة التحميل بحدّ 2 تُبقي الأحدث ملاحظةً: n1 وn4
+    assert set(NodeNeuralAdvisor(tmp_path / "a.json", max_nodes=2)._stats) == {"n1", "n4"}
+
+
 # ── AIDecisionLayer ───────────────────────────────────────────────────────
 class _G:
     def __init__(self, nb):

@@ -1860,18 +1860,29 @@ class MeshBundle:
                         "MeshBundle: scoring/memory learning after direct execution failed: %s", e
                     )
 
+            # الأحداث = محاولات فشلت ثم أُنقذت ببديل (كانت تضيع لأن الخطوة تُستبدل)
+            # + الخطوات النهائية. بدون الأولى تبدو عقدة تفشل وتُنقَذ دائماً «مثالية»
+            # في السمعة فلا تُحجَر أبداً ولا يُبَثّ node_failed لجيرانها.
+            events = []
+            for fa in (getattr(result, "failed_attempts", None) or []):
+                events.append((fa.get("node_id"), fa.get("node_name"), False,
+                               float(fa.get("duration_ms") or 0.0), fa.get("error")))
             for step in getattr(result, "steps", []):
-                node_id = getattr(step, "node_id", None)
                 status = getattr(step, "status", None)
-                if not node_id or status not in ("success", "error"):
+                if status in ("success", "error"):
+                    events.append((getattr(step, "node_id", None), getattr(step, "node_name", None),
+                                   status == "success",
+                                   float(getattr(step, "duration_ms", None) or 0.0),
+                                   getattr(step, "error", None)))
+
+            for node_id, step_name, success, latency, err in events:
+                if not node_id:
                     continue
                 node = self.registry.get(node_id)
                 if not node:
                     continue  # عقدة غير موجودة أصلاً — لا سمعة لها لتُسجَّل
 
-                success = status == "success"
-                name = getattr(step, "node_name", None) or node.name
-                latency = float(getattr(step, "duration_ms", None) or 0.0)
+                name = step_name or node.name
 
                 self.reputation_engine.record_execution(node_id, name, success, latency)
 
@@ -1892,7 +1903,7 @@ class MeshBundle:
                                 "role": name,
                                 "previous_state": prev_state,
                                 "current_state": node.state,
-                                "error": getattr(step, "error", None) if not success else None,
+                                "error": err if not success else None,
                             },
                         )
 

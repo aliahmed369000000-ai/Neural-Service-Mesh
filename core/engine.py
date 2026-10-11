@@ -55,6 +55,10 @@ class ExecutionResult:
         self.final_output: Optional[dict] = None
         self.status: str = "running"
         self.ai_suggested: bool = False
+        # محاولات فشلت ثم أُنقذت ببديل: الخطوة الواحدة تُستبدل بيانات البديل فيها،
+        # فكان فشل العقدة الأصلية يضيع من steps (لا تدريب عصبي ولا سمعة ولا بثّ
+        # node_failed) رغم أنه فشل حقيقي. تُسجَّل هنا صراحةً.
+        self.failed_attempts: List[Dict[str, Any]] = []
 
     def to_dict(self):
         return {
@@ -62,6 +66,7 @@ class ExecutionResult:
             "started_at": self.started_at, "finished_at": self.finished_at,
             "total_duration_ms": self.total_duration_ms, "status": self.status,
             "final_output": self.final_output, "ai_suggested": self.ai_suggested,
+            "failed_attempts": list(self.failed_attempts),
             "steps": [s.to_dict() for s in self.steps],
         }
 
@@ -168,6 +173,7 @@ class ExecutionEngine:
                 step.started_at = datetime.now(timezone.utc).isoformat()
                 step.input_data = dict(current)
                 step.status = "running"
+                step.state_before = attempt_node.state
                 t0 = time.time()
                 try:
                     transformed = self._transformer.transform(current, attempt_node.input_schema)
@@ -176,7 +182,6 @@ class ExecutionEngine:
                     # pending_input محفوظة على القرص فعلاً (وليس فقط في
                     # الذاكرة)، فيقدر resume_interrupted() يكتشفها ويكمل
                     # من نفس المدخلات بدل فقدان الخطوة والبدء من جديد.
-                    step.state_before = attempt_node.state
                     attempt_node.begin_execution(transformed)
                     self._registry.refresh_meta(attempt_node.node_id)
                     output = attempt_node.execute(transformed)
@@ -202,6 +207,14 @@ class ExecutionEngine:
                             if candidate and candidate.state != NodeState.PAUSED:
                                 fb_node = candidate
                     if fb_node:
+                        result.failed_attempts.append({
+                            "index": step.index,
+                            "node_id": attempt_node.node_id,
+                            "node_name": attempt_node.name,
+                            "error": step.error,
+                            "duration_ms": step.duration_ms,
+                            "state_before": step.state_before,
+                        })
                         step.is_fallback = True
                         attempt_node = fb_node
                         continue  # محاولة ثانية وأخيرة عبر البديل

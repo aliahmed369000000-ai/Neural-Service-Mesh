@@ -190,6 +190,11 @@ class AIDecisionLayer:
             if st.get("status") in ("success", "error") and st.get("node_id"):
                 self.observe_outcome(st["node_id"], st["status"] == "success",
                                      st.get("duration_ms"), st.get("state_before"))
+        # محاولات فشلت ثم أُنقذت ببديل (لا تظهر في steps) — فشل حقيقي يجب أن تتعلمه الشبكة
+        for fa in (run_result.get("failed_attempts") or []):
+            if fa.get("node_id"):
+                self.observe_outcome(fa["node_id"], False, fa.get("duration_ms"),
+                                     fa.get("state_before"))
         path = run_result.get("path", [])
         if not path:
             return

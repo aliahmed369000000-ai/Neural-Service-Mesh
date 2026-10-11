@@ -27,7 +27,7 @@ import json
 import logging
 import os
 import threading
-from collections import deque
+from collections import OrderedDict, deque
 from pathlib import Path
 from typing import Any, Deque, Dict, Iterable, List, Optional, Tuple
 
@@ -90,12 +90,16 @@ class NodeNeuralAdvisor:
         learning_rate: float = 0.03,
         seed: int = 7,
         save_every: int = 25,
+        max_nodes: int = 5000,
     ):
         self._path = Path(storage_path) if storage_path else None
         self._min_obs = max(1, int(min_observations))
         self._save_every = max(0, int(save_every))
         self._lock = threading.RLock()
-        self._stats: Dict[str, _NodeStats] = {}
+        # حدّ أعلى لعدد العُقد المتتبَّعة (الأقدم ملاحظةً يُطرد): عُقد ديناميكية/مؤقتة
+        # كثيرة كانت تُنمّي الإحصاءات وملف الحفظ بلا حد.
+        self._max_nodes = max(1, int(max_nodes))
+        self._stats: "OrderedDict[str, _NodeStats]" = OrderedDict()
         self._observed = 0
         self._last_loss: Optional[float] = None
         self._net = NeuralNetwork(
@@ -158,6 +162,9 @@ class NodeNeuralAdvisor:
         """يتدرّب على نتيجة تنفيذ فعلية. الخصائص تُحسب قبل تحديث الإحصاءات."""
         with self._lock:
             stats = self._stats.setdefault(node_id, _NodeStats())
+            self._stats.move_to_end(node_id)
+            while len(self._stats) > self._max_nodes:
+                self._stats.popitem(last=False)
             x = self._features(stats, state, reputation)
             loss = float(self._net.train_step(x, [1.0 if success else 0.0]))
             self._last_loss = loss
@@ -226,8 +233,9 @@ class NodeNeuralAdvisor:
                 self._net = net
                 self._observed = max(0, int(data.get("observed", 0)))
                 self._last_loss = data.get("last_loss")
-                self._stats = {k: _NodeStats.from_dict(v)
-                               for k, v in (data.get("stats") or {}).items()}
+                self._stats = OrderedDict(
+                    (k, _NodeStats.from_dict(v)) for k, v in list((data.get("stats") or {}).items())[-self._max_nodes:]
+                )
         except Exception as e:
             logger.warning("NodeNeuralAdvisor: ignoring unreadable saved state (%s); starting fresh", e)
-            self._stats, self._observed, self._last_loss = {}, 0, None
+            self._stats, self._observed, self._last_loss = OrderedDict(), 0, None
