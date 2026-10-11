@@ -57,9 +57,24 @@ class GitManager:
 
     @property
     def can_push(self) -> bool:
-        """True فقط إن وُجد توكن GitHub — بدونه الاستنساخ ممكن (مستودع عام)
-        لكن الدفع مضمون الفشل، فلا فائدة من محاولته."""
-        return bool(self.token)
+        """True فقط إن: (1) وُجد توكن GitHub — بدونه الاستنساخ ممكن (مستودع
+        عام) لكن الدفع مضمون الفشل، و(2) وُجد تفعيل صريح
+        NSM_ALLOW_AUTO_EVOLUTION_PUSH=1 في البيئة.
+
+        🆕 الشرط الثاني افتراضي-مرفوض (fail-closed) عمداً: قبله، وجود
+        GITHUB_TOKEN وحده كان كافياً لدفع تلقائي كامل لـmain بلا أي مراجعة
+        بشرية — تحقّقت فعلياً: السجل يحتوي عشرات كوميتات "🧬 NSM Evolution"
+        مدفوعة تلقائياً من دورة خلفية (maybe_self_evolve) بلا تدخّل أحد، في
+        نفس هذا المستودع. محتوى الدفع اليوم بسيط (سطر في README عبر
+        apply_evolution أدناه، والرؤية العصبية من ai/node_think.py نص
+        وصفي فقط ولا تُنفَّذ أو تُدفَع كأمر) — لكن آلية "دفع تلقائي بلا
+        بوابة محتوى" نفسها خطر تشغيلي قائم بصرف النظر عن تفاهة المحتوى
+        الحالي: تضارب مع عمل بشري متزامن (حدث فعلاً — راجع تعليق clone()
+        أعلاه)، أو تضخّم غير محدود لو تغيّر apply_evolution لاحقاً بلا نفس
+        العناية. من يريد تفعيل الدفع التلقائي يضبط المتغيّر صراحة؛ الاستنساخ/
+        التشخيص المحلي (self_diagnose وغيرها) لا يحتاجانه إطلاقاً ويستمران
+        يعملان بلا أي تغيير."""
+        return bool(self.token) and os.getenv("NSM_ALLOW_AUTO_EVOLUTION_PUSH") == "1"
 
     def _get_auth_url(self) -> str:
         """بناء رابط الاستنساخ مع التوكن للمصادقة."""
@@ -166,7 +181,12 @@ class GitManager:
         if not self.can_push:
             # كانت كل دورة تطوّر بلا توكن تستنسخ المستودع ثم تفشل بـ"could not
             # read Username" (استنساخ + شبكة مهدورة + ERROR مزعج كل دورة).
-            logger.info("⏭️ تطوّر ذاتي مُتخطّى: لا GITHUB_TOKEN — لا دفع ممكن (%s)", task_description)
+            reason = (
+                "لا GITHUB_TOKEN"
+                if not self.token
+                else "NSM_ALLOW_AUTO_EVOLUTION_PUSH غير مضبوط على '1' (دفع تلقائي معطَّل افتراضياً)"
+            )
+            logger.info("⏭️ تطوّر ذاتي مُتخطّى: %s — لا دفع ممكن (%s)", reason, task_description)
             return False
         repo_path = self.clone("self_evolution_task")
         # هنا يتم تنفيذ منطق التعديل البرمجي
