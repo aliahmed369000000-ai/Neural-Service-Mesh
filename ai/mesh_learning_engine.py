@@ -78,15 +78,18 @@ class MeshLearningEngine:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self.state, ensure_ascii=False, indent=2), encoding="utf-8")
         try:
-            st = self.node._load_state()
-            st[LEARN_STATE_KEY] = {
-                "skills": self.state.get("skills"),
-                "skill_counts": self.state.get("skill_counts"),
-                "stats": self.state.get("stats"),
-                "knowledge_count": len(self.state.get("knowledge") or []),
-                "updated_at": _now(),
-            }
-            self.node._save_state(st)
+            import contextlib as _cl
+            _txn = getattr(self.node, "_state_txn", None)
+            with (_txn() if _txn else _cl.nullcontext()):
+                st = self.node._load_state()
+                st[LEARN_STATE_KEY] = {
+                    "skills": self.state.get("skills"),
+                    "skill_counts": self.state.get("skill_counts"),
+                    "stats": self.state.get("stats"),
+                    "knowledge_count": len(self.state.get("knowledge") or []),
+                    "updated_at": _now(),
+                }
+                self.node._save_state(st)
         except Exception:
             pass
 

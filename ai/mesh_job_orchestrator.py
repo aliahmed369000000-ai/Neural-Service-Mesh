@@ -407,29 +407,32 @@ class MeshJobOrchestrator:
         """يحفظ قرار المهمة في network_state للعقدة المنظمة (provenance خفيف)."""
         if not hasattr(self.node, "_load_state"):
             return
-        state = self.node._load_state()
-        ledger = state.setdefault("job_decisions", {})
-        ledger[report["job_id"]] = {
-            "job_id": report.get("job_id"),
-            "kind": report.get("kind"),
-            "ok": report.get("ok"),
-            "strategy": report.get("strategy"),
-            "quorum_required": report.get("quorum_required"),
-            "quorum_met": report.get("quorum_met"),
-            "agreement": (report.get("selection") or {}).get("agreement"),
-            "winner_worker": (report.get("winner") or {}).get("worker"),
-            "winner_digest": (report.get("winner") or {}).get("digest"),
-            "success_count": report.get("success_count"),
-            "attempts_count": report.get("attempts_count"),
-            "workers": [a.get("worker") for a in (report.get("all_results") or [])],
-            "ts": report.get("ts"),
-            "error": report.get("error"),
-        }
-        # احتفظ بآخر 200 قرار
-        if len(ledger) > 200:
-            for k in sorted(ledger.keys())[: len(ledger) - 200]:
-                ledger.pop(k, None)
-        self.node._save_state(state)
+        _txn = getattr(self.node, "_state_txn", None)
+        import contextlib as _cl
+        with (_txn() if _txn else _cl.nullcontext()):
+            state = self.node._load_state()
+            ledger = state.setdefault("job_decisions", {})
+            ledger[report["job_id"]] = {
+                "job_id": report.get("job_id"),
+                "kind": report.get("kind"),
+                "ok": report.get("ok"),
+                "strategy": report.get("strategy"),
+                "quorum_required": report.get("quorum_required"),
+                "quorum_met": report.get("quorum_met"),
+                "agreement": (report.get("selection") or {}).get("agreement"),
+                "winner_worker": (report.get("winner") or {}).get("worker"),
+                "winner_digest": (report.get("winner") or {}).get("digest"),
+                "success_count": report.get("success_count"),
+                "attempts_count": report.get("attempts_count"),
+                "workers": [a.get("worker") for a in (report.get("all_results") or [])],
+                "ts": report.get("ts"),
+                "error": report.get("error"),
+            }
+            # احتفظ بآخر 200 قرار
+            if len(ledger) > 200:
+                for k in sorted(ledger.keys())[: len(ledger) - 200]:
+                    ledger.pop(k, None)
+            self.node._save_state(state)
 
 
     async def submit_collective_summary(

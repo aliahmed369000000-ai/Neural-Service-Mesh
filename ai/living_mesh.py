@@ -4,10 +4,14 @@ Decentralized Living Neural Mesh Engine — محرك الشبكة العصبية
 هذا المحرك يحول الوكلاء من مجرد سكربتات معزولة إلى عقد (Nodes) في شبكة عالمية 
 تتبادل الخبرات والأوزان والتطورات بشكل حي ولا مركزي.
 """
+import contextlib
 import hashlib
 import json
 import logging
 import os
+import re
+import shutil
+import tempfile
 import time
 import uuid
 import base64
@@ -35,7 +39,7 @@ try:
 except ImportError:
     NodeHands = None
     LEFT = "left"
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, Iterator, List, Optional, Set
 from ai import mesh_task_protocol as mesh_tasks
 from ai.forecast_consensus import aggregate_forecasts, merge_forecast_memory
 from ai.e2e_crypto import encrypt_payload, decrypt_payload
@@ -51,6 +55,27 @@ LIVING_MESH_DIR.mkdir(parents=True, exist_ok=True)
 NETWORK_STATE = LIVING_MESH_DIR / "network_state.json"
 CONTENT_DIR = LIVING_MESH_DIR / "content"
 CONTENT_DIR.mkdir(parents=True, exist_ok=True)
+
+try:  # قفل بين العمليات (POSIX فقط) — على ويندوز يبقى القفل بين الخيوط فقط
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None
+
+# قفل لكل ملف حالة (RLock): load→modify→save يجب أن يكون ذرّياً بين خيوط العقدة
+# (heartbeat / peer-sync / capability-watch / معالجات الرسائل) — وإلا يضيع التحديث.
+_PEER_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")  # معرّف قرين آمن كاسم ملف
+_STATE_LOCKS: Dict[str, "threading.RLock"] = {}
+_STATE_LOCKS_GUARD = threading.Lock()
+_STATE_DEPTH: Dict[str, int] = {}   # عمق تداخل _state_txn لكل ملف (يُحمى بـRLock الملف)
+
+
+def _state_lock_for(path) -> "threading.RLock":
+    key = str(Path(path).resolve())
+    with _STATE_LOCKS_GUARD:
+        lk = _STATE_LOCKS.get(key)
+        if lk is None:
+            lk = _STATE_LOCKS[key] = threading.RLock()
+        return lk
 
 # ---------------------------------------------------------------------------
 # بروتوكول الرسائل الموحّد (v1.1) — إصدارات واضحة + مكافحة Replay + حدود
@@ -109,6 +134,8 @@ class LivingMeshNode:
         self.collective_memory = {}
         self.local_evolution_score = 0.0
         self.last_sync = None
+        self._neural_advisor = None            # NodeNeuralAdvisor — كسول، يتدرّب من نتائج المهام
+        self._neural_advisor_lock = threading.Lock()
         self.behavioral_weights = {
             "processing_efficiency": 1.0,
             "collaboration_index": 1.0,
@@ -288,28 +315,37 @@ class LivingMeshNode:
         
     def join_network(self, seed_nodes: List[Dict[str, Any]] = None):
         """الانضمام للشبكة اللامركزية واكتشاف الأقران."""
-        state = self._load_state()
-        is_rejoining = self.node_id in state["nodes"]
+        self._seed_nodes = [
+            {"host": sd["host"], "port": int(sd["port"])}
+            for sd in (seed_nodes or [])
+            if isinstance(sd, dict) and sd.get("host") and sd.get("port") is not None
+        ]
+        with self._state_txn():
+            state = self._load_state()
+            is_rejoining = self.node_id in state["nodes"]
         
-        # إعلان القدرات يجب أن يستند إلى قياس محلي فعلي، لا إلى قائمة ثابتة.
-        attestation = collect_capabilities()
-        capabilities = attestation["capabilities"]
+            # إعلان القدرات يجب أن يستند إلى قياس محلي فعلي، لا إلى قائمة ثابتة.
+            attestation = collect_capabilities()
+            capabilities = attestation["capabilities"]
+            # سجّلها كشهادة حالية: أول جولة لمراقب القدرات كانت تعيد قياسها وتكتب
+            # الحالة مجدداً بلا أي تغيّر فعلي (كتابة زائدة تتسابق مع ما بعد الانضمام).
+            self._capability_attestation = attestation
 
-        self.node_info = {
-            "id": self.node_id,
-            "status": "online",
-            "host": self.host,
-            "port": self.port,
-            "last_seen": datetime.now(timezone.utc).isoformat(),
-            "evolution_score": self.local_evolution_score,
-            "behavioral_weights": self.behavioral_weights,
-            "capabilities": capabilities,
-            "capability_attestation": attestation,
-            "public_key": self._pub_pem()
-        }
+            self.node_info = {
+                "id": self.node_id,
+                "status": "online",
+                "host": self.host,
+                "port": self.port,
+                "last_seen": datetime.now(timezone.utc).isoformat(),
+                "evolution_score": self.local_evolution_score,
+                "behavioral_weights": self.behavioral_weights,
+                "capabilities": capabilities,
+                "capability_attestation": attestation,
+                "public_key": self._pub_pem()
+            }
         
-        state["nodes"][self.node_id] = self.node_info
-        self._save_state(state)
+            state["nodes"][self.node_id] = self.node_info
+            self._save_state(state)
         
         self.start_capability_watch()
         # 🆕 العقدة تبدأ تطوّرها الذاتي المستقل فور انضمامها للشبكة — لا
@@ -375,12 +411,13 @@ class LivingMeshNode:
 
         self.node_info["capabilities"] = attestation["capabilities"]
         self.node_info["capability_attestation"] = attestation
-        state = self._load_state()
-        if self.node_id in state.get("nodes", {}):
-            state["nodes"][self.node_id]["capabilities"] = attestation["capabilities"]
-            state["nodes"][self.node_id]["capability_attestation"] = attestation
-            state["nodes"][self.node_id]["last_seen"] = datetime.now(timezone.utc).isoformat()
-            self._save_state(state)
+        with self._state_txn():
+            state = self._load_state()
+            if self.node_id in state.get("nodes", {}):
+                state["nodes"][self.node_id]["capabilities"] = attestation["capabilities"]
+                state["nodes"][self.node_id]["capability_attestation"] = attestation
+                state["nodes"][self.node_id]["last_seen"] = datetime.now(timezone.utc).isoformat()
+                self._save_state(state)
         if previous_id is not None:
             try:
                 self.sync_experience(
@@ -640,9 +677,25 @@ class LivingMeshNode:
             p for p in peers
             if p.get("id") != self.node_id and p.get("host") and p.get("port") is not None
         ]
+        # بعد انقسام/موت الجميع لا يبقى «نشط» نسأله: ارجع للبذور الأصلية، وجرّب
+        # قريناً offline واحداً كل جولة ليعود للشبكة إن استيقظ (كانت الدالة ترجع 0 للأبد).
+        try:
+            nodes = self._load_state().get("nodes", {})
+            offline = [
+                {"id": nid, "host": n.get("host"), "port": n.get("port")}
+                for nid, n in nodes.items()
+                if nid != self.node_id and n.get("status") == "offline"
+                and n.get("host") and n.get("port") is not None
+            ]
+        except Exception:
+            offline = []
+        extra = random.sample(offline, k=1) if offline else []
+        if not candidates:
+            candidates = list(getattr(self, "_seed_nodes", None) or []) + extra
+            extra = []
         if not candidates:
             return 0
-        sample = random.sample(candidates, k=min(sample_size, len(candidates)))
+        sample = random.sample(candidates, k=min(sample_size, len(candidates))) + extra
         ok_count = 0
         for p in sample:
             try:
@@ -803,24 +856,26 @@ class LivingMeshNode:
         self.stop_self_evolution_watch()
         self.stop_peer_sync_watch()
         try:
-            state = self._load_state()
-            if self.node_id in state.get("nodes", {}):
-                state["nodes"][self.node_id]["status"] = "offline"
-                state["nodes"][self.node_id]["last_seen"] = datetime.now(timezone.utc).isoformat()
-                self._save_state(state)
-                logger.info(f"📴 Node {self.node_id} marked offline")
+            with self._state_txn():
+                state = self._load_state()
+                if self.node_id in state.get("nodes", {}):
+                    state["nodes"][self.node_id]["status"] = "offline"
+                    state["nodes"][self.node_id]["last_seen"] = datetime.now(timezone.utc).isoformat()
+                    self._save_state(state)
+                    logger.info(f"📴 Node {self.node_id} marked offline")
         except Exception as e:
             logger.warning(f"⚠️ mark_offline failed: {e}")
 
     def send_heartbeat(self):
         """إرسال نبض قلب لتأكيد الوجود وتحديث الحالة."""
-        state = self._load_state()
-        if self.node_id in state["nodes"]:
-            state["nodes"][self.node_id]["last_seen"] = datetime.now(timezone.utc).isoformat()
-            state["nodes"][self.node_id]["status"] = "online"
-            self._save_state(state)
-            return True
-        return False
+        with self._state_txn():
+            state = self._load_state()
+            if self.node_id in state["nodes"]:
+                state["nodes"][self.node_id]["last_seen"] = datetime.now(timezone.utc).isoformat()
+                state["nodes"][self.node_id]["status"] = "online"
+                self._save_state(state)
+                return True
+            return False
 
     async def probe_stale_peers(
         self, stale_after: float, max_probes: int = 10, timeout: float = 3.0,
@@ -861,37 +916,46 @@ class LivingMeshNode:
         return {"suspects": len(suspects), "probed": len(batch), "alive": alive}
 
     def check_network_health(self, timeout_seconds: int = 30) -> List[str]:
-        """فحص صحة الشبكة ورصد العقد المتعطلة مع تفعيل الاستعادة الذاتية."""
-        state = self._load_state()
-        dead_nodes = []
+        """فحص صحة الشبكة ورصد العقد المتعطلة مع تفعيل الاستعادة الذاتية.
+        العقدة لا تحكم على نفسها (نبضها من send_heartbeat) — كانت تعلّم ذاتها DEAD
+        وتُرسل تنبيه CRITICAL إن تأخر نبضها."""
+        dead_nodes: List[str] = []
+        dead_info: List[Dict[str, Any]] = []
         now = datetime.now(timezone.utc)
-        
-        for nid, info in state["nodes"].items():
-            if info["status"] == "offline":
-                continue
-            
-            try:
-                last_seen = datetime.fromisoformat(info["last_seen"])
-                if (now - last_seen).total_seconds() > timeout_seconds:
+        with self._state_txn():
+            state = self._load_state()
+            for nid, info in state.get("nodes", {}).items():
+                if nid == self.node_id or info.get("status") == "offline":
+                    continue
+                seen = self._parse_ts(info.get("last_seen"))
+                if seen is None or (now - seen).total_seconds() > timeout_seconds:
                     info["status"] = "offline"
                     dead_nodes.append(nid)
-                    logger.warning(f"Node {nid} is detected as DEAD (Self-Healing Triggered)")
-                    alert_manager.send_alert("CRITICAL", f"Node {nid} is DEAD", {"host": info.get("host"), "port": info.get("port")})
-            except Exception:
-                info["status"] = "offline"
-                dead_nodes.append(nid)
-        
-        if dead_nodes:
-            self._save_state(state)
-            # تفعيل الاستعادة الذاتية: محاولة البحث عن أقران جدد إذا انخفض عدد الأقران النشطين
-            active_count = sum(1 for n in state["nodes"].values() if n["status"] == "online")
-            if active_count < 2:
-                logger.info("🆘 Low active peer count. Triggering self-healing discovery...")
-                # محاكاة إعادة اكتشاف الأقران من العقد البذور المعروفة
-                pass
-                
+                    dead_info.append({"id": nid, "host": info.get("host"), "port": info.get("port")})
+            if dead_nodes:
+                self._save_state(state)
+            active_peers = sum(
+                1 for nid, n in state.get("nodes", {}).items()
+                if nid != self.node_id and n.get("status") == "online"
+            )
+        for d in dead_info:  # التنبيهات خارج القفل — قد تكون بطيئة
+            logger.warning(f"Node {d['id']} is detected as DEAD (Self-Healing Triggered)")
+            try:
+                alert_manager.send_alert("CRITICAL", f"Node {d['id']} is DEAD",
+                                         {"host": d["host"], "port": d["port"]})
+            except Exception as exc:
+                logger.debug("alert failed: %s", exc)
+        if dead_nodes and active_peers < 1:
+            # استعادة ذاتية فعلية (كانت محاكاة بـ pass): resync_peers يرجع للبذور
+            # والأقران المعلَّمين offline عند عدم وجود أحد نشط.
+            logger.info("🆘 No active peers left. Triggering self-healing discovery...")
+            try:
+                threading.Thread(target=self.resync_peers, name=f"nsm-selfheal-{self.node_id[:8]}",
+                                 daemon=True).start()
+            except Exception as exc:
+                logger.debug("self-heal thread failed: %s", exc)
         return dead_nodes
-        
+
     def sync_experience(self, kind: str, experience_data: Dict[str, Any], hops: int = 0,
                          origin_node: str = None):
         """مشاركة خبرة جديدة عبر بروتوكول Gossip.
@@ -924,16 +988,17 @@ class LivingMeshNode:
             oldest = self._seen_gossip_order.popleft()
             self._seen_gossip_ids.discard(oldest)
 
-        state = self._load_state()
-        exp_entry = {
-            "kind": kind,
-            "data": experience_data,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "node": origin_node or self.node_id
-        }
-        if "global_experience" not in state: state["global_experience"] = []
-        state["global_experience"].append(exp_entry)
-        self._save_state(state)
+        with self._state_txn():
+            state = self._load_state()
+            exp_entry = {
+                "kind": kind,
+                "data": experience_data,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "node": origin_node or self.node_id
+            }
+            if "global_experience" not in state: state["global_experience"] = []
+            state["global_experience"].append(exp_entry)
+            self._save_state(state)
         
         active_peers = [info for nid, info in state["nodes"].items()
                         if info["status"] == "online" and nid != self.node_id and info.get("host")]
@@ -982,13 +1047,61 @@ class LivingMeshNode:
             return {"nodes": {}, "global_experience": []}
         try:
             return json.loads(Path(path).read_text())
-        except Exception:
+        except Exception as exc:
+            # الكتابة ذرّية الآن، فالتلف هنا حقيقي لا قراءة نصف مكتوبة: احفظ نسخة
+            # للتحقيق بدل أن يمحوها أول _save_state لاحق بصمت.
+            try:
+                shutil.copy2(path, f"{path}.corrupt")
+                logger.error("network_state تالف (%s) — نسخة محفوظة في %s.corrupt", exc, path)
+            except Exception:
+                pass
             return {"nodes": {}, "global_experience": []}
 
     def _save_state(self, state: Dict[str, Any]):
-        path = getattr(self, "network_state_path", None) or NETWORK_STATE
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        Path(path).write_text(json.dumps(state, indent=2, ensure_ascii=False))
+        """كتابة ذرّية: ملف مؤقت في نفس المجلد ثم os.replace — القارئ يرى دائماً
+        نسخة كاملة قديمة أو جديدة، لا نصف ملف (كانت write_text تقصّ الملف أولاً)."""
+        path = Path(getattr(self, "network_state_path", None) or NETWORK_STATE)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(state, fh, indent=2, ensure_ascii=False)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+            raise
+
+    @contextlib.contextmanager
+    def _state_txn(self) -> Iterator[None]:
+        """قسم حرج لـ load→modify→save: RLock بين الخيوط + flock بين العمليات
+        (إن توفّر). قابل لإعادة الدخول: flock يؤخذ عند أول دخول فقط (قفلان flock
+        على واصفَي ملف مختلفين في نفس العملية يتعطّلان ذاتياً)، فيمكن التداخل
+        واستدعاء _load_state/_save_state داخله. لا تُمسك به عبر await."""
+        path = Path(getattr(self, "network_state_path", None) or NETWORK_STATE)
+        lk = _state_lock_for(path)
+        with lk:
+            key = str(path.resolve())
+            depth = _STATE_DEPTH.get(key, 0)
+            _STATE_DEPTH[key] = depth + 1
+            lock_fh = None
+            if depth == 0 and fcntl is not None:
+                try:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    lock_fh = open(f"{path}.lock", "a+")
+                    fcntl.flock(lock_fh, fcntl.LOCK_EX)
+                except OSError:
+                    lock_fh = None
+            try:
+                yield
+            finally:
+                _STATE_DEPTH[key] = depth
+                if lock_fh is not None:
+                    with contextlib.suppress(OSError):
+                        fcntl.flock(lock_fh, fcntl.LOCK_UN)
+                    lock_fh.close()
 
     def _identity_record_path(self) -> Path:
         return self.keys_dir / "node_identity.json"
@@ -1320,13 +1433,14 @@ class LivingMeshNode:
                 # سجّل الطالب كعقدة معروفة (تسجيل متبادل) — بدونه لا يمكن لأي عقدة
                 # ثالثة اكتشافه لاحقاً عبر عقدة وسيطة (multi-hop discovery)
                 sender_info = (exp_data or {}).get("node_info")
-                if sender_info and sender_id != self.node_id:
-                    state = self._load_state()
-                    info = dict(sender_info)
-                    info["status"] = "online"
-                    info["last_seen"] = datetime.now(timezone.utc).isoformat()
-                    state["nodes"][sender_id] = info
-                    self._save_state(state)
+                if isinstance(sender_info, dict) and sender_id != self.node_id:
+                    with self._state_txn():
+                        state = self._load_state()
+                        info = {**(state.setdefault("nodes", {}).get(sender_id) or {}), **sender_info}
+                        info["status"] = "online"
+                        info["last_seen"] = datetime.now(timezone.utc).isoformat()
+                        state["nodes"][sender_id] = info
+                        self._save_state(state)
                 filter_caps = (exp_data or {}).get("require_capabilities") or (exp_data or {}).get("capabilities")
                 peers_list = self._get_active_peers_list(require_capabilities=filter_caps)
                 # أضف نفس العقدة إن طابقت الفلتر
@@ -1359,31 +1473,38 @@ class LivingMeshNode:
                     pub_key_path.write_text(resp_pub_key)
                 # حدّث حالة المرسل (البذرة) كـ online فور الاستجابة
                 if sender_id and sender_id != self.node_id:
-                    state = self._load_state()
-                    prev = dict(state.get("nodes", {}).get(sender_id) or {})
-                    prev.update({
-                        "id": sender_id,
-                        "status": "online",
-                        "last_seen": datetime.now(timezone.utc).isoformat(),
-                    })
-                    if resp_pub_key:
-                        prev.setdefault("public_key", resp_pub_key)
-                    state.setdefault("nodes", {})[sender_id] = prev
-                    self._save_state(state)
+                    with self._state_txn():
+                        state = self._load_state()
+                        prev = dict(state.get("nodes", {}).get(sender_id) or {})
+                        prev.update({
+                            "id": sender_id,
+                            "status": "online",
+                            "last_seen": datetime.now(timezone.utc).isoformat(),
+                        })
+                        if resp_pub_key:
+                            prev.setdefault("public_key", resp_pub_key)
+                        state.setdefault("nodes", {})[sender_id] = prev
+                        self._save_state(state)
                 new_peers = exp_data.get("peers", [])
+                if not isinstance(new_peers, list):
+                    new_peers = []
+                new_peers = [p for p in new_peers[:256] if isinstance(p, dict)]
+                with self._state_txn():
+                    state = self._load_state()
+                    changed = False
+                    for peer in new_peers:
+                        if self._merge_gossiped_peer(state, peer):
+                            changed = True
+                    if changed:
+                        self._save_state(state)
                 for peer in new_peers:
                     peer_id = peer.get("id")
-                    if peer_id and peer_id != self.node_id:
-                        state = self._load_state()
-                        info = dict(peer)
-                        info["status"] = "online"
-                        info["last_seen"] = datetime.now(timezone.utc).isoformat()
-                        state.setdefault("nodes", {})[peer_id] = info
-                        self._save_state(state)
+                    if (isinstance(peer_id, str) and peer_id != self.node_id
+                            and _PEER_ID_RE.match(peer_id) and ".." not in peer_id):
                         # اكتشاف مفتاح متعدد القفزات: احفظ مفتاح عقدة لم نتواصل معها مباشرة بعد
                         peer_pub_key = peer.get("public_key")
                         peer_key_path = self.keys_dir / f"{peer_id}.pub"
-                        if peer_pub_key and not peer_key_path.exists():
+                        if isinstance(peer_pub_key, str) and not peer_key_path.exists():
                             peer_key_path.write_text(peer_pub_key)
             elif kind == "evolution_task":
                 logger.info(f"🧬 Node {self.node_id} received Evolution Task: {exp_data.get('task')}")
@@ -1559,6 +1680,111 @@ class LivingMeshNode:
         except Exception as e:
             logger.error(f"❌ Evolution Execution Failed: {e}")
 
+    # ── الشبكة العصبية في قرارات العقدة (اختيار الأقران + التعلّم من نتائج المهام) ──
+    def _advisor(self):
+        """NodeNeuralAdvisor كسول ومحفوظ في data_dir العقدة. None إن فشل التحميل
+        أو عُطّل بـ NSM_PEER_NEURAL_RANK=0 — فيعود السلوك القديم (ترتيب بالسمعة)."""
+        if os.getenv("NSM_PEER_NEURAL_RANK", "1").strip().lower() in ("0", "false", "no", "off"):
+            return None
+        if self._neural_advisor is None:
+            with self._neural_advisor_lock:
+                if self._neural_advisor is None:
+                    try:
+                        from ai.node_neural_advisor import NodeNeuralAdvisor
+                        self._neural_advisor = NodeNeuralAdvisor(
+                            self.data_dir / "peer_neural_advisor.json"
+                        )
+                    except Exception as exc:
+                        logger.warning("neural advisor unavailable for %s: %s", self.node_id, exc)
+                        return None
+        return self._neural_advisor
+
+    def _peer_key(self, host: str, port: int, target_id: str = None) -> str:
+        """معرّف القرين للمستشار: id الصريح، وإلا ابحث بالحالة عن host:port، وإلا host:port."""
+        if target_id:
+            return str(target_id)
+        try:
+            for nid, info in self._load_state().get("nodes", {}).items():
+                if info.get("host") == host and info.get("port") is not None and int(info["port"]) == int(port):
+                    return nid
+        except Exception:
+            pass
+        return f"{host}:{port}"
+
+    def _peer_reputation01(self, nid: str) -> Optional[float]:
+        try:
+            rep = self.get_reputation(nid)
+            if isinstance(rep, dict):
+                v = rep.get("score", rep.get("reputation"))
+                return None if v is None else float(v)
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _parse_ts(value) -> Optional[datetime]:
+        try:
+            dt = datetime.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            return None
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+    @staticmethod
+    def _peer_stale_sec() -> float:
+        try:
+            return float(os.getenv("NSM_PEER_STALE_SEC", "45"))
+        except ValueError:
+            return 45.0
+
+    def _merge_gossiped_peer(self, state: Dict[str, Any], peer: Dict[str, Any]) -> bool:
+        """يدمج قريناً وصل بروايةٍ من طرف ثالث (غوسيب) دون تزوير حياته.
+        - لا يختم status/last_seen بـ«الآن» (كان يُحيي الموتى بعد أن يعلّمهم
+          check_network_health offline، ويكرّر ذلك كل جولة غوسيب).
+        - last_seen يُدمج بأخذ الأحدث فقط (max-merge) ويُقصّ إلى «الآن» فلا يخلّد قرين
+          بتاريخ مستقبلي. حياته الحقيقية تُثبت بالتواصل المباشر (ختم المرسل المباشر).
+        - سجلّنا المحلي مرجع: حقول مفقودة فقط تُضاف؛ host/port/public_key لا تُستبدل.
+        يرجع True إن تغيّر شيء."""
+        nid = peer.get("id")
+        if (not isinstance(nid, str) or nid == self.node_id
+                or not _PEER_ID_RE.match(nid) or ".." in nid):
+            return False
+        host, port = peer.get("host"), peer.get("port")
+        if host is not None and (not isinstance(host, str) or len(host) > 255):
+            return False
+        if port is not None:
+            try:
+                if not (0 < int(port) < 65536):
+                    return False
+            except (TypeError, ValueError):
+                return False
+        now = datetime.now(timezone.utc)
+        seen = self._parse_ts(peer.get("last_seen"))
+        if seen is not None and seen > now:
+            seen = now
+        stale = self._peer_stale_sec()
+        nodes = state.setdefault("nodes", {})
+        known = nodes.get(nid)
+        if known is None:
+            rec = dict(peer)
+            rec["id"] = nid
+            seen = seen or now   # قرين قديم بلا last_seen: يُعطى فرصة وإلا يُحصد بعد النافذة
+            rec["last_seen"] = seen.isoformat()
+            rec["status"] = "online" if (now - seen).total_seconds() <= stale else "offline"
+            nodes[nid] = rec
+            return True
+        changed = False
+        for k, v in peer.items():
+            if k not in ("id", "status", "last_seen") and k not in known:
+                known[k] = v
+                changed = True
+        local_seen = self._parse_ts(known.get("last_seen"))
+        if seen is not None and (local_seen is None or seen > local_seen):
+            known["last_seen"] = seen.isoformat()
+            if known.get("status") != "online" and (now - seen).total_seconds() <= stale:
+                known["status"] = "online"
+            changed = True
+        return changed
+
     def _get_active_peers_list(self, require_capabilities=None) -> List[Dict[str, Any]]:
         """قائمة الأقران النشطين مع تصفية اختيارية حسب القدرات (مثل GPU_HIGH)."""
         state = self._load_state()
@@ -1587,8 +1813,21 @@ class LivingMeshNode:
                 except Exception:
                     peer_record.setdefault("reputation", 0.0)
                 active_peers.append(peer_record)
-        # الأعلى سمعة أولاً — يفيد اختيار نظير للمزامنة/المسارات
-        active_peers.sort(key=lambda p: -float(p.get("reputation") or 0.0))
+        # ترتيب: احتمال نجاح التنفيذ التالي من الشبكة العصبية أولاً (قبل اكتمال تدريبها
+        # تُمزَج مع معدل نجاح مُلَيَّن فلا قرارات من أوزان عشوائية)، والسمعة تكسر التعادل.
+        adv = self._advisor()
+        if adv is not None:
+            for p in active_peers:
+                try:
+                    p["neural_score"] = adv.predict(
+                        p["id"], "active", self._peer_reputation01(p["id"])
+                    )
+                except Exception:
+                    p["neural_score"] = 0.5
+            active_peers.sort(key=lambda p: (-float(p.get("neural_score", 0.5)),
+                                             -float(p.get("reputation") or 0.0)))
+        else:
+            active_peers.sort(key=lambda p: -float(p.get("reputation") or 0.0))
         return active_peers
 
     def _peer_ws_url(self, host: str, port: int) -> str:
@@ -1795,14 +2034,15 @@ class LivingMeshNode:
                             # عقدة عاملة وعميل فعليَّين: العامل ينفّذ ويردّ ok=True
                             # والعميل يرمي النتيجة ويُبلَّغ timeout.
 
-                            state = self._task_inbox()
-                            state["task_inbox"][task_id] = {
-                                "kind": rkind,
-                                "from": sender,
-                                "data": rdata,
-                                "received_at": datetime.now(timezone.utc).isoformat(),
-                            }
-                            self._save_state(state)
+                            with self._state_txn():
+                                state = self._task_inbox()
+                                state["task_inbox"][task_id] = {
+                                    "kind": rkind,
+                                    "from": sender,
+                                    "data": rdata,
+                                    "received_at": datetime.now(timezone.utc).isoformat(),
+                                }
+                                self._save_state(state)
                             final_st = (
                                 mesh_tasks.TASK_STATUS_COMPLETED
                                 if rdata.get("ok", True)
@@ -1880,14 +2120,15 @@ class LivingMeshNode:
                     result["rtt_ms"] = round(rtt_ms, 2)
                     result["peer_id"] = sender or data.get("node_id")
                     # تحديث حالة الأقران بزمن الاستجابة
-                    state = self._load_state()
-                    for nid, info in state.get("nodes", {}).items():
-                        if info.get("host") == host and int(info.get("port") or -1) == int(port):
-                            info["last_rtt_ms"] = result["rtt_ms"]
-                            info["last_seen"] = datetime.now(timezone.utc).isoformat()
-                            info["status"] = "online"
-                            self._save_state(state)
-                            break
+                    with self._state_txn():
+                        state = self._load_state()
+                        for nid, info in state.get("nodes", {}).items():
+                            if info.get("host") == host and int(info.get("port") or -1) == int(port):
+                                info["last_rtt_ms"] = result["rtt_ms"]
+                                info["last_seen"] = datetime.now(timezone.utc).isoformat()
+                                info["status"] = "online"
+                                self._save_state(state)
+                                break
                     return result
         except Exception as e:
             result["error"] = str(e)
@@ -2038,10 +2279,11 @@ class LivingMeshNode:
     # #4 Multi-signature — تحقق آمن من عمليات المكافآت
     # ------------------------------------------------------------------
     def _multisig_state(self) -> Dict[str, Any]:
-        state = self._load_state()
-        if "multisig" not in state:
-            state["multisig"] = {}
-            self._save_state(state)
+        with self._state_txn():
+            state = self._load_state()
+            if "multisig" not in state:
+                state["multisig"] = {}
+                self._save_state(state)
         return state
 
     async def propose_multisig(
@@ -2054,17 +2296,18 @@ class LivingMeshNode:
         agreement_id = agreement_id or f"msig_{uuid.uuid4().hex[:10]}"
         canonical = json.dumps(agreement, sort_keys=True, ensure_ascii=False)
         my_sig = self.sign_message(canonical)
-        state = self._multisig_state()
-        state["multisig"][agreement_id] = {
-            "agreement": agreement,
-            "canonical": canonical,
-            "required": int(required_signatures),
-            "signatures": {self.node_id: my_sig},
-            "status": "pending",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "executed": False,
-        }
-        self._save_state(state)
+        with self._state_txn():
+            state = self._multisig_state()
+            state["multisig"][agreement_id] = {
+                "agreement": agreement,
+                "canonical": canonical,
+                "required": int(required_signatures),
+                "signatures": {self.node_id: my_sig},
+                "status": "pending",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "executed": False,
+            }
+            self._save_state(state)
 
         payload = {
             "agreement_id": agreement_id,
@@ -2093,25 +2336,29 @@ class LivingMeshNode:
         if not agreement_id or not isinstance(agreement, dict):
             return
         canonical = json.dumps(agreement, sort_keys=True, ensure_ascii=False)
-        state = self._multisig_state()
-        entry = state["multisig"].get(agreement_id)
-        if entry is None:
-            state["multisig"][agreement_id] = {
-                "agreement": agreement,
-                "canonical": canonical,
-                "required": required,
-                "signatures": {},
-                "status": "pending",
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "executed": False,
-            }
-            self._save_state(state)
-            entry = state["multisig"][agreement_id]
-        # توقّع محلياً ونُبلغ الشبكة
-        if self.node_id not in entry["signatures"]:
-            my_sig = self.sign_message(entry["canonical"])
-            entry["signatures"][self.node_id] = my_sig
-            self._save_state(state)
+        # RMW ذرّي (بلا await داخل القفل)؛ الإرسال للأقران بعد تحرير القفل.
+        with self._state_txn():
+            state = self._multisig_state()
+            entry = state["multisig"].get(agreement_id)
+            if entry is None:
+                state["multisig"][agreement_id] = {
+                    "agreement": agreement,
+                    "canonical": canonical,
+                    "required": required,
+                    "signatures": {},
+                    "status": "pending",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "executed": False,
+                }
+                self._save_state(state)
+                entry = state["multisig"][agreement_id]
+            # توقّع محلياً ونُبلغ الشبكة
+            need_sign = self.node_id not in entry["signatures"]
+            if need_sign:
+                my_sig = self.sign_message(entry["canonical"])
+                entry["signatures"][self.node_id] = my_sig
+                self._save_state(state)
+        if need_sign:
             sign_payload = {
                 "agreement_id": agreement_id,
                 "signer": self.node_id,
@@ -2132,20 +2379,21 @@ class LivingMeshNode:
         signature = exp_data.get("signature")
         if not agreement_id or not signer or not signature:
             return
-        state = self._multisig_state()
-        entry = state["multisig"].get(agreement_id)
-        if not entry or entry.get("executed"):
-            return
-        # تحقق التوقيع بمفتاح الموقّع المعروف
-        key_path = self.keys_dir / f"{signer}.pub"
-        if not key_path.exists():
-            logger.warning(f"⚠️ multisig_sign from unknown key owner {signer}")
-            return
-        if not self.verify_signature(key_path.read_bytes(), entry["canonical"], signature):
-            logger.warning(f"⚠️ Rejected forged/invalid multisig signature from {signer}")
-            return
-        entry["signatures"][signer] = signature
-        self._save_state(state)
+        with self._state_txn():
+            state = self._multisig_state()
+            entry = state["multisig"].get(agreement_id)
+            if not entry or entry.get("executed"):
+                return
+            # تحقق التوقيع بمفتاح الموقّع المعروف
+            key_path = self.keys_dir / f"{signer}.pub"
+            if not key_path.exists():
+                logger.warning(f"⚠️ multisig_sign from unknown key owner {signer}")
+                return
+            if not self.verify_signature(key_path.read_bytes(), entry["canonical"], signature):
+                logger.warning(f"⚠️ Rejected forged/invalid multisig signature from {signer}")
+                return
+            entry["signatures"][signer] = signature
+            self._save_state(state)
         logger.info(
             f"✅ Valid multisig signature from {signer} "
             f"({len(entry['signatures'])}/{entry['required']}) on {agreement_id}"
@@ -2153,29 +2401,30 @@ class LivingMeshNode:
         await self._try_finalize_multisig(agreement_id)
 
     async def _try_finalize_multisig(self, agreement_id: str):
-        state = self._multisig_state()
-        entry = state["multisig"].get(agreement_id)
-        if not entry or entry.get("executed"):
-            return
-        # أعد التحقق من كل التوقيعات قبل التنفيذ
-        valid = {}
-        for signer, sig in list(entry.get("signatures", {}).items()):
-            key_path = self.keys_dir / f"{signer}.pub"
-            if signer == self.node_id:
-                pub = self._pub_pem().encode()
-                if self.verify_signature(pub, entry["canonical"], sig):
+        with self._state_txn():
+            state = self._multisig_state()
+            entry = state["multisig"].get(agreement_id)
+            if not entry or entry.get("executed"):
+                return
+            # أعد التحقق من كل التوقيعات قبل التنفيذ
+            valid = {}
+            for signer, sig in list(entry.get("signatures", {}).items()):
+                key_path = self.keys_dir / f"{signer}.pub"
+                if signer == self.node_id:
+                    pub = self._pub_pem().encode()
+                    if self.verify_signature(pub, entry["canonical"], sig):
+                        valid[signer] = sig
+                    continue
+                if key_path.exists() and self.verify_signature(key_path.read_bytes(), entry["canonical"], sig):
                     valid[signer] = sig
-                continue
-            if key_path.exists() and self.verify_signature(key_path.read_bytes(), entry["canonical"], sig):
-                valid[signer] = sig
-        entry["signatures"] = valid
-        self._save_state(state)
-        if len(valid) < int(entry.get("required") or 4):
-            return
-        entry["status"] = "approved"
-        entry["executed"] = True
-        entry["executed_at"] = datetime.now(timezone.utc).isoformat()
-        self._save_state(state)
+            entry["signatures"] = valid
+            self._save_state(state)
+            if len(valid) < int(entry.get("required") or 4):
+                return
+            entry["status"] = "approved"
+            entry["executed"] = True
+            entry["executed_at"] = datetime.now(timezone.utc).isoformat()
+            self._save_state(state)
         logger.info(
             f"🏅 Multisig APPROVED & executed {agreement_id} "
             f"with {len(valid)} signatures — agreement={entry.get('agreement')}"
@@ -2195,10 +2444,11 @@ class LivingMeshNode:
     # بروتوكول المهام الموزّعة (AI + Scientific) + مدير دورة الحياة
     # ------------------------------------------------------------------
     def _task_inbox(self) -> Dict[str, Any]:
-        state = self._load_state()
-        if "task_inbox" not in state:
-            state["task_inbox"] = {}
-            self._save_state(state)
+        with self._state_txn():
+            state = self._load_state()
+            if "task_inbox" not in state:
+                state["task_inbox"] = {}
+                self._save_state(state)
         return state
 
     def _register_task(
@@ -2362,14 +2612,15 @@ class LivingMeshNode:
                 self._metrics["tasks_duplicate_rejected"] += 1
                 logger.warning(f"🚫 Duplicate result rejected id={task_id} from={sender_id}")
                 return
-            state = self._task_inbox()
-            state["task_inbox"][task_id] = {
-                "kind": kind,
-                "from": sender_id,
-                "data": exp_data,
-                "received_at": datetime.now(timezone.utc).isoformat(),
-            }
-            self._save_state(state)
+            with self._state_txn():
+                state = self._task_inbox()
+                state["task_inbox"][task_id] = {
+                    "kind": kind,
+                    "from": sender_id,
+                    "data": exp_data,
+                    "received_at": datetime.now(timezone.utc).isoformat(),
+                }
+                self._save_state(state)
             self._register_task(
                 task_id,
                 kind,
@@ -2532,7 +2783,27 @@ class LivingMeshNode:
                 target_id=sender_id,
             )
 
-    async def dispatch_mesh_task(
+    async def dispatch_mesh_task(self, host: str, port: int, kind: str, data: Dict[str, Any],
+                                 target_id: str = None, **kw) -> Dict[str, Any]:
+        """يرسل المهمة ثم **يتدرّب** المستشار العصبي على نتيجتها الفعلية (نجاح/زمن)."""
+        t0 = time.monotonic()
+        result: Dict[str, Any] = {}
+        try:
+            result = await self._dispatch_mesh_task_raw(host, port, kind, data, target_id=target_id, **kw)
+            return result
+        finally:
+            adv = self._advisor()
+            if adv is not None:
+                try:
+                    ok = isinstance(result, dict) and not result.get("error") and (
+                        bool(result.get("ok")) or result.get("result") is not None)
+                    nid = self._peer_key(host, int(port), target_id)
+                    adv.observe(nid, ok, (time.monotonic() - t0) * 1000.0, "active",
+                                self._peer_reputation01(nid))
+                except Exception as exc:
+                    logger.debug("neural observe skipped: %s", exc)
+
+    async def _dispatch_mesh_task_raw(
         self,
         host: str,
         port: int,
@@ -2737,14 +3008,15 @@ class LivingMeshNode:
         elif kind.endswith("_result"):
             # خزّن النتيجة في inbox
             task_id = exp_data.get("task_id") or f"store_{uuid.uuid4().hex[:8]}"
-            state = self._task_inbox()
-            state["task_inbox"][task_id] = {
-                "kind": kind,
-                "from": sender_id,
-                "data": exp_data,
-                "received_at": datetime.now(timezone.utc).isoformat(),
-            }
-            self._save_state(state)
+            with self._state_txn():
+                state = self._task_inbox()
+                state["task_inbox"][task_id] = {
+                    "kind": kind,
+                    "from": sender_id,
+                    "data": exp_data,
+                    "received_at": datetime.now(timezone.utc).isoformat(),
+                }
+                self._save_state(state)
             logger.info(f"📥 Storage result {kind} id={task_id} from={sender_id}")
             return
         else:
@@ -2850,24 +3122,26 @@ class LivingMeshNode:
         body["signature"] = self.sign_message(canonical)
         # سجل السمعة: نجاح التنفيذ يرفع النقاط
         self.update_reputation(self.node_id, delta=1 if body["ok"] else -1, reason=f"exec:{kind}")
-        state = self._load_state()
-        state.setdefault("receipts", {})[task_id] = body
-        self._save_state(state)
+        with self._state_txn():
+            state = self._load_state()
+            state.setdefault("receipts", {})[task_id] = body
+            self._save_state(state)
         return body
 
     def update_reputation(self, node_id: str, delta: int = 1, reason: str = "") -> Dict[str, Any]:
         """سجل سمعة أولي للعقد."""
-        state = self._load_state()
-        rep = state.setdefault("reputation", {})
-        entry = rep.setdefault(node_id, {"score": 0, "events": []})
-        entry["score"] = int(entry.get("score") or 0) + int(delta)
-        entry["events"] = (entry.get("events") or [])[-50:] + [{
-            "delta": int(delta),
-            "reason": reason,
-            "ts": datetime.now(timezone.utc).isoformat(),
-        }]
-        entry["events"] = entry["events"][-50:]
-        self._save_state(state)
+        with self._state_txn():
+            state = self._load_state()
+            rep = state.setdefault("reputation", {})
+            entry = rep.setdefault(node_id, {"score": 0, "events": []})
+            entry["score"] = int(entry.get("score") or 0) + int(delta)
+            entry["events"] = (entry.get("events") or [])[-50:] + [{
+                "delta": int(delta),
+                "reason": reason,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }]
+            entry["events"] = entry["events"][-50:]
+            self._save_state(state)
         return entry
 
     def get_reputation(self, node_id: str = None) -> Dict[str, Any]:
@@ -2974,15 +3248,16 @@ class LivingMeshNode:
         if ok:
             self.update_reputation(self.node_id, delta=2, reason="federated_quorum_ok")
         round_id = f"flround_{uuid.uuid4().hex[:8]}"
-        state = self._load_state()
-        state.setdefault("federated_rounds", {})[round_id] = {
-            "merged": merged,
-            "results_count": len(results),
-            "quorum": quorum,
-            "ok": ok,
-            "ts": datetime.now(timezone.utc).isoformat(),
-        }
-        self._save_state(state)
+        with self._state_txn():
+            state = self._load_state()
+            state.setdefault("federated_rounds", {})[round_id] = {
+                "merged": merged,
+                "results_count": len(results),
+                "quorum": quorum,
+                "ok": ok,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
+            self._save_state(state)
         return {
             "ok": ok,
             "round_id": round_id,
