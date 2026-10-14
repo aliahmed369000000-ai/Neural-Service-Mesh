@@ -51,6 +51,8 @@ KIND_CLASSIC_SHOWCASE = "classic_showcase"
 KIND_CLASSIC_SHOWCASE_RESULT = "classic_showcase_result"
 KIND_SELF_FEED_LEARN = "self_feed_learn"
 KIND_SELF_FEED_LEARN_RESULT = "self_feed_learn_result"
+KIND_NEURAL_TRAIN = "neural_train"
+KIND_NEURAL_TRAIN_RESULT = "neural_train_result"
 KIND_HEALTH_REPORT = "mesh_health_report"
 KIND_HEALTH_REPORT_RESULT = "mesh_health_report_result"
 
@@ -74,6 +76,7 @@ ALL_TASK_KINDS = {
     KIND_TEMPORAL_FORECAST, KIND_TEMPORAL_FORECAST_RESULT,
     KIND_CLASSIC_SHOWCASE, KIND_CLASSIC_SHOWCASE_RESULT,
     KIND_SELF_FEED_LEARN, KIND_SELF_FEED_LEARN_RESULT,
+    KIND_NEURAL_TRAIN, KIND_NEURAL_TRAIN_RESULT,
     KIND_HEALTH_REPORT, KIND_HEALTH_REPORT_RESULT,
     KIND_TASK_ACK, KIND_TASK_CANCEL,
     KIND_TASK_STATUS, KIND_TASK_STATUS_RESULT,
@@ -1016,6 +1019,178 @@ def execute_self_feed_learn(task: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+# ── مهمة عصبية حقيقية: كل عقدة تُدرِّب شبكتها العصبية على شريحة بياناتها ──────────
+# (ai.neural_core.NeuralNetwork: backprop + Adam حقيقيان، وليست محاكاة كـsubmodel_train).
+# الحمولة تأتي من نظير عبر الشبكة، فكل شيء محدود صراحةً: صفوف/أبعاد/دورات/عمق، وميزانية
+# زمنية صلبة، وقيم عددية منتهية فقط — لا كود ولا مسارات ولا روابط.
+_NEURAL_MAX_ROWS = 400
+_NEURAL_MAX_FEATURES = 8
+_NEURAL_MAX_EPOCHS = 100
+_NEURAL_MAX_HIDDEN_LAYERS = 3
+_NEURAL_MAX_HIDDEN_UNITS = 32
+_NEURAL_MAX_PREDICT_ROWS = 64
+_NEURAL_BUDGET_S = 8.0
+
+
+def _neural_matrix(rows: Any, name: str, max_rows: int, min_rows: int = 1):
+    import numpy as np
+    if not isinstance(rows, list) or not (min_rows <= len(rows) <= max_rows):
+        raise ValueError(f"{name}_rows_out_of_range")
+    width = None
+    out = []
+    for r in rows:
+        if not isinstance(r, (list, tuple)) or not r or len(r) > _NEURAL_MAX_FEATURES:
+            raise ValueError(f"{name}_bad_row")
+        if width is None:
+            width = len(r)
+        elif len(r) != width:
+            raise ValueError(f"{name}_ragged")
+        vals = []
+        for v in r:
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise ValueError(f"{name}_non_numeric")
+            f = float(v)
+            if not math.isfinite(f) or abs(f) > 1e6:
+                raise ValueError(f"{name}_value_out_of_range")
+            vals.append(f)
+        out.append(vals)
+    return np.array(out, dtype=np.float64)
+
+
+def execute_neural_train(task: Dict[str, Any]) -> Dict[str, Any]:
+    """تدريب شبكة عصبية حقيقية على شريحة بيانات هذه العقدة ثم تقييمها على مجموعة تحقّق.
+
+    task = {x: [[...]], y: [...], task: "regression"|"classification", hidden: [16, 8],
+            epochs: 30, lr: 0.01, val_split: 0.2, seed: 0, predict: [[...]] (اختياري)}
+    يرجع: val_loss مقابل baseline_val_loss (متوسط التدريب/الفئة الغالبة)، وimprovement،
+    وتنبؤات اختيارية. أي مدخل غير صالح → {ok: False, error: ...} بلا استثناء.
+    """
+    import numpy as np
+    t0 = time.time()
+    tid = task.get("task_id")
+
+    def fail(err: str) -> Dict[str, Any]:
+        return {"ok": False, "error": err, "task_id": tid}
+
+    try:
+        X = _neural_matrix(task.get("x"), "x", _NEURAL_MAX_ROWS, min_rows=8)
+        raw_y = task.get("y")
+        if not isinstance(raw_y, list) or len(raw_y) != len(X):
+            return fail("y_length_mismatch")
+        y = _neural_matrix([[v] if not isinstance(v, (list, tuple)) else v for v in raw_y],
+                           "y", _NEURAL_MAX_ROWS, min_rows=8)
+        if y.shape[1] != 1:
+            return fail("y_must_be_scalar")
+        y = y[:, 0]
+        P = None
+        if task.get("predict") is not None:
+            P = _neural_matrix(task["predict"], "predict", _NEURAL_MAX_PREDICT_ROWS)
+            if P.shape[1] != X.shape[1]:
+                return fail("predict_width_mismatch")
+    except ValueError as e:
+        return fail(str(e))
+
+    mode = str(task.get("task") or "regression").lower()
+    if mode not in ("regression", "classification"):
+        return fail("task_must_be_regression_or_classification")
+    if mode == "classification" and not set(np.unique(y)).issubset({0.0, 1.0}):
+        return fail("classification_labels_must_be_0_or_1")
+
+    hidden = task.get("hidden") or [16, 8]
+    if (not isinstance(hidden, list) or not (1 <= len(hidden) <= _NEURAL_MAX_HIDDEN_LAYERS)
+            or any(isinstance(h, bool) or not isinstance(h, int) or not (1 <= h <= _NEURAL_MAX_HIDDEN_UNITS)
+                   for h in hidden)):
+        return fail("hidden_out_of_range")
+    epochs = max(1, min(int(_safe_float(task.get("epochs"), 30)), _NEURAL_MAX_EPOCHS))
+    lr = min(0.1, max(1e-4, _safe_float(task.get("lr"), 0.01)))
+    val_split = min(0.4, max(0.1, _safe_float(task.get("val_split"), 0.2)))
+    seed = int(_safe_float(task.get("seed"), 0)) % (2 ** 31)
+
+    rng = np.random.default_rng(seed)
+    perm = rng.permutation(len(X))
+    n_val = max(2, int(len(X) * val_split))
+    val_idx, tr_idx = perm[:n_val], perm[n_val:]
+    if len(tr_idx) < 4:
+        return fail("not_enough_training_rows")
+
+    mu = X[tr_idx].mean(axis=0)
+    sd = X[tr_idx].std(axis=0)
+    sd[sd < 1e-9] = 1.0
+    Xn = (X - mu) / sd
+    if mode == "regression":
+        y_mu, y_sd = float(y[tr_idx].mean()), float(y[tr_idx].std()) or 1.0
+        target = (y - y_mu) / y_sd
+        out_act = "linear"
+    else:
+        y_mu, y_sd, target, out_act = 0.0, 1.0, y, "sigmoid"
+
+    from ai.neural_core import NeuralNetwork
+    net = NeuralNetwork(
+        [X.shape[1], *hidden, 1], ["tanh"] * len(hidden) + [out_act],
+        learning_rate=lr, loss="mse", optimizer="adam", name="mesh_neural_train", seed=seed,
+    )
+
+    epochs_run, stopped_early = 0, False
+    for _ in range(epochs):
+        for k in rng.permutation(tr_idx):
+            net.train_step(Xn[k], [target[k]])
+        epochs_run += 1
+        if time.time() - t0 > _NEURAL_BUDGET_S:
+            stopped_early = epochs_run < epochs
+            break
+
+    def predict_rows(rows):
+        rn = (rows - mu) / sd
+        raw = np.array([float(net.forward(r)[0]) for r in rn])
+        return raw * y_sd + y_mu if mode == "regression" else raw
+
+    pred_val, pred_tr = predict_rows(X[val_idx]), predict_rows(X[tr_idx])
+    val_loss = float(np.mean((pred_val - y[val_idx]) ** 2))
+    train_loss = float(np.mean((pred_tr - y[tr_idx]) ** 2))
+    baseline = float(np.mean((float(y[tr_idx].mean()) - y[val_idx]) ** 2))
+    out: Dict[str, Any] = {
+        "ok": True, "task_id": tid, "task": mode,
+        "network": net.architecture_str(), "params": net.param_count(),
+        "epochs_run": epochs_run, "stopped_early": stopped_early,
+        "n_train": int(len(tr_idx)), "n_val": int(len(val_idx)),
+        "train_loss": round(train_loss, 6), "val_loss": round(val_loss, 6),
+        "baseline_val_loss": round(baseline, 6),
+        "improvement": round(1.0 - val_loss / baseline, 6) if baseline > 1e-12 else 0.0,
+    }
+    if mode == "classification":
+        majority = float(np.round(y[tr_idx].mean()))
+        out["val_accuracy"] = round(float(np.mean((pred_val >= 0.5) == (y[val_idx] >= 0.5))), 6)
+        out["baseline_accuracy"] = round(float(np.mean((y[val_idx] >= 0.5) == (majority >= 0.5))), 6)
+    if P is not None:
+        out["predictions"] = [round(float(v), 6) for v in predict_rows(P)]
+    out["elapsed_ms"] = round((time.time() - t0) * 1000, 2)
+    return out
+
+
+def merge_neural_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """يدمج نتائج عُقد عدّة: متوسط تنبؤات (ensemble) + أفضل عقدة بـval_loss."""
+    good = [r for r in (results or []) if isinstance(r, dict) and r.get("ok")]
+    merged: Dict[str, Any] = {
+        "ok": bool(good), "nodes_ok": len(good),
+        "nodes_failed": len(results or []) - len(good),
+    }
+    if not good:
+        return merged
+    best = min(range(len(good)), key=lambda i: good[i].get("val_loss", float("inf")))
+    merged.update({
+        "best_node_index": best, "best_val_loss": good[best]["val_loss"],
+        "mean_val_loss": round(sum(r["val_loss"] for r in good) / len(good), 6),
+        "mean_improvement": round(sum(r["improvement"] for r in good) / len(good), 6),
+    })
+    preds = [r["predictions"] for r in good if isinstance(r.get("predictions"), list)]
+    if preds and len({len(p) for p in preds}) == 1:
+        merged["ensemble_predictions"] = [
+            round(sum(col) / len(col), 6) for col in zip(*preds)
+        ]
+        merged["ensemble_size"] = len(preds)
+    return merged
+
+
 def dispatch_task(kind: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """موجّه مركزي لتنفيذ مهمة حسب النوع."""
     data = data or {}
@@ -1045,6 +1220,8 @@ def dispatch_task(kind: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return execute_temporal_forecast(data)
     if kind == KIND_SELF_FEED_LEARN:
         return execute_self_feed_learn(data)
+    if kind == KIND_NEURAL_TRAIN:
+        return execute_neural_train(data)
     if kind == KIND_HEALTH_REPORT:
         return {"ok": True, "task_id": data.get("task_id"), "report_kind": KIND_HEALTH_REPORT}
     return None
@@ -1065,6 +1242,7 @@ def result_kind_for(request_kind: str) -> str:
         KIND_PREDICT: KIND_PREDICT_RESULT,
         KIND_TEMPORAL_FORECAST: KIND_TEMPORAL_FORECAST_RESULT,
         KIND_SELF_FEED_LEARN: KIND_SELF_FEED_LEARN_RESULT,
+        KIND_NEURAL_TRAIN: KIND_NEURAL_TRAIN_RESULT,
         KIND_HEALTH_REPORT: KIND_HEALTH_REPORT_RESULT,
         KIND_TASK_STATUS: KIND_TASK_STATUS_RESULT,
     }.get(request_kind, request_kind + "_result")

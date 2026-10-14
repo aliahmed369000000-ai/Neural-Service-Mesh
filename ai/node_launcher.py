@@ -854,6 +854,7 @@ CONTROL_TASK_KINDS = {
     "capability_report",
     "mesh_health_report",
     "forecast_consensus_benchmark",
+    "neural_train_benchmark",
 }
 CONTROL_MAX_TARGETS = 28
 
@@ -883,7 +884,49 @@ def _control_targets(node, body):
     return resolved, None
 
 
+def _validate_neural_train_parameters(params):
+    """تحقق من جهة المُنسِّق قبل إرسال بيانات التدريب للعُقد (الحدود نفسها التي
+    تفرضها العقدة المستقبِلة، فلا تُرسَل حمولات ضخمة أو غير صالحة أصلاً)."""
+    from ai import mesh_task_protocol as mt
+    try:
+        X = mt._neural_matrix(params.get("x"), "x", mt._NEURAL_MAX_ROWS, 8)
+        y = params.get("y")
+        if not isinstance(y, list) or len(y) != len(X):
+            return "y_length_mismatch"
+        mt._neural_matrix([[v] for v in y], "y", mt._NEURAL_MAX_ROWS, 8)
+        if params.get("predict") is not None:
+            P = mt._neural_matrix(params["predict"], "predict", mt._NEURAL_MAX_PREDICT_ROWS)
+            if P.shape[1] != X.shape[1]:
+                return "predict_width_mismatch"
+    except ValueError as exc:
+        return str(exc)
+    if str(params.get("task") or "regression").lower() not in ("regression", "classification"):
+        return "task_must_be_regression_or_classification"
+    hidden = params.get("hidden")
+    if hidden is not None and (
+        not isinstance(hidden, list) or not 1 <= len(hidden) <= mt._NEURAL_MAX_HIDDEN_LAYERS
+        or any(isinstance(h, bool) or not isinstance(h, int)
+               or not 1 <= h <= mt._NEURAL_MAX_HIDDEN_UNITS for h in hidden)
+    ):
+        return "hidden_out_of_range"
+    try:
+        epochs = int(params.get("epochs", 30))
+        timeout_s = float(params.get("timeout_s", 30))
+        int(params.get("seed", 0))
+        float(params.get("lr", 0.01))
+        float(params.get("val_split", 0.2))
+    except (TypeError, ValueError):
+        return "numeric_parameters_invalid"
+    if not 1 <= epochs <= mt._NEURAL_MAX_EPOCHS:
+        return "epochs_must_be_between_1_and_100"
+    if not 1 <= timeout_s <= 60:
+        return "timeout_s_must_be_between_1_and_60"
+    return None
+
+
 def _validate_control_parameters(kind, params):
+    if kind == "neural_train_benchmark":
+        return _validate_neural_train_parameters(params)
     if kind != "forecast_consensus_benchmark":
         return None
     series = params.get("series") or params.get("values")
@@ -932,7 +975,7 @@ async def handle_control_task(request):
     dry_run = body.get("dry_run", True) is True
     if body.get("dry_run") not in (None, True, False):
         return web.json_response({"ok": False, "error": "dry_run_must_be_boolean"}, status=400)
-    if kind in {"encrypted_rpc_roundtrip", "mesh_health_report", "forecast_consensus_benchmark"} and any(not t["has_public_key"] for t in targets):
+    if kind in {"encrypted_rpc_roundtrip", "mesh_health_report", "forecast_consensus_benchmark", "neural_train_benchmark"} and any(not t["has_public_key"] for t in targets):
         return web.json_response({"ok": False, "error": "peer_public_key_required_for_encrypted_task"}, status=409)
     plan = {
         "task_id": task_id, "kind": kind, "dry_run": dry_run,
@@ -942,9 +985,11 @@ async def handle_control_task(request):
     if dry_run:
         return web.json_response({"ok": True, "mode": "dry_run", "plan": plan})
 
+    target_index = {t["id"]: i for i, t in enumerate(targets)}
+
     async def run_one(target):
         try:
-            timeout_s = float(params.get("timeout_s", 15))
+            timeout_s = float(params.get("timeout_s", 30 if kind == "neural_train_benchmark" else 15))
             if kind == "latency_benchmark":
                 result = await node.ping_peer(target["host"], target["port"], timeout=timeout_s)
             elif kind == "capability_report":
@@ -952,6 +997,20 @@ async def handle_control_task(request):
             elif kind == "mesh_health_report":
                 from ai import mesh_task_protocol as mt
                 result = await node.dispatch_mesh_task(target["host"], target["port"], mt.KIND_HEALTH_REPORT, {"task_id": task_id}, target_id=target["id"], timeout=timeout_s)
+            elif kind == "neural_train_benchmark":
+                from ai import mesh_task_protocol as mt
+                payload = {
+                    "task_id": task_id, "x": params["x"], "y": params["y"],
+                    "task": params.get("task", "regression"),
+                    "hidden": params.get("hidden") or [16, 8],
+                    "epochs": int(params.get("epochs", 30)),
+                    "lr": float(params.get("lr", 0.01)),
+                    "val_split": float(params.get("val_split", 0.2)),
+                    "seed": int(params.get("seed", 0)) + target_index[target["id"]],
+                }
+                if params.get("predict") is not None:
+                    payload["predict"] = params["predict"]
+                result = await node.dispatch_mesh_task(target["host"], target["port"], mt.KIND_NEURAL_TRAIN, payload, target_id=target["id"], timeout=timeout_s)
             elif kind == "forecast_consensus_benchmark":
                 from ai import mesh_task_protocol as mt
                 payload = {"task_id": task_id, "series": params.get("series") or params.get("values"), "horizon": int(params.get("horizon", 1))}
@@ -965,6 +1024,15 @@ async def handle_control_task(request):
 
     results = await asyncio.gather(*(run_one(t) for t in targets))
     response = {"ok": all(bool(r.get("result", r).get("ok")) for r in results), "mode": "executed", "plan": plan, "results": results}
+    if kind == "neural_train_benchmark":
+        from ai import mesh_task_protocol as mt
+        trained = []
+        for item in results:
+            rpc = item.get("result") or {}
+            inner = rpc.get("result") if isinstance(rpc, dict) else None
+            if isinstance(inner, dict):
+                trained.append(inner)
+        response["aggregate"] = {"method": "neural_ensemble_mean", **mt.merge_neural_results(trained)}
     if kind == "forecast_consensus_benchmark":
         forecasts = []
         for item in results:
