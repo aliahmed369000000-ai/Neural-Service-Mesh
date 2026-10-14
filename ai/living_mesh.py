@@ -49,6 +49,24 @@ from cryptography.hazmat.primitives import serialization
 
 logger = logging.getLogger("LivingMesh")
 
+# asyncio لا يحتفظ إلا بمرجع ضعيف للمهام: asyncio.create_task() بلا مرجع قد تُجمَّع
+# بالـGC قبل اكتمالها، وأي استثناء فيها يضيع بصمت. نمسك مرجعاً قوياً حتى تنتهي
+# ونسجّل فشلها.
+_BG_TASKS: set = set()
+
+
+def _spawn_bg(coro, name: str = "bg"):
+    task = asyncio.create_task(coro)
+    _BG_TASKS.add(task)
+
+    def _done(t):
+        _BG_TASKS.discard(t)
+        if not t.cancelled() and t.exception() is not None:
+            logger.error("مهمة خلفية '%s' فشلت: %r", name, t.exception())
+
+    task.add_done_callback(_done)
+    return task
+
 ROOT = Path(__file__).resolve().parent.parent
 LIVING_MESH_DIR = ROOT / "artifacts" / "living_mesh"
 LIVING_MESH_DIR.mkdir(parents=True, exist_ok=True)
@@ -1031,7 +1049,7 @@ class LivingMeshNode:
                 t_host = target.get("host")
                 t_port = target.get("port")
                 if t_host:
-                    asyncio.create_task(self.send_to_peer(t_host, t_port, kind, experience_data, hops + 1))
+                    _spawn_bg(self.send_to_peer(t_host, t_port, kind, experience_data, hops + 1), "gossip_send")
 
     def get_evolutionary_updates(self) -> List[Dict[str, Any]]:
         """تحديثات التطور (evolution_sync) المستلمة من العقد الأخرى.
@@ -1046,7 +1064,7 @@ class LivingMeshNode:
         if not Path(path).exists():
             return {"nodes": {}, "global_experience": []}
         try:
-            return json.loads(Path(path).read_text())
+            return json.loads(Path(path).read_text(encoding="utf-8"))
         except Exception as exc:
             # الكتابة ذرّية الآن، فالتلف هنا حقيقي لا قراءة نصف مكتوبة: احفظ نسخة
             # للتحقيق بدل أن يمحوها أول _save_state لاحق بصمت.
@@ -1118,7 +1136,7 @@ class LivingMeshNode:
             return env_id
         if path.exists():
             try:
-                data = json.loads(path.read_text())
+                data = json.loads(path.read_text(encoding="utf-8"))
                 if data.get("node_id"):
                     logger.info(f"♻️ Restored persistent node_id={data['node_id']}")
                     return data["node_id"]
@@ -1136,13 +1154,13 @@ class LivingMeshNode:
             "host": self.host,
             "port": self.port,
         }
-        path.write_text(json.dumps(rec, indent=2, ensure_ascii=False))
+        path.write_text(json.dumps(rec, indent=2, ensure_ascii=False), encoding="utf-8")
 
     def identity_info(self) -> Dict[str, Any]:
         path = self._identity_record_path()
         if path.exists():
             try:
-                return json.loads(path.read_text())
+                return json.loads(path.read_text(encoding="utf-8"))
             except Exception:
                 pass
         return {
@@ -1508,7 +1526,7 @@ class LivingMeshNode:
                             peer_key_path.write_text(peer_pub_key)
             elif kind == "evolution_task":
                 logger.info(f"🧬 Node {self.node_id} received Evolution Task: {exp_data.get('task')}")
-                asyncio.create_task(self._execute_evolution(exp_data))
+                _spawn_bg(self._execute_evolution(exp_data), "execute_evolution")
             elif kind == "tool_request":
                 # طلب تنفيذ أداة محددة من السرب — أظهر الأخطاء ولا تبتلعها (#16)
                 logger.info(f"🛠️ Node {self.node_id} received Tool Request: {(exp_data or {}).get('tool_name')}")
@@ -2060,8 +2078,8 @@ class LivingMeshNode:
 
                         try:
                             await self._process_secure_message(resp.data, websocket=ws)
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.warning("RPC: فشل معالجة رسالة آمنة واردة أثناء الانتظار: %r", exc)
                     if not out.get("result") and not out.get("error"):
                         out["error"] = "timeout"
                         self._register_task(task_id, kind, mesh_tasks.TASK_STATUS_TIMEOUT)
@@ -2941,7 +2959,7 @@ class LivingMeshNode:
             "stored_at": datetime.now(timezone.utc).isoformat(),
         }
         meta_path = path.with_suffix(".json")
-        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
         logger.info(f"💾 Stored content {content_id[:16]}… size={len(data)}")
         return meta
 
