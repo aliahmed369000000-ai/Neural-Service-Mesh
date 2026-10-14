@@ -232,13 +232,26 @@ class BaseNode(ABC):
                 f"[{self.name}] restore_state: node_id mismatch "
                 f"(self={self.node_id[:8]}, snapshot={snap_id[:8]})"
             )
-        self._execution_count = snapshot.get("execution_count", 0) or 0
+        # تعقيم القيم المستردة: snapshot قادم من القرص قد يكون تالفاً. قبل هذا
+        # كانت execution_count="abc" تنهار لاحقاً عند أول `+= 1` في execute()،
+        # وstate غير معروفة (مثل "banana") تبقى كما هي فلا تطابق أي حالة حقيقية.
+        def _as_count(v) -> int:
+            try:
+                n = int(v)
+            except (TypeError, ValueError):
+                return 0
+            return n if n > 0 else 0
+
+        self._execution_count = _as_count(snapshot.get("execution_count"))
         self._last_executed = snapshot.get("last_executed")
-        self.state = snapshot.get("state") or NodeState.CREATED
+        state = snapshot.get("state")
+        self.state = state if state in NodeState.ALL else NodeState.CREATED
         self._last_error = snapshot.get("last_error")
-        self.pause_reason = snapshot.get("pause_reason") if self.state == NodeState.PAUSED else None
-        self._pending_input = snapshot.get("pending_input")
-        self._resume_attempts = snapshot.get("resume_attempts", 0) or 0
+        reason = snapshot.get("pause_reason")
+        self.pause_reason = reason if self.state == NodeState.PAUSED and isinstance(reason, str) else None
+        pending = snapshot.get("pending_input")
+        self._pending_input = pending if isinstance(pending, dict) else None
+        self._resume_attempts = _as_count(snapshot.get("resume_attempts"))
         logger.info(
             f"[{self.name}] state restored: {self.state} "
             f"(execution_count={self._execution_count})"

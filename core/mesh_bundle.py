@@ -1500,12 +1500,13 @@ class MeshBundle:
                 self.role_node_ids[role] = existing.node_id
                 continue
             persisted = self.registry.get_meta_by_name(role)
-            node = AgentRoleNode(
-                role, spec,
-                node_id=persisted.get("node_id") if persisted else None,
-            )
+            pid = persisted.get("node_id") if persisted else None
+            node = AgentRoleNode(role, spec, node_id=pid if isinstance(pid, str) and pid else None)
             if persisted:
-                node.restore_state(persisted)
+                try:
+                    node.restore_state(persisted)
+                except Exception as e:  # سجل محفوظ تالف لا يُسقط الإقلاع
+                    logger.warning("MeshBundle: تعذّر استرجاع حالة الدور %s: %s", role, e)
             node_id = self.registry.register(node)
             self.role_node_ids[role] = node_id
             if root_id is None:
@@ -1542,12 +1543,16 @@ class MeshBundle:
                 self.mcp_tool_node_ids[tool_name] = existing.node_id
                 continue
             persisted = self.registry.get_meta_by_name(tool_name)
+            pid = persisted.get("node_id") if persisted else None
             node = MCPToolNode(
                 tool_name, fn, fn.__doc__ or "",
-                node_id=persisted.get("node_id") if persisted else None,
+                node_id=pid if isinstance(pid, str) and pid else None,
             )
             if persisted:
-                node.restore_state(persisted)
+                try:
+                    node.restore_state(persisted)
+                except Exception as e:  # سجل محفوظ تالف لا يُسقط الإقلاع
+                    logger.warning("MeshBundle: تعذّر استرجاع حالة أداة %s: %s", tool_name, e)
             node_id = self.registry.register(node)
             self.mcp_tool_node_ids[tool_name] = node_id
 
@@ -1575,29 +1580,48 @@ class MeshBundle:
         node_id تماماً في الحالتين."""
         from services.generated_service_nodes import NODE_CLASS_BY_NAME
         for meta in self.registry.orphaned_metadata():
-            node_id = meta.get("node_id")
-            if not node_id:
-                continue
-            shell_cls = NODE_CLASS_BY_NAME.get(meta.get("node_type"), PassThroughNode)
-            shell = shell_cls(
-                name=meta.get("name", node_id[:8]),
-                description=meta.get("description", ""),
-                tags=meta.get("tags") or ["dynamic", "passthrough", "restored"],
-                node_id=node_id,
-            )
-            shell.restore_state(meta)
+            # عزل كل سجل: سجل تالف واحد في nodes.json (node_id رقم، node_type
+            # قائمة...) كان يرفع استثناءً من __init__ فيفشل إقلاع MeshBundle كله.
             try:
-                self.registry.register(shell)
-                # 🆕 دفاع صريح: تجهيز اليدين فور الإحياء — لا نعتمد فقط على
-                # حلقة list_all اللاحقة في __init__ (قد تتغيّر ترتيباً أو تُتخطى).
-                self._equip_hands(shell)
-                logger.info(
-                    "MeshBundle: أُحييت عقدة ديناميكية بعد إعادة التشغيل: %s [%s] (hands=%s)",
-                    shell.name, node_id[:8],
-                    "yes" if getattr(shell, "hands", None) else "no",
+                self._restore_one_dynamic_node(meta, NODE_CLASS_BY_NAME)
+            except Exception as e:
+                logger.warning(
+                    "MeshBundle: تُخطّي سجل عقدة ديناميكية تالف (%r): %s",
+                    meta.get("node_id") if isinstance(meta, dict) else meta, e,
                 )
-            except ValueError:
-                pass  # سبقتنا خطوة أخرى لتسجيلها بنفس node_id — لا مشكلة
+
+    def _restore_one_dynamic_node(self, meta, NODE_CLASS_BY_NAME) -> None:
+        if not isinstance(meta, dict):
+            return
+        node_id = meta.get("node_id")
+        if not node_id or not isinstance(node_id, str):
+            return
+        node_type = meta.get("node_type")
+        shell_cls = (NODE_CLASS_BY_NAME.get(node_type, PassThroughNode)
+                     if isinstance(node_type, str) else PassThroughNode)
+        raw_tags = meta.get("tags")
+        tags = (list(raw_tags) if isinstance(raw_tags, list) and raw_tags
+                else ["dynamic", "passthrough", "restored"])
+        name = meta.get("name")
+        shell = shell_cls(
+            name=name if isinstance(name, str) and name else node_id[:8],
+            description=meta.get("description") if isinstance(meta.get("description"), str) else "",
+            tags=tags,
+            node_id=node_id,
+        )
+        shell.restore_state(meta)
+        try:
+            self.registry.register(shell)
+            # 🆕 دفاع صريح: تجهيز اليدين فور الإحياء — لا نعتمد فقط على
+            # حلقة list_all اللاحقة في __init__ (قد تتغيّر ترتيباً أو تُتخطى).
+            self._equip_hands(shell)
+            logger.info(
+                "MeshBundle: أُحييت عقدة ديناميكية بعد إعادة التشغيل: %s [%s] (hands=%s)",
+                shell.name, node_id[:8],
+                "yes" if getattr(shell, "hands", None) else "no",
+            )
+        except ValueError:
+            pass  # سبقتنا خطوة أخرى لتسجيلها بنفس node_id — لا مشكلة
 
     # ── تغذية نتيجة تنفيذ سرب حقيقية إلى Scoring + Memory + Reputation ──────
     def record_swarm_result(self, swarm_result) -> None:

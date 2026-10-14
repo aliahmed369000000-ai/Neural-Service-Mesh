@@ -147,9 +147,12 @@ class NodeRegistry:
     def _load(self):
         data = self._storage.load(REGISTRY_FILE)
         if data:
-            for nm in data.get("nodes", []):
-                nid = nm.get("node_id")
-                if nid:
+            nodes = data.get("nodes", []) if isinstance(data, dict) else []
+            for nm in nodes if isinstance(nodes, list) else []:
+                # سجل غير dict أو node_id غير نصي كان يرفع AttributeError/يُدخل
+                # مفتاحاً فاسداً فيفشل إنشاء الـregistry (وإقلاع الحزمة) كله.
+                nid = nm.get("node_id") if isinstance(nm, dict) else None
+                if isinstance(nid, str) and nid:
                     self._meta_cache[nid] = nm
             logger.info(f"Registry loaded {len(self._meta_cache)} records")
 
