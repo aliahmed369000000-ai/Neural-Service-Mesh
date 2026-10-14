@@ -131,7 +131,11 @@ class LivingMeshNode:
         self._self_evolution_stop = threading.Event()
         self._self_evolution_thread = None
         self._self_evolution_interval = max(
-            60.0, float(os.getenv("NSM_SELF_EVOLUTION_INTERVAL_SEC", "1800"))
+            # 🆕 كان 60.0 — رُفع إلى 300 (5 دقائق): 60 ثانية سمحت عملياً
+            # بمحاولة استنساخ/دفع Git لكل عقدة كل دقيقة، وهو تكرار مفرط
+            # لعملية شبكة حقيقية (حتى مع التخطّي النظيف عند غياب
+            # GITHUB_TOKEN) على نطاق شبكة من عشرات/مئات العقد.
+            300.0, float(os.getenv("NSM_SELF_EVOLUTION_INTERVAL_SEC", "1800"))
         )
         self._last_self_evolution_ts = 0.0
 
@@ -408,7 +412,7 @@ class LivingMeshNode:
         if self._self_evolution_thread and self._self_evolution_thread.is_alive():
             return False
         if interval_seconds is not None:
-            self._self_evolution_interval = max(60.0, float(interval_seconds))
+            self._self_evolution_interval = max(300.0, float(interval_seconds))
         self._self_evolution_stop.clear()
         # تبعثر البداية: كل العقد كانت تنفّذ أول دورة تطوّر فور الإقلاع في نفس
         # اللحظة (_last_self_evolution_ts=0) — مع GITHUB_TOKEN تعني ~N دفعة
@@ -416,7 +420,7 @@ class LivingMeshNode:
         # متكررة). الآن أول دورة بعد تأخير عشوائي في [30ث، الفاصل]، فتتوزّع.
         if self._last_self_evolution_ts == 0.0:
             import random
-            jitter = random.uniform(30.0, max(60.0, self._self_evolution_interval))
+            jitter = random.uniform(30.0, max(300.0, self._self_evolution_interval))
             self._last_self_evolution_ts = time.time() - self._self_evolution_interval + jitter
         self._self_evolution_thread = threading.Thread(
             target=self._self_evolution_watch_loop,
