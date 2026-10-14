@@ -133,13 +133,30 @@ class ServiceGraph:
         }
 
     def from_dict(self, data: dict):
+        """يُحمّل الرسم من dict محفوظ. متسامح مع بيانات تالفة جزئياً: عقدة
+        بلا node_id أو حافة تشير لعقدة غير موجودة تُتجاهَل بتحذير بدل أن
+        ترفع KeyError وتُسقط إقلاع الشبكة كلها بسبب سجل واحد فاسد."""
         for nm in data.get("nodes", []):
-            nid = nm["node_id"]
+            nid = nm.get("node_id") if isinstance(nm, dict) else None
+            if not nid:
+                logger.warning("Graph.from_dict: عقدة بلا node_id تم تجاهلها")
+                continue
             self._adjacency[nid] = []
             self._reverse[nid] = set()
             self._node_meta[nid] = nm
         for ed in data.get("edges", []):
-            self.add_edge(ed["source_id"], ed["target_id"], ed.get("weight", 1.0), ed.get("label", ""))
+            try:
+                src, dst = ed["source_id"], ed["target_id"]
+            except (KeyError, TypeError):
+                logger.warning("Graph.from_dict: حافة ناقصة الحقول تم تجاهلها")
+                continue
+            if src not in self._adjacency or dst not in self._adjacency:
+                logger.warning(
+                    f"Graph.from_dict: حافة معلّقة {str(src)[:8]} -> {str(dst)[:8]} "
+                    f"(عقدة غير موجودة) تم تجاهلها"
+                )
+                continue
+            self.add_edge(src, dst, ed.get("weight", 1.0), ed.get("label", ""))
 
     def _check(self, node_id: str):
         if node_id not in self._adjacency:
