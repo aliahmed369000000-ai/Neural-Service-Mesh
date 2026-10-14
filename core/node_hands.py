@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import time
 from collections import deque
@@ -78,13 +79,48 @@ def default_policy(node: Any, hand: str, tool: str, kwargs: Dict[str, Any]) -> T
     return False, "right hand is default-deny: no policy granted"
 
 
+# أسرار داخل نصوص القيم: «Bearer xxx» / «token=xxx» / «password: xxx» / توكنات
+# معروفة البادئة (GitHub/OpenAI/Slack). كان الحجب بحسب اسم المفتاح الأعلى فقط،
+# فسرّ داخل URL أو أمر نصي أو dict متداخل يتسرّب كما هو إلى سجل التدقيق.
+_SECRET_IN_TEXT = re.compile(
+    r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{6,}"
+    r"|\b(?:token|secret|password|passwd|api[_-]?key|key|auth\w*|credential)s?\s*[=:]\s*[^\s&;,'\"]+"
+    r"|\b(?:ghp|gho|ghs|ghu|github_pat|sk|xox[abp])[-_][A-Za-z0-9_-]{8,}"
+)
+_REDACT_MAX_DEPTH = 6
+_REDACT_MAX_ITEMS = 50
+
+
+def _is_sensitive_key(k: Any) -> bool:
+    return any(s in str(k).lower() for s in _SENSITIVE_KEYS)
+
+
+def _redact_value(v: Any, depth: int = 0) -> Any:
+    """يحجب الأسرار بشكل متداخل: مفاتيح حسّاسة في أي مستوى، وأنماط أسرار داخل
+    النصوص. يعيد بنية آمنة للتسجيل (لا يُعدّل الأصل)."""
+    if depth > _REDACT_MAX_DEPTH:
+        return "…"
+    if isinstance(v, dict):
+        return {
+            str(k): ("***" if _is_sensitive_key(k) else _redact_value(x, depth + 1))
+            for k, x in list(v.items())[:_REDACT_MAX_ITEMS]
+        }
+    if isinstance(v, (list, tuple, set, frozenset)):
+        return [_redact_value(x, depth + 1) for x in list(v)[:_REDACT_MAX_ITEMS]]
+    if isinstance(v, (bytes, bytearray)):
+        return "<bytes>"
+    if isinstance(v, str):
+        return _SECRET_IN_TEXT.sub("***", v)
+    return v
+
+
 def _redact(kwargs: Dict[str, Any]) -> Dict[str, str]:
     out: Dict[str, str] = {}
     for k, v in (kwargs or {}).items():
-        if any(s in str(k).lower() for s in _SENSITIVE_KEYS):
+        if _is_sensitive_key(k):
             out[str(k)] = "***"
         else:
-            out[str(k)] = repr(v)[:200]
+            out[str(k)] = repr(_redact_value(v))[:200]
     return out
 
 
