@@ -1775,9 +1775,7 @@ class MeshBundle:
             # التشغيل الفعلي إطلاقاً رغم أنهما مكتوبان ومختبَران. الآن كل
             # نتيجة سرب حقيقية (وليس فقط دورة تطوّر يدوية) تُشغّلهما مباشرة.
             try:
-                self._apply_reputation_feedback()
-                self._apply_reputation_recovery()
-                self._apply_node_retirement()
+                self._run_reputation_maintenance()
             except Exception as e:
                 logger.warning("MeshBundle: reputation feedback/recovery after swarm result failed: %s", e)
 
@@ -1908,9 +1906,7 @@ class MeshBundle:
                         )
 
             try:
-                self._apply_reputation_feedback()
-                self._apply_reputation_recovery()
-                self._apply_node_retirement()
+                self._run_reputation_maintenance()
             except Exception as e:
                 logger.warning(
                     "MeshBundle: reputation feedback/recovery after direct execution failed: %s", e
@@ -2260,9 +2256,7 @@ class MeshBundle:
     def run_evolution_cycle(self) -> dict:
         with self._lock:
             cycle = self.evolution.run_cycle(auto_register=True, verbose=False)
-            self._apply_reputation_feedback()
-            self._apply_reputation_recovery()
-            self._apply_node_retirement()
+            self._run_reputation_maintenance()
             try:
                 # تحليل فقط (analyze())، لا تطبيق (apply_report()) — انظر
                 # تعليق تسليك OptimizationEngine في __init__ أعلاه للسبب.
@@ -2326,31 +2320,53 @@ class MeshBundle:
     # فعلياً في NodeReputationEngine (فتُستبعد من التوجيه)، وتُبلَّغ جيرانها
     # في الرسم البياني بذلك عبر NodeChannel — إشعار حقيقي، وليس مجرد رقم
     # في لوحة تحكم لا يقرأه أحد.
+    def _run_reputation_maintenance(self) -> None:
+        """الحجر ثم التعافي ثم التقاعد، كل خطوة معزولة عن الأخرى: فشل إحداها
+        (استثناء غير متوقع) لا يمنع الباقيتين. كانت الثلاث تُستدعى تباعاً داخل
+        try واحد، فاستثناء في الحجر كان يعطّل التعافي والتقاعد في كل دورة."""
+        for step in (self._apply_reputation_feedback,
+                     self._apply_reputation_recovery,
+                     self._apply_node_retirement):
+            try:
+                step()
+            except Exception as e:
+                logger.warning("MeshBundle: %s فشلت: %s", step.__name__, e)
+
     def _apply_reputation_feedback(self, low_threshold: float = 25.0) -> None:
         for rep in self.reputation_engine.low_reputation_nodes(threshold=low_threshold):
-            node_id = rep.get("node_id")
-            if not node_id or rep.get("is_quarantined"):
-                continue
-            if rep.get("total_runs", 0) < 5:
-                continue  # بيانات غير كافية بعد لاتخاذ قرار
-            self.reputation_engine.quarantine(node_id)
-            # حجر فعلي على مستوى العقدة نفسها (BaseNode.state=paused) لا
-            # فقط في طبقة السمعة/التوجيه — بدون هذا كان أي استدعاء مباشر
-            # لـ node.execute() (خارج مسار التوجيه القائم على السمعة) ينفّذ
-            # عقدة محجورة دون أن يعرف.
-            node = self.registry.get(node_id)
-            if node:
-                node.pause(reason="quarantine")
-                self.registry.refresh_meta(node_id)
-            if self.graph.has_node(node_id):
-                neighbors = self.graph.get_neighbors(node_id)
-                self.channel.broadcast(
-                    from_id=node_id,
-                    to_ids=neighbors,
-                    topic="node_quarantined",
-                    payload={"reason": "low_reputation", "score": rep.get("reputation_score")},
-                )
-            logger.info("MeshBundle: quarantined low-reputation node %s", node_id[:8])
+            try:
+                node_id = rep.get("node_id")
+                if not node_id or rep.get("is_quarantined"):
+                    continue
+                if rep.get("total_runs", 0) < 5:
+                    continue  # بيانات غير كافية بعد لاتخاذ قرار
+                # حجر فعلي على مستوى العقدة نفسها (BaseNode.state=paused) لا
+                # فقط في طبقة السمعة/التوجيه — بدون هذا كان أي استدعاء مباشر
+                # لـ node.execute() (خارج مسار التوجيه القائم على السمعة) ينفّذ
+                # عقدة محجورة دون أن يعرف.
+                # الترتيب مقصود: الإيقاف الفعلي أولاً ثم تسجيل الحجر في السمعة.
+                # كان العكس، فلو فشل pause/refresh_meta بعد تسجيل الحجر تبقى
+                # العقدة محجورة في السمعة وغير موقوفة فعلاً، ولا تُعاد معالجتها
+                # أبداً لأن is_quarantined يصبح True. الآن الفشل قابل للإعادة.
+                node = self.registry.get(node_id)
+                if node:
+                    node.pause(reason="quarantine")
+                    self.registry.refresh_meta(node_id)
+                self.reputation_engine.quarantine(node_id)
+                if self.graph.has_node(node_id):
+                    neighbors = self.graph.get_neighbors(node_id)
+                    self.channel.broadcast(
+                        from_id=node_id,
+                        to_ids=neighbors,
+                        topic="node_quarantined",
+                        payload={"reason": "low_reputation", "score": rep.get("reputation_score")},
+                    )
+                logger.info("MeshBundle: quarantined low-reputation node %s", node_id[:8])
+            except Exception as e:
+                # عزل عقدة معطوبة: بدونه يوقف استثناء عقدة واحدة معالجة بقية
+                # العقد (والدوال التالية) في كل دورة، لأن نفس العقدة تأتي أولاً دائماً.
+                logger.warning("MeshBundle: الحجر بالسمعة فشل للعقدة %s: %s",
+                               str(rep.get("node_id"))[:8], e)
 
     # ── رفع الحجر تلقائياً عن عقدة تعافت فعلياً + استئنافها الحقيقي ─────────
     # quarantine() كان طريقاً باتجاه واحد: unquarantine() موجودة في
@@ -2365,35 +2381,41 @@ class MeshBundle:
         for rep in self.reputation_engine.release_eligible_nodes(
             recovery_threshold=recovery_threshold, min_new_runs=min_new_runs
         ):
-            node_id = rep.get("node_id")
-            if not node_id:
-                continue
-            self.reputation_engine.unquarantine(node_id)
-            node = self.registry.get(node_id)
-            if node:
-                # expected_reason="quarantine": إن أوقف إنسان هذه العقدة
-                # يدوياً بسبب آخر بعد حجرها (node.pause_reason != "quarantine"
-                # الآن)، لا نستأنفها رغماً عنه فقط لأن سمعتها تعافت.
-                resumed = node.resume(expected_reason="quarantine")
-                if not resumed:
-                    logger.info(
-                        "MeshBundle: skipped auto-resume for %s — "
-                        "currently paused for a different reason (%s)",
-                        node_id[:8], node.pause_reason,
-                    )
+            try:
+                node_id = rep.get("node_id")
+                if not node_id:
                     continue
-                self.registry.refresh_meta(node_id)
-            updated = self.reputation_engine.get_reputation(node_id)
-            score = updated.reputation_score if updated else None
-            if self.graph.has_node(node_id):
-                neighbors = self.graph.get_neighbors(node_id)
-                self.channel.broadcast(
-                    from_id=node_id,
-                    to_ids=[n for n in neighbors if n and n != node_id],
-                    topic="node_unquarantined",
-                    payload={"reason": "reputation_recovered", "score": score},
-                )
-            logger.info("MeshBundle: released quarantine for recovered node %s", node_id[:8])
+                self.reputation_engine.unquarantine(node_id)
+                node = self.registry.get(node_id)
+                if node:
+                    # expected_reason="quarantine": إن أوقف إنسان هذه العقدة
+                    # يدوياً بسبب آخر بعد حجرها (node.pause_reason != "quarantine"
+                    # الآن)، لا نستأنفها رغماً عنه فقط لأن سمعتها تعافت.
+                    resumed = node.resume(expected_reason="quarantine")
+                    if not resumed:
+                        logger.info(
+                            "MeshBundle: skipped auto-resume for %s — "
+                            "currently paused for a different reason (%s)",
+                            node_id[:8], node.pause_reason,
+                        )
+                        continue
+                    self.registry.refresh_meta(node_id)
+                updated = self.reputation_engine.get_reputation(node_id)
+                score = updated.reputation_score if updated else None
+                if self.graph.has_node(node_id):
+                    neighbors = self.graph.get_neighbors(node_id)
+                    self.channel.broadcast(
+                        from_id=node_id,
+                        to_ids=[n for n in neighbors if n and n != node_id],
+                        topic="node_unquarantined",
+                        payload={"reason": "reputation_recovered", "score": score},
+                    )
+                logger.info("MeshBundle: released quarantine for recovered node %s", node_id[:8])
+            except Exception as e:
+                # عزل عقدة معطوبة: بدونه يوقف استثناء عقدة واحدة معالجة بقية
+                # العقد (والدوال التالية) في كل دورة، لأن نفس العقدة تأتي أولاً دائماً.
+                logger.warning("MeshBundle: رفع الحجر فشل للعقدة %s: %s",
+                               str(rep.get("node_id"))[:8], e)
 
     # ── تقاعد دائم لعُقد ذاتية التوليد فشلت بشكل مزمن ─────────────────────
     # الحجر/رفع الحجر (أعلاه) يغطيان حالتين: عقدة سيئة مؤقتاً (تُحجَر ثم
@@ -2411,47 +2433,53 @@ class MeshBundle:
     def _apply_node_retirement(self, min_quarantine_checks: int = 15) -> None:
         self.reputation_engine.tick_quarantine_checks()
         for rep in self.reputation_engine.retirement_eligible_nodes(min_quarantine_checks):
-            node_id = rep.get("node_id")
-            if not node_id:
-                continue
-            node = self.registry.get(node_id)
-            if node is None:
-                continue
-            if "ai-generated" not in (node.tags or []):
-                # حماية: لا تُطبَّق آلية التقاعد إلا على عُقد ai-generated —
-                # عُقد الكتالوج الأساسية تبقى محجورة (لا تُنفَّذ) لكن لا تُحذف.
-                continue
-
-            predecessors = self.graph.get_predecessors(node_id) if self.graph.has_node(node_id) else []
-            neighbors = (
-                predecessors + self.graph.get_neighbors(node_id)
-                if self.graph.has_node(node_id) else []
-            )
-            self.channel.broadcast(
-                from_id=node_id,
-                to_ids=[n for n in set(neighbors) if n and n != node_id],
-                topic="node_retired",
-                payload={
-                    "reason": "chronic_quarantine",
-                    "quarantine_checks": rep.get("quarantine_checks"),
-                },
-            )
-
-            self.registry.unregister(node_id)
-            if self.graph.has_node(node_id):
-                self.graph.remove_node(node_id)
             try:
-                self.exec_log.delete_node(node_id)
-                for pred in predecessors:
-                    self.exec_log.delete_connection(pred, node_id)
-            except Exception as e:
-                logger.warning("MeshBundle: تعذّر تنظيف exec_log بعد تقاعد العقدة %s: %s",
-                                node_id[:8], e)
+                node_id = rep.get("node_id")
+                if not node_id:
+                    continue
+                node = self.registry.get(node_id)
+                if node is None:
+                    continue
+                if "ai-generated" not in (node.tags or []):
+                    # حماية: لا تُطبَّق آلية التقاعد إلا على عُقد ai-generated —
+                    # عُقد الكتالوج الأساسية تبقى محجورة (لا تُنفَّذ) لكن لا تُحذف.
+                    continue
 
-            logger.info(
-                "MeshBundle: تقاعد العقدة %s '%s' نهائياً بعد %s فحص سمعة محجورة دون تعافٍ",
-                node_id[:8], node.name, rep.get("quarantine_checks"),
-            )
+                predecessors = self.graph.get_predecessors(node_id) if self.graph.has_node(node_id) else []
+                neighbors = (
+                    predecessors + self.graph.get_neighbors(node_id)
+                    if self.graph.has_node(node_id) else []
+                )
+                self.channel.broadcast(
+                    from_id=node_id,
+                    to_ids=[n for n in set(neighbors) if n and n != node_id],
+                    topic="node_retired",
+                    payload={
+                        "reason": "chronic_quarantine",
+                        "quarantine_checks": rep.get("quarantine_checks"),
+                    },
+                )
+
+                self.registry.unregister(node_id)
+                if self.graph.has_node(node_id):
+                    self.graph.remove_node(node_id)
+                try:
+                    self.exec_log.delete_node(node_id)
+                    for pred in predecessors:
+                        self.exec_log.delete_connection(pred, node_id)
+                except Exception as e:
+                    logger.warning("MeshBundle: تعذّر تنظيف exec_log بعد تقاعد العقدة %s: %s",
+                                    node_id[:8], e)
+
+                logger.info(
+                    "MeshBundle: تقاعد العقدة %s '%s' نهائياً بعد %s فحص سمعة محجورة دون تعافٍ",
+                    node_id[:8], node.name, rep.get("quarantine_checks"),
+                )
+            except Exception as e:
+                # عزل عقدة معطوبة: بدونه يوقف استثناء عقدة واحدة معالجة بقية
+                # العقد (والدوال التالية) في كل دورة، لأن نفس العقدة تأتي أولاً دائماً.
+                logger.warning("MeshBundle: تقاعد العقدة فشل للعقدة %s: %s",
+                               str(rep.get("node_id"))[:8], e)
 
     # ── تخطيط وتنفيذ هدف مركّب متعدد الخطوات عبر MultiGoalPlanner (Phase 5) ──
     # نقطة الاستخدام الفعلية الوحيدة لـself.multi_goal_planner أعلاه: تفكّك
