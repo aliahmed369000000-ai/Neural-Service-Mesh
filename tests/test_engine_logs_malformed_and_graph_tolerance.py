@@ -1,9 +1,8 @@
 """
 اختبار تحصينين في طبقة العقد الأساسية:
 
-1. core/engine.py::_persist — logs.json كان يكبر بلا حد ويُعاد تحميله وكتابته
-   كاملاً بعد كل run، وكذلك ExecutionEngine._history في الذاكرة. الآن يُحتفَظ
-   بآخر MAX_PERSISTED_RUNS فقط (الأحدث يبقى، الأقدم يُسقَط).
+1. core/engine.py::_persist — logs.json قد يحوي runs غير قائمة (تلف)؛ يُعاد
+   تهيئتها بدل الانهيار. (لا سقف لحجم السجل — قرار المالك: يكبر بحرية.)
 2. core/graph.py::ServiceGraph.from_dict — حافة تشير لعقدة غير موجودة (أو
    عقدة بلا node_id) كانت ترفع KeyError وتُسقط تحميل الرسم كله؛ الآن تُتجاهَل
    بتحذير وبقية الرسم يُحمَّل سليماً.
@@ -13,7 +12,6 @@ from __future__ import annotations
 import shutil
 import tempfile
 
-import core.engine as engine_mod
 from core.engine import ExecutionEngine
 from core.graph import ServiceGraph
 from core.node import BaseNode, NodeSchema
@@ -42,22 +40,6 @@ def _build(tmp):
     registry.register(node)
     graph.add_node(node.node_id, node.to_dict())
     return ExecutionEngine(registry, graph, storage), node, storage
-
-
-def test_logs_and_history_are_capped_to_latest_runs(monkeypatch):
-    monkeypatch.setattr(engine_mod, "MAX_PERSISTED_RUNS", 5)
-    tmp = tempfile.mkdtemp()
-    try:
-        eng, node, storage = _build(tmp)
-        run_ids = [eng.run_path([node.node_id], {}).run_id for _ in range(12)]
-
-        saved = storage.load("logs.json")["runs"]
-        assert len(saved) == 5
-        assert [r["run_id"] for r in saved] == run_ids[-5:]  # الأحدث فقط وبالترتيب
-        assert len(eng._history) == 5
-        assert eng.get_run(run_ids[-1])["run_id"] == run_ids[-1]
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def test_logs_file_with_malformed_runs_does_not_break_persist():

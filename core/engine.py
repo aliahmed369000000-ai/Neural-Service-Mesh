@@ -15,10 +15,6 @@ MAX_RESUME_ATTEMPTS = 3  # عقدة تقتل العملية في كل استئن
 
 logger = logging.getLogger(__name__)
 LOGS_FILE = "logs.json"
-# سقف سجل التشغيلات: logs.json كان يكبر بلا حد، و_persist يعيد تحميله وكتابته
-# كاملاً (JSON مُنسَّق + fsync) بعد كل run — فيتباطأ كل تشغيل أكثر من سابقه مع
-# الزمن، وتتضخّم _history في الذاكرة بنفس الطريقة. نحتفظ بآخر N تشغيل فقط.
-MAX_PERSISTED_RUNS = 500
 
 
 class ExecutionStep:
@@ -319,8 +315,6 @@ class ExecutionEngine:
 
     def _persist(self, result: ExecutionResult):
         self._history.append(result)
-        if len(self._history) > MAX_PERSISTED_RUNS:
-            del self._history[:-MAX_PERSISTED_RUNS]
         if self._db:
             self._db.save_run(result.to_dict())
         data = self._storage.load(LOGS_FILE) or {"runs": []}
@@ -328,8 +322,7 @@ class ExecutionEngine:
         if not isinstance(runs, list):
             runs = []
         runs.append(result.to_dict())
-        # الأحدث فقط — الأقدم يبقى متاحاً عبر self._db إن وُجدت قاعدة بيانات
-        data["runs"] = runs[-MAX_PERSISTED_RUNS:]
+        data["runs"] = runs
         self._storage.save(LOGS_FILE, data)
 
     def __repr__(self):
