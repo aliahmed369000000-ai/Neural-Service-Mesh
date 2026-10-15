@@ -42,6 +42,14 @@ app = FastAPI(
 
 logger = logging.getLogger(__name__)
 
+# واجهة إدارة العقد (api_nodes.py): قائمة/تفاصيل/تشغيل/إيقاف/استئناف/ترتيب الشبكة
+# العصبية. تعذّر تحميلها لا يُسقط بقية الخادم.
+try:
+    from api_nodes import router as _nodes_router
+    app.include_router(_nodes_router)
+except Exception as _e:  # noqa: BLE001
+    logger.warning("api_server: تعذّر تحميل api_nodes: %s", _e)
+
 # السماح بجميع الاتصالات (CORS)
 app.add_middleware(
     CORSMiddleware,
