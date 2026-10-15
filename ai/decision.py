@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+import os
 import math
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
@@ -155,6 +156,64 @@ class AIDecisionLayer:
 
         logger.info(f"AI suggests next: {best_nb[:8] if best_nb else None}")
         return best_nb
+
+    # ── الاختيار الاستباقي (قبل التنفيذ) ────────────────────────────────────
+    # عتبات متحفظة عمداً: الاستباق يغيّر سلوك مسار قد ينجح أصلاً، بعكس failover
+    # الذي يعمل بعد فشل فعلي. لا يُفعَّل إلا بشبكة مدرَّبة وبفارق واضح وبديل
+    # مكافئ تماماً (يتحقق منه المحرك)، ويُجرَّب الأصلي دورياً ليُكتشف تعافيه.
+    PREEMPT_MAX_SCORE = 0.5      # العقدة الأصلية أقل من هذا الاحتمال
+    PREEMPT_MIN_MARGIN = 0.25    # والبديل يتفوق عليها بهذا الفارق على الأقل
+    PREEMPT_EXPLORE_EVERY = 10   # كل 10 قرارات استباق يُترك الأصلي ليُجرَّب فعلاً
+
+    def suggest_preemptive(self, node_id: str, is_compatible=None) -> Optional[str]:
+        """بديل أرجح نجاحاً يُنفَّذ بدل العقدة *قبل* تشغيلها، أو None.
+
+        is_compatible(candidate_id)->bool يقدّمه المحرك (نفس الصنف والـschemas):
+        جيران الرسم هم عادة عقد لاحقة لا نسخ مكافئة، واستبدالها بصمت يعطي نتائج
+        خاطئة. بدون الاستكشاف الدوري كانت العقدة المتروكة لا تُلاحَظ أبداً
+        فلا يُعرف أنها أُصلحت. NSM_PREEMPTIVE_ROUTING=0 يعطّل الميزة كلياً."""
+        if self._advisor is None or not self._graph:
+            return None
+        if os.environ.get("NSM_PREEMPTIVE_ROUTING", "1").strip() == "0":
+            return None
+        try:
+            if not self._advisor.is_trained():
+                return None
+            neighbors = self._graph.get_neighbors(node_id)
+        except Exception:
+            return None
+        eligible = []
+        for n in neighbors or []:
+            if n == node_id or self._state_of(n) == "paused":
+                continue
+            try:
+                if is_compatible is not None and not is_compatible(n):
+                    continue
+            except Exception:
+                continue
+            eligible.append(n)
+        if not eligible:
+            return None
+
+        def score(nid: str) -> float:
+            return self._advisor.ranking_score(nid, self._state_of(nid), self._reputation_of(nid))
+
+        try:
+            p_self = score(node_id)
+            if p_self >= self.PREEMPT_MAX_SCORE:
+                return None
+            best = max(eligible, key=score)  # التعادل: الترتيب الأصلي
+            if score(best) - p_self < self.PREEMPT_MIN_MARGIN:
+                return None
+        except Exception as e:
+            logger.warning("preemptive routing failed: %s", e)
+            return None
+        calls = self.__dict__.setdefault("_preempt_calls", {})
+        calls[node_id] = calls.get(node_id, 0) + 1
+        if calls[node_id] % self.PREEMPT_EXPLORE_EVERY == 0:
+            return None  # استكشاف: جرّب الأصلي فعلاً
+        logger.info("AI preemptive (neural): %s -> %s", node_id[:8], best[:8])
+        return best
 
     def should_fallback(self, failed_node_id: str, error: str) -> Optional[str]:
         """

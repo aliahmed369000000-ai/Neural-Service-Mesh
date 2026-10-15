@@ -32,9 +32,11 @@ class ExecutionStep:
         self.is_fallback: bool = False
         # حالة العقدة قبل بدء هذه الخطوة (لتدريب عصبي بلا تسريب للتسمية)
         self.state_before: Optional[str] = None
+        # عقدة استُبدلت *قبل* التنفيذ بقرار استباقي من الشبكة العصبية (id الأصلية)
+        self.preempted_from: Optional[str] = None
 
     def to_dict(self):
-        return {
+        d = {
             "index": self.index, "node_id": self.node_id, "node_name": self.node_name,
             "started_at": self.started_at, "finished_at": self.finished_at,
             "duration_ms": self.duration_ms, "input_data": self.input_data,
@@ -42,6 +44,9 @@ class ExecutionStep:
             "error": self.error, "is_fallback": self.is_fallback,
             "state_before": self.state_before,
         }
+        if self.preempted_from:  # مشروط: شكل القاموس القديم لا يتغيّر عند عدم الاستباق
+            d["preempted_from"] = self.preempted_from
+        return d
 
 
 class ExecutionResult:
@@ -157,6 +162,23 @@ class ExecutionEngine:
                 else:
                     return self._finalize(result, "failed", t_start)
 
+            # ── اختيار استباقي: بديل مكافئ أرجح نجاحاً بفارق واضح (شبكة عصبية) ──
+            # اختيارية بالكامل: واجهة self._ai duck-typed (كائنات ai مخصّصة/وهمية قد لا
+            # تملك suggest_preemptive)، وأي خطأ فيها لا يجوز أن يُسقط تشغيلاً.
+            suggest = getattr(self._ai, "suggest_preemptive", None) if self._ai else None
+            if use_fallback and callable(suggest) and not step.is_fallback:
+                try:
+                    pre_id = suggest(
+                        node.node_id, is_compatible=lambda cid, _n=node: self._is_replica(_n, cid))
+                    pre = self._registry.get(pre_id) if pre_id else None
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("preemptive routing skipped: %s", e)
+                    pre = None
+                if pre and pre.state != NodeState.PAUSED:
+                    step.preempted_from = node.node_id
+                    step.is_fallback = True  # مستوى بديل واحد فقط (كما في بقية المسارات)
+                    node = pre
+
             # ── تنفيذ فعلي — بمحاولة واحدة إضافية عبر بديل عند فشل حقيقي ──
             # كان فشل حقيقي أثناء process() (استثناء من منطق العقدة نفسها،
             # أو رفض NodeSchema.validate() لبيانات غير مطابقة) يُسقِط
@@ -223,6 +245,17 @@ class ExecutionEngine:
 
         result.final_output = current
         return self._finalize(result, "success", t_start)
+
+    def _is_replica(self, primary, candidate_id: str) -> bool:
+        """بديل مكافئ فعلاً: نفس الصنف ونفس مخططي الإدخال والإخراج. جيران الرسم
+        عادة عقد لاحقة مختلفة الوظيفة، فلا يصح استبدالها استباقياً."""
+        cand = self._registry.get(candidate_id)
+        if cand is None or type(cand) is not type(primary):
+            return False
+        return (cand.input_schema.fields == primary.input_schema.fields
+                and cand.input_schema.required == primary.input_schema.required
+                and cand.output_schema.fields == primary.output_schema.fields
+                and cand.output_schema.required == primary.output_schema.required)
 
     def resume_interrupted(self) -> List["ExecutionResult"]:
         """يبحث عن أي عقدة توقفت قسراً وسط process() في جلسة سابقة (state
