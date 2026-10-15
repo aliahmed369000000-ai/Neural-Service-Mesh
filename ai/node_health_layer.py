@@ -179,7 +179,7 @@ class NodeHealthLayer:
             for p in peers:
                 if p.get("id") == self.node.node_id:
                     continue
-                if p.get("host") and p.get("port") is not None:
+                if p.get("host") and p.get("port"):
                     return {"peer_id": p.get("id"), "host": p["host"], "port": p["port"], "path": "direct"}
             return None
         candidates.sort(

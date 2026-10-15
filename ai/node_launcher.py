@@ -1443,28 +1443,9 @@ async def main():
                 if dead:
                     logger.info(f"📴 Marked stale/offline: {dead}")
                 tick += 1
-                # اكتشاف الأقران كان يحدث مرة واحدة فقط عند الإقلاع (أعلاه):
-                # عقدة تنضم لاحقاً لا تراها العقد الأقدم أبداً (شُغِّلت شبكة
-                # محلية من 3 عقد فعلياً: worker_1 لم يعرف worker_2 حتى بعد
-                # دقائق). إعادة طلب دورية من البذور + بضعة أقران معروفين
-                # (gossip) تجعل الشبكة تتقارب ذاتياً بلا نقطة مركزية.
-                # retries=1 كي لا يتعطّل النبض على قرين ميت.
-                refresh_every = max(1, int(os.getenv("NSM_PEER_REFRESH_TICKS", "4")))
-                if tick % refresh_every == 0:
-                    try:
-                        targets = {(s["host"], int(s["port"])) for s in seed_nodes}
-                        known = [
-                            p for p in node._get_active_peers_list()
-                            if p.get("id") != node.node_id and p.get("host") and p.get("port") is not None
-                        ]
-                        for p in random.sample(known, min(2, len(known))):
-                            targets.add((p["host"], int(p["port"])))
-                        for host, prt in targets:
-                            if (host, prt) == (node_host, node.port):
-                                continue
-                            await node.request_peers(host, prt, retries=1)
-                    except Exception as e:
-                        logger.warning(f"⚠️ periodic peer refresh failed: {e}")
+                # إعادة اكتشاف الأقران الدورية (بذور + عيّنة gossip + قرين offline) صارت
+                # مسؤولية مراقب node.resync_peers() الذي يبدأه join_network — حلقة موازية
+                # هنا كانت تضاعف الطلبات لكل بذرة. الفاصل: NSM_PEER_SYNC_INTERVAL_SEC.
                 if tick % 4 == 0:
                     try:
                         health = await node.measure_peers_health(timeout=4.0)

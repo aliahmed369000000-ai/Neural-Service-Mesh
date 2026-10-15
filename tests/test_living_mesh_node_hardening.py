@@ -218,3 +218,79 @@ def test_reputation_updates_are_atomic_across_threads(node):
     [t.start() for t in ts]
     [t.join() for t in ts]
     assert node.get_reputation("p")["score"] == 100
+
+
+def _fake_requests(node, monkeypatch):
+    calls = []
+
+    async def fake(host, port, retries=3, **kw):
+        calls.append((host, port))
+        return True
+
+    monkeypatch.setattr(node, "request_peers", fake)
+    return calls
+
+
+def test_resync_always_includes_a_seed_even_when_peers_exist(node, monkeypatch):
+    node._seed_nodes = [{"host": "seed.local", "port": 7000}]
+    node._save_state({"nodes": {
+        "B": {"id": "B", "status": "online", "host": "b", "port": 1, "last_seen": _iso()}}})
+    calls = _fake_requests(node, monkeypatch)
+    assert node.resync_peers() == 2
+    assert sorted(calls) == [("b", 1), ("seed.local", 7000)]
+
+
+def test_resync_never_contacts_itself_nor_duplicates_endpoints(node, monkeypatch):
+    # البذرة هي نفس العقدة (127.0.0.1:9001) + بذرة ثانية تطابق قريناً نشطاً
+    node._seed_nodes = [{"host": "127.0.0.1", "port": 9001}]
+    node._save_state({"nodes": {
+        "B": {"id": "B", "status": "online", "host": "b", "port": 1, "last_seen": _iso()}}})
+    calls = _fake_requests(node, monkeypatch)
+    node.resync_peers()
+    assert calls == [("b", 1)]
+    node._seed_nodes = [{"host": "b", "port": 1}]
+    calls.clear()
+    node.resync_peers()
+    assert calls == [("b", 1)]
+
+
+def test_resync_with_nothing_known_returns_zero(node, monkeypatch):
+    node._seed_nodes = []
+    node._save_state({"nodes": {}})
+    calls = _fake_requests(node, monkeypatch)
+    assert node.resync_peers() == 0 and calls == []
+
+
+def test_launcher_has_no_parallel_peer_refresh_loop():
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parent.parent / "ai" / "node_launcher.py").read_text(encoding="utf-8")
+    assert "periodic peer refresh failed" not in src
+    assert "NSM_PEER_REFRESH_TICKS" not in src
+
+
+@pytest.mark.parametrize("host,port,ok", [
+    ("h", 7860, True), ("h", "7860", True), ("h", 65535, True),
+    ("h", 0, False), ("h", None, False), ("h", "abc", False),
+    ("h", -1, False), ("h", 65536, False), ("", 80, False), (None, 80, False),
+])
+def test_is_dialable(host, port, ok):
+    from ai.living_mesh import is_dialable
+    assert is_dialable(host, port) is ok
+
+
+def test_resync_never_dials_port_zero_peer_or_seed(node, monkeypatch):
+    node._seed_nodes = []
+    node.join_network.__func__  # الدالة موجودة
+    # بذرة port=0 تُهمل عند الانضمام
+    node.join_network(seed_nodes=[{"host": "z", "port": 0}, {"host": "ok", "port": 7000}])
+    node.stop_capability_watch(); node.stop_self_evolution_watch(); node.stop_peer_sync_watch()
+    assert node._seed_nodes == [{"host": "ok", "port": 7000}]
+    node._save_state({"nodes": {
+        "Z": {"id": "Z", "status": "online", "host": "z", "port": 0, "last_seen": _iso()},
+        "O": {"id": "O", "status": "offline", "host": "o", "port": 0, "last_seen": _iso(-999)},
+        "B": {"id": "B", "status": "online", "host": "b", "port": 1, "last_seen": _iso()}}})
+    calls = _fake_requests(node, monkeypatch)
+    for _ in range(10):
+        node.resync_peers()
+    assert calls and all(p != 0 for _, p in calls)
+    assert {"z", "o"}.isdisjoint({h for h, _ in calls})

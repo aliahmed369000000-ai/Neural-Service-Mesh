@@ -82,6 +82,19 @@ except ImportError:  # pragma: no cover
 # قفل لكل ملف حالة (RLock): load→modify→save يجب أن يكون ذرّياً بين خيوط العقدة
 # (heartbeat / peer-sync / capability-watch / معالجات الرسائل) — وإلا يضيع التحديث.
 _PEER_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")  # معرّف قرين آمن كاسم ملف
+
+
+def is_dialable(host, port) -> bool:
+    """قرين يمكن الاتصال به فعلاً: host غير فارغ و port عدد صحيح في 1..65535.
+    port=0 (عقدة/سكربت بلا خادم يستقبل) وNone وغير الرقمي مستبعدة — الفحص القديم
+    `port is not None` كان يمرّر 0 فتُجرى محاولات اتصال فاشلة بـ host:0 كل جولة."""
+    if not host:
+        return False
+    try:
+        return 0 < int(port) < 65536
+    except (TypeError, ValueError):
+        return False
+
 _STATE_LOCKS: Dict[str, "threading.RLock"] = {}
 _STATE_LOCKS_GUARD = threading.Lock()
 _STATE_DEPTH: Dict[str, int] = {}   # عمق تداخل _state_txn لكل ملف (يُحمى بـRLock الملف)
@@ -336,7 +349,7 @@ class LivingMeshNode:
         self._seed_nodes = [
             {"host": sd["host"], "port": int(sd["port"])}
             for sd in (seed_nodes or [])
-            if isinstance(sd, dict) and sd.get("host") and sd.get("port") is not None
+            if isinstance(sd, dict) and is_dialable(sd.get("host"), sd.get("port"))
         ]
         with self._state_txn():
             state = self._load_state()
@@ -693,7 +706,7 @@ class LivingMeshNode:
         peers = self._get_active_peers_list()
         candidates = [
             p for p in peers
-            if p.get("id") != self.node_id and p.get("host") and p.get("port") is not None
+            if p.get("id") != self.node_id and is_dialable(p.get("host"), p.get("port"))
         ]
         # بعد انقسام/موت الجميع لا يبقى «نشط» نسأله: ارجع للبذور الأصلية، وجرّب
         # قريناً offline واحداً كل جولة ليعود للشبكة إن استيقظ (كانت الدالة ترجع 0 للأبد).
@@ -703,17 +716,40 @@ class LivingMeshNode:
                 {"id": nid, "host": n.get("host"), "port": n.get("port")}
                 for nid, n in nodes.items()
                 if nid != self.node_id and n.get("status") == "offline"
-                and n.get("host") and n.get("port") is not None
+                and is_dialable(n.get("host"), n.get("port"))
             ]
         except Exception:
             offline = []
-        extra = random.sample(offline, k=1) if offline else []
-        if not candidates:
-            candidates = list(getattr(self, "_seed_nodes", None) or []) + extra
-            extra = []
-        if not candidates:
+        # المسار الوحيد لإعادة الاكتشاف الدوري (كان node_launcher يكرّر نفس العمل بحلقة
+        # موازية فتتضاعف الطلبات لكل بذرة). الهدف كل جولة:
+        #   • عيّنة من الأقران النشطين (تقارب gossip)،
+        #   • بذرة واحدة دائماً حتى لو وُجد أقران: عقدة داخل عنقود فرعي تلتئم مع بقية
+        #     الشبكة عبر بذرتها (كان يحدث في المشغّل فقط وبمعدّل أدنى)،
+        #   • قرين offline واحد ليعود إن استيقظ.
+        # بلا تكرار host:port وبلا اتصال بنفسها.
+        seeds = list(getattr(self, "_seed_nodes", None) or [])
+        me = (self.host, self.port)
+
+        def _ep(x):
+            try:
+                return (x.get("host"), int(x.get("port")))
+            except (TypeError, ValueError, AttributeError):
+                return None
+
+        picked = random.sample(candidates, k=min(sample_size, len(candidates))) if candidates else []
+        if seeds:
+            picked.append(random.choice(seeds))
+        if offline:
+            picked.append(random.choice(offline))
+        sample, seen_eps = [], {me}
+        for p in picked:
+            ep = _ep(p)
+            if ep is None or ep in seen_eps:
+                continue
+            seen_eps.add(ep)
+            sample.append(p)
+        if not sample:
             return 0
-        sample = random.sample(candidates, k=min(sample_size, len(candidates))) + extra
         ok_count = 0
         for p in sample:
             try:
@@ -1928,7 +1964,7 @@ class LivingMeshNode:
         peers = self._get_active_peers_list()
         results = await asyncio.gather(
             *(self.send_to_peer(p["host"], int(p["port"]), FORECAST_SHARE_KIND, share, hops=hops)
-              for p in peers if p.get("host") and p.get("port") is not None),
+              for p in peers if is_dialable(p.get("host"), p.get("port"))),
             return_exceptions=True,
         )
         return sum(result is True for result in results)
@@ -2199,8 +2235,7 @@ class LivingMeshNode:
         candidates = [
             p for p in self._get_active_peers_list()
             if p.get("id") != self.node_id
-            and p.get("host")
-            and p.get("port") is not None
+            and is_dialable(p.get("host"), p.get("port"))
             and not (p.get("host") == host and int(p.get("port")) == int(port))
         ]
         import random
@@ -2791,7 +2826,7 @@ class LivingMeshNode:
         # وإلا أرسل للمرسل عبر الشبكة إن عرفنا عنوانه
         state = self._load_state()
         sender_info = (state.get("nodes") or {}).get(sender_id or "")
-        if sender_info and sender_info.get("host") and sender_info.get("port") is not None:
+        if sender_info and is_dialable(sender_info.get("host"), sender_info.get("port")):
             await self.send_to_peer_with_relay(
                 sender_info["host"],
                 int(sender_info["port"]),
@@ -3059,7 +3094,7 @@ class LivingMeshNode:
                 logger.warning(f"⚠️ storage WS reply failed: {e}")
         state = self._load_state()
         sender_info = (state.get("nodes") or {}).get(sender_id or "")
-        if sender_info and sender_info.get("host") and sender_info.get("port") is not None:
+        if sender_info and is_dialable(sender_info.get("host"), sender_info.get("port")):
             await self.send_to_peer_with_relay(
                 sender_info["host"], int(sender_info["port"]), result_kind, result,
                 hops=hops + 1, target_id=sender_id,
@@ -3217,7 +3252,7 @@ class LivingMeshNode:
         يوزّع submodel_train على العمال، ينتظر نتائج/إيصالات، يدمج عند اكتمال النصاب (quorum).
         """
         peers = worker_peers or self._get_active_peers_list()
-        peers = [p for p in peers if p.get("id") != self.node_id and p.get("host") and p.get("port") is not None]
+        peers = [p for p in peers if p.get("id") != self.node_id and is_dialable(p.get("host"), p.get("port"))]
         if not peers:
             # جولة محلية فقط (بدون عمال) — تُحتسب نصاباً ذاتياً للتجربة
             local = mesh_tasks.execute_submodel_train({

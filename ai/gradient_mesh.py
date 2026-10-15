@@ -229,7 +229,7 @@ class GradientExchangeProtocol:
         active_peers = self.mesh_node._get_active_peers_list()
         targets = [
             p for p in active_peers
-            if p.get("id") != self.node_id and p.get("host") and p.get("port") is not None
+            if p.get("id") != self.node_id and p.get("host") and p.get("port")
         ]
 
         # إن لم يوجد أقران بعد، أعد محاولة الاكتشاف عبر بذرة alpha
@@ -240,7 +240,7 @@ class GradientExchangeProtocol:
                 active_peers = self.mesh_node._get_active_peers_list()
                 targets = [
                     p for p in active_peers
-                    if p.get("id") != self.node_id and p.get("host") and p.get("port") is not None
+                    if p.get("id") != self.node_id and p.get("host") and p.get("port")
                 ]
 
         ok_count = 0
