@@ -2161,7 +2161,7 @@ class LivingMeshNode:
             if peer.get("id") == self.node_id:
                 continue
             host, port = peer.get("host"), peer.get("port")
-            if not host or port is None:
+            if not host or not port:
                 results.append({"peer_id": peer.get("id"), "ok": False, "error": "no_address"})
                 continue
             r = await self.ping_peer(host, int(port), timeout=timeout)
@@ -2244,7 +2244,7 @@ class LivingMeshNode:
         inner_kind = exp_data.get("inner_kind")
         inner_data = exp_data.get("inner_data") or {}
         origin = exp_data.get("origin")
-        if not target_host or target_port is None or not inner_kind:
+        if not target_host or not target_port or not inner_kind:
             logger.warning("⚠️ Malformed relay_task")
             return
         # لا نعيد التوجيه لأنفسنا كهدف إن كنا الهدف
@@ -2335,7 +2335,7 @@ class LivingMeshNode:
         }
         # بث الاقتراح للأقران
         for peer in self._get_active_peers_list():
-            if peer.get("id") == self.node_id or not peer.get("host") or peer.get("port") is None:
+            if peer.get("id") == self.node_id or not peer.get("host") or not peer.get("port"):
                 continue
             await self.send_to_peer_with_relay(
                 peer["host"], int(peer["port"]), "multisig_propose", payload, target_id=peer.get("id")
@@ -2383,7 +2383,7 @@ class LivingMeshNode:
                 "signature": my_sig,
             }
             for peer in self._get_active_peers_list():
-                if peer.get("id") == self.node_id or not peer.get("host") or peer.get("port") is None:
+                if peer.get("id") == self.node_id or not peer.get("host") or not peer.get("port"):
                     continue
                 await self.send_to_peer(
                     peer["host"], int(peer["port"]), "multisig_sign", sign_payload
@@ -3085,7 +3085,7 @@ class LivingMeshNode:
         sent = []
         for peer in targets:
             host, port = peer.get("host"), peer.get("port")
-            if not host or port is None:
+            if not host or not port:
                 continue
             r = await self.dispatch_mesh_task(
                 host, int(port), "checkpoint_store",

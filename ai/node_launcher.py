@@ -878,7 +878,7 @@ def _control_targets(node, body):
     resolved = []
     for node_id in targets:
         info = dict((state.get("nodes") or {}).get(node_id) or {})
-        if not info.get("host") or info.get("port") is None:
+        if not info.get("host") or not info.get("port"):
             return None, f"target_not_resolvable:{node_id}"
         resolved.append({"id": node_id, "host": info["host"], "port": int(info["port"]), "status": info.get("status"), "has_public_key": bool(info.get("public_key") or node._public_key_for_id(node_id))})
     return resolved, None

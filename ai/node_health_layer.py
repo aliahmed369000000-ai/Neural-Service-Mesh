@@ -123,6 +123,15 @@ class NodeHealthLayer:
             pid = p.get("id")
             if pid == self.node.node_id:
                 continue
+            # 🆕 قرين بـhost فارغ أو port=0 (عادة عقدة/سكربت منظِّم لا
+            # خادم له يستقبل اتصالات — انظر التعليق في
+            # ai/mesh_job_orchestrator.py::_rank_workers) غير قابل للاتصال
+            # إطلاقاً؛ كان يمر هنا رغم ذلك لأن routes_table() لا تُصفّي
+            # أصلاً (الفحص السابق في rank_workers() كان في مسار fallback
+            # فقط، لا يُستخدَم أبداً طالما routes_table() ترجع صفاً واحداً
+            # على الأقل)، فيظهر كمسار مُرتَّب صالح ويُختار فعلياً للعمل.
+            if not p.get("host") or not p.get("port"):
+                continue
             cached = self._route_cache.get(pid) or {}
             rows.append({
                 "peer_id": pid,
@@ -314,7 +323,7 @@ class NodeHealthLayer:
             for p in peers:
                 if p.get("id") == self.node.node_id:
                     continue
-                if not p.get("host") or p.get("port") is None:
+                if not p.get("host") or not p.get("port"):
                     continue
                 ranked.append({
                     "peer_id": p.get("id"),
@@ -371,7 +380,7 @@ class NodeHealthLayer:
 
         for i, w in enumerate(workers[:max_attempts]):
             host, port = w.get("host"), w.get("port")
-            if not host or port is None:
+            if not host or not port:
                 continue
             attempt = {
                 "worker": w.get("peer_id"),

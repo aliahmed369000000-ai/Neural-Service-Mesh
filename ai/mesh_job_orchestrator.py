@@ -92,7 +92,18 @@ class MeshJobOrchestrator:
         for p in peers:
             if p.get("id") == self.node.node_id:
                 continue
-            if not p.get("host") or p.get("port") is None:
+            # 🆕 not p.get("port") — وليس p.get("port") is None — يستبعد
+            # port=0 أيضاً، لا None فقط. وُجد بتكليف شبكة حقيقية (seed +
+            # عاملان) بمهمة تلخيص جماعي فعلية: عقدة عميل انضمت بـport=0
+            # (لا تستقبل اتصالات — شائع لعقدة/سكربت منظِّم لا خادم له)
+            # انتشرت عبر gossip كقرين عادي؛ هذا الفحص كان يسمح لها بالمرور
+            # (port=0 ليس None)، فتُختار كـ'عامل' ويُرسَل لها عمل فعلي،
+            # محاولة اتصال بـhost:0 مضمونة الفشل تستهلك timeout_per_task
+            # كاملاً (رُصد تجريبياً: محاولة اتصال حقيقية فعلية استغرقت
+            # 15 ثانية كاملة قبل أن يسقط الفشل ويُعاد توجيه المهمة). نفس
+            # النمط المعيب تكرَّر في 8 مواضع أخرى عبر 3 ملفات — صُحِّحت
+            # كلها بهذا الكوميت.
+            if not p.get("host") or not p.get("port"):
                 continue
             out.append({
                 "peer_id": p.get("id"),
