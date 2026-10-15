@@ -129,6 +129,25 @@ class MeshJobOrchestrator:
         payload: Dict[str, Any],
         timeout: float,
     ) -> Dict[str, Any]:
+        """إرسال لعامل واحد + تدريب المستشار العصبي على النتيجة. أخطاء NON_RETRYABLE
+        (عيب في المهمة لا في العامل) لا تُحتسب فشلاً للعامل فلا يُظلَم في ترتيبه."""
+        out = await self._dispatch_one_raw(worker, kind, payload, timeout)
+        rec = getattr(self.node, "record_dispatch_outcome", None)
+        if rec is not None and out.get("error") not in NON_RETRYABLE_ERRORS:
+            try:
+                rec(out.get("host"), out.get("port"), bool(out.get("ok")),
+                    out.get("rtt_ms"), target_id=out.get("worker"))
+            except Exception:
+                pass
+        return out
+
+    async def _dispatch_one_raw(
+        self,
+        worker: Dict[str, Any],
+        kind: str,
+        payload: Dict[str, Any],
+        timeout: float,
+    ) -> Dict[str, Any]:
         host, port = worker.get("host"), worker.get("port")
         peer_id = worker.get("peer_id") or worker.get("id")
         task_id = payload.get("task_id") or f"jobtask_{uuid.uuid4().hex[:10]}"

@@ -910,6 +910,10 @@ class LivingMeshNode:
         self.stop_self_evolution_watch()
         self.stop_peer_sync_watch()
         try:
+            adv = self._neural_advisor
+            if adv is not None:
+                with contextlib.suppress(Exception):
+                    adv.save()
             with self._state_txn():
                 state = self._load_state()
                 if self.node_id in state.get("nodes", {}):
@@ -1765,15 +1769,66 @@ class LivingMeshNode:
             pass
         return f"{host}:{port}"
 
-    def _peer_reputation01(self, nid: str) -> Optional[float]:
+    @staticmethod
+    def _rep01(entry: Any) -> Optional[float]:
+        """سمعة الشبكة (عدد صحيح يبدأ من 0 بلا حد أعلى) → 0..1 كما يفعل MeshBundle
+        (score/100). غير المقيَّم (لا أحداث) = None فتأخذ الخاصية قيمتها المحايدة 0.5:
+        كان يُمرَّر الخام فيتشبّع المستشار عند 1.0 لأي سمعة ≥ 1 ويعدّ غير المقيَّم الأسوأ."""
+        if not isinstance(entry, dict) or not entry.get("events"):
+            return None
         try:
-            rep = self.get_reputation(nid)
-            if isinstance(rep, dict):
-                v = rep.get("score", rep.get("reputation"))
-                return None if v is None else float(v)
+            return float(min(1.0, max(0.0, float(entry.get("score") or 0) / 100.0)))
+        except (TypeError, ValueError):
+            return None
+
+    def _peer_reputation01(self, nid: str, rep_all: Optional[Dict[str, Any]] = None) -> Optional[float]:
+        try:
+            if rep_all is None:
+                rep_all = self.get_reputation() or {}
+            return self._rep01(rep_all.get(nid))
         except Exception:
-            pass
-        return None
+            return None
+
+    @staticmethod
+    def _dispatch_succeeded(result: Any) -> bool:
+        return isinstance(result, dict) and not result.get("error") and (
+            bool(result.get("ok")) or result.get("result") is not None)
+
+    def record_dispatch_outcome(self, host: str, port: int, ok: bool,
+                                latency_ms: Optional[float] = None,
+                                target_id: Optional[str] = None) -> None:
+        """يُدرّب المستشار العصبي على نتيجة إرسال فعلية. واجهة عامة كي تستعملها كل مسارات
+        الإرسال (dispatch_mesh_task + MeshJobOrchestrator) — الأخير كان يستدعي
+        request_from_peer مباشرة فلا يتعلّم المستشار من الحمل الموزّع الأساسي."""
+        adv = self._advisor()
+        if adv is None:
+            return
+        try:
+            nid = self._peer_key(host, int(port), target_id)
+            adv.observe(nid, bool(ok), latency_ms, "active", self._peer_reputation01(nid))
+        except Exception as exc:
+            logger.debug("neural observe skipped: %s", exc)
+
+    def neural_score(self, peer_id: str, rep_all: Optional[Dict[str, Any]] = None) -> Optional[float]:
+        """درجة موثوقية القرين 0..1 (مزيج الشبكة العصبية ومعدل النجاح المُلَيَّن)، أو None إن عُطّل المستشار."""
+        adv = self._advisor()
+        if adv is None:
+            return None
+        try:
+            return float(adv.ranking_score(
+                peer_id, "active", self._peer_reputation01(peer_id, rep_all),
+                nn_weight=self._neural_blend()))
+        except Exception:
+            return None
+
+    @staticmethod
+    def _neural_blend() -> float:
+        """وزن الشبكة في درجة الترتيب مقابل معدل النجاح المُلَيَّن (NSM_NEURAL_BLEND، 0..1،
+        الافتراضي 0.5). 0 = المعدل فقط، 1 = الشبكة فقط (غير مُوصى به: انظر ranking_score)."""
+        try:
+            return min(1.0, max(0.0, float(os.getenv("NSM_NEURAL_BLEND", "0.5"))))
+        except ValueError:
+            return 0.5
 
     @staticmethod
     def _parse_ts(value) -> Optional[datetime]:
@@ -1871,13 +1926,13 @@ class LivingMeshNode:
         # تُمزَج مع معدل نجاح مُلَيَّن فلا قرارات من أوزان عشوائية)، والسمعة تكسر التعادل.
         adv = self._advisor()
         if adv is not None:
+            try:
+                rep_all = self.get_reputation() or {}   # قراءة واحدة لا N قراءة لملف الحالة
+            except Exception:
+                rep_all = {}
             for p in active_peers:
-                try:
-                    p["neural_score"] = adv.predict(
-                        p["id"], "active", self._peer_reputation01(p["id"])
-                    )
-                except Exception:
-                    p["neural_score"] = 0.5
+                score = self.neural_score(p["id"], rep_all)
+                p["neural_score"] = 0.5 if score is None else score
             active_peers.sort(key=lambda p: (-float(p.get("neural_score", 0.5)),
                                              -float(p.get("reputation") or 0.0)))
         else:
@@ -2845,16 +2900,9 @@ class LivingMeshNode:
             result = await self._dispatch_mesh_task_raw(host, port, kind, data, target_id=target_id, **kw)
             return result
         finally:
-            adv = self._advisor()
-            if adv is not None:
-                try:
-                    ok = isinstance(result, dict) and not result.get("error") and (
-                        bool(result.get("ok")) or result.get("result") is not None)
-                    nid = self._peer_key(host, int(port), target_id)
-                    adv.observe(nid, ok, (time.monotonic() - t0) * 1000.0, "active",
-                                self._peer_reputation01(nid))
-                except Exception as exc:
-                    logger.debug("neural observe skipped: %s", exc)
+            self.record_dispatch_outcome(
+                host, port, self._dispatch_succeeded(result),
+                (time.monotonic() - t0) * 1000.0, target_id=target_id)
 
     async def _dispatch_mesh_task_raw(
         self,

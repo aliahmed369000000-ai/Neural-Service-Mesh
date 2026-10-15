@@ -291,6 +291,16 @@ class NodeHealthLayer:
     # ------------------------------------------------------------------
     # #6 اختيار أفضل عامل حسب الصحة والكمون والسمعة
     # ------------------------------------------------------------------
+    @staticmethod
+    def _neural_weight() -> float:
+        """وزن الشبكة العصبية في selection_score (مقياسه: reachable ±1000، سمعة ×5، RTT حتى 200).
+        NSM_NEURAL_RANK_WEIGHT=0 يعطّل."""
+        import os
+        try:
+            return max(0.0, float(os.getenv("NSM_NEURAL_RANK_WEIGHT", "300")))
+        except ValueError:
+            return 300.0
+
     def rank_workers(
         self,
         require_capabilities=None,
@@ -301,6 +311,22 @@ class NodeHealthLayer:
         need = None
         if require_capabilities:
             need = {require_capabilities} if isinstance(require_capabilities, str) else set(require_capabilities)
+
+        neural_w = self._neural_weight()
+        neural_fn = getattr(self.node, "neural_score", None)
+        try:
+            rep_map = self.node.get_reputation() or {}
+        except Exception:
+            rep_map = {}
+
+        def neural_of(pid):
+            if neural_fn is None or neural_w <= 0 or not pid:
+                return None
+            try:
+                v = neural_fn(pid, rep_map)
+            except Exception:
+                return None
+            return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
         ranked = []
         for r in table:
@@ -315,7 +341,14 @@ class NodeHealthLayer:
             if rtt is not None:
                 score += max(0.0, 200.0 - float(rtt))  # أسرع = أعلى
             score += float(r.get("reputation") or 0) * 5.0
-            ranked.append({**r, "selection_score": round(score, 2)})
+            # الشبكة العصبية: احتمال نجاح المهمة التالية عند هذا العامل. محايد (0) عند
+            # 0.5 (قرين غير معروف)، +W لمن يُنجز دائماً، −W لمن يفشل دائماً. يسبق التحويل
+            # (failover) فيجرّب العامل الأوثق أولاً بدل الأقل كموناً فقط. W=0 يعطّله.
+            p_ok = neural_of(r.get("peer_id"))
+            if p_ok is not None:
+                score += (p_ok - 0.5) * 2.0 * neural_w
+            ranked.append({**r, "selection_score": round(score, 2),
+                           **({"neural_score": round(p_ok, 4)} if p_ok is not None else {})})
 
         # إن لم يوجد كاش، استخدم الأقران النشطين
         if not ranked:
