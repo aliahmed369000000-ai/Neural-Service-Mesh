@@ -855,6 +855,7 @@ CONTROL_TASK_KINDS = {
     "mesh_health_report",
     "forecast_consensus_benchmark",
     "neural_train_benchmark",
+    "reasoning_benchmark",
 }
 CONTROL_MAX_TARGETS = 28
 
@@ -927,6 +928,22 @@ def _validate_neural_train_parameters(params):
 def _validate_control_parameters(kind, params):
     if kind == "neural_train_benchmark":
         return _validate_neural_train_parameters(params)
+    if kind == "reasoning_benchmark":
+        prompt = params.get("prompt")
+        context = params.get("context") or ""
+        if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= 4000:
+            return "prompt_must_be_1_to_4000_characters"
+        if not isinstance(context, str) or len(context) > 4000:
+            return "context_max_4000_characters"
+        if params.get("require_live", True) not in (True, False):
+            return "require_live_must_be_boolean"
+        try:
+            timeout_s = float(params.get("timeout_s", 90))
+        except (TypeError, ValueError):
+            return "timeout_s_must_be_numeric"
+        if not 1 <= timeout_s <= 180:
+            return "timeout_s_must_be_between_1_and_180"
+        return None
     if kind != "forecast_consensus_benchmark":
         return None
     series = params.get("series") or params.get("values")
@@ -975,7 +992,7 @@ async def handle_control_task(request):
     dry_run = body.get("dry_run", True) is True
     if body.get("dry_run") not in (None, True, False):
         return web.json_response({"ok": False, "error": "dry_run_must_be_boolean"}, status=400)
-    if kind in {"encrypted_rpc_roundtrip", "mesh_health_report", "forecast_consensus_benchmark", "neural_train_benchmark"} and any(not t["has_public_key"] for t in targets):
+    if kind in {"encrypted_rpc_roundtrip", "mesh_health_report", "forecast_consensus_benchmark", "neural_train_benchmark", "reasoning_benchmark"} and any(not t["has_public_key"] for t in targets):
         return web.json_response({"ok": False, "error": "peer_public_key_required_for_encrypted_task"}, status=409)
     plan = {
         "task_id": task_id, "kind": kind, "dry_run": dry_run,
@@ -1015,6 +1032,15 @@ async def handle_control_task(request):
                 from ai import mesh_task_protocol as mt
                 payload = {"task_id": task_id, "series": params.get("series") or params.get("values"), "horizon": int(params.get("horizon", 1))}
                 result = await node.dispatch_mesh_task(target["host"], target["port"], mt.KIND_PREDICT, payload, target_id=target["id"], timeout=timeout_s)
+            elif kind == "reasoning_benchmark":
+                from ai import mesh_task_protocol as mt
+                payload = {
+                    "task_id": task_id,
+                    "prompt": params["prompt"],
+                    "context": params.get("context") or "",
+                    "require_live": params.get("require_live", True),
+                }
+                result = await node.dispatch_mesh_task(target["host"], target["port"], mt.KIND_REASONING, payload, target_id=target["id"], timeout=timeout_s)
             else:
                 payload = {"task_id": task_id, "text": str(params.get("text") or "NSM encrypted control probe"), "mode": "control_probe"}
                 result = await node.dispatch_mesh_task(target["host"], target["port"], "inference_request", payload, target_id=target["id"], timeout=timeout_s)
@@ -1033,6 +1059,21 @@ async def handle_control_task(request):
             if isinstance(inner, dict):
                 trained.append(inner)
         response["aggregate"] = {"method": "neural_ensemble_mean", **mt.merge_neural_results(trained)}
+    if kind == "reasoning_benchmark":
+        reasoned = []
+        for item in results:
+            rpc = item.get("result") or {}
+            inner = rpc.get("result") if isinstance(rpc, dict) else None
+            if isinstance(inner, dict):
+                reasoned.append(inner)
+        live = [r for r in reasoned if r.get("live_llm")]
+        response["aggregate"] = {
+            "method": "independent_reasoning_reports",
+            "nodes_ok": sum(bool(r.get("ok")) for r in reasoned),
+            "nodes_live_llm": len(live),
+            "providers": sorted({str(r.get("provider")) for r in reasoned if r.get("provider")}),
+            "reports": [{"provider": r.get("provider"), "model": r.get("model"), "live_llm": r.get("live_llm"), "answer": r.get("answer")} for r in reasoned],
+        }
     if kind == "forecast_consensus_benchmark":
         forecasts = []
         for item in results:

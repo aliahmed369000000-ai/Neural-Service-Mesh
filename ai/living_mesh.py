@@ -125,6 +125,7 @@ ALLOWED_TASK_CAPABILITIES = {
     # kind → مجموعة القدرات المطلوبة عند المنفذ
     "submodel_train": {"GPU_HIGH", "GPU_LOW", "CPU", "tf_engine"},
     "inference_request": {"text", "tf_engine", "GPU_HIGH", "GPU_LOW", "CPU"},
+    "reasoning_request": {"text", "tf_engine", "GPU_HIGH", "GPU_LOW", "CPU"},
     "model_eval": {"tf_engine", "GPU_HIGH", "GPU_LOW", "CPU"},
     "map_reduce_map": {"CPU", "GPU_LOW", "GPU_HIGH"},
     "sim_chunk": {"CPU", "GPU_LOW", "GPU_HIGH"},

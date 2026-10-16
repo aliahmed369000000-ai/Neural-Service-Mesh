@@ -53,6 +53,8 @@ KIND_SELF_FEED_LEARN = "self_feed_learn"
 KIND_SELF_FEED_LEARN_RESULT = "self_feed_learn_result"
 KIND_NEURAL_TRAIN = "neural_train"
 KIND_NEURAL_TRAIN_RESULT = "neural_train_result"
+KIND_REASONING = "reasoning_request"
+KIND_REASONING_RESULT = "reasoning_result"
 KIND_HEALTH_REPORT = "mesh_health_report"
 KIND_HEALTH_REPORT_RESULT = "mesh_health_report_result"
 
@@ -77,6 +79,7 @@ ALL_TASK_KINDS = {
     KIND_CLASSIC_SHOWCASE, KIND_CLASSIC_SHOWCASE_RESULT,
     KIND_SELF_FEED_LEARN, KIND_SELF_FEED_LEARN_RESULT,
     KIND_NEURAL_TRAIN, KIND_NEURAL_TRAIN_RESULT,
+    KIND_REASONING, KIND_REASONING_RESULT,
     KIND_HEALTH_REPORT, KIND_HEALTH_REPORT_RESULT,
     KIND_TASK_ACK, KIND_TASK_CANCEL,
     KIND_TASK_STATUS, KIND_TASK_STATUS_RESULT,
@@ -1191,6 +1194,56 @@ def merge_neural_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     return merged
 
 
+def execute_reasoning_request(task: Dict[str, Any], llm_factory=None) -> Dict[str, Any]:
+    """استدلال فعلي محدود: يستدعي LLM حياً ويعيد ملخص قرار قابل للتدقيق.
+
+    لا نسمّي النص الناتج «وعيًا» ولا نعرض سلسلة التفكير الداخلية؛ الناتج هو
+    جواب وخطوات مختصرة وافتراضات يمكن اختبارها. عند require_live=true لا
+    يُقبل CKG synthesis كبديل صامت.
+    """
+    t0 = time.time()
+    prompt = task.get("prompt")
+    if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= 4000:
+        return {"ok": False, "error": "prompt_must_be_1_to_4000_characters", "task_id": task.get("task_id")}
+    context = task.get("context") or ""
+    if not isinstance(context, str) or len(context) > 4000:
+        return {"ok": False, "error": "context_max_4000_characters", "task_id": task.get("task_id")}
+    require_live = bool(task.get("require_live", True))
+    system = (
+        "أنت محرك استدلال في شبكة NSM. قدّم جوابًا عربيًا موجزًا قابلًا للتدقيق "
+        "بالصيغة: القرار، الأسباب المختصرة، الافتراضات، واختبار تحقق واحد. "
+        "لا تدّعِ وعيًا أو تنفيذًا لم يحدث، ولا تعرض سلسلة التفكير الداخلية السرية. "
+        "إذا كانت البيانات غير كافية فاذكر ذلك صراحة."
+    )
+    query = prompt.strip()
+    if context:
+        query += "\n\nسياق موثوق مقدم من المنسّق:\n" + context
+    try:
+        llm = llm_factory() if llm_factory else __import__("ai.llm_fallback", fromlist=["LLMFallback"]).LLMFallback()
+        result = llm.generate(query=query, system_prompt=system)
+        provider = getattr(getattr(result, "provider", None), "value", str(getattr(result, "provider", "unknown")))
+        live = provider != "ckg_synthesis" and not bool(getattr(result, "error", None))
+        out = {
+            "ok": bool(getattr(result, "text", "")) and (live or not require_live),
+            "task_id": task.get("task_id"),
+            "answer": str(getattr(result, "text", ""))[:8000],
+            "provider": provider,
+            "model": str(getattr(result, "model", "")),
+            "live_llm": live,
+            "tried": list(getattr(result, "tried", []) or []),
+            "latency_ms": round((time.time() - t0) * 1000, 2),
+        }
+        if not out["ok"] and require_live and not live:
+            out["error"] = "live_llm_unavailable"
+        return out
+    except Exception as exc:
+        return {
+            "ok": False, "task_id": task.get("task_id"),
+            "error": f"reasoning_provider_error:{type(exc).__name__}",
+            "latency_ms": round((time.time() - t0) * 1000, 2),
+        }
+
+
 def dispatch_task(kind: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """موجّه مركزي لتنفيذ مهمة حسب النوع."""
     data = data or {}
@@ -1222,6 +1275,8 @@ def dispatch_task(kind: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return execute_self_feed_learn(data)
     if kind == KIND_NEURAL_TRAIN:
         return execute_neural_train(data)
+    if kind == KIND_REASONING:
+        return execute_reasoning_request(data)
     if kind == KIND_HEALTH_REPORT:
         return {"ok": True, "task_id": data.get("task_id"), "report_kind": KIND_HEALTH_REPORT}
     return None
@@ -1243,6 +1298,7 @@ def result_kind_for(request_kind: str) -> str:
         KIND_TEMPORAL_FORECAST: KIND_TEMPORAL_FORECAST_RESULT,
         KIND_SELF_FEED_LEARN: KIND_SELF_FEED_LEARN_RESULT,
         KIND_NEURAL_TRAIN: KIND_NEURAL_TRAIN_RESULT,
+        KIND_REASONING: KIND_REASONING_RESULT,
         KIND_HEALTH_REPORT: KIND_HEALTH_REPORT_RESULT,
         KIND_TASK_STATUS: KIND_TASK_STATUS_RESULT,
     }.get(request_kind, request_kind + "_result")
